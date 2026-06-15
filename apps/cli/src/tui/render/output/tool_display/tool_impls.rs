@@ -80,6 +80,49 @@ impl ToolDisplay for ReadDisplay {
             Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
         ])
     }
+    /// 当 result 到达后，使用实际读取的行数更新 header。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_summary: Option<&str>,
+    ) -> Line<'static> {
+        let path = file_path(input);
+        let display_path = truncate_path(path, 60);
+        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let start = offset + 1;
+
+        // 尝试从 result_summary 中解析实际行数
+        // result_summary 格式: "Read {n} lines from {path}" 或完整 JSON
+        let actual_lines = result_summary.and_then(|summary| {
+            // 尝试解析 JSON
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
+                if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
+                    return parse_line_count_from_message(message);
+                }
+            }
+            // 直接解析文本
+            parse_line_count_from_message(summary)
+        });
+
+        let range_info = match actual_lines {
+            Some(actual) if actual < limit => {
+                // 实际行数小于请求的 limit，显示实际行数
+                let actual_end = offset + actual;
+                format!("L{start}:L{actual_end} ({actual} lines)")
+            }
+            _ => {
+                // 无法解析或实际行数等于 limit，显示请求的 limit
+                let end = offset + limit;
+                format!("L{start}:L{end} ({limit} lines)")
+            }
+        };
+
+        Line::from(vec![
+            Span::raw(format!("{} {display_path} ", self.display_name())),
+            Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
+        ])
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 行范围信息已在 header 中，不再需要 details
         vec![]
@@ -91,6 +134,14 @@ impl ToolDisplay for ReadDisplay {
             result: ResultPolicy::Hidden, // 不显示 result 子块
         }
     }
+}
+
+/// 从 message 中解析行数，如 "Read 340 lines from /path/to/file"
+fn parse_line_count_from_message(message: &str) -> Option<usize> {
+    let re = regex::Regex::new(r"Read (\d+) lines? from").ok()?;
+    re.captures(message)
+        .and_then(|cap| cap.get(1))
+        .and_then(|m| m.as_str().parse::<usize>().ok())
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Read",

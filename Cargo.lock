@@ -263,6 +263,7 @@ dependencies = [
  "once_cell",
  "rand",
  "ratatui",
+ "regex",
  "sdk",
  "serde_json",
  "similar",
