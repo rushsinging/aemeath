@@ -4,19 +4,23 @@
 //!
 //! 唯一 logger 实现 `log::Log` trait，`log::log!` 宏按 `record.target()` 前缀路由：
 //!
-//! | target 前缀 | 路由目标 |
-//! |-------------|----------|
-//! | `cli::*`    | `tui.log` |
-//! | `hook::*`   | `hook.log` |
-//! | 其他         | `aemeath.log` |
+//! | target 前缀   | 路由目标       |
+//! |---------------|---------------|
+//! | `cli::*`      | `tui.log`     |
+//! | `hook::*`     | `hook.log`    |
+//! | `runtime::*`  | `runtime.log` |
+//! | `provider::*` | `provider.log`|
+//! | `tools::*`    | `tools.log`   |
+//! | `prompt::*`   | `prompt.log`  |
+//! | 其他           | `aemeath.log` |
 //!
-//! 审计日志通过静态方法 `log_input` / `log_output` / `log_tool` 直接写入
-//! `input.log` / `output.log` / `tool.log`，绕过 `log::*!` 宏以保留 `serde_json::Value` 原始结构。
+//! 审计日志通过静态方法 `log_input` / `log_output` / `log_user_input` / `audit` 直接写入
+//! `input.log` / `output.log` / `audit.log`，绕过 `log::*!` 宏以保留 `serde_json::Value` 原始结构。
 //!
 //! ## 过滤
 //!
 //! - `enabled()` 委托 `env_logger::Logger::enabled()`：保留 `RUST_LOG` + `config.level` 解析。
-//! - 审计 API 额外受 `role_logs_enabled` 控制。
+//! - `log_input` / `log_output` / `log_user_input` 额外受 `role_logs_enabled` 控制；`audit()` 始终写入。
 //!
 //! ## 输出格式
 //!
@@ -32,42 +36,34 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-/// tool 审计类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolKind {
-    Call,
-    Result,
-}
-
-impl ToolKind {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ToolKind::Call => "tool_call",
-            ToolKind::Result => "tool_result",
-        }
-    }
-}
-
-/// 6 个 sink 的文件路径（用于轮转时重开）
+/// 10 个 sink 的文件路径（用于轮转时重开）
 #[derive(Debug, Clone)]
 struct SinkPaths {
     aemeath: PathBuf,
+    runtime: PathBuf,
+    provider: PathBuf,
+    tools: PathBuf,
+    prompt: PathBuf,
     tui: PathBuf,
     hook: PathBuf,
     input: PathBuf,
     output: PathBuf,
-    tool: PathBuf,
+    audit: PathBuf,
 }
 
 impl SinkPaths {
     fn from_logs_dir(logs_dir: &Path) -> Self {
         Self {
             aemeath: logs_dir.join("aemeath.log"),
+            runtime: logs_dir.join("runtime.log"),
+            provider: logs_dir.join("provider.log"),
+            tools: logs_dir.join("tools.log"),
+            prompt: logs_dir.join("prompt.log"),
             tui: logs_dir.join("tui.log"),
             hook: logs_dir.join("hook.log"),
             input: logs_dir.join("input.log"),
             output: logs_dir.join("output.log"),
-            tool: logs_dir.join("tool.log"),
+            audit: logs_dir.join("audit.log"),
         }
     }
 }
@@ -75,14 +71,18 @@ impl SinkPaths {
 /// 统一 logger。
 ///
 /// 通过 `Box::leak` 获得 `'static` 引用并 `log::set_logger`，因此静态方法
-/// (`log_input` / `log_output` / `log_tool`) 与 `log::log!` 宏调用均能命中同一实例。
+/// (`log_input` / `log_output` / `log_user_input` / `audit`) 与 `log::log!` 宏调用均能命中同一实例。
 pub struct UnifiedLogger {
     aemeath: Mutex<Option<BufWriter<File>>>,
+    runtime: Mutex<Option<BufWriter<File>>>,
+    provider: Mutex<Option<BufWriter<File>>>,
+    tools: Mutex<Option<BufWriter<File>>>,
+    prompt: Mutex<Option<BufWriter<File>>>,
     tui: Mutex<Option<BufWriter<File>>>,
     hook: Mutex<Option<BufWriter<File>>>,
     input: Mutex<Option<BufWriter<File>>>,
     output: Mutex<Option<BufWriter<File>>>,
-    tool: Mutex<Option<BufWriter<File>>>,
+    audit: Mutex<Option<BufWriter<File>>>,
     paths: SinkPaths,
     max_bytes: u64,
     max_backups: usize,
@@ -111,21 +111,29 @@ impl UnifiedLogger {
         let paths = SinkPaths::from_logs_dir(logs_dir);
         for path in [
             &paths.aemeath,
+            &paths.runtime,
+            &paths.provider,
+            &paths.tools,
+            &paths.prompt,
             &paths.tui,
             &paths.hook,
             &paths.input,
             &paths.output,
-            &paths.tool,
+            &paths.audit,
         ] {
             rotate_if_needed(path, max_bytes, max_backups)?;
         }
         let logger = UnifiedLogger {
             aemeath: Mutex::new(Some(open_buf(&paths.aemeath)?)),
+            runtime: Mutex::new(Some(open_buf(&paths.runtime)?)),
+            provider: Mutex::new(Some(open_buf(&paths.provider)?)),
+            tools: Mutex::new(Some(open_buf(&paths.tools)?)),
+            prompt: Mutex::new(Some(open_buf(&paths.prompt)?)),
             tui: Mutex::new(Some(open_buf(&paths.tui)?)),
             hook: Mutex::new(Some(open_buf(&paths.hook)?)),
             input: Mutex::new(Some(open_buf(&paths.input)?)),
             output: Mutex::new(Some(open_buf(&paths.output)?)),
-            tool: Mutex::new(Some(open_buf(&paths.tool)?)),
+            audit: Mutex::new(Some(open_buf(&paths.audit)?)),
             paths,
             max_bytes,
             max_backups,
@@ -169,16 +177,45 @@ impl UnifiedLogger {
         logger.write_audit(&logger.output, &logger.paths.output, &line);
     }
 
-    /// 记录 tool call / result 到 `tool.log`。
-    pub fn log_tool(role: &str, kind: ToolKind, payload: Value) {
+    /// 记录用户输入到 `input.log`（type="user_input"）。
+    pub fn log_user_input(payload: Value) {
         let Some(logger) = Self::current() else {
             return;
         };
         if !logger.role_logs_enabled {
             return;
         }
-        let line = format_audit_json_line(kind.as_str(), role, payload);
-        logger.write_audit(&logger.tool, &logger.paths.tool, &line);
+        let line = format_audit_json_line("user_input", "default", payload);
+        logger.write_audit(&logger.input, &logger.paths.input, &line);
+    }
+
+    /// 记录审计事件到 `audit.log`。
+    pub fn audit(audit_type: &str, payload: Value) {
+        let Some(logger) = Self::current() else {
+            return;
+        };
+        let line = format_audit_json_line(audit_type, "audit", payload);
+        logger.write_audit(&logger.audit, &logger.paths.audit, &line);
+    }
+
+    /// 按 target 前缀路由到对应的诊断 sink。
+    /// 返回 `None` 时走兜底 aemeath sink。
+    fn route(&self, target: &str) -> Option<(&Mutex<Option<BufWriter<File>>>, &Path)> {
+        if target.starts_with("cli::") {
+            Some((&self.tui, &self.paths.tui))
+        } else if target.starts_with("hook::") {
+            Some((&self.hook, &self.paths.hook))
+        } else if target.starts_with("runtime::") {
+            Some((&self.runtime, &self.paths.runtime))
+        } else if target.starts_with("provider::") {
+            Some((&self.provider, &self.paths.provider))
+        } else if target.starts_with("tools::") {
+            Some((&self.tools, &self.paths.tools))
+        } else if target.starts_with("prompt::") {
+            Some((&self.prompt, &self.paths.prompt))
+        } else {
+            None
+        }
     }
 
     fn write_audit(&self, sink: &Mutex<Option<BufWriter<File>>>, path: &Path, line: &str) {
@@ -234,10 +271,8 @@ impl Log for UnifiedLogger {
         }
         let line = format_diag_json_line(record);
         let target = record.target();
-        if target.starts_with("cli::") {
-            self.write_diag(&self.tui, &self.paths.tui, &line);
-        } else if target.starts_with("hook::") {
-            self.write_diag(&self.hook, &self.paths.hook, &line);
+        if let Some((sink, path)) = self.route(target) {
+            self.write_diag(sink, path, &line);
         } else {
             self.write_diag(&self.aemeath, &self.paths.aemeath, &line);
         }
@@ -246,11 +281,15 @@ impl Log for UnifiedLogger {
     fn flush(&self) {
         for sink in [
             &self.aemeath,
+            &self.runtime,
+            &self.provider,
+            &self.tools,
+            &self.prompt,
             &self.tui,
             &self.hook,
             &self.input,
             &self.output,
-            &self.tool,
+            &self.audit,
         ] {
             if let Ok(mut guard) = sink.lock() {
                 if let Some(w) = guard.as_mut() {
@@ -282,39 +321,42 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn tool_kind_as_str() {
-        assert_eq!(ToolKind::Call.as_str(), "tool_call");
-        assert_eq!(ToolKind::Result.as_str(), "tool_result");
-    }
-
-    #[test]
     fn sink_paths_in_logs_dir() {
         let paths = SinkPaths::from_logs_dir(Path::new("/tmp/logs"));
         assert_eq!(paths.aemeath, PathBuf::from("/tmp/logs/aemeath.log"));
+        assert_eq!(paths.runtime, PathBuf::from("/tmp/logs/runtime.log"));
+        assert_eq!(paths.provider, PathBuf::from("/tmp/logs/provider.log"));
+        assert_eq!(paths.tools, PathBuf::from("/tmp/logs/tools.log"));
+        assert_eq!(paths.prompt, PathBuf::from("/tmp/logs/prompt.log"));
         assert_eq!(paths.tui, PathBuf::from("/tmp/logs/tui.log"));
         assert_eq!(paths.hook, PathBuf::from("/tmp/logs/hook.log"));
         assert_eq!(paths.input, PathBuf::from("/tmp/logs/input.log"));
         assert_eq!(paths.output, PathBuf::from("/tmp/logs/output.log"));
-        assert_eq!(paths.tool, PathBuf::from("/tmp/logs/tool.log"));
+        assert_eq!(paths.audit, PathBuf::from("/tmp/logs/audit.log"));
     }
 
     #[test]
     fn static_audit_methods_are_noop_without_init() {
-        // 未 init 时 log_input/output/tool 应静默 no-op（不能 panic）
+        // 未 init 时 log_input/output/user_input/audit 应静默 no-op（不能 panic）
         UnifiedLogger::log_input("default", json!({}));
         UnifiedLogger::log_output("default", json!({}));
-        UnifiedLogger::log_tool("default", ToolKind::Call, json!({}));
+        UnifiedLogger::log_user_input(json!({}));
+        UnifiedLogger::audit("permission", json!({}));
     }
 
     /// 构造一个仅用于测试 `maybe_rotate` 的最小 logger（其余 sink 留空）。
     fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> UnifiedLogger {
         UnifiedLogger {
             aemeath: Mutex::new(None),
+            runtime: Mutex::new(None),
+            provider: Mutex::new(None),
+            tools: Mutex::new(None),
+            prompt: Mutex::new(None),
             tui: Mutex::new(None),
             hook: Mutex::new(None),
             input: Mutex::new(None),
             output: Mutex::new(None),
-            tool: Mutex::new(None),
+            audit: Mutex::new(None),
             paths: SinkPaths::from_logs_dir(dir),
             max_bytes,
             max_backups,
@@ -388,5 +430,36 @@ mod tests {
         assert!(guard.is_none(), "缺文件应直接 no-op");
         assert!(!path.exists(), "no-op 不应创建文件");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn route_returns_correct_sink_for_known_prefixes() {
+        let logger = rotate_test_logger(&std::env::temp_dir(), 1024, 3);
+
+        // Verify each prefix routes to the correct path
+        let (_, path_cli) = logger.route("cli::tui::render").unwrap();
+        assert_eq!(path_cli, &logger.paths.tui);
+
+        let (_, path_hook) = logger.route("hook::runner").unwrap();
+        assert_eq!(path_hook, &logger.paths.hook);
+
+        let (_, path_runtime) = logger.route("runtime::loop_runner").unwrap();
+        assert_eq!(path_runtime, &logger.paths.runtime);
+
+        let (_, path_provider) = logger.route("provider::client").unwrap();
+        assert_eq!(path_provider, &logger.paths.provider);
+
+        let (_, path_tools) = logger.route("tools::mcp").unwrap();
+        assert_eq!(path_tools, &logger.paths.tools);
+
+        let (_, path_prompt) = logger.route("prompt::guidance").unwrap();
+        assert_eq!(path_prompt, &logger.paths.prompt);
+    }
+
+    #[test]
+    fn route_returns_none_for_unknown_prefix() {
+        let logger = rotate_test_logger(&std::env::temp_dir(), 1024, 3);
+        assert!(logger.route("unknown::module").is_none());
+        assert!(logger.route("app").is_none());
     }
 }

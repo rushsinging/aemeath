@@ -30,7 +30,7 @@ pub use text::{
     append_text_line_with_turn, format_text_line, format_text_line_with_turn, open_append,
     prepare_log_file, LogFile,
 };
-pub use unified_logger::{ToolKind, UnifiedLogger};
+pub use unified_logger::UnifiedLogger;
 
 /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
 pub fn level_filter_from_str(level: &str) -> log::LevelFilter {
