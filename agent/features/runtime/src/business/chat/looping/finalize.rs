@@ -1,5 +1,5 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
-use crate::business::chat::looping::hook_ui::{runtime_hook_event_finished, HookUi};
+use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
@@ -67,7 +67,7 @@ where
 
 pub(crate) async fn run_stop_hook_before_finish<S>(
     outcome: &AgentRunOutcome,
-    sink: &S,
+    _sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     session_id: &str,
@@ -87,16 +87,8 @@ where
         )
         .await;
     if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {
-        if let Some((entry, result, json_output)) = stop_hook_blocking_result(&stop_results) {
-            let _ = sink
-                .send_event(RuntimeStreamEvent::HookEvent(runtime_hook_event_finished(
-                    "Stop",
-                    entry,
-                    result,
-                    json_output,
-                )))
-                .await;
-        }
+        // hook_ui.run_json 已在内部发送 HookEvent（含 Blocked 状态），
+        // 此处不再重复发送，避免 TUI 显示两次 "Hook blocked: Stop"。
         return Some(feedback);
     }
     None
