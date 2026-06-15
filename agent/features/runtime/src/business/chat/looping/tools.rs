@@ -38,12 +38,13 @@ pub(crate) async fn execute_tool_round<S>(
     hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
 {
     let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
-    let denied_results = deny_tool_calls(&denied, sink, context, hook_ui, hook_runner).await;
+    let denied_results = deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, language).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
@@ -75,7 +76,7 @@ where
 
     let ask_user_results = ask_user(context, sink, hook_ui, hook_runner, &non_agent_calls).await;
     let non_agent_results =
-        execute_non_agent(context, agent, sink, hook_ui, hook_runner, &non_agent_calls).await;
+        execute_non_agent(context, agent, sink, hook_ui, hook_runner, &non_agent_calls, language).await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
@@ -103,6 +104,7 @@ async fn deny_tool_calls<S>(
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -134,19 +136,20 @@ where
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;
-        let result = (
-            call.id.clone(),
-            call.provider_id.clone(),
-            format!(
+        let deny_msg = match language {
+            "zh" => format!("工具 {} 被拒绝：使用 --allow-all 允许写操作", call.name),
+            _ => format!(
                 "Tool {} denied: use --allow-all to permit write operations",
                 call.name
             ),
+        };
+        let result = (
+            call.id.clone(),
+            call.provider_id.clone(),
+            deny_msg.clone(),
             serde_json::json!({
                 "status": "error",
-                "message": format!(
-                    "Tool {} denied: use --allow-all to permit write operations",
-                    call.name
-                )
+                "message": deny_msg,
             }),
             true,
             Vec::new(),

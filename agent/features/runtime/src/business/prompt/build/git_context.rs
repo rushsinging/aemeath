@@ -11,11 +11,30 @@ pub async fn is_git_repo(cwd: &PathBuf) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn collect_git_context(cwd: &PathBuf) -> String {
+pub async fn collect_git_context(cwd: &PathBuf, lang: &str) -> String {
     use tokio::process::Command;
 
+    let l = match lang {
+        "zh" => GitContextLabels {
+            header: "# Git Context",
+            branch: "当前分支",
+            default_branch: "默认分支",
+            git_user: "Git 用户",
+            status: "状态",
+            recent_commits: "最近提交",
+        },
+        _ => GitContextLabels {
+            header: "# Git Context",
+            branch: "Current branch",
+            default_branch: "Default branch",
+            git_user: "Git user",
+            status: "Status",
+            recent_commits: "Recent commits",
+        },
+    };
+
     let mut parts: Vec<String> = Vec::new();
-    parts.push("# Git Context".to_string());
+    parts.push(l.header.to_string());
 
     // Branch name
     if let Ok(output) = Command::new("git")
@@ -26,7 +45,7 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
     {
         let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !branch.is_empty() {
-            parts.push(format!("Current branch: {branch}"));
+            parts.push(format!("{}: {branch}", l.branch));
         }
     }
 
@@ -40,7 +59,7 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
         let default = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !default.is_empty() && default != "origin/HEAD" {
             let branch = default.strip_prefix("origin/").unwrap_or(&default);
-            parts.push(format!("Default branch: {branch}"));
+            parts.push(format!("{}: {branch}", l.default_branch));
         }
     }
 
@@ -53,7 +72,7 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
     {
         let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !name.is_empty() {
-            parts.push(format!("Git user: {name}"));
+            parts.push(format!("{}: {name}", l.git_user));
         }
     }
 
@@ -67,7 +86,7 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
         let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !status.is_empty() {
             let lines: Vec<&str> = status.lines().take(20).collect();
-            parts.push(format!("Status:\n{}", lines.join("\n")));
+            parts.push(format!("{}:\n{}", l.status, lines.join("\n")));
         }
     }
 
@@ -80,7 +99,7 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
     {
         let log = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !log.is_empty() {
-            parts.push(format!("Recent commits:\n{log}"));
+            parts.push(format!("{}:\n{log}", l.recent_commits));
         }
     }
 
@@ -95,4 +114,13 @@ pub async fn collect_git_context(cwd: &PathBuf) -> String {
     } else {
         result
     }
+}
+
+struct GitContextLabels {
+    header: &'static str,
+    branch: &'static str,
+    default_branch: &'static str,
+    git_user: &'static str,
+    status: &'static str,
+    recent_commits: &'static str,
 }

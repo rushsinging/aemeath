@@ -15,6 +15,7 @@ const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 /// without reaching here. When a stop hook blocks the stop, the returned
 /// feedback is injected as a system-reminder and the loop `continue`s — the
 /// next iteration will again drain the queue first.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn finalize_main_loop<S>(
     outcome: &AgentRunOutcome,
     sink: &S,
@@ -23,6 +24,7 @@ pub(crate) async fn finalize_main_loop<S>(
     session_id: &str,
     context: &RuntimeTurnContext,
     _task_store: &TaskStore,
+    language: &str,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -31,7 +33,7 @@ where
 
     match &outcome.status {
         AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
-            run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id).await
+            run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id, language).await
         }
         AgentRunStatus::Cancelled => {
             let _ = sink
@@ -68,6 +70,7 @@ pub(crate) async fn run_stop_hook_before_finish<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     session_id: &str,
+    language: &str,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -82,7 +85,7 @@ where
             }),
         )
         .await;
-    if let Some(feedback) = stop_hook_feedback(&stop_results, session_id).await {
+    if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {
         if let Some((entry, result, json_output)) = stop_hook_blocking_result(&stop_results) {
             let _ = sink
                 .send_event(RuntimeStreamEvent::HookEvent(runtime_hook_event_finished(
@@ -133,13 +136,17 @@ async fn stop_hook_feedback(
         Option<HookJsonOutput>,
     )],
     session_id: &str,
+    language: &str,
 ) -> Option<String> {
     let (entry, result, json) = stop_hook_blocking_result(hook_results)?;
-    let details = hook_feedback_details(result, json, session_id, &entry.command).await;
-    Some(format!(
-        "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{}\n{}",
-        entry.command, details
-    ))
+    let details = hook_feedback_details(result, json, session_id, &entry.command, language).await;
+    let template = match language {
+        "zh" => "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{cmd}\n{details}",
+        _ => "Stop hook prevented stopping. You cannot finish this turn yet.\nYou MUST first satisfy the Stop hook requirement below, then attempt to stop again.\nCommand: {cmd}\n{details}",
+    };
+    Some(template
+        .replace("{cmd}", &entry.command)
+        .replace("{details}", &details))
 }
 
 fn stop_hook_blocking_result(
@@ -188,25 +195,52 @@ fn hook_json_reason(json: &Option<HookJsonOutput>) -> Option<String> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn hook_feedback_details(
     result: &HookResult,
     json: &Option<HookJsonOutput>,
     session_id: &str,
     command: &str,
+    language: &str,
 ) -> String {
+    let (labels, lang) = match language {
+        "zh" => (
+            HookFeedbackLabels {
+                json_feedback: "JSON 反馈：\n{}",
+                stderr_error: "stderr/错误：\n{}",
+                stdout: "stdout：\n{}",
+                no_reason: "Stop hook 阻止了停止，但没有提供原因",
+                output_too_long_file: "hook 输出过长，已保存到文件：{}\n请读取该文件查看完整 stdout/stderr。",
+                output_too_long_preview: "hook 输出过长，以下为前 {n} 字节预览：\n{preview}",
+            },
+            "zh",
+        ),
+        _ => (
+            HookFeedbackLabels {
+                json_feedback: "JSON feedback:\n{}",
+                stderr_error: "stderr/error:\n{}",
+                stdout: "stdout:\n{}",
+                no_reason: "Stop hook prevented stopping but provided no reason",
+                output_too_long_file: "Hook output too long, saved to file: {}\nPlease read that file for the full stdout/stderr.",
+                output_too_long_preview: "Hook output too long, showing first {n} bytes:\n{preview}",
+            },
+            "en",
+        ),
+    };
+    let _ = lang;
     let json_reason = hook_json_reason(json);
     let mut sections = Vec::new();
     if let Some(reason) = non_empty_text(json_reason.as_deref().unwrap_or_default()) {
-        sections.push(format!("JSON 反馈：\n{}", reason));
+        sections.push(str::replace(labels.json_feedback, "{}", &reason));
     }
     if let Some(error) = non_empty_text(result.error.as_deref().unwrap_or_default()) {
-        sections.push(format!("stderr/错误：\n{}", error));
+        sections.push(str::replace(labels.stderr_error, "{}", &error));
     }
     if let Some(output) = non_empty_text(&result.output) {
-        sections.push(format!("stdout：\n{}", output));
+        sections.push(str::replace(labels.stdout, "{}", &output));
     }
     if sections.is_empty() {
-        return "Stop hook 阻止了停止，但没有提供原因".to_string();
+        return labels.no_reason.to_string();
     }
 
     let details = sections.join("\n\n");
@@ -215,15 +249,11 @@ async fn hook_feedback_details(
     }
 
     match write_long_hook_feedback(session_id, command, &details).await {
-        Some(path) => format!(
-            "hook 输出过长，已保存到文件：{}\n请读取该文件查看完整 stdout/stderr。",
-            path.display()
-        ),
-        None => format!(
-            "hook 输出过长，以下为前 {} 字节预览：\n{}",
-            INLINE_HOOK_OUTPUT_LIMIT,
-            truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT)
-        ),
+        Some(path) => str::replace(labels.output_too_long_file, "{}", &path.display().to_string()),
+        None => labels
+            .output_too_long_preview
+            .replace("{n}", &INLINE_HOOK_OUTPUT_LIMIT.to_string())
+            .replace("{preview}", truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT)),
     }
 }
 
@@ -280,6 +310,15 @@ fn non_empty_text(text: &str) -> Option<String> {
     }
 }
 
+struct HookFeedbackLabels {
+    json_feedback: &'static str,
+    stderr_error: &'static str,
+    stdout: &'static str,
+    no_reason: &'static str,
+    output_too_long_file: &'static str,
+    output_too_long_preview: &'static str,
+}
+
 #[cfg(test)]
 fn stop_hook_feedback_for_test(
     hook_results: &[(
@@ -289,7 +328,7 @@ fn stop_hook_feedback_for_test(
     )],
 ) -> Option<String> {
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(stop_hook_feedback(hook_results, "test-session"))
+    runtime.block_on(stop_hook_feedback(hook_results, "test-session", "zh"))
 }
 
 #[cfg(test)]
@@ -399,6 +438,7 @@ mod tests {
             &None,
             "test-long-output",
             "check long.sh",
+            "zh",
         ));
 
         assert!(feedback.contains("hook 输出过长"));
