@@ -13,3 +13,31 @@
   - `_reasoning.md` — reasoning 开启时附加。
 - 首次运行自动生成默认文件，**不覆盖**用户编辑。
 - 改 provider 默认 model 时注意：model id 变化会影响 `{prefix}.md` 的命中，需确认对应 guidance 仍匹配。
+
+## 多语言一致性（Config.language）
+
+所有注入 LLM context 的文本 **MUST** 按 `Config.language`（`"en"` / `"zh"`）提供对应语言版本。**NEVER** 在同一 system prompt 中混合中英文（结构性标签如 XML tag name 除外）。
+
+### 当前覆盖状态
+
+| 注入路径 | 状态 | 位置 |
+|---|---|---|
+| Guidance 文件（`_default.md` 等） | ✅ 已双语（`DEFAULT_FILES_EN` / `DEFAULT_FILES_ZH`） | `constants.rs` |
+| `UNIVERSAL_EXECUTION_DISCIPLINE` | ✅ 已双语（`universal_execution_discipline(lang)`） | `constants.rs` |
+| task reminder 模板 | ✅ 已双语（`build_reminder(lang)`） | `task_reminder.rs` |
+| `static_system_prompt_for()` | ❌ 硬编码英文，无 language 参数 | `prompt_build.rs` |
+| `build_commit_guidance()` | ❌ 硬编码英文 | `prompt_build.rs` |
+| `currentDate` 段 | ❌ 硬编码英文 | `prompt_build.rs` |
+| git context 标签 | ❌ 硬编码英文 | `git_context.rs` |
+| `# Available Skills` / `# Available Agent Roles` | ❌ 硬编码英文 | `prompt_build_ext.rs` |
+| claudeMd system-reminder 包裹文本 | ❌ 硬编码英文 | `loop_runner.rs` |
+| `Tool {} denied` / `Cancelled by user` / `Blocked by PreToolUse hook` | ❌ 硬编码英文 | `tools.rs` / `non_agent.rs` |
+| guidance 重载提示 | ❌ 硬编码中文 | `loop_runner.rs` |
+| Stop hook 反馈 | ❌ 硬编码中文 | `finalize.rs` |
+
+### 改造原则
+
+1. **MUST** 在注入文本的函数签名中传入 `language: &str`（或 `Config`），按值选择对应语言版本。
+2. **MUST** 为每个文本块定义 `const XXX_EN: &str` 和 `const XXX_ZH: &str`，再通过 `fn xxx(lang) -> &'static str` 选择——**NEVER** 在调用点内联 match。
+3. **SHOULD** 优先双语化直接面向 LLM 行为指令的文本（system prompt、task reminder），其次处理反馈性文本（hook 反馈、tool denied）。
+4. **MAY** 对纯结构性标签（`<system-reminder>` XML tag name、JSON key name）保持英文不翻译。

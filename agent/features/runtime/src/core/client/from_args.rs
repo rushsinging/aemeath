@@ -210,6 +210,10 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         context_size,
         verbose: args.verbose,
         resume: args.resume,
+        language: config_file
+            .as_ref()
+            .map(|c| c.language.clone())
+            .unwrap_or_else(|| "en".to_string()),
     };
 
     // 19. 构建 handle

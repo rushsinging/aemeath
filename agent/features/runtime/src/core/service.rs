@@ -156,6 +156,7 @@ mod tests {
             context_size: 200_000,
             verbose: false,
             resume: None,
+            language: "en".to_string(),
         }
     }
 

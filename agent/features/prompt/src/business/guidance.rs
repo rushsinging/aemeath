@@ -34,7 +34,7 @@ fn global_guidance_dir() -> PathBuf {
 }
 
 // Re-export public API so external code can use `share::guidance::...` unchanged.
-pub use constants::UNIVERSAL_EXECUTION_DISCIPLINE;
+pub use constants::universal_execution_discipline;
 pub use resolver::{resolve_guidance, resolve_guidance_async, resolve_model_guidance_async};
 
 /// Returns the default guidance dir: `~/.agents/guidance/`

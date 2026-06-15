@@ -1,7 +1,7 @@
 pub mod guidance {
     pub use crate::business::guidance::resolver::InstructionsLoadedHook;
     pub use crate::business::guidance::{
-        init_guidance_dir, resolve_guidance, resolve_guidance_async, UNIVERSAL_EXECUTION_DISCIPLINE,
+        init_guidance_dir, resolve_guidance, resolve_guidance_async, universal_execution_discipline,
     };
 }
 
