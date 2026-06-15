@@ -122,17 +122,18 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::ToolCallStart { name, .. } => {
             eprintln!("[tool:start] {name}");
         }
-        sdk::ChatEvent::AskUser {
-            question,
-            options,
-            allow_free_input,
-            default,
-            reply_tx,
-            ..
-        } => {
-            let reply =
-                read_ask_user_reply(&question, &options, allow_free_input, default.as_deref())?;
-            let _ = reply_tx.send(reply);
+        sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
+            let mut answers = Vec::new();
+            for item in items {
+                let reply = read_ask_user_reply(
+                    &item.question,
+                    &item.options,
+                    true,
+                    item.default.as_deref(),
+                )?;
+                answers.push(reply);
+            }
+            let _ = reply_tx.send(answers);
         }
         sdk::ChatEvent::AgentProgress { event, .. } => {
             eprintln!("[agent] {event}");

@@ -322,7 +322,7 @@ mod tests {
                 name: "Read".to_string(),
                 index: 0,
                 arguments: Some("{}".to_string()),
-                                status: ToolCallStatus::Ready,
+                status: ToolCallStatus::Ready,
             },
             RuntimeObservation::AgentProgress {
                 context: context.clone(),

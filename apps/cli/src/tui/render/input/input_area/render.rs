@@ -26,7 +26,8 @@ impl InputArea {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let display_lines = wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
+        let display_lines =
+            wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
         let mut textarea = configured_textarea(view_model, &display_lines);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);

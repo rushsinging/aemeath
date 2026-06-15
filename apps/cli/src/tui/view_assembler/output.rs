@@ -5,7 +5,7 @@ use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
-    allowed_child, AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
+    allowed_child, AskUserBatchBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
     OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
     ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
 };
@@ -189,33 +189,31 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                OutputTimelineItem::AskUser {
+                OutputTimelineItem::AskUserBatch {
                     id,
-                    question,
-                    options,
-                    llm_option_count,
-                    multi_select,
+                    slots,
+                    active_index,
+                    phase,
                     cursor,
                     selected,
                     chat_input_active,
                     chat_input_text,
-                    default,
-                    answer,
+                    confirm_cursor,
+                    confirmed,
                 } => {
                     roots.push(leaf(
                         id.clone(),
-                        OutputBlockKind::AskUser(AskUserBlockView {
+                        OutputBlockKind::AskUserBatch(AskUserBatchBlockView {
                             key: id.clone(),
-                            question: question.clone(),
-                            options: options.clone(),
-                            llm_option_count: *llm_option_count,
-                            multi_select: *multi_select,
+                            slots: slots.clone(),
+                            active_index: *active_index,
+                            phase: *phase,
                             cursor: *cursor,
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
                             chat_input_text: chat_input_text.clone(),
-                            default: default.clone(),
-                            answer: answer.clone(),
+                            confirm_cursor: *confirm_cursor,
+                            confirmed: *confirmed,
                         }),
                     ));
                 }

@@ -50,7 +50,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ReflectionUsage => "ReflectionUsage",
         UiEvent::ReflectionDone { .. } => "ReflectionDone",
         UiEvent::ReflectionApplyDone { .. } => "ReflectionApplyDone",
-        UiEvent::AskUser { .. } => "AskUser",
+        UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",

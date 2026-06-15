@@ -15,6 +15,29 @@ pub struct HookNoticeContent {
     pub details: Option<String>,
 }
 
+/// AskUserQuestion 批量交互中的单个问题槽位。
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct AskUserSlot {
+    pub id: String,
+    pub question: String,
+    /// 全部选项（LLM 选项 + 内建选项）。
+    pub options: Vec<sdk::OptionItem>,
+    /// LLM 选项数量（内建选项从该索引开始）。
+    pub llm_option_count: usize,
+    pub multi_select: bool,
+    pub default: Option<String>,
+    /// 用户回答。None=未答，Some=已答。
+    pub answer: Option<String>,
+}
+
+/// AskUser 批量交互的阶段。
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AskUserPhase {
+    /// 逐个回答中。
+    Answering,
+    /// 全部答完，等待确认。
+    Confirming,
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConversationBlock {
     UserMessage {
@@ -77,30 +100,28 @@ pub enum ConversationBlock {
         content: serde_json::Value,
         is_error: bool,
     },
-    /// AskUserQuestion 交互块（问题 + 选项列表）。渲染与选项导航高亮的单一真相。
-    ///
-    /// 选项导航的可变状态（`cursor`、`selected`、`chat_input_active`）随键盘交互
-    /// 派发 intent 写入本块，渲染组件据此高亮，避免命令式重写输出行。
-    AskUser {
+    /// AskUserQuestion 批量交互块（多问 + 确认页状态机）。
+    AskUserBatch {
         id: String,
-        question: String,
-        /// 全部选项（LLM 选项 + 内建选项）。
-        options: Vec<sdk::OptionItem>,
-        /// LLM 提供的选项数量（内建选项从该索引开始，不可在 multi_select 下勾选）。
-        llm_option_count: usize,
-        multi_select: bool,
-        /// 当前光标所在选项索引（导航高亮的单一真相）。
+        /// 所有问题槽位。
+        slots: Vec<AskUserSlot>,
+        /// 当前激活的问题索引。
+        active_index: usize,
+        /// 交互阶段。
+        phase: AskUserPhase,
+        // ── 当前激活问题的选项导航状态 ──
+        /// 当前激活问题的选项光标。
         cursor: usize,
-        /// multi_select 下各选项是否已勾选。
+        /// 当前激活问题的 multi_select 勾选状态。
         selected: Vec<bool>,
-        /// 是否处于自由输入态（光标在 Type something 位置）。
+        /// 是否处于 Type something 自由输入子态。
         chat_input_active: bool,
-        /// Type something 输入框中的文本。
+        /// Type something 输入框文本。
         chat_input_text: String,
-        /// 无选项自由输入模式下的默认值提示。
-        default: Option<String>,
-        /// 用户回答内容。设置后 block 进入已回答状态，渲染为问答对。
-        answer: Option<String>,
+        /// 确认页导航光标。
+        confirm_cursor: usize,
+        /// 用户已确认提交（block 进入终态）。
+        confirmed: bool,
     },
 }
 
@@ -116,7 +137,7 @@ impl ConversationBlock {
             | ConversationBlock::QueuedUserMessage { id, .. }
             | ConversationBlock::AgentProgress { id, .. }
             | ConversationBlock::OrphanToolResult { id, .. }
-            | ConversationBlock::AskUser { id, .. } => id,
+            | ConversationBlock::AskUserBatch { id, .. } => id,
             ConversationBlock::ToolCall { id, .. } | ConversationBlock::ToolResult { id, .. } => {
                 id.as_ref()
             }

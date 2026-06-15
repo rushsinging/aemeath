@@ -100,10 +100,7 @@ where
         .await;
 
     // 等待用户回答所有问题
-    let answers: Vec<String> = match reply_rx.await {
-        Ok(a) => a,
-        Err(_) => Vec::new(),
-    };
+    let answers: Vec<String> = reply_rx.await.unwrap_or_default();
 
     // 收到答案后，逐个 send_tool_result 回传；
     // 答案数量不匹配时用 default 值填充

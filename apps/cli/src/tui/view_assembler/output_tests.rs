@@ -317,7 +317,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         .expect("tool block");
 
     assert_eq!(tool.title, "Read");
-    
+
     assert_eq!(
         tool.args_preview.as_deref(),
         Some(r#"{"file_path":"src/lib.rs"}"#)

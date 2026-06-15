@@ -1,18 +1,16 @@
-//! 交互式选项提问状态
+//! 交互式批量提问状态
 //!
-//! 选项导航的可变状态（cursor/selected/chat_input_active）已迁入
-//! `ConversationModel` 的 `AskUser` 块，作为渲染与导航高亮的单一真相；
-//! 本结构仅保留应答回传所需的静态元数据与 reply_tx。
+//! 导航高亮的可变状态（cursor/selected/chat_input_active）由
+//! `ConversationModel` 的 `AskUserBatch` 块管理；本结构仅保留
+//! 应答回传所需的 reply_tx 和原始问题列表。
 
 /// Built-in options appended after LLM options in AskUserQuestion.
 pub(crate) const BUILTIN_OPTION_CHAT: &str = "Type something...";
 
-/// State for interactive AskUserQuestion option selection
+/// 批量 AskUserQuestion 交互状态。
 pub(crate) struct AskUserState {
-    pub reply_tx: tokio::sync::oneshot::Sender<String>,
-    /// All options shown to user: LLM options + built-in options.
-    pub options: Vec<sdk::OptionItem>,
-    /// Number of LLM-provided options (built-in options start at this index).
-    pub llm_option_count: usize,
-    pub multi_select: bool,
+    /// 回传所有答案（顺序与 items 一致）。
+    pub reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
+    /// 原始问题列表（用于构建 AskUserSlot 和回传时取 default）。
+    pub items: Vec<sdk::AskUserQuestionItem>,
 }

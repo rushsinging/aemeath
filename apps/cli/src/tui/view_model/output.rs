@@ -37,32 +37,23 @@ pub enum OutputBlockKind {
     HookNotice(HookNoticeBlockView),
     DiagnosticNotice(TextBlockView),
     SystemNotice(TextBlockView),
-    AskUser(AskUserBlockView),
+    AskUserBatch(AskUserBatchBlockView),
 }
 
-/// AskUserQuestion 交互块视图：问题 + 选项列表 + 当前导航高亮状态。
+/// AskUserQuestion 批量交互块视图。
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AskUserBlockView {
+pub struct AskUserBatchBlockView {
     pub key: String,
-    pub question: String,
-    pub options: Vec<sdk::OptionItem>,
-    /// LLM 选项数量（内建项从该索引开始，不显示勾选框）。
-    pub llm_option_count: usize,
-    pub multi_select: bool,
-    /// 当前光标所在选项索引（高亮行）。
+    pub slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
+    pub active_index: usize,
+    pub phase: crate::tui::model::conversation::block::AskUserPhase,
     pub cursor: usize,
-    /// multi_select 下各选项勾选状态。
     pub selected: Vec<bool>,
-    /// 处于自由输入态（光标在 Type something 位置）。
     pub chat_input_active: bool,
-    /// Type something 输入框中的文本。
     pub chat_input_text: String,
-    /// 无选项自由输入模式下的默认值提示（渲染 `(default: ...)` 行）。
-    pub default: Option<String>,
-    /// 用户回答内容。Some 表示已回答，渲染为问答对。
-    pub answer: Option<String>,
+    pub confirm_cursor: usize,
+    pub confirmed: bool,
 }
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TextBlockView {
     pub key: String,

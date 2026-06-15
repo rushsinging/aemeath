@@ -12,7 +12,7 @@ pub use input::InputAreaViewModel;
 pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
-    AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind,
+    AskUserBatchBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind,
     OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{

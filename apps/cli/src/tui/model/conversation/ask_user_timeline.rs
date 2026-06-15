@@ -7,43 +7,41 @@ pub(super) fn sync_ask_user_timeline_item(
 ) {
     let Some(block) = blocks
         .iter()
-        .find(|block| matches!(block, ConversationBlock::AskUser { .. }))
+        .find(|block| matches!(block, ConversationBlock::AskUserBatch { .. }))
     else {
         return;
     };
     let Some(item) = timeline
         .iter_mut()
-        .find(|item| matches!(item, OutputTimelineItem::AskUser { .. }))
+        .find(|item| matches!(item, OutputTimelineItem::AskUserBatch { .. }))
     else {
         return;
     };
-    let ConversationBlock::AskUser {
+    let ConversationBlock::AskUserBatch {
         id,
-        question,
-        options,
-        llm_option_count,
-        multi_select,
+        slots,
+        active_index,
+        phase,
         cursor,
         selected,
         chat_input_active,
         chat_input_text,
-        default,
-        answer,
+        confirm_cursor,
+        confirmed,
     } = block
     else {
         return;
     };
-    *item = OutputTimelineItem::AskUser {
+    *item = OutputTimelineItem::AskUserBatch {
         id: id.clone(),
-        question: question.clone(),
-        options: options.clone(),
-        llm_option_count: *llm_option_count,
-        multi_select: *multi_select,
+        slots: slots.clone(),
+        active_index: *active_index,
+        phase: *phase,
         cursor: *cursor,
         selected: selected.clone(),
         chat_input_active: *chat_input_active,
         chat_input_text: chat_input_text.clone(),
-        default: default.clone(),
-        answer: answer.clone(),
+        confirm_cursor: *confirm_cursor,
+        confirmed: *confirmed,
     };
 }

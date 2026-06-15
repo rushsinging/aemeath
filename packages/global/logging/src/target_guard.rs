@@ -102,12 +102,13 @@ mod tests {
             return;
         }
         for file in rust_files_under(&dir) {
-            if file.file_name().is_some_and(|n| n.to_string_lossy().contains("test")) {
+            if file
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().contains("test"))
+            {
                 continue;
             }
-            let source = production_source(
-                &fs::read_to_string(&file).expect("read rust source"),
-            );
+            let source = production_source(&fs::read_to_string(&file).expect("read rust source"));
             let violations = has_bare_log_calls(&source);
             assert!(
                 violations.is_empty(),
