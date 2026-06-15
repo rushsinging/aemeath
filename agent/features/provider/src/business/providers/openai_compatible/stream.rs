@@ -9,8 +9,8 @@ use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
-/// 流空闲超时：90 秒无数据则中止
-pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+/// 流空闲超时：180 秒无数据则中止
+pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 /// 停滞检测阈值：超过 30 秒无数据则记录警告
 pub(crate) const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -77,6 +77,31 @@ pub(crate) fn try_complete_truncated_json(raw: &str) -> Option<serde_json::Value
     serde_json::from_str(&candidate).ok()
 }
 
+/// 格式化流状态快照，用于 idle timeout / error 诊断日志。
+///
+/// 输出形如：`text=42B reasoning=0B tools=[Write: 12KB/45d, Read: 0B/0d]`
+fn format_stream_snapshot(
+    text: &str,
+    reasoning: &str,
+    tool_calls: &std::collections::HashMap<usize, (String, String, String, u32)>,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(format!("text={}B", text.len()));
+    parts.push(format!("reasoning={}B", reasoning.len()));
+    if !tool_calls.is_empty() {
+        let mut sorted: Vec<_> = tool_calls.iter().collect();
+        sorted.sort_by_key(|(i, _)| **i);
+        let tools_str: Vec<String> = sorted
+            .iter()
+            .map(|(_, (_, name, args, delta_count))| {
+                format!("{}: {}B/{}d", name, args.len(), delta_count)
+            })
+            .collect();
+        parts.push(format!("tools=[{}]", tools_str.join(", ")));
+    }
+    parts.join(" ")
+}
+
 /// 解析 OpenAI 风格的 SSE 流
 pub(crate) async fn parse_openai_stream(
     response: reqwest::Response,
@@ -119,7 +144,17 @@ pub(crate) async fn parse_openai_stream(
                 return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
-                handler.on_error(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
+                let snapshot = format_stream_snapshot(
+                    &current_text, &current_reasoning, &current_tool_calls,
+                );
+                log::warn!(target: "provider::openai_stream",
+                    "[openai-compat stream] idle timeout: no data for {}s — {snapshot}",
+                    STREAM_IDLE_TIMEOUT.as_secs(),
+                );
+                handler.on_error(&format!(
+                    "Stream idle timeout: no data for {}s — {snapshot}",
+                    STREAM_IDLE_TIMEOUT.as_secs(),
+                ));
                 return Err(crate::LlmError::Stream(format!(
                     "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
                 )));
@@ -257,6 +292,10 @@ pub(crate) async fn parse_openai_stream(
                                         entry.0 = format!("call_{}", index);
                                     }
                                     if is_new {
+                                        log::debug!(target: "provider::openai_stream",
+                                            "[openai-compat stream] tool_use_start: name={} id={} index={}",
+                                            name, entry.0, index,
+                                        );
                                         handler.on_tool_use_start(name, Some(&entry.0), index);
                                     }
                                 }
@@ -265,6 +304,12 @@ pub(crate) async fn parse_openai_stream(
                                 {
                                     entry.2.push_str(args);
                                     entry.3 += 1;
+                                    if entry.3 == 1 {
+                                        log::debug!(target: "provider::openai_stream",
+                                            "[openai-compat stream] tool_args_first_delta: name={} index={} delta_bytes={}",
+                                            entry.1, index, args.len(),
+                                        );
+                                    }
                                     // Notify handler with accumulated arguments for
                                     // real-time UI updates (e.g. showing file path).
                                     if !entry.1.is_empty() {

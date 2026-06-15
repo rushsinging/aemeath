@@ -97,6 +97,10 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
+        log::debug!(target: "runtime::stream_handler",
+            "on_tool_use_start: name={} provider_id={:?} index={} turn_id={}",
+            name, provider_id, index, self.context.turn_id,
+        );
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink.try_send_event(RuntimeStreamEvent::ToolCallStart {
