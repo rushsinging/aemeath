@@ -81,6 +81,7 @@ pub struct ToolRenderPolicy {
 | ExitWorktree | Standard | Hidden | `Visible { 16, Plain, false }` |
 | WebFetch | Standard | Hidden | `Visible { 5, Plain, false }` |
 | AskUserQuestion | Standard | Hidden | Hidden |
+| TaskCreate | Compact | Hidden | Hidden |
 
 ### 关键设计决策
 
@@ -89,3 +90,5 @@ pub struct ToolRenderPolicy {
 - **Agent 是唯一使用 `DetailsPolicy::Expanded` 的内置工具**，展示 prompt 预览（截断 200 字符）。
 - **Edit 是唯一使用 `ResultRender::Diff` 的工具**，显示全部 diff 行（`max_lines: None`）。
 - **Bash 使用 `tail_mode: true`**，只显示最后 5 行输出，避免长命令输出淹没 TUI。
+- **TaskCreate 使用 `Compact` 单行模式**，description 合并进 header（`TaskCreate {subject}: {description}`）。
+- **ToolResult 子块首行使用 `└─` 拐角**作为 gutter marker（由 `gutter.rs` 按 `OutputBlockKind::ToolResult` 注入），连接到父 ToolCall header。

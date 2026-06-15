@@ -13,19 +13,20 @@ impl ToolDisplay for TaskCreateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let subject = str_arg(input, "subject", "?");
-        format!("TaskCreate {subject}")
-    }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let desc = str_arg(input, "description", "");
         if desc.is_empty() {
-            return vec![];
+            format!("TaskCreate {subject}")
+        } else {
+            format!("TaskCreate {subject}: {}", truncate_ellipsis(desc, 60))
         }
-        vec![truncate_ellipsis(desc, 80)]
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
-            header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Expanded,
+            header: HeaderPolicy::Compact,
+            details: DetailsPolicy::Hidden,
             result: ResultPolicy::Hidden,
         }
     }
