@@ -78,7 +78,7 @@ aemeath/                    # workspace root
 │   ├── panic.log            #   Panic 日志
 │   └── agent.log            #   审计日志（已废弃）
 >
-> 注意：`-v` / `--verbose` 参数**不会**将应用日志输出到 stderr；日志始终写入 `~/.agents/logs/aemeath.log`。
+> 注意：`-v` / `--verbose` 参数将应用日志输出到 stderr（常与 `-q` 配合用于 CLI 测试：`echo "hello" | aemeath -q -v --allow-all`）。不加 `-v` 时日志始终写入 `~/.agents/logs/aemeath.log`。
 ├── memory/                  # 持久化记忆存储
 ├── sessions/                # 会话持久化
 ├── skills/                  # 全局 Skills
