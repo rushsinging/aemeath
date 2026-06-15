@@ -135,7 +135,7 @@ pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<St
         let lang_path = dir.join(language).join(format!("{}.md", name));
         if let Ok(content) = std::fs::read_to_string(&lang_path) {
             if !content.trim().is_empty() {
-                log::debug!("Loaded guidance from {}", lang_path.display());
+                log::debug!(target: "prompt::resolver", "Loaded guidance from {}", lang_path.display());
                 return Some(content);
             }
         }
@@ -145,7 +145,7 @@ pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<St
     let root_path = dir.join(format!("{}.md", name));
     if let Ok(content) = std::fs::read_to_string(&root_path) {
         if !content.trim().is_empty() {
-            log::debug!("Loaded guidance from {}", root_path.display());
+            log::debug!(target: "prompt::resolver", "Loaded guidance from {}", root_path.display());
             return Some(content);
         }
     }
@@ -170,7 +170,7 @@ async fn load_named_file_async_with_lang(
         let lang_path = dir.join(language).join(format!("{}.md", name));
         if let Ok(content) = std::fs::read_to_string(&lang_path) {
             if !content.trim().is_empty() {
-                log::debug!("Loaded guidance from {}", lang_path.display());
+                log::debug!(target: "prompt::resolver", "Loaded guidance from {}", lang_path.display());
                 if let Some(hr) = hook_runner {
                     let file_path_str = lang_path.to_string_lossy().to_string();
                     hr.on_instructions_loaded(&file_path_str, "guidance").await;
@@ -184,7 +184,7 @@ async fn load_named_file_async_with_lang(
     let root_path = dir.join(format!("{}.md", name));
     if let Ok(content) = std::fs::read_to_string(&root_path) {
         if !content.trim().is_empty() {
-            log::debug!("Loaded guidance from {}", root_path.display());
+            log::debug!(target: "prompt::resolver", "Loaded guidance from {}", root_path.display());
             if let Some(hr) = hook_runner {
                 let file_path_str = root_path.to_string_lossy().to_string();
                 hr.on_instructions_loaded(&file_path_str, "guidance").await;
@@ -244,7 +244,7 @@ fn load_prefix_matched_from_dir(dir: &std::path::Path, model_lower: &str) -> Opt
     }
 
     if best_content.is_some() {
-        log::debug!(
+        log::debug!(target: "prompt::resolver",
             "Matched guidance prefix '{}' for model '{}' in {}",
             best_prefix,
             model_lower,
@@ -340,7 +340,7 @@ fn find_matching_config_guidance(
                 let warnings = crate::business::security::scan_content(path, &content);
                 if !warnings.is_empty() {
                     for w in &warnings {
-                        log::warn!(
+                        log::warn!(target: "prompt::resolver",
                             "[Security] {} in {} line {}: {}",
                             w.threat_type,
                             w.filename,
@@ -355,7 +355,7 @@ fn find_matching_config_guidance(
                 Some(content)
             }
             Err(e) => {
-                log::warn!("Failed to read guidance file {}: {}", expanded, e);
+                log::warn!(target: "prompt::resolver", "Failed to read guidance file {}: {}", expanded, e);
                 None
             }
         }
@@ -412,7 +412,7 @@ fn load_builtin_default(name: &str, language: &str) -> Option<String> {
 
     for &(file_name, content) in files {
         if file_name == filename {
-            log::debug!("Using built-in default for {} ({})", filename, language);
+            log::debug!(target: "prompt::resolver", "Using built-in default for {} ({})", filename, language);
             return Some(content.trim().to_string());
         }
     }
