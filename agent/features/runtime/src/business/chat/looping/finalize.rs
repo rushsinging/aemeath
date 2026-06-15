@@ -33,7 +33,8 @@ where
 
     match &outcome.status {
         AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
-            run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id, language).await
+            run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id, language)
+                .await
         }
         AgentRunStatus::Cancelled => {
             let _ = sink
@@ -144,9 +145,11 @@ async fn stop_hook_feedback(
         "zh" => "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{cmd}\n{details}",
         _ => "Stop hook prevented stopping. You cannot finish this turn yet.\nYou MUST first satisfy the Stop hook requirement below, then attempt to stop again.\nCommand: {cmd}\n{details}",
     };
-    Some(template
-        .replace("{cmd}", &entry.command)
-        .replace("{details}", &details))
+    Some(
+        template
+            .replace("{cmd}", &entry.command)
+            .replace("{details}", &details),
+    )
 }
 
 fn stop_hook_blocking_result(
@@ -249,11 +252,18 @@ async fn hook_feedback_details(
     }
 
     match write_long_hook_feedback(session_id, command, &details).await {
-        Some(path) => str::replace(labels.output_too_long_file, "{}", &path.display().to_string()),
+        Some(path) => str::replace(
+            labels.output_too_long_file,
+            "{}",
+            &path.display().to_string(),
+        ),
         None => labels
             .output_too_long_preview
             .replace("{n}", &INLINE_HOOK_OUTPUT_LIMIT.to_string())
-            .replace("{preview}", truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT)),
+            .replace(
+                "{preview}",
+                truncate_utf8(&details, INLINE_HOOK_OUTPUT_LIMIT),
+            ),
     }
 }
 

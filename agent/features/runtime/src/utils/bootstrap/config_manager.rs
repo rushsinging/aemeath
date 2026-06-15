@@ -293,7 +293,9 @@ impl ConfigManager {
                         log::warn!(target: "runtime::config_manager", "解析全局配置失败 {}: {err}", self.global_path.display())
                     }
                 },
-                Err(err) => log::warn!(target: "runtime::config_manager", "读取全局配置失败 {}: {err}", self.global_path.display()),
+                Err(err) => {
+                    log::warn!(target: "runtime::config_manager", "读取全局配置失败 {}: {err}", self.global_path.display())
+                }
             }
         }
 
@@ -336,7 +338,9 @@ impl ConfigManager {
                             log::warn!(target: "runtime::config_manager", "解析项目配置失败 {}: {err}", project_path.display())
                         }
                     },
-                    Err(err) => log::warn!(target: "runtime::config_manager", "读取项目配置失败 {}: {err}", project_path.display()),
+                    Err(err) => {
+                        log::warn!(target: "runtime::config_manager", "读取项目配置失败 {}: {err}", project_path.display())
+                    }
                 }
             }
         }

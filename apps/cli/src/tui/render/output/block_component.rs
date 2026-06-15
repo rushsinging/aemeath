@@ -47,7 +47,9 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::UserMessage(text) => {
                 blocks::user_message::render_user_message(block_id, text, ctx)
             }
-            OutputBlockKind::AskUser(ask) => blocks::ask_user::render_ask_user(block_id, ask, ctx),
+            OutputBlockKind::AskUserBatch(ask) => {
+                blocks::ask_user::render_ask_user_batch(block_id, ask, ctx)
+            }
             OutputBlockKind::HookNotice(notice) => {
                 blocks::diagnostic::render_hook_notice(block_id, notice, ctx)
             }

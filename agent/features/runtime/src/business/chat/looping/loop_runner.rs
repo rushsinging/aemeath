@@ -136,7 +136,8 @@ where
     // 将 chat_id 同步到日志 context，影响 tool/audit/hook 等共享 sink 的 chat 字段
     logging::context::set_current_chat_id(chat_id.to_string());
     // 初始化配置变更快照注册表（turn 边界轮询用）
-    let mut config_snapshot = crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
+    let mut config_snapshot =
+        crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
     loop {
         turn_count += 1;
         let turn_id = ChatTurnId::new_v7();
@@ -159,7 +160,8 @@ where
                 // 通过 sink 发送 ConfigReloaded 事件通知客户端
                 sink.send_event(RuntimeStreamEvent::ConfigReloaded {
                     changed_keys: config_diff.changed_keys.clone(),
-                }).await;
+                })
+                .await;
 
                 // Guidance 变更处理：按 reload_policy 配置注入通知
                 let has_guidance_change = config_diff
@@ -199,7 +201,8 @@ where
                             messages.push(reminder);
                             sink.send_event(RuntimeStreamEvent::SystemMessage(
                                 "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
-                            )).await;
+                            ))
+                            .await;
                             log::info!(target: "runtime::loop_runner", "[config_reload] guidance confirm mode: waiting for user confirmation");
                         }
                     }
@@ -208,7 +211,7 @@ where
         }
 
         // Refresh tool schemas each turn so dynamically registered MCP tools
-                    // are visible to the LLM once the background connector finishes.
+        // are visible to the LLM once the background connector finishes.
         let tool_schemas = registry.schemas();
         let tool_schema_tokens =
             crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
@@ -768,7 +771,7 @@ mod tests {
                 RuntimeStreamEvent::ToolCallUpdate { .. } => "ToolCallUpdate".to_string(),
                 RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
                 RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
-                RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
+                RuntimeStreamEvent::AskUserBatch { .. } => "AskUserBatch".to_string(),
                 RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
                 RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                     "WorkingDirectoryChanged".to_string()

@@ -41,30 +41,39 @@ impl Tool for SleepTool {
 
         // Check for cancellation
         if ctx.cancel.is_cancelled() {
-            return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": "Sleep cancelled",
-                "data": {}
-            }).to_string());
+            return ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "Sleep cancelled",
+                    "data": {}
+                })
+                .to_string(),
+            );
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
 
         // Check again after sleep
         if ctx.cancel.is_cancelled() {
-            return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": "Sleep cancelled",
-                "data": {}
-            }).to_string());
+            return ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "Sleep cancelled",
+                    "data": {}
+                })
+                .to_string(),
+            );
         }
 
-        ToolResult::success(serde_json::json!({
-            "status": "success",
-            "message": format!("Slept for {}ms", duration_ms),
-            "data": {
-                "duration_ms": duration_ms
-            }
-        }).to_string())
+        ToolResult::success(
+            serde_json::json!({
+                "status": "success",
+                "message": format!("Slept for {}ms", duration_ms),
+                "data": {
+                    "duration_ms": duration_ms
+                }
+            })
+            .to_string(),
+        )
     }
 }

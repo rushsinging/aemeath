@@ -5,9 +5,9 @@ use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
-    allowed_child, AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
-    OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
-    ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
+    allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
+    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
+    TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
 };
 
 pub struct OutputViewAssembler;
@@ -189,33 +189,48 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                OutputTimelineItem::AskUser {
+                OutputTimelineItem::AskUserBatch {
                     id,
-                    question,
-                    options,
-                    llm_option_count,
-                    multi_select,
+                    slots,
+                    active_index,
+                    phase,
                     cursor,
                     selected,
                     chat_input_active,
                     chat_input_text,
-                    default,
-                    answer,
+                    confirm_cursor,
+                    confirmed,
                 } => {
+                    use crate::tui::model::conversation::block::AskUserPhase as MPhase;
+                    let phase_view = match phase {
+                        MPhase::Answering => AskUserPhaseView::Answering,
+                        MPhase::Confirming => AskUserPhaseView::Confirming,
+                    };
+                    let slots_view: Vec<_> = slots
+                        .iter()
+                        .map(|s| AskUserSlotView {
+                            id: s.id.clone(),
+                            question: s.question.clone(),
+                            options: s.options.clone(),
+                            llm_option_count: s.llm_option_count,
+                            multi_select: s.multi_select,
+                            default: s.default.clone(),
+                            answer: s.answer.clone(),
+                        })
+                        .collect();
                     roots.push(leaf(
                         id.clone(),
-                        OutputBlockKind::AskUser(AskUserBlockView {
+                        OutputBlockKind::AskUserBatch(AskUserBatchBlockView {
                             key: id.clone(),
-                            question: question.clone(),
-                            options: options.clone(),
-                            llm_option_count: *llm_option_count,
-                            multi_select: *multi_select,
+                            slots: slots_view,
+                            active_index: *active_index,
+                            phase: phase_view,
                             cursor: *cursor,
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
                             chat_input_text: chat_input_text.clone(),
-                            default: default.clone(),
-                            answer: answer.clone(),
+                            confirm_cursor: *confirm_cursor,
+                            confirmed: *confirmed,
                         }),
                     ));
                 }

@@ -75,29 +75,23 @@ pub enum ConversationIntent {
         tool_id: ToolCallId,
         message: String,
     },
-    /// 显示 AskUserQuestion 交互块（问题 + 选项），替换已有的 AskUser 块（若有）。
-    ShowAskUser {
-        question: String,
-        options: Vec<sdk::OptionItem>,
-        llm_option_count: usize,
-        multi_select: bool,
-        cursor: usize,
-        /// 无选项自由输入模式下的默认值提示。
-        default: Option<String>,
+    /// 显示 AskUserBatch 交互块（批量问题）。
+    ShowAskUserBatch {
+        slots: Vec<super::block::AskUserSlot>,
     },
-    /// 设置用户回答内容，AskUser block 进入已回答状态。
-    AnswerAskUser {
+    /// 回答当前激活问题，自动前进到下一题或进入确认页。
+    AnswerCurrentAskUser {
         answer: String,
     },
-    /// 更新 AskUser 块的光标位置（选项导航高亮的单一真相）。
+    /// 更新当前激活问题的选项光标。
     SetAskUserCursor {
         cursor: usize,
     },
-    /// 切换 AskUser 块中某选项的勾选状态（multi_select）。
+    /// 切换当前激活问题中某选项的勾选状态。
     ToggleAskUserSelected {
         index: usize,
     },
-    /// 设置 AskUser 块是否处于「Chat about this...」自由输入子态。
+    /// 设置当前激活问题是否处于 Type something 子态。
     SetAskUserChatInput {
         active: bool,
     },
@@ -107,8 +101,18 @@ pub enum ConversationIntent {
     },
     /// 删除 Type something 输入框末尾字符。
     DeleteAskUserChatChar,
-    /// 移除 AskUser 交互块（用户提交答案或取消后折叠）。
-    DismissAskUser,
+    /// 确认页：导航到某项（重新作答）。
+    NavigateAskUserTo {
+        index: usize,
+    },
+    /// 更新确认页导航光标。
+    SetAskUserConfirmCursor {
+        cursor: usize,
+    },
+    /// 确认提交所有答案。
+    ConfirmAskUserBatch,
+    /// 取消整个 batch（回传空答案）。
+    DismissAskUserBatch,
     CompleteChat {
         chat_id: ChatId,
         turn_id: ChatTurnId,

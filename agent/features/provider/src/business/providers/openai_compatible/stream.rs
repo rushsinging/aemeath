@@ -305,9 +305,9 @@ pub(crate) async fn parse_openai_stream(
     for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if name.is_empty() {
             log::warn!(target: "provider::openai_stream",
-                      "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
-                      id, arguments.len(), delta_count
-                  );
+                "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
+                id, arguments.len(), delta_count
+            );
             continue;
         }
         // Note: on_tool_use_start was already called during streaming
@@ -315,9 +315,9 @@ pub(crate) async fn parse_openai_stream(
         // call it again here.
         let input: serde_json::Value = if arguments.is_empty() {
             log::warn!(target: "provider::openai_stream",
-                          "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
-                          name, id, delta_count
-                      );
+                "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
+                name, id, delta_count
+            );
             serde_json::Value::Object(serde_json::Map::new())
         } else {
             match serde_json::from_str(&arguments) {
@@ -328,9 +328,9 @@ pub(crate) async fn parse_openai_stream(
                     // 先尝试启发式补全：仅当 JSON 在字符串字面量中间被截断时有效。
                     if let Some(recovered) = try_complete_truncated_json(&arguments) {
                         log::warn!(target: "provider::openai_stream",
-                                  "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
-                                  name, id, delta_count, arguments.len(), e
-                              );
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
+                            name, id, delta_count, arguments.len(), e
+                        );
                         recovered
                     } else {
                         let head: String = arguments.chars().take(300).collect();
@@ -338,9 +338,9 @@ pub(crate) async fn parse_openai_stream(
                             arguments.chars().rev().take(200).collect::<String>();
                         let tail: String = tail_rev.chars().rev().collect();
                         log::warn!(target: "provider::openai_stream",
-                                  "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
-                                  name, id, delta_count, arguments.len(), e
-                              );
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
+                            name, id, delta_count, arguments.len(), e
+                        );
                         log::warn!(target: "provider::openai_stream", "[openai-compat stream] truncated args head: {}", head);
                         log::warn!(target: "provider::openai_stream", "[openai-compat stream] truncated args tail: {}", tail);
                         if is_eof && truncated_tool.is_none() {

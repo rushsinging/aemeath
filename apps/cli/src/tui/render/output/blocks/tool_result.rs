@@ -98,7 +98,12 @@ pub fn render_tool_result(
 /// 用暗色（`theme::TEXT_DIM`）——文件/命令输出预览不跟随 tool 状态色（状态绿/红只在 header
 /// 的 ✓/✗ marker）；**不做 markdown 重渲染**——避免文件内容里的 markdown（表格/标题/fence）
 /// 被渲染变形，保留原文（含 Read 行号/缩进，#91）。
-fn format_result_lines(_tool_name: &str, result: &str, width: u16, max_lines: usize) -> Vec<RenderedLine> {
+fn format_result_lines(
+    _tool_name: &str,
+    result: &str,
+    width: u16,
+    max_lines: usize,
+) -> Vec<RenderedLine> {
     if result.trim().is_empty() {
         return Vec::new();
     }
@@ -141,7 +146,12 @@ fn format_result_lines(_tool_name: &str, result: &str, width: u16, max_lines: us
 
 /// 渲染 Plain 工具结果（tail 模式）：只显示最后 `max_lines` 行。
 /// 适用于 Bash 等持续输出的工具，用户关注最新输出。
-fn format_result_lines_tail(_tool_name: &str, result: &str, width: u16, max_lines: usize) -> Vec<RenderedLine> {
+fn format_result_lines_tail(
+    _tool_name: &str,
+    result: &str,
+    width: u16,
+    max_lines: usize,
+) -> Vec<RenderedLine> {
     if result.trim().is_empty() {
         return Vec::new();
     }
@@ -153,7 +163,7 @@ fn format_result_lines_tail(_tool_name: &str, result: &str, width: u16, max_line
     let start = all_lines.len().saturating_sub(max_lines);
     let mut out: Vec<RenderedLine> = Vec::new();
     // SAFETY: start ≤ all_lines.len()（saturating_sub 保证），Vec slice 不会越界
-    for line in &all_lines[start..] { // allow unsafe_text_op
+    for line in &all_lines[start..] { // allow unsafe_text_op: start 从 Vec 下标推导，不涉及 str 字节偏移
         out.extend(wrap_spans_to_rendered_lines(
             vec![Span::styled(line.to_string(), base)],
             width as usize,
@@ -165,10 +175,13 @@ fn format_result_lines_tail(_tool_name: &str, result: &str, width: u16, max_line
     }
     // 显示省略的行数
     if start > 0 {
-        out.insert(0, RenderedLine::new(vec![Span::styled(
-            format!("... ({start} lines above)"),
-            base,
-        )]));
+        out.insert(
+            0,
+            RenderedLine::new(vec![Span::styled(
+                format!("... ({start} lines above)"),
+                base,
+            )]),
+        );
     }
     out
 }
@@ -186,7 +199,7 @@ mod tests {
             key: format!("{tool_title}-result"),
             tool_title: tool_title.into(),
             args_preview: None,
-                        result_text: result_text.into(),
+            result_text: result_text.into(),
             style: SemanticStyle::Success,
         }
     }
@@ -338,7 +351,6 @@ mod tests {
             "Edit",
             "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
         );
-        
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 
@@ -384,7 +396,10 @@ mod tests {
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 
         // Bash 默认 5 行 tail 模式
-        assert!(block.lines.iter().any(|l| l.plain.contains("... (2 lines above)")));
+        assert!(block
+            .lines
+            .iter()
+            .any(|l| l.plain.contains("... (2 lines above)")));
         assert!(block.lines.iter().any(|l| l.plain == "line3"));
         assert!(block.lines.iter().any(|l| l.plain == "line4"));
         assert!(block.lines.iter().any(|l| l.plain == "line5"));

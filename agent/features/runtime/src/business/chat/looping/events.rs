@@ -116,14 +116,9 @@ pub enum RuntimeStreamEvent {
     LiveTps(f64),
     TurnChanged(usize),
     HookEvent(RuntimeHookEvent),
-    AskUser {
-        id: ToolCallId,
-        question: String,
-        options: Vec<sdk::OptionItem>,
-        allow_free_input: bool,
-        multi_select: bool,
-        default: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<String>,
+    AskUserBatch {
+        items: Vec<sdk::AskUserQuestionItem>,
+        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
     },
     AgentProgress {
         context: RuntimeTurnContext,

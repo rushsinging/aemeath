@@ -41,7 +41,7 @@ async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, M
         Ok(c) => c,
         Err(e) => {
             log::warn!(target: "runtime::mcp_loader", "invalid MCP config {}: {e}", config_path.display());
-              return None;
+            return None;
         }
     };
 
@@ -49,7 +49,7 @@ async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, M
         Ok(servers) => Some(servers),
         Err(e) => {
             log::warn!(target: "runtime::mcp_loader", "invalid MCP config {}: {e}", config_path.display());
-              None
+            None
         }
     }
 }
@@ -100,7 +100,9 @@ pub async fn spawn_mcp_connect(
                     connection.tools.len()
                 );
             }
-            Err(e) => log::warn!(target: "runtime::mcp_loader", "[MCP] failed to connect to {}: {e}", name),
+            Err(e) => {
+                log::warn!(target: "runtime::mcp_loader", "[MCP] failed to connect to {}: {e}", name)
+            }
         }
     }
     manager.register_tools(&registry).await;

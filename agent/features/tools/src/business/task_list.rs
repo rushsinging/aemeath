@@ -112,13 +112,16 @@ impl Tool for TaskListTool {
                 .iter()
                 .filter(|task| task.status == TaskStatus::Completed)
                 .count();
-            batches_json.as_array_mut().unwrap().push(serde_json::json!({
-                "id": batch.id,
-                "status": format!("{:?}", batch.status),
-                "done": done,
-                "total": batch_tasks.len(),
-                "summary": batch.summary
-            }));
+            batches_json
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "id": batch.id,
+                    "status": format!("{:?}", batch.status),
+                    "done": done,
+                    "total": batch_tasks.len(),
+                    "summary": batch.summary
+                }));
         }
 
         let mut tasks_json = serde_json::json!([]);

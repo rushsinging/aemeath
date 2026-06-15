@@ -66,26 +66,14 @@ impl App {
         self.mark_output_dirty();
     }
 
-    /// 显示 AskUserQuestion 交互块（问题 + 选项），作为渲染单一真相进入 ConversationModel。
-    pub(crate) fn show_ask_user_block(
+    /// 显示 AskUserBatch 交互块（批量问题 + 选项），作为渲染单一真相进入 ConversationModel。
+    pub(crate) fn show_ask_user_batch(
         &mut self,
-        question: String,
-        options: Vec<sdk::OptionItem>,
-        llm_option_count: usize,
-        multi_select: bool,
-        cursor: usize,
-        default: Option<String>,
+        slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
     ) {
         self.model
             .conversation
-            .apply(ConversationIntent::ShowAskUser {
-                question,
-                options,
-                llm_option_count,
-                multi_select,
-                cursor,
-                default,
-            });
+            .apply(ConversationIntent::ShowAskUserBatch { slots });
         self.mark_output_dirty();
     }
 
@@ -113,11 +101,11 @@ impl App {
         self.mark_output_dirty();
     }
 
-    /// 移除 AskUser 交互块（用户提交/取消后折叠），并刷新文档。
+    /// 移除 AskUserBatch 交互块（用户提交/取消后折叠），并刷新文档。
     pub(crate) fn dismiss_ask_user_block(&mut self) {
         self.model
             .conversation
-            .apply(ConversationIntent::DismissAskUser);
+            .apply(ConversationIntent::DismissAskUserBatch);
         self.mark_output_dirty();
     }
 }

@@ -4,9 +4,7 @@
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::theme;
-use crate::tui::view_model::output::{
-    HookNoticeSemanticKind, OutputBlockKind, ToolSemanticStatus,
-};
+use crate::tui::view_model::output::{HookNoticeSemanticKind, OutputBlockKind, ToolSemanticStatus};
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -130,8 +128,7 @@ mod tests {
     use super::*;
     use crate::tui::render::output::rendered::RenderedLine;
     use crate::tui::view_model::output::{
-        OutputBlockKind, TextBlockView, ToolCallBlockView, ToolResultBlockView,
-        ToolSemanticStatus,
+        OutputBlockKind, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
     };
     use crate::tui::view_model::style::SemanticStyle;
     use ratatui::text::Span;
@@ -147,7 +144,7 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: None,
-                        activity_summary: None,
+            activity_summary: None,
             result_summary: None,
             collapsible: false,
             collapsed: false,

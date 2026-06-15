@@ -268,7 +268,5 @@ pub const DEFAULT_FILES_ZH: &[(&str, &str)] = &[
 ];
 
 /// All supported languages and their default files.
-pub const SUPPORTED_LANGUAGES: &[(&str, &[(&str, &str)])] = &[
-    ("en", DEFAULT_FILES_EN),
-    ("zh", DEFAULT_FILES_ZH),
-];
+pub const SUPPORTED_LANGUAGES: &[(&str, &[(&str, &str)])] =
+    &[("en", DEFAULT_FILES_EN), ("zh", DEFAULT_FILES_ZH)];

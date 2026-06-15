@@ -52,10 +52,12 @@ impl Tool for BashTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: command"
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: command"
+                }))
+            }
         };
         if let Some(reason) = check_command_safety(command) {
             if !ctx.allow_all {
@@ -92,10 +94,12 @@ impl Tool for BashTool {
             .spawn()
         {
             Ok(c) => c,
-            Err(e) => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": format!("failed to execute: {e}")
-            })),
+            Err(e) => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("failed to execute: {e}")
+                }))
+            }
         };
 
         // Take stdout/stderr pipes before spawning readers

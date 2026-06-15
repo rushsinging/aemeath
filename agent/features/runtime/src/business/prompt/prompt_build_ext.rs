@@ -18,9 +18,7 @@ pub async fn build_static_prompt(
     let guidance_config = config_file
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
-    let language = config_file
-        .map(|c| c.language.as_str())
-        .unwrap_or("en");
+    let language = config_file.map(|c| c.language.as_str()).unwrap_or("en");
     let instructions_hook = bootstrap::InstructionsLoadedHookRunner(hook_runner);
     let model_guidance = prompt::api::guidance::resolve_guidance_async(
         model,
@@ -32,7 +30,9 @@ pub async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(prompt::api::guidance::universal_execution_discipline(language));
+    prompt.push_str(prompt::api::guidance::universal_execution_discipline(
+        language,
+    ));
     append_skills(&mut prompt, &skills_guard, language);
     append_agent_roles(&mut prompt, config_file, language);
     if !model_guidance.is_empty() {
@@ -101,10 +101,5 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>, lang: &
         "zh" => "\n\n# Available Agent Roles\n以下 agent role 可用于 Agent 工具的 `role` 参数。请为每个任务选择最合适的 role：\n",
         _ => "\n\n# Available Agent Roles\nThe following agent roles are available for the Agent tool's `role` parameter. Choose the most appropriate role for each task:\n",
     };
-    prompt.push_str(&format!(
-        "{}{}{}",
-        header,
-        role_lines.join("\n"),
-        footer
-    ));
+    prompt.push_str(&format!("{}{}{}", header, role_lines.join("\n"), footer));
 }

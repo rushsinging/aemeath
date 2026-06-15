@@ -80,18 +80,17 @@ pub enum OutputTimelineItem {
         content: serde_json::Value,
         is_error: bool,
     },
-    AskUser {
+    AskUserBatch {
         id: String,
-        question: String,
-        options: Vec<sdk::OptionItem>,
-        llm_option_count: usize,
-        multi_select: bool,
+        slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
+        active_index: usize,
+        phase: crate::tui::model::conversation::block::AskUserPhase,
         cursor: usize,
         selected: Vec<bool>,
         chat_input_active: bool,
         chat_input_text: String,
-        default: Option<String>,
-        answer: Option<String>,
+        confirm_cursor: usize,
+        confirmed: bool,
     },
 }
 
@@ -107,7 +106,7 @@ impl OutputTimelineItem {
             | OutputTimelineItem::QueuedUserMessage { id, .. }
             | OutputTimelineItem::AgentProgress { id, .. }
             | OutputTimelineItem::OrphanToolResult { id, .. }
-            | OutputTimelineItem::AskUser { id, .. } => Cow::Borrowed(id),
+            | OutputTimelineItem::AskUserBatch { id, .. } => Cow::Borrowed(id),
             OutputTimelineItem::ToolCall { reference } => {
                 Cow::Owned(format!("tool-call-{}", reference.tool_call_id.as_ref()))
             }

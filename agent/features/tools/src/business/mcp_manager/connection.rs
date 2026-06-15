@@ -244,10 +244,10 @@ impl McpConnectionManager {
 
             if let Err(error) = ping_result {
                 log::warn!(target: "tools::connection",
-                        "MCP server '{}' health check failed: {}",
-                        server.name,
-                        error
-                    );
+                    "MCP server '{}' health check failed: {}",
+                    server.name,
+                    error
+                );
 
                 if self.config.auto_reconnect {
                     if let Err(reconnect_error) = self.reconnect_server(&server.name).await {

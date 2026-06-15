@@ -68,13 +68,18 @@ impl Tool for FileWriteTool {
             ctx.allow_all,
         ) {
             Ok(p) => p,
-            Err(e) => return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": e,
-                "data": {
-                    "file_path": file_path
-                }
-            }).to_string()),
+            Err(e) => {
+                return ToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": e,
+                        "data": {
+                            "file_path": file_path
+                        }
+                    })
+                    .to_string(),
+                )
+            }
         };
         // For existing files, require read first
         if path.exists() {
@@ -95,32 +100,41 @@ impl Tool for FileWriteTool {
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                    return ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": format!("failed to create directory: {e}"),
-                        "data": {
-                            "file_path": file_path
-                        }
-                    }).to_string());
+                    return ToolResult::error(
+                        serde_json::json!({
+                            "status": "error",
+                            "message": format!("failed to create directory: {e}"),
+                            "data": {
+                                "file_path": file_path
+                            }
+                        })
+                        .to_string(),
+                    );
                 }
             }
         }
         match tokio::fs::write(path, content).await {
-            Ok(()) => ToolResult::success(serde_json::json!({
-                "status": "success",
-                "message": format!("Wrote {} bytes to {file_path}", content.len()),
-                "data": {
-                    "file_path": file_path,
-                    "bytes_written": content.len()
-                }
-            }).to_string()),
-            Err(e) => ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("failed to write file: {e}"),
-                "data": {
-                    "file_path": file_path
-                }
-            }).to_string()),
+            Ok(()) => ToolResult::success(
+                serde_json::json!({
+                    "status": "success",
+                    "message": format!("Wrote {} bytes to {file_path}", content.len()),
+                    "data": {
+                        "file_path": file_path,
+                        "bytes_written": content.len()
+                    }
+                })
+                .to_string(),
+            ),
+            Err(e) => ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("failed to write file: {e}"),
+                    "data": {
+                        "file_path": file_path
+                    }
+                })
+                .to_string(),
+            ),
         }
     }
 }

@@ -112,14 +112,10 @@ pub enum AppEvent {
         output: sdk::ReflectionOutputView,
         result: Result<String, String>,
     },
-    /// AskUserQuestion tool call: pause and wait for user input
-    AskUser {
-        id: sdk::ids::ToolCallId,
-        question: String,
-        options: Vec<sdk::OptionItem>,
-        multi_select: bool,
-        default: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<String>,
+    /// AskUserQuestion 批量请求——一次携带多个问题。
+    AskUserBatch {
+        items: Vec<sdk::AskUserQuestionItem>,
+        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
     },
     /// Sub-agent progress update (streams per-turn output to TUI)
     AgentProgress {

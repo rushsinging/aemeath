@@ -1,7 +1,7 @@
 //! Guidance resolution logic: loading, prefix-matching, and assembly.
 
-use super::guidance_dir;
 use super::constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH};
+use super::guidance_dir;
 
 #[async_trait::async_trait(?Send)]
 pub trait InstructionsLoadedHook {
@@ -61,8 +61,7 @@ pub async fn resolve_guidance_async(
     let mut parts: Vec<String> = Vec::new();
 
     // 1. Always inject _default guidance
-    if let Some(content) =
-        load_named_file_async_with_lang("_default", language, hook_runner).await
+    if let Some(content) = load_named_file_async_with_lang("_default", language, hook_runner).await
     {
         parts.push(content);
     }

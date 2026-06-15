@@ -35,11 +35,13 @@ impl Tool for FileReadTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: file_path",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: file_path",
+                    "data": {}
+                }))
+            }
         };
 
         // Validate path is within workspace boundary
@@ -52,11 +54,13 @@ impl Tool for FileReadTool {
             ctx.allow_all,
         ) {
             Ok(p) => p,
-            Err(e) => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": e,
-                "data": { "file_path": file_path }
-            })),
+            Err(e) => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": e,
+                    "data": { "file_path": file_path }
+                }))
+            }
         };
         if !path.exists() {
             return ToolResult::error_json(serde_json::json!({
@@ -133,11 +137,13 @@ async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
 
     let data = match tokio::fs::read(path).await {
         Ok(d) => d,
-        Err(e) => return ToolResult::error_json(serde_json::json!({
-            "status": "error",
-            "message": format!("failed to read image: {e}"),
-            "data": { "file_path": file_path }
-        })),
+        Err(e) => {
+            return ToolResult::error_json(serde_json::json!({
+                "status": "error",
+                "message": format!("failed to read image: {e}"),
+                "data": { "file_path": file_path }
+            }))
+        }
     };
 
     if data.is_empty() {
