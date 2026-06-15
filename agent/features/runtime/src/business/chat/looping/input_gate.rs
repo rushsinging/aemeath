@@ -206,7 +206,7 @@ fn user_message_with_images(text: String, image_paths: Vec<String>) -> Message {
         return Message::user(text);
     }
 
-    log::warn!(
+    log::warn!(target: "runtime::input_gate",
         "queued ChatInputEvent image_paths are not decoded in runtime gate yet; appending text only (image_count={})",
         image_paths.len()
     );

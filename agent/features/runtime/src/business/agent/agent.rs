@@ -51,7 +51,7 @@ async fn call_tool_with_timeout(
     tokio::select! {
         _ = ctx.cancel.cancelled() => {
             let message = tool_call_cancelled_message(name);
-            log::info!("{message}");
+            log::info!(target: "runtime::agent", "{message}");
             Err(message)
         }
         result = tokio::time::timeout(
@@ -60,7 +60,7 @@ async fn call_tool_with_timeout(
         ) => {
             match result {
                 Ok(result) => {
-                    log::debug!(
+                    log::debug!(target: "runtime::agent",
                         "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
                         name,
                         timeout,
@@ -71,7 +71,7 @@ async fn call_tool_with_timeout(
                 Err(_) => {
                     let elapsed = started.elapsed();
                     let message = tool_call_timeout_message(name, timeout, elapsed);
-                    log::warn!("{message}");
+                    log::warn!(target: "runtime::agent", "{message}");
                     Err(message)
                 }
             }

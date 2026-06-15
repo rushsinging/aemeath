@@ -63,7 +63,7 @@ where
     }
 
     if pre_compact_blocked {
-        log::warn!("PreCompact hook blocked compaction");
+        log::warn!(target: "runtime::compact", "PreCompact hook blocked compaction");
         return false;
     }
 

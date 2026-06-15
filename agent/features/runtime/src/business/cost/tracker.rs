@@ -176,7 +176,7 @@ impl CostTracker {
     pub fn clear(&mut self) {
         self.records.clear();
         if let Err(e) = self.save() {
-            log::warn!("Failed to save after clearing: {}", e);
+            log::warn!(target: "runtime::tracker", "Failed to save after clearing: {}", e);
         }
     }
 

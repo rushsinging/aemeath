@@ -86,7 +86,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
                 auto_applied = true;
             }
             Err(error) => {
-                log::warn!("Reflection auto apply failed: {error}");
+                log::warn!(target: "runtime::reflection", "Reflection auto apply failed: {error}");
             }
         }
     }
@@ -156,7 +156,7 @@ async fn call_llm_for_reflection(
             }
         }
         Err(e) => {
-            log::debug!("Reflection LLM call failed: {e}");
+            log::debug!(target: "runtime::reflection", "Reflection LLM call failed: {e}");
             None
         }
     }

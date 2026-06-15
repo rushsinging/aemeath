@@ -70,7 +70,7 @@ impl ChatLoopFsm {
 
     pub fn assert_state(&self, expected: ChatLoopState, context: &str) {
         if self.state != expected {
-            log::warn!(
+            log::warn!(target: "runtime::state",
                 "chat loop state guard failed: context={}, expected={:?}, actual={:?}",
                 context,
                 expected,
@@ -88,7 +88,7 @@ impl ChatLoopFsm {
         let previous = self.state;
         if let Some(next) = self.state.apply(transition) {
             self.state = next;
-            log::debug!(
+            log::debug!(target: "runtime::state",
                 "chat loop state transition: {:?} --{:?}--> {:?}",
                 previous,
                 transition,
@@ -96,7 +96,7 @@ impl ChatLoopFsm {
             );
         } else {
             self.invalid_transition_count += 1;
-            log::warn!(
+            log::warn!(target: "runtime::state",
                 "invalid chat loop state transition ignored: {:?} --{:?}-->",
                 previous,
                 transition

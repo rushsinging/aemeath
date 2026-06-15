@@ -44,7 +44,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
             writeln!(buf, "{}", line)
         });
         builder.init();
-        log::info!(
+        log::info!(target: "runtime::logging_setup",
             "logging initialized: filter={} target=stderr logs_dir={}",
             std::env::var("RUST_LOG").unwrap_or(default_filter),
             logs_dir.display()
@@ -65,7 +65,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
             .init();
             return;
         }
-        log::info!(
+        log::info!(target: "runtime::logging_setup",
             "logging initialized: filter={} target=unified logs_dir={}",
             std::env::var("RUST_LOG").unwrap_or(default_filter),
             logs_dir.display()

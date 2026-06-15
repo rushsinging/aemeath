@@ -30,7 +30,7 @@ impl AutoCompactState {
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES {
             self.circuit_broken = true;
-            log::warn!(
+            log::warn!(target: "runtime::autocompact",
                 "[autocompact] circuit breaker tripped after {} consecutive failures — skipping future attempts",
                 self.consecutive_failures
             );
