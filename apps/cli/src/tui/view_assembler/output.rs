@@ -143,7 +143,7 @@ impl OutputViewAssembler {
                 OutputTimelineItem::HookNotice { id, content } => {
                     let (kind, style) = match content.kind {
                         HookNoticeKind::Blocked => {
-                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Warning)
+                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
                         }
                         HookNoticeKind::Failed => {
                             (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
