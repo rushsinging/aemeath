@@ -245,8 +245,28 @@ pub(super) async fn run_reflection_impl(
         &me.inner.context.system_prompt_text,
     )
     .await
+    .map_err(|e| {
+        let msg = match &e {
+            crate::business::reflection::ReflectionError::StoreInit(detail) => {
+                format!("反思记忆存储初始化失败：{detail}")
+            }
+            crate::business::reflection::ReflectionError::LlmCall(detail) => {
+                format!("反思 LLM 调用失败：{detail}")
+            }
+            crate::business::reflection::ReflectionError::EmptyResponse => {
+                "LLM 未返回任何反思内容".to_string()
+            }
+            crate::business::reflection::ReflectionError::Unparseable(detail) => {
+                format!("LLM 返回的内容无法解析为反思 JSON：{detail}")
+            }
+            other => format!("Reflection 运行失败：{other}"),
+        };
+        SdkError::Internal(msg)
+    })?
     .ok_or_else(|| {
-        SdkError::Internal("Reflection 运行失败：LLM 未返回可解析的反思结果。".to_string())
+        SdkError::Internal(
+            "Reflection 未执行：条件不满足（已禁用或未命中触发间隔）。".to_string(),
+        )
     })?;
 
     Ok(super::mapping::reflection_output_to_sdk_with_content(
