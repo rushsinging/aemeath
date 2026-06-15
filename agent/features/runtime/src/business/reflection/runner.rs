@@ -66,7 +66,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
         .unwrap_or_default();
 
     let project_memory = ReflectionEngine::memory_summary(&entries);
-    let recent_summary = ReflectionEngine::recent_messages_summary(messages, 4000);
+    let recent_summary = ReflectionEngine::recent_messages_summary(messages, usize::MAX);
     let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
 
     let (full_response, input_tokens, output_tokens) =
