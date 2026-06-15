@@ -51,8 +51,7 @@ impl ToolFlowProjector {
                 name,
                 index,
             } => {
-                log::debug!(
-                    target: "cli::tui::tool_flow",
+                crate::tui::log_debug!(
                     "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
                     context.chat_id,
                     context.turn_id,
@@ -79,8 +78,7 @@ impl ToolFlowProjector {
                 arguments,
                 status,
             } => {
-                log::debug!(
-                    target: "cli::tui::tool_flow",
+                crate::tui::log_debug!(
                     "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} ",
                     context.chat_id,
                     context.turn_id,
@@ -114,8 +112,7 @@ impl ToolFlowProjector {
                 is_error,
                 image_count,
             } => {
-                log::debug!(
-                    target: "cli::tui::tool_flow",
+                crate::tui::log_debug!(
                     "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
                     context.chat_id,
                     context.turn_id,

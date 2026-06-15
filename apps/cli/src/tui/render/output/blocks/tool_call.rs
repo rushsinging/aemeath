@@ -18,8 +18,7 @@ pub fn render_tool_call(
     let (header_line, detail_lines) = header_input
         .map(|raw_json| format_tool_call(&view.title, raw_json))
         .unwrap_or_else(|| (Line::from(Span::raw(format!("● {}", view.title))), Vec::new()));
-    log::debug!(
-        target: "cli::tui::tool_flow",
+    crate::tui::log_debug!(
         "render tool_call block_id={} title={} status={:?} args_len={}  result_len={} detail_lines={} activity_present={}",
         block_id,
         view.title,

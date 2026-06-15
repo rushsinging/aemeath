@@ -51,7 +51,10 @@ macro_rules! tui_log_trace {
     };
 }
 
-pub(crate) use {tui_log_info as log_info, tui_log_trace as log_trace, tui_log_warn as log_warn};
+pub(crate) use {
+    tui_log_debug as log_debug, tui_log_error as log_error, tui_log_info as log_info,
+    tui_log_trace as log_trace, tui_log_warn as log_warn,
+};
 
 pub use self::app::App;
 pub use self::render::input::input_area::InputArea;

@@ -100,7 +100,7 @@ pub(crate) async fn run_chat(args: Args) {
     app.run(bootstrap.client, initial_resume_id)
         .await
         .unwrap_or_else(|e| {
-            log::error!("TUI error: {e}");
+            crate::tui::log_error!("TUI error: {e}");
             std::process::exit(1);
         });
     println!("aemeath --resume {}", session_id);

@@ -50,8 +50,7 @@ pub fn render_tool_result(
     let policy = result_policy(&view.tool_title);
     // 解析结构化 JSON，提取显示文本
     let display_text = resolve_display_text(&view.result_text);
-    log::debug!(
-        target: "cli::tui::tool_flow",
+    crate::tui::log_debug!(
         "render tool_result block_id={} tool_title={} result_len={} display_len={} width={} style={:?} policy={:?}",
         block_id,
         view.tool_title,
