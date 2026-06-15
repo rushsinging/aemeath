@@ -10,9 +10,7 @@ use serde_json::Value;
 use share::tool::{PathAccess, PathKind, PolicyDecision};
 use tools::api::Tool;
 
-use policy::api::{
-    validate_and_normalize_path_from_base, validate_search_path_from_base,
-};
+use policy::api::{validate_and_normalize_path_from_base, validate_search_path_from_base};
 
 /// The unified permission gate.
 ///

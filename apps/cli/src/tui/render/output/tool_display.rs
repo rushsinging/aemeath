@@ -276,8 +276,11 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_update_compact_hides_details() {
-        let (header, details) =
-            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#, None);
+        let (header, details) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"42","status":"completed"}"#,
+            None,
+        );
         let text = line_to_string(&header);
         assert!(text.contains("42"), "header 应包含 taskId: {text}");
         assert!(text.contains("completed"), "header 应包含 status: {text}");

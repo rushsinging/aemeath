@@ -9,6 +9,8 @@ mod hook_ui;
 mod input_gate;
 mod input_log;
 mod llm_log;
+mod loop_helpers;
+mod loop_phases;
 mod loop_runner;
 mod non_agent;
 mod permissions;
