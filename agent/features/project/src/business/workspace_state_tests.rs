@@ -102,10 +102,14 @@ fn enter_rejects_nested_when_in_worktree() {
         path_base: "/prev".into(),
         working_root: "/prev".into(),
     });
-    assert_eq!(
+    assert!(matches!(
         enter(&mut s, &git, Some("/other".into()), None),
-        Err(WorkspaceError::NestedWorktree)
-    );
+        Err(WorkspaceError::NestedWorktree {
+            current_working_root,
+            current_path_base,
+        }) if current_working_root == PathBuf::from("/repo")
+           && current_path_base == PathBuf::from("/repo")
+    ));
 }
 
 #[test]

@@ -115,7 +115,10 @@ pub fn enter(
         if !git.in_worktree(&state.path_base) {
             state.stack.clear(); // 残栈自愈（refs #96）
         } else {
-            return Err(WorkspaceError::NestedWorktree);
+            return Err(WorkspaceError::NestedWorktree {
+                current_working_root: state.working_root.clone(),
+                current_path_base: state.path_base.clone(),
+            });
         }
     }
     let target = resolve_worktree_path(state, path, branch.as_deref())?;
