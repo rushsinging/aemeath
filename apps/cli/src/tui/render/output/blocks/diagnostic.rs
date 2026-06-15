@@ -26,16 +26,7 @@ pub fn render_hook_notice(
     view: &HookNoticeBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let mut text = format!("{}\n{}", view.title, view.body);
-    if let Some(details) = view
-        .details
-        .as_deref()
-        .filter(|details| !details.trim().is_empty())
-    {
-        text.push('\n');
-        text.push_str(details);
-    }
-    render_text_lines(block_id, &text, view.style)
+    render_text_lines(block_id, &view.title, view.style)
 }
 
 fn render_text_lines(block_id: &str, text: &str, semantic_style: SemanticStyle) -> RenderedBlock {
