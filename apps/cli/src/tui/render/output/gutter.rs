@@ -40,6 +40,8 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::AssistantMessage(_) => "●",
         // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
         OutputBlockKind::ThinkingMessage(_) => "💭",
+        // └─ 拐角连接到父 ToolCall header，表示这是工具结果子块。
+        OutputBlockKind::ToolResult(_) => "└─",
         _ => " ",
     }
 }
@@ -57,6 +59,7 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
         OutputBlockKind::UserMessage(_) => theme::USER,
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
         OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
+        OutputBlockKind::ToolResult(_) => theme::TEXT_MUTED,
         _ => theme::TEXT_MUTED,
     }
 }
@@ -117,7 +120,8 @@ mod tests {
     use super::*;
     use crate::tui::render::output::rendered::RenderedLine;
     use crate::tui::view_model::output::{
-        OutputBlockKind, TextBlockView, ToolCallBlockView, ToolSemanticStatus,
+        OutputBlockKind, TextBlockView, ToolCallBlockView, ToolResultBlockView,
+        ToolSemanticStatus,
     };
     use crate::tui::view_model::style::SemanticStyle;
     use ratatui::text::Span;
@@ -157,6 +161,20 @@ mod tests {
 
         assert_eq!(marker_glyph(&kind), "●");
         assert_eq!(marker_color(&kind), theme::ASSISTANT);
+    }
+
+    #[test]
+    fn test_marker_glyph_for_tool_result_is_corner() {
+        let kind = OutputBlockKind::ToolResult(ToolResultBlockView {
+            key: "r".into(),
+            tool_title: "Bash".into(),
+            args_preview: None,
+            result_text: "done".into(),
+            style: SemanticStyle::Success,
+        });
+
+        assert_eq!(marker_glyph(&kind), "└─");
+        assert_eq!(marker_color(&kind), theme::TEXT_MUTED);
     }
 
     #[test]

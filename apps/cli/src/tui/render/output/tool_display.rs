@@ -217,14 +217,36 @@ mod tests {
     }
 
     #[test]
-    fn test_format_tool_call_task_create_keeps_expanded_details_by_default() {
+    fn test_format_tool_call_task_create_compact_merges_description_into_header() {
         let (header, details) = format_tool_call(
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
         );
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
-        assert_eq!(details, vec!["查看结构".to_string()]);
+        assert!(
+            text.contains("查看结构"),
+            "header 应合并 description: {text}"
+        );
+        assert!(
+            details.is_empty(),
+            "Compact 模式不应显示 details: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_task_create_compact_no_description() {
+        let (header, details) = format_tool_call(
+            "TaskCreate",
+            r#"{"subject":"分析"}"#,
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("分析"), "header: {text}");
+        assert!(
+            !text.contains(':'),
+            "无 description 时 header 不应有冒号: {text}"
+        );
+        assert!(details.is_empty());
     }
 
     #[test]
