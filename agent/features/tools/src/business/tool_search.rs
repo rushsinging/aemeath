@@ -60,10 +60,6 @@ impl Tool for ToolSearchTool {
             ("TaskList", "List all tasks and their status"),
             ("TaskGet", "Retrieve a specific task by ID"),
             ("TaskStop", "Stop a running or pending task"),
-            (
-                "TodoWrite",
-                "Create or update a todo list for tracking progress",
-            ),
             ("MCP", "Call MCP server tools"),
             ("Skill", "Execute a skill template"),
             ("Config", "View or modify configuration settings"),

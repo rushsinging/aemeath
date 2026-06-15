@@ -139,7 +139,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
 
     if let OutputBlockKind::DiagnosticNotice(text_view) = &orphan.kind {
         assert_eq!(
-            text_view.text, "✓ Bash completed",
+            text_view.text, "✓ Run completed",
             "orphan 应显示工具摘要而非原始 output，实际: {}",
             text_view.text
         );

@@ -3,6 +3,7 @@ use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
     allowed_child, AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
     OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
@@ -70,7 +71,8 @@ impl OutputViewAssembler {
                                 OutputBlockKind::ToolResult(ToolResultBlockView {
                                     key: result_id,
                                     tool_title: tool.title.clone(),
-                                    args_preview: tool.args_preview.clone(),                                    result_text,
+                                    args_preview: tool.args_preview.clone(),
+                                    result_text,
                                     style: tool.style,
                                 }),
                             );
@@ -312,7 +314,7 @@ fn summarize_non_embedded_result(tool_name: Option<&str>, output: &str, is_error
         return String::new();
     }
     // 无工具名时用占位名走通用完成摘要（如 `✓ Tool completed`），仍不泄漏正文。
-    let name = tool_name.unwrap_or("Tool");
+    let name = tool_name.map(tool_display_name).unwrap_or("Tool");
     default_tool_result_summary(name, is_error).join("\n")
 }
 
@@ -361,7 +363,7 @@ fn find_tool_view(
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-                // 工具已完成时不再显示 activity_summary（结果已在 ToolResult 子块展示，
+        // 工具已完成时不再显示 activity_summary（结果已在 ToolResult 子块展示，
         // 避免子代理最终输出同时出现在 activity 行和 result 子块中造成重复）。
         activity_summary: if matches!(
             call.status,

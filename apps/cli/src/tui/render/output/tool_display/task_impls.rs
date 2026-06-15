@@ -15,9 +15,13 @@ impl ToolDisplay for TaskCreateDisplay {
         let subject = str_arg(input, "subject", "?");
         let desc = str_arg(input, "description", "");
         if desc.is_empty() {
-            format!("TaskCreate {subject}")
+            format!("{} {subject}", self.display_name())
         } else {
-            format!("TaskCreate {subject}: {}", truncate_ellipsis(desc, 60))
+            format!(
+                "{} {subject}: {}",
+                self.display_name(),
+                truncate_ellipsis(desc, 60)
+            )
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -47,9 +51,9 @@ impl ToolDisplay for TaskUpdateDisplay {
         let id = str_arg(input, "taskId", "?");
         let status = str_arg(input, "status", "");
         if status.is_empty() {
-            format!("TaskUpdate {id}")
+            format!("{} {id}", self.display_name())
         } else {
-            format!("TaskUpdate {id} → {status}")
+            format!("{} {id} → {status}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -76,7 +80,7 @@ impl ToolDisplay for TaskListDisplay {
         "TaskList"
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
-        "TaskList".to_string()
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -107,7 +111,7 @@ impl ToolDisplay for TaskListCreateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let subject = str_arg(input, "subject", "?");
-        format!("TaskListCreate: {subject}")
+        format!("{}: {subject}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -133,7 +137,7 @@ impl ToolDisplay for TaskListCompleteDisplay {
         "TaskListComplete"
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
-        "TaskListComplete".to_string()
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -160,7 +164,7 @@ impl ToolDisplay for SkillDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let skill = str_arg(input, "skill", "?");
-        format!("Skill {skill}")
+        format!("{} {skill}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -192,7 +196,7 @@ impl ToolDisplay for LspDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let op = str_arg(input, "operation", "?");
         let path = str_arg(input, "filePath", "?");
-        format!("LSP::{op} {path}")
+        format!("{}::{op} {path}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -223,7 +227,7 @@ impl ToolDisplay for TaskGetDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = str_arg(input, "taskId", "?");
-        format!("TaskGet {id}")
+        format!("{} {id}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -254,7 +258,7 @@ impl ToolDisplay for TaskStopDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = str_arg(input, "taskId", "?");
-        format!("TaskStop {id}")
+        format!("{} {id}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -270,36 +274,6 @@ impl ToolDisplay for TaskStopDisplay {
 inventory::submit!(ToolDisplayEntry {
     name: "TaskStop",
     display: || Box::new(TaskStopDisplay)
-});
-
-// ── TaskOutput ───────────────────────────────────────────────────
-
-struct TaskOutputDisplay;
-impl ToolDisplay for TaskOutputDisplay {
-    fn name(&self) -> &str {
-        "TaskOutput"
-    }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "TaskOutput".to_string()
-    }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
-    }
-    fn render_policy(&self) -> ToolRenderPolicy {
-        ToolRenderPolicy {
-            header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
-            result: ResultPolicy::Visible {
-                max_lines: Some(5),
-                render_kind: ResultRender::Plain,
-                tail_mode: false,
-            },
-        }
-    }
-}
-inventory::submit!(ToolDisplayEntry {
-    name: "TaskOutput",
-    display: || Box::new(TaskOutputDisplay)
 });
 
 // ── EnterPlanMode ────────────────────────────────────────────────

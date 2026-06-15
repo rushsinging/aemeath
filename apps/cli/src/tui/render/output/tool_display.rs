@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
 mod common;
 mod task_impls;
 mod tool_impls;
 
-use common::{format_todowrite_value, truncate_json};
+use crate::tui::view_model::tool_name::tool_display_name;
+use common::truncate_json;
 use ratatui::text::{Line, Span};
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
 // ── ToolRenderPolicy 系统 ──────────────────────────────────────────
 
@@ -72,6 +72,11 @@ pub trait ToolDisplay: Send + Sync {
     /// Tool name as registered in the tool registry.
     fn name(&self) -> &str;
 
+    /// 用户可见的 display name（默认从 `tool_display_name` 映射查表）。
+    fn display_name(&self) -> &str {
+        tool_display_name(self.name())
+    }
+
     /// Format the header line as plain string.
     /// `input` 是解析后的 JSON。
     fn format_header(&self, input: &serde_json::Value) -> String;
@@ -132,29 +137,9 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 
 /// Format a tool call for human-friendly display.
 /// 返回 `(Line, details)`：Line 已含样式，details 为纯文本行。
-pub fn format_tool_call(
-    name: &str,
-    raw_json: &str,
-) -> (Line<'static>, Vec<String>) {
+pub fn format_tool_call(name: &str, raw_json: &str) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
-
-    if name == "TodoWrite" {
-        return match format_todowrite_value(&parsed) {
-            Some((header, details)) => (Line::from(Span::raw(header)), details),
-            None => {
-                let truncated = truncate_json(raw_json);
-                (Line::from(Span::raw(format!("● {name}"))), vec![truncated])
-            }
-        };
-    }
-
-    if name == "TodoRun" {
-        return (
-            Line::from(Span::raw("● TodoRun")),
-            vec!["execute all pending todos".to_string()],
-        );
-    }
 
     if let Some(display) = lookup_display(name) {
         let header = display.format_header_line(&parsed);
@@ -167,7 +152,10 @@ pub fn format_tool_call(
 
     // Fallback for unknown tools
     let truncated = truncate_json(raw_json);
-    (Line::from(Span::raw(format!("● {name}"))), vec![truncated])
+    (
+        Line::from(Span::raw(format!("● {}", tool_display_name(name)))),
+        vec![truncated],
+    )
 }
 
 #[cfg(test)]
@@ -236,10 +224,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_create_compact_no_description() {
-        let (header, details) = format_tool_call(
-            "TaskCreate",
-            r#"{"subject":"分析"}"#,
-        );
+        let (header, details) = format_tool_call("TaskCreate", r#"{"subject":"分析"}"#);
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
         assert!(
@@ -251,19 +236,41 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_update_compact_hides_details() {
-        let (header, details) = format_tool_call(
-            "TaskUpdate",
-            r#"{"taskId":"42","status":"completed"}"#,
-        );
+        let (header, details) =
+            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#);
         let text = line_to_string(&header);
         assert!(text.contains("42"), "header 应包含 taskId: {text}");
-        assert!(
-            text.contains("completed"),
-            "header 应包含 status: {text}"
-        );
+        assert!(text.contains("completed"), "header 应包含 status: {text}");
         assert!(
             details.is_empty(),
             "Compact 模式不应显示 details: {details:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_uses_display_name_in_header() {
+        // Bash → Run
+        let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#);
+        let text = line_to_string(&header);
+        assert!(
+            text.starts_with("Run "),
+            "Bash header 应使用 display name 'Run': {text}"
+        );
+
+        // Grep → Search
+        let (header, _) = format_tool_call("Grep", r#"{"pattern":"foo"}"#);
+        let text = line_to_string(&header);
+        assert!(
+            text.starts_with("Search "),
+            "Grep header 应使用 display name 'Search': {text}"
+        );
+
+        // Glob → Find
+        let (header, _) = format_tool_call("Glob", r#"{"pattern":"*.rs"}"#);
+        let text = line_to_string(&header);
+        assert!(
+            text.starts_with("Find "),
+            "Glob header 应使用 display name 'Find': {text}"
         );
     }
 
@@ -278,9 +285,9 @@ mod tests {
     #[test]
     fn test_format_tool_call_invalid_json_uses_fallback() {
         let (header, _details) = format_tool_call("TaskListCreate", "not json");
-        // 不应 panic，应 fallback
+        // 不应 panic，应 fallback。display name 为 "New Task List"。
         let text = line_to_string(&header);
-        assert!(text.contains("TaskListCreate"));
+        assert!(text.contains("New Task List"));
     }
 
     #[test]
@@ -321,8 +328,8 @@ mod tests {
         let (header, _details) = format_tool_call("Bash", &raw);
         let text = line_to_string(&header);
         assert!(
-            text.starts_with("Bash "),
-            "header 应以 'Bash ' 开头: {text}"
+            text.starts_with("Run "),
+            "header 应以 'Run ' 开头 (Bash display name): {text}"
         );
         assert!(
             text.ends_with("..."),

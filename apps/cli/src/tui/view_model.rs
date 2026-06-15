@@ -5,6 +5,7 @@ pub mod nesting;
 pub mod output;
 pub mod status;
 pub mod style;
+pub mod tool_name;
 
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
