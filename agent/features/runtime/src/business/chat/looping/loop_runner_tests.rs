@@ -1,14 +1,17 @@
 //! Tests for `loop_runner`, extracted into a dedicated module to keep the
 //! runner file focused on the production code path.
 
+use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
+use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
 use provider::api::{LlmProvider, StreamHandler};
 use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
-use share::message::{MessageSource, Role};
+use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -97,7 +100,7 @@ impl RecordingSink {
             RuntimeStreamEvent::ToolCallUpdate { .. } => "ToolCallUpdate".to_string(),
             RuntimeStreamEvent::ToolResult { .. } => "ToolResult".to_string(),
             RuntimeStreamEvent::LiveTps(_) => "LiveTps".to_string(),
-            RuntimeStreamEvent::AskUser { .. } => "AskUser".to_string(),
+            RuntimeStreamEvent::AskUserBatch { .. } => "AskUserBatch".to_string(),
             RuntimeStreamEvent::AgentProgress { .. } => "AgentProgress".to_string(),
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()

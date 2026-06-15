@@ -12,6 +12,8 @@ mod llm_log;
 mod loop_helpers;
 mod loop_phases;
 mod loop_runner;
+#[cfg(test)]
+mod loop_runner_tests;
 mod non_agent;
 mod permissions;
 mod post_batch;

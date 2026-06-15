@@ -1,10 +1,9 @@
 //! Chat 事件流类型：事件 / 上下文 / 工具调用状态。
 
+use crate::chat::AskUserQuestionItem;
+use crate::chat_result::{ChatResult, ToolResultImage};
+use crate::chat_view::{AgentProgressEventView, HookEventView, WorkspaceContextView};
 use crate::ChatMessage;
-use crate::{
-    AgentProgressEventView, ChatResult, HookEventView, OptionItem, ToolResultImage,
-    WorkspaceContextView,
-};
 use serde::{Deserialize, Serialize};
 
 /// Runtime stream context used to bind UI events to the authoritative chat/turn.
@@ -106,15 +105,11 @@ pub enum ChatEvent {
     CurrentTurnChanged(usize),
     /// Hook 事件。
     HookEvent(HookEventView),
-    /// AskUserQuestion 请求。
-    AskUser {
-        id: String,
-        question: String,
-        options: Vec<OptionItem>,
-        allow_free_input: bool,
-        multi_select: bool,
-        default: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<String>,
+    /// AskUserQuestion 批量请求（一次携带多个问题）。
+    AskUserBatch {
+        items: Vec<AskUserQuestionItem>,
+        /// 回传每个问题的答案（顺序与 items 一致）。
+        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
     },
     /// Agent progress 事件投影。
     AgentProgress {

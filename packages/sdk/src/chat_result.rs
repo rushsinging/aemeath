@@ -1,6 +1,6 @@
 //! Chat 完成结果 / 事件流 / 工具结果图片。
 
-use crate::ChatEvent;
+use crate::chat_event::ChatEvent;
 
 /// 工具结果中的图片载荷。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +39,7 @@ impl ChatStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ChatEvent, ChatEventContext};
+    use crate::chat_event::{ChatEvent, ChatEventContext};
 
     #[tokio::test]
     async fn test_chat_stream_recv_returns_sent_event() {

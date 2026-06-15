@@ -215,10 +215,7 @@ mod tests {
                 ],
             },
         };
-        assert_eq!(
-            format!("{event}"),
-            "Bash ls -la /project, Read project/TODO.md"
-        );
+        assert_eq!(format!("{event}"), "Bash, Read");
     }
 
     #[test]
