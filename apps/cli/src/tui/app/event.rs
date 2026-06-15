@@ -57,7 +57,6 @@ pub enum AppEvent {
         index: usize,
         arguments_delta: Option<String>,
         arguments: Option<serde_json::Value>,
-        summary: Option<String>,
         status: sdk::ToolCallStatusView,
     },
     ToolResult {

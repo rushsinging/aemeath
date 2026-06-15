@@ -121,12 +121,11 @@ pub struct AgentToolCallProgressView {
     pub id: crate::ids::ToolCallId,
     pub name: String,
     pub input: serde_json::Value,
-    pub summary: String,
 }
 
 impl std::fmt::Display for AgentToolCallProgressView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.name, self.summary)
+        write!(f, "{}", self.name)
     }
 }
 
@@ -272,7 +271,6 @@ pub enum ChatEvent {
         index: usize,
         arguments_delta: Option<String>,
         arguments: Option<serde_json::Value>,
-        summary: Option<String>,
         status: ToolCallStatusView,
     },
     /// 工具执行结果。
@@ -439,7 +437,6 @@ mod tests {
                     id: crate::ids::ToolCallId::new_v7(),
                     name: "Read".to_string(),
                     input: serde_json::json!({"file_path":"a.rs"}),
-                    summary: "a.rs".to_string(),
                 }],
             },
         };
@@ -452,7 +449,7 @@ mod tests {
         match tools.kind {
             AgentProgressKindView::ToolCalls { calls } => {
                 assert_eq!(calls[0].name, "Read");
-                assert_eq!(calls[0].summary, "a.rs");
+                // summary 已移除
             }
             other => panic!("unexpected kind: {other:?}"),
         }
@@ -468,13 +465,11 @@ mod tests {
                         id: crate::ids::ToolCallId::new_v7(),
                         name: "Bash".to_string(),
                         input: serde_json::json!({"command": "ls"}),
-                        summary: "ls -la /project".to_string(),
                     },
                     AgentToolCallProgressView {
                         id: crate::ids::ToolCallId::new_v7(),
                         name: "Read".to_string(),
                         input: serde_json::json!({"file_path": "TODO.md"}),
-                        summary: "project/TODO.md".to_string(),
                     },
                 ],
             },

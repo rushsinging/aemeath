@@ -14,19 +14,18 @@ pub fn render_tool_call(
     view: &ToolCallBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty()).or(view.summary.as_deref());
+    let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty());
     let (header_line, detail_lines) = header_input
-        .map(|raw_json| format_tool_call(&view.title, raw_json, view.summary.as_deref()))
+        .map(|raw_json| format_tool_call(&view.title, raw_json))
         .unwrap_or_else(|| (Line::from(Span::raw(format!("● {}", view.title))), Vec::new()));
     log::debug!(
         target: "cli::tui::tool_flow",
-        "render tool_call block_id={} title={} status={:?} args_len={} summary_len={} result_len={} detail_lines={} activity_present={}",
+        "render tool_call block_id={} title={} status={:?} args_len={}  result_len={} detail_lines={} activity_present={}",
         block_id,
         view.title,
         view.semantic_status,
         view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
-        view.summary.as_ref().map(|value| value.len()).unwrap_or(0),
-        view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+                view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         detail_lines.len(),
         view.activity_summary.is_some(),
     );
@@ -87,7 +86,6 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: Some("/foo/".into()),
-            summary: None,
             activity_summary: None,
             result_summary: None,
             collapsible: false,
@@ -136,7 +134,7 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
-        view.summary = Some(r#"{"pattern":"test","path":"src"}"#.into());
+        
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
@@ -151,7 +149,7 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
-        view.summary = None;
+        
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 

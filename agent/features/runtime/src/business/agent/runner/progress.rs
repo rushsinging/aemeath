@@ -14,7 +14,7 @@ pub(crate) fn build_tool_calls_progress_event(
                     id: call.id.to_string(),
                     name: call.name.clone(),
                     input: call.input.clone(),
-                    summary: String::new(),
+
                 })
                 .collect(),
         },

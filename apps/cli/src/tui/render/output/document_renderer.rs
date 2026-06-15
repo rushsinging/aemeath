@@ -242,8 +242,7 @@ mod tests {
             semantic_status: ToolSemanticStatus::Success,
             style: SemanticStyle::Success,
             args_preview: None,
-            summary: None,
-            activity_summary: None,
+                        activity_summary: None,
             result_summary: Some("```\ncode\n```".into()),
             collapsible: false,
             collapsed: false,
@@ -252,8 +251,7 @@ mod tests {
             key: "tool-result".into(),
             tool_title: "Bash".into(),
             args_preview: None,
-            summary: None,
-            result_text: "```\ncode\n```".into(),
+                        result_text: "```\ncode\n```".into(),
             style: SemanticStyle::Success,
         });
         let tool_node = BlockNode {

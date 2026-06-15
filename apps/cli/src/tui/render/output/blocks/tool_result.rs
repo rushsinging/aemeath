@@ -187,8 +187,7 @@ mod tests {
             key: format!("{tool_title}-result"),
             tool_title: tool_title.into(),
             args_preview: None,
-            summary: None,
-            result_text: result_text.into(),
+                        result_text: result_text.into(),
             style: SemanticStyle::Success,
         }
     }
@@ -340,7 +339,7 @@ mod tests {
             "Edit",
             "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
         );
-        view.summary = Some(r#"{"file_path":"src/lib.rs"}"#.into());
+        
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 

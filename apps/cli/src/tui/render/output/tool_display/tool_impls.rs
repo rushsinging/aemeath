@@ -16,7 +16,7 @@ impl ToolDisplay for BashDisplay {
     fn name(&self) -> &str {
         "Bash"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let cmd = str_arg(input, "command", "?");
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
         format!("Bash {}", truncate_ellipsis(cmd, 80))
@@ -55,7 +55,7 @@ impl ToolDisplay for ReadDisplay {
     fn name(&self) -> &str {
         "Read"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -64,7 +64,7 @@ impl ToolDisplay for ReadDisplay {
         let end = offset + limit;
         format!("Read {display_path} L{start}:L{end} ({limit} lines)")
     }
-    fn format_header_line(&self, input: &serde_json::Value, _summary: Option<&str>) -> Line<'static> {
+    fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -101,7 +101,7 @@ impl ToolDisplay for WriteDisplay {
     fn name(&self) -> &str {
         "Write"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
         // 从 input 的 content 计算字节数
@@ -136,7 +136,7 @@ impl ToolDisplay for EditDisplay {
     fn name(&self) -> &str {
         "Edit"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
         // 从 input 的 old_string/new_string 计算变更统计
@@ -180,7 +180,7 @@ impl ToolDisplay for GlobDisplay {
     fn name(&self) -> &str {
         "Glob"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let pattern = str_arg(input, "pattern", "?");
         format!("Glob {pattern}")
     }
@@ -211,7 +211,7 @@ impl ToolDisplay for GrepDisplay {
     fn name(&self) -> &str {
         "Grep"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let pattern = str_arg(input, "pattern", "?");
         let path = str_arg(input, "path", ".");
         let display_path = truncate_path(path, 40);
@@ -244,7 +244,7 @@ impl ToolDisplay for AgentDisplay {
     fn name(&self) -> &str {
         "Agent"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let desc = str_arg(input, "description", "sub-task");
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
@@ -291,7 +291,7 @@ impl ToolDisplay for EnterWorktreeDisplay {
     fn name(&self) -> &str {
         "EnterWorktree"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let target = input
             .get("branch")
             .and_then(|branch| branch.as_str())
@@ -326,7 +326,7 @@ impl ToolDisplay for ExitWorktreeDisplay {
     fn name(&self) -> &str {
         "ExitWorktree"
     }
-    fn format_header(&self, _input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, _input: &serde_json::Value) -> String {
         "ExitWorktree".to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -356,7 +356,7 @@ impl ToolDisplay for WebFetchDisplay {
     fn name(&self) -> &str {
         "WebFetch"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let url = str_arg(input, "url", "?");
         let display_url = truncate_ellipsis(url, 60);
         format!("WebFetch {display_url}")
@@ -388,7 +388,7 @@ impl ToolDisplay for AskUserQuestionDisplay {
     fn name(&self) -> &str {
         "AskUserQuestion"
     }
-    fn format_header(&self, input: &serde_json::Value, _summary: Option<&str>) -> String {
+    fn format_header(&self, input: &serde_json::Value) -> String {
         let question = str_arg(input, "question", "?");
         let preview = truncate_ellipsis(question, 60usize);
         format!("AskUserQuestion {preview}")

@@ -361,7 +361,6 @@ mod tests {
                 index: 1,
                 arguments_delta: None,
                 arguments: None,
-                summary: Some(r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string()),
                 status: sdk::ToolCallStatusView::Ready,
             },            UiEvent::ToolResult {
                 context: test_turn_context(),

@@ -56,8 +56,7 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                summary: None,
-                status: RuntimeToolCallStatus::Ready,
+                                status: RuntimeToolCallStatus::Ready,
             })
             .await;
     }
@@ -132,7 +131,6 @@ where
                 index: call.index,
                 arguments_delta: None,
                 arguments: Some(call.input.clone()),
-                summary: None,
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;

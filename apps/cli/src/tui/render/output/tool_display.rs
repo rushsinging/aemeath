@@ -73,13 +73,13 @@ pub trait ToolDisplay: Send + Sync {
     fn name(&self) -> &str;
 
     /// Format the header line as plain string.
-    /// `input` 是解析后的 JSON，`summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
-    fn format_header(&self, input: &serde_json::Value, summary: Option<&str>) -> String;
+    /// `input` 是解析后的 JSON。
+    fn format_header(&self, input: &serde_json::Value) -> String;
 
     /// Format the header line as styled `Line`。默认实现将 `format_header` 包装为单个 raw span。
-    /// 需要对 header 不同部分施加不同颜色的工具（如 Read 的 summary 灰色）可覆写此方法。
-    fn format_header_line(&self, input: &serde_json::Value, summary: Option<&str>) -> Line<'static> {
-        Line::from(Span::raw(self.format_header(input, summary)))
+    /// 需要对 header 不同部分施加不同颜色的工具可覆写此方法。
+    fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
+        Line::from(Span::raw(self.format_header(input)))
     }
 
     /// Format detail lines shown below the header.
@@ -131,12 +131,10 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 }
 
 /// Format a tool call for human-friendly display.
-/// `summary` 是动态更新的摘要（如 Read 的行范围、Write 的字节数）。
-/// 返回 `(Line, details)`：Line 已含样式（如 Read 的 summary 灰色），details 为纯文本行。
+/// 返回 `(Line, details)`：Line 已含样式，details 为纯文本行。
 pub fn format_tool_call(
     name: &str,
     raw_json: &str,
-    summary: Option<&str>,
 ) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
@@ -159,7 +157,7 @@ pub fn format_tool_call(
     }
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header_line(&parsed, summary);
+        let header = display.format_header_line(&parsed);
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -206,7 +204,6 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskListCreate",
             r#"{"subject":"修复 bug 84","summary":"修复渲染"}"#,
-            None,
         );
         let text = line_to_string(&header);
         assert!(
@@ -224,7 +221,6 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
-            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
@@ -236,7 +232,6 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskUpdate",
             r#"{"taskId":"42","status":"completed"}"#,
-            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("42"), "header 应包含 taskId: {text}");
@@ -252,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_unknown_tool_uses_fallback() {
-        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#, None);
+        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#);
         let text = line_to_string(&header);
         assert_eq!(text, "● UnknownTool");
         assert!(!details.is_empty(), "fallback 应截断 JSON");
@@ -260,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_invalid_json_uses_fallback() {
-        let (header, _details) = format_tool_call("TaskListCreate", "not json", None);
+        let (header, _details) = format_tool_call("TaskListCreate", "not json");
         // 不应 panic，应 fallback
         let text = line_to_string(&header);
         assert!(text.contains("TaskListCreate"));
@@ -301,7 +296,7 @@ mod tests {
         // 回归 #218：含中文的超长 Bash 命令按字节切片会落在多字节字符内部触发 panic。
         let cmd = "gh pr create --title 'fix(runtime): 使用人类可读摘要替代 JSON 作为 tool call summary' --body '## 问题'";
         let raw = serde_json::json!({ "command": cmd }).to_string();
-        let (header, _details) = format_tool_call("Bash", &raw, None);
+        let (header, _details) = format_tool_call("Bash", &raw);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Bash "),
@@ -318,7 +313,7 @@ mod tests {
         // 回归 #218：含中文的超长路径经 truncate_path 尾部截断不应 panic。
         let path = format!("/项目/{}/数据/报告为准的文件名.rs", "子目录".repeat(20));
         let raw = serde_json::json!({ "file_path": path }).to_string();
-        let (header, _details) = format_tool_call("Read", &raw, None);
+        let (header, _details) = format_tool_call("Read", &raw);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Read "),

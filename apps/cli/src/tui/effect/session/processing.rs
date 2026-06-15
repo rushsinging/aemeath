@@ -94,7 +94,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             index,
             arguments_delta,
             arguments,
-            summary,
             status,
         } => UiEvent::ToolCallUpdate {
             context: context.into(),
@@ -104,7 +103,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             index,
             arguments_delta,
             arguments,
-            summary,
             status,
         },
         sdk::ChatEvent::ToolResult {
@@ -261,11 +259,10 @@ fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
             index,
             arguments_delta,
             arguments,
-            summary,
             status,
         } => log::trace!(
             target: "cli::tui::tool_flow",
-            "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
+            "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
             stage,
             context.chat_id,
             context.turn_id,
@@ -276,7 +273,6 @@ fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
             status,
             arguments_delta.as_ref().map(|value| value.len()).unwrap_or(0),
             arguments.is_some(),
-            summary.as_ref().map(|value| value.len()).unwrap_or(0)
         ),
         sdk::ChatEvent::ToolResult {
             context,
@@ -333,11 +329,10 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             index,
             arguments_delta,
             arguments,
-            summary,
             status,
         } => log::trace!(
             target: "cli::tui::tool_flow",
-            "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
+            "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
             stage,
             context.chat_id,
             context.turn_id,
@@ -348,7 +343,6 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             status,
             arguments_delta.as_ref().map(|value| value.len()).unwrap_or(0),
             arguments.is_some(),
-            summary.as_ref().map(|value| value.len()).unwrap_or(0)
         ),
         UiEvent::ToolResult {
             context,

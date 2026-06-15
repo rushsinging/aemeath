@@ -150,7 +150,6 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
                 index,
                 arguments_delta: Some(partial_args.to_string()),
                 arguments: None,
-                summary: None,
                 status: RuntimeToolCallStatus::PendingArgs,
             });
     }

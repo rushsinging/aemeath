@@ -176,7 +176,6 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         id: ToolCallId::new("tool-1"),
         name: "Edit".to_string(),
         index: 0,
-        summary: Some(r#"{"file_path":"docs/bug/active.md"}"#.to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -304,7 +303,6 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         name: "Read".to_string(),
         index: 0,
         arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
 
@@ -319,7 +317,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         .expect("tool block");
 
     assert_eq!(tool.title, "Read");
-    assert_eq!(tool.summary, None, "最终 ToolCall 尚未到达");
+    
     assert_eq!(
         tool.args_preview.as_deref(),
         Some(r#"{"file_path":"src/lib.rs"}"#)
@@ -359,7 +357,6 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         id: ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("search".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -440,7 +437,6 @@ fn add_completed_tool(
         id: ToolCallId::new(id),
         name: name.to_string(),
         index: 0,
-        summary: Some(summary.to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
