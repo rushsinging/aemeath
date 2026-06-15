@@ -11,7 +11,7 @@ use tools::api::{ToolExecutionContext, ToolRegistry};
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_agent_calls<S>(
     context: &RuntimeTurnContext,
-    agent_approved: &[&ToolCall],
+    agent_approved: &[ToolCall],
     registry: &Arc<ToolRegistry>,
     agent_ctx: &ToolExecutionContext,
     sink: &S,

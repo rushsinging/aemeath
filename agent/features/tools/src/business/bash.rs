@@ -49,6 +49,14 @@ impl Tool for BashTool {
         600
     }
 
+    fn is_input_safe(&self, input: &Value) -> bool {
+        input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(is_readonly_command)
+            .unwrap_or(false)
+    }
+
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
