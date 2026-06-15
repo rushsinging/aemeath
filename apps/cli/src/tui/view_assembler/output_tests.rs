@@ -374,6 +374,122 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
     );
 }
 
+#[test]
+fn test_output_assembler_hides_activity_summary_when_tool_completed() {
+    // 回归：Agent 工具完成后，子代理最终输出同时出现在 activity_summary（ToolCall 内）
+    // 和 ToolResult 子块中，造成重复。完成后应隐藏 activity_summary，让位给结果子块。
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "run sub-agent".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        provider_id: Some("provider-1".to_string()),
+        id: ToolCallId::new("tool-1"),
+        name: "Agent".to_string(),
+        index: 0,
+        arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
+        status: ToolCallStatus::Ready,
+    });
+    // 子代理运行中发送 progress（写入 activities）
+    conversation.apply(ConversationIntent::RecordAgentProgress {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        tool_id: ToolCallId::new("tool-1"),
+        message: "子代理最终输出文本".to_string(),
+    });
+    // 工具完成
+    conversation.apply(ConversationIntent::ObserveToolResult {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        provider_id: "provider-1".to_string(),
+        id: ToolCallId::new("tool-1"),
+        tool_name: "Agent".to_string(),
+        output: "子代理最终输出文本".to_string(),
+        content: serde_json::json!({ "text": "子代理最终输出文本" }),
+        is_error: false,
+        image_count: 0,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let tool = vm
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("tool block");
+
+    assert!(
+        tool.activity_summary.is_none(),
+        "工具完成后不应显示 activity_summary（结果已在 ToolResult 子块），实际: {:?}",
+        tool.activity_summary
+    );
+    assert_eq!(
+        tool.result_summary.as_deref(),
+        Some("子代理最终输出文本"),
+        "结果应在 ToolResult 子块中展示"
+    );
+}
+
+#[test]
+fn test_output_assembler_shows_activity_summary_while_tool_running() {
+    // 运行中（未完成）的工具仍应显示 activity_summary 作为实时进度。
+    let mut conversation = ConversationModel::default();
+    conversation.apply(ConversationIntent::StartChat {
+        submission: "run sub-agent".to_string(),
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        provider_id: Some("provider-1".to_string()),
+        id: ToolCallId::new("tool-1"),
+        name: "Agent".to_string(),
+        index: 0,
+        arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
+        status: ToolCallStatus::Ready,
+    });
+    conversation.apply(ConversationIntent::RecordAgentProgress {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        tool_id: ToolCallId::new("tool-1"),
+        message: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let tool = vm
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("tool block");
+
+    assert!(
+        tool.activity_summary.is_some(),
+        "运行中工具应显示 activity_summary 作为进度指示"
+    );
+}
+
 fn add_failed_tool_after_thinking(conversation: &mut ConversationModel, name: &str, output: &str) {
     add_tool_after_thinking(conversation, name, output, true);
 }

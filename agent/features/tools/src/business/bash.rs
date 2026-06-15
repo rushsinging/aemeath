@@ -181,18 +181,34 @@ impl Tool for BashTool {
                 if !stderr.is_empty() {
                     data["stderr"] = serde_json::Value::String(stderr.to_string());
                 }
+                // 构造 TUI 显示文本：stdout + stderr（如有），让 TUI 显示实际命令输出
+                // 而非 "Command executed successfully" 这类元信息（display > message 优先级）
+                let display = {
+                    let mut parts: Vec<&str> = Vec::new();
+                    if !stdout.is_empty() {
+                        parts.push(stdout.as_str());
+                    }
+                    if !stderr.is_empty() {
+                        parts.push(stderr.as_ref());
+                    }
+                    parts.join("\n")
+                };
+                let mut result_json = serde_json::json!({
+                    "status": if status.success() { "success" } else { "error" },
+                    "message": if status.success() {
+                        "Command executed successfully".to_string()
+                    } else {
+                        format!("Command failed with exit code {exit_code}")
+                    },
+                    "data": data,
+                });
+                if !display.is_empty() {
+                    result_json["display"] = serde_json::Value::String(display);
+                }
                 if status.success() {
-                    ToolResult::success_json(serde_json::json!({
-                        "status": "success",
-                        "message": "Command executed successfully",
-                        "data": data
-                    }))
+                    ToolResult::success_json(result_json)
                 } else {
-                    ToolResult::error_json(serde_json::json!({
-                        "status": "error",
-                        "message": format!("Command failed with exit code {exit_code}"),
-                        "data": data
-                    }))
+                    ToolResult::error_json(result_json)
                 }
             }
             Ok(Err(e)) => ToolResult::error_json(serde_json::json!({
@@ -273,5 +289,52 @@ mod tests {
         use project::api::WorkspaceRead;
         assert_eq!(ws.current_path_base(), worktree);
         assert_eq!(ws.current_root(), worktree);
+    }
+
+    #[tokio::test]
+    async fn test_bash_display_field_contains_stdout_not_message() {
+        // 回归：Bash result 的 output 应包含 stdout（通过 display 字段），
+        // 而非 "Command executed successfully" 元信息。
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            cwd: workspace.path().to_path_buf(),
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            memory_config: share::config::MemoryConfig::default(),
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(json!({ "command": "echo hello_world_12345" }), &ctx)
+            .await;
+
+        assert!(!result.is_error);
+        // output 应包含 stdout 内容，而非 "Command executed successfully"
+        assert!(
+            result.output.contains("hello_world_12345"),
+            "output 应包含 stdout，实际: {}",
+            result.output
+        );
+        assert!(
+            !result.output.contains("Command executed successfully"),
+            "output 不应是元信息 'Command executed successfully'，实际: {}",
+            result.output
+        );
+        // content 中应有 display 字段
+        assert_eq!(
+            result.content["display"].as_str(),
+            Some("hello_world_12345"),
+            "content[display] 应为 stdout 内容"
+        );
     }
 }
