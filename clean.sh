@@ -4,14 +4,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/aemeath-target}"
+TARGET_ROOT="$HOME/.cache/aemeath-target"
 
-if [ -d "$TARGET_DIR" ]; then
-    SIZE=$(du -sh "$TARGET_DIR" | cut -f1)
-    rm -rf "$TARGET_DIR"
-    echo ">>> cleaned: $TARGET_DIR ($SIZE freed)"
+# Clean all per-branch target subdirectories under the cache root.
+if [ -d "$TARGET_ROOT" ]; then
+    SIZE=$(du -sh "$TARGET_ROOT" | cut -f1)
+    rm -rf "$TARGET_ROOT"
+    echo ">>> cleaned: $TARGET_ROOT ($SIZE freed)"
 else
-    echo ">>> target dir not found: $TARGET_DIR"
+    echo ">>> target root not found: $TARGET_ROOT"
 fi
 
 # Clean rotated log backups (e.g. aemeath.log.1, tui.log.12). Active *.log files
