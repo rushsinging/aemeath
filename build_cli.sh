@@ -32,7 +32,7 @@ TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
     | python3 -c 'import sys, json; print(json.load(sys.stdin)["target_directory"])')"
 
 # Limit parallel rustc jobs to avoid hook-time SIGTERM on memory pressure.
-CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
+CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
 echo ">>> cargo build --release --package cli --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
 cargo build --release --package cli --jobs "$CARGO_BUILD_JOBS"

@@ -115,7 +115,10 @@ pub fn enter(
         if !git.in_worktree(&state.path_base) {
             state.stack.clear(); // 残栈自愈（refs #96）
         } else {
-            return Err(WorkspaceError::NestedWorktree);
+            return Err(WorkspaceError::NestedWorktree {
+                current_working_root: state.working_root.clone(),
+                current_path_base: state.path_base.clone(),
+            });
         }
     }
     let target = resolve_worktree_path(state, path, branch.as_deref())?;
@@ -308,10 +311,14 @@ mod tests {
             path_base: "/prev".into(),
             working_root: "/prev".into(),
         });
-        assert_eq!(
+        assert!(matches!(
             enter(&mut s, &git, Some("/other".into()), None),
-            Err(WorkspaceError::NestedWorktree)
-        );
+            Err(WorkspaceError::NestedWorktree {
+                current_working_root,
+                current_path_base,
+            }) if current_working_root == PathBuf::from("/repo")
+               && current_path_base == PathBuf::from("/repo")
+        ));
     }
 
     #[test]

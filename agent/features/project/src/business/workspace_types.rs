@@ -20,7 +20,10 @@ pub enum WorkspaceError {
     PathNotFound(PathBuf),
     MissingPathAndBranch,
     InvalidBranch,
-    NestedWorktree,
+    NestedWorktree {
+        current_working_root: PathBuf,
+        current_path_base: PathBuf,
+    },
     RepoMismatch { path: PathBuf, repo_root: PathBuf },
     EmptyStack,
     RestoreInvalidPath(PathBuf),
@@ -35,9 +38,16 @@ impl std::fmt::Display for WorkspaceError {
                 write!(f, "进入或创建 worktree 时必须提供 path 或 branch")
             }
             WorkspaceError::InvalidBranch => write!(f, "branch 不能只包含路径分隔符或敏感字符"),
-            WorkspaceError::NestedWorktree => write!(
+            WorkspaceError::NestedWorktree {
+                current_working_root,
+                current_path_base,
+            } => write!(
                 f,
-                "已在 worktree 中，请先 ExitWorktree 退出当前 worktree 再进入新的"
+                "已在 worktree 中（当前 working_root: {}，path_base: {}）。\
+                 如需进入新 worktree，请先 ExitWorktree 退出当前 worktree 再进入新的；\
+                 如目标一致，可直接在当前 worktree 继续工作",
+                current_working_root.display(),
+                current_path_base.display()
             ),
             WorkspaceError::RepoMismatch { path, repo_root } => write!(
                 f,
