@@ -189,7 +189,7 @@ fn select_task_window<'a>(
         return visible;
     }
 
-    // Priority: completed (newest) → in_progress → pending
+    // Priority: completed (most recent N, ascending) → in_progress → pending
     // Reserve at least 1 slot for completed (if any exist)
     let mut completed_len = max_lines
         .saturating_sub(in_progress.len())
@@ -197,7 +197,8 @@ fn select_task_window<'a>(
     if !completed.is_empty() {
         completed_len = completed_len.max(1);
     }
-    visible.extend(completed.iter().rev().take(completed_len).copied());
+    let skip = completed.len().saturating_sub(completed_len);
+    visible.extend(completed.iter().skip(skip).take(completed_len).copied());
     let remaining = max_lines.saturating_sub(visible.len());
     visible.extend(in_progress.into_iter().take(remaining));
     let remaining = max_lines.saturating_sub(visible.len());
