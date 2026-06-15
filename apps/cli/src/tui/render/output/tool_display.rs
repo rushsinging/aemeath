@@ -2,8 +2,10 @@ mod common;
 mod task_impls;
 mod tool_impls;
 
+use crate::tui::render::theme;
 use crate::tui::view_model::tool_name::tool_display_name;
 use common::truncate_json;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -81,10 +83,23 @@ pub trait ToolDisplay: Send + Sync {
     /// `input` 是解析后的 JSON。
     fn format_header(&self, input: &serde_json::Value) -> String;
 
-    /// Format the header line as styled `Line`。默认实现将 `format_header` 包装为单个 raw span。
+    /// Format the header line as styled `Line`。默认实现将 `format_header` 的输出按
+    /// `display_name` 前缀拆分：tool name 用 `ACCENT_BRIGHT`（Mauve）着色突出，
+    /// 其余文本保持 raw（由调用方的 line base style 统一赋色）。
     /// 需要对 header 不同部分施加不同颜色的工具可覆写此方法。
     fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
-        Line::from(Span::raw(self.format_header(input)))
+        let text = self.format_header(input);
+        let name = self.display_name();
+        if let Some(rest) = text.strip_prefix(name) {
+            Line::from(vec![
+                Span::styled(name.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
+                Span::raw(rest.to_string()),
+            ])
+        } else {
+            // format_header 不以 display_name 开头（如 EnterPlanMode 用 📋 前缀），
+            // 保持整体 raw。
+            Line::from(Span::raw(text))
+        }
     }
 
     /// Format the header line with optional result summary。
@@ -170,7 +185,13 @@ pub fn format_tool_call(
     // Fallback for unknown tools
     let truncated = truncate_json(raw_json);
     (
-        Line::from(Span::raw(format!("● {}", tool_display_name(name)))),
+        Line::from(vec![
+            Span::raw("● "),
+            Span::styled(
+                tool_display_name(name).to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+        ]),
         vec![truncated],
     )
 }

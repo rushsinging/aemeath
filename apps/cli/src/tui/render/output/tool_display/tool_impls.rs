@@ -76,7 +76,11 @@ impl ToolDisplay for ReadDisplay {
         let end = offset + limit;
         let range_info = format!("L{start}:L{end} ({limit} lines)");
         Line::from(vec![
-            Span::raw(format!("{} {display_path} ", self.display_name())),
+            Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+            Span::raw(format!(" {display_path} ")),
             Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
         ])
     }

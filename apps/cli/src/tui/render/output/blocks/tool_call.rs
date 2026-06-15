@@ -26,7 +26,13 @@ pub fn render_tool_call(
         })
         .unwrap_or_else(|| {
             (
-                Line::from(Span::raw(format!("● {}", tool_display_name(&view.title)))),
+                Line::from(vec![
+                    Span::raw("● "),
+                    Span::styled(
+                        tool_display_name(&view.title).to_string(),
+                        Style::default().fg(theme::ACCENT_BRIGHT),
+                    ),
+                ]),
                 Vec::new(),
             )
         });
