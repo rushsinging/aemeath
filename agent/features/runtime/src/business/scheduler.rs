@@ -317,13 +317,13 @@ impl TaskScheduler {
             let timed_out = self.check_timeouts().await;
             for task_id in timed_out {
                 if let Err(e) = self.cancel_task(&task_id).await {
-                    log::warn!("Failed to cancel task {}: {}", task_id, e);
+                    log::warn!(target: "runtime::scheduler", "Failed to cancel task {}: {}", task_id, e);
                 }
             }
 
             // Persist state
             if let Err(e) = self.persist().await {
-                log::warn!("Failed to persist scheduler state: {}", e);
+                log::warn!(target: "runtime::scheduler", "Failed to persist scheduler state: {}", e);
             }
         }
     }
@@ -335,7 +335,7 @@ impl TaskScheduler {
 
         // Persist final state
         if let Err(e) = self.persist().await {
-            log::warn!("Failed to persist scheduler state on shutdown: {}", e);
+            log::warn!(target: "runtime::scheduler", "Failed to persist scheduler state on shutdown: {}", e);
         }
     }
 }

@@ -153,12 +153,11 @@ pub(crate) fn runtime_event_to_sdk_event(
             index,
             arguments_delta,
             arguments,
-            summary,
             status,
         } => {
             log::trace!(
                 target: "cli::tui::tool_flow",
-                "runtime->sdk tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} summary_len={}",
+                "runtime->sdk tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={}",
                 context.chat_id,
                 context.turn_id,
                 id,
@@ -167,8 +166,7 @@ pub(crate) fn runtime_event_to_sdk_event(
                 index,
                 status,
                 arguments_delta.as_ref().map(|value| value.len()).unwrap_or(0),
-                arguments.is_some(),
-                summary.as_ref().map(|value| value.len()).unwrap_or(0)
+                arguments.is_some()
             );
             ChatEvent::ToolCallUpdate {
                 context: turn_context_to_sdk(context),
@@ -178,7 +176,6 @@ pub(crate) fn runtime_event_to_sdk_event(
                 index,
                 arguments_delta,
                 arguments,
-                summary,
                 status: tool_call_status_to_sdk(status),
             }
         }
@@ -357,7 +354,6 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
                     id: sdk::ids::ToolCallId::from_legacy_or_new(&call.id),
                     name: call.name,
                     input: call.input,
-                    summary: call.summary,
                 })
                 .collect(),
         },

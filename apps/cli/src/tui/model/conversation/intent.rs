@@ -43,7 +43,6 @@ pub enum ConversationIntent {
         name: String,
         index: usize,
         arguments: Option<String>,
-        summary: Option<String>,
         status: super::tool_call::ToolCallStatus,
     },
     ObserveToolResult {

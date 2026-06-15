@@ -1,5 +1,5 @@
 use super::UpdateResult;
-use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
+use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
@@ -74,10 +74,9 @@ impl App {
                 self.spinner_phase(SpinnerPhase::AgentWorking);
             }
             UiEvent::HookEvent(event) => {
+                // Hook notice 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel，
+                // 此处仅更新 spinner 状态（spinner 归 RuntimeModel 管理）。
                 self.spinner_phase(hook_spinner_phase(&event));
-                if let Some(notice) = hook_event_notice(&event) {
-                    self.append_hook_notice(notice);
-                }
             }
             UiEvent::Error(msg) => {
                 // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，                // 此处不再重复写 output_area（消除双表示）。

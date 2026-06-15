@@ -29,7 +29,8 @@ impl ConfigDiff {
 ///
 /// 包括：
 /// - 配置文件：`~/.agents/aemeath.json`、`{cwd}/.agents/aemeath.json`、`{cwd}/.claude/settings.json`
-/// - 指令文件：`{cwd}/CLAUDE.md`、`{cwd}/AGENTS.md`、`~/.agents/AGENTS.md`
+/// - 指令文件：从 cwd 向上 5 级祖先目录，每层 `CLAUDE.md` + `AGENTS.md`；
+///   全局指令 `~/.agents/AGENTS.md`，fallback `~/.claude/CLAUDE.md`
 /// - Guidance 文件：`~/.agents/guidance/_default.md`、`~/.agents/guidance/_reasoning.md`
 pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -50,13 +51,16 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     files.push(claude_settings);
 
     // ── 指令文件 ──
-    // 项目指令（CLAUDE.md 优先）
-    files.push(cwd.join(paths::CLAUDE_MD));
-    files.push(cwd.join(paths::AGENTS_MD));
+    // 项目指令：从 cwd 向上 5 级祖先目录，每层 CLAUDE.md + AGENTS.md
+    const WATCH_DEPTH: u32 = 5;
+    for dir in paths::project_instruction_dirs(cwd, WATCH_DEPTH) {
+        files.push(dir.join(paths::CLAUDE_MD));
+        files.push(dir.join(paths::AGENTS_MD));
+    }
 
-    // 全局指令
-    let global_agents_md = expand_home(&paths::global_agents_md_path());
-    files.push(global_agents_md);
+    // 全局指令：~/.agents/AGENTS.md，fallback ~/.claude/CLAUDE.md
+    files.push(expand_home(&paths::global_agents_md_path()));
+    files.push(expand_home(&paths::old_global_claude_md_path()));
 
     // ── Guidance 文件（静态已知的） ──
     let guidance_dir = expand_home(&paths::global_guidance_dir());
@@ -74,7 +78,7 @@ pub fn init_snapshot_registry(cwd: &Path) -> SourceSnapshotRegistry {
     let mut registry = SourceSnapshotRegistry::new();
     registry.register_all(files);
     registry.take_baseline();
-    log::info!(
+    log::info!(target: "runtime::config_reload",
         "[config_reload] snapshot registry initialized with {} files",
         registry.len()
     );
@@ -95,7 +99,7 @@ pub fn check_config_changes(registry: &mut SourceSnapshotRegistry) -> ConfigDiff
         };
     }
 
-    log::info!(
+    log::info!(target: "runtime::config_reload",
         "[config_reload] detected {} file change(s)",
         changes.len()
     );
@@ -166,10 +170,10 @@ pub fn resolve_guidance_reload_policy() -> GuidanceReloadPolicy {
                     "remind" => GuidanceReloadPolicy::Remind,
                     "confirm" => GuidanceReloadPolicy::Confirm,
                     _ => {
-                        log::warn!(
-                            "[config_reload] unknown guidance.reload_policy '{}', using default",
-                            policy_str
-                        );
+                          log::warn!(target: "runtime::config_reload",
+                              "[config_reload] unknown guidance.reload_policy '{}', using default",
+                              policy_str
+                          );
                         GuidanceReloadPolicy::Remind
                     }
                 };

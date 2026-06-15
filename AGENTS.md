@@ -78,7 +78,7 @@ aemeath/                    # workspace root
 │   ├── panic.log            #   Panic 日志
 │   └── agent.log            #   审计日志（已废弃）
 >
-> 注意：`-v` / `--verbose` 参数**不会**将应用日志输出到 stderr；日志始终写入 `~/.agents/logs/aemeath.log`。
+> 注意：`-v` / `--verbose` 参数将应用日志输出到 stderr（常与 `-q` 配合用于 CLI 测试：`echo "hello" | aemeath -q -v --allow-all`）。不加 `-v` 时日志始终写入 `~/.agents/logs/aemeath.log`。
 ├── memory/                  # 持久化记忆存储
 ├── sessions/                # 会话持久化
 ├── skills/                  # 全局 Skills
@@ -111,8 +111,14 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 - **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
 - **MUST** worktree 分支完成验证并提交后，通过 **Pull Request** 提交回 `main`；**NEVER** 直接 push 到 `main`（`main` 已受保护，不允许直接推送）。
 - **MUST NEVER** 由 agent 自动合并 PR。PR 创建后由用户 review，用户确认后手动合并；agent 只能在用户明确授权后执行合并动作。
-- **MUST** 创建 PR 前，先在 `main` 工作区执行 `git pull`（或等价的 fetch + fast-forward）拉取最新更新；若拉取后存在冲突，**MUST** 在 worktree 分支上 rebase/merge 最新 `main` 并重新通过验证后才能推送分支并创建 PR。
-- **MUST** 用户合并 PR 后，agent 在 `main` 工作区执行 `git pull` 拉取最新并运行对应验证，然后清理已完成的 worktree。
+- **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin main` 拉取最新 main；若存在冲突，解决后重新通过验证门禁，才能推送分支并创建 PR。
+
+### Hook 阻断处理
+
+工作中若遇到 hook 阻断（例如 PreToolUse 阻止 Edit/Write）：
+
+1. **MUST** 先止血：立即切换到正确的工作上下文（如进入 git worktree），让用户请求的原始操作能够继续执行。
+2. **MUST** 向用户报告：发生了什么阻断、阻断原因、以及采取了什么措施来处理。
 
 ## 开放决策
 

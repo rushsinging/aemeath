@@ -92,7 +92,7 @@ impl McpClient {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
-                log::warn!("[MCP:{}:stderr] {}", server_name, line);
+                log::warn!(target: "tools::mcp_client", "[MCP:{}:stderr] {}", server_name, line);
             }
         });
 

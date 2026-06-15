@@ -89,11 +89,11 @@ fn test_all_completed_over_max_lines_backfills_recent_completed() {
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    // task_slots_with_fold = 5 → show 5 most recent completed (newest first)
+    // task_slots_with_fold = 5 → show 5 most recent completed (ascending: #6 → #10)
     assert_eq!(result.len(), 7); // summary + 5 completed + fold
     assert!(result[0].contains("10/10"));
-    assert!(result[1].contains("✓ #10 task 10"));
-    assert!(result[5].contains("✓ #6 task 6"));
+    assert!(result[1].contains("✓ #6 task 6"));
+    assert!(result[5].contains("✓ #10 task 10"));
     assert!(result.last().unwrap().contains("+5 more"));
 }
 
@@ -104,11 +104,11 @@ fn test_all_completed_at_window_limit_backfills_recent_completed() {
         .collect();
     let map = make_display_map(&tasks);
     let result = build_task_window(&tasks, &map, 7);
-    // task_slots_with_fold = 5 → show 5 most recent completed
+    // task_slots_with_fold = 5 → show 5 most recent completed (ascending: #3 → #7)
     assert_eq!(result.len(), 7); // summary + 5 completed + fold
     assert!(result[0].contains("7/7"));
-    assert!(result[1].contains("✓ #7 task 7"));
-    assert!(result[5].contains("✓ #3 task 3"));
+    assert!(result[1].contains("✓ #3 task 3"));
+    assert!(result[5].contains("✓ #7 task 7"));
     assert!(result.last().unwrap().contains("+2 more"));
 }
 

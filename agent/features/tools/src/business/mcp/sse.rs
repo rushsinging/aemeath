@@ -117,7 +117,7 @@ impl SseTransport {
         let stream_client = build_http_client(headers)?;
         let post_client = build_http_client(headers)?;
 
-        log::info!("[MCP:SSE] connecting to {sse_url}");
+        log::info!(target: "tools::sse", "[MCP:SSE] connecting to {sse_url}");
 
         let response = stream_client
             .get(sse_url)
@@ -174,7 +174,7 @@ impl SseTransport {
         let endpoint_url = endpoint_url
             .ok_or_else(|| "SSE server did not send an 'endpoint' event".to_string())?;
 
-        log::info!("[MCP:SSE] connected, endpoint={endpoint_url}");
+        log::info!(target: "tools::sse", "[MCP:SSE] connected, endpoint={endpoint_url}");
 
         Ok(Self {
             stream_client,
@@ -274,7 +274,7 @@ fn try_extract_response(data: &str, expected_id: u64) -> Result<Option<Value>, S
     match resp_id {
         Some(rid) if rid == expected_id => {}
         Some(rid) if rid < expected_id => {
-            log::info!("[MCP:SSE] accepting stale response id={rid} (expected {expected_id})");
+            log::info!(target: "tools::sse", "[MCP:SSE] accepting stale response id={rid} (expected {expected_id})");
         }
         _ => return Ok(None),
     }

@@ -29,8 +29,7 @@ mod tests {
             key: "t-result".into(),
             tool_title: "Grep".into(),
             args_preview: None,
-            summary: None,
-            result_text: "done".into(),
+                        result_text: "done".into(),
             style: SemanticStyle::Success,
         })
     }
@@ -46,8 +45,7 @@ mod tests {
             semantic_status: ToolSemanticStatus::Success,
             style: SemanticStyle::Running,
             args_preview: None,
-            summary: None,
-            activity_summary: None,
+                        activity_summary: None,
             result_summary: None,
             collapsible: false,
             collapsed: false,

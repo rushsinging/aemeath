@@ -51,7 +51,7 @@ impl AgentRunner for CliAgentRunner {
             .and_then(|(_, _, entry)| entry.reasoning);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         client.set_reasoning(reasoning);
-        log::info!(
+        log::info!(target: "runtime::setup",
             "[SubAgent] reasoning={} max_tokens={:?} (role={:?}, model={:?}, default={})",
             reasoning,
             max_tokens_override,
@@ -150,7 +150,7 @@ impl AgentRunner for CliAgentRunner {
                     })
                 })
                 .collect();
-            log::info!(
+            log::info!(target: "runtime::setup",
                 "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
                 session_id_for_log,
                 turn,

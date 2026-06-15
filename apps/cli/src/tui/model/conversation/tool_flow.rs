@@ -84,8 +84,7 @@ impl ConversationModel {
                 is_error,
                 image_count,
             );
-            log::debug!(
-                target: "cli::tui::tool_flow",
+            crate::tui::log_debug!(
                 "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} blocks_after={}",
                 id,
                 tool_name,
@@ -117,8 +116,7 @@ impl ConversationModel {
             content,
             is_error,
         });
-        log::debug!(
-            target: "cli::tui::tool_flow",
+        crate::tui::log_debug!(
             "model observe tool_result orphan id={} is_error={} image_count={} blocks_after={}",
             id,
             is_error,

@@ -104,7 +104,6 @@ impl crate::tui::app::App {
                             name: name.clone(),
                             index,
                             arguments: Some(input_json.clone()),
-                            summary: Some(input_json),
                             status: ToolCallStatus::Ready,
                         });
                     if let Some(result) = tool_results.get(id.as_str()) {

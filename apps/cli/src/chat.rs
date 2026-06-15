@@ -26,8 +26,12 @@ fn initial_tui_resume_id(args: &Args) -> Option<String> {
     args.resume.clone()
 }
 
-fn should_clear_stderr_log_env(quiet: bool) -> bool {
-    quiet
+fn should_clear_stderr_log_env(quiet: bool, verbose: bool) -> bool {
+    quiet && !verbose
+}
+
+fn should_set_stderr_log_env(verbose: bool) -> bool {
+    verbose
 }
 
 fn should_emit_cli_frontend_started_log() -> bool {
@@ -40,7 +44,9 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
 
 /// 主聊天逻辑 — 瘦身入口（CLI 通过 composition 装配 runtime）。
 pub(crate) async fn run_chat(args: Args) {
-    if should_clear_stderr_log_env(args.quiet) {
+    if should_set_stderr_log_env(args.verbose) {
+        std::env::set_var("AEMEATH_LOG_STDERR", "1");
+    } else if should_clear_stderr_log_env(args.quiet, args.verbose) {
         std::env::remove_var("AEMEATH_LOG_STDERR");
     }
     let args = apply_permission_env_override(args);
@@ -94,7 +100,7 @@ pub(crate) async fn run_chat(args: Args) {
     app.run(bootstrap.client, initial_resume_id)
         .await
         .unwrap_or_else(|e| {
-            log::error!("TUI error: {e}");
+            crate::tui::log_error!("TUI error: {e}");
             std::process::exit(1);
         });
     println!("aemeath --resume {}", session_id);
@@ -136,12 +142,27 @@ mod tests {
 
     #[test]
     fn test_should_clear_stderr_log_env_for_quiet_mode() {
-        assert!(should_clear_stderr_log_env(true));
+        assert!(should_clear_stderr_log_env(true, false));
     }
 
     #[test]
     fn test_should_clear_stderr_log_env_keeps_user_choice_for_tui_mode() {
-        assert!(!should_clear_stderr_log_env(false));
+        assert!(!should_clear_stderr_log_env(false, false));
+    }
+
+    #[test]
+    fn test_should_clear_stderr_log_env_verbose_overrides_quiet() {
+        assert!(!should_clear_stderr_log_env(true, true));
+    }
+
+    #[test]
+    fn test_should_set_stderr_log_env_for_verbose() {
+        assert!(should_set_stderr_log_env(true));
+    }
+
+    #[test]
+    fn test_should_set_stderr_log_env_skips_non_verbose() {
+        assert!(!should_set_stderr_log_env(false));
     }
 
     #[test]

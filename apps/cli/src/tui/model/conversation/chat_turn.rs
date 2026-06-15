@@ -38,14 +38,13 @@ impl ChatTurn {
         &mut self,
         id: &str,
         arguments: Option<String>,
-        summary: Option<String>,
         status: ToolCallStatus,
     ) -> Option<String> {
         let call = self
             .tool_calls
             .iter_mut()
             .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id))?;
-        call.update(arguments, summary, status);
+        call.update(arguments, status);
         self.status = match status {
             ToolCallStatus::PendingArgs | ToolCallStatus::Ready => {
                 if self.status == ChatTurnStatus::Completed {
@@ -62,12 +61,12 @@ impl ChatTurn {
         };
         Some(call.args_preview.clone())
     }
-    pub fn bind_tool(&mut self, id: &str, summary: String) -> Option<String> {
+    pub fn bind_tool(&mut self, id: &str) -> Option<String> {
         let call = self
             .tool_calls
             .iter_mut()
             .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id))?;
-        call.bind(summary);
+        call.bind();
         self.status = ChatTurnStatus::ToolExecuting;
         Some(call.args_preview.clone())
     }
@@ -125,7 +124,7 @@ mod tests {
         turn.observe_tool_start(call_r.clone(), chat.clone(), "Read".into(), 0);
         turn.observe_tool_start(call_b.clone(), chat, "Bash".into(), 1);
 
-        assert!(turn.bind_tool(call_r.as_str(), String::new()).is_some());
+        assert!(turn.bind_tool(call_r.as_str()).is_some());
         assert_eq!(turn.tool_calls[0].id.as_ref(), Some(&call_r));
         assert_eq!(turn.tool_calls[1].id.as_ref(), Some(&call_b));
     }
@@ -142,9 +141,9 @@ mod tests {
         turn.observe_tool_start(call_a.clone(), chat.clone(), "Read".into(), 0);
         turn.observe_tool_start(call_b.clone(), chat, "Read".into(), 1);
 
-        assert!(turn.bind_tool(call_a.as_str(), String::new()).is_some());
+        assert!(turn.bind_tool(call_a.as_str()).is_some());
         assert!(
-            turn.bind_tool(call_b.as_str(), String::new()).is_some(),
+            turn.bind_tool(call_b.as_str()).is_some(),
             "internal id 应直接绑定，不再依赖 provider/content index"
         );
 
@@ -166,12 +165,12 @@ mod tests {
         // 轮 1 占位 + 绑定。
         turn.observe_tool_start(call_1a.clone(), chat.clone(), "Read".into(), 0);
         turn.observe_tool_start(call_1.clone(), chat.clone(), "Read".into(), 1);
-        turn.bind_tool(call_1.as_str(), String::new());
+        turn.bind_tool(call_1.as_str());
         // 轮 2 占位（index 跨轮重复）。
         turn.observe_tool_start(call_2a.clone(), chat.clone(), "Read".into(), 0);
         turn.observe_tool_start(call_2.clone(), chat, "Read".into(), 1);
         // 轮 2 bind(index=1)：internal id 直连，不会覆盖轮1 已绑 call_1。
-        turn.bind_tool(call_2.as_str(), String::new());
+        turn.bind_tool(call_2.as_str());
 
         let ids = bound_ids(&turn);
         assert!(

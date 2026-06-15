@@ -54,6 +54,7 @@ where
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
+    pub language: String,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -88,6 +89,7 @@ where
         agent_semaphore,
         hook_runner,
         memory_config,
+        language,
     } = ctx;
     let hook_ui = HookUi::new(sink.clone());
 
@@ -96,7 +98,7 @@ where
     let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
     let in_worktree = project::api::WorkspaceRead::in_worktree(workspace.as_ref());
     hook_runner.set_project_context(cwd.display().to_string(), in_worktree);
-    log::info!(
+    log::info!(target: "runtime::loop_runner",
         "chat loop hook runner ready: project_dir={} configured_events={}",
         hook_runner.project_dir(),
         hook_runner.hook_count()
@@ -149,7 +151,7 @@ where
                 &mut config_snapshot,
             );
             if config_diff.has_changes() {
-                log::info!(
+                log::info!(target: "runtime::loop_runner",
                     "[config_reload] turn {} detected changes: {:?}",
                     turn_count,
                     config_diff.changed_keys
@@ -175,7 +177,7 @@ where
                             messages.push(reminder);
                             sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                                 .await;
-                            log::info!("[config_reload] guidance inject mode: injected reminder into messages");
+                            log::info!(target: "runtime::loop_runner", "[config_reload] guidance inject mode: injected reminder into messages");
                         }
                         share::config::GuidanceReloadPolicy::Remind => {
                             // 发 system-reminder 让 LLM 自行决定是否读取
@@ -183,7 +185,7 @@ where
                                 "<system-reminder>guidance 文件已被外部修改，请用 Read 工具重新读取 ~/.agents/guidance/_default.md 与本次匹配的模型前缀文件以获取最新指引。</system-reminder>".to_string(),
                             );
                             messages.push(reminder);
-                            log::info!("[config_reload] guidance remind mode: injected system-reminder");
+                            log::info!(target: "runtime::loop_runner", "[config_reload] guidance remind mode: injected system-reminder");
                         }
                         share::config::GuidanceReloadPolicy::Confirm => {
                             // 发 system-reminder + 标记等待用户确认
@@ -194,7 +196,7 @@ where
                             sink.send_event(RuntimeStreamEvent::SystemMessage(
                                 "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
                             )).await;
-                            log::info!("[config_reload] guidance confirm mode: waiting for user confirmation");
+                            log::info!(target: "runtime::loop_runner", "[config_reload] guidance confirm mode: waiting for user confirmation");
                         }
                     }
                 }
@@ -304,7 +306,7 @@ where
             }
             // Inject task reminder if conditions are met
             if let Some(reminder) = task_reminder_state
-                .build_reminder(turn_count as u64, &task_store)
+                .build_reminder(turn_count as u64, &task_store, &language)
                 .await
             {
                 api_msgs.push(reminder);
@@ -336,7 +338,7 @@ where
             )
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
-        log::debug!(
+        log::debug!(target: "runtime::loop_runner",
             "turn api finished: session={}, turn={}, elapsed_secs={:.3}",
             session_id,
             turn_count,
@@ -960,6 +962,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: blocking_then_success_hook_runner(&flag_path),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
         let _ = std::fs::remove_file(&flag_path);
@@ -1038,6 +1041,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: blocking_then_success_hook_runner(&flag_path),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
         let _ = std::fs::remove_file(&flag_path);
@@ -1120,6 +1124,7 @@ mod tests {
                 path_base.path().display().to_string(),
             ),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
 
@@ -1175,6 +1180,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             hook_runner: test_hook_runner(),
             memory_config: share::config::MemoryConfig::default(),
+            language: "en".to_string(),
         })
         .await;
 

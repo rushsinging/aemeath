@@ -39,9 +39,8 @@ mod tests {
             semantic_status: ToolSemanticStatus::Success,
             style: SemanticStyle::Success,
             args_preview: Some("src/main.rs".to_string()),
-            summary: Some("读取文件".to_string()),
             activity_summary: None,
-            result_summary: Some("120 lines".to_string()),
+            result_summary: None,
             collapsible: true,
             collapsed: false,
         });

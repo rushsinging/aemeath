@@ -72,10 +72,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         UiEvent::MessagesSync(messages) => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        UiEvent::AskUser { id, question, .. } => diagnostic(DiagnosticIntent::OpenPrompt {
-            id: id.to_string(),
-            question: question.clone(),
-        }),
+        UiEvent::AskUser { .. } => AgentEventMapping::default(),
         UiEvent::AgentProgress {
             context,
             tool_id,
@@ -138,7 +135,6 @@ fn runtime_observation_from_ui_event(event: &UiEvent) -> Option<RuntimeObservati
             index,
             arguments_delta,
             arguments,
-            summary,
             status,
         } => Some(RuntimeObservation::ToolCallUpdate {
             context: runtime_context(context),
@@ -146,9 +142,7 @@ fn runtime_observation_from_ui_event(event: &UiEvent) -> Option<RuntimeObservati
             provider_id: provider_id.clone(),
             name: name.clone(),
             index: *index,
-            arguments: arguments_delta.clone(),
-            summary: summary
-                .clone()
+            arguments: arguments_delta.clone()
                 .or_else(|| arguments.as_ref().map(ToString::to_string)),
             status: tool_call_status_from_sdk(*status),
         }),
@@ -200,7 +194,7 @@ fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     }
 }
 
-fn diagnostic(intent: DiagnosticIntent) -> AgentEventMapping {
+fn _diagnostic(intent: DiagnosticIntent) -> AgentEventMapping {
     AgentEventMapping {
         diagnostic: vec![intent],
         ..AgentEventMapping::default()
@@ -288,8 +282,7 @@ mod tests {
                 index: 0,
                 arguments_delta: Some(r#"{"file_path":"Cargo.toml"}"#.to_string()),
                 arguments: None,
-                summary: None,
-                status: sdk::ToolCallStatusView::Ready,
+                                status: sdk::ToolCallStatusView::Ready,
             },
             UiEvent::ToolResult {
                 context,
@@ -375,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn test_map_agent_event_tool_call_uses_json_arguments_when_summary_missing() {
+    fn test_map_agent_event_tool_call_fallback_uses_full_arguments_when_delta_absent() {
         let event = UiEvent::ToolCallUpdate {
             context: ctx(),
             id: sdk::ids::ToolCallId::new("tool-1"),
@@ -384,17 +377,16 @@ mod tests {
             index: 0,
             arguments_delta: None,
             arguments: Some(serde_json::json!({ "file_path": "src/lib.rs" })),
-            summary: None,
             status: sdk::ToolCallStatusView::Ready,
         };
         let mapping = map_agent_event(&event);
 
         match first_observation(&mapping) {
             Some(ConversationIntent::ObserveToolCallUpdate {
-                arguments, summary, ..
+                arguments, ..
             }) => {
-                assert!(arguments.is_none());
-                assert_eq!(summary.as_deref(), Some(r#"{"file_path":"src/lib.rs"}"#));
+                // arguments_delta 为 None 时，fallback 到 arguments JSON 字符串
+                assert!(arguments.is_some());
             }
             other => panic!("unexpected mapping: {other:?}"),
         }

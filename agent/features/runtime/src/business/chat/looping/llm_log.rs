@@ -1,6 +1,6 @@
 use crate::business::agent::ToolCall;
 use crate::business::chat::looping::input_log::logged_input_messages;
-use logging::{ToolKind, UnifiedLogger};
+use logging::UnifiedLogger;
 use provider::api::{StreamResponse, SystemBlock};
 use share::message::Message;
 
@@ -66,6 +66,10 @@ pub(super) fn log_llm_output_and_tool_calls(
             "tool_name": tc.name,
             "input": tc.input,
         });
-        UnifiedLogger::log_tool("default", ToolKind::Call, tc_data);
+        log::info!(
+            target: "tools::audit",
+            "tool_call: {}",
+            serde_json::to_string(&tc_data).unwrap_or_default()
+        );
     }
 }

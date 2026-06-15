@@ -161,6 +161,10 @@ where
                 }
             }
             ChatInputEvent::UserMessage { text, image_paths } => {
+                logging::UnifiedLogger::log_user_input(serde_json::json!({
+                    "text": &text,
+                    "image_paths": &image_paths,
+                }));
                 messages.push(user_message_with_images(text, image_paths));
                 appended_this_gate.push(());
                 appended_user_messages += 1;
@@ -202,7 +206,7 @@ fn user_message_with_images(text: String, image_paths: Vec<String>) -> Message {
         return Message::user(text);
     }
 
-    log::warn!(
+    log::warn!(target: "runtime::input_gate",
         "queued ChatInputEvent image_paths are not decoded in runtime gate yet; appending text only (image_count={})",
         image_paths.len()
     );

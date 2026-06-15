@@ -25,7 +25,7 @@ pub struct AgentRunOutcome {
 
 /// 主 loop 和子 agent 共用的结构化日志摘要
 pub fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
-    log::info!(
+    log::info!(target: "runtime::finalize",
         "[agent_loop_finished] session={}, status={:?}, turns={}, duration_ms={}, role={}, model={}",
         session_id,
         outcome.status,

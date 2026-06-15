@@ -284,12 +284,13 @@ mod tests {
         // Grep header 现在包含 pattern 和 path
         assert!(rendered.iter().any(|line| line.contains("Grep /76/") && line.contains("docs/bug/active.md")));
         // Grep details 已隐藏（path 已在 header 中）
-        // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(空白 marker 槽) = 4 列前导。
+        // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(marker 槽) = 4 列前导。
+        // 首行 marker 为 ⎿ 圆角连接（连接父 ToolCall），续行为 4 空格。
         // result 子块展示工具 output 前 N 行预览（Grep result_max_lines=5；6 行 output →
         // 前 5 行 + "1 lines omitted"），不再退化为纯 "✓ Grep completed" 摘要。
         assert!(rendered
             .iter()
-            .any(|line| line == "    /tmp/docs/bug/active.md:18:match"));
+            .any(|line| line == "  ⎿ /tmp/docs/bug/active.md:18:match"));
         assert!(rendered
             .iter()
             .any(|line| line == "    ... (1 lines omitted)"));
@@ -360,10 +361,13 @@ mod tests {
                 name: "Grep".to_string(),
                 index: 1,
                 arguments_delta: None,
-                arguments: None,
-                summary: Some(r#"{"pattern":"76","path":"docs/bug/active.md"}"#.to_string()),
+                arguments: Some(serde_json::json!({
+                    "pattern": "76",
+                    "path": "docs/bug/active.md"
+                })),
                 status: sdk::ToolCallStatusView::Ready,
-            },            UiEvent::ToolResult {
+            },
+            UiEvent::ToolResult {
                 context: test_turn_context(),
                 id: sdk::ids::ToolCallId::new("grep-1"),
                 provider_id: "provider-grep-1".to_string(),

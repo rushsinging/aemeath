@@ -131,7 +131,6 @@ pub struct AgentToolCallProgress {
     pub id: String,
     pub name: String,
     pub input: serde_json::Value,
-    pub summary: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

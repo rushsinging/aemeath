@@ -1,10 +1,9 @@
-use crate::tui::render::output::blocks::diagnostic::semantic_color;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
 use ratatui::style::Style;
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 
 /// 渲染工具调用块：仅 header（标题）+ args detail 行 + 可选的 activity 状态行。
 ///
@@ -15,31 +14,27 @@ pub fn render_tool_call(
     view: &ToolCallBlockView,
     _ctx: &RenderCtx,
 ) -> RenderedBlock {
-    let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty()).or(view.summary.as_deref());
-    let (header_text, detail_lines) = header_input
-        .map(|raw_json| format_tool_call(&view.title, raw_json, view.summary.as_deref()))
-        .unwrap_or_else(|| (format!("● {}", view.title), Vec::new()));
-    log::debug!(
-        target: "cli::tui::tool_flow",
-        "render tool_call block_id={} title={} status={:?} args_len={} summary_len={} result_len={} detail_lines={} activity_present={}",
+    let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty());
+    let (header_line, detail_lines) = header_input
+        .map(|raw_json| format_tool_call(&view.title, raw_json))
+        .unwrap_or_else(|| (Line::from(Span::raw(format!("● {}", view.title))), Vec::new()));
+    crate::tui::log_debug!(
+        "render tool_call block_id={} title={} status={:?} args_len={}  result_len={} detail_lines={} activity_present={}",
         block_id,
         view.title,
         view.semantic_status,
         view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
-        view.summary.as_ref().map(|value| value.len()).unwrap_or(0),
-        view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+                view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         detail_lines.len(),
         view.activity_summary.is_some(),
     );
-    let icon_color = semantic_color(view.style); // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉 format_tool_call 前导 ● 的标题文本（颜色不变）。
-    let title_text = header_text
-        .strip_prefix('●')
-        .unwrap_or(&header_text)
-        .trim_start();
-    let mut lines = vec![RenderedLine::new(vec![Span::styled(
-        title_text.to_string(),
-        Style::default().fg(icon_color),
-    )])];
+    // marker（●/✓/✗）现由 gutter 注入；header 只渲染去掉 format_tool_call 前导 ● 的标题文本。
+    // header 文本颜色统一使用 TEXT（与 assistant message 一致），任务状态由 gutter 颜色表示。
+    // 通过 RenderedLine 的 line base style 让未显式着色的 span 继承 TEXT 色，
+    // 已有显式颜色的 span（如 Read 的 summary 灰色）保留各自样式。
+    let header_line = strip_leading_bullet(header_line);
+    let first_line = RenderedLine::new(header_line.spans).with_style(Style::default().fg(theme::TEXT));
+    let mut lines = vec![first_line];
     for detail in detail_lines {
         lines.push(RenderedLine::new(vec![Span::styled(
             detail,
@@ -61,6 +56,18 @@ pub fn render_tool_call(
     }
 }
 
+/// 从 Line 的文本内容中去掉前导 `●` marker 并 trim 空白。
+/// 操作方式：如果第一个 span 以 `●` 开头，移除该前缀并 trim_start。
+fn strip_leading_bullet(mut line: Line<'static>) -> Line<'static> {
+    if let Some(first) = line.spans.first_mut() {
+        let content: &str = first.content.as_ref();
+        if let Some(stripped) = content.strip_prefix('●') {
+            first.content = std::borrow::Cow::Owned(stripped.trim_start().to_string());
+        }
+    }
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,7 +85,6 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: Some("/foo/".into()),
-            summary: None,
             activity_summary: None,
             result_summary: None,
             collapsible: false,
@@ -87,20 +93,16 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_call_running_applies_theme_color_to_title() {
-        // marker（●）现由 gutter 注入；组件只渲染带语义色的标题（无自写 icon span）。
+    fn test_tool_call_running_applies_text_color_to_title() {
+        // marker（●）现由 gutter 注入；header 文本统一使用 TEXT 色（与 assistant message 一致），
+        // 任务状态由 gutter 颜色表示。颜色通过 RenderedLine 的 line base style 传递。
         let block = render_tool_call(
             "t1",
             &tool(ToolSemanticStatus::Running),
             &RenderCtx { width: 80 },
         );
-        let title_span = block.lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content.as_ref().contains("Grep"))
-            .unwrap();
-
-        assert_eq!(title_span.style.fg, Some(theme::TOOL_RUNNING));
+        // header 行的 line base style 应为 TEXT
+        assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
         assert!(block.lines[0].plain.contains("Grep"));
         // header 行不再自写 marker 字形（gutter.rs 覆盖 marker）。
         assert!(
@@ -110,18 +112,13 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_call_success_uses_success_title_color() {
+    fn test_tool_call_success_uses_text_title_color() {
         let mut view = tool(ToolSemanticStatus::Success);
         view.style = SemanticStyle::Success;
         view.icon = "✓".into();
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
-        let title_span = block.lines[0]
-            .spans
-            .iter()
-            .find(|span| span.content.as_ref().contains("Grep"))
-            .unwrap();
-
-        assert_eq!(title_span.style.fg, Some(theme::SUCCESS));
+        // header 行的 line base style 应为 TEXT
+        assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
         assert!(block.lines[0].plain.contains("Grep"));
         assert!(
             !block.lines[0].plain.starts_with('✓'),
@@ -136,7 +133,7 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
-        view.summary = Some(r#"{"pattern":"test","path":"src"}"#.into());
+        
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
@@ -151,7 +148,7 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
-        view.summary = None;
+        
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 

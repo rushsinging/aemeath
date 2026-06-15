@@ -40,11 +40,42 @@
 
 ## 日志规范
 
-- `env_logger` 驱动，从配置文件的 `logging.level` 读取全局日志级别。
-- 日志文件：`~/.agents/logs/aemeath.log`（追加模式）。
-- Panic 日志：`~/.agents/logs/panic.log`。
-- Agent 审计日志：`~/.agents/logs/agent.log`（已废弃，保留兼容枚举；当前无写入点）。
+- UnifiedLogger 驱动，从配置文件的 `logging.level` 读取全局日志级别。
 - 设置 `AEMEATH_LOG_STDERR=1` 可恢复 stderr 输出（用于 `--no-tui` 模式）。
+
+### 日志文件路由
+
+UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
+
+| 文件 | target 前缀 | 来源 crate |
+|------|-------------|------------|
+| `aemeath.log` | 兜底（无匹配前缀） | shared/composition |
+| `runtime.log` | `runtime::` | runtime |
+| `provider.log` | `provider::` | provider |
+| `tools.log` | `tools::` | tools |
+| `prompt.log` | `prompt::` | prompt |
+| `tui.log` | `cli::` | cli/tui |
+| `hook.log` | `hook::` | hook |
+
+原始记录文件（静态方法直写）：
+- `input.log` — 用户输入 + LLM 输入（`log_input` / `log_user_input`）
+- `output.log` — LLM 输出（`log_output`）
+
+审计文件：
+- `audit.log` — 权限/行为审计（`audit`，预留）
+
+特殊文件：
+- `panic.log` — panic_hook 直写，不纳入 UnifiedLogger
+
+### Log 规范
+
+- **MUST** 所有 `log::xxx!` 调用显式指定 `target:` 参数，格式为 `target: "crate_name::module"`。
+  - 例：`log::info!(target: "runtime::loop_runner", "...")`
+  - 例：`log::debug!(target: "provider::client", "...")`
+- **NEVER** 在生产代码中使用裸 `log::xxx!` 调用（不带 `target:`）。
+- **MUST** TUI 层使用 `crate::tui::log_xxx!` 宏（自动设置 `target: "cli::tui"`）。
+- **SHOULD** target 前缀与 crate 名一致（runtime crate 用 `runtime::`，provider crate 用 `provider::`，以此类推）。
+- 架构守卫（`target_guard.rs`）在 CI 中扫描全仓库确保合规。
 
 ## 测试规范
 

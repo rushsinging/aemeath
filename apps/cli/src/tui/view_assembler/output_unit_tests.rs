@@ -77,7 +77,6 @@ fn test_non_embedded_tool_result_uses_summary() {
         id: ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("read file".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });

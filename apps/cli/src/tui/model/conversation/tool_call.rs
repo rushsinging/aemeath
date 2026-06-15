@@ -7,7 +7,6 @@ pub struct ToolCall {
     pub stream_key: ToolStreamKey,
     pub name: String,
     pub args_preview: String,
-    pub summary: Option<String>,
     pub status: ToolCallStatus,
     pub result: Option<String>,
     pub result_content: Option<serde_json::Value>,
@@ -23,7 +22,6 @@ impl ToolCall {
             id: Some(id),
             stream_key,
             args_preview: String::new(),
-            summary: None,
             status: ToolCallStatus::PendingArgs,
             result: None,
             result_content: None,
@@ -39,22 +37,10 @@ impl ToolCall {
     pub fn update(
         &mut self,
         arguments: Option<String>,
-        summary: Option<String>,
         status: ToolCallStatus,
     ) -> Vec<ToolCallChange> {
         if let Some(arguments) = arguments {
             self.args_preview = arguments;
-        }
-        if let Some(summary) = summary {
-            if summary.is_empty() {
-                if self.summary.as_deref().unwrap_or_default().is_empty()
-                    && !self.args_preview.is_empty()
-                {
-                    self.summary = Some(self.args_preview.clone());
-                }
-            } else {
-                self.summary = Some(summary);
-            }
         }
         let previous = self.status;
         if self.status != ToolCallStatus::Success && self.status != ToolCallStatus::Error {
@@ -66,16 +52,7 @@ impl ToolCall {
         }
         changes
     }
-    pub fn bind(&mut self, summary: String) -> Vec<ToolCallChange> {
-        if summary.is_empty() {
-            if self.summary.as_deref().unwrap_or_default().is_empty()
-                && !self.args_preview.is_empty()
-            {
-                self.summary = Some(self.args_preview.clone());
-            }
-        } else {
-            self.summary = Some(summary);
-        }
+    pub fn bind(&mut self) -> Vec<ToolCallChange> {
         if self.status == ToolCallStatus::PendingArgs {
             self.status = ToolCallStatus::Running;
             vec![ToolCallChange::Bound, ToolCallChange::Running]
@@ -135,7 +112,7 @@ mod tests {
     #[test]
     fn test_tool_call_binds_id_and_runs() {
         let mut call = pending_call();
-        let changes = call.bind("Read file".to_string());
+        let changes = call.bind();
         assert!(call.id.as_ref().is_some(), "id should be set after bind");
         assert_eq!(call.status, ToolCallStatus::Running);
         assert_eq!(
@@ -147,7 +124,7 @@ mod tests {
     #[test]
     fn test_tool_call_completes_success() {
         let mut call = pending_call();
-        call.bind("Read file".to_string());
+        call.bind();
         call.complete(ToolResultPayload::new(
             "ok".to_string(),
             serde_json::json!({ "text": "ok" }),
@@ -165,7 +142,7 @@ mod tests {
     #[test]
     fn test_tool_call_completes_error() {
         let mut call = pending_call();
-        call.bind("Read file".to_string());
+        call.bind();
         call.complete(ToolResultPayload::new(
             "failed".to_string(),
             serde_json::json!({ "text": "failed" }),

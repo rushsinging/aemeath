@@ -50,8 +50,7 @@ pub fn render_tool_result(
     let policy = result_policy(&view.tool_title);
     // 解析结构化 JSON，提取显示文本
     let display_text = resolve_display_text(&view.result_text);
-    log::debug!(
-        target: "cli::tui::tool_flow",
+    crate::tui::log_debug!(
         "render tool_result block_id={} tool_title={} result_len={} display_len={} width={} style={:?} policy={:?}",
         block_id,
         view.tool_title,
@@ -187,8 +186,7 @@ mod tests {
             key: format!("{tool_title}-result"),
             tool_title: tool_title.into(),
             args_preview: None,
-            summary: None,
-            result_text: result_text.into(),
+                        result_text: result_text.into(),
             style: SemanticStyle::Success,
         }
     }
@@ -340,7 +338,7 @@ mod tests {
             "Edit",
             "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
         );
-        view.summary = Some(r#"{"file_path":"src/lib.rs"}"#.into());
+        
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
 

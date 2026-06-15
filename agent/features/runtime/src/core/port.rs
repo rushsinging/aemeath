@@ -28,6 +28,8 @@ pub struct ChatRuntimeContext {
     pub context_size: usize,
     pub verbose: bool,
     pub resume: Option<String>,
+    /// Language code for prompt/reminder text selection (`"en"` / `"zh"`).
+    pub language: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -79,7 +79,7 @@ When you use TaskCreate to create tasks, you MUST maintain task status throughou
 - For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a concise request summary.
 - BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(taskId, status="in_progress")` in the same tool batch or an earlier one.
 - AFTER completing a task yourself: call `TaskUpdate(taskId, status="completed")` before reporting completion.
-- If dispatching a sub-agent for a task: pass `taskId` to the Agent tool and do NOT call TaskUpdate for that task; the dispatcher manages Pending → InProgress → Completed/Pending automatically.
+- If dispatching a sub-agent for a task: optionally pass `taskId` to the Agent tool for automatic status tracking (the dispatcher manages Pending → InProgress → Completed/Pending). For free-form exploration or ad-hoc calls, taskId is NOT required.
 - After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
 
@@ -89,7 +89,7 @@ System reminders about tasks may refer to older task batches. If a reminder is u
 
 Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
 
-BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (missing taskId / no lifecycle ownership)
+BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (no lifecycle ownership — pass taskId for auto-tracking)
 GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, in_progress) → Read X.rs → TaskUpdate(id1, completed) → ...
 
 # Tone and style
@@ -221,20 +221,16 @@ pub fn current_date() -> String {
 }
 
 fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    let mut current = Some(cwd);
-
-    for _ in 0..=depth {
-        if let Some(dir) = current {
-            paths.push(dir.join(share::config::paths::CLAUDE_MD));
-            paths.push(dir.join(share::config::paths::AGENTS_MD));
-            current = dir.parent();
-        } else {
-            break;
-        }
-    }
-
-    paths
+    // 从 cwd 向上 depth 级祖先目录（含 cwd），每层 CLAUDE.md 优先于 AGENTS.md
+    paths::project_instruction_dirs(cwd, depth)
+        .into_iter()
+        .flat_map(|dir| {
+            [
+                dir.join(paths::CLAUDE_MD),
+                dir.join(paths::AGENTS_MD),
+            ]
+        })
+        .collect()
 }
 
 pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
@@ -258,7 +254,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
         }
     }
 
-    // Project: walk up/down INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
+    // Project: walk up INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
     for project_path in project_instruction_walk(cwd, INSTRUCTION_SEARCH_DEPTH) {
         if project_path.exists() {
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
@@ -277,7 +273,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     let warnings = policy::api::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
-            log::warn!(
+            log::warn!(target: "runtime::prompt_build",
                 "[Security] {} in {} line {}: {}",
                 w.threat_type,
                 w.filename,

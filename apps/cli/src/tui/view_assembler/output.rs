@@ -70,9 +70,7 @@ impl OutputViewAssembler {
                                 OutputBlockKind::ToolResult(ToolResultBlockView {
                                     key: result_id,
                                     tool_title: tool.title.clone(),
-                                    args_preview: tool.args_preview.clone(),
-                                    summary: tool.summary.clone(),
-                                    result_text,
+                                    args_preview: tool.args_preview.clone(),                                    result_text,
                                     style: tool.style,
                                 }),
                             );
@@ -145,7 +143,7 @@ impl OutputViewAssembler {
                 OutputTimelineItem::HookNotice { id, content } => {
                     let (kind, style) = match content.kind {
                         HookNoticeKind::Blocked => {
-                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Warning)
+                            (HookNoticeSemanticKind::Blocked, SemanticStyle::Error)
                         }
                         HookNoticeKind::Failed => {
                             (HookNoticeSemanticKind::Failed, SemanticStyle::Error)
@@ -337,16 +335,15 @@ fn find_tool_view(
                 })
                 .unwrap_or_else(|| result.to_string())
         });
-    log::debug!(
-        target: "cli::tui::tool_flow",        "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} summary_len={} result_len={} activity_count={}",
+    crate::tui::log_debug!(
+        "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
         chat_id.as_ref(),
         turn_id.as_ref(),
         tool_id.as_ref(),
         call.name,
         call.status,
         call.args_preview.len(),
-        call.summary.as_ref().map(|value| value.len()).unwrap_or(0),
-        result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
+                result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         call.activities.len(),
     );
     Some(ToolCallBlockView {
@@ -364,8 +361,7 @@ fn find_tool_view(
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-        summary: call.summary.clone(),
-        activity_summary: call.activities.last().cloned(),
+                activity_summary: call.activities.last().cloned(),
         // result 子块展示实际工具 output（供渲染层 format_result_lines 按
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
         // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。

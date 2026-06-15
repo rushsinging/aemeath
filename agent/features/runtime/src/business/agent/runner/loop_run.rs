@@ -7,7 +7,7 @@ use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
 use crate::business::compact::{safe_slice, truncate_tool_result};
-use logging::{ToolKind, UnifiedLogger};
+use logging::UnifiedLogger;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
@@ -247,7 +247,11 @@ impl<'a> SubAgentRun<'a> {
     fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::business::agent::ToolCall]) {
         for tool_call in tool_calls {
             let data = build_json_logger_tool_call_data(tool_call);
-            UnifiedLogger::log_tool(&self.role_name_for_log, ToolKind::Call, data);
+            log::info!(
+                target: "tools::audit",
+                "tool_call: {}",
+                serde_json::to_string(&data).unwrap_or_default()
+            );
         }
         logging::context::set_current_turn(turn_number);
     }

@@ -117,7 +117,6 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         name: "Bash".to_string(),
         index: 0,
         arguments: Some(r#"{"command":"pwd"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
 

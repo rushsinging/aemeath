@@ -1,22 +1,41 @@
-//! 日志文件管理与格式化输出
+//! # 日志文件职责
 //!
-//! 路径无关：所有接受文件路径的函数通过 `base_dir: &Path` 参数传入。
+//! ## 诊断日志（UnifiedLogger 按 target 前缀路由）
 //!
-//! # 日志文件职责（feature #79 路径 C）
+//! | 文件 | target 前缀 | 来源 |
+//! |------|-------------|------|
+//! | `aemeath.log` | 兜底 | shared/composition + 其他 |
+//! | `runtime.log` | `runtime::` | runtime crate |
+//! | `provider.log` | `provider::` | provider crate |
+//! | `tools.log` | `tools::` | tools crate + tool_call/tool_result |
+//! | `prompt.log` | `prompt::` | prompt crate |
+//! | `tui.log` | `cli::` | cli/tui |
+//! | `hook.log` | `hook::` | hook crate |
 //!
-//! | 文件 | 职责 | 写入路径 |
+//! ## 原始记录（静态方法直写）
+//!
+//! | 文件 | 数据 | 写入方法 |
 //! |------|------|----------|
-//! | `aemeath.log` | 应用主日志（兜底） | `UnifiedLogger::log` 中 `target` 不以 `cli::`/`hook::` 开头 |
-//! | `tui.log` | TUI 渲染/事件/状态 | `UnifiedLogger::log` 中 `target` 以 `cli::` 开头 |
-//! | `hook.log` | Hook 匹配/执行/结果 | `UnifiedLogger::log` 中 `target` 以 `hook::` 开头 |
-//! | `input.log` | LLM 输入快照 | `UnifiedLogger::log_input` 静态方法 |
-//! | `output.log` | LLM 完整输出 | `UnifiedLogger::log_output` 静态方法 |
-//! | `tool.log` | 工具调用请求 + 执行结果 | `UnifiedLogger::log_tool` 静态方法 |
-//! | `panic.log` | Panic 崩溃日志 | `panic_hook.rs`，不纳入 `UnifiedLogger` |
+//! | `input.log` | 用户输入 + LLM 输入 | `log_input` / `log_user_input` |
+//! | `output.log` | LLM 输出 | `log_output` |
+//!
+//! ## 审计
+//!
+//! | 文件 | 数据 | 写入方法 |
+//! |------|------|----------|
+//! | `audit.log` | 权限/行为审计（预留） | `audit` |
+//!
+//! ## 不变
+//!
+//! | 文件 | 说明 |
+//! |------|------|
+//! | `panic.log` | panic_hook.rs 直写，不纳入 UnifiedLogger |
 
 pub mod context;
 pub mod format;
 pub mod rotation;
+#[cfg(test)]
+pub mod target_guard;
 pub mod text;
 pub mod unified_logger;
 
@@ -30,7 +49,7 @@ pub use text::{
     append_text_line_with_turn, format_text_line, format_text_line_with_turn, open_append,
     prepare_log_file, LogFile,
 };
-pub use unified_logger::{ToolKind, UnifiedLogger};
+pub use unified_logger::UnifiedLogger;
 
 /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
 pub fn level_filter_from_str(level: &str) -> log::LevelFilter {

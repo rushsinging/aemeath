@@ -290,10 +290,10 @@ impl ConfigManager {
                 Ok(content) => match serde_json::from_str::<ConfigPatch>(&content) {
                     Ok(global_patch) => config = Self::apply_patch(config, global_patch),
                     Err(err) => {
-                        log::warn!("解析全局配置失败 {}: {err}", self.global_path.display())
+                        log::warn!(target: "runtime::config_manager", "解析全局配置失败 {}: {err}", self.global_path.display())
                     }
                 },
-                Err(err) => log::warn!("读取全局配置失败 {}: {err}", self.global_path.display()),
+                Err(err) => log::warn!(target: "runtime::config_manager", "读取全局配置失败 {}: {err}", self.global_path.display()),
             }
         }
 
@@ -312,13 +312,13 @@ impl ConfigManager {
                                     },
                                 )
                             }
-                            Err(err) => log::warn!(
+                            Err(err) => log::warn!(target: "runtime::config_manager",
                                 "解析 Claude Code 项目设置失败 {}: {err}",
                                 claude_path.display()
                             ),
                         }
                     }
-                    Err(err) => log::warn!(
+                    Err(err) => log::warn!(target: "runtime::config_manager",
                         "读取 Claude Code 项目设置失败 {}: {err}",
                         claude_path.display()
                     ),
@@ -333,10 +333,10 @@ impl ConfigManager {
                     Ok(content) => match serde_json::from_str::<ConfigPatch>(&content) {
                         Ok(project_patch) => config = Self::apply_patch(config, project_patch),
                         Err(err) => {
-                            log::warn!("解析项目配置失败 {}: {err}", project_path.display())
+                            log::warn!(target: "runtime::config_manager", "解析项目配置失败 {}: {err}", project_path.display())
                         }
                     },
-                    Err(err) => log::warn!("读取项目配置失败 {}: {err}", project_path.display()),
+                    Err(err) => log::warn!(target: "runtime::config_manager", "读取项目配置失败 {}: {err}", project_path.display()),
                 }
             }
         }
@@ -834,7 +834,7 @@ impl ConfigManager {
                 "remind" => share::config::GuidanceReloadPolicy::Remind,
                 "confirm" => share::config::GuidanceReloadPolicy::Confirm,
                 _ => {
-                    log::warn!("[config] unknown guidance.reload_policy '{}', keeping default", v);
+                    log::warn!(target: "runtime::config_manager", "[config] unknown guidance.reload_policy '{}', keeping default", v);
                     base.reload_policy
                 }
             };
