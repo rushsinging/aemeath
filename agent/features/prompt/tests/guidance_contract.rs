@@ -15,10 +15,39 @@ fn test_prompt_guidance_resolves_config_fallback() {
 }
 
 #[test]
+fn test_prompt_guidance_has_followup_classification() {
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("handling_user_followups"),
+        "guidance should have a dedicated followup classification block"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("INTERRUPT"),
+        "followup guidance should classify INTERRUPT"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("NEW REQUEST"),
+        "followup guidance should classify NEW REQUEST"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("CLARIFICATION"),
+        "followup guidance should classify CLARIFICATION"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("ASIDE"),
+        "followup guidance should classify ASIDE"
+    );
+    assert!(
+        UNIVERSAL_EXECUTION_DISCIPLINE
+            .contains("INTERRUPT > NEW REQUEST > CLARIFICATION > ASIDE"),
+        "followup guidance should define priority ordering"
+    );
+}
+
+#[test]
 fn test_prompt_guidance_mentions_task_list_updates_when_user_changes_scope() {
     assert!(
-        UNIVERSAL_EXECUTION_DISCIPLINE.contains("When the user asks a question"),
-        "guidance should explicitly cover user questions during active task execution"
+        UNIVERSAL_EXECUTION_DISCIPLINE.contains("When the user sends a new message"),
+        "guidance should explicitly cover user followup messages during task execution"
     );
     assert!(
         UNIVERSAL_EXECUTION_DISCIPLINE.contains("update the active task list"),
