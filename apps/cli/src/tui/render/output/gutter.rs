@@ -4,7 +4,9 @@
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::theme;
-use crate::tui::view_model::output::{OutputBlockKind, ToolSemanticStatus};
+use crate::tui::view_model::output::{
+    HookNoticeSemanticKind, OutputBlockKind, ToolSemanticStatus,
+};
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -42,6 +44,10 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::ThinkingMessage(_) => "💭",
         // └─ 拐角连接到父 ToolCall header，表示这是工具结果子块。
         OutputBlockKind::ToolResult(_) => "└─",
+        OutputBlockKind::HookNotice(h) => match h.kind {
+            HookNoticeSemanticKind::Blocked | HookNoticeSemanticKind::Failed => "⊘",
+            HookNoticeSemanticKind::Info => "ℹ",
+        },
         _ => " ",
     }
 }
@@ -60,6 +66,10 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
         OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
         OutputBlockKind::ToolResult(_) => theme::TEXT_MUTED,
+        OutputBlockKind::HookNotice(h) => match h.kind {
+            HookNoticeSemanticKind::Blocked | HookNoticeSemanticKind::Failed => theme::ERROR,
+            HookNoticeSemanticKind::Info => theme::TEXT_MUTED,
+        },
         _ => theme::TEXT_MUTED,
     }
 }
