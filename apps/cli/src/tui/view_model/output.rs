@@ -44,15 +44,34 @@ pub enum OutputBlockKind {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AskUserBatchBlockView {
     pub key: String,
-    pub slots: Vec<crate::tui::model::conversation::block::AskUserSlot>,
+    pub slots: Vec<AskUserSlotView>,
     pub active_index: usize,
-    pub phase: crate::tui::model::conversation::block::AskUserPhase,
+    pub phase: AskUserPhaseView,
     pub cursor: usize,
     pub selected: Vec<bool>,
     pub chat_input_active: bool,
     pub chat_input_text: String,
     pub confirm_cursor: usize,
     pub confirmed: bool,
+}
+
+/// AskUserBatch 单问槽位视图（投影自 model 层，不依赖 model internals）。
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct AskUserSlotView {
+    pub id: String,
+    pub question: String,
+    pub options: Vec<sdk::OptionItem>,
+    pub llm_option_count: usize,
+    pub multi_select: bool,
+    pub default: Option<String>,
+    pub answer: Option<String>,
+}
+
+/// AskUserBatch 阶段视图。
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum AskUserPhaseView {
+    Answering,
+    Confirming,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TextBlockView {

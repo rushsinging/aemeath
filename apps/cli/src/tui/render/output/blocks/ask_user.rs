@@ -5,10 +5,9 @@
 //! - **Confirming**：所有 Q→A 摘要列表 + 提交/取消操作
 //! - **Confirmed**（终态）：简洁的 Q→A 列表
 
-use crate::tui::model::conversation::block::{AskUserPhase, AskUserSlot};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::AskUserBatchBlockView;
+use crate::tui::view_model::output::{AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use sdk::OptionItem;
@@ -148,7 +147,7 @@ fn truncate(text: &str, max_width: usize) -> String {
 /// 渲染 Q→A 摘要行（用于确认页和折叠摘要）。
 fn qa_summary_lines(
     index: usize,
-    slot: &AskUserSlot,
+    slot: &AskUserSlotView,
     active: bool,
     max_width: usize,
 ) -> Vec<RenderedLine> {
@@ -199,7 +198,7 @@ pub fn render_ask_user_batch(
     }
 
     match view.phase {
-        AskUserPhase::Answering => render_answering(
+        AskUserPhaseView::Answering => render_answering(
             block_id,
             view,
             ctx,
@@ -208,7 +207,7 @@ pub fn render_ask_user_batch(
             normal_style,
             question_max_width,
         ),
-        AskUserPhase::Confirming => {
+        AskUserPhaseView::Confirming => {
             render_confirming(block_id, view, header_style, hint_style, question_max_width)
         }
     }
@@ -440,9 +439,8 @@ fn render_confirmed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::conversation::block::{AskUserPhase, AskUserSlot};
 
-    fn make_slot(question: &str, options: &[&str]) -> AskUserSlot {
+    fn make_slot(question: &str, options: &[&str]) -> AskUserSlotView {
         let llm_count = options.len();
         let mut all = options
             .iter()
@@ -451,7 +449,7 @@ mod tests {
         if !all.is_empty() {
             all.push(sdk::OptionItem::title_only("Type something...".to_string()));
         }
-        AskUserSlot {
+        AskUserSlotView {
             id: format!("q-{}", question.len()),
             question: question.to_string(),
             options: all,
@@ -463,9 +461,9 @@ mod tests {
     }
 
     fn batch_view(
-        slots: Vec<AskUserSlot>,
+        slots: Vec<AskUserSlotView>,
         active_index: usize,
-        phase: AskUserPhase,
+        phase: AskUserPhaseView,
     ) -> AskUserBatchBlockView {
         let cursor = 0;
         let options_count = slots
@@ -491,7 +489,7 @@ mod tests {
         let view = batch_view(
             vec![make_slot("问题1", &["A"]), make_slot("问题2", &["B"])],
             0,
-            AskUserPhase::Answering,
+            AskUserPhaseView::Answering,
         );
         let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("(1/2)")));
@@ -502,7 +500,7 @@ mod tests {
         let view = batch_view(
             vec![make_slot("选哪个?", &["A", "B"])],
             0,
-            AskUserPhase::Answering,
+            AskUserPhaseView::Answering,
         );
         let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("选哪个?")));
@@ -516,7 +514,7 @@ mod tests {
         let view = batch_view(
             vec![s1, make_slot("问题2", &["B"])],
             1,
-            AskUserPhase::Answering,
+            AskUserPhaseView::Answering,
         );
         let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("✓ Q1.")));
@@ -526,7 +524,7 @@ mod tests {
     fn test_confirming_shows_qa_list_and_actions() {
         let mut s1 = make_slot("问题1", &["A"]);
         s1.answer = Some("A".to_string());
-        let view = batch_view(vec![s1], 0, AskUserPhase::Confirming);
+        let view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
         let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("确认回答")));
         assert!(block.lines.iter().any(|l| l.plain.contains("全部确认提交")));
@@ -537,7 +535,7 @@ mod tests {
     fn test_confirming_submit_highlighted_at_default_cursor() {
         let mut s1 = make_slot("问题1", &["A"]);
         s1.answer = Some("A".to_string());
-        let mut view = batch_view(vec![s1], 0, AskUserPhase::Confirming);
+        let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
         view.confirm_cursor = 1; // N=1 → 提交
         let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
         let submit_line = block
@@ -552,7 +550,7 @@ mod tests {
     fn test_confirmed_shows_simple_list() {
         let mut s1 = make_slot("问题1", &["A"]);
         s1.answer = Some("A".to_string());
-        let mut view = batch_view(vec![s1], 0, AskUserPhase::Confirming);
+        let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
         view.confirmed = true;
         let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("已回答")));
@@ -564,7 +562,7 @@ mod tests {
         let mut view = batch_view(
             vec![make_slot("选哪个?", &["A"])],
             0,
-            AskUserPhase::Answering,
+            AskUserPhaseView::Answering,
         );
         view.chat_input_active = true;
         view.chat_input_text = "hello".to_string();

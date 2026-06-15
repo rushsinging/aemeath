@@ -5,9 +5,9 @@ use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
-    allowed_child, AskUserBatchBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
-    OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
-    ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
+    allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
+    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
+    TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
 };
 
 pub struct OutputViewAssembler;
@@ -201,13 +201,30 @@ impl OutputViewAssembler {
                     confirm_cursor,
                     confirmed,
                 } => {
+                    use crate::tui::model::conversation::block::AskUserPhase as MPhase;
+                    let phase_view = match phase {
+                        MPhase::Answering => AskUserPhaseView::Answering,
+                        MPhase::Confirming => AskUserPhaseView::Confirming,
+                    };
+                    let slots_view: Vec<_> = slots
+                        .iter()
+                        .map(|s| AskUserSlotView {
+                            id: s.id.clone(),
+                            question: s.question.clone(),
+                            options: s.options.clone(),
+                            llm_option_count: s.llm_option_count,
+                            multi_select: s.multi_select,
+                            default: s.default.clone(),
+                            answer: s.answer.clone(),
+                        })
+                        .collect();
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::AskUserBatch(AskUserBatchBlockView {
                             key: id.clone(),
-                            slots: slots.clone(),
+                            slots: slots_view,
                             active_index: *active_index,
-                            phase: *phase,
+                            phase: phase_view,
                             cursor: *cursor,
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
