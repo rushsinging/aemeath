@@ -186,12 +186,16 @@ where
             }),
         )
         .await;
-    if pre_results.iter().any(|r| r.blocked) {
+    if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+        let error_detail = blocked_result
+            .error
+            .as_deref()
+            .unwrap_or("Blocked by PreToolUse hook");
         let result = (
             owned_call.id.clone(),
             owned_call.provider_id.clone(),
-            "Blocked by PreToolUse hook".to_string(),
-            serde_json::json!({ "text": "Blocked by PreToolUse hook" }),
+            error_detail.to_string(),
+            serde_json::json!({ "text": error_detail }),
             true,
             Vec::new(),
         );
