@@ -4,12 +4,13 @@ use crate::business::chat::looping::agent_calls::execute_agent_calls;
 use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
-use crate::business::chat::looping::permissions::split_approved_calls;
+use crate::business::chat::looping::permissions::evaluate_calls;
 use crate::business::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use hook::api::{HookData, ToolHookData};
 
+use crate::business::chat::looping::engine::{DeniedCall, PolicyEngine};
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use share::tool::ImageData;
@@ -43,9 +44,13 @@ pub(crate) async fn execute_tool_round<S>(
 where
     S: ChatEventSink,
 {
-    let (approved, denied) = split_approved_calls(tool_calls, registry, allow_all);
+    let path_base = agent.ctx.workspace_read().current_path_base();
+    let workspace_root = agent.ctx.workspace_read().current_root();
+    let engine = PolicyEngine::new(&path_base, &workspace_root, allow_all);
+
+    let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
     let denied_results =
-        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, language).await;
+        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
@@ -62,30 +67,14 @@ where
             })
             .await;
     }
-    let (agent_approved, non_agent_approved): (Vec<_>, Vec<_>) =
+    let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
         approved.into_iter().partition(|c| c.name == "Agent");
-    let non_agent_calls: Vec<ToolCall> = non_agent_approved
-        .into_iter()
-        .map(|c| ToolCall {
-            id: c.id.clone(),
-            provider_id: c.provider_id.clone(),
-            name: c.name.clone(),
-            index: c.index,
-            input: c.input.clone(),
-        })
-        .collect();
 
-    let ask_user_results = ask_user(context, sink, hook_ui, hook_runner, &non_agent_calls).await;
-    let non_agent_results = execute_non_agent(
-        context,
-        agent,
-        sink,
-        hook_ui,
-        hook_runner,
-        &non_agent_calls,
-        language,
-    )
-    .await;
+    let ask_user_results =
+        ask_user(context, sink, hook_ui, hook_runner, &non_agent_approved).await;
+    let non_agent_results =
+        execute_non_agent(context, agent, sink, hook_ui, hook_runner, &non_agent_approved, language)
+            .await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
@@ -108,12 +97,11 @@ where
 }
 
 async fn deny_tool_calls<S>(
-    denied: &[&ToolCall],
+    denied: &[DeniedCall],
     sink: &S,
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -133,37 +121,30 @@ where
             .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
         // 后续 ToolResult 中的 mark_tool_header_done 才能精确匹配（Bug #52）。
+        let call_id = sdk::ids::ToolCallId::from_legacy_or_new(&call.id);
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: context.clone(),
-                id: call.id.clone(),
-                provider_id: Some(call.provider_id.clone()),
+                id: call_id.clone(),
+                provider_id: None,
                 name: call.name.clone(),
-                index: call.index,
+                index: 0,
                 arguments_delta: None,
-                arguments: Some(call.input.clone()),
+                arguments: None,
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;
-        let deny_msg = match language {
-            "zh" => format!("工具 {} 被拒绝：使用 --allow-all 允许写操作", call.name),
-            _ => format!(
-                "Tool {} denied: use --allow-all to permit write operations",
-                call.name
-            ),
-        };
         let result = (
+            call_id,
             call.id.clone(),
-            call.provider_id.clone(),
-            deny_msg.clone(),
+            call.reason.clone(),
             serde_json::json!({
                 "status": "error",
-                "message": deny_msg,
+                "message": call.reason,
             }),
             true,
             Vec::new(),
         );
-        send_tool_result(sink, context, call, &result).await;
         denied_results.push(result);
     }
     denied_results

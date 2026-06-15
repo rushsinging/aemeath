@@ -1,10 +1,15 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
-use crate::utils::path_security::validate_and_normalize_path_from_base;
 use async_trait::async_trait;
+use share::tool::{PathAccess, PathKind};
 use serde_json::Value;
 use std::path::Path;
 
 pub struct FileReadTool;
+
+const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
+    field: "file_path",
+    kind: PathKind::File,
+}];
 
 #[async_trait]
 impl Tool for FileReadTool {
@@ -31,6 +36,9 @@ impl Tool for FileReadTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
+    fn path_accesses(&self) -> &'static [PathAccess] {
+        &FILE_ACCESS
+    }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
@@ -44,24 +52,8 @@ impl Tool for FileReadTool {
             }
         };
 
-        // Validate path is within workspace boundary
-        let path_base = ctx.workspace_read().current_path_base();
-        let working_root = ctx.workspace_read().current_root();
-        let path = match validate_and_normalize_path_from_base(
-            file_path,
-            &path_base,
-            &working_root,
-            ctx.allow_all,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": e,
-                    "data": { "file_path": file_path }
-                }))
-            }
-        };
+        // Path has already been validated and normalised by PolicyEngine
+        let path = std::path::PathBuf::from(file_path);
         if !path.exists() {
             return ToolResult::error_json(serde_json::json!({
                 "status": "error",

@@ -2,6 +2,7 @@ mod agent_calls;
 mod ask_user;
 mod compact;
 pub(crate) mod config_reload;
+mod engine;
 mod events;
 mod finalize;
 mod hook_ui;
