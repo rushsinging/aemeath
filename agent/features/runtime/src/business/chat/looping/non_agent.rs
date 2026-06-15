@@ -17,6 +17,7 @@ pub(super) async fn execute_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -32,13 +33,13 @@ where
 
     if other_calls.len() == 1 {
         if agent.ctx.cancel.is_cancelled() {
-            return vec![cancelled_result(other_calls[0])];
+            return vec![cancelled_result(other_calls[0], language)];
         }
-        return execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, other_calls[0])
+        return execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, other_calls[0], language)
             .await;
     }
 
-    execute_multiple_non_agent(context, agent, sink, hook_ui, hook_runner, &other_calls).await
+    execute_multiple_non_agent(context, agent, sink, hook_ui, hook_runner, &other_calls, language).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -49,6 +50,7 @@ async fn execute_multiple_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     other_calls: &[&ToolCall],
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -74,7 +76,7 @@ where
                     }
                     let _permit = sem.acquire().await.expect("semaphore closed");
                     let result =
-                        execute_one_non_agent(&context, agent, &sink, &hook_ui, &hook_runner, call)
+                        execute_one_non_agent(&context, agent, &sink, &hook_ui, &hook_runner, call, language)
                             .await;
                     (pos, result)
                 }
@@ -84,7 +86,7 @@ where
             if let Some(r) = result_vec.into_iter().next() {
                 results[pos] = Some(r);
             } else {
-                results[pos] = Some(cancelled_result(other_calls[pos]));
+                results[pos] = Some(cancelled_result(other_calls[pos], language));
             }
         }
     }
@@ -94,12 +96,12 @@ where
         let result_vec = if agent.ctx.cancel.is_cancelled() {
             Vec::new()
         } else {
-            execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, call).await
+            execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, call, language).await
         };
         if let Some(r) = result_vec.into_iter().next() {
             results[pos] = Some(r);
         } else {
-            results[pos] = Some(cancelled_result(call));
+            results[pos] = Some(cancelled_result(call, language));
         }
     }
 
@@ -132,12 +134,16 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
     (concurrent_positions, sequential_positions)
 }
 
-fn cancelled_result(call: &ToolCall) -> UiToolResult {
+fn cancelled_result(call: &ToolCall, language: &str) -> UiToolResult {
+    let msg = match language {
+        "zh" => "用户已取消",
+        _ => "Cancelled by user",
+    };
     (
         call.id.clone(),
         call.provider_id.clone(),
-        "Cancelled by user".to_string(),
-        serde_json::json!({ "text": "Cancelled by user" }),
+        msg.to_string(),
+        serde_json::json!({ "text": msg }),
         true,
         Vec::new(),
     )
@@ -151,6 +157,7 @@ async fn execute_one_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -187,10 +194,14 @@ where
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+        let default_blocked = match language {
+            "zh" => "被 PreToolUse hook 阻止",
+            _ => "Blocked by PreToolUse hook",
+        };
         let error_detail = blocked_result
             .error
             .as_deref()
-            .unwrap_or("Blocked by PreToolUse hook");
+            .unwrap_or(default_blocked);
         let result = (
             owned_call.id.clone(),
             owned_call.provider_id.clone(),

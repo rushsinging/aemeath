@@ -181,17 +181,21 @@ where
                         }
                         share::config::GuidanceReloadPolicy::Remind => {
                             // 发 system-reminder 让 LLM 自行决定是否读取
-                            let reminder = Message::user(
-                                "<system-reminder>guidance 文件已被外部修改，请用 Read 工具重新读取 ~/.agents/guidance/_default.md 与本次匹配的模型前缀文件以获取最新指引。</system-reminder>".to_string(),
-                            );
+                            let reminder_text = match language.as_str() {
+                                "zh" => "<system-reminder>guidance 文件已被外部修改，请用 Read 工具重新读取 ~/.agents/guidance/_default.md 与本次匹配的模型前缀文件以获取最新指引。</system-reminder>",
+                                _ => "<system-reminder>The guidance files have been modified externally. Please use the Read tool to re-read ~/.agents/guidance/_default.md and the matching model prefix file to get the latest instructions.</system-reminder>",
+                            };
+                            let reminder = Message::user(reminder_text.to_string());
                             messages.push(reminder);
                             log::info!(target: "runtime::loop_runner", "[config_reload] guidance remind mode: injected system-reminder");
                         }
                         share::config::GuidanceReloadPolicy::Confirm => {
                             // 发 system-reminder + 标记等待用户确认
-                            let reminder = Message::user(
-                                "<system-reminder>guidance 文件已被外部修改，等待用户确认后应用。TUI 状态栏已标记 \"guidance 改动未应用\"。</system-reminder>".to_string(),
-                            );
+                            let reminder_text = match language.as_str() {
+                                "zh" => "<system-reminder>guidance 文件已被外部修改，等待用户确认后应用。TUI 状态栏已标记 \"guidance 改动未应用\"。</system-reminder>",
+                                _ => "<system-reminder>The guidance files have been modified externally and will be applied after user confirmation. The TUI status bar shows \"guidance changes pending\".</system-reminder>",
+                            };
+                            let reminder = Message::user(reminder_text.to_string());
                             messages.push(reminder);
                             sink.send_event(RuntimeStreamEvent::SystemMessage(
                                 "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
@@ -246,6 +250,7 @@ where
                 &session_id,
                 &turn_context,
                 &task_store,
+                &language,
             )
             .await;
             loop_fsm.assert_state(ChatLoopState::Done, "cancel finalizes loop");
@@ -300,9 +305,15 @@ where
         let messages_for_api: Vec<Message> = {
             let mut api_msgs = Vec::new();
             if !user_context.is_empty() {
-                api_msgs.push(Message::user(format!(
-                    "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# claudeMd\n{user_context}\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>"
-                )));
+                let context_wrapper = match language.as_str() {
+                    "zh" => format!(
+                        "<system-reminder>\n在回答用户问题时，你可以使用以下上下文：\n# claudeMd\n{user_context}\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>"
+                    ),
+                    _ => format!(
+                        "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# claudeMd\n{user_context}\n\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>"
+                    ),
+                };
+                api_msgs.push(Message::user(context_wrapper));
             }
             // Inject task reminder if conditions are met
             if let Some(reminder) = task_reminder_state
@@ -445,6 +456,7 @@ where
                         &hook_ui,
                         &hook_runner,
                         &session_id,
+                        &language,
                     )
                     .await
                     {
@@ -493,6 +505,7 @@ where
                         &hook_runner,
                         max_agent_concurrency,
                         &cancel,
+                        &language,
                     )
                     .await;
 
@@ -558,6 +571,7 @@ where
                         &session_id,
                         &turn_context,
                         &task_store,
+                        &language,
                     )
                     .await;
                     loop_fsm.assert_state(ChatLoopState::Done, "api cancel finalizes loop");
@@ -595,6 +609,7 @@ where
                     &session_id,
                     &turn_context,
                     &task_store,
+                    &language,
                 )
                 .await
                 {
@@ -972,7 +987,7 @@ mod tests {
             .iter()
             .position(|event| {
                 event.starts_with("MessagesSync:")
-                    && event.contains("你 MUST 先满足下面 Stop hook 的要求")
+                    && event.contains("You MUST first satisfy the Stop hook requirement")
             })
             .expect("blocked Stop hook feedback should be synced into messages");
         let hook_notice = events
@@ -1053,7 +1068,7 @@ mod tests {
             .find(|message| {
                 message
                     .text_content()
-                    .contains("你 MUST 先满足下面 Stop hook 的要求")
+                    .contains("You MUST first satisfy the Stop hook requirement")
             })
             .expect("blocked Stop hook feedback should be synced into messages");
 
