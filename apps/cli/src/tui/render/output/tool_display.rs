@@ -87,6 +87,17 @@ pub trait ToolDisplay: Send + Sync {
         Line::from(Span::raw(self.format_header(input)))
     }
 
+    /// Format the header line with optional result summary。
+    /// 默认实现忽略 result_summary，直接调用 `format_header_line`。
+    /// 需要根据 result 更新 header 的工具（如 Read）可覆写此方法。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        _result_summary: Option<&str>,
+    ) -> Line<'static> {
+        self.format_header_line(input)
+    }
+
     /// Format detail lines shown below the header.
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
 
@@ -137,12 +148,18 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 
 /// Format a tool call for human-friendly display.
 /// 返回 `(Line, details)`：Line 已含样式，details 为纯文本行。
-pub fn format_tool_call(name: &str, raw_json: &str) -> (Line<'static>, Vec<String>) {
+///
+/// `result_summary`：可选的结果摘要，用于在 result 到达后更新 header（如 Read 实际行数）。
+pub fn format_tool_call(
+    name: &str,
+    raw_json: &str,
+    result_summary: Option<&str>,
+) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header_line(&parsed);
+        let header = display.format_header_line_with_result(&parsed, result_summary);
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -192,6 +209,7 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskListCreate",
             r#"{"subject":"修复 bug 84","summary":"修复渲染"}"#,
+            None,
         );
         let text = line_to_string(&header);
         assert!(
@@ -209,6 +227,7 @@ mod tests {
         let (header, details) = format_tool_call(
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
@@ -224,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_create_compact_no_description() {
-        let (header, details) = format_tool_call("TaskCreate", r#"{"subject":"分析"}"#);
+        let (header, details) = format_tool_call("TaskCreate", r#"{"subject":"分析"}"#, None);
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
         assert!(
@@ -237,7 +256,7 @@ mod tests {
     #[test]
     fn test_format_tool_call_task_update_compact_hides_details() {
         let (header, details) =
-            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#);
+            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#, None);
         let text = line_to_string(&header);
         assert!(text.contains("42"), "header 应包含 taskId: {text}");
         assert!(text.contains("completed"), "header 应包含 status: {text}");
@@ -250,7 +269,7 @@ mod tests {
     #[test]
     fn test_format_tool_call_uses_display_name_in_header() {
         // Bash → Run
-        let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#);
+        let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Run "),
@@ -258,7 +277,7 @@ mod tests {
         );
 
         // Grep → Search
-        let (header, _) = format_tool_call("Grep", r#"{"pattern":"foo"}"#);
+        let (header, _) = format_tool_call("Grep", r#"{"pattern":"foo"}"#, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Search "),
@@ -266,7 +285,7 @@ mod tests {
         );
 
         // Glob → Find
-        let (header, _) = format_tool_call("Glob", r#"{"pattern":"*.rs"}"#);
+        let (header, _) = format_tool_call("Glob", r#"{"pattern":"*.rs"}"#, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Find "),
@@ -276,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_unknown_tool_uses_fallback() {
-        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#);
+        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#, None);
         let text = line_to_string(&header);
         assert_eq!(text, "● UnknownTool");
         assert!(!details.is_empty(), "fallback 应截断 JSON");
@@ -284,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_invalid_json_uses_fallback() {
-        let (header, _details) = format_tool_call("TaskListCreate", "not json");
+        let (header, _details) = format_tool_call("TaskListCreate", "not json", None);
         // 不应 panic，应 fallback。display name 为 "New Task List"。
         let text = line_to_string(&header);
         assert!(text.contains("New Task List"));
@@ -325,7 +344,7 @@ mod tests {
         // 回归 #218：含中文的超长 Bash 命令按字节切片会落在多字节字符内部触发 panic。
         let cmd = "gh pr create --title 'fix(runtime): 使用人类可读摘要替代 JSON 作为 tool call summary' --body '## 问题'";
         let raw = serde_json::json!({ "command": cmd }).to_string();
-        let (header, _details) = format_tool_call("Bash", &raw);
+        let (header, _details) = format_tool_call("Bash", &raw, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Run "),
@@ -342,7 +361,7 @@ mod tests {
         // 回归 #218：含中文的超长路径经 truncate_path 尾部截断不应 panic。
         let path = format!("/项目/{}/数据/报告为准的文件名.rs", "子目录".repeat(20));
         let raw = serde_json::json!({ "file_path": path }).to_string();
-        let (header, _details) = format_tool_call("Read", &raw);
+        let (header, _details) = format_tool_call("Read", &raw, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Read "),
