@@ -57,14 +57,14 @@ pub(crate) async fn parse_ollama_stream(
         if line.trim().is_empty() {
             continue;
         }
-        log::trace!("[ollama stream] <- {}", line);
+        log::trace!(target: "provider::ollama_stream", "[ollama stream] <- {}", line);
         handler.on_raw_line(&line);
 
         // Native NDJSON: parse each non-empty line as a JSON object
         let chunk: serde_json::Value = match serde_json::from_str(&line) {
             Ok(v) => v,
             Err(e) => {
-                log::debug!("[ollama stream] unparseable line ({}): {}", e, line);
+                log::debug!(target: "provider::ollama_stream", "[ollama stream] unparseable line ({}): {}", e, line);
                 continue;
             }
         };
@@ -157,7 +157,7 @@ pub(crate) async fn parse_ollama_stream(
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
     }
 
-    log::debug!(
+    log::debug!(target: "provider::ollama_stream",
         "[ollama stream] done text_bytes={} tool_calls={} stop={:?} in_tok={} out_tok={}",
         text_len,
         tool_count,
