@@ -63,10 +63,13 @@ impl TaskReminderState {
     /// 3. Task list is not empty
     ///
     /// Returns `None` if throttled or tasks are empty.
+    ///
+    /// `lang` selects the template language (`"en"` / `"zh"`, defaults to `"en"`).
     pub async fn build_reminder(
         &mut self,
         current_turn: u64,
         task_store: &TaskStore,
+        lang: &str,
     ) -> Option<Message> {
         let is_first_reminder = self.last_reminder_turn == 0;
 
@@ -87,6 +90,11 @@ impl TaskReminderState {
         if !is_first_reminder && current_turn < self.last_reminder_turn + TURNS_BETWEEN_REMINDERS {
             return None;
         }
+
+        let no_summary: &str = match lang {
+            "zh" => "无摘要",
+            _ => "no summary",
+        };
 
         let mut lines = Vec::new();
         let mut pending_batches = task_store.lists_with_pending().await;
@@ -115,7 +123,7 @@ impl TaskReminderState {
                 .map(|task| format!("#{} {} [{:?}]", task.id, task.subject, task.status))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let summary = batch.summary.as_deref().unwrap_or("no summary");
+            let summary = batch.summary.as_deref().unwrap_or(no_summary);
             lines.push(format!(
                 "Task batch #{} [{:?}] — summary: {} — {}",
                 batch.id, batch.status, summary, task_text
@@ -127,9 +135,21 @@ impl TaskReminderState {
 
         self.last_reminder_turn = current_turn;
 
+        let (preamble, epilogue) = match lang {
+            "zh" => (
+                "任务提醒按 task batch 分组，可能属于较早的用户请求。如果与最新的用户消息无关，请优先回答最新的用户消息。\n",
+                "\n仅当用户要求继续/恢复，或列出的任务明显相关时，才使用 TaskList。",
+            ),
+            _ => (
+                "Task reminders are grouped by task batch and may belong to earlier user requests. If unrelated to the latest user message, answer the latest user message first.\n",
+                "\nUse TaskList only when the user asks to continue/resume or when a listed task is clearly relevant.",
+            ),
+        };
         let text = format!(
-            "Task reminders are grouped by task batch and may belong to earlier user requests. If unrelated to the latest user message, answer the latest user message first.\n{}\nUse TaskList only when the user asks to continue/resume or when a listed task is clearly relevant.",
-            lines.join("\n")
+            "{}{}\n{}",
+            preamble,
+            lines.join("\n"),
+            epilogue
         );
         let reminder = format!("<system-reminder>\n{}\n</system-reminder>", text);
 
@@ -161,7 +181,7 @@ mod tests {
 
         let mut state = TaskReminderState::new();
         // Turn 2 < TURNS_SINCE_WRITE_FIRST(3) → should NOT trigger
-        let reminder = state.build_reminder(2, &store).await;
+        let reminder = state.build_reminder(2, &store, "en").await;
         assert!(reminder.is_none());
     }
 
@@ -175,7 +195,7 @@ mod tests {
         let mut state = TaskReminderState::new();
         // Turn 3 == TURNS_SINCE_WRITE_FIRST(3) → should trigger
         let reminder = state
-            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store)
+            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store, "en")
             .await
             .expect("reminder exists");
         let text = reminder_text(&reminder);
@@ -193,7 +213,7 @@ mod tests {
             .await;
         let mut state = TaskReminderState::new();
         let reminder = state
-            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store)
+            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store, "en")
             .await
             .expect("reminder exists");
         let text = reminder_text(&reminder);
@@ -220,7 +240,7 @@ mod tests {
 
         let mut state = TaskReminderState::new();
         let reminder = state
-            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store)
+            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store, "en")
             .await;
 
         assert!(reminder.is_none());
@@ -235,12 +255,31 @@ mod tests {
 
         let mut state = TaskReminderState::new();
         let reminder = state
-            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store)
+            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store, "en")
             .await
             .expect("reminder exists");
         let text = reminder_text(&reminder);
 
         assert!(text.contains("Use TaskList only when the user asks to continue/resume"));
         assert!(!text.contains("Use TaskList to see details."));
+    }
+
+    #[tokio::test]
+    async fn test_build_reminder_zh_template() {
+        let store = TaskStore::new();
+        store
+            .create("遗留任务".to_string(), "old request".to_string(), None)
+            .await;
+
+        let mut state = TaskReminderState::new();
+        let reminder = state
+            .build_reminder(TURNS_SINCE_WRITE_FIRST, &store, "zh")
+            .await
+            .expect("reminder exists");
+        let text = reminder_text(&reminder);
+
+        assert!(text.contains("任务提醒按 task batch 分组"));
+        assert!(text.contains("仅当用户要求继续/恢复"));
+        assert!(!text.contains("Use TaskList only when"));
     }
 }

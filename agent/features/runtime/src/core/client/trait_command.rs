@@ -543,6 +543,7 @@ mod tests {
             context_size: 200_000,
             verbose: false,
             resume: None,
+            language: "en".to_string(),
         };
         let (change_tx, change_rx) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
         let handle = super::super::accessors::RuntimeHandle {
