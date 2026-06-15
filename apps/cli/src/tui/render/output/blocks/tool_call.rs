@@ -35,9 +35,13 @@ pub fn render_tool_call(
     // format_header_line 返回的 Line 已含样式（如 Read 的 summary 灰色），
     // 未显式着色的 span 会继承 Line 的 base style（TEXT）。
     let header_line = strip_leading_bullet(header_line);
-    let mut styled_line = header_line;
-    styled_line.style = Style::default().fg(theme::TEXT);
-    let mut lines = vec![RenderedLine::new(styled_line.spans)];
+    // 将 TEXT 色 patch 到每个 span（而非 Line base style），确保 RenderedLine 保留颜色。
+    let styled_spans: Vec<Span<'static>> = header_line
+        .spans
+        .into_iter()
+        .map(|span| span.patch_style(Style::default().fg(theme::TEXT)))
+        .collect();
+    let mut lines = vec![RenderedLine::new(styled_spans)];
     for detail in detail_lines {
         lines.push(RenderedLine::new(vec![Span::styled(
             detail,
