@@ -12,23 +12,31 @@ use super::rotation::{prepare_log_path, timestamp_rfc3339};
 
 pub enum LogFile {
     Aemeath,
-    /// 已废弃：无写入点，保留枚举兼容
-    Agent,
+    Runtime,
+    Provider,
+    Tools,
+    Prompt,
     Panic,
     Input,
     Output,
-    Tool,
+    Audit,
+    /// 已废弃：无写入点，保留枚举兼容
+    Agent,
 }
 
 impl LogFile {
     pub fn file_name(self) -> &'static str {
         match self {
             LogFile::Aemeath => "aemeath.log",
-            LogFile::Agent => "agent.log",
+            LogFile::Runtime => "runtime.log",
+            LogFile::Provider => "provider.log",
+            LogFile::Tools => "tools.log",
+            LogFile::Prompt => "prompt.log",
             LogFile::Panic => "panic.log",
             LogFile::Input => "input.log",
             LogFile::Output => "output.log",
-            LogFile::Tool => "tool.log",
+            LogFile::Audit => "audit.log",
+            LogFile::Agent => "agent.log",
         }
     }
 }
