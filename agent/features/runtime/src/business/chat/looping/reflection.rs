@@ -80,7 +80,7 @@ async fn run_forced_reflection_with_base_dir(
     system_prompt_text: &str,
     base_dir: PathBuf,
 ) -> Option<String> {
-    run_complete_reflection_with_base_dir(
+    match run_complete_reflection_with_base_dir(
         ReflectionRunMode::Forced,
         config,
         messages,
@@ -90,7 +90,14 @@ async fn run_forced_reflection_with_base_dir(
         base_dir,
     )
     .await
-    .map(|result| result.formatted_content)
+    {
+        Ok(Some(result)) => Some(result.formatted_content),
+        Ok(None) => None,
+        Err(e) => {
+            log::warn!(target: "runtime::reflection", "Forced reflection failed: {e}");
+            None
+        }
+    }
 }
 async fn run_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
@@ -101,7 +108,7 @@ async fn run_reflection_with_base_dir(
     system_prompt_text: &str,
     base_dir: PathBuf,
 ) -> Option<String> {
-    run_complete_reflection_with_base_dir(
+    match run_complete_reflection_with_base_dir(
         ReflectionRunMode::Interval { turn_count },
         config,
         messages,
@@ -111,7 +118,14 @@ async fn run_reflection_with_base_dir(
         base_dir,
     )
     .await
-    .map(|result| result.formatted_content)
+    {
+        Ok(Some(result)) => Some(result.formatted_content),
+        Ok(None) => None,
+        Err(e) => {
+            log::warn!(target: "runtime::reflection", "Interval reflection failed: {e}");
+            None
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -320,7 +334,8 @@ mod tests {
             "system prompt",
             base_dir.clone(),
         )
-        .await;
+        .await
+        .unwrap();
 
         assert!(result.is_none());
         let _ = std::fs::remove_dir_all(cwd);
@@ -345,7 +360,8 @@ mod tests {
             "system prompt",
             base_dir.clone(),
         )
-        .await;
+        .await
+        .unwrap();
 
         assert!(result.is_none());
         let _ = std::fs::remove_dir_all(cwd);
@@ -372,6 +388,7 @@ mod tests {
             base_dir.clone(),
         )
         .await
+        .unwrap()
         .unwrap();
 
         assert!(result.formatted_content.contains("forced 已运行"));
@@ -413,6 +430,7 @@ mod tests {
             base_dir.clone(),
         )
         .await
+        .unwrap()
         .unwrap();
         let text = result.formatted_content.clone();
         let store = MemoryStore::new(
@@ -478,6 +496,60 @@ mod tests {
         assert!(text.contains("auto apply false 不写入"));
         assert!(!text.contains("已自动应用 Reflection"));
         assert!(entries.is_empty());
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_complete_reflection_empty_response_returns_err_empty_response() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let client = build_client("   ");
+        let config = share::config::MemoryConfig::default();
+
+        let result = run_complete_reflection_with_base_dir(
+            ReflectionRunMode::Forced,
+            &config,
+            &[share::message::Message::user("LLM 空响应")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(crate::business::reflection::ReflectionError::EmptyResponse)
+        ));
+        let _ = std::fs::remove_dir_all(cwd);
+        let _ = std::fs::remove_dir_all(base_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_complete_reflection_unparseable_returns_err_unparseable() {
+        let cwd = temp_dir("reflection-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let base_dir = temp_dir("reflection-memory");
+        let client = build_client("这不是 JSON 格式的反思结果");
+        let config = share::config::MemoryConfig::default();
+
+        let result = run_complete_reflection_with_base_dir(
+            ReflectionRunMode::Forced,
+            &config,
+            &[share::message::Message::user("无法解析")],
+            &cwd,
+            &client,
+            "system prompt",
+            base_dir.clone(),
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(crate::business::reflection::ReflectionError::Unparseable(_))
+        ));
         let _ = std::fs::remove_dir_all(cwd);
         let _ = std::fs::remove_dir_all(base_dir);
     }
