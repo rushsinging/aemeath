@@ -98,7 +98,6 @@ pub struct ToolCallBlockView {
     pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
     pub args_preview: Option<String>,
-    pub summary: Option<String>,
     pub activity_summary: Option<String>,
     pub result_summary: Option<String>,
     pub collapsible: bool,
@@ -115,7 +114,6 @@ pub struct ToolResultBlockView {
     pub key: String,
     pub tool_title: String,
     pub args_preview: Option<String>,
-    pub summary: Option<String>,
     pub result_text: String,
     pub style: SemanticStyle,
 }

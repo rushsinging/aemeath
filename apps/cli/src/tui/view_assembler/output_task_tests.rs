@@ -121,7 +121,6 @@ fn add_task_tool(
         id: ToolCallId::new(id),
         name: name.to_string(),
         index: 0,
-        summary: Some(summary.to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });

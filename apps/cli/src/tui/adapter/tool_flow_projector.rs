@@ -77,12 +77,11 @@ impl ToolFlowProjector {
                 name,
                 index,
                 arguments,
-                summary,
                 status,
             } => {
                 log::debug!(
                     target: "cli::tui::tool_flow",
-                    "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} summary_len={}",
+                    "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} ",
                     context.chat_id,
                     context.turn_id,
                     id,
@@ -91,7 +90,6 @@ impl ToolFlowProjector {
                     index,
                     status,
                     arguments.as_ref().map(|value| value.len()).unwrap_or(0),
-                    summary.as_ref().map(|value| value.len()).unwrap_or(0),
                 );
                 conversation(ConversationIntent::ObserveToolCallUpdate {
                     chat_id: context.chat_id.clone(),
@@ -103,9 +101,6 @@ impl ToolFlowProjector {
                     arguments: arguments
                         .as_ref()
                         .map(|value| sanitize_tool_arguments_delta(name, value)),
-                    summary: summary
-                        .as_ref()
-                        .map(|value| sanitize_tool_summary(name, value)),
                     status: *status,
                 })
             }
@@ -179,7 +174,7 @@ fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String 
     truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name))
 }
 
-fn sanitize_tool_summary(tool_name: &str, summary: &str) -> String {
+fn _sanitize_tool_summary(tool_name: &str, summary: &str) -> String {
     let Ok(value) = serde_json::from_str::<Value>(summary) else {
         return truncate_large_tool_text(summary, Some(tool_name));
     };
@@ -329,8 +324,7 @@ mod tests {
                 name: "Read".to_string(),
                 index: 0,
                 arguments: Some("{}".to_string()),
-                summary: None,
-                status: ToolCallStatus::Ready,
+                                status: ToolCallStatus::Ready,
             },
             RuntimeObservation::AgentProgress {
                 context: context.clone(),

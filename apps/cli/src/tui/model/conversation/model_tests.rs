@@ -163,7 +163,6 @@ fn test_conversation_observes_tool_lifecycle() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read file".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -231,7 +230,6 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         name: "Skill".to_string(),
         index: 0,
         arguments: Some(r#"{"skill":"superpowers:using-superpowers"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
@@ -241,7 +239,6 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Skill".to_string(),
         index: 0,
-        summary: Some(String::new()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -269,7 +266,6 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         name: "Skill".to_string(),
         index: 0,
         arguments: Some(r#"{"skill":"superpowers:brainstorming"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
@@ -279,7 +275,6 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         id: super::ids::ToolCallId::new("tool-3"),
         name: "Skill".to_string(),
         index: 0,
-        summary: Some(String::new()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -292,7 +287,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         .tool_calls
         .iter()
         .filter(|call| call.name == "Skill")
-        .filter_map(|call| call.summary.as_deref())
+        .filter_map(|call| Some(call.args_preview.as_str()))
         .collect();
 
     assert_eq!(summaries.len(), 2);
@@ -327,7 +322,6 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         name: "Read".to_string(),
         index: 0,
         arguments: Some(r#"{"file_path":"Cargo.toml"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolResult {
@@ -390,7 +384,6 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         name: "Skill".to_string(),
         index: 0,
         arguments: Some(r#"{"skill":"superpowers:using-superpowers"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
@@ -400,7 +393,6 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Skill".to_string(),
         index: 0,
-        summary: Some(String::new()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -430,7 +422,6 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         id: super::ids::ToolCallId::new("tool-2"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some(r#"{"file_path":"agent/shared/src/config.rs"}"#.to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -489,7 +480,6 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         name: "Skill".to_string(),
         index: 0,
         arguments: Some(r#"{"skill":"superpowers:brainstorming"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
@@ -499,7 +489,6 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         id: super::ids::ToolCallId::new("tool-99"),
         name: "Skill".to_string(),
         index: 0,
-        summary: Some(String::new()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -515,7 +504,7 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         .map(|call| {
             (
                 call.id.as_ref().unwrap().as_ref(),
-                call.summary.as_deref().unwrap_or(""),
+                Some(call.args_preview.as_str()).unwrap_or(""),
             )
         })
         .collect();
@@ -524,151 +513,6 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
     assert_eq!(tool_calls[0].0, provider_skill_id.to_string());
     assert!(tool_calls[0].1.contains("superpowers:brainstorming"));
 }
-
-#[test]
-fn test_conversation_preserves_streamed_args_when_tool_call_summary_is_empty() {
-    let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::StartChat {
-        submission: "load skill".to_string(),
-    });
-    model.apply(ConversationIntent::ObserveToolCallStart {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        id: super::ids::ToolCallId::new("call-skill"),
-        provider_id: None,
-        name: "Skill".to_string(),
-        index: 0,
-    });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        id: super::ids::ToolCallId::new("call-skill"),
-        provider_id: None,
-        name: "Skill".to_string(),
-        index: 0,
-        arguments: Some(r#"{"skill":"superpowers:using-superpowers"}"#.to_string()),
-        summary: None,
-        status: ToolCallStatus::Ready,
-    });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        provider_id: Some("provider-skill".to_string()),
-        id: super::ids::ToolCallId::new("call-skill"),
-        name: "Skill".to_string(),
-        index: 0,
-        summary: Some(String::new()),
-        arguments: None,
-        status: ToolCallStatus::Ready,
-    });
-
-    let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
-    let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
-    let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
-    assert_eq!(
-        turn.tool_calls[0].summary.as_deref(),
-        Some(r#"{"skill":"superpowers:using-superpowers"}"#)
-    );
-    assert!(turn.tool_calls.iter().any(|call| {
-        call.summary.as_deref() == Some(r#"{"skill":"superpowers:using-superpowers"}"#)
-    }));
-}
-
-#[test]
-fn test_conversation_keeps_distinct_task_tool_blocks_after_empty_summary_bind() {
-    let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::StartChat {
-        submission: "create tasks".to_string(),
-    });
-    model.apply(ConversationIntent::ObserveToolCallStart {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        id: super::ids::ToolCallId::new("call-list"),
-        provider_id: None,
-        name: "TaskListCreate".to_string(),
-        index: 0,
-    });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        id: super::ids::ToolCallId::new("call-list"),
-        provider_id: None,
-        name: "TaskListCreate".to_string(),
-        index: 0,
-        arguments: Some(r#"{"subject":"修复显示","summary":"排查 tool call"}"#.to_string()),
-        summary: None,
-        status: ToolCallStatus::Ready,
-    });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        provider_id: Some("provider-list".to_string()),
-        id: super::ids::ToolCallId::new("call-list"),
-        name: "TaskListCreate".to_string(),
-        index: 0,
-        summary: Some(String::new()),
-        arguments: None,
-        status: ToolCallStatus::Ready,
-    });
-    model.apply(ConversationIntent::ObserveToolCallStart {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        id: super::ids::ToolCallId::new("call-task"),
-        provider_id: None,
-        name: "TaskCreate".to_string(),
-        index: 1,
-    });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        id: super::ids::ToolCallId::new("call-task"),
-        provider_id: None,
-        name: "TaskCreate".to_string(),
-        index: 1,
-        arguments: Some(r#"{"subject":"写测试","description":"复现 TaskCreate 显示"}"#.to_string()),
-        summary: None,
-        status: ToolCallStatus::Ready,
-    });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
-        chat_id: super::ids::ChatId::new("chat-1"),
-        turn_id: super::ids::ChatTurnId::new("turn-1"),
-        provider_id: Some("provider-task".to_string()),
-        id: super::ids::ToolCallId::new("call-task"),
-        name: "TaskCreate".to_string(),
-        index: 1,
-        summary: Some(String::new()),
-        arguments: None,
-        status: ToolCallStatus::Ready,
-    });
-
-    let chat_id = super::ids::ChatId::new("chat-1");
-    let turn_id = super::ids::ChatTurnId::new("turn-1");
-    let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
-    let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
-    let tool_calls: Vec<_> = turn
-        .tool_calls
-        .iter()
-        .map(|call| {
-            (
-                call.id.as_ref().unwrap().as_ref(),
-                call.name.as_str(),
-                call.summary.as_deref().unwrap_or(""),
-            )
-        })
-        .collect();
-
-    let call_list_id = super::ids::ToolCallId::new("call-list");
-    let call_task_id = super::ids::ToolCallId::new("call-task");
-    assert_eq!(tool_calls.len(), 2, "应保留两个独立 tool call block");
-    assert!(tool_calls.iter().any(|(id, name, summary)| {
-        *id == call_list_id.to_string() && *name == "TaskListCreate" && summary.contains("修复显示")
-    }));
-    assert!(tool_calls.iter().any(|(id, name, summary)| {
-        *id == call_task_id.to_string() && *name == "TaskCreate" && summary.contains("写测试")
-    }));
-}
-
 #[test]
 fn test_conversation_late_tool_call_binds_existing_result() {
     let mut model = ConversationModel::default();
@@ -701,7 +545,6 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read file".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -832,7 +675,6 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read docs".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -895,7 +737,6 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read docs".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -955,7 +796,6 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read docs".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -1005,7 +845,6 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read docs".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -1119,7 +958,6 @@ fn test_conversation_keeps_tool_args_preview() {
         name: "Read".to_string(),
         index: 0,
         arguments: Some(r#"{"file_path":"src/main.rs"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
     model.apply(ConversationIntent::ObserveToolCallUpdate {
@@ -1129,7 +967,6 @@ fn test_conversation_keeps_tool_args_preview() {
         id: super::ids::ToolCallId::new("tool-1"),
         name: "Read".to_string(),
         index: 0,
-        summary: Some("Read file".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -1160,7 +997,6 @@ fn test_tool_call_timeline_item_stores_reference_not_copied_payload() {
         name: "Read".to_string(),
         index: 0,
         arguments: Some(r#"{"file_path":"src/main.rs"}"#.to_string()),
-        summary: None,
         status: ToolCallStatus::Ready,
     });
 
@@ -1223,7 +1059,6 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         id: super::ids::ToolCallId::new("call_agent_1"),
         name: "Agent".to_string(),
         index: 1,
-        summary: Some("Review code".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -1293,7 +1128,6 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         id: super::ids::ToolCallId::new("call_abc"),
         name: "Agent".to_string(),
         index: 1,
-        summary: Some("Review".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });
@@ -1334,7 +1168,6 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         id: super::ids::ToolCallId::new("call_agent_no_start"),
         name: "Agent".to_string(),
         index: 0,
-        summary: Some("Review code".to_string()),
         arguments: None,
         status: ToolCallStatus::Ready,
     });

@@ -35,7 +35,6 @@ struct ToolCallUpdateObservation {
     name: String,
     index: usize,
     arguments: Option<String>,
-    summary: Option<String>,
     status: ToolCallStatus,
 }
 
@@ -65,8 +64,7 @@ impl ConversationModel {
                 name,
                 index,
                 arguments,
-                summary,
-                status,
+                                status,
             } => self.observe_tool_call_update(ToolCallUpdateObservation {
                 chat_id,
                 turn_id,
@@ -75,8 +73,7 @@ impl ConversationModel {
                 name,
                 index,
                 arguments,
-                summary,
-                status,
+                                status,
             }),
             ConversationIntent::ObserveToolResult {
                 chat_id,
@@ -272,8 +269,7 @@ impl ConversationModel {
             name,
             index,
             arguments,
-            summary,
-            status,
+                        status,
         } = update;
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         let mut candidate_ids = vec![Some(id.to_string())];
@@ -286,22 +282,15 @@ impl ConversationModel {
         }
         let mut bound_id = id.clone();
         let mut args_preview = arguments.clone().unwrap_or_default();
-        let mut final_summary = summary.clone().unwrap_or_default();
         let mut bound = false;
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             for candidate_id in candidate_ids.into_iter().flatten() {
                 if let Some(preview) =
-                    turn.update_tool(&candidate_id, arguments.clone(), summary.clone(), status)
+                    turn.update_tool(&candidate_id, arguments.clone(), status)
                 {
                     args_preview = preview;
                     bound_id = ToolCallId::from_legacy_or_new(&candidate_id);
-                    if final_summary.is_empty() {
-                        if let Some(call) = turn.tool_calls.iter().find(|call| {
-                            call.id.as_ref().map(AsRef::as_ref) == Some(candidate_id.as_str())
-                        }) {
-                            final_summary = call.summary.clone().unwrap_or_default();
-                        }
-                    }
+
                     bound = true;
                     break;
                 }
@@ -311,14 +300,8 @@ impl ConversationModel {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
                 let _ =
-                    turn.update_tool(id.as_ref(), arguments.clone(), summary.clone(), status);
+                    turn.update_tool(id.as_ref(), arguments.clone(), status);
                 bound_id = id.clone();
-                if let Some(call) = turn.tool_calls.iter().find(|call| {
-                    call.id.as_ref().map(AsRef::as_ref) == Some(id.as_ref())
-                }) {
-                    args_preview = call.args_preview.clone();
-                    final_summary = call.summary.clone().unwrap_or_default();
-                }
             }
         }
         self.promote_orphan_tool_result(&chat_id, &turn_id, bound_id.as_ref());
@@ -339,7 +322,7 @@ impl ConversationModel {
         self.move_tool_results_after_tool_call(&chat_id, &turn_id, bound_id.as_ref());
         log::debug!(
             target: "cli::tui::tool_flow",
-            "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} summary_len={} has_block={} blocks_after={}",
+            "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} has_block={} blocks_after={}",
             chat_id,
             turn_id,
             id,
@@ -350,8 +333,7 @@ impl ConversationModel {
             status,
             bound,
             args_preview.len(),
-            final_summary.len(),
-            existing_tool_position.is_some(),
+                        existing_tool_position.is_some(),
             self.blocks.len(),
         );
         vec![

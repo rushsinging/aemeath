@@ -363,7 +363,6 @@ mod tests {
                     name: "Read".to_string(),
                     index: 0,
                     arguments: None,
-                    summary: Some("Read file".to_string()),
                     status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
                 }],
                 ..Default::default()
@@ -396,7 +395,6 @@ mod tests {
                     name: "Read".to_string(),
                     index: 0,
                     arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
-                    summary: Some("Read src/lib.rs".to_string()),
                     status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
                 }],
                 runtime: vec![

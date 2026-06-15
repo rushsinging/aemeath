@@ -94,10 +94,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::WorkingDirectoryChanged { .. }
         | sdk::ChatEvent::TasksChanged
         | sdk::ChatEvent::ConfigReloaded { .. } => {}
-        sdk::ChatEvent::ToolCallUpdate { name, summary, .. } => {
-            if let Some(summary) = summary {
-                eprintln!("[tool:update] {name} {summary}");
-            }
+        sdk::ChatEvent::ToolCallUpdate { name, .. } => {
+            log::debug!("[tool:update] {name}");
         }
         sdk::ChatEvent::ToolResult {
             tool_name,

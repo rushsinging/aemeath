@@ -40,7 +40,6 @@ pub enum RuntimeObservation {
         name: String,
         index: usize,
         arguments: Option<String>,
-        summary: Option<String>,
         status: ToolCallStatus,
     },
     ToolResult {
