@@ -6,9 +6,9 @@
 pub mod bootstrap;
 pub mod change_set;
 pub mod chat;
-pub mod chat_event;
-pub mod chat_result;
-pub mod chat_view;
+mod chat_event;
+mod chat_result;
+mod chat_view;
 pub mod client;
 pub mod commands;
 pub mod error;
