@@ -168,14 +168,15 @@ fn json_value_kind(value: &Value) -> &'static str {
 }
 
 fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
-    truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name))
-}
-
-fn _sanitize_tool_summary(tool_name: &str, summary: &str) -> String {
-    let Ok(value) = serde_json::from_str::<Value>(summary) else {
-        return truncate_large_tool_text(summary, Some(tool_name));
-    };
-    sanitize_tool_value(tool_name, value).to_string()
+    match serde_json::from_str::<Value>(partial_args) {
+        Ok(value) => {
+            // 对大字段做摘要后重新序列化，保持 JSON 有效性。
+            // 不再做字节截断：大字段已被 summarize_object_string_field 控制在 256 字节以内，
+            // 其余字段通常很短，整体 JSON 不会过大。
+            sanitize_tool_value(tool_name, value).to_string()
+        }
+        Err(_) => truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name)),
+    }
 }
 
 fn sanitize_tool_output(tool_name: &str, output: &str) -> String {
@@ -221,7 +222,7 @@ fn summarize_object_string_field(object: &mut Map<String, Value>, tool_name: &st
         return;
     }
     *value = Value::String(format!(
-        "{}\n... ({} bytes omitted from TUI {tool_name}.{field} preview)",
+        "{} ... ({} bytes omitted from TUI {tool_name}.{field} preview)",
         utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT),
         text.len()
             .saturating_sub(utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT).len())
@@ -365,5 +366,59 @@ mod tests {
         let truncated = truncate_tool_text(&text, 31, None);
         assert!(truncated.is_char_boundary(truncated.len()));
         assert!(truncated.contains("omitted"));
+    }
+
+    #[test]
+    fn test_sanitize_edit_arguments_delta_preserves_valid_json() {
+        // Edit 参数含超长 old_string/new_string，原始 JSON 远超 512 字节
+        let long_old = "x".repeat(400);
+        let long_new = "y".repeat(400);
+        let raw = format!(
+            r#"{{"file_path":"src/main.rs","old_string":"{long_old}","new_string":"{long_new}"}}"#
+        );
+        assert!(
+            raw.len() > TOOL_STREAM_PREVIEW_LIMIT,
+            "test precondition: raw JSON should exceed limit"
+        );
+
+        let sanitized = sanitize_tool_arguments_delta("Edit", &raw);
+
+        // 核心断言：摘要后仍是合法 JSON
+        let parsed: Value =
+            serde_json::from_str(&sanitized).expect("sanitized args must be valid JSON");
+
+        // file_path 正确保留
+        assert_eq!(
+            parsed.get("file_path").and_then(|v| v.as_str()),
+            Some("src/main.rs"),
+            "file_path must survive sanitization"
+        );
+
+        // old_string/new_string 被截断摘要（不再保持原长）
+        let old_val = parsed
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            old_val.len() < long_old.len(),
+            "old_string should be summarized, got {} bytes",
+            old_val.len()
+        );
+        assert!(
+            old_val.contains("omitted"),
+            "old_string should contain omission marker"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_arguments_delta_fallback_on_partial_json() {
+        // 流式传输中的不完整 JSON → 解析失败 → 回退到截断
+        let partial = r#"{"file_path":"src/main.rs","old_string":"x"#;
+        let sanitized = sanitize_tool_arguments_delta("Edit", partial);
+        // 回退模式：不是合法 JSON 但被截断
+        assert!(
+            sanitized.contains("omitted") || sanitized == partial,
+            "partial JSON should be truncated, got: {sanitized}"
+        );
     }
 }
