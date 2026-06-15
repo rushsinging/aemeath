@@ -89,7 +89,7 @@ impl Tool for McpToolWrapper {
     async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         // Validate input against schema before calling MCP tool
         if let Err(e) = validate_mcp_input(&input, &self.schema) {
-            log::warn!("MCP tool {} input validation failed: {}", self.tool_name, e);
+            log::warn!(target: "tools::wrapper", "MCP tool {} input validation failed: {}", self.tool_name, e);
             return ToolResult::error(serde_json::json!({
                 "status": "error",
                 "message": format!("Invalid input for {}: {}", self.tool_name, e),

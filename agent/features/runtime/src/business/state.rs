@@ -231,7 +231,7 @@ impl AppState {
         }
         let session = InternalSession::new(cwd);
         if let Err(e) = self.save_session(&session).await {
-            log::warn!("failed to persist new session {}: {e}", session.id);
+            log::warn!(target: "runtime::state", "failed to persist new session {}: {e}", session.id);
         }
         session
     }

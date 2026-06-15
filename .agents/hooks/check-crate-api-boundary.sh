@@ -90,6 +90,10 @@ def check_cross_crate_line(current_crate: str | None, line: str) -> list[str]:
     if not stripped or stripped.startswith("//") or stripped.startswith("*"):
         return []
 
+    # 剥离字符串字面量内容，避免把日志 target 字符串（如 "tools::audit"）
+    # 误判为跨 crate 模块访问。
+    line = re.sub(r'"[^"]*"', '""', line)
+
     violations: list[str] = []
     for match in path_pattern.finditer(line):
         prefix = line[: match.start()].rstrip()

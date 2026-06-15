@@ -135,7 +135,7 @@ impl CommandContext {
     pub fn new(state: Arc<AppState>, config: Config, cwd: String, session_id: String) -> Self {
         let mut cost_tracker = CostTracker::new();
         if let Err(e) = cost_tracker.load() {
-            log::warn!("Failed to load cost history: {}", e);
+            log::warn!(target: "runtime::commands", "Failed to load cost history: {}", e);
         }
         Self {
             state,

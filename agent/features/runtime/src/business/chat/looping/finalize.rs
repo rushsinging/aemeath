@@ -118,7 +118,7 @@ pub(crate) async fn finish_completed_loop<S>(
             task_store
                 .set_batch_status(active.id, BatchStatus::Archived)
                 .await;
-            log::info!(
+            log::info!(target: "runtime::finalize",
                 "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
                 active.id
             );

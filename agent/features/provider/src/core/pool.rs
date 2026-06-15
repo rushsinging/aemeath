@@ -64,11 +64,11 @@ impl LlmClientPool {
                     .lock()
                     .await
                     .insert(spec.to_string(), client.clone());
-                log::info!("[LlmClientPool] created new client for {:?}", spec);
+                log::info!(target: "provider::pool", "[LlmClientPool] created new client for {:?}", spec);
                 client
             }
             Err(e) => {
-                log::warn!(
+                log::warn!(target: "provider::pool",
                     "[LlmClientPool] failed to create client for {:?}: {}. Falling back to default.",
                     spec,
                     e
@@ -162,7 +162,7 @@ impl LlmClientPool {
 
         let max_tokens = model_entry.max_tokens;
         if max_tokens == 0 {
-            log::warn!(
+            log::warn!(target: "provider::pool",
                 "[LlmClientPool] max_tokens is 0 for '{}' — using 200000 default",
                 spec
             );

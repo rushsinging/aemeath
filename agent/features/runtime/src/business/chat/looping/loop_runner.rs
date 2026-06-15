@@ -96,7 +96,7 @@ where
     let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
     let in_worktree = project::api::WorkspaceRead::in_worktree(workspace.as_ref());
     hook_runner.set_project_context(cwd.display().to_string(), in_worktree);
-    log::info!(
+    log::info!(target: "runtime::loop_runner",
         "chat loop hook runner ready: project_dir={} configured_events={}",
         hook_runner.project_dir(),
         hook_runner.hook_count()
@@ -149,7 +149,7 @@ where
                 &mut config_snapshot,
             );
             if config_diff.has_changes() {
-                log::info!(
+                log::info!(target: "runtime::loop_runner",
                     "[config_reload] turn {} detected changes: {:?}",
                     turn_count,
                     config_diff.changed_keys
@@ -175,7 +175,7 @@ where
                             messages.push(reminder);
                             sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                                 .await;
-                            log::info!("[config_reload] guidance inject mode: injected reminder into messages");
+                            log::info!(target: "runtime::loop_runner", "[config_reload] guidance inject mode: injected reminder into messages");
                         }
                         share::config::GuidanceReloadPolicy::Remind => {
                             // 发 system-reminder 让 LLM 自行决定是否读取
@@ -183,7 +183,7 @@ where
                                 "<system-reminder>guidance 文件已被外部修改，请用 Read 工具重新读取 ~/.agents/guidance/_default.md 与本次匹配的模型前缀文件以获取最新指引。</system-reminder>".to_string(),
                             );
                             messages.push(reminder);
-                            log::info!("[config_reload] guidance remind mode: injected system-reminder");
+                            log::info!(target: "runtime::loop_runner", "[config_reload] guidance remind mode: injected system-reminder");
                         }
                         share::config::GuidanceReloadPolicy::Confirm => {
                             // 发 system-reminder + 标记等待用户确认
@@ -194,7 +194,7 @@ where
                             sink.send_event(RuntimeStreamEvent::SystemMessage(
                                 "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
                             )).await;
-                            log::info!("[config_reload] guidance confirm mode: waiting for user confirmation");
+                            log::info!(target: "runtime::loop_runner", "[config_reload] guidance confirm mode: waiting for user confirmation");
                         }
                     }
                 }
@@ -336,7 +336,7 @@ where
             )
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
-        log::debug!(
+        log::debug!(target: "runtime::loop_runner",
             "turn api finished: session={}, turn={}, elapsed_secs={:.3}",
             session_id,
             turn_count,

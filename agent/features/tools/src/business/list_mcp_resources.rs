@@ -115,7 +115,7 @@ impl Tool for ListMcpResourcesTool {
                 }
                 Err(e) => {
                     // Log error but continue with other servers
-                    log::warn!("Failed to list resources from {}: {}", server_name, e);
+                    log::warn!(target: "tools::list_resources", "Failed to list resources from {}: {}", server_name, e);
                 }
             }
         }

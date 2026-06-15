@@ -60,7 +60,7 @@ pub fn init_guidance_dir() {
 
     if !dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            log::warn!("Failed to create guidance dir {}: {}", dir.display(), e);
+            log::warn!(target: "prompt::guidance", "Failed to create guidance dir {}: {}", dir.display(), e);
             return;
         }
     }
@@ -72,11 +72,11 @@ pub fn init_guidance_dir() {
             continue; // never overwrite user-edited files
         }
         if let Err(e) = std::fs::File::create(&path) {
-            log::warn!("Failed to create {}: {}", path.display(), e);
+            log::warn!(target: "prompt::guidance", "Failed to create {}: {}", path.display(), e);
         }
     }
 
-    log::info!("Initialised guidance files in {}", dir.display());
+    log::info!(target: "prompt::guidance", "Initialised guidance files in {}", dir.display());
 }
 
 #[cfg(test)]

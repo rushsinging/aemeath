@@ -318,7 +318,7 @@ impl LlmClient {
             .iter()
             .map(|b| truncate_preview(&b.text, 200))
             .collect();
-        log::debug!(
+        log::debug!(target: "provider::client",
             "[LLM REQUEST] provider={} model={} system_blocks={} messages={} tools={}\n  system: {:?}\n  messages: {}",
             self.provider_name(), self.model_name(), system.len(), messages.len(), tool_schemas.len(),
             system_preview, serde_json::to_string_pretty(&msg_summary).unwrap_or_default(),
@@ -338,14 +338,14 @@ impl LlmClient {
                     let input_str = input.to_string();
                     serde_json::json!({"id":id,"name":name,"input_preview":truncate_preview(&input_str,300)})
                 }).collect();
-                log::debug!(
+                log::debug!(target: "provider::client",
                     "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={}\n  text: {}\n  tools: {}",
                     resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
                     tool_uses.len(), text_preview, serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
                 );
             }
             Err(e) => {
-                log::warn!("[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
+                log::warn!(target: "provider::client", "[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
             }
         }
     }
@@ -361,7 +361,7 @@ impl LlmClient {
         let (text_blocks, thinking_blocks, tool_use_blocks, tool_result_blocks, image_blocks) =
             content_block_counts(messages);
         let (largest_idx, largest_role, largest_bytes) = largest_message_summary(messages);
-        log::warn!(
+        log::warn!(target: "provider::client",
             "[LLM STREAM ERROR] phase={} provider={} model={} system_blocks={} messages={} tools={} messages_payload_bytes={} content_blocks={{text:{},thinking:{},tool_use:{},tool_result:{},image:{}}} largest_message={{index:{},role:{},bytes:{}}} error={}{}",
             phase,
             self.provider_name(),

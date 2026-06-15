@@ -14,7 +14,7 @@ pub fn set_current_turn(turn: usize) {
 
 /// 初始化日志子系统（feature #79 路径 C）。
 ///
-/// - 默认：用 `UnifiedLogger::init` 写到 `~/.agents/logs/{aemeath,tui,hook,input,output,tool}.log`。
+/// - 默认：用 `UnifiedLogger::init` 写到 `~/.agents/logs/{aemeath,runtime,provider,tools,prompt,tui,hook,input,output,audit}.log`。
 /// - `AEMEATH_LOG_STDERR=1` 或 `AEMEATH_LOG_STDERR=true`：回退到 `env_logger` 写 stderr
 ///   （CLI 模式调试用，会破坏 TUI 渲染）。
 ///
@@ -44,13 +44,13 @@ pub fn init_logging(logging_config: &LoggingConfig) {
             writeln!(buf, "{}", line)
         });
         builder.init();
-        log::info!(
+        log::info!(target: "runtime::logging_setup",
             "logging initialized: filter={} target=stderr logs_dir={}",
             std::env::var("RUST_LOG").unwrap_or(default_filter),
             logs_dir.display()
         );
     } else {
-        // 默认：UnifiedLogger 统一入口，6 个文件按 record.target() 路由
+        // 默认：UnifiedLogger 统一入口，10 个文件按 record.target() 路由
         if let Err(err) = UnifiedLogger::init(
             &logs_dir,
             logging_config.max_bytes,
@@ -65,7 +65,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
             .init();
             return;
         }
-        log::info!(
+        log::info!(target: "runtime::logging_setup",
             "logging initialized: filter={} target=unified logs_dir={}",
             std::env::var("RUST_LOG").unwrap_or(default_filter),
             logs_dir.display()

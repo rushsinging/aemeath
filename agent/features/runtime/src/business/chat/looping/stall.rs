@@ -38,14 +38,14 @@ impl StallDetector {
             .count();
         if repeat_count > self.max_fingerprint_repeat {
             self.max_fingerprint_repeat = repeat_count;
-            log::debug!(
+            log::debug!(target: "runtime::stall",
                 "[stall] fingerprint repeat count: {} (max so far: {})",
                 repeat_count,
                 self.max_fingerprint_repeat
             );
         }
         if repeat_count >= Self::FINGERPRINT_MAX_REPEAT {
-            log::warn!(
+            log::warn!(target: "runtime::stall",
                 "[stall] assistant text repeated {} times in recent {} turns (max: {})",
                 repeat_count,
                 self.recent_fingerprints.len(),

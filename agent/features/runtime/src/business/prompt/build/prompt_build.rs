@@ -273,7 +273,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     let warnings = policy::api::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
-            log::warn!(
+            log::warn!(target: "runtime::prompt_build",
                 "[Security] {} in {} line {}: {}",
                 w.threat_type,
                 w.filename,

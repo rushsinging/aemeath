@@ -240,8 +240,7 @@ fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
             provider_id,
             name,
             index,
-        } => log::trace!(
-            target: "cli::tui::tool_flow",
+        } => crate::tui::log_trace!(
             "{} tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
             stage,
             context.chat_id,
@@ -260,8 +259,7 @@ fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
             arguments_delta,
             arguments,
             status,
-        } => log::trace!(
-            target: "cli::tui::tool_flow",
+        } => crate::tui::log_trace!(
             "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
             stage,
             context.chat_id,
@@ -284,8 +282,7 @@ fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
             is_error,
             images,
             ..
-        } => log::trace!(
-            target: "cli::tui::tool_flow",
+        } => crate::tui::log_trace!(
             "{} tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
             stage,
             context.chat_id,
@@ -310,8 +307,7 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             provider_id,
             name,
             index,
-        } => log::trace!(
-            target: "cli::tui::tool_flow",
+        } => crate::tui::log_trace!(
             "{} tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
             stage,
             context.chat_id,
@@ -330,8 +326,7 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             arguments_delta,
             arguments,
             status,
-        } => log::trace!(
-            target: "cli::tui::tool_flow",
+        } => crate::tui::log_trace!(
             "{} tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={} ",
             stage,
             context.chat_id,
@@ -353,8 +348,7 @@ fn log_ui_tool_event(event: &UiEvent, stage: &'static str) {
             content,
             is_error,
             images,
-        } => log::trace!(
-            target: "cli::tui::tool_flow",
+        } => crate::tui::log_trace!(
             "{} tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
             stage,
             context.chat_id,

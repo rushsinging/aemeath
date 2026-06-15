@@ -335,8 +335,8 @@ fn find_tool_view(
                 })
                 .unwrap_or_else(|| result.to_string())
         });
-    log::debug!(
-        target: "cli::tui::tool_flow",        "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
+    crate::tui::log_debug!(
+        "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
         chat_id.as_ref(),
         turn_id.as_ref(),
         tool_id.as_ref(),

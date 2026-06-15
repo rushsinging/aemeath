@@ -78,7 +78,7 @@ pub fn init_snapshot_registry(cwd: &Path) -> SourceSnapshotRegistry {
     let mut registry = SourceSnapshotRegistry::new();
     registry.register_all(files);
     registry.take_baseline();
-    log::info!(
+    log::info!(target: "runtime::config_reload",
         "[config_reload] snapshot registry initialized with {} files",
         registry.len()
     );
@@ -99,7 +99,7 @@ pub fn check_config_changes(registry: &mut SourceSnapshotRegistry) -> ConfigDiff
         };
     }
 
-    log::info!(
+    log::info!(target: "runtime::config_reload",
         "[config_reload] detected {} file change(s)",
         changes.len()
     );
@@ -170,10 +170,10 @@ pub fn resolve_guidance_reload_policy() -> GuidanceReloadPolicy {
                     "remind" => GuidanceReloadPolicy::Remind,
                     "confirm" => GuidanceReloadPolicy::Confirm,
                     _ => {
-                        log::warn!(
-                            "[config_reload] unknown guidance.reload_policy '{}', using default",
-                            policy_str
-                        );
+                          log::warn!(target: "runtime::config_reload",
+                              "[config_reload] unknown guidance.reload_policy '{}', using default",
+                              policy_str
+                          );
                         GuidanceReloadPolicy::Remind
                     }
                 };

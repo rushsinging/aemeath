@@ -1,5 +1,5 @@
 use crate::business::compact::safe_slice;
-use logging::{ToolKind, UnifiedLogger};
+
 use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
@@ -52,7 +52,11 @@ impl<'a> SubAgentRun<'a> {
     ) {
         for (id, _provider_id, output, _content, is_error, _) in results.iter() {
             let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
-            UnifiedLogger::log_tool(&self.role_name_for_log, ToolKind::Result, data);
+            log::info!(
+                target: "tools::audit",
+                "tool_result: {}",
+                serde_json::to_string(&data).unwrap_or_default()
+            );
         }
         logging::context::set_current_turn(turn_number);
     }

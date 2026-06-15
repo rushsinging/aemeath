@@ -9,7 +9,7 @@ use crate::business::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use hook::api::{HookData, ToolHookData};
-use logging::{ToolKind, UnifiedLogger};
+
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
 use share::tool::ImageData;
@@ -276,7 +276,11 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
         "is_error": is_error,
         "output": output,
     });
-    UnifiedLogger::log_tool("default", ToolKind::Result, tr_data);
+    log::info!(
+        target: "tools::audit",
+        "tool_result: {}",
+        serde_json::to_string(&tr_data).unwrap_or_default()
+    );
 }
 
 #[cfg(test)]

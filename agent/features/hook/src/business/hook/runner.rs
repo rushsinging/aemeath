@@ -150,6 +150,7 @@ impl HookRunner {
             Ok(c) => c,
             Err(e) => {
                 log::warn!(
+                    target: "hook::runner",
                     "hook spawn failed: event={:?} command={} error={}",
                     input.event,
                     command,
@@ -204,6 +205,7 @@ impl HookRunner {
 
                 if code != 0 && !stderr.is_empty() {
                     log::warn!(
+                        target: "hook::runner",
                         "hook '{}' exited with code {}: {}",
                         command,
                         code,
@@ -237,6 +239,7 @@ impl HookRunner {
             }
             Ok(Err(e)) => {
                 log::warn!(
+                    target: "hook::runner",
                     "hook wait failed: event={:?} command={} error={}",
                     input.event,
                     command,
@@ -246,6 +249,7 @@ impl HookRunner {
             }
             Err(_) => {
                 log::warn!(
+                    target: "hook::runner",
                     "hook timeout: event={:?} command={} timeout={}s",
                     input.event,
                     command,
@@ -283,6 +287,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
+                target: "hook::runner",
                 "running hook: event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -290,6 +295,7 @@ impl HookRunner {
             );
             let result = self.execute_hook(hook, &input).await;
             log::debug!(
+                target: "hook::runner",
                 "hook result: blocked={} error={:?}",
                 result.blocked,
                 result.error
@@ -323,6 +329,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
+                target: "hook::runner",
                 "running hook (with json): event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -333,6 +340,7 @@ impl HookRunner {
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
             log::debug!(
+                target: "hook::runner",
                 "hook result (json): blocked={} continue={:?} error={:?}",
                 result.blocked,
                 json_output.as_ref().map(|j| j.r#continue),

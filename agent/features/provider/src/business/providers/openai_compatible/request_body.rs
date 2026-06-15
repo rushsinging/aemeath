@@ -113,7 +113,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             let body_bytes = serde_json::to_string(&request_body)
                 .map(|s| s.len())
                 .unwrap_or(0);
-            log::debug!(
+            log::debug!(target: "provider::openai_request",
                 "[openai-compat stream] POST provider={} body_bytes={} messages={}:{}",
                 self.config.source_key,
                 body_bytes,
@@ -196,7 +196,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 depth += 1;
                             }
                             let remaining = self.max_retries.saturating_sub(attempt + 1);
-                            log::warn!(
+                            log::warn!(target: "provider::openai_request",
                                 "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
                                 self.config.source_key,
                                 self.model,
@@ -222,7 +222,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             };
 
             let status = response.status();
-            log::debug!(
+            log::debug!(target: "provider::openai_request",
                 "[openai-compat stream] response received provider={} model={} status={} attempt={}/{} body_bytes={} messages={} tools={}",
                 self.config.source_key,
                 self.model,
@@ -291,7 +291,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                         source = cause.source();
                         depth += 1;
                     }
-                    log::warn!(
+                    log::warn!(target: "provider::openai_request",
                         "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
                         self.config.source_key,
                         self.model,

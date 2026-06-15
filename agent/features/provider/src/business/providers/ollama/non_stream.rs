@@ -28,7 +28,7 @@ impl OllamaProviderNonStream for OllamaProvider {
         let headers = self.build_headers()?;
         let url = format!("{}/api/chat", self.base_url);
 
-        log::debug!(
+        log::debug!(target: "provider::ollama_non_stream",
             "[ollama non-stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             self.model,

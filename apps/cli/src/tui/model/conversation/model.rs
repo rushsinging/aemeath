@@ -237,8 +237,7 @@ impl ConversationModel {
         index: usize,
     ) -> Vec<ConversationChange> {
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
-        log::debug!(
-            target: "cli::tui::tool_flow",
+        crate::tui::log_debug!(
             "model observe tool_call_start chat_id={} turn_id={} id={} name={} index={} blocks_before={}",
             chat_id,
             turn_id,
@@ -320,8 +319,7 @@ impl ConversationModel {
             );
         }
         self.move_tool_results_after_tool_call(&chat_id, &turn_id, bound_id.as_ref());
-        log::debug!(
-            target: "cli::tui::tool_flow",
+        crate::tui::log_debug!(
             "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} has_block={} blocks_after={}",
             chat_id,
             turn_id,
