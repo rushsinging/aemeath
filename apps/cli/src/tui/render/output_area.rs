@@ -8,6 +8,8 @@ use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 pub mod content;
 pub mod display;
 pub mod render;
+#[cfg(test)]
+mod render_tests;
 mod resize;
 pub mod selection;
 pub mod spinner;

@@ -89,11 +89,7 @@ mod tests {
                 .map(tools::api::is_readonly_command)
                 .unwrap_or(false)
         }
-        async fn call(
-            &self,
-            _: serde_json::Value,
-            _: &ToolExecutionContext,
-        ) -> ToolResult {
+        async fn call(&self, _: serde_json::Value, _: &ToolExecutionContext) -> ToolResult {
             unreachable!()
         }
     }

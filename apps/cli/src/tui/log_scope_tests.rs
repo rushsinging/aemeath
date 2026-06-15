@@ -13,7 +13,7 @@ mod tests {
 
     const FORBIDDEN_HIGH_VOLUME_LOG_FILES: &[&str] = &[
         "apps/cli/src/tui/app/update.rs",
-        "apps/cli/src/tui/render/output/document_renderer.rs",
+        "apps/cli/src/tui/render/output/document_renderer/mod.rs",
         "apps/cli/src/tui/render/output_area/render.rs",
         "apps/cli/src/tui/render/output/status_line.rs",
         "apps/cli/src/tui/render/output_area/selection.rs",

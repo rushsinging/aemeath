@@ -49,8 +49,7 @@ where
     let engine = PolicyEngine::new(&path_base, &workspace_root, allow_all);
 
     let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
-    let denied_results =
-        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner).await;
+    let denied_results = deny_tool_calls(&denied, sink, context, hook_ui, hook_runner).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
@@ -70,11 +69,17 @@ where
     let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
         approved.into_iter().partition(|c| c.name == "Agent");
 
-    let ask_user_results =
-        ask_user(context, sink, hook_ui, hook_runner, &non_agent_approved).await;
-    let non_agent_results =
-        execute_non_agent(context, agent, sink, hook_ui, hook_runner, &non_agent_approved, language)
-            .await;
+    let ask_user_results = ask_user(context, sink, hook_ui, hook_runner, &non_agent_approved).await;
+    let non_agent_results = execute_non_agent(
+        context,
+        agent,
+        sink,
+        hook_ui,
+        hook_runner,
+        &non_agent_approved,
+        language,
+    )
+    .await;
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,

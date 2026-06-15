@@ -73,8 +73,9 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
     let (full_response, input_tokens, output_tokens) =
         call_llm_for_reflection(client, &prompt, system_prompt_text).await?;
 
-    let output = ReflectionEngine::parse_output(&full_response)
-        .map_err(|e| ReflectionError::Unparseable(format!("{e}: {}", truncate_200(&full_response))))?;
+    let output = ReflectionEngine::parse_output(&full_response).map_err(|e| {
+        ReflectionError::Unparseable(format!("{e}: {}", truncate_200(&full_response)))
+    })?;
 
     let mut formatted_content = ReflectionEngine::format_output(&output);
     let mut auto_applied = false;

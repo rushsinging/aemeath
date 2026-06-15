@@ -53,10 +53,10 @@ impl AgentClient for AgentClientImpl {
         &self,
         params: sdk::ModelSwitchParams,
     ) -> Result<sdk::ModelSwitchResult, SdkError> {
-        super::trait_command::switch_model_impl(self, params).await
+        super::trait_model::switch_model_impl(self, params).await
     }
     async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, SdkError> {
-        super::trait_command::set_thinking_impl(self, desired).await
+        super::trait_model::set_thinking_impl(self, desired).await
     }
     async fn compact_messages(
         &self,
@@ -64,44 +64,44 @@ impl AgentClient for AgentClientImpl {
         system_prompt: &str,
         context_size: usize,
     ) -> Result<(Vec<sdk::ChatMessage>, bool), SdkError> {
-        super::trait_command::compact_messages_impl(self, messages, system_prompt, context_size)
+        super::trait_compact::compact_messages_impl(self, messages, system_prompt, context_size)
             .await
     }
     async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), SdkError> {
-        super::trait_command::notify_hook_impl(self, message, kind).await
+        super::trait_misc::notify_hook_impl(self, message, kind).await
     }
     async fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
-        super::trait_command::list_models_impl(self).await
+        super::trait_model::list_models_impl(self).await
     }
     async fn compact(&self) -> Result<(), SdkError> {
-        super::trait_command::compact_impl(self).await
+        super::trait_compact::compact_impl(self).await
     }
     async fn read_clipboard_image(&self) -> Result<ClipboardImageView, SdkError> {
-        super::trait_command::read_clipboard_image_impl(self).await
+        super::trait_misc::read_clipboard_image_impl(self).await
     }
     async fn process_image_file(&self, path: String) -> Result<ClipboardImageView, SdkError> {
-        super::trait_command::process_image_file_impl(self, path).await
+        super::trait_misc::process_image_file_impl(self, path).await
     }
     async fn run_reflection(
         &self,
         messages: Vec<sdk::ChatMessage>,
     ) -> Result<ReflectionOutputView, SdkError> {
-        super::trait_command::run_reflection_impl(self, messages).await
+        super::trait_reflection::run_reflection_impl(self, messages).await
     }
     async fn apply_reflection(&self, output: ReflectionOutputView) -> Result<String, SdkError> {
-        super::trait_command::apply_reflection_impl(self, output).await
+        super::trait_reflection::apply_reflection_impl(self, output).await
     }
     async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, SdkError> {
-        super::trait_command::list_reminders_impl(self).await
+        super::trait_memory::list_reminders_impl(self).await
     }
     async fn add_reminder(&self, content: &str) -> Result<String, SdkError> {
-        super::trait_command::add_reminder_impl(self, content).await
+        super::trait_memory::add_reminder_impl(self, content).await
     }
     async fn complete_reminder(&self, id: &str) -> Result<(), SdkError> {
-        super::trait_command::complete_reminder_impl(self, id).await
+        super::trait_memory::complete_reminder_impl(self, id).await
     }
     async fn get_thinking(&self) -> Result<bool, SdkError> {
-        super::trait_command::get_thinking_impl(self).await
+        super::trait_model::get_thinking_impl(self).await
     }
 
     // accessor methods (sync)

@@ -5,7 +5,12 @@ mod mapping;
 mod trait_accessor;
 mod trait_chat;
 mod trait_command;
+mod trait_compact;
 mod trait_impl;
+mod trait_memory;
+mod trait_misc;
+mod trait_model;
+mod trait_reflection;
 mod trait_session;
 
 pub(crate) use accessors::*;

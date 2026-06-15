@@ -24,7 +24,10 @@ pub enum WorkspaceError {
         current_working_root: PathBuf,
         current_path_base: PathBuf,
     },
-    RepoMismatch { path: PathBuf, repo_root: PathBuf },
+    RepoMismatch {
+        path: PathBuf,
+        repo_root: PathBuf,
+    },
     EmptyStack,
     RestoreInvalidPath(PathBuf),
     Git(String),
