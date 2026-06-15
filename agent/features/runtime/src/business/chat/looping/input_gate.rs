@@ -161,6 +161,10 @@ where
                 }
             }
             ChatInputEvent::UserMessage { text, image_paths } => {
+                logging::UnifiedLogger::log_user_input(serde_json::json!({
+                    "text": &text,
+                    "image_paths": &image_paths,
+                }));
                 messages.push(user_message_with_images(text, image_paths));
                 appended_this_gate.push(());
                 appended_user_messages += 1;
