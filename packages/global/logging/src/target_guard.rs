@@ -92,7 +92,6 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-#[cfg(test)]
 mod tests {
     use super::*;
 

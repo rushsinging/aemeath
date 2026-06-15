@@ -34,6 +34,7 @@
 pub mod context;
 pub mod format;
 pub mod rotation;
+#[cfg(test)]
 pub mod target_guard;
 pub mod text;
 pub mod unified_logger;

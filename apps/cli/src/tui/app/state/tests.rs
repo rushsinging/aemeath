@@ -360,9 +360,13 @@ mod tests {
                 name: "Grep".to_string(),
                 index: 1,
                 arguments_delta: None,
-                arguments: None,
+                arguments: Some(serde_json::json!({
+                    "pattern": "76",
+                    "path": "docs/bug/active.md"
+                })),
                 status: sdk::ToolCallStatusView::Ready,
-            },            UiEvent::ToolResult {
+            },
+            UiEvent::ToolResult {
                 context: test_turn_context(),
                 id: sdk::ids::ToolCallId::new("grep-1"),
                 provider_id: "provider-grep-1".to_string(),
