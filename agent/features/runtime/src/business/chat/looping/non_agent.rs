@@ -234,7 +234,44 @@ where
         send_tool_result(sink, context, &owned_call, &result).await;
         return vec![result];
     }
-    let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
+    // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
+    let (prog_tx, mut prog_rx) =
+        tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
+    let mut streaming_ctx = agent.ctx.clone();
+    streaming_ctx.progress_tx = Some(prog_tx);
+    let call_id = owned_call.id.clone();
+    let stream_sink = sink.clone();
+    let stream_context = context.clone();
+    let forward_handle = tokio::spawn(async move {
+        while let Some(event) = prog_rx.recv().await {
+            let _ = stream_sink
+                .send_event(RuntimeStreamEvent::AgentProgress {
+                    context: stream_context.clone(),
+                    tool_id: call_id.clone(),
+                    event,
+                })
+                .await;
+        }
+    });
+
+    let exec_results =
+        vec![agent.execute_one_with_ctx(&owned_call, &streaming_ctx).await];
+
+    // Drop the sender so the forwarding task can complete naturally.
+    streaming_ctx.progress_tx = None;
+
+    // Flush any remaining progress events before proceeding.
+    // Abort the forwarding task if it doesn't complete within 500ms
+    // to prevent task/resource leaks.
+    let mut forward_handle = forward_handle;
+    tokio::select! {
+        _ = &mut forward_handle => {}
+        _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+            forward_handle.abort();
+            let _ = forward_handle.await;
+        }
+    }
+
     let working_root = agent.ctx.workspace_read().current_root();
     let in_worktree = agent.ctx.workspace_read().in_worktree();
     hook_runner.set_project_context(working_root.display().to_string(), in_worktree);
