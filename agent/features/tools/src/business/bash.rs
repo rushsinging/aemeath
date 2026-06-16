@@ -162,18 +162,13 @@ impl Tool for BashTool {
                             if let Some(tx) = &progress_tx {
                                 // Prepend any carried suffix from the previous chunk,
                                 // then take the full combined text for processing.
-                                let mut combined =
-                                    std::mem::take(&mut suffix_carry);
-                                combined.push_str(
-                                    &String::from_utf8_lossy(&tmp[..n]),
-                                );
+                                let mut combined = std::mem::take(&mut suffix_carry);
+                                combined.push_str(&String::from_utf8_lossy(&tmp[..n]));
 
                                 // Strip CWD marker from the combined text.
                                 // Retain a suffix in case the marker is split
                                 // across reads.
-                                let display_text = match combined
-                                    .find(CWD_MARKER)
-                                {
+                                let display_text = match combined.find(CWD_MARKER) {
                                     Some(pos) => &combined[..pos],
                                     None => &combined[..],
                                 };
@@ -182,34 +177,23 @@ impl Tool for BashTool {
                                 // (only if we didn't find a marker — once found,
                                 // remaining output after the marker is internal).
                                 if !display_text.contains(CWD_MARKER) {
-                                    let carry_len = marker_len
-                                        .saturating_sub(1)
-                                        .min(display_text.len());
-                                    suffix_carry = display_text
-                                        [display_text.len() - carry_len..]
-                                        .to_string();
+                                    let carry_len =
+                                        marker_len.saturating_sub(1).min(display_text.len());
+                                    suffix_carry =
+                                        share::string_idx::slice_tail(display_text, carry_len)
+                                            .to_string();
                                 }
 
                                 // Append to line buffer and emit completed lines.
                                 line_buf.push_str(display_text);
                                 while let Some(nl) = line_buf.find('\n') {
-                                    let line: String =
-                                        line_buf.drain(..=nl).collect();
-                                    send_progress!(
-                                        tx,
-                                        sequence,
-                                        line
-                                    );
+                                    let line: String = line_buf.drain(..=nl).collect();
+                                    send_progress!(tx, sequence, line);
                                 }
                                 // Flush if buffer exceeds the cap even without newline.
                                 if line_buf.len() > MAX_STREAM_LINE {
-                                    let flush: String =
-                                        std::mem::take(&mut line_buf);
-                                    send_progress!(
-                                        tx,
-                                        sequence,
-                                        flush
-                                    );
+                                    let flush: String = std::mem::take(&mut line_buf);
+                                    send_progress!(tx, sequence, flush);
                                 }
                             }
                         }
@@ -245,44 +229,43 @@ impl Tool for BashTool {
         });
 
         // Race: cancel signal vs timeout vs command completion
-        let wait_result: Result<std::process::ExitStatus, std::io::Error> =
-            tokio::select! {
-                biased;
-                _ = ctx.cancel.cancelled() => {
-                    let _ = child.kill().await;
-                    stdout_handle.abort();
-                    stderr_handle.abort();
-                    return ToolResult::error_json(serde_json::json!({
-                        "status": "error",
-                        "message": "[interrupted by user]"
-                    }));
-                }
-                result = tokio::time::timeout(
-                    Duration::from_millis(timeout_ms),
-                    child.wait(),
-                ) => {
-                    match result {
-                        Ok(inner) => inner,
-                        // Timeout: kill the child immediately and abort
-                        // reader tasks so we don't hang awaiting pipes
-                        // that will never reach EOF on their own.
-                        Err(_) => {
-                            let _ = child.kill().await;
-                            let _ = child.wait().await;
-                            stdout_handle.abort();
-                            stderr_handle.abort();
-                            // Return early — no point awaiting aborted
-                            // handles.
-                            return ToolResult::error_json(serde_json::json!({
-                                "status": "error",
-                                "message": format!(
-                                    "command timed out after {timeout_ms}ms"
-                                )
-                            }));
-                        }
+        let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
+            biased;
+            _ = ctx.cancel.cancelled() => {
+                let _ = child.kill().await;
+                stdout_handle.abort();
+                stderr_handle.abort();
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "[interrupted by user]"
+                }));
+            }
+            result = tokio::time::timeout(
+                Duration::from_millis(timeout_ms),
+                child.wait(),
+            ) => {
+                match result {
+                    Ok(inner) => inner,
+                    // Timeout: kill the child immediately and abort
+                    // reader tasks so we don't hang awaiting pipes
+                    // that will never reach EOF on their own.
+                    Err(_) => {
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
+                        stdout_handle.abort();
+                        stderr_handle.abort();
+                        // Return early — no point awaiting aborted
+                        // handles.
+                        return ToolResult::error_json(serde_json::json!({
+                            "status": "error",
+                            "message": format!(
+                                "command timed out after {timeout_ms}ms"
+                            )
+                        }));
                     }
                 }
-            };
+            }
+        };
 
         let stdout = stdout_handle.await.unwrap_or_default();
         let stderr = stderr_handle.await.unwrap_or_default();

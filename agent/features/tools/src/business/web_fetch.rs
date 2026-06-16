@@ -94,19 +94,6 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-/// Safely truncate a string to a maximum character count without breaking UTF-8.
-fn safe_truncate(s: &str, max_chars: usize) -> &str {
-    if s.len() <= max_chars {
-        return s;
-    }
-    // Find the largest valid char boundary <= max_chars
-    let mut boundary = max_chars;
-    while boundary > 0 && !s.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    &s[..boundary]
-}
-
 #[async_trait]
 impl Tool for WebFetchTool {
     fn name(&self) -> &str {
@@ -208,7 +195,7 @@ impl Tool for WebFetchTool {
                     // Truncate very large responses safely
                     let max_chars = 50_000;
                     if body.len() > max_chars {
-                        let truncated = safe_truncate(&body, max_chars);
+                        let truncated = share::string_idx::slice_head(&body, max_chars);
                         ToolResult::success(serde_json::json!({
                             "status": "success",
                             "message": format!("Fetched {} (truncated, showing first {} chars of {} total)", url, truncated.chars().count(), body.chars().count()),
