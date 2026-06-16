@@ -27,6 +27,8 @@ pub struct AskUserSnapshot {
     pub options_count: usize,
     /// 当前激活问题的 multi_select 标志。
     pub multi_select: bool,
+    /// 用户已确认提交（block 进入终态）。
+    pub confirmed: bool,
 }
 
 impl ConversationModel {
@@ -41,6 +43,7 @@ impl ConversationModel {
                 selected,
                 chat_input_active,
                 confirm_cursor,
+                confirmed,
                 ..
             } = block
             {
@@ -55,6 +58,7 @@ impl ConversationModel {
                     llm_option_count: slot.map(|s| s.llm_option_count).unwrap_or(0),
                     options_count: slot.map(|s| s.options.len()).unwrap_or(0),
                     multi_select: slot.map(|s| s.multi_select).unwrap_or(false),
+                    confirmed: *confirmed,
                 })
             } else {
                 None
@@ -114,6 +118,7 @@ impl ConversationModel {
             chat_input_active,
             chat_input_text,
             confirm_cursor,
+            confirmed,
             ..
         }) = self.ask_user_block_mut()
         {
@@ -132,6 +137,9 @@ impl ConversationModel {
                 *selected = vec![false; new_total];
                 *chat_input_active = false;
                 chat_input_text.clear();
+            } else if slots.len() == 1 {
+                // 单问题：直接确认，跳过确认页
+                *confirmed = true;
             } else {
                 *phase = AskUserPhase::Confirming;
                 *confirm_cursor = slots.len(); // 默认停在「全部确认提交」
@@ -465,14 +473,27 @@ mod tests {
     }
 
     #[test]
-    fn test_single_question_batch_answer_enters_confirming_immediately() {
+    fn test_single_question_batch_answer_confirmed_immediately() {
         let mut model = ConversationModel::default();
         show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
         model.apply(ConversationIntent::AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        if let ConversationBlock::AskUserBatch { phase, .. } = batch_block(&model) {
-            assert_eq!(*phase, AskUserPhase::Confirming);
+        if let ConversationBlock::AskUserBatch { confirmed, phase, .. } = batch_block(&model) {
+            assert!(*confirmed);
+            assert_eq!(*phase, AskUserPhase::Answering); // phase 不变，直接 confirmed
+        }
+    }
+
+    #[test]
+    fn test_single_question_batch_answer_no_options_confirmed_immediately() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "自由输入".to_string(),
+        });
+        if let ConversationBlock::AskUserBatch { confirmed, .. } = batch_block(&model) {
+            assert!(*confirmed);
         }
     }
 

@@ -296,11 +296,7 @@ fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
     if text.len() <= max_bytes {
         return text;
     }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    &text[..end] // allow unsafe_text_op: end is adjusted to UTF-8 char boundary
+    &text[..text.floor_char_boundary(max_bytes)]
 }
 
 fn non_empty_text(text: &str) -> Option<String> {

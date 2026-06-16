@@ -103,3 +103,55 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
         }] if text == "a\nb\nc"
     ));
 }
+
+#[test]
+fn test_up_arrow_restores_all_queued_input_to_input_area() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    // 入队两条消息
+    app.input.push_queue("first".to_string());
+    app.enqueue_submission_echo("first");
+    app.input.push_queue("second".to_string());
+    app.enqueue_submission_echo("second");
+
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &ui_tx, &spawn_refs);
+
+    // queue 应被清空
+    assert_eq!(app.input.queue_len(), 0);
+    // input area 应包含两条排队内容（\n 连接）
+    assert_eq!(app.model.input.document.buffer, "first\nsecond");
+    // 排队显示块应被清除
+    assert!(app.model.conversation.queued_submissions.is_empty());
+}
+
+#[test]
+fn test_up_arrow_history_recall_when_queue_empty() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    // 设置 history
+    app.model
+        .input
+        .apply(InputIntent::ReplaceHistory(vec!["past input".to_string()]));
+    // queue 为空
+    assert_eq!(app.input.queue_len(), 0);
+
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &ui_tx, &spawn_refs);
+
+    // queue 空时应走 history recall
+    assert_eq!(app.model.input.document.buffer, "past input");
+}
