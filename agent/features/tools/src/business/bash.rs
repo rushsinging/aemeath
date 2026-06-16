@@ -3,6 +3,7 @@ mod safety;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
+use share::tool::{AgentProgressEvent, AgentProgressKind};
 
 pub use safety::is_readonly_command;
 use serde_json::Value;
@@ -114,8 +115,39 @@ impl Tool for BashTool {
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
 
+        let progress_tx = ctx.progress_tx.clone();
         let stdout_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
+            let mut sequence: usize = 0;
+            // Line-buffer for coalescing: accumulate partial lines and emit at
+            // line boundaries (or when the buffer reaches MAX_STREAM_LINE bytes).
+            // This drastically reduces the number of progress events vs per-read
+            // sending, mitigating channel pressure and chunk loss.
+            let mut line_buf = String::new();
+            // Suffix buffer for robust CWD marker detection across chunk splits.
+            // The marker "__AEMEATH_CWD__=" is 16 bytes; retaining the last 15
+            // bytes of each chunk lets us detect a marker split between reads.
+            let marker_len = CWD_MARKER.len();
+            let mut suffix_carry = String::new();
+            const MAX_STREAM_LINE: usize = 16 * 1024;
+
+            /// Send `text` as a progress event via `tx` (best-effort).
+            /// Strips any trailing CWD marker fragment.
+            macro_rules! send_progress {
+                ($tx:expr, $seq:expr, $text:expr) => {{
+                    if !$text.is_empty() {
+                        $seq += 1;
+                        // Best-effort: drop chunks if channel is full/closed.
+                        let _ = $tx.try_send(AgentProgressEvent {
+                            sequence: $seq,
+                            kind: AgentProgressKind::Message {
+                                text: $text.to_string(),
+                            },
+                        });
+                    }
+                }};
+            }
+
             if let Some(ref mut pipe) = stdout_pipe {
                 let mut tmp = [0u8; 8192];
                 loop {
@@ -125,10 +157,70 @@ impl Tool for BashTool {
                             if buf.len() + n <= MAX_CAPTURE_BYTES {
                                 buf.extend_from_slice(&tmp[..n]);
                             }
-                            // If over limit, keep reading (to drain the pipe) but don't store
+                            // If over limit, keep reading (to drain the pipe) but don't store.
+                            // Stream stdout chunk to TUI via progress_tx.
+                            if let Some(tx) = &progress_tx {
+                                // Prepend any carried suffix from the previous chunk,
+                                // then take the full combined text for processing.
+                                let mut combined =
+                                    std::mem::take(&mut suffix_carry);
+                                combined.push_str(
+                                    &String::from_utf8_lossy(&tmp[..n]),
+                                );
+
+                                // Strip CWD marker from the combined text.
+                                // Retain a suffix in case the marker is split
+                                // across reads.
+                                let display_text = match combined
+                                    .find(CWD_MARKER)
+                                {
+                                    Some(pos) => &combined[..pos],
+                                    None => &combined[..],
+                                };
+
+                                // Save the tail as suffix_carry for next iteration
+                                // (only if we didn't find a marker — once found,
+                                // remaining output after the marker is internal).
+                                if !display_text.contains(CWD_MARKER) {
+                                    let carry_len = marker_len
+                                        .saturating_sub(1)
+                                        .min(display_text.len());
+                                    suffix_carry = display_text
+                                        [display_text.len() - carry_len..]
+                                        .to_string();
+                                }
+
+                                // Append to line buffer and emit completed lines.
+                                line_buf.push_str(display_text);
+                                while let Some(nl) = line_buf.find('\n') {
+                                    let line: String =
+                                        line_buf.drain(..=nl).collect();
+                                    send_progress!(
+                                        tx,
+                                        sequence,
+                                        line
+                                    );
+                                }
+                                // Flush if buffer exceeds the cap even without newline.
+                                if line_buf.len() > MAX_STREAM_LINE {
+                                    let flush: String =
+                                        std::mem::take(&mut line_buf);
+                                    send_progress!(
+                                        tx,
+                                        sequence,
+                                        flush
+                                    );
+                                }
+                            }
                         }
                         Err(_) => break,
                     }
+                }
+            }
+            // Flush any remaining buffered text after the read loop ends.
+            if let Some(tx) = &progress_tx {
+                if !line_buf.is_empty() {
+                    send_progress!(tx, sequence, line_buf);
                 }
             }
             buf
@@ -153,27 +245,50 @@ impl Tool for BashTool {
         });
 
         // Race: cancel signal vs timeout vs command completion
-        let wait_result = tokio::select! {
-            biased;
-            _ = ctx.cancel.cancelled() => {
-                let _ = child.kill().await;
-                stdout_handle.abort();
-                stderr_handle.abort();
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": "[interrupted by user]"
-                }));
-            }
-            result = tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait()) => {
-                result
-            }
-        };
+        let wait_result: Result<std::process::ExitStatus, std::io::Error> =
+            tokio::select! {
+                biased;
+                _ = ctx.cancel.cancelled() => {
+                    let _ = child.kill().await;
+                    stdout_handle.abort();
+                    stderr_handle.abort();
+                    return ToolResult::error_json(serde_json::json!({
+                        "status": "error",
+                        "message": "[interrupted by user]"
+                    }));
+                }
+                result = tokio::time::timeout(
+                    Duration::from_millis(timeout_ms),
+                    child.wait(),
+                ) => {
+                    match result {
+                        Ok(inner) => inner,
+                        // Timeout: kill the child immediately and abort
+                        // reader tasks so we don't hang awaiting pipes
+                        // that will never reach EOF on their own.
+                        Err(_) => {
+                            let _ = child.kill().await;
+                            let _ = child.wait().await;
+                            stdout_handle.abort();
+                            stderr_handle.abort();
+                            // Return early — no point awaiting aborted
+                            // handles.
+                            return ToolResult::error_json(serde_json::json!({
+                                "status": "error",
+                                "message": format!(
+                                    "command timed out after {timeout_ms}ms"
+                                )
+                            }));
+                        }
+                    }
+                }
+            };
 
         let stdout = stdout_handle.await.unwrap_or_default();
         let stderr = stderr_handle.await.unwrap_or_default();
 
         match wait_result {
-            Ok(Ok(status)) => {
+            Ok(status) => {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
@@ -223,17 +338,10 @@ impl Tool for BashTool {
                     ToolResult::error_json(result_json)
                 }
             }
-            Ok(Err(e)) => ToolResult::error_json(serde_json::json!({
+            Err(e) => ToolResult::error_json(serde_json::json!({
                 "status": "error",
                 "message": format!("failed to execute: {e}")
             })),
-            Err(_) => {
-                let _ = child.kill().await;
-                ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("command timed out after {timeout_ms}ms")
-                }))
-            }
         }
     }
 }
@@ -347,6 +455,124 @@ mod tests {
             result.content["display"].as_str(),
             Some("hello_world_12345"),
             "content[display] 应为 stdout 内容"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bash_streams_stdout_via_progress_tx() {
+        use tokio::sync::mpsc;
+
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
+        let ctx = ToolExecutionContext {
+            cwd: workspace.path().to_path_buf(),
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            memory_config: share::config::MemoryConfig::default(),
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: Some(tx),
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(
+                json!({ "command": "echo progress_stream_test_marker" }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!result.is_error);
+
+        // Drop ctx (which owns the original Sender) so that once the spawned
+        // stdout reader finishes and drops its clone, the channel is fully closed
+        // and rx.recv() will return None.
+        drop(ctx);
+
+        // Collect all progress events
+        let mut events = Vec::new();
+        while let Some(ev) = rx.recv().await {
+            events.push(ev);
+        }
+
+        assert!(
+            !events.is_empty(),
+            "progress_tx should have received at least one event"
+        );
+
+        // All collected text fragments concatenated should contain the echoed marker
+        let all_text: String = events
+            .iter()
+            .filter_map(|ev| match &ev.kind {
+                AgentProgressKind::Message { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            all_text.contains("progress_stream_test_marker"),
+            "progress events should contain echoed output, got: {:?}",
+            events
+        );
+
+        // No event should contain the internal CWD marker
+        for ev in &events {
+            if let AgentProgressKind::Message { text } = &ev.kind {
+                assert!(
+                    !text.contains("__AEMEATH_CWD__"),
+                    "progress event must not contain __AEMEATH_CWD__ marker: {}",
+                    text
+                );
+            }
+        }
+
+        // Sequence must be monotonically increasing and > 0
+        for ev in &events {
+            assert!(
+                ev.sequence > 0,
+                "progress event sequence must be > 0, got {}",
+                ev.sequence
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bash_no_progress_tx_still_works() {
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            cwd: workspace.path().to_path_buf(),
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            memory_config: share::config::MemoryConfig::default(),
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(json!({ "command": "echo no_channel_test_98765" }), &ctx)
+            .await;
+
+        assert!(!result.is_error);
+        assert!(
+            result.output.contains("no_channel_test_98765"),
+            "output should contain echoed text even without progress_tx, got: {}",
+            result.output
         );
     }
 }

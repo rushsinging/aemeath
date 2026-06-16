@@ -445,6 +445,10 @@ impl ConversationModel {
         tool_id: ToolCallId,
         message: String,
     ) -> Vec<ConversationChange> {
+        // Maximum bytes of accumulated stdout to retain for live display.
+        // Older content is trimmed to keep memory bounded for high-volume output.
+        const STREAM_CAP: usize = 4 * 1024;
+
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
         // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
@@ -452,7 +456,24 @@ impl ConversationModel {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                call.activities.push(message.clone());
+                // For Bash streaming stdout: accumulate into a single activity
+                // entry so the TUI shows the full live output (up to STREAM_CAP)
+                // rather than just the latest chunk. Other tools (e.g. sub-agent
+                // status messages) use per-message push as before.
+                if call.name == "Bash" {
+                    if let Some(last) = call.activities.last_mut() {
+                        last.push_str(&message);
+                        // Trim oldest content if over cap (keep the tail).
+                        if last.len() > STREAM_CAP {
+                            let start = last.len() - STREAM_CAP;
+                            *last = last[start..].to_string();
+                        }
+                    } else {
+                        call.activities.push(message.clone());
+                    }
+                } else {
+                    call.activities.push(message.clone());
+                }
             }
         }
         self.agent_progress.push(AgentProgressEntry::new(
