@@ -5,8 +5,8 @@
 
 use crate::business::compact::micro::microcompact;
 use crate::business::compact::restore::{fix_role_alternation, sanitize_tool_pairs};
-use crate::business::compact::truncate::safe_slice;
 use share::message::{ContentBlock, Message, Role};
+use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
 // 向后兼容的 re-export
@@ -151,7 +151,7 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
                 ContentBlock::ToolUse { name, input, .. } => {
                     let input_str = input.to_string();
                     let truncated = if input_str.len() > 500 {
-                        format!("{}...", safe_slice(&input_str, 500))
+                        format!("{}...", slice_head(&input_str, 500))
                     } else {
                         input_str
                     };
@@ -166,7 +166,7 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
                         _ => content.to_string(),
                     };
                     let truncated = if content_str.len() > 1000 {
-                        format!("{}...", safe_slice(&content_str, 1000))
+                        format!("{}...", slice_head(&content_str, 1000))
                     } else {
                         content_str
                     };
@@ -213,7 +213,7 @@ pub fn build_summary_text(messages: &[Message]) -> String {
         let text = msg.text_content();
         if !text.is_empty() {
             let truncated = if text.len() > 200 {
-                format!("{}...", safe_slice(&text, 200))
+                format!("{}...", slice_head(&text, 200))
             } else {
                 text
             };

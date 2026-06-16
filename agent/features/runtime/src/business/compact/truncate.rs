@@ -3,6 +3,7 @@
 //! 超长工具输出会在加入对话历史之前被截断为预览头 + 尾部。
 
 use share::message::{ContentBlock, Message};
+use share::string_idx::{slice_head, slice_tail};
 
 /// 单条工具结果在截断前的最大字符数。
 pub const MAX_TOOL_RESULT_CHARS: usize = 50_000;
@@ -23,8 +24,8 @@ pub fn truncate_tool_result(output: &str) -> String {
         return output.to_string();
     }
 
-    let head = safe_slice(output, TRUNCATION_PREVIEW_HEAD);
-    let tail = safe_slice_tail(output, TRUNCATION_PREVIEW_TAIL);
+    let head = slice_head(output, TRUNCATION_PREVIEW_HEAD);
+    let tail = slice_tail(output, TRUNCATION_PREVIEW_TAIL);
 
     format!(
         "{head}\n\n[... truncated {} chars, showing first {} + last {} chars ...]\n\n{tail}",
@@ -89,82 +90,10 @@ pub fn truncate_tool_results(results: &mut [(String, String, bool, Vec<share::to
     }
 }
 
-/// 从字符串开头安全切片，确保不拆分 UTF-8 字符边界。
-pub fn safe_slice(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
-/// 从字符串末尾安全切片。
-pub fn safe_slice_tail(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut start = s.len() - max_bytes;
-    while start < s.len() && !s.is_char_boundary(start) {
-        start += 1;
-    }
-    &s[start..]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use share::message::{ContentBlock, Message};
-
-    // ── safe_slice ──────────────────────────────────────────────
-
-    #[test]
-    fn safe_slice_short_string_unchanged() {
-        assert_eq!(safe_slice("hello", 10), "hello");
-    }
-
-    #[test]
-    fn safe_slice_ascii_exact_truncation() {
-        assert_eq!(safe_slice("hello world", 5), "hello");
-    }
-
-    #[test]
-    fn safe_slice_multibyte_no_char_split() {
-        // "你好世界" — each char is 3 bytes in UTF-8
-        let s = "你好世界";
-        // 4 bytes falls inside the second Chinese character (bytes 3-5)
-        // should back up to byte 3, returning "你"
-        assert_eq!(safe_slice(s, 4), "你");
-    }
-
-    #[test]
-    fn safe_slice_at_char_boundary_returns_directly() {
-        let s = "abc你好";
-        // byte 3 is exactly the boundary before '你'
-        assert_eq!(safe_slice(s, 3), "abc");
-    }
-
-    // ── safe_slice_tail ─────────────────────────────────────────
-
-    #[test]
-    fn safe_slice_tail_short_string_unchanged() {
-        assert_eq!(safe_slice_tail("hello", 10), "hello");
-    }
-
-    #[test]
-    fn safe_slice_tail_ascii_truncation() {
-        assert_eq!(safe_slice_tail("hello world", 5), "world");
-    }
-
-    #[test]
-    fn safe_slice_tail_multibyte_no_char_split() {
-        let s = "你好世界";
-        // 4 bytes from the end: bytes 7-11 ("界" is bytes 9-11)
-        // should skip forward to char boundary at byte 9, returning "界"
-        assert_eq!(safe_slice_tail(s, 4), "界");
-    }
 
     // ── truncate_tool_result ────────────────────────────────────
 
