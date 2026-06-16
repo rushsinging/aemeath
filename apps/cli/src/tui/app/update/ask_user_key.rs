@@ -167,6 +167,7 @@ impl App {
                     });
                 self.mark_output_dirty();
                 self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
+                self.maybe_auto_submit_ask_user();
             }
             KeyCode::Esc => {
                 // 取消整个 batch
@@ -235,6 +236,14 @@ impl App {
         Some(UpdateResult::none())
     }
 
+    /// 单问题 batch 被 model 直接 confirmed 时自动提交。
+    fn maybe_auto_submit_ask_user(&mut self) {
+        let snap = self.model.conversation.ask_user_snapshot();
+        if snap.as_ref().map(|s| s.confirmed).unwrap_or(false) {
+            self.submit_ask_user_batch();
+        }
+    }
+
     /// 提交整个 batch：收集所有答案并回传。
     fn submit_ask_user_batch(&mut self) {
         let state = self.input.ask_user_state.take().unwrap();
@@ -297,6 +306,7 @@ impl App {
                         .apply(ConversationIntent::AnswerCurrentAskUser { answer: text });
                     self.mark_output_dirty();
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
+                    self.maybe_auto_submit_ask_user();
                 }
             }
             KeyCode::Esc => {

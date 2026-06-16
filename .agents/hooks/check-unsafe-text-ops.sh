@@ -22,6 +22,10 @@ while IFS= read -r -d '' file; do
       apps/cli/src/tui/display/safe_text.rs)
           continue
           ;;
+      # split_at_ascii 是安全的 helper（只计数字节值 < 128 的 ASCII 字符）
+      apps/cli/src/tui/text.rs)
+          continue
+          ;;
     esac
 
     # 检测会因「字节偏移落在非 char 边界」而 panic 的文本操作：
@@ -55,6 +59,6 @@ if [[ "$COUNT" -eq 0 ]]; then
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then
-  echo "Unsafe CLI text/index operations found ($COUNT). Use crate::tui::render::display::safe_text helpers (truncate_ellipsis / truncate_unicode_width / safe_byte_prefix / safe_str_slice_by_char), or add an explicit 'allow unsafe_text_op: <结构性边界理由>' comment when the offsets are provably on char boundaries (e.g. derived from an ASCII delimiter search). NEVER 用「输入是 ASCII」搪塞动态文本。"
+  echo "Unsafe CLI text/index operations found ($COUNT). Use safe helpers: strip_prefix/strip_suffix, get() with Option, floor_char_boundary(), split_at_ascii(). For Vec slice (not str slice), add explicit 'allow unsafe_text_op: Vec slice' comment. NEVER 用「输入是 ASCII」搪塞动态文本。"
   exit 1
 fi

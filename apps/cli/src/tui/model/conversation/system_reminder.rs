@@ -5,11 +5,12 @@ const CLOSE_TAG: &str = "</system-reminder>";
 
 pub fn strip_system_reminder_envelope(text: &str) -> Cow<'_, str> {
     let trimmed = text.trim();
-    if !trimmed.starts_with(OPEN_TAG) || !trimmed.ends_with(CLOSE_TAG) {
+    let Some(after_open) = trimmed.strip_prefix(OPEN_TAG) else {
         return Cow::Borrowed(text);
-    }
-
-    let inner = &trimmed[OPEN_TAG.len()..trimmed.len() - CLOSE_TAG.len()]; // allow unsafe_text_op: ASCII system-reminder tag boundaries validated by starts_with/ends_with
+    };
+    let Some(inner) = after_open.strip_suffix(CLOSE_TAG) else {
+        return Cow::Borrowed(text);
+    };
     Cow::Owned(inner.trim().to_string())
 }
 
