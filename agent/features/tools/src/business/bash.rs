@@ -374,4 +374,122 @@ mod tests {
             "content[display] 应为 stdout 内容"
         );
     }
+
+    #[tokio::test]
+    async fn test_bash_streams_stdout_via_progress_tx() {
+        use tokio::sync::mpsc;
+
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
+        let ctx = ToolExecutionContext {
+            cwd: workspace.path().to_path_buf(),
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            memory_config: share::config::MemoryConfig::default(),
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: Some(tx),
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(
+                json!({ "command": "echo progress_stream_test_marker" }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!result.is_error);
+
+        // Drop ctx (which owns the original Sender) so that once the spawned
+        // stdout reader finishes and drops its clone, the channel is fully closed
+        // and rx.recv() will return None.
+        drop(ctx);
+
+        // Collect all progress events
+        let mut events = Vec::new();
+        while let Some(ev) = rx.recv().await {
+            events.push(ev);
+        }
+
+        assert!(
+            !events.is_empty(),
+            "progress_tx should have received at least one event"
+        );
+
+        // All collected text fragments concatenated should contain the echoed marker
+        let all_text: String = events
+            .iter()
+            .filter_map(|ev| match &ev.kind {
+                AgentProgressKind::Message { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            all_text.contains("progress_stream_test_marker"),
+            "progress events should contain echoed output, got: {:?}",
+            events
+        );
+
+        // No event should contain the internal CWD marker
+        for ev in &events {
+            if let AgentProgressKind::Message { text } = &ev.kind {
+                assert!(
+                    !text.contains("__AEMEATH_CWD__"),
+                    "progress event must not contain __AEMEATH_CWD__ marker: {}",
+                    text
+                );
+            }
+        }
+
+        // Sequence must be monotonically increasing and > 0
+        for ev in &events {
+            assert!(
+                ev.sequence > 0,
+                "progress event sequence must be > 0, got {}",
+                ev.sequence
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bash_no_progress_tx_still_works() {
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            cwd: workspace.path().to_path_buf(),
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            memory_config: share::config::MemoryConfig::default(),
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(json!({ "command": "echo no_channel_test_98765" }), &ctx)
+            .await;
+
+        assert!(!result.is_error);
+        assert!(
+            result.output.contains("no_channel_test_98765"),
+            "output should contain echoed text even without progress_tx, got: {}",
+            result.output
+        );
+    }
 }
