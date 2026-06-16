@@ -31,14 +31,18 @@ fn current_turn_for_log() -> Option<usize> {
     }
 }
 
+/// 从 panic payload 提取可读消息，供 panic hook、catch_unwind 兜底、后台 task 兜底复用。
+pub fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_string())
+}
+
 pub fn init_panic_hook() {
     std::panic::set_hook(Box::new(move |info| {
-        let payload = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "unknown panic".to_string());
+        let payload = payload_message(info.payload());
 
         let location = info
             .location()
@@ -77,4 +81,27 @@ pub fn init_panic_hook() {
             eprintln!("[PANIC] {} at {}", payload, location);
         }
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_payload_message_str() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(payload_message(payload.as_ref()), "boom");
+    }
+
+    #[test]
+    fn test_payload_message_string() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("kaboom"));
+        assert_eq!(payload_message(payload.as_ref()), "kaboom");
+    }
+
+    #[test]
+    fn test_payload_message_unknown() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42u32);
+        assert_eq!(payload_message(payload.as_ref()), "unknown panic");
+    }
 }
