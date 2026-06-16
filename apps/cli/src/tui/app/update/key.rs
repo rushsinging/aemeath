@@ -212,6 +212,11 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Up) => {
                 if completion_visible {
                     self.handle_input_intent(InputIntent::SelectCompletionPrevious);
+                } else if !self.input.input_queue.is_empty() {
+                    // input queue 非空：全部恢复到 input area（\n 连接），清空 queue 和显示块
+                    let queued = self.input.drain_queue();
+                    self.handle_input_intent(InputIntent::ReplaceText(queued.join("\n")));
+                    self.clear_queued_submission_echo();
                 } else {
                     self.handle_input_intent(InputIntent::MoveCursorUp);
                 }
