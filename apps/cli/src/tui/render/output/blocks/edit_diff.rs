@@ -33,21 +33,15 @@ pub struct EditDiff {
 pub fn parse_edit_diff(result: &str) -> Option<EditDiff> {
     let first = find_diff_marker(result)?;
     let after_first = first.end;
-    let second = find_diff_marker(
-        &result[after_first..], // allow unsafe_text_op: ASCII marker boundary
-    )?;
+    let second = find_diff_marker(result.get(after_first..)?)?;
     let second_start = after_first + second.start;
     let second_end = after_first + second.end;
 
     Some(EditDiff {
-        old: strip_edge_newlines(
-            &result[after_first..second_start], // allow unsafe_text_op: ASCII marker boundaries
-        )
-        .to_string(),
-        new: strip_edge_newlines(
-            &result[second_end..], // allow unsafe_text_op: ASCII marker boundary
-        )
-        .to_string(),
+        old: strip_edge_newlines(result.get(after_first..second_start)?)
+            .to_string(),
+        new: strip_edge_newlines(result.get(second_end..)?)
+            .to_string(),
         start_line: first.start_line,
     })
 }
@@ -60,14 +54,10 @@ struct DiffMarker {
 
 fn find_diff_marker(text: &str) -> Option<DiffMarker> {
     let start = text.find(DIFF_MARKER_PREFIX)?;
-    let tail = {
-        &text[start + DIFF_MARKER_PREFIX.len()..] // allow unsafe_text_op: ASCII marker prefix boundary
-    };
+    let tail = text.get(start + DIFF_MARKER_PREFIX.len()..)?;
     let suffix_start = tail.find(DIFF_MARKER_SUFFIX)?;
     let relative_end = DIFF_MARKER_PREFIX.len() + suffix_start + DIFF_MARKER_SUFFIX.len();
-    let marker = {
-        &text[start..start + relative_end] // allow unsafe_text_op: ASCII marker boundaries
-    };
+    let marker = text.get(start..start + relative_end)?;
     let start_line = parse_diff_marker_start_line(marker)?;
     Some(DiffMarker {
         start,

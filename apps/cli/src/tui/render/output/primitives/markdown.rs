@@ -8,6 +8,7 @@
 use crate::tui::render::output::markdown as md;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::theme;
+use crate::tui::text::split_at_ascii;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -110,9 +111,7 @@ fn strip_blockquote(line: &str) -> Option<(usize, &str)> {
 /// - 无序：`- ` / `* ` / `+ ` → 统一 `BULLET`。
 /// - 有序：`N. ` / `N) ` → 原样保留 `N. `。
 fn strip_list_item(line: &str) -> Option<(String, String, &str)> {
-    let indent_len = line.len() - line.trim_start().len();
-    // allow unsafe_text_op: indent_len = trim_start 前缀字节长度，恒为 char 边界
-    let (indent, rest) = line.split_at(indent_len); // allow unsafe_text_op
+    let (indent, rest) = split_at_ascii(line, |c| c.is_ascii_whitespace());
     if let Some(body) = rest
         .strip_prefix("- ")
         .or_else(|| rest.strip_prefix("* "))
@@ -121,10 +120,8 @@ fn strip_list_item(line: &str) -> Option<(String, String, &str)> {
         return Some((indent.to_string(), BULLET.to_string(), body));
     }
     // 有序列表：开头若干数字 + `.`/`)` + 空格。
-    let digit_len = rest.chars().take_while(|c| c.is_ascii_digit()).count();
-    if digit_len > 0 {
-        // digit_len 为 ASCII 数字字节数，是合法字符边界。
-        let (digits, after) = rest.split_at(digit_len); // allow unsafe_text_op
+    let (digits, after) = split_at_ascii(rest, |c| c.is_ascii_digit());
+    if !digits.is_empty() {
         for sep in [". ", ") "] {
             if let Some(body) = after.strip_prefix(sep) {
                 return Some((indent.to_string(), format!("{digits}. "), body));
