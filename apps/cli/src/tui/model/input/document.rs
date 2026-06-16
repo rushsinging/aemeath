@@ -5,7 +5,6 @@ pub struct InputDocument {
     pub buffer: String,
     pub cursor: usize,
     pub copied_text_spans: Vec<CopiedTextSpan>,
-    next_copied_text_index: usize,
 }
 
 impl InputDocument {
@@ -266,14 +265,15 @@ impl InputDocument {
     }
 
     fn insert_copied_text(&mut self, original: &str) {
-        self.next_copied_text_index += 1;
-        let placeholder = format!("[Copied Text {}]", self.next_copied_text_index);
+        let trimmed = original.trim();
+        let line_count = non_empty_line_count(trimmed);
+        let placeholder = format!("[Copied {} lines]", line_count);
         let cursor = clamp_to_char_boundary(&self.buffer, self.cursor.min(self.buffer.len()));
         self.buffer.insert_str(cursor, &placeholder);
         self.shift_spans_for_insert(cursor, placeholder.len());
         let end = cursor + placeholder.len();
         self.copied_text_spans
-            .push(CopiedTextSpan::new(placeholder, original, cursor, end));
+            .push(CopiedTextSpan::new(placeholder, trimmed, cursor, end));
         self.cursor = end;
     }
 
@@ -315,7 +315,14 @@ impl InputDocument {
 }
 
 fn should_collapse_paste(text: &str) -> bool {
-    text.matches('\n').count() >= 2
+    non_empty_line_count(text.trim()) > 3
+}
+
+fn non_empty_line_count(text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    text.lines().filter(|l| !l.trim().is_empty()).count()
 }
 
 fn clamp_to_char_boundary(text: &str, cursor: usize) -> usize {

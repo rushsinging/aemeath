@@ -111,7 +111,7 @@ mod tests {
         let mut app = test_app();
         app.model
             .input
-            .apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+            .apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
         let (ui_tx, _ui_rx) = mpsc::channel(1);
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
@@ -122,17 +122,17 @@ mod tests {
             matches!(
                 block,
                 crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. }
-                    if text == "a\nb\nc"
+                    if text == "a\nb\nc\nd"
             )
         });
         assert!(
             has_original_user_message,
-            "首轮 user message 应渲染复制原文，而不是 [Copied Text n] 占位符"
+            "首轮 user message 应渲染复制原文，而不是 [Copied N lines] 占位符"
         );
         assert!(app
             .chat
             .messages
             .iter()
-            .any(|message| { message.role == "user" && message.text_content() == "a\nb\nc" }));
+            .any(|message| { message.role == "user" && message.text_content() == "a\nb\nc\nd" }));
     }
 }

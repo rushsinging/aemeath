@@ -84,9 +84,9 @@ fn test_input_model_replace_history_clears_active_selection() {
 #[test]
 fn test_input_model_collapses_long_pasted_text_and_submits_original() {
     let mut model = InputModel::default();
-    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+    model.apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
 
-    assert_eq!(model.document.buffer, "[Copied Text 1]");
+    assert_eq!(model.document.buffer, "[Copied 4 lines]");
 
     let changes = model.apply(InputIntent::Submit);
     let submission = changes
@@ -96,8 +96,8 @@ fn test_input_model_collapses_long_pasted_text_and_submits_original() {
             _ => None,
         })
         .expect("应产生提交变更");
-    assert_eq!(submission.text, "a\nb\nc");
-    assert_eq!(submission.display_text, "[Copied Text 1]");
+    assert_eq!(submission.text, "a\nb\nc\nd");
+    assert_eq!(submission.display_text, "[Copied 4 lines]");
 }
 
 #[test]
@@ -106,12 +106,20 @@ fn test_input_model_does_not_collapse_two_line_paste() {
     model.apply(InputIntent::InsertPastedText("a\nb".to_string()));
 
     assert_eq!(model.document.buffer, "a\nb");
+
+#[test]
+fn test_input_model_does_not_collapse_three_line_paste() {
+    let mut model = InputModel::default();
+    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+
+    assert_eq!(model.document.buffer, "a\nb\nc");
+}
 }
 
 #[test]
 fn test_input_model_backspace_deletes_copied_text_as_atomic_block() {
     let mut model = InputModel::default();
-    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+    model.apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
 
     model.apply(InputIntent::DeleteBackward);
 
@@ -123,7 +131,7 @@ fn test_input_model_backspace_deletes_copied_text_as_atomic_block() {
 #[test]
 fn test_input_model_backspace_inside_copied_text_deletes_atomic_block() {
     let mut model = InputModel::default();
-    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+    model.apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
     model.apply(InputIntent::MoveCursor(5));
 
     model.apply(InputIntent::DeleteBackward);
@@ -136,7 +144,7 @@ fn test_input_model_backspace_inside_copied_text_deletes_atomic_block() {
 #[test]
 fn test_input_model_ctrl_backspace_deletes_copied_text_as_atomic_block() {
     let mut model = InputModel::default();
-    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+    model.apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
 
     model.apply(InputIntent::DeleteWordBeforeCursor);
 
@@ -148,12 +156,12 @@ fn test_input_model_ctrl_backspace_deletes_copied_text_as_atomic_block() {
 #[test]
 fn test_input_model_copied_text_counter_increments_per_long_paste() {
     let mut model = InputModel::default();
-    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+    model.apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
     model.apply(InputIntent::InsertText(" ".to_string()));
-    model.apply(InputIntent::InsertPastedText("d\ne\nf".to_string()));
+    model.apply(InputIntent::InsertPastedText("d\ne\nf\ng".to_string()));
 
-    assert_eq!(model.document.buffer, "[Copied Text 1] [Copied Text 2]");
-    assert_eq!(model.document.expand_copied_text(), "a\nb\nc d\ne\nf");
+    assert_eq!(model.document.buffer, "[Copied 4 lines] [Copied 4 lines]");
+    assert_eq!(model.document.expand_copied_text(), "a\nb\nc\nd d\ne\nf\ng");
 }
 
 #[test]
