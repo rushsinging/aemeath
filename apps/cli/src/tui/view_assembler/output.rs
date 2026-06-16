@@ -498,7 +498,7 @@ fn display_text_for_tool_result(
     content: &serde_json::Value,
 ) -> String {
     // 建议同步（#196）：Bash/Read 工具结果在进入 TUI 渲染前把 `\t` 展开为 4 空格，
-    // 避免 ratatui `Buffer::set_stringn` 把 `\t` 当控制字符过滤带来的列宽不一致。
+    // 避免 Buffer::set_stringn 把 `\t` 当控制字符过滤带来的列宽不一致。
     // 不用 `sanitize_for_display` 是因为它会同时剥掉 `\n`，破坏多行 Read 输出。
     if matches!(tool_name, Some("EnterWorktree" | "ExitWorktree")) {
         let message = content
