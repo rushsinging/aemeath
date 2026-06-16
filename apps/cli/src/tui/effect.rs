@@ -5,3 +5,4 @@ pub mod completion;
 pub mod effect;
 pub mod executor;
 pub mod session;
+pub mod spawn_guard;
