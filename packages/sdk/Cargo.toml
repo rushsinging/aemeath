@@ -11,3 +11,4 @@ serde_json = { workspace = true }
 bitflags = "2"
 uuid = { version = "1", features = ["v5", "v7", "serde"] }
 thiserror = { workspace = true }
+utils = { path = "../global/utils" }

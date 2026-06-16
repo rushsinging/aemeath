@@ -66,6 +66,7 @@ allowed_dependencies = {
     "log",
     "logging",
     "unicode-width",
+    "utils",
 }
 
 

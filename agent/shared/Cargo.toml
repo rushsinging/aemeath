@@ -17,4 +17,5 @@ uuid = { version = "1", features = ["v7"] }
 log = "0.4"
 unicode-width = "0.2"
 logging = { path = "../../packages/global/logging" }
+utils = { path = "../../packages/global/utils" }
 
