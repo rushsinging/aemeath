@@ -1,4 +1,4 @@
-use crate::business::compact::safe_slice;
+use share::string_idx::slice_head;
 
 use share::message::Message;
 
@@ -29,7 +29,7 @@ impl<'a> SubAgentRun<'a> {
                 (self.progress)(Some(turn_number), &format!("  → {}({})", name, input_short));
             }
             let out_short = if output.len() > 300 {
-                format!("{}...[{} chars]", safe_slice(output, 300), output.len())
+                format!("{}...[{} chars]", slice_head(output, 300), output.len())
             } else {
                 output.clone()
             };

@@ -128,6 +128,40 @@ impl StrSlice for str {
 }
 
 // ---------------------------------------------------------------------------
+// 字符边界安全截断 — 全仓单一实现
+// ---------------------------------------------------------------------------
+
+/// 从开头保留至多 `max_bytes` 字节，终点向前对齐到字符边界（不拆分 UTF-8）。
+///
+/// 用于头部预览截断。`max_bytes` 落在多字节字符内部时回退到该字符起始，
+/// 杜绝 "byte index N is not a char boundary" panic。
+pub fn slice_head(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// 从末尾保留至多 `max_bytes` 字节，起点向后对齐到字符边界（不拆分 UTF-8）。
+///
+/// 用于流式输出的 keep-tail 截断。`s.len() - max_bytes` 落在多字节字符内部时
+/// 向后移到下一个字符起始，杜绝字符边界 panic。
+pub fn slice_tail(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut start = s.len() - max_bytes;
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
+
+// ---------------------------------------------------------------------------
 // 测试：跨类型转换 + StrSlice + 混合场景
 // ---------------------------------------------------------------------------
 
@@ -322,5 +356,38 @@ mod tests {
         let col = char_to_col(s, CharIdx::new(100));
         // 走到末尾，只累计到字符串末尾
         assert_eq!(col.as_usize(), 2);
+    }
+
+    // -- slice_head / slice_tail 边界安全截断 --
+
+    #[test]
+    fn test_slice_head_ascii_and_short() {
+        assert_eq!(slice_head("hello", 3), "hel");
+        assert_eq!(slice_head("hi", 10), "hi"); // 短于上限原样返回
+    }
+
+    #[test]
+    fn test_slice_head_cjk_rounds_down() {
+        // "你好世界" 每字 3 字节；max=4 落在 '好'(字节3..6) 内 → 回退到 "你"
+        assert_eq!(slice_head("你好世界", 4), "你");
+        assert_eq!(slice_head("你好世界", 6), "你好"); // 正好边界
+    }
+
+    #[test]
+    fn test_slice_tail_cjk_rounds_up() {
+        // max=4 → start=8 落在 '世'(6..9) 内 → 前移到 9 → "界"
+        assert_eq!(slice_tail("你好世界", 4), "界");
+        assert_eq!(slice_tail("你好世界", 6), "世界"); // 正好边界
+        assert_eq!(slice_tail("hi", 10), "hi");
+    }
+
+    #[test]
+    fn test_slice_head_tail_never_panic() {
+        // 回归：任意字节上限都不 panic（覆盖所有切点落在多字节字符内的情况）
+        let s = "a你b好c世";
+        for n in 0..=s.len() {
+            let _ = slice_head(s, n);
+            let _ = slice_tail(s, n);
+        }
     }
 }

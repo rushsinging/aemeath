@@ -6,11 +6,12 @@ use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
-use crate::business::compact::{safe_slice, truncate_tool_result};
+use crate::business::compact::truncate_tool_result;
 use logging::UnifiedLogger;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
+use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
 use tools::api::ToolExecutionContext;
@@ -232,7 +233,7 @@ impl<'a> SubAgentRun<'a> {
             let trimmed = text.trim();
             if !trimmed.is_empty() {
                 let short = if trimmed.len() > 300 {
-                    format!("{}...", safe_slice(trimmed, 300))
+                    format!("{}...", slice_head(trimmed, 300))
                 } else {
                     trimmed.to_string()
                 };
@@ -265,7 +266,7 @@ impl<'a> SubAgentRun<'a> {
             .map(|call| {
                 let input_summary = call.input.to_string();
                 let input_short = if input_summary.len() > 200 {
-                    format!("{}...", safe_slice(&input_summary, 200))
+                    format!("{}...", slice_head(&input_summary, 200))
                 } else {
                     input_summary
                 };
