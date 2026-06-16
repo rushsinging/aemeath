@@ -21,6 +21,31 @@ pub(super) async fn chat_impl(
     let queue_drain = input.queue_drain.clone();
     let input_events = input.input_events.clone();
     let messages: Vec<_> = input.messages.into_iter().map(message_from_sdk).collect();
+
+    // 前置校验：如果消息包含图片但当前模型不支持图片输入，返回清晰错误
+    let has_image = messages.iter().any(|msg| {
+        msg.content
+            .iter()
+            .any(|block| matches!(block, share::message::ContentBlock::Image { .. }))
+    });
+    if has_image {
+        let supports_image = me
+            .inner
+            .resolved_model
+            .model
+            .input
+            .iter()
+            .any(|t| t == "image");
+        if !supports_image {
+            let model_id = &me.inner.resolved_model.model.id;
+            let provider = &me.inner.resolved_model.source_key;
+            return Err(SdkError::Internal(format!(
+                "当前模型 {provider}/{model_id} 不支持图片输入。\
+                 请切换到支持图片的模型（如 MiniMax/MiniMax-M3）或使用 /clear-images 清除待发送图片后重试。"
+            )));
+        }
+    }
+
     *me.inner
         .current_messages
         .lock()

@@ -206,8 +206,10 @@ fn user_message_with_images(text: String, image_paths: Vec<String>) -> Message {
         return Message::user(text);
     }
 
-    log::warn!(target: "runtime::input_gate",
-        "queued ChatInputEvent image_paths are not decoded in runtime gate yet; appending text only (image_count={})",
+    // 图片已在首轮消息中通过 ChatMessage::user_with_images() 发送；
+    // 排队消息（processing 期间追加）不携带图片数据。
+    log::info!(target: "runtime::input_gate",
+        "queued message has {} image_paths (ignored, images only sent with first message)",
         image_paths.len()
     );
     Message::user(text)
