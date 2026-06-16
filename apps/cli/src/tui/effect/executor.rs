@@ -184,7 +184,7 @@ impl App {
         };
         let messages = self.chat.messages.clone();
         let tx = ui_tx.clone();
-        tokio::spawn(async move {
+        crate::tui::effect::spawn_guard::spawn_guarded("reflection", async move {
             if foreground {
                 let _ = tx.send(UiEvent::ReflectionStarted).await;
             }
@@ -212,7 +212,7 @@ impl App {
             return;
         };
         let tx = ui_tx.clone();
-        tokio::spawn(async move {
+        crate::tui::effect::spawn_guard::spawn_guarded("apply_reflection", async move {
             let result = agent_client
                 .apply_reflection(output.clone())
                 .await

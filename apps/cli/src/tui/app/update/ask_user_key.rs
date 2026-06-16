@@ -114,9 +114,18 @@ impl App {
                 self.toggle_ask_user_selected(cursor);
             }
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                let state = self.input.ask_user_state.as_ref().unwrap();
                 let active_index = snap.active_index;
-                let active_item = &state.items[active_index];
+                // items（self.input）与 active_index（conversation snapshot）是两个真相源，
+                // 不同步时越界——防御性返回，避免 panic 退出整个 TUI。
+                let Some(active_item) = self
+                    .input
+                    .ask_user_state
+                    .as_ref()
+                    .and_then(|s| s.items.get(active_index))
+                else {
+                    crate::tui::log_warn!("ask_user active_index {} 越界，跳过提交", active_index);
+                    return Some(UpdateResult::none());
+                };
 
                 let answer = if cursor >= llm_option_count && options_count > 0 {
                     // "Type something..." 被选中 → 切换到自由输入子态
@@ -379,5 +388,20 @@ impl App {
             ),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Enter 提交路径用 `items.get(active_index)` 替代裸索引 `items[active_index]`：
+    // active_index（conversation snapshot）与 items（input state）是两个真相源，
+    // 越界时 get 返回 None、走 let-else 防御分支，而非数组越界 panic。
+    // 此处验证该防御所依赖的 Vec::get 语义。
+    #[test]
+    fn test_items_get_out_of_bounds_returns_none() {
+        let items: Vec<u8> = vec![1, 2, 3];
+        assert!(items.get(99).is_none());
+        assert!(items.get(3).is_none());
+        assert_eq!(items.get(0), Some(&1));
     }
 }
