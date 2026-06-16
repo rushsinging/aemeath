@@ -13,6 +13,11 @@ use crate::tui::render::output::selection_overlay::{apply_selection_overlay, Sel
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::{OutputViewState, SelectionAnchor};
 
+/// 输出区内容为滚动条预留的列数：滚动条本身（1 列）+ 与内容之间的间距（2 列）。
+/// 此常量同时用于文档预换行宽度（`output_document_width`）与实际渲染区域
+/// （`content_area_for_scrollbar`），两侧 MUST 保持同步，避免二次折行。
+pub(crate) const SCROLLBAR_RESERVE_COLS: u16 = 3;
+
 impl OutputArea {
     /// 渲染输出区域
     pub fn render(
@@ -212,7 +217,7 @@ pub(crate) fn content_area_for_scrollbar(area: Rect, needs_scrollbar: bool) -> R
     Rect {
         x: area.x,
         y: area.y,
-        width: area.width.saturating_sub(5).max(1),
+        width: area.width.saturating_sub(SCROLLBAR_RESERVE_COLS).max(1),
         height: area.height,
     }
 }
@@ -358,7 +363,10 @@ mod tests {
 
         assert_eq!(
             content_area.width,
-            area_rect.width.saturating_sub(5).max(1),
+            area_rect
+                .width
+                .saturating_sub(SCROLLBAR_RESERVE_COLS)
+                .max(1),
             "输出文档预换行宽度必须等于 Paragraph 实际渲染宽度，避免二次折行"
         );
     }

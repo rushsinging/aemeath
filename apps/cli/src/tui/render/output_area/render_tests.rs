@@ -2,6 +2,7 @@ use super::render::content_area_for_scrollbar;
 use super::OutputArea;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
 use crate::tui::render::output_area::selection::output_selection_view_for_test;
+use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::render::theme;
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::OutputViewState;
@@ -50,7 +51,10 @@ fn test_content_area_width_matches_output_document_width_when_scrollbar_visible(
 
     assert_eq!(
         content_area.width,
-        area_rect.width.saturating_sub(5).max(1),
+        area_rect
+            .width
+            .saturating_sub(SCROLLBAR_RESERVE_COLS)
+            .max(1),
         "输出文档预换行宽度必须等于 Paragraph 实际渲染宽度，避免二次折行"
     );
 }
