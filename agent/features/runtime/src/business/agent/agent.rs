@@ -253,6 +253,57 @@ impl<'a> Agent<'a> {
             .collect()
     }
 
+    /// Execute a single tool call with a custom context (for streaming support).
+    ///
+    /// Mirrors the sequential path of `execute_tools` but allows the caller to
+    /// inject a modified `ToolExecutionContext` (e.g., with `progress_tx` set
+    /// for stdout streaming). Reuses `call_tool_with_timeout` for timeout/cancel.
+    pub async fn execute_one_with_ctx(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolExecutionContext,
+    ) -> ToolResultTuple {
+        if ctx.cancel.is_cancelled() {
+            return (
+                call.id.clone(),
+                call.provider_id.clone(),
+                "Cancelled by user".to_string(),
+                serde_json::json!({ "text": "Cancelled by user" }),
+                true,
+                Vec::new(),
+            );
+        }
+        if let Some(tool) = self.registry.get(&call.name) {
+            match call_tool_with_timeout(tool, &call.name, call.input.clone(), ctx).await {
+                Ok(result) => (
+                    call.id.clone(),
+                    call.provider_id.clone(),
+                    result.output,
+                    result.content,
+                    result.is_error,
+                    result.images,
+                ),
+                Err(message) => (
+                    call.id.clone(),
+                    call.provider_id.clone(),
+                    message.clone(),
+                    serde_json::json!({ "text": message }),
+                    true,
+                    Vec::new(),
+                ),
+            }
+        } else {
+            (
+                call.id.clone(),
+                call.provider_id.clone(),
+                format!("unknown tool: {}", call.name),
+                serde_json::json!({ "text": format!("unknown tool: {}", call.name) }),
+                true,
+                Vec::new(),
+            )
+        }
+    }
+
     /// Execute only the given tool calls (subset of all calls)
     pub async fn execute_tools_filtered(&self, tool_calls: &[&ToolCall]) -> Vec<ToolResultTuple> {
         let owned: Vec<ToolCall> = tool_calls
