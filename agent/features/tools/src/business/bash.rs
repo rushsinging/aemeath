@@ -3,6 +3,7 @@ mod safety;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
+use share::tool::{AgentProgressEvent, AgentProgressKind};
 
 pub use safety::is_readonly_command;
 use serde_json::Value;
@@ -114,8 +115,10 @@ impl Tool for BashTool {
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
 
+        let progress_tx = ctx.progress_tx.clone();
         let stdout_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
+            let mut sequence: usize = 0;
             if let Some(ref mut pipe) = stdout_pipe {
                 let mut tmp = [0u8; 8192];
                 loop {
@@ -126,6 +129,28 @@ impl Tool for BashTool {
                                 buf.extend_from_slice(&tmp[..n]);
                             }
                             // If over limit, keep reading (to drain the pipe) but don't store
+                            // Stream stdout chunk to TUI via progress_tx (strip internal CWD marker)
+                            if let Some(tx) = &progress_tx {
+                                let text = String::from_utf8_lossy(&tmp[..n]).to_string();
+                                // Strip the internal CWD marker (__AEMEATH_CWD__=...) from streamed
+                                // output. The marker is appended to stdout for internal workspace
+                                // tracking; it must not appear in the TUI.  If the marker appears
+                                // mid-chunk, keep the text that precedes it.
+                                let display_text = match text.find("__AEMEATH_CWD__") {
+                                    Some(pos) => &text[..pos],
+                                    None => &text[..],
+                                };
+                                if !display_text.trim().is_empty() {
+                                    sequence += 1;
+                                    // Best-effort: drop chunks if channel is full/closed.
+                                    let _ = tx.try_send(AgentProgressEvent {
+                                        sequence,
+                                        kind: AgentProgressKind::Message {
+                                            text: display_text.to_string(),
+                                        },
+                                    });
+                                }
+                            }
                         }
                         Err(_) => break,
                     }
