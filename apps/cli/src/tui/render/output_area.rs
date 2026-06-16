@@ -16,6 +16,7 @@ pub mod spinner;
 pub mod types;
 
 // 重新导出核心类型，方便外部使用
+pub(crate) use render::SCROLLBAR_RESERVE_COLS;
 pub use types::{SpanPart, INDENT};
 
 /// 可滚动输出区域，显示对话历史
