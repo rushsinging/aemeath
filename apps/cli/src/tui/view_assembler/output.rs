@@ -497,6 +497,9 @@ fn display_text_for_tool_result(
     fallback_output: &str,
     content: &serde_json::Value,
 ) -> String {
+    // 建议同步（#196）：Bash/Read 工具结果在进入 TUI 渲染前把 `\t` 展开为 4 空格，
+    // 避免 ratatui `Buffer::set_stringn` 把 `\t` 当控制字符过滤带来的列宽不一致。
+    // 不用 `sanitize_for_display` 是因为它会同时剥掉 `\n`，破坏多行 Read 输出。
     if matches!(tool_name, Some("EnterWorktree" | "ExitWorktree")) {
         let message = content
             .get("message")
@@ -508,19 +511,34 @@ fn display_text_for_tool_result(
             .filter(|value| !value.is_empty());
         match (message, branch) {
             (Some(message), Some(branch)) => {
-                return format!("{message}\n当前分支：{branch}");
+                return expand_tabs(&format!("{message}\n当前分支：{branch}"));
             }
-            (Some(message), None) => return message.to_string(),
+            (Some(message), None) => return expand_tabs(message).to_string(),
             _ => {}
         }
     }
-    content
+    let text = content
         .get("display")
         .and_then(|value| value.as_str())
         .or_else(|| content.get("message").and_then(|value| value.as_str()))
         .or_else(|| content.get("text").and_then(|value| value.as_str()))
         .map(str::to_string)
-        .unwrap_or_else(|| fallback_output.to_string())
+        .unwrap_or_else(|| fallback_output.to_string());
+    expand_tabs(&text).to_string()
+}
+
+/// 把 `\t` 展开为 4 空格（issue #196 建议同步专用）。其它控制字符与换行一律保留，
+/// 不调用 `sanitize_for_display` 以免破坏多行 tool result。
+fn expand_tabs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ch == '\t' {
+            out.push_str("    ");
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {
