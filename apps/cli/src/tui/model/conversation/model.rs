@@ -465,8 +465,7 @@ impl ConversationModel {
                         last.push_str(&message);
                         // Trim oldest content if over cap (keep the tail).
                         if last.len() > STREAM_CAP {
-                            let start = last.len() - STREAM_CAP;
-                            *last = last[start..].to_string();
+                            *last = share::string_idx::slice_tail(last, STREAM_CAP).to_string();
                         }
                     } else {
                         call.activities.push(message.clone());
