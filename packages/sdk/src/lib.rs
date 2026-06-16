@@ -51,3 +51,4 @@ pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
     StrSlice, TaskState, TaskSummary,
 };
+pub use utils::{slice_head, slice_tail};

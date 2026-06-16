@@ -15,6 +15,7 @@ members = [
     "agent/shared",
     "packages/sdk",
     "packages/global/logging",
+    "packages/global/utils",
 ]
 
 [workspace.dependencies]
