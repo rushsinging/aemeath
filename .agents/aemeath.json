@@ -22,6 +22,11 @@
         "matcher": "",
         "command": "\"{AEMEATH_PROJECT_DIR}/.agents/hooks/check-unit-tests.sh\"",
         "timeout": 600
+      },
+      {
+        "matcher": "",
+        "command": "\"{AEMEATH_PROJECT_DIR}/build_cli.sh\"",
+        "timeout": 300
       }
     ]
   }
