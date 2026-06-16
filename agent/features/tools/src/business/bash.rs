@@ -8,8 +8,12 @@ use share::tool::{AgentProgressEvent, AgentProgressKind};
 pub use safety::is_readonly_command;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
+
+// Unix: 需要从 ExitStatus 获取 signal 信息
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 /// Maximum bytes to capture from a single pipe (stdout or stderr).
 /// Prevents OOM from commands that produce massive output.
@@ -91,6 +95,11 @@ impl Tool for BashTool {
             .unwrap_or(120_000);
 
         let path_base = ctx.workspace_read().current_path_base();
+        log::debug!(
+            target: "tools::bash",
+            "executing command: path_base={:?} timeout_ms={} command={:?}",
+            path_base, timeout_ms, command
+        );
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
         let mut child = match Command::new("bash")
@@ -110,6 +119,9 @@ impl Tool for BashTool {
                 }))
             }
         };
+        // [DIAG] 记录耗时起点与子进程 PID，便于 #286 / 复现诊断
+        let start = Instant::now();
+        let child_pid = child.id();
 
         // Take stdout/stderr pipes before spawning readers
         let mut stdout_pipe = child.stdout.take();
@@ -300,7 +312,40 @@ impl Tool for BashTool {
                     }
                 }
                 let stderr = String::from_utf8_lossy(&stderr);
-                let exit_code = status.code().unwrap_or(-1);
+                let (exit_code, failure_detail) = exit_status_description(&status);
+
+                // 被信号终止时记 warn 日志，方便诊断 OOM kill / 外部 kill 等
+                let elapsed_ms = start.elapsed().as_millis();
+                if failure_detail.starts_with("signal") {
+                    log::warn!(
+                        target: "tools::bash",
+                        "command terminated by signal: {}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
+                        failure_detail,
+                        command,
+                        child_pid,
+                        path_base,
+                        elapsed_ms,
+                        stdout.len(),
+                        stderr.len(),
+                        preview(&stdout),
+                        preview(&stderr),
+                    );
+                } else {
+                    log::debug!(
+                        target: "tools::bash",
+                        "command finished: exit_code={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
+                        exit_code,
+                        command,
+                        child_pid,
+                        path_base,
+                        elapsed_ms,
+                        stdout.len(),
+                        stderr.len(),
+                        preview(&stdout),
+                        preview(&stderr),
+                    );
+                }
+
                 let mut data = serde_json::json!({
                     "stdout": stdout.to_string(),
                     "exit_code": exit_code
@@ -325,7 +370,7 @@ impl Tool for BashTool {
                     "message": if status.success() {
                         "Command executed successfully".to_string()
                     } else {
-                        format!("Command failed with exit code {exit_code}")
+                        format!("Command failed: {failure_detail}")
                     },
                     "data": data,
                 });
@@ -338,11 +383,90 @@ impl Tool for BashTool {
                     ToolResult::error_json(result_json)
                 }
             }
-            Err(e) => ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": format!("failed to execute: {e}")
-            })),
+            Err(e) => {
+                // [DIAG] wait 失败时记 warn 日志，便于 #286 诊断
+                // stdout/stderr 在此分支仍是 Vec<u8>，先用 lossy 转成字符串
+                let stdout_lossy = String::from_utf8_lossy(&stdout);
+                let stderr_lossy = String::from_utf8_lossy(&stderr);
+                log::warn!(
+                    target: "tools::bash",
+                    "wait_result failed: error={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
+                    e,
+                    command,
+                    child_pid,
+                    path_base,
+                    start.elapsed().as_millis(),
+                    stdout.len(),
+                    stderr.len(),
+                    preview(&stdout_lossy),
+                    preview(&stderr_lossy),
+                );
+                ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("failed to execute: {e}")
+                }))
+            }
         }
+    }
+}
+
+/// 从 ExitStatus 提取 (exit_code, failure_detail)。
+///
+/// - 正常退出：`exit_code` 为实际码，`failure_detail` 为 `"exit code N"`
+/// - 信号终止（Unix）：`exit_code` 为 `-1`，`failure_detail` 为 `"signal N (SIGNAME)"`
+/// - 信号终止（非 Unix）：`exit_code` 为 `-1`，`failure_detail` 为 `"unknown (no exit code)"`
+fn exit_status_description(status: &std::process::ExitStatus) -> (i32, String) {
+    if let Some(code) = status.code() {
+        return (code, format!("exit code {code}"));
+    }
+    // 进程没有正常退出码 → 被信号终止
+    #[cfg(unix)]
+    {
+        let signal = status.signal().unwrap_or(0);
+        let sig_name = signal_name(signal);
+        (
+            -1,
+            format!("signal {signal} ({sig_name})"),
+        )
+    }
+    #[cfg(not(unix))]
+    {
+        (-1, "unknown (no exit code)".to_string())
+    }
+}
+
+/// 将常见 Unix signal 编号映射为可读名称（覆盖最常见值，未知返回 "UNKNOWN"）。
+fn signal_name(sig: i32) -> &'static str {
+    match sig {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        4 => "SIGILL",
+        6 => "SIGABRT",
+        8 => "SIGFPE",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
+        15 => "SIGTERM",
+        _ => "UNKNOWN",
+    }
+}
+
+/// 截断字符串到 PREVIEW_MAX 字节（按 char boundary），超长时附加截断标记。
+/// 用于日志预览，避免大输出把日志刷爆。
+const PREVIEW_MAX: usize = 512;
+fn preview(s: &str) -> String {
+    if s.len() <= PREVIEW_MAX {
+        s.to_string()
+    } else {
+        let cut = s
+            .char_indices()
+            .take_while(|(i, _)| *i < PREVIEW_MAX)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(PREVIEW_MAX);
+        format!("{}...[truncated {} bytes]", &s[..cut], s.len() - cut)
     }
 }
 
@@ -572,6 +696,142 @@ mod tests {
         assert!(
             result.output.contains("no_channel_test_98765"),
             "output should contain echoed text even without progress_tx, got: {}",
+            result.output
+        );
+    }
+
+    // ---- Issue #286: exit code 映射 + 信号终止诊断 ----
+
+    #[test]
+    fn test_exit_status_description_normal_exit() {
+        // 正常退出码 → 返回实际码 + "exit code N"
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("exit 42")
+            .status()
+            .unwrap();
+        let (code, detail) = exit_status_description(&status);
+        assert_eq!(code, 42);
+        assert_eq!(detail, "exit code 42");
+    }
+
+    #[test]
+    fn test_exit_status_description_success() {
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("true")
+            .status()
+            .unwrap();
+        let (code, detail) = exit_status_description(&status);
+        assert_eq!(code, 0);
+        assert_eq!(detail, "exit code 0");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_exit_status_description_signal_termination() {
+        // 信号终止 → exit_code=-1, detail 包含 signal 信息
+        let status = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("kill -9 $$")
+            .status()
+            .unwrap();
+        assert!(status.code().is_none(), "signal termination should have no exit code");
+        let (code, detail) = exit_status_description(&status);
+        assert_eq!(code, -1);
+        assert!(
+            detail.starts_with("signal 9"),
+            "detail should indicate SIGKILL, got: {detail}"
+        );
+        assert!(
+            detail.contains("SIGKILL"),
+            "detail should include signal name, got: {detail}"
+        );
+    }
+
+    #[test]
+    fn test_signal_name_known_signals() {
+        assert_eq!(signal_name(9), "SIGKILL");
+        assert_eq!(signal_name(15), "SIGTERM");
+        assert_eq!(signal_name(2), "SIGINT");
+    }
+
+    #[test]
+    fn test_signal_name_unknown_signal() {
+        assert_eq!(signal_name(255), "UNKNOWN");
+        assert_eq!(signal_name(0), "UNKNOWN");
+    }
+
+    #[test]
+    fn test_preview_no_truncation() {
+        // 短字符串（< PREVIEW_MAX）原样返回
+        let s = "short stdout";
+        assert_eq!(preview(s), "short stdout");
+    }
+
+    #[test]
+    fn test_preview_truncation_with_marker() {
+        // 长字符串（>= PREVIEW_MAX）按 char boundary 截断，附加截断标记
+        let s: String = "a".repeat(PREVIEW_MAX + 100);
+        let result = preview(&s);
+        assert!(result.starts_with(&"a".repeat(PREVIEW_MAX)), "should keep first PREVIEW_MAX bytes");
+        assert!(result.contains("...[truncated"), "should include truncation marker");
+        assert!(
+            result.contains("100 bytes"),
+            "should report truncated byte count, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_preview_respects_utf8_char_boundary() {
+        // UTF-8 多字节字符：PREVIEW_MAX 落在多字节字符中间时，必须按 char boundary 截断
+        // 汉字 "中" 占 3 字节；构造一个 PREVIEW_MAX = 512 全部由汉字组成的字符串
+        let s: String = "中".repeat(PREVIEW_MAX);
+        // 中占 3 字节，总长 PREVIEW_MAX * 3 > PREVIEW_MAX，必然触发截断
+        // 但 PREVIEW_MAX = 512 不是 3 的倍数，可能在某个字符中间；切到最近的 char boundary
+        let result = preview(&s);
+        // 不应该 panic
+        assert!(result.contains("...[truncated"), "should include truncation marker");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
+        // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
+        // 而应包含 signal 信息。
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            cwd: workspace.path().to_path_buf(),
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            agent_runner: None,
+            session_reminders: None,
+            memory_config: share::config::MemoryConfig::default(),
+            plan_mode: None,
+            allow_all: true,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(json!({ "command": "kill -9 $$" }), &ctx)
+            .await;
+
+        assert!(result.is_error);
+        // 消息应包含 "signal" 而非无信息的 "exit code -1"
+        assert!(
+            result.output.contains("signal"),
+            "error message should contain signal info, got: {}",
+            result.output
+        );
+        assert!(
+            result.output.contains("SIGKILL"),
+            "error message should contain signal name, got: {}",
             result.output
         );
     }
