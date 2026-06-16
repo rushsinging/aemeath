@@ -126,9 +126,7 @@ mod tests {
     #[test]
     fn test_terminal_restore_seq_contains_leave_altscreen_and_show_cursor() {
         // \x1b[?1049l = LeaveAlternateScreen, \x1b[?25h = show cursor
-        assert!(TERMINAL_RESTORE_SEQ
-            .windows(8)
-            .any(|w| w == b"\x1b[?1049l"));
+        assert!(TERMINAL_RESTORE_SEQ.windows(8).any(|w| w == b"\x1b[?1049l"));
         assert!(TERMINAL_RESTORE_SEQ.windows(6).any(|w| w == b"\x1b[?25h"));
     }
 }
