@@ -119,6 +119,35 @@ impl Tool for BashTool {
         let stdout_handle = tokio::spawn(async move {
             let mut buf = Vec::new();
             let mut sequence: usize = 0;
+            // Line-buffer for coalescing: accumulate partial lines and emit at
+            // line boundaries (or when the buffer reaches MAX_STREAM_LINE bytes).
+            // This drastically reduces the number of progress events vs per-read
+            // sending, mitigating channel pressure and chunk loss.
+            let mut line_buf = String::new();
+            // Suffix buffer for robust CWD marker detection across chunk splits.
+            // The marker "__AEMEATH_CWD__=" is 16 bytes; retaining the last 15
+            // bytes of each chunk lets us detect a marker split between reads.
+            let marker_len = CWD_MARKER.len();
+            let mut suffix_carry = String::new();
+            const MAX_STREAM_LINE: usize = 16 * 1024;
+
+            /// Send `text` as a progress event via `tx` (best-effort).
+            /// Strips any trailing CWD marker fragment.
+            macro_rules! send_progress {
+                ($tx:expr, $seq:expr, $text:expr) => {{
+                    if !$text.is_empty() {
+                        $seq += 1;
+                        // Best-effort: drop chunks if channel is full/closed.
+                        let _ = $tx.try_send(AgentProgressEvent {
+                            sequence: $seq,
+                            kind: AgentProgressKind::Message {
+                                text: $text.to_string(),
+                            },
+                        });
+                    }
+                }};
+            }
+
             if let Some(ref mut pipe) = stdout_pipe {
                 let mut tmp = [0u8; 8192];
                 loop {
@@ -128,32 +157,70 @@ impl Tool for BashTool {
                             if buf.len() + n <= MAX_CAPTURE_BYTES {
                                 buf.extend_from_slice(&tmp[..n]);
                             }
-                            // If over limit, keep reading (to drain the pipe) but don't store
-                            // Stream stdout chunk to TUI via progress_tx (strip internal CWD marker)
+                            // If over limit, keep reading (to drain the pipe) but don't store.
+                            // Stream stdout chunk to TUI via progress_tx.
                             if let Some(tx) = &progress_tx {
-                                let text = String::from_utf8_lossy(&tmp[..n]).to_string();
-                                // Strip the internal CWD marker (__AEMEATH_CWD__=...) from streamed
-                                // output. The marker is appended to stdout for internal workspace
-                                // tracking; it must not appear in the TUI.  If the marker appears
-                                // mid-chunk, keep the text that precedes it.
-                                let display_text = match text.find("__AEMEATH_CWD__") {
-                                    Some(pos) => &text[..pos],
-                                    None => &text[..],
+                                // Prepend any carried suffix from the previous chunk,
+                                // then take the full combined text for processing.
+                                let mut combined =
+                                    std::mem::take(&mut suffix_carry);
+                                combined.push_str(
+                                    &String::from_utf8_lossy(&tmp[..n]),
+                                );
+
+                                // Strip CWD marker from the combined text.
+                                // Retain a suffix in case the marker is split
+                                // across reads.
+                                let display_text = match combined
+                                    .find(CWD_MARKER)
+                                {
+                                    Some(pos) => &combined[..pos],
+                                    None => &combined[..],
                                 };
-                                if !display_text.trim().is_empty() {
-                                    sequence += 1;
-                                    // Best-effort: drop chunks if channel is full/closed.
-                                    let _ = tx.try_send(AgentProgressEvent {
+
+                                // Save the tail as suffix_carry for next iteration
+                                // (only if we didn't find a marker — once found,
+                                // remaining output after the marker is internal).
+                                if !display_text.contains(CWD_MARKER) {
+                                    let carry_len = marker_len
+                                        .saturating_sub(1)
+                                        .min(display_text.len());
+                                    suffix_carry = display_text
+                                        [display_text.len() - carry_len..]
+                                        .to_string();
+                                }
+
+                                // Append to line buffer and emit completed lines.
+                                line_buf.push_str(display_text);
+                                while let Some(nl) = line_buf.find('\n') {
+                                    let line: String =
+                                        line_buf.drain(..=nl).collect();
+                                    send_progress!(
+                                        tx,
                                         sequence,
-                                        kind: AgentProgressKind::Message {
-                                            text: display_text.to_string(),
-                                        },
-                                    });
+                                        line
+                                    );
+                                }
+                                // Flush if buffer exceeds the cap even without newline.
+                                if line_buf.len() > MAX_STREAM_LINE {
+                                    let flush: String =
+                                        std::mem::take(&mut line_buf);
+                                    send_progress!(
+                                        tx,
+                                        sequence,
+                                        flush
+                                    );
                                 }
                             }
                         }
                         Err(_) => break,
                     }
+                }
+            }
+            // Flush any remaining buffered text after the read loop ends.
+            if let Some(tx) = &progress_tx {
+                if !line_buf.is_empty() {
+                    send_progress!(tx, sequence, line_buf);
                 }
             }
             buf
@@ -178,27 +245,50 @@ impl Tool for BashTool {
         });
 
         // Race: cancel signal vs timeout vs command completion
-        let wait_result = tokio::select! {
-            biased;
-            _ = ctx.cancel.cancelled() => {
-                let _ = child.kill().await;
-                stdout_handle.abort();
-                stderr_handle.abort();
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": "[interrupted by user]"
-                }));
-            }
-            result = tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait()) => {
-                result
-            }
-        };
+        let wait_result: Result<std::process::ExitStatus, std::io::Error> =
+            tokio::select! {
+                biased;
+                _ = ctx.cancel.cancelled() => {
+                    let _ = child.kill().await;
+                    stdout_handle.abort();
+                    stderr_handle.abort();
+                    return ToolResult::error_json(serde_json::json!({
+                        "status": "error",
+                        "message": "[interrupted by user]"
+                    }));
+                }
+                result = tokio::time::timeout(
+                    Duration::from_millis(timeout_ms),
+                    child.wait(),
+                ) => {
+                    match result {
+                        Ok(inner) => inner,
+                        // Timeout: kill the child immediately and abort
+                        // reader tasks so we don't hang awaiting pipes
+                        // that will never reach EOF on their own.
+                        Err(_) => {
+                            let _ = child.kill().await;
+                            let _ = child.wait().await;
+                            stdout_handle.abort();
+                            stderr_handle.abort();
+                            // Return early — no point awaiting aborted
+                            // handles.
+                            return ToolResult::error_json(serde_json::json!({
+                                "status": "error",
+                                "message": format!(
+                                    "command timed out after {timeout_ms}ms"
+                                )
+                            }));
+                        }
+                    }
+                }
+            };
 
         let stdout = stdout_handle.await.unwrap_or_default();
         let stderr = stderr_handle.await.unwrap_or_default();
 
         match wait_result {
-            Ok(Ok(status)) => {
+            Ok(status) => {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
@@ -248,17 +338,10 @@ impl Tool for BashTool {
                     ToolResult::error_json(result_json)
                 }
             }
-            Ok(Err(e)) => ToolResult::error_json(serde_json::json!({
+            Err(e) => ToolResult::error_json(serde_json::json!({
                 "status": "error",
                 "message": format!("failed to execute: {e}")
             })),
-            Err(_) => {
-                let _ = child.kill().await;
-                ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("command timed out after {timeout_ms}ms")
-                }))
-            }
         }
     }
 }
