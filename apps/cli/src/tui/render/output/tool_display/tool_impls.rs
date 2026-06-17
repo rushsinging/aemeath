@@ -21,14 +21,18 @@ impl ToolDisplay for BashDisplay {
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
         format!("{} {}", self.display_name(), truncate_ellipsis(cmd, 80))
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // command 已在 header 显示，不再需要 details
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let cmd = str_arg(input, "command", "");
+        if cmd.is_empty() {
+            return vec![];
+        }
+        // 展示完整命令（多行命令会显示所有行）
+        cmd.lines().map(|line| line.to_string()).collect()
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: Some(5),
                 render_kind: ResultRender::Plain,
@@ -170,6 +174,55 @@ impl ToolDisplay for WriteDisplay {
             .unwrap_or(0);
         format!("{} {display_path} {bytes} bytes", self.display_name())
     }
+    /// 当 result 到达后，使用实际写入的字节数更新 header。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_summary: Option<&str>,
+    ) -> Line<'static> {
+        let path = file_path(input);
+        let display_path = truncate_path(path, 60);
+
+        // 尝试从 result_summary 中解析实际写入字节数
+        let actual_bytes = result_summary.and_then(|summary| {
+            // 尝试解析 JSON: {"message":"Wrote N bytes to ...", "data":{"bytes_written":N}}
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
+                // 优先从 data.bytes_written 获取
+                if let Some(b) = json
+                    .get("data")
+                    .and_then(|d| d.get("bytes_written"))
+                    .and_then(|v| v.as_u64())
+                {
+                    return Some(b as usize);
+                }
+                // 回退：从 message 解析 "Wrote N bytes to"
+                if let Some(msg) = json.get("message").and_then(|v| v.as_str()) {
+                    return parse_bytes_from_message(msg);
+                }
+            }
+            // 直接解析文本
+            parse_bytes_from_message(summary)
+        });
+
+        // 计算入参中的字节数（回退值）
+        let input_bytes = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0);
+
+        let bytes = actual_bytes.unwrap_or(input_bytes);
+        let bytes_info = format!("{bytes} bytes");
+
+        Line::from(vec![
+            Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+            Span::raw(format!(" {display_path} ")),
+            Span::styled(bytes_info, Style::default().fg(theme::TEXT_MUTED)),
+        ])
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 字节数已在 summary 中，不再需要 details
         vec![]
@@ -181,6 +234,14 @@ impl ToolDisplay for WriteDisplay {
             result: ResultPolicy::Hidden, // 不显示 result 子块
         }
     }
+}
+
+/// 从 message 中解析字节数，如 "Wrote 1234 bytes to /path"
+fn parse_bytes_from_message(message: &str) -> Option<usize> {
+    let re = regex::Regex::new(r"Wrote (\d+) bytes? to").ok()?;
+    re.captures(message)
+        .and_then(|cap| cap.get(1))
+        .and_then(|m| m.as_str().parse::<usize>().ok())
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Write",
@@ -213,14 +274,36 @@ impl ToolDisplay for EditDisplay {
             self.display_name()
         )
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // 变更统计已在 summary 中，不再需要 details
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let old_string = input
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let new_string = input
+            .get("new_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let old_lines = old_string.lines().count();
+        let new_lines = new_string.lines().count();
+        let old_preview = if old_string.len() > 80 {
+            format!("{}...", &old_string[..80])
+        } else {
+            old_string.to_string()
+        };
+        let new_preview = if new_string.len() > 80 {
+            format!("{}...", &new_string[..80])
+        } else {
+            new_string.to_string()
+        };
+        vec![
+            format!("- ({old_lines} lines): {old_preview}"),
+            format!("+ ({new_lines} lines): {new_preview}"),
+        ]
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: None, // 全部显示
                 render_kind: ResultRender::Diff,

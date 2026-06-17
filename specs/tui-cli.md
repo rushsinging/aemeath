@@ -70,10 +70,10 @@ pub struct ToolRenderPolicy {
 
 | Tool | Header | Details | Result |
 |---|---|---|---|
-| Bash | Standard | Hidden | `Visible { 5, Plain, tail=true }` |
+| Bash | Standard | **Expanded** | `Visible { 5, Plain, tail=true }` |
 | Read | Standard | Hidden | Hidden |
 | Write | Standard | Hidden | Hidden |
-| Edit | Standard | Hidden | `Visible { None, Diff, false }` |
+| Edit | Standard | **Expanded** | `Visible { None, Diff, false }` |
 | Glob | Standard | Hidden | `Visible { 5, Plain, false }` |
 | Grep | Standard | Hidden | `Visible { 5, Plain, false }` |
 | Agent | Standard | **Expanded** | `Visible { 5, Plain, false }` |
