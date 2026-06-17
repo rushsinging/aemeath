@@ -15,13 +15,13 @@
 │   └─ reject-main-edit.sh    拦截在 main 工作区直接改代码     │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 17 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 18 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 │   └─ build_cli.sh                   cargo build release      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 17 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 18 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
 
 ## 守卫索引
 
@@ -43,9 +43,10 @@
 | 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
 | 16 | `check-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
-| 17 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
+| 17 | `check-log-target-prefix.sh` | 日志架构 | log target 字符串字面量必须以 `aemeath:` 开头 |
+| 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 
-另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §18。
+另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
 
 ## 1. check-cargo-dependency-graph.sh
 
@@ -372,7 +373,20 @@
   - 不检测 `get(range)`（返回 `Option` 不 panic，是 safe_text 推荐用法，flag 会误伤）；
   - 不检测 `truncate`（本仓库内均为 `Vec::truncate`，flag 会产生误导性注解）。
 
-## 17. no_mod_rs.sh
+## 17. check-log-target-prefix.sh
+
+- **功能**：扫描整个仓库的 `.rs` 生产代码，检查所有 `log::xxx!` 宏中的 `target:` 字符串字面量必须以 `aemeath:` 开头。
+- **守护**：日志架构统一——所有 log target 必须遵循 `aemeath:<domain>[:<crate>]` 命名约定，避免日志路由到错误的 target。
+- **检查方式**：
+  - 扫描全部 `.rs` 文件（排除 `target/`、`tests/`、`*test*.rs`、`packages/global/logging/src/`）；
+  - 匹配 `target:\s*"[^"]*"` 模式，筛选出不包含 `aemeath:` 的行；
+  - 引用常量（如 `target: LOG_TARGET`）不带引号，不会被匹配，自然放行。
+- **白名单**：无文件级白名单。
+- **例外**：`packages/global/logging/src/`（该目录的守卫由 Rust 测试 `target_guard.rs` 覆盖）。
+- **错误信息**：`log target must start with 'aemeath:' (or use LOG_TARGET constant)`。
+- **关联 Rust 守卫**：`packages/global/logging/src/target_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
+
+## 18. no_mod_rs.sh
 
 - **功能**：架构 guard——检测项目中新增的 `mod.rs` 文件，强制 Rust 2018+ 文件即模块惯例。
 - **运行模式**：
@@ -382,7 +396,7 @@
 - **白名单**：无（这就是"无例外"规则）。
 - **错误信息**：`Rust 2018+ 推荐使用与目录同名的文件代替 mod.rs：foo/mod.rs → foo.rs`.
 
-## 18. run_tui_single_source_structure_guard（内联）
+## 19. run_tui_single_source_structure_guard（内联）
 
 - **位置**：`check-architecture-guards.sh` 内的 `run_tui_single_source_structure_guard` 函数，**不**是独立脚本。
 - **功能**：feature #70 结构化单一真相规则——app/domain 真相只在 `model/` 或 `view_state/`；render widgets 仅保留 render 投影/缓存；退场 adapter 必须只活在 `#[cfg(test)]`。
@@ -390,20 +404,20 @@
 
 | 编号 | 检查 | 详情 |
 |---|---|---|
-| 18.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
-| 18.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
-| 18.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
-| 18.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
-| 18.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
-| 18.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
-| 18.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
-| 18.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
-| 18.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
-| 18.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
-| 18.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
-| 18.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
+| 19.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
+| 19.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
+| 19.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
+| 19.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
+| 19.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
+| 19.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
+| 19.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
+| 19.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
+| 19.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
+| 19.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
+| 19.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
+| 19.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
 
-- **白名单**：各 check 内联有具体保留名单（如 18.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
+- **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 
 ## 附：钩子体系（非架构守卫）
 
