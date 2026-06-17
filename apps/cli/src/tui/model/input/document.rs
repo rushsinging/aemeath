@@ -1,10 +1,12 @@
 use super::copied_text::CopiedTextSpan;
+use super::image_span::ImageSpan;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputDocument {
     pub buffer: String,
     pub cursor: usize,
     pub copied_text_spans: Vec<CopiedTextSpan>,
+    pub image_spans: Vec<ImageSpan>,
 }
 
 impl InputDocument {
@@ -28,10 +30,24 @@ impl InputDocument {
         }
     }
 
+    /// 插入图片占位符 `[Image #N]` 并记录 span。序号固定不重排。
+    pub fn insert_image(&mut self, image: sdk::ClipboardImageView) {
+        let index = self.image_spans.len() + 1;
+        let placeholder = format!("[Image #{index}]");
+        let cursor = clamp_to_char_boundary(&self.buffer, self.cursor.min(self.buffer.len()));
+        self.buffer.insert_str(cursor, &placeholder);
+        self.shift_spans_for_insert(cursor, placeholder.len());
+        let end = cursor + placeholder.len();
+        self.image_spans
+            .push(ImageSpan::new(index, image, cursor, end));
+        self.cursor = end;
+    }
+
     pub fn replace_text(&mut self, text: String) {
         self.buffer = text;
         self.cursor = self.buffer.len();
         self.copied_text_spans.clear();
+        self.image_spans.clear();
     }
 
     pub fn move_cursor(&mut self, cursor: usize) {
@@ -88,7 +104,7 @@ impl InputDocument {
         if self.cursor == 0 {
             return;
         }
-        if let Some((start, end)) = self.copied_text_span_for_backward_delete() {
+        if let Some((start, end)) = self.atomic_span_for_backward_delete() {
             self.delete_range(start, end);
             return;
         }
@@ -101,7 +117,7 @@ impl InputDocument {
         if self.cursor == 0 {
             return;
         }
-        if let Some((start, end)) = self.copied_text_span_for_backward_delete() {
+        if let Some((start, end)) = self.atomic_span_for_backward_delete() {
             self.delete_range(start, end);
             return;
         }
@@ -133,6 +149,7 @@ impl InputDocument {
         self.buffer.clear();
         self.cursor = 0;
         self.copied_text_spans.clear();
+        self.image_spans.clear();
     }
 
     pub fn display_text(&self) -> String {
@@ -158,6 +175,65 @@ impl InputDocument {
             expanded.push_str(&self.buffer[cursor..]);
         }
         expanded
+    }
+
+    /// 提交文本：展开 copied text 原文、剔除 image 占位。
+    ///
+    /// 基于**原始 buffer** 的位置统一遍历两类 span，避免先 expand 再定位导致错位。
+    pub fn submit_text(&self) -> String {
+        if self.copied_text_spans.is_empty() && self.image_spans.is_empty() {
+            return self.buffer.trim().to_string();
+        }
+        // 收集所有替换区间：copied text → 原文；image → 空
+        let mut replacements: Vec<(usize, usize, String)> = self
+            .copied_text_spans
+            .iter()
+            .map(|span| (span.start, span.end, span.original.to_string()))
+            .collect();
+        replacements.extend(
+            self.image_spans
+                .iter()
+                .map(|span| (span.start, span.end, String::new())),
+        );
+        // 按 start 排序，正向构建结果，位置始终基于原始 buffer
+        replacements.sort_by_key(|(start, _, _)| *start);
+        let mut result = String::new();
+        let mut cursor = 0;
+        for (start, end, repl) in &replacements {
+            if *start > cursor {
+                result.push_str(&self.buffer[cursor..*start]);
+            }
+            result.push_str(repl);
+            cursor = *end;
+        }
+        if cursor < self.buffer.len() {
+            result.push_str(&self.buffer[cursor..]);
+        }
+        result.trim().to_string()
+    }
+
+    /// 按文档中出现顺序取出全部图片数据。
+    pub fn drain_images(&mut self) -> Vec<sdk::ClipboardImageView> {
+        let mut spans = std::mem::take(&mut self.image_spans);
+        spans.sort_by_key(|span| span.start);
+        spans.into_iter().map(|span| span.image).collect()
+    }
+
+    /// 移除所有图片占位符，保留其余文本。
+    pub fn remove_all_images(&mut self) {
+        // 按 start 倒序移除，避免偏移重算
+        let mut spans: Vec<ImageSpan> = std::mem::take(&mut self.image_spans);
+        spans.sort_by_key(|span| std::cmp::Reverse(span.start));
+        for span in &spans {
+            let placeholder = span.placeholder();
+            if self.buffer.get(span.start..span.end) == Some(placeholder.as_str()) {
+                self.buffer.replace_range(span.start..span.end, "");
+            }
+        }
+        // 重新计算光标位置（clamp 到合法范围）
+        self.cursor = clamp_to_char_boundary(&self.buffer, self.cursor.min(self.buffer.len()));
+        // 清理已删除的 spans 中可能与 copied_text_spans 重叠的情况不需要处理，
+        // 因为 image_spans 已经被 take 掉了
     }
 
     /// 光标所在行号（从 0 开始）
@@ -277,11 +353,18 @@ impl InputDocument {
         self.cursor = end;
     }
 
-    fn copied_text_span_for_backward_delete(&self) -> Option<(usize, usize)> {
+    /// 光标紧邻 span 末尾时，返回该 span 的区间，实现原子删除。
+    fn atomic_span_for_backward_delete(&self) -> Option<(usize, usize)> {
         self.copied_text_spans
             .iter()
             .find(|span| self.cursor > span.start && self.cursor <= span.end)
             .map(|span| (span.start, span.end))
+            .or_else(|| {
+                self.image_spans
+                    .iter()
+                    .find(|span| self.cursor > span.start && self.cursor <= span.end)
+                    .map(|span| (span.start, span.end))
+            })
     }
 
     fn delete_range(&mut self, start: usize, end: usize) {
@@ -295,7 +378,15 @@ impl InputDocument {
         let deleted_len = end - start;
         self.copied_text_spans
             .retain(|span| !(span.start >= start && span.end <= end));
+        self.image_spans
+            .retain(|span| !(span.start >= start && span.end <= end));
         for span in &mut self.copied_text_spans {
+            if span.start >= end {
+                span.start -= deleted_len;
+                span.end -= deleted_len;
+            }
+        }
+        for span in &mut self.image_spans {
             if span.start >= end {
                 span.start -= deleted_len;
                 span.end -= deleted_len;
@@ -306,6 +397,12 @@ impl InputDocument {
 
     fn shift_spans_for_insert(&mut self, start: usize, len: usize) {
         for span in &mut self.copied_text_spans {
+            if span.start >= start {
+                span.start += len;
+                span.end += len;
+            }
+        }
+        for span in &mut self.image_spans {
             if span.start >= start {
                 span.start += len;
                 span.end += len;

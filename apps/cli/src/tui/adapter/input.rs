@@ -40,7 +40,7 @@ mod tests {
             InputSubmission {
                 text: "hello".to_string(),
                 display_text: "hello".to_string(),
-                attachments: Vec::new(),
+                images: Vec::new(),
             },
             ConversationAvailability::Idle,
             false,
@@ -54,7 +54,7 @@ mod tests {
             InputSubmission {
                 text: "hello".to_string(),
                 display_text: "hello".to_string(),
-                attachments: Vec::new(),
+                images: Vec::new(),
             },
             ConversationAvailability::Running,
             false,
@@ -68,7 +68,7 @@ mod tests {
             InputSubmission {
                 text: "yes".to_string(),
                 display_text: "yes".to_string(),
-                attachments: Vec::new(),
+                images: Vec::new(),
             },
             ConversationAvailability::Idle,
             true,

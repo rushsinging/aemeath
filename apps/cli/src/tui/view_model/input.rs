@@ -8,7 +8,6 @@ pub struct InputAreaViewModel {
     pub mode_label: Option<String>,
     pub queued_hint: Option<String>,
     pub disabled_reason: Option<String>,
-    pub pending_images: usize,
     pub focused: bool,
 }
 

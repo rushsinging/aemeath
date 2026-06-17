@@ -8,7 +8,6 @@ pub struct InputRenderModel {
     pub cursor_row: usize,
     pub cursor_col: usize,
     pub placeholder: Option<String>,
-    pub pending_images: usize,
     pub focused: bool,
 }
 
@@ -16,7 +15,6 @@ impl InputRenderModel {
     pub fn from_document(
         document: &InputDocument,
         placeholder: Option<String>,
-        pending_images: usize,
         focused: bool,
     ) -> Self {
         let cursor = clamp_to_char_boundary(&document.buffer, document.cursor);
@@ -27,7 +25,6 @@ impl InputRenderModel {
             cursor_row,
             cursor_col,
             placeholder,
-            pending_images,
             focused,
         }
     }
