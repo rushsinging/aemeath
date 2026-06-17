@@ -11,6 +11,7 @@ use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use share::config::GuidanceReloadPolicy;
 use share::message::Message;
+use crate::LOG_TARGET;
 
 /// Turn 边界配置变更检测与 guidance 注入。
 ///
@@ -28,7 +29,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
 {
     let config_diff = check_config_changes(config_snapshot);
     if config_diff.has_changes() {
-        log::info!(target: "runtime::loop_runner",
+        log::info!(target: LOG_TARGET,
             "[config_reload] turn {} detected changes: {:?}",
             turn_count,
             config_diff.changed_keys
@@ -55,7 +56,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                     messages.push(reminder);
                     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                         .await;
-                    log::info!(target: "runtime::loop_runner", "[config_reload] guidance inject mode: injected reminder into messages");
+                    log::info!(target: LOG_TARGET, "[config_reload] guidance inject mode: injected reminder into messages");
                 }
                 GuidanceReloadPolicy::Remind => {
                     // 发 system-reminder 让 LLM 自行决定是否读取
@@ -65,7 +66,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                     };
                     let reminder = Message::user(reminder_text.to_string());
                     messages.push(reminder);
-                    log::info!(target: "runtime::loop_runner", "[config_reload] guidance remind mode: injected system-reminder");
+                    log::info!(target: LOG_TARGET, "[config_reload] guidance remind mode: injected system-reminder");
                 }
                 GuidanceReloadPolicy::Confirm => {
                     // 发 system-reminder + 标记等待用户确认
@@ -79,7 +80,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                         "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
                     ))
                     .await;
-                    log::info!(target: "runtime::loop_runner", "[config_reload] guidance confirm mode: waiting for user confirmation");
+                    log::info!(target: LOG_TARGET, "[config_reload] guidance confirm mode: waiting for user confirmation");
                 }
             }
         }

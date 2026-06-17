@@ -1,6 +1,7 @@
 use crate::utils::bootstrap::config_paths as paths;
 use logging::{self, UnifiedLogger};
 use share::config::LoggingConfig;
+use crate::LOG_TARGET;
 
 /// 设置全局 session ID（只能调用一次）。委托 `logging::set_session_id`。
 pub fn set_session_id(id: String) {
@@ -44,7 +45,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
             writeln!(buf, "{}", line)
         });
         builder.init();
-        log::info!(target: "aemeath:agent:runtime",
+        log::info!(target: LOG_TARGET,
             "logging initialized: filter={} target=stderr logs_dir={}",
             std::env::var("RUST_LOG").unwrap_or(default_filter),
             logs_dir.display()
@@ -65,7 +66,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
             .init();
             return;
         }
-        log::info!(target: "aemeath:agent:runtime",
+        log::info!(target: LOG_TARGET,
             "logging initialized: filter={} target=unified logs_dir={}",
             std::env::var("RUST_LOG").unwrap_or(default_filter),
             logs_dir.display()

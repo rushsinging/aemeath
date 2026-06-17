@@ -3,6 +3,7 @@
 use crate::utils::bootstrap::claude_settings_adapter::ClaudeSettingsAdapter;
 use crate::utils::bootstrap::config_patch::ConfigPatch;
 use crate::utils::bootstrap::config_paths as paths;
+use crate::LOG_TARGET;
 use share::config::{hooks, paths as share_paths, permissions::PermissionModeConfig, Config};
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
@@ -53,11 +54,11 @@ impl ConfigManager {
                 Ok(content) => match serde_json::from_str::<ConfigPatch>(&content) {
                     Ok(global_patch) => config = Self::apply_patch(config, global_patch),
                     Err(err) => {
-                        log::warn!(target: "runtime::config_manager", "解析全局配置失败 {}: {err}", self.global_path.display())
+                        log::warn!(target: LOG_TARGET, "解析全局配置失败 {}: {err}", self.global_path.display())
                     }
                 },
                 Err(err) => {
-                    log::warn!(target: "runtime::config_manager", "读取全局配置失败 {}: {err}", self.global_path.display())
+                    log::warn!(target: LOG_TARGET, "读取全局配置失败 {}: {err}", self.global_path.display())
                 }
             }
         }
@@ -74,13 +75,13 @@ impl ConfigManager {
                                     ConfigPatch::with_hooks(claude_config.into_config().hooks),
                                 )
                             }
-                            Err(err) => log::warn!(target: "runtime::config_manager",
+                            Err(err) => log::warn!(target: LOG_TARGET,
                                 "解析 Claude Code 项目设置失败 {}: {err}",
                                 claude_path.display()
                             ),
                         }
                     }
-                    Err(err) => log::warn!(target: "runtime::config_manager",
+                    Err(err) => log::warn!(target: LOG_TARGET,
                         "读取 Claude Code 项目设置失败 {}: {err}",
                         claude_path.display()
                     ),
@@ -95,11 +96,11 @@ impl ConfigManager {
                     Ok(content) => match serde_json::from_str::<ConfigPatch>(&content) {
                         Ok(project_patch) => config = Self::apply_patch(config, project_patch),
                         Err(err) => {
-                            log::warn!(target: "runtime::config_manager", "解析项目配置失败 {}: {err}", project_path.display())
+                            log::warn!(target: LOG_TARGET, "解析项目配置失败 {}: {err}", project_path.display())
                         }
                     },
                     Err(err) => {
-                        log::warn!(target: "runtime::config_manager", "读取项目配置失败 {}: {err}", project_path.display())
+                        log::warn!(target: LOG_TARGET, "读取项目配置失败 {}: {err}", project_path.display())
                     }
                 }
             }

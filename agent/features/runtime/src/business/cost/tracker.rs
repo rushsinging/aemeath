@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::LOG_TARGET;
 
 /// 单条 API 使用记录
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,7 +177,7 @@ impl CostTracker {
     pub fn clear(&mut self) {
         self.records.clear();
         if let Err(e) = self.save() {
-            log::warn!(target: "runtime::tracker", "Failed to save after clearing: {}", e);
+            log::warn!(target: LOG_TARGET, "Failed to save after clearing: {}", e);
         }
     }
 

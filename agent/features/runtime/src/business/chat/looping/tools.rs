@@ -17,6 +17,7 @@ use share::tool::ImageData;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
+use crate::LOG_TARGET;
 
 pub(crate) type UiToolResult = (
     ToolCallId,
@@ -275,7 +276,7 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
         "output": output,
     });
     log::info!(
-        target: "tools::audit",
+        target: LOG_TARGET,
         "tool_result: {}",
         serde_json::to_string(&tr_data).unwrap_or_default()
     );

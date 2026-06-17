@@ -1,4 +1,5 @@
 use crate::business::chat::{RuntimeHookEvent, RuntimeHookEventStatus};
+use crate::LOG_TARGET;
 use std::sync::{Arc, Mutex};
 
 use crate::business::chat::looping::RuntimeTurnContext;
@@ -128,7 +129,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             index,
         } => {
             log::trace!(
-                target: "cli::tui::tool_flow",
+                target: LOG_TARGET,
                 "runtime->sdk tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
                 context.chat_id,
                 context.turn_id,
@@ -156,7 +157,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             status,
         } => {
             log::trace!(
-                target: "cli::tui::tool_flow",
+                target: LOG_TARGET,
                 "runtime->sdk tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} args_present={}",
                 context.chat_id,
                 context.turn_id,
@@ -190,7 +191,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             images,
         } => {
             log::trace!(
-                target: "cli::tui::tool_flow",
+                target: LOG_TARGET,
                 "runtime->sdk tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
                 context.chat_id,
                 context.turn_id,

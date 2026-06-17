@@ -8,6 +8,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
+use crate::LOG_TARGET;
 
 pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
     let cwd_str = cwd.display().to_string();
@@ -15,7 +16,7 @@ pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner
         Some(config) => HookRunner::from_config(config, cwd_str),
         None => HookRunner::empty(cwd_str),
     };
-    log::info!(target: "runtime::runtime_support",
+    log::info!(target: LOG_TARGET,
         "hook runner built: project_dir={} configured_events={}",
         runner.project_dir(),
         runner.hook_count()
@@ -25,7 +26,7 @@ pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
     let session_id = resume_session_id.unwrap_or_else(crate::business::session::new_session_id);
-    log::info!(target: "runtime::runtime_support", "session started");
+    log::info!(target: LOG_TARGET, "session started");
     session_id
 }
 

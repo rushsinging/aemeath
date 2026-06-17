@@ -4,6 +4,7 @@ use crate::business::chat::looping::{
 };
 use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner};
 use share::config::hooks::{HookEntry, HookEvent};
+use crate::LOG_TARGET;
 
 #[derive(Clone)]
 pub(crate) struct HookUi<S>
@@ -29,7 +30,7 @@ where
         data: HookData,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = runner.matching_hooks(event, tool_name);
-        log::info!(target: "runtime::hook_ui",
+        log::info!(target: LOG_TARGET,
             "hook ui dispatch: event={} tool_name={:?} matched={}",
             hook_event_name(event),
             tool_name,

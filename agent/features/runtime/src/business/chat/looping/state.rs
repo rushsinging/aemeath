@@ -1,3 +1,5 @@
+use crate::LOG_TARGET;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatLoopState {
     Running,
@@ -70,7 +72,7 @@ impl ChatLoopFsm {
 
     pub fn assert_state(&self, expected: ChatLoopState, context: &str) {
         if self.state != expected {
-            log::warn!(target: "runtime::state",
+            log::warn!(target: LOG_TARGET,
                 "chat loop state guard failed: context={}, expected={:?}, actual={:?}",
                 context,
                 expected,
@@ -88,7 +90,7 @@ impl ChatLoopFsm {
         let previous = self.state;
         if let Some(next) = self.state.apply(transition) {
             self.state = next;
-            log::debug!(target: "runtime::state",
+            log::debug!(target: LOG_TARGET,
                 "chat loop state transition: {:?} --{:?}--> {:?}",
                 previous,
                 transition,
@@ -96,7 +98,7 @@ impl ChatLoopFsm {
             );
         } else {
             self.invalid_transition_count += 1;
-            log::warn!(target: "runtime::state",
+            log::warn!(target: LOG_TARGET,
                 "invalid chat loop state transition ignored: {:?} --{:?}-->",
                 previous,
                 transition

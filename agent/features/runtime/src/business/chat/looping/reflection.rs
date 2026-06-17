@@ -4,6 +4,7 @@ use crate::business::reflection::runner::run_complete_reflection_with_base_dir;
 use crate::business::reflection::ReflectionRunMode;
 use provider::api::StopReason;
 use std::path::{Path, PathBuf};
+use crate::LOG_TARGET;
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
 ///
@@ -94,7 +95,7 @@ async fn run_forced_reflection_with_base_dir(
         Ok(Some(result)) => Some(result.formatted_content),
         Ok(None) => None,
         Err(e) => {
-            log::warn!(target: "runtime::reflection", "Forced reflection failed: {e}");
+            log::warn!(target: LOG_TARGET, "Forced reflection failed: {e}");
             None
         }
     }
@@ -122,7 +123,7 @@ async fn run_reflection_with_base_dir(
         Ok(Some(result)) => Some(result.formatted_content),
         Ok(None) => None,
         Err(e) => {
-            log::warn!(target: "runtime::reflection", "Interval reflection failed: {e}");
+            log::warn!(target: LOG_TARGET, "Interval reflection failed: {e}");
             None
         }
     }

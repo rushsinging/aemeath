@@ -8,6 +8,7 @@ use share::config::paths;
 use share::config::snapshot::{FileChange, FileChangeKind};
 use share::config::GuidanceReloadPolicy;
 use std::path::{Path, PathBuf};
+use crate::LOG_TARGET;
 
 /// 配置变更差异。
 #[derive(Debug, Clone)]
@@ -78,7 +79,7 @@ pub fn init_snapshot_registry(cwd: &Path) -> SourceSnapshotRegistry {
     let mut registry = SourceSnapshotRegistry::new();
     registry.register_all(files);
     registry.take_baseline();
-    log::info!(target: "runtime::config_reload",
+    log::info!(target: LOG_TARGET,
         "[config_reload] snapshot registry initialized with {} files",
         registry.len()
     );
@@ -99,7 +100,7 @@ pub fn check_config_changes(registry: &mut SourceSnapshotRegistry) -> ConfigDiff
         };
     }
 
-    log::info!(target: "runtime::config_reload",
+    log::info!(target: LOG_TARGET,
         "[config_reload] detected {} file change(s)",
         changes.len()
     );
@@ -170,7 +171,7 @@ pub fn resolve_guidance_reload_policy() -> GuidanceReloadPolicy {
                     "remind" => GuidanceReloadPolicy::Remind,
                     "confirm" => GuidanceReloadPolicy::Confirm,
                     _ => {
-                        log::warn!(target: "runtime::config_reload",
+                        log::warn!(target: LOG_TARGET,
                             "[config_reload] unknown guidance.reload_policy '{}', using default",
                             policy_str
                         );

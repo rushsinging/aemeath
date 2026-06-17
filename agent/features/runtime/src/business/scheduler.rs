@@ -317,13 +317,13 @@ impl TaskScheduler {
             let timed_out = self.check_timeouts().await;
             for task_id in timed_out {
                 if let Err(e) = self.cancel_task(&task_id).await {
-                    log::warn!(target: "runtime::scheduler", "Failed to cancel task {}: {}", task_id, e);
+                    log::warn!(target: LOG_TARGET, "Failed to cancel task {}: {}", task_id, e);
                 }
             }
 
             // Persist state
             if let Err(e) = self.persist().await {
-                log::warn!(target: "runtime::scheduler", "Failed to persist scheduler state: {}", e);
+                log::warn!(target: LOG_TARGET, "Failed to persist scheduler state: {}", e);
             }
         }
     }
@@ -335,12 +335,13 @@ impl TaskScheduler {
 
         // Persist final state
         if let Err(e) = self.persist().await {
-            log::warn!(target: "runtime::scheduler", "Failed to persist scheduler state on shutdown: {}", e);
+            log::warn!(target: LOG_TARGET, "Failed to persist scheduler state on shutdown: {}", e);
         }
     }
 }
 
 use types::current_timestamp;
+use crate::LOG_TARGET;
 
 /// Shared task scheduler
 pub type SharedTaskScheduler = Arc<TaskScheduler>;
