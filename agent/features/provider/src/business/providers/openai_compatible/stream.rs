@@ -1,5 +1,6 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
+use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
 use crate::business::types::StreamResponse;
 use crate::core::provider::StreamHandler;
 use futures_util::StreamExt;
@@ -110,7 +111,7 @@ pub(crate) async fn parse_openai_stream(
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
-    let mut current_reasoning = String::new();
+    let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
     let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> =
         std::collections::HashMap::new();
@@ -120,6 +121,7 @@ pub(crate) async fn parse_openai_stream(
     };
     let mut stop_reason = crate::business::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
+    let mut chunk_index: u64 = 0;
 
     let byte_stream = response.bytes_stream().map(|r| {
         r.map_err(|e| {
@@ -145,7 +147,7 @@ pub(crate) async fn parse_openai_stream(
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
                 let snapshot = format_stream_snapshot(
-                    &current_text, &current_reasoning, &current_tool_calls,
+                    &current_text, reasoning_normalizer.accumulated(), &current_tool_calls,
                 );
                 log::warn!(target: "provider::openai_stream",
                     "[openai-compat stream] idle timeout: no data for {}s — {snapshot}",
@@ -198,6 +200,7 @@ pub(crate) async fn parse_openai_stream(
             Ok(v) => v,
             Err(_) => continue,
         };
+        chunk_index += 1;
 
         // 检查错误
         if let Some(error) = chunk.get("error") {
@@ -245,19 +248,52 @@ pub(crate) async fn parse_openai_stream(
 
                 // 处理 delta
                 if let Some(delta) = choice.get("delta") {
-                    // Reasoning 内容（例如 glm-5.1, DeepSeek-R1）
+                    // Reasoning 内容（例如 glm-5.1, DeepSeek-R1, Mimo）
                     if let Some(reasoning) = delta.get("reasoning_content").and_then(|c| c.as_str())
                     {
                         if !reasoning.is_empty() {
-                            handler.on_thinking(reasoning);
-                            current_reasoning.push_str(reasoning);
+                            // chunk 级诊断日志（debug/trace 级，安全 preview）
+                            let raw_chars = reasoning.chars().count();
+                            let raw_bytes = reasoning.len();
+                            let acc_chars_before = reasoning_normalizer.accumulated_char_count();
+                            log::trace!(target: "provider::openai_stream",
+                                "[reasoning chunk] idx={} raw_chars={} raw_bytes={} \
+                                 acc_chars_before={} acc_chars_after={}",
+                                chunk_index, raw_chars, raw_bytes,
+                                acc_chars_before, acc_chars_before + raw_chars,
+                            );
+                            if log::log_enabled!(log::Level::Trace) {
+                                log::trace!(target: "provider::openai_stream",
+                                    "[reasoning chunk] idx={} preview={}",
+                                    chunk_index, reasoning_normalizer::safe_preview(reasoning),
+                                );
+                            }
+
+                            // 归一化：处理 snapshot / 重复片段
+                            let result = reasoning_normalizer.process(reasoning);
+                            if !result.delta.is_empty() {
+                                handler.on_thinking(result.delta);
+                            }
+                            log::debug!(target: "provider::openai_stream",
+                                "[reasoning chunk] idx={} dedup_action={:?} \
+                                 raw_chars={} emitted_chars={} acc_chars={}",
+                                chunk_index, result.action, raw_chars,
+                                result.delta.chars().count(),
+                                reasoning_normalizer.accumulated_char_count(),
+                            );
                         }
                     }
 
                     // 文本内容
                     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                        handler.on_text(content);
-                        current_text.push_str(content);
+                        if !content.is_empty() {
+                            log::trace!(target: "provider::openai_stream",
+                                "[content chunk] idx={} content_chars={} content_bytes={}",
+                                chunk_index, content.chars().count(), content.len(),
+                            );
+                            handler.on_text(content);
+                            current_text.push_str(content);
+                        }
                     }
 
                     // Tool calls
@@ -332,7 +368,19 @@ pub(crate) async fn parse_openai_stream(
     // 构建最终的 content blocks。
     // Thinking 块必须在 Text 之前，以便 convert_messages 在重发 assistant 历史
     // 时能正确地将 reasoning_content 附加到拥有内容的消息上（对 DeepSeek thinking 模式很重要）。
+    let current_reasoning = reasoning_normalizer.accumulated().to_string();
+    let reasoning_stats = reasoning_normalizer.stats.clone();
+    let total_chunks = chunk_index;
     if !current_reasoning.is_empty() {
+        let reasoning_chars = current_reasoning.chars().count();
+        log::debug!(target: "provider::openai_stream",
+            "[openai-compat stream] reasoning summary: total_chunks={} \
+             thinking_chars={} thinking_bytes={} \
+             dedup={{none:{},snapshot_suffix:{},duplicate_drop:{},overlap_trim:{}}}",
+            total_chunks, reasoning_chars, current_reasoning.len(),
+            reasoning_stats.none, reasoning_stats.snapshot_suffix,
+            reasoning_stats.duplicate_drop, reasoning_stats.overlap_trim,
+        );
         content_blocks.push(ContentBlock::Thinking {
             thinking: current_reasoning,
         });

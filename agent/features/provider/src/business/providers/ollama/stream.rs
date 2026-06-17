@@ -8,6 +8,7 @@ use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
 use super::STREAM_IDLE_TIMEOUT;
+use crate::business::providers::openai_compatible::reasoning_normalizer::ReasoningDeltaNormalizer;
 use crate::business::types::StreamResponse;
 use crate::core::provider::StreamHandler;
 
@@ -23,6 +24,7 @@ pub(crate) async fn parse_ollama_stream(
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
+    let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     let mut final_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
     let mut usage = crate::business::types::Usage {
         input_tokens: 0,
@@ -79,10 +81,21 @@ pub(crate) async fn parse_ollama_stream(
         }
 
         if let Some(message) = chunk.get("message") {
-            // Thinking delta
+            // Thinking delta — 经 normalizer 归一化处理 snapshot/重复
             if let Some(thinking) = message.get("thinking").and_then(|v| v.as_str()) {
                 if !thinking.is_empty() {
-                    handler.on_thinking(thinking);
+                    let result = reasoning_normalizer.process(thinking);
+                    if !result.delta.is_empty() {
+                        handler.on_thinking(result.delta);
+                    }
+                    log::debug!(target: "provider::ollama_stream",
+                        "[ollama stream] reasoning dedup_action={:?} \
+                         raw_chars={} emitted_chars={} acc_chars={}",
+                        result.action,
+                        thinking.chars().count(),
+                        result.delta.chars().count(),
+                        reasoning_normalizer.accumulated_char_count(),
+                    );
                 }
             }
 
@@ -147,6 +160,20 @@ pub(crate) async fn parse_ollama_stream(
     let tool_count = final_tool_calls.len();
 
     // Build final content blocks
+    // Thinking 块必须在 Text 之前（与 openai_compatible 一致）
+    if !reasoning_normalizer.accumulated().is_empty() {
+        let stats = &reasoning_normalizer.stats;
+        log::debug!(target: "provider::ollama_stream",
+            "[ollama stream] reasoning summary: thinking_chars={} thinking_bytes={} \
+             dedup={{none:{},snapshot_suffix:{},duplicate_drop:{},overlap_trim:{}}}",
+            reasoning_normalizer.accumulated_char_count(),
+            reasoning_normalizer.accumulated_byte_count(),
+            stats.none, stats.snapshot_suffix, stats.duplicate_drop, stats.overlap_trim,
+        );
+        content_blocks.push(ContentBlock::Thinking {
+            thinking: reasoning_normalizer.accumulated().to_string(),
+        });
+    }
     if !current_text.is_empty() {
         handler.on_block_complete(&current_text);
         content_blocks.push(ContentBlock::Text { text: current_text });
