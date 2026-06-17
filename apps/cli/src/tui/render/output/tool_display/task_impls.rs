@@ -3,9 +3,6 @@ use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
-use crate::tui::render::theme;
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
 
 // ── TaskCreate ───────────────────────────────────────────────────
 
@@ -289,32 +286,9 @@ impl ToolDisplay for EnterPlanModeDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let reason = str_arg(input, "reason", "");
         if reason.is_empty() {
-            "📋 Enter Plan Mode".to_string()
+            self.display_name().to_string()
         } else {
-            format!("📋 Plan: {reason}")
-        }
-    }
-    fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
-        let text = self.format_header(input);
-        // emoji 前缀 + tool name（着色） + rest
-        if let Some(rest) = text.strip_prefix("📋 ") {
-            let name = self.display_name();
-            if let Some(suffix) = rest.strip_prefix(name) {
-                // "📋 Enter Plan Mode" 或 "📋 Enter Plan Mode..."
-                Line::from(vec![
-                    Span::raw("📋 "),
-                    Span::styled(name.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
-                    Span::raw(suffix.to_string()),
-                ])
-            } else {
-                // "📋 Plan: {reason}"
-                Line::from(vec![
-                    Span::raw("📋 "),
-                    Span::styled(rest.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
-                ])
-            }
-        } else {
-            Line::from(Span::raw(text))
+            format!("Plan: {reason}")
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -342,21 +316,9 @@ impl ToolDisplay for ExitPlanModeDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         if bool_arg(input, "execute", false) {
-            "▶ Execute Plan".to_string()
+            "Execute Plan".to_string()
         } else {
-            "▶ Exit Plan Mode".to_string()
-        }
-    }
-    fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
-        let text = self.format_header(input);
-        // emoji 前缀 + tool name（着色）
-        if let Some(rest) = text.strip_prefix("▶ ") {
-            Line::from(vec![
-                Span::raw("▶ "),
-                Span::styled(rest.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
-            ])
-        } else {
-            Line::from(Span::raw(text))
+            self.display_name().to_string()
         }
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
