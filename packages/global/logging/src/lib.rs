@@ -5,25 +5,24 @@
 //! | 文件 | target 前缀 | 来源 |
 //! |------|-------------|------|
 //! | `aemeath.log` | 兜底 | shared/composition + 其他 |
-//! | `runtime.log` | `runtime::` | runtime crate |
-//! | `provider.log` | `provider::` | provider crate |
-//! | `tools.log` | `tools::` | tools crate + tool_call/tool_result |
-//! | `prompt.log` | `prompt::` | prompt crate |
-//! | `tui.log` | `cli::` | cli/tui |
-//! | `hook.log` | `hook::` | hook crate |
+//! | `tui.log` | `aemeath:tui` | cli/tui |
+//! | `shared.log` | `aemeath:shared` | shared 层 |
+//! | `composition.log` | `aemeath:composition` | composition 层 |
+//! | `agent-provider.log` | `aemeath:agent:provider` | provider crate + LLM 输入/输出 |
+//! | `agent-runtime.log` | `aemeath:agent:runtime` | runtime crate |
+//! | `agent-tools.log` | `aemeath:agent:tools` | tools crate |
+//! | `agent-prompt.log` | `aemeath:agent:prompt` | prompt crate |
+//! | `agent-hook.log` | `aemeath:agent:hook` | hook crate |
+//! | `agent-storage.log` | `aemeath:agent:storage` | storage 层 |
+//! | `agent-project.log` | `aemeath:agent:project` | project 层 |
+//! | `agent-policy.log` | `aemeath:agent:policy` | policy 层 |
+//! | `agent-audit.log` | `aemeath:agent:audit` | audit 层 |
 //!
-//! ## 原始记录（静态方法直写）
+//! ## 审计日志（静态方法直写）
 //!
 //! | 文件 | 数据 | 写入方法 |
 //! |------|------|----------|
-//! | `input.log` | 用户输入 + LLM 输入 | `log_input` / `log_user_input` |
-//! | `output.log` | LLM 输出 | `log_output` |
-//!
-//! ## 审计
-//!
-//! | 文件 | 数据 | 写入方法 |
-//! |------|------|----------|
-//! | `audit.log` | 权限/行为审计（预留） | `audit` |
+//! | `agent-provider.log` | 用户输入 + LLM 输入 + LLM 输出 | `log_input` / `log_user_input` / `log_output` |
 //!
 //! ## 不变
 //!
@@ -36,19 +35,16 @@ pub mod format;
 pub mod rotation;
 #[cfg(test)]
 pub mod target_guard;
-pub mod text;
 pub mod unified_logger;
 
 pub use context::{
-    current_chat_id, current_model, current_turn, session_id, set_current_chat_id,
-    set_current_model, set_current_turn, set_session_id,
+    app_version, boot_ts, current_chat_id, current_model, current_provider, current_request_id,
+    current_role, current_turn, session_id, set_app_version, set_boot_ts, set_current_chat_id,
+    set_current_model, set_current_provider, set_current_request_id, set_current_role,
+    set_current_turn, set_session_id,
 };
+pub use format::{format_text_line_with_turn, timestamp_local_rfc3339};
 pub use rotation::{is_rotated_log_path, rotated_path, timestamp_rfc3339};
-pub use text::{
-    append_json_line, append_json_line_with_turn, append_line, append_text_line,
-    append_text_line_with_turn, format_text_line, format_text_line_with_turn, open_append,
-    prepare_log_file, LogFile,
-};
 pub use unified_logger::UnifiedLogger;
 
 /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。

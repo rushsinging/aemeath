@@ -5,38 +5,43 @@ use serde_json::json;
 fn sink_paths_in_logs_dir() {
     let paths = SinkPaths::from_logs_dir(Path::new("/tmp/logs"));
     assert_eq!(paths.aemeath, PathBuf::from("/tmp/logs/aemeath.log"));
-    assert_eq!(paths.runtime, PathBuf::from("/tmp/logs/runtime.log"));
-    assert_eq!(paths.provider, PathBuf::from("/tmp/logs/provider.log"));
-    assert_eq!(paths.tools, PathBuf::from("/tmp/logs/tools.log"));
-    assert_eq!(paths.prompt, PathBuf::from("/tmp/logs/prompt.log"));
     assert_eq!(paths.tui, PathBuf::from("/tmp/logs/tui.log"));
-    assert_eq!(paths.hook, PathBuf::from("/tmp/logs/hook.log"));
-    assert_eq!(paths.input, PathBuf::from("/tmp/logs/input.log"));
-    assert_eq!(paths.output, PathBuf::from("/tmp/logs/output.log"));
-    assert_eq!(paths.audit, PathBuf::from("/tmp/logs/audit.log"));
+    assert_eq!(paths.shared, PathBuf::from("/tmp/logs/shared.log"));
+    assert_eq!(paths.composition, PathBuf::from("/tmp/logs/composition.log"));
+    assert_eq!(paths.provider, PathBuf::from("/tmp/logs/agent-provider.log"));
+    assert_eq!(paths.runtime, PathBuf::from("/tmp/logs/agent-runtime.log"));
+    assert_eq!(paths.tools, PathBuf::from("/tmp/logs/agent-tools.log"));
+    assert_eq!(paths.prompt, PathBuf::from("/tmp/logs/agent-prompt.log"));
+    assert_eq!(paths.hook, PathBuf::from("/tmp/logs/agent-hook.log"));
+    assert_eq!(paths.storage, PathBuf::from("/tmp/logs/agent-storage.log"));
+    assert_eq!(paths.project, PathBuf::from("/tmp/logs/agent-project.log"));
+    assert_eq!(paths.policy, PathBuf::from("/tmp/logs/agent-policy.log"));
+    assert_eq!(paths.audit, PathBuf::from("/tmp/logs/agent-audit.log"));
 }
 
 #[test]
 fn static_audit_methods_are_noop_without_init() {
-    // 未 init 时 log_input/output/user_input/audit 应静默 no-op（不能 panic）
+    // 未 init 时 log_input/output/user_input 应静默 no-op（不能 panic）
     UnifiedLogger::log_input("default", json!({}));
     UnifiedLogger::log_output("default", json!({}));
     UnifiedLogger::log_user_input(json!({}));
-    UnifiedLogger::audit("permission", json!({}));
 }
 
 /// 构造一个仅用于测试 `maybe_rotate` 的最小 logger（其余 sink 留空）。
 fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> UnifiedLogger {
     UnifiedLogger {
         aemeath: Mutex::new(None),
-        runtime: Mutex::new(None),
+        tui: Mutex::new(None),
+        shared: Mutex::new(None),
+        composition: Mutex::new(None),
         provider: Mutex::new(None),
+        runtime: Mutex::new(None),
         tools: Mutex::new(None),
         prompt: Mutex::new(None),
-        tui: Mutex::new(None),
         hook: Mutex::new(None),
-        input: Mutex::new(None),
-        output: Mutex::new(None),
+        storage: Mutex::new(None),
+        project: Mutex::new(None),
+        policy: Mutex::new(None),
         audit: Mutex::new(None),
         paths: SinkPaths::from_logs_dir(dir),
         max_bytes,
@@ -114,32 +119,51 @@ fn maybe_rotate_is_noop_when_file_missing() {
 }
 
 #[test]
-fn route_returns_correct_sink_for_known_prefixes() {
+fn route_returns_correct_sink_for_aemeath_targets() {
     let logger = rotate_test_logger(&std::env::temp_dir(), 1024, 3);
 
-    // Verify each prefix routes to the correct path
-    let (_, path_cli) = logger.route("cli::tui::render").unwrap();
-    assert_eq!(path_cli, &logger.paths.tui);
+    let (_, path) = logger.route("aemeath:tui");
+    assert_eq!(path, &logger.paths.tui);
 
-    let (_, path_hook) = logger.route("hook::runner").unwrap();
-    assert_eq!(path_hook, &logger.paths.hook);
+    let (_, path) = logger.route("aemeath:shared");
+    assert_eq!(path, &logger.paths.shared);
 
-    let (_, path_runtime) = logger.route("runtime::loop_runner").unwrap();
-    assert_eq!(path_runtime, &logger.paths.runtime);
+    let (_, path) = logger.route("aemeath:composition");
+    assert_eq!(path, &logger.paths.composition);
 
-    let (_, path_provider) = logger.route("provider::client").unwrap();
-    assert_eq!(path_provider, &logger.paths.provider);
+    let (_, path) = logger.route("aemeath:agent:provider");
+    assert_eq!(path, &logger.paths.provider);
 
-    let (_, path_tools) = logger.route("tools::mcp").unwrap();
-    assert_eq!(path_tools, &logger.paths.tools);
+    let (_, path) = logger.route("aemeath:agent:runtime");
+    assert_eq!(path, &logger.paths.runtime);
 
-    let (_, path_prompt) = logger.route("prompt::guidance").unwrap();
-    assert_eq!(path_prompt, &logger.paths.prompt);
+    let (_, path) = logger.route("aemeath:agent:tools");
+    assert_eq!(path, &logger.paths.tools);
+
+    let (_, path) = logger.route("aemeath:agent:prompt");
+    assert_eq!(path, &logger.paths.prompt);
+
+    let (_, path) = logger.route("aemeath:agent:hook");
+    assert_eq!(path, &logger.paths.hook);
+
+    let (_, path) = logger.route("aemeath:agent:storage");
+    assert_eq!(path, &logger.paths.storage);
+
+    let (_, path) = logger.route("aemeath:agent:project");
+    assert_eq!(path, &logger.paths.project);
+
+    let (_, path) = logger.route("aemeath:agent:policy");
+    assert_eq!(path, &logger.paths.policy);
+
+    let (_, path) = logger.route("aemeath:agent:audit");
+    assert_eq!(path, &logger.paths.audit);
 }
 
 #[test]
-fn route_returns_none_for_unknown_prefix() {
+fn route_returns_aemeath_for_unknown_target() {
     let logger = rotate_test_logger(&std::env::temp_dir(), 1024, 3);
-    assert!(logger.route("unknown::module").is_none());
-    assert!(logger.route("app").is_none());
+    let (_, path) = logger.route("unknown::module");
+    assert_eq!(path, &logger.paths.aemeath);
+    let (_, path) = logger.route("app");
+    assert_eq!(path, &logger.paths.aemeath);
 }

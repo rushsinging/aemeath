@@ -14,6 +14,7 @@ pub fn timestamp_rfc3339() -> String {
     now.to_rfc3339()
 }
 
+#[allow(dead_code)]
 pub(crate) fn prepare_log_path(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -53,6 +54,7 @@ pub(crate) fn rotate_if_needed(path: &Path, max_bytes: u64, max_backups: usize) 
     fs::rename(path, rotated_path(path, 1))
 }
 
+#[allow(dead_code)]
 pub(crate) fn cleanup_old_rotated_logs(dir: &Path) -> io::Result<()> {
     let cutoff = SystemTime::now()
         .checked_sub(Duration::from_secs(LOG_RETENTION_DAYS * 24 * 60 * 60))
