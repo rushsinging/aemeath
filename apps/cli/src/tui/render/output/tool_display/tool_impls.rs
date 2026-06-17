@@ -369,9 +369,13 @@ impl ToolDisplay for WebFetchDisplay {
         "WebFetch"
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let url = str_arg(input, "url", "?");
-        let display_url = truncate_ellipsis(url, 60);
-        format!("WebFetch {display_url}")
+        let url = str_arg(input, "url", "");
+        if url.is_empty() {
+            "WebFetch".to_string()
+        } else {
+            let display_url = truncate_ellipsis(url, 60);
+            format!("WebFetch {display_url}")
+        }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -401,9 +405,13 @@ impl ToolDisplay for AskUserQuestionDisplay {
         "AskUserQuestion"
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
-        let question = str_arg(input, "question", "?");
-        let preview = truncate_ellipsis(question, 60usize);
-        format!("AskUserQuestion {preview}")
+        let question = str_arg(input, "question", "");
+        if question.is_empty() {
+            "AskUserQuestion".to_string()
+        } else {
+            let preview = truncate_ellipsis(question, 60usize);
+            format!("AskUserQuestion {preview}")
+        }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

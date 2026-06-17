@@ -132,10 +132,7 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 
 /// Format a tool call for human-friendly display.
 /// 返回 `(Line, details)`：Line 已含样式，details 为纯文本行。
-pub fn format_tool_call(
-    name: &str,
-    raw_json: &str,
-) -> (Line<'static>, Vec<String>) {
+pub fn format_tool_call(name: &str, raw_json: &str) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
@@ -236,10 +233,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_create_compact_no_description() {
-        let (header, details) = format_tool_call(
-            "TaskCreate",
-            r#"{"subject":"分析"}"#,
-        );
+        let (header, details) = format_tool_call("TaskCreate", r#"{"subject":"分析"}"#);
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
         assert!(
@@ -251,16 +245,11 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_update_compact_hides_details() {
-        let (header, details) = format_tool_call(
-            "TaskUpdate",
-            r#"{"taskId":"42","status":"completed"}"#,
-        );
+        let (header, details) =
+            format_tool_call("TaskUpdate", r#"{"taskId":"42","status":"completed"}"#);
         let text = line_to_string(&header);
         assert!(text.contains("42"), "header 应包含 taskId: {text}");
-        assert!(
-            text.contains("completed"),
-            "header 应包含 status: {text}"
-        );
+        assert!(text.contains("completed"), "header 应包含 status: {text}");
         assert!(
             details.is_empty(),
             "Compact 模式不应显示 details: {details:?}"
@@ -342,5 +331,151 @@ mod tests {
             "header 应以 'Read ' 开头: {text}"
         );
         assert!(text.contains("..."), "超长路径应被截断: {text}");
+    }
+
+    // ── 回归 #304 ──────────────────────────────────────────────────
+    // 参数未就绪时 header 不应显示 "?" 占位（参数为空时只显示工具名）。
+    // 覆盖 task_impls.rs 与 tool_impls.rs 中所有 ? → "" 的修复点。
+
+    #[test]
+    fn test_format_tool_call_bash_empty_command_no_question_mark() {
+        let (header, _details) = format_tool_call("Bash", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "Bash", "空 command 时应只显示 'Bash': {text}");
+        assert!(!text.contains('?'), "header 不应含 '?': {text}");
+    }
+
+    #[test]
+    fn test_format_tool_call_glob_empty_pattern_no_question_mark() {
+        let (header, _details) = format_tool_call("Glob", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "Glob", "空 pattern 时应只显示 'Glob': {text}");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_grep_empty_pattern_no_question_mark() {
+        let (header, _details) = format_tool_call("Grep", r#"{"path":"."}"#);
+        let text = line_to_string(&header);
+        assert_eq!(text, "Grep in .", "空 pattern 时应显示 'Grep in .': {text}");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_task_create_empty_subject_no_question_mark() {
+        let (header, _details) = format_tool_call("TaskCreate", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "TaskCreate");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_task_create_with_subject_and_description() {
+        // 回归：subject + description 都给定时，header 应保留 ":" 分隔与截断。
+        let (header, _details) = format_tool_call(
+            "TaskCreate",
+            r#"{"subject":"分析","description":"查看结构"}"#,
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("分析"), "header: {text}");
+        assert!(text.contains("查看结构"), "header: {text}");
+    }
+
+    #[test]
+    fn test_format_tool_call_task_update_empty_id_no_question_mark() {
+        let (header, _details) = format_tool_call("TaskUpdate", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "TaskUpdate");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_task_update_with_id_no_status() {
+        // 回归：id 给定但 status 缺失时，header 应只显示 id。
+        let (header, _details) = format_tool_call("TaskUpdate", r#"{"taskId":"42"}"#);
+        let text = line_to_string(&header);
+        assert!(text.contains("42"));
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_task_get_empty_id_no_question_mark() {
+        let (header, _details) = format_tool_call("TaskGet", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "TaskGet");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_task_stop_empty_id_no_question_mark() {
+        let (header, _details) = format_tool_call("TaskStop", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "TaskStop");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
+        let (header, _details) = format_tool_call("TaskListCreate", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "TaskListCreate");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_skill_empty_no_question_mark() {
+        let (header, _details) = format_tool_call("Skill", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "Skill");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_lsp_both_empty_no_question_mark() {
+        let (header, _details) = format_tool_call("LSP", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "LSP");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_lsp_only_operation_no_path() {
+        let (header, _details) = format_tool_call("LSP", r#"{"operation":"hover"}"#);
+        let text = line_to_string(&header);
+        assert_eq!(text, "LSP::hover");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_lsp_only_path_no_operation() {
+        let (header, _details) = format_tool_call("LSP", r#"{"filePath":"/tmp/x.rs"}"#);
+        let text = line_to_string(&header);
+        assert_eq!(text, "LSP /tmp/x.rs");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_lsp_full_no_question_mark() {
+        let (header, _details) =
+            format_tool_call("LSP", r#"{"operation":"hover","filePath":"/tmp/x.rs"}"#);
+        let text = line_to_string(&header);
+        assert_eq!(text, "LSP::hover /tmp/x.rs");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_web_fetch_empty_url_no_question_mark() {
+        let (header, _details) = format_tool_call("WebFetch", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "WebFetch");
+        assert!(!text.contains('?'));
+    }
+
+    #[test]
+    fn test_format_tool_call_ask_user_question_empty_no_question_mark() {
+        let (header, _details) = format_tool_call("AskUserQuestion", "{}");
+        let text = line_to_string(&header);
+        assert_eq!(text, "AskUserQuestion");
+        assert!(!text.contains('?'));
     }
 }

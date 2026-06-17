@@ -52,7 +52,7 @@ pub(super) fn format_todowrite_value(input: &serde_json::Value) -> Option<(Strin
     let mut details = Vec::new();
 
     for todo in todos.iter().take(3) {
-        let subject = str_arg(todo, "subject", "?");
+        let subject = str_arg(todo, "subject", "");
         let status = str_arg(todo, "status", "pending");
         let icon = match status {
             "completed" => "✓",
