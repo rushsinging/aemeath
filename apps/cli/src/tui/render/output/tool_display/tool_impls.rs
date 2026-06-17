@@ -25,14 +25,21 @@ impl ToolDisplay for BashDisplay {
             format!("{} {}", self.display_name(), truncate_ellipsis(cmd, 80))
         }
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // command 已在 header 显示，不再需要 details
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let cmd = str_arg(input, "command", "");
+        if cmd.is_empty() {
+            return vec![];
+        }
+        // 截断显示，避免过长命令占用太多空间
+        vec![truncate_ellipsis(
+            cmd,
+            200usize.saturating_sub(INDENT.len()),
+        )]
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: Some(5),
                 render_kind: ResultRender::Plain,
@@ -67,7 +74,7 @@ impl ToolDisplay for ReadDisplay {
         let start = offset + 1; // 转为 1-based
         let end = offset + limit;
         format!(
-            "{} {display_path} L{start}:L{end} ({limit} lines)",
+            "{} {display_path} {start}:{end}",
             self.display_name()
         )
     }
@@ -78,7 +85,7 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
         let end = offset + limit;
-        let range_info = format!("L{start}:L{end} ({limit} lines)");
+        let range_info = format!("{start}:{end}");
         Line::from(vec![
             Span::styled(
                 self.display_name().to_string(),
@@ -101,33 +108,33 @@ impl ToolDisplay for ReadDisplay {
         let start = offset + 1;
 
         // 尝试从 result_summary 中解析实际行数
-        // result_summary 格式: "Read {n} lines from {path}" 或完整 JSON
         let actual_lines = result_summary.and_then(|summary| {
-            // 尝试解析 JSON
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
                 if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
                     return parse_line_count_from_message(message);
                 }
             }
-            // 直接解析文本
             parse_line_count_from_message(summary)
         });
 
         let range_info = match actual_lines {
-            Some(actual) if actual < limit => {
-                // 实际行数小于请求的 limit，显示实际行数
+            Some(actual) => {
                 let actual_end = offset + actual;
-                format!("L{start}:L{actual_end} ({actual} lines)")
+                format!("{start}:{actual_end} ({actual} lines)")
             }
             _ => {
-                // 无法解析或实际行数等于 limit，显示请求的 limit
+                // 无法解析，不显示 () 部分
                 let end = offset + limit;
-                format!("L{start}:L{end} ({limit} lines)")
+                format!("{start}:{end}")
             }
         };
 
         Line::from(vec![
-            Span::raw(format!("{} {display_path} ", self.display_name())),
+            Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+            Span::raw(format!(" {display_path} ")),
             Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
         ])
     }
@@ -174,6 +181,55 @@ impl ToolDisplay for WriteDisplay {
             .unwrap_or(0);
         format!("{} {display_path} {bytes} bytes", self.display_name())
     }
+    /// 当 result 到达后，使用实际写入的字节数更新 header。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_summary: Option<&str>,
+    ) -> Line<'static> {
+        let path = file_path(input);
+        let display_path = truncate_path(path, 60);
+
+        // 尝试从 result_summary 中解析实际写入字节数
+        let actual_bytes = result_summary.and_then(|summary| {
+            // 尝试解析 JSON: {"message":"Wrote N bytes to ...", "data":{"bytes_written":N}}
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
+                // 优先从 data.bytes_written 获取
+                if let Some(b) = json
+                    .get("data")
+                    .and_then(|d| d.get("bytes_written"))
+                    .and_then(|v| v.as_u64())
+                {
+                    return Some(b as usize);
+                }
+                // 回退：从 message 解析 "Wrote N bytes to"
+                if let Some(msg) = json.get("message").and_then(|v| v.as_str()) {
+                    return parse_bytes_from_message(msg);
+                }
+            }
+            // 直接解析文本
+            parse_bytes_from_message(summary)
+        });
+
+        // 计算入参中的字节数（回退值）
+        let input_bytes = input
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.len())
+            .unwrap_or(0);
+
+        let bytes = actual_bytes.unwrap_or(input_bytes);
+        let bytes_info = format!("{bytes} bytes");
+
+        Line::from(vec![
+            Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+            Span::raw(format!(" {display_path} ")),
+            Span::styled(bytes_info, Style::default().fg(theme::TEXT_MUTED)),
+        ])
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 字节数已在 summary 中，不再需要 details
         vec![]
@@ -185,6 +241,14 @@ impl ToolDisplay for WriteDisplay {
             result: ResultPolicy::Hidden, // 不显示 result 子块
         }
     }
+}
+
+/// 从 message 中解析字节数，如 "Wrote 1234 bytes to /path"
+fn parse_bytes_from_message(message: &str) -> Option<usize> {
+    let re = regex::Regex::new(r"Wrote (\d+) bytes? to").ok()?;
+    re.captures(message)
+        .and_then(|cap| cap.get(1))
+        .and_then(|m| m.as_str().parse::<usize>().ok())
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Write",
@@ -218,7 +282,7 @@ impl ToolDisplay for EditDisplay {
         )
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // 变更统计已在 summary 中，不再需要 details
+        // old/new 内容由 result 子块的 diff 渲染展示
         vec![]
     }
     fn render_policy(&self) -> ToolRenderPolicy {

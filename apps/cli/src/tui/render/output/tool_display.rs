@@ -89,16 +89,17 @@ pub trait ToolDisplay: Send + Sync {
     /// 需要对 header 不同部分施加不同颜色的工具可覆写此方法。
     fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
         let text = self.format_header(input);
-        let name = self.display_name();
-        if let Some(rest) = text.strip_prefix(name) {
+        let name = self.display_name().to_string();
+        // 用 display_name 作为 tool name 的锚点，不依赖 strip_prefix 匹配
+        if let Some(rest) = text.strip_prefix(&name) {
             Line::from(vec![
-                Span::styled(name.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
+                Span::styled(name, Style::default().fg(theme::ACCENT_BRIGHT)),
                 Span::raw(rest.to_string()),
             ])
         } else {
             // format_header 不以 display_name 开头（如 EnterPlanMode 用 📋 前缀），
-            // 保持整体 raw。
-            Line::from(Span::raw(text))
+            // 将整个文本作为 tool name 着色。
+            Line::from(Span::styled(text, Style::default().fg(theme::ACCENT_BRIGHT)))
         }
     }
 

@@ -314,9 +314,9 @@ impl ToolDisplay for EnterPlanModeDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let reason = str_arg(input, "reason", "");
         if reason.is_empty() {
-            "📋 Enter Plan Mode".to_string()
+            self.display_name().to_string()
         } else {
-            format!("📋 Plan: {reason}")
+            format!("Plan: {reason}")
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -344,9 +344,9 @@ impl ToolDisplay for ExitPlanModeDisplay {
     }
     fn format_header(&self, input: &serde_json::Value) -> String {
         if bool_arg(input, "execute", false) {
-            "▶ Execute Plan".to_string()
+            "Execute Plan".to_string()
         } else {
-            "▶ Exit Plan Mode".to_string()
+            self.display_name().to_string()
         }
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
