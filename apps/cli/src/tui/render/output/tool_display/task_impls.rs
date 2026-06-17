@@ -14,7 +14,7 @@ impl ToolDisplay for TaskCreateDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let subject = str_arg(input, "subject", "");
         if subject.is_empty() {
-            return "TaskCreate".to_string();
+            return self.display_name().to_string();
         }
         let desc = str_arg(input, "description", "");
         if desc.is_empty() {
@@ -53,7 +53,7 @@ impl ToolDisplay for TaskUpdateDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = str_arg(input, "taskId", "");
         if id.is_empty() {
-            return "TaskUpdate".to_string();
+            return self.display_name().to_string();
         }
         let status = str_arg(input, "status", "");
         if status.is_empty() {
@@ -118,9 +118,9 @@ impl ToolDisplay for TaskListCreateDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let subject = str_arg(input, "subject", "");
         if subject.is_empty() {
-            "TaskListCreate".to_string()
+            self.display_name().to_string()
         } else {
-            format!("TaskListCreate: {subject}")
+            format!("{}: {subject}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -175,9 +175,9 @@ impl ToolDisplay for SkillDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let skill = str_arg(input, "skill", "");
         if skill.is_empty() {
-            "Skill".to_string()
+            self.display_name().to_string()
         } else {
-            format!("Skill {skill}")
+            format!("{} {skill}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -210,11 +210,12 @@ impl ToolDisplay for LspDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let op = str_arg(input, "operation", "");
         let path = str_arg(input, "filePath", "");
+        let name = self.display_name();
         match (op.is_empty(), path.is_empty()) {
-            (true, true) => "LSP".to_string(),
-            (true, false) => format!("LSP {path}"),
-            (false, true) => format!("LSP::{op}"),
-            (false, false) => format!("LSP::{op} {path}"),
+            (true, true) => name.to_string(),
+            (true, false) => format!("{name} {path}"),
+            (false, true) => format!("{name}::{op}"),
+            (false, false) => format!("{name}::{op} {path}"),
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -247,9 +248,9 @@ impl ToolDisplay for TaskGetDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = str_arg(input, "taskId", "");
         if id.is_empty() {
-            "TaskGet".to_string()
+            self.display_name().to_string()
         } else {
-            format!("TaskGet {id}")
+            format!("{} {id}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -282,9 +283,9 @@ impl ToolDisplay for TaskStopDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let id = str_arg(input, "taskId", "");
         if id.is_empty() {
-            "TaskStop".to_string()
+            self.display_name().to_string()
         } else {
-            format!("TaskStop {id}")
+            format!("{} {id}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {

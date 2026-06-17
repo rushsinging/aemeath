@@ -402,7 +402,10 @@ mod tests {
     fn test_format_tool_call_bash_empty_command_no_question_mark() {
         let (header, _details) = format_tool_call("Bash", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "Bash", "空 command 时应只显示 'Bash': {text}");
+        assert_eq!(
+            text, "Run",
+            "空 command 时应只显示 display name 'Run': {text}"
+        );
         assert!(!text.contains('?'), "header 不应含 '?': {text}");
     }
 
@@ -410,7 +413,10 @@ mod tests {
     fn test_format_tool_call_glob_empty_pattern_no_question_mark() {
         let (header, _details) = format_tool_call("Glob", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "Glob", "空 pattern 时应只显示 'Glob': {text}");
+        assert_eq!(
+            text, "Find",
+            "空 pattern 时应只显示 display name 'Find': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -418,7 +424,10 @@ mod tests {
     fn test_format_tool_call_grep_empty_pattern_no_question_mark() {
         let (header, _details) = format_tool_call("Grep", r#"{"path":"."}"#, None);
         let text = line_to_string(&header);
-        assert_eq!(text, "Grep in .", "空 pattern 时应显示 'Grep in .': {text}");
+        assert_eq!(
+            text, "Search in .",
+            "空 pattern 时应显示 display name 'Search in .': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -426,7 +435,10 @@ mod tests {
     fn test_format_tool_call_task_create_empty_subject_no_question_mark() {
         let (header, _details) = format_tool_call("TaskCreate", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "TaskCreate");
+        assert_eq!(
+            text, "Task",
+            "空 subject 时应只显示 display name 'Task': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -436,6 +448,7 @@ mod tests {
         let (header, _details) = format_tool_call(
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
@@ -446,7 +459,10 @@ mod tests {
     fn test_format_tool_call_task_update_empty_id_no_question_mark() {
         let (header, _details) = format_tool_call("TaskUpdate", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "TaskUpdate");
+        assert_eq!(
+            text, "Task",
+            "空 taskId 时应只显示 display name 'Task': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -463,7 +479,10 @@ mod tests {
     fn test_format_tool_call_task_get_empty_id_no_question_mark() {
         let (header, _details) = format_tool_call("TaskGet", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "TaskGet");
+        assert_eq!(
+            text, "Task",
+            "空 taskId 时应只显示 display name 'Task': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -471,7 +490,10 @@ mod tests {
     fn test_format_tool_call_task_stop_empty_id_no_question_mark() {
         let (header, _details) = format_tool_call("TaskStop", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "TaskStop");
+        assert_eq!(
+            text, "Stop Task",
+            "空 taskId 时应只显示 display name 'Stop Task': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -479,7 +501,10 @@ mod tests {
     fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
         let (header, _details) = format_tool_call("TaskListCreate", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "TaskListCreate");
+        assert_eq!(
+            text, "New Task List",
+            "空 subject 时应只显示 display name 'New Task List': {text}"
+        );
         assert!(!text.contains('?'));
     }
 
@@ -517,8 +542,11 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_lsp_full_no_question_mark() {
-        let (header, _details) =
-            format_tool_call("LSP", r#"{"operation":"hover","filePath":"/tmp/x.rs"}"#, None);
+        let (header, _details) = format_tool_call(
+            "LSP",
+            r#"{"operation":"hover","filePath":"/tmp/x.rs"}"#,
+            None,
+        );
         let text = line_to_string(&header);
         assert_eq!(text, "LSP::hover /tmp/x.rs");
         assert!(!text.contains('?'));
@@ -536,7 +564,10 @@ mod tests {
     fn test_format_tool_call_ask_user_question_empty_no_question_mark() {
         let (header, _details) = format_tool_call("AskUserQuestion", "{}", None);
         let text = line_to_string(&header);
-        assert_eq!(text, "AskUserQuestion");
+        assert_eq!(
+            text, "Ask",
+            "空 question 时应只显示 display name 'Ask': {text}"
+        );
         assert!(!text.contains('?'));
     }
 }

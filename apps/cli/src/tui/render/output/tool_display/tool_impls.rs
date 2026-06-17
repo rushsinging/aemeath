@@ -20,9 +20,9 @@ impl ToolDisplay for BashDisplay {
         let cmd = str_arg(input, "command", "");
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
         if cmd.is_empty() {
-            "Bash".to_string()
+            self.display_name().to_string()
         } else {
-            format!("Bash {}", truncate_ellipsis(cmd, 80))
+            format!("{} {}", self.display_name(), truncate_ellipsis(cmd, 80))
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -248,9 +248,9 @@ impl ToolDisplay for GlobDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let pattern = str_arg(input, "pattern", "");
         if pattern.is_empty() {
-            "Glob".to_string()
+            self.display_name().to_string()
         } else {
-            format!("Glob {pattern}")
+            format!("{} {pattern}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -285,9 +285,9 @@ impl ToolDisplay for GrepDisplay {
         let path = str_arg(input, "path", ".");
         let display_path = truncate_path(path, 40);
         if pattern.is_empty() {
-            format!("Grep in {display_path}")
+            format!("{} in {display_path}", self.display_name())
         } else {
-            format!("Grep /{pattern}/ in {display_path}")
+            format!("{} /{pattern}/ in {display_path}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -432,10 +432,10 @@ impl ToolDisplay for WebFetchDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let url = str_arg(input, "url", "");
         if url.is_empty() {
-            "WebFetch".to_string()
+            self.display_name().to_string()
         } else {
             let display_url = truncate_ellipsis(url, 60);
-            format!("WebFetch {display_url}")
+            format!("{} {display_url}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -468,10 +468,10 @@ impl ToolDisplay for AskUserQuestionDisplay {
     fn format_header(&self, input: &serde_json::Value) -> String {
         let question = str_arg(input, "question", "");
         if question.is_empty() {
-            "AskUserQuestion".to_string()
+            self.display_name().to_string()
         } else {
             let preview = truncate_ellipsis(question, 60usize);
-            format!("AskUserQuestion {preview}")
+            format!("{} {preview}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
