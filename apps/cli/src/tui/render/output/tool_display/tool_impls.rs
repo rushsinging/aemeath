@@ -26,8 +26,11 @@ impl ToolDisplay for BashDisplay {
         if cmd.is_empty() {
             return vec![];
         }
-        // 展示完整命令（多行命令会显示所有行）
-        cmd.lines().map(|line| line.to_string()).collect()
+        // 截断显示，避免过长命令占用太多空间
+        vec![truncate_ellipsis(
+            cmd,
+            200usize.saturating_sub(INDENT.len()),
+        )]
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
@@ -67,7 +70,7 @@ impl ToolDisplay for ReadDisplay {
         let start = offset + 1; // 转为 1-based
         let end = offset + limit;
         format!(
-            "{} {display_path} L{start}:L{end} ({limit} lines)",
+            "{} {display_path} {start}:{end}",
             self.display_name()
         )
     }
@@ -78,7 +81,7 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
         let end = offset + limit;
-        let range_info = format!("L{start}:L{end} ({limit} lines)");
+        let range_info = format!("{start}:{end}");
         Line::from(vec![
             Span::styled(
                 self.display_name().to_string(),
@@ -101,33 +104,33 @@ impl ToolDisplay for ReadDisplay {
         let start = offset + 1;
 
         // 尝试从 result_summary 中解析实际行数
-        // result_summary 格式: "Read {n} lines from {path}" 或完整 JSON
         let actual_lines = result_summary.and_then(|summary| {
-            // 尝试解析 JSON
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
                 if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
                     return parse_line_count_from_message(message);
                 }
             }
-            // 直接解析文本
             parse_line_count_from_message(summary)
         });
 
         let range_info = match actual_lines {
-            Some(actual) if actual < limit => {
-                // 实际行数小于请求的 limit，显示实际行数
+            Some(actual) => {
                 let actual_end = offset + actual;
-                format!("L{start}:L{actual_end} ({actual} lines)")
+                format!("{start}:{actual_end} ({actual} lines)")
             }
             _ => {
-                // 无法解析或实际行数等于 limit，显示请求的 limit
+                // 无法解析，不显示 () 部分
                 let end = offset + limit;
-                format!("L{start}:L{end} ({limit} lines)")
+                format!("{start}:{end}")
             }
         };
 
         Line::from(vec![
-            Span::raw(format!("{} {display_path} ", self.display_name())),
+            Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+            Span::raw(format!(" {display_path} ")),
             Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
         ])
     }
@@ -274,36 +277,14 @@ impl ToolDisplay for EditDisplay {
             self.display_name()
         )
     }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let old_string = input
-            .get("old_string")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let new_string = input
-            .get("new_string")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let old_lines = old_string.lines().count();
-        let new_lines = new_string.lines().count();
-        let old_preview = if old_string.len() > 80 {
-            format!("{}...", &old_string[..80])
-        } else {
-            old_string.to_string()
-        };
-        let new_preview = if new_string.len() > 80 {
-            format!("{}...", &new_string[..80])
-        } else {
-            new_string.to_string()
-        };
-        vec![
-            format!("- ({old_lines} lines): {old_preview}"),
-            format!("+ ({new_lines} lines): {new_preview}"),
-        ]
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        // old/new 内容由 result 子块的 diff 渲染展示
+        vec![]
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Expanded,
+            details: DetailsPolicy::Hidden,
             result: ResultPolicy::Visible {
                 max_lines: None, // 全部显示
                 render_kind: ResultRender::Diff,
