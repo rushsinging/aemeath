@@ -40,6 +40,7 @@
 | `specs/storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
 | `specs/policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
 | `specs/bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；操作 GitHub Issues（迁移自 `docs/bug/`、`docs/snapshot/`） |
+| `specs/logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段、新增日志文件 |
 | `docs/design/architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/architecture-guards.md` 本身 |
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
@@ -81,10 +82,22 @@ aemeath/                    # workspace root
 │   ├── _reasoning.md        #   reasoning 开启时附加
 │   └── {prefix}.md          #   按 model id 前缀匹配（最长优先）
 ├── hooks/                   # 全局 Hook 脚本
-├── logs/                    # 日志文件
-│   ├── aemeath.log          #   应用主日志（追加模式）
-│   ├── panic.log            #   Panic 日志
-│   └── agent.log            #   审计日志（已废弃）
+├── logs/                    # 日志文件（12 个 target 路由文件 + 兜底 + panic）
+│   ├── aemeath.log          #   兜底日志（不匹配任何合法 target 时路由到此）
+│   ├── panic.log            #   Panic 日志（panic_hook.rs 直写，不纳入 UnifiedLogger）
+│   ├── tui.log              #   aemeath:tui — TUI / CLI 入口
+│   ├── shared.log           #   aemeath:shared — shared 层
+│   ├── composition.log      #   aemeath:composition — composition 层
+│   ├── agent-provider.log   #   aemeath:agent:provider — provider + LLM 输入/输出
+│   ├── agent-runtime.log    #   aemeath:agent:runtime — agent 循环
+│   ├── agent-tools.log      #   aemeath:agent:tools — tool 执行
+│   ├── agent-prompt.log     #   aemeath:agent:prompt — Guidance 系统
+│   ├── agent-hook.log       #   aemeath:agent:hook — hook 执行
+│   ├── agent-storage.log    #   aemeath:agent:storage — 持久化
+│   ├── agent-project.log    #   aemeath:agent:project — worktree 管理
+│   ├── agent-policy.log     #   aemeath:agent:policy — 权限评估
+│   └── agent-audit.log      #   aemeath:agent:audit — 审计事件
+> **废弃文件**：`input.log` / `output.log` / `tool.log` / `audit.log` / `agent.log` 已废弃，NEVER 再使用。详见 `specs/logging.md`。
 >
 > 注意：`-v` / `--verbose` 参数将应用日志输出到 stderr（常与 `-q` 配合用于 CLI 测试：`echo "hello" | aemeath -q -v --allow-all`）。不加 `-v` 时日志始终写入 `~/.agents/logs/aemeath.log`。
 ├── memory/                  # 持久化记忆存储

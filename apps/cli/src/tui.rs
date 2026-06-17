@@ -65,6 +65,6 @@ pub use self::render::status::StatusBar;
 mod tests {
     #[test]
     fn test_log_target_uses_cli_prefix() {
-        assert_eq!(super::LOG_TARGET, "cli::tui");
+        assert_eq!(super::LOG_TARGET, "aemeath:tui");
     }
 }
