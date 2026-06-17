@@ -46,7 +46,7 @@ where
 {
     let path_base = agent.ctx.workspace_read().current_path_base();
     let workspace_root = agent.ctx.workspace_read().current_root();
-    let engine = PolicyEngine::new(&path_base, &workspace_root, allow_all);
+    let engine = PolicyEngine::new(&path_base, &workspace_root, allow_all, &agent.ctx.read_files);
 
     let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
     let denied_results = deny_tool_calls(&denied, sink, context, hook_ui, hook_runner).await;

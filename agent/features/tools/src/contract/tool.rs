@@ -37,5 +37,16 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Whether the PolicyEngine should enforce "read-before-write" for this tool.
+    ///
+    /// When overridden to `true`, the engine will deny the call (after path
+    /// normalisation) if any `PathKind::File` access resolves to an **existing**
+    /// file that has not been recorded in the session's `read_files` set.
+    ///
+    /// Override in tools like Edit / Write that modify existing files.
+    fn requires_read_before_write(&self) -> bool {
+        false
+    }
+
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult;
 }

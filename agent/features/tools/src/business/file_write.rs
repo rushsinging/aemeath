@@ -42,8 +42,11 @@ impl Tool for FileWriteTool {
     fn path_accesses(&self) -> &'static [PathAccess] {
         &FILE_ACCESS
     }
+    fn requires_read_before_write(&self) -> bool {
+        true
+    }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error(serde_json::json!({
@@ -66,24 +69,9 @@ impl Tool for FileWriteTool {
                 "data": {}
             }).to_string()),
         };
-        // Path has already been validated and normalised by PolicyEngine
+        // Path has already been validated and normalised by PolicyEngine,
+        // including the read-before-write check for existing files.
         let path = std::path::PathBuf::from(file_path);
-        // For existing files, require read first
-        if path.exists() {
-            if let Ok(read_files) = ctx.read_files.lock() {
-                let normalized_path = path.to_string_lossy();
-                if !read_files.contains(file_path) && !read_files.contains(normalized_path.as_ref())
-                {
-                    return ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": format!("You must read {file_path} before overwriting it. Use the Read tool first."),
-                        "data": {
-                            "file_path": file_path
-                        }
-                    }).to_string());
-                }
-            }
-        }
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 if let Err(e) = tokio::fs::create_dir_all(parent).await {
