@@ -116,7 +116,7 @@ pub fn format_audit_json_line(event_type: &str, payload: Value) -> String {
             .unwrap_or(Value::Null),
     );
     line.insert("level".to_string(), Value::String("AUDIT".to_string()));
-    line.insert("target".to_string(), Value::String("audit".to_string()));
+    line.insert("target".to_string(), Value::String("aemeath:agent:provider".to_string()));
     line.insert(
         "event_type".to_string(),
         Value::String(event_type.to_string()),

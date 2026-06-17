@@ -319,9 +319,24 @@ impl LlmClient {
             .iter()
             .map(|b| truncate_preview(&b.text, 200))
             .collect();
+        // 计算 messages 总字符数用于 DEBUG 摘要
+        let total_chars: usize = messages
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .map(|b| match b {
+                share::message::ContentBlock::Text { text } => text.len(),
+                share::message::ContentBlock::Thinking { thinking } => thinking.len(),
+                share::message::ContentBlock::ToolUse { input, .. } => input.to_string().len(),
+                share::message::ContentBlock::ToolResult { content, .. } => content.to_string().len(),
+                share::message::ContentBlock::Image { .. } => 0,
+            })
+            .sum();
         log::debug!(target: LOG_TARGET,
-            "[LLM REQUEST] provider={} model={} system_blocks={} messages={} tools={}\n  system: {:?}\n  messages: {}",
-            self.provider_name(), self.model_name(), system.len(), messages.len(), tool_schemas.len(),
+            "[LLM REQUEST] provider={} model={} system_blocks={} messages={}({} chars) tools={}",
+            self.provider_name(), self.model_name(), system.len(), messages.len(), total_chars, tool_schemas.len(),
+        );
+        log::trace!(target: LOG_TARGET,
+            "[LLM REQUEST] system: {:?}\n  messages: {}",
             system_preview, serde_json::to_string_pretty(&msg_summary).unwrap_or_default(),
         );
     }
@@ -367,9 +382,13 @@ impl LlmClient {
                     .collect();
 
                 log::debug!(target: LOG_TARGET,
-                    "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}\n  text: {}\n  thinking: {}\n  tools: {}",
+                    "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}",
                     resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
-                    tool_uses.len(), thinking_info.len(), text_preview,
+                    tool_uses.len(), thinking_info.len(),
+                );
+                log::trace!(target: LOG_TARGET,
+                    "[LLM RESPONSE] text: {}\n  thinking: {}\n  tools: {}",
+                    text_preview,
                     serde_json::to_string_pretty(&thinking_info).unwrap_or_default(),
                     serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
                 );

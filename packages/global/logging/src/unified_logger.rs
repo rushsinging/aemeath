@@ -245,7 +245,7 @@ impl UnifiedLogger {
         if !logger.role_logs_enabled {
             return;
         }
-        let line = format_audit_json_line("input", payload);
+        let line = format_audit_json_line("llm_input", payload);
         logger.write_line(&logger.provider, &logger.paths.provider, &line);
     }
 
@@ -257,7 +257,7 @@ impl UnifiedLogger {
         if !logger.role_logs_enabled {
             return;
         }
-        let line = format_audit_json_line("output", payload);
+        let line = format_audit_json_line("llm_output", payload);
         logger.write_line(&logger.provider, &logger.paths.provider, &line);
     }
 
