@@ -55,6 +55,10 @@ mod tests {
     use serde_json::json;
     use tools::api::{Tool, ToolExecutionContext, ToolRegistry, ToolResult};
 
+    fn empty_read_files() -> std::sync::Mutex<std::collections::HashSet<String>> {
+        std::sync::Mutex::new(std::collections::HashSet::new())
+    }
+
     fn call(name: &str, input: serde_json::Value) -> ToolCall {
         ToolCall {
             provider_id: "provider-test".to_string(),
@@ -97,10 +101,12 @@ mod tests {
     #[test]
     fn test_evaluate_calls_allow_all_approves_everything() {
         let registry = ToolRegistry::new();
+        let read_files = empty_read_files();
         let engine = PolicyEngine::new(
             std::path::Path::new("/tmp"),
             std::path::Path::new("/tmp"),
             true, // allow_all
+            &read_files,
         );
         let calls = vec![
             call("Edit", json!({})),
@@ -117,10 +123,12 @@ mod tests {
     fn test_evaluate_calls_readonly_bash_is_approved() {
         let registry = ToolRegistry::new();
         registry.register(Box::new(MockBashTool));
+        let read_files = empty_read_files();
         let engine = PolicyEngine::new(
             std::path::Path::new("/tmp"),
             std::path::Path::new("/tmp"),
             false,
+            &read_files,
         );
         let calls = vec![call("Bash", json!({"command": "git status --short"}))];
 
@@ -133,10 +141,12 @@ mod tests {
     #[test]
     fn test_evaluate_calls_unknown_tool_is_denied() {
         let registry = ToolRegistry::new();
+        let read_files = empty_read_files();
         let engine = PolicyEngine::new(
             std::path::Path::new("/tmp"),
             std::path::Path::new("/tmp"),
             false,
+            &read_files,
         );
         let calls = vec![call("UnknownTool", json!({}))];
 

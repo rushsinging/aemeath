@@ -36,8 +36,11 @@ impl Tool for FileEditTool {
     fn path_accesses(&self) -> &'static [PathAccess] {
         &FILE_ACCESS
     }
+    fn requires_read_before_write(&self) -> bool {
+        true
+    }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
@@ -54,17 +57,6 @@ impl Tool for FileEditTool {
 
         // Path has already been validated and normalised by PolicyEngine
         let path = std::path::PathBuf::from(file_path);
-        // Check if file was read first
-        if let Ok(read_files) = ctx.read_files.lock() {
-            let normalized_path = path.to_string_lossy();
-            if !read_files.contains(file_path) && !read_files.contains(normalized_path.as_ref()) {
-                return ToolResult::error(serde_json::json!({
-                    "status": "error",
-                    "message": format!("You must read {file_path} before editing it. Use the Read tool first."),
-                    "data": null
-                }).to_string());
-            }
-        }
         let old_string = match input.get("old_string").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
