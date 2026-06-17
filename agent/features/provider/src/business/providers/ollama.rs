@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+use crate::LOG_TARGET;
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
 
@@ -126,7 +127,7 @@ impl LlmProvider for OllamaProvider {
         let body_bytes = serde_json::to_string(&request_body)
             .map(|s| s.len())
             .unwrap_or(0);
-        log::debug!(target: "provider::ollama",
+        log::debug!(target: LOG_TARGET,
             "[ollama stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             self.model,
@@ -145,7 +146,7 @@ impl LlmProvider for OllamaProvider {
             if attempt > 0 {
                 let delay =
                     std::time::Duration::from_millis((1000 * 2u64.pow(attempt)).min(30_000));
-                log::debug!(target: "provider::ollama",
+                log::debug!(target: LOG_TARGET,
                     "[ollama stream] retry {}/{} after {:?}",
                     attempt,
                     self.max_retries,
@@ -199,7 +200,7 @@ impl LlmProvider for OllamaProvider {
             };
 
             let status = response.status();
-            log::debug!(target: "provider::ollama",
+            log::debug!(target: LOG_TARGET,
                 "[ollama stream] attempt={} HTTP {} content-type={:?}",
                 attempt,
                 status,
@@ -216,7 +217,7 @@ impl LlmProvider for OllamaProvider {
 
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
-                log::debug!(target: "provider::ollama", "[ollama stream] 5xx body: {}", error_body);
+                log::debug!(target: LOG_TARGET, "[ollama stream] 5xx body: {}", error_body);
                 last_error = Some(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: error_body,
@@ -226,7 +227,7 @@ impl LlmProvider for OllamaProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                log::debug!(target: "provider::ollama", "[ollama stream] non-success body: {}", body);
+                log::debug!(target: LOG_TARGET, "[ollama stream] non-success body: {}", body);
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: body,

@@ -15,6 +15,8 @@
 //! 这些内容应该由用户在 `~/.agents/guidance/` 下的 md 文件中自行配置。
 //! 此处仅提供最小可用的初始模板，让用户知道文件格式和可用选项。
 
+use crate::LOG_TARGET;
+
 use std::path::PathBuf;
 
 pub mod constants;
@@ -60,7 +62,7 @@ pub fn init_guidance_dir() {
 
     if !dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            log::warn!(target: "prompt::guidance", "Failed to create guidance dir {}: {}", dir.display(), e);
+            log::warn!(target: LOG_TARGET, "Failed to create guidance dir {}: {}", dir.display(), e);
             return;
         }
     }
@@ -72,11 +74,11 @@ pub fn init_guidance_dir() {
             continue; // never overwrite user-edited files
         }
         if let Err(e) = std::fs::File::create(&path) {
-            log::warn!(target: "prompt::guidance", "Failed to create {}: {}", path.display(), e);
+            log::warn!(target: LOG_TARGET, "Failed to create {}: {}", path.display(), e);
         }
     }
 
-    log::info!(target: "prompt::guidance", "Initialised guidance files in {}", dir.display());
+    log::info!(target: LOG_TARGET, "Initialised guidance files in {}", dir.display());
 }
 
 #[cfg(test)]

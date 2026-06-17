@@ -1,5 +1,6 @@
 //! Hook 运行器 — 核心执行引擎
 
+use crate::LOG_TARGET;
 use crate::business::hook::data::{HookData, HookInput};
 use crate::business::hook::result::{HookJsonOutput, HookResult};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -95,7 +96,7 @@ impl HookRunner {
             })
             .unwrap_or_default();
         log::debug!(
-            target: "hook::runner",
+            target: LOG_TARGET,
             "hook match: event={:?} tool_name={:?} matched={} configured_events={} project_dir={}",
             event,
             tool_name,
@@ -119,7 +120,7 @@ impl HookRunner {
         let project_dir = self.project_dir();
         let command = self.expand_command_placeholders(&hook.command);
         log::debug!(
-            target: "hook::runner",
+            target: LOG_TARGET,
             "hook start: event={:?} matcher={} command={} project_dir={}",
             input.event,
             hook.matcher,
@@ -150,7 +151,7 @@ impl HookRunner {
             Ok(c) => c,
             Err(e) => {
                 log::warn!(
-                    target: "hook::runner",
+                    target: LOG_TARGET,
                     "hook spawn failed: event={:?} command={} error={}",
                     input.event,
                     command,
@@ -183,7 +184,7 @@ impl HookRunner {
 
                 for line in hook_env_lines(&stdout) {
                     log::debug!(
-                        target: "hook::runner",
+                        target: LOG_TARGET,
                         "hook env: event={:?} command={} stream=stdout line={}",
                         input.event,
                         command,
@@ -192,7 +193,7 @@ impl HookRunner {
                 }
                 for line in hook_env_lines(&stderr) {
                     log::debug!(
-                        target: "hook::runner",
+                        target: LOG_TARGET,
                         "hook env: event={:?} command={} stream=stderr line={}",
                         input.event,
                         command,
@@ -205,7 +206,7 @@ impl HookRunner {
 
                 if code != 0 && !stderr.is_empty() {
                     log::warn!(
-                        target: "hook::runner",
+                        target: LOG_TARGET,
                         "hook '{}' exited with code {}: {}",
                         command,
                         code,
@@ -213,7 +214,7 @@ impl HookRunner {
                     );
                 }
                 log::debug!(
-                    target: "hook::runner",
+                    target: LOG_TARGET,
                     "hook end: event={:?} command={} code={} blocked={} stdout_bytes={} stderr_bytes={}",
                     input.event,
                     command,
@@ -239,7 +240,7 @@ impl HookRunner {
             }
             Ok(Err(e)) => {
                 log::warn!(
-                    target: "hook::runner",
+                    target: LOG_TARGET,
                     "hook wait failed: event={:?} command={} error={}",
                     input.event,
                     command,
@@ -249,7 +250,7 @@ impl HookRunner {
             }
             Err(_) => {
                 log::warn!(
-                    target: "hook::runner",
+                    target: LOG_TARGET,
                     "hook timeout: event={:?} command={} timeout={}s",
                     input.event,
                     command,
@@ -287,7 +288,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
-                target: "hook::runner",
+                target: LOG_TARGET,
                 "running hook: event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -295,7 +296,7 @@ impl HookRunner {
             );
             let result = self.execute_hook(hook, &input).await;
             log::debug!(
-                target: "hook::runner",
+                target: LOG_TARGET,
                 "hook result: blocked={} error={:?}",
                 result.blocked,
                 result.error
@@ -329,7 +330,7 @@ impl HookRunner {
         let mut results = Vec::with_capacity(hooks.len());
         for hook in hooks {
             log::debug!(
-                target: "hook::runner",
+                target: LOG_TARGET,
                 "running hook (with json): event={:?} matcher={} cmd={}",
                 event,
                 hook.matcher,
@@ -340,7 +341,7 @@ impl HookRunner {
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
             log::debug!(
-                target: "hook::runner",
+                target: LOG_TARGET,
                 "hook result (json): blocked={} continue={:?} error={:?}",
                 result.blocked,
                 json_output.as_ref().map(|j| j.r#continue),

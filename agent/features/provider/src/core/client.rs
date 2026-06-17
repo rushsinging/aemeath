@@ -3,6 +3,7 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
+use crate::LOG_TARGET;
 use crate::api::ProviderDriverKind;
 use crate::business::providers::openai_compatible::ReasoningConfig;
 use crate::business::types::{StreamResponse, SystemBlock};
@@ -318,7 +319,7 @@ impl LlmClient {
             .iter()
             .map(|b| truncate_preview(&b.text, 200))
             .collect();
-        log::debug!(target: "provider::client",
+        log::debug!(target: LOG_TARGET,
             "[LLM REQUEST] provider={} model={} system_blocks={} messages={} tools={}\n  system: {:?}\n  messages: {}",
             self.provider_name(), self.model_name(), system.len(), messages.len(), tool_schemas.len(),
             system_preview, serde_json::to_string_pretty(&msg_summary).unwrap_or_default(),
@@ -365,7 +366,7 @@ impl LlmClient {
                     })
                     .collect();
 
-                log::debug!(target: "provider::client",
+                log::debug!(target: LOG_TARGET,
                     "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}\n  text: {}\n  thinking: {}\n  tools: {}",
                     resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
                     tool_uses.len(), thinking_info.len(), text_preview,
@@ -374,7 +375,7 @@ impl LlmClient {
                 );
             }
             Err(e) => {
-                log::warn!(target: "provider::client", "[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
+                log::warn!(target: LOG_TARGET, "[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
             }
         }
     }
@@ -390,7 +391,7 @@ impl LlmClient {
         let (text_blocks, thinking_blocks, tool_use_blocks, tool_result_blocks, image_blocks) =
             content_block_counts(messages);
         let (largest_idx, largest_role, largest_bytes) = largest_message_summary(messages);
-        log::warn!(target: "provider::client",
+        log::warn!(target: LOG_TARGET,
             "[LLM STREAM ERROR] phase={} provider={} model={} system_blocks={} messages={} tools={} messages_payload_bytes={} content_blocks={{text:{},thinking:{},tool_use:{},tool_result:{},image:{}}} largest_message={{index:{},role:{},bytes:{}}} error={}{}",
             phase,
             self.provider_name(),

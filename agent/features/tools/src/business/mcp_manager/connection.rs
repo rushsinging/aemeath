@@ -1,6 +1,7 @@
 use super::config::{ConnectionState, McpManagerConfig, McpServerConnection};
 use super::diff::qualified_tool_name;
 use super::wrapper::McpToolWrapper;
+use crate::LOG_TARGET;
 use crate::business::mcp::{McpClient, McpServerConfig, McpToolDef};
 use crate::core::tool_registry::ToolRegistry;
 use std::collections::HashMap;
@@ -91,12 +92,12 @@ impl McpConnectionManager {
                             break;
                         }
                         Err(e) if attempt < 5 => {
-                            log::warn!(target: "tools::connection",
+                            log::warn!(target: LOG_TARGET,
                                 "[MCP] tools/list attempt {attempt} failed: {e}, retrying..."
                             );
                         }
                         Err(e) => {
-                            log::warn!(target: "tools::connection", "[MCP] tools/list failed after 5 attempts: {e}");
+                            log::warn!(target: LOG_TARGET, "[MCP] tools/list failed after 5 attempts: {e}");
                         }
                     }
                 }
@@ -243,7 +244,7 @@ impl McpConnectionManager {
             };
 
             if let Err(error) = ping_result {
-                log::warn!(target: "tools::connection",
+                log::warn!(target: LOG_TARGET,
                     "MCP server '{}' health check failed: {}",
                     server.name,
                     error
@@ -251,7 +252,7 @@ impl McpConnectionManager {
 
                 if self.config.auto_reconnect {
                     if let Err(reconnect_error) = self.reconnect_server(&server.name).await {
-                        log::warn!(target: "tools::connection",
+                        log::warn!(target: LOG_TARGET,
                             "Failed to reconnect MCP server '{}': {}",
                             server.name,
                             reconnect_error
@@ -260,7 +261,7 @@ impl McpConnectionManager {
                         if let Err(set_failed_error) =
                             self.set_failed(&server.name, reconnect_error).await
                         {
-                            log::warn!(target: "tools::connection",
+                            log::warn!(target: LOG_TARGET,
                                 "Failed to mark MCP server '{}' as failed: {}",
                                 server.name,
                                 set_failed_error
@@ -268,7 +269,7 @@ impl McpConnectionManager {
                         }
                     }
                 } else if let Err(mark_error) = self.mark_reconnecting(&server.name).await {
-                    log::warn!(target: "tools::connection",
+                    log::warn!(target: LOG_TARGET,
                         "Failed to mark MCP server '{}' as reconnecting: {}",
                         server.name,
                         mark_error

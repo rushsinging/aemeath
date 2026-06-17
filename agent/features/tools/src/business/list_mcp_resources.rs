@@ -1,5 +1,6 @@
 //! List resources from connected MCP servers
 
+use crate::LOG_TARGET;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
 use async_trait::async_trait;
@@ -115,7 +116,7 @@ impl Tool for ListMcpResourcesTool {
                 }
                 Err(e) => {
                     // Log error but continue with other servers
-                    log::warn!(target: "tools::list_resources", "Failed to list resources from {}: {}", server_name, e);
+                    log::warn!(target: LOG_TARGET, "Failed to list resources from {}: {}", server_name, e);
                 }
             }
         }

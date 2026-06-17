@@ -1,6 +1,7 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
+use crate::LOG_TARGET;
 use crate::business::types::StreamResponse;
 use crate::core::provider::StreamHandler;
 use futures_util::StreamExt;
@@ -149,7 +150,7 @@ pub(crate) async fn parse_openai_stream(
                 let snapshot = format_stream_snapshot(
                     &current_text, reasoning_normalizer.accumulated(), &current_tool_calls,
                 );
-                log::warn!(target: "provider::openai_stream",
+                log::warn!(target: LOG_TARGET,
                     "[openai-compat stream] idle timeout: no data for {}s — {snapshot}",
                     STREAM_IDLE_TIMEOUT.as_secs(),
                 );
@@ -166,7 +167,7 @@ pub(crate) async fn parse_openai_stream(
                     Ok(Some(line)) => line,
                     Ok(None) => break,
                     Err(e) => {
-                        log::warn!(target: "provider::openai_stream", "[openai-compat stream] failed to read SSE line: {}", e);
+                        log::warn!(target: LOG_TARGET, "[openai-compat stream] failed to read SSE line: {}", e);
                         return Err(crate::LlmError::Stream(e.to_string()));
                     }
                 }            }
@@ -256,14 +257,14 @@ pub(crate) async fn parse_openai_stream(
                             let raw_chars = reasoning.chars().count();
                             let raw_bytes = reasoning.len();
                             let acc_chars_before = reasoning_normalizer.accumulated_char_count();
-                            log::trace!(target: "provider::openai_stream",
+                            log::trace!(target: LOG_TARGET,
                                 "[reasoning chunk] idx={} raw_chars={} raw_bytes={} \
                                  acc_chars_before={} acc_chars_after={}",
                                 chunk_index, raw_chars, raw_bytes,
                                 acc_chars_before, acc_chars_before + raw_chars,
                             );
                             if log::log_enabled!(log::Level::Trace) {
-                                log::trace!(target: "provider::openai_stream",
+                                log::trace!(target: LOG_TARGET,
                                     "[reasoning chunk] idx={} preview={}",
                                     chunk_index, reasoning_normalizer::safe_preview(reasoning),
                                 );
@@ -274,7 +275,7 @@ pub(crate) async fn parse_openai_stream(
                             if !result.delta.is_empty() {
                                 handler.on_thinking(result.delta);
                             }
-                            log::debug!(target: "provider::openai_stream",
+                            log::debug!(target: LOG_TARGET,
                                 "[reasoning chunk] idx={} dedup_action={:?} \
                                  raw_chars={} emitted_chars={} acc_chars={}",
                                 chunk_index, result.action, raw_chars,
@@ -287,7 +288,7 @@ pub(crate) async fn parse_openai_stream(
                     // 文本内容
                     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                         if !content.is_empty() {
-                            log::trace!(target: "provider::openai_stream",
+                            log::trace!(target: LOG_TARGET,
                                 "[content chunk] idx={} content_chars={} content_bytes={}",
                                 chunk_index, content.chars().count(), content.len(),
                             );
@@ -328,7 +329,7 @@ pub(crate) async fn parse_openai_stream(
                                         entry.0 = format!("call_{}", index);
                                     }
                                     if is_new {
-                                        log::debug!(target: "provider::openai_stream",
+                                        log::debug!(target: LOG_TARGET,
                                             "[openai-compat stream] tool_use_start: name={} id={} index={}",
                                             name, entry.0, index,
                                         );
@@ -341,7 +342,7 @@ pub(crate) async fn parse_openai_stream(
                                     entry.2.push_str(args);
                                     entry.3 += 1;
                                     if entry.3 == 1 {
-                                        log::debug!(target: "provider::openai_stream",
+                                        log::debug!(target: LOG_TARGET,
                                             "[openai-compat stream] tool_args_first_delta: name={} index={} delta_bytes={}",
                                             entry.1, index, args.len(),
                                         );
@@ -373,7 +374,7 @@ pub(crate) async fn parse_openai_stream(
     let total_chunks = chunk_index;
     if !current_reasoning.is_empty() {
         let reasoning_chars = current_reasoning.chars().count();
-        log::debug!(target: "provider::openai_stream",
+        log::debug!(target: LOG_TARGET,
             "[openai-compat stream] reasoning summary: total_chunks={} \
              thinking_chars={} thinking_bytes={} \
              dedup={{none:{},snapshot_suffix:{},duplicate_drop:{},overlap_trim:{}}}",
@@ -397,7 +398,7 @@ pub(crate) async fn parse_openai_stream(
     let mut truncated_tool: Option<(String, String, String, String, usize, u32)> = None;
     for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if name.is_empty() {
-            log::warn!(target: "provider::openai_stream",
+            log::warn!(target: LOG_TARGET,
                 "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
                 id, arguments.len(), delta_count
             );
@@ -407,7 +408,7 @@ pub(crate) async fn parse_openai_stream(
         // when the name first appeared in a delta chunk. No need to
         // call it again here.
         let input: serde_json::Value = if arguments.is_empty() {
-            log::warn!(target: "provider::openai_stream",
+            log::warn!(target: LOG_TARGET,
                 "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
                 name, id, delta_count
             );
@@ -420,7 +421,7 @@ pub(crate) async fn parse_openai_stream(
 
                     // 先尝试启发式补全：仅当 JSON 在字符串字面量中间被截断时有效。
                     if let Some(recovered) = try_complete_truncated_json(&arguments) {
-                        log::warn!(target: "provider::openai_stream",
+                        log::warn!(target: LOG_TARGET,
                             "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
                             name, id, delta_count, arguments.len(), e
                         );
@@ -430,12 +431,12 @@ pub(crate) async fn parse_openai_stream(
                         let tail_rev: String =
                             arguments.chars().rev().take(200).collect::<String>();
                         let tail: String = tail_rev.chars().rev().collect();
-                        log::warn!(target: "provider::openai_stream",
+                        log::warn!(target: LOG_TARGET,
                             "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
                             name, id, delta_count, arguments.len(), e
                         );
-                        log::warn!(target: "provider::openai_stream", "[openai-compat stream] truncated args head: {}", head);
-                        log::warn!(target: "provider::openai_stream", "[openai-compat stream] truncated args tail: {}", tail);
+                        log::warn!(target: LOG_TARGET, "[openai-compat stream] truncated args head: {}", head);
+                        log::warn!(target: LOG_TARGET, "[openai-compat stream] truncated args tail: {}", tail);
                         if is_eof && truncated_tool.is_none() {
                             truncated_tool = Some((
                                 id.clone(),
