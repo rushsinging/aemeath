@@ -9,6 +9,7 @@ mod message_helpers;
 mod non_stream;
 mod provider;
 mod reasoning;
+pub(crate) mod reasoning_normalizer;
 mod request_body;
 mod stream;
 
