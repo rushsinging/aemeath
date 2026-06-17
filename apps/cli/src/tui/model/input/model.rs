@@ -1,4 +1,3 @@
-use super::attachment::InputAttachment;
 use super::change::InputChange;
 use super::completion::InputCompletion;
 use super::document::InputDocument;
@@ -12,7 +11,6 @@ pub struct InputModel {
     pub document: InputDocument,
     pub history: InputHistory,
     pub completion: InputCompletion,
-    pub attachments: Vec<InputAttachment>,
     pub mode: InputMode,
 }
 
@@ -121,8 +119,11 @@ impl InputModel {
             InputIntent::AcceptCompletionValue(replacement) => {
                 self.accept_completion_replacement(replacement)
             }
-            InputIntent::SetAttachmentCount(count) => {
-                vec![InputChange::AttachmentChanged { count }]
+            InputIntent::InsertImage(image) => {
+                self.completion.clear();
+                self.history.selected_index = None;
+                self.document.insert_image(image);
+                self.text_changed()
             }
             InputIntent::SetMode(mode) => {
                 self.mode = mode;
@@ -286,21 +287,22 @@ impl InputModel {
     }
 
     fn submit(&mut self) -> Vec<InputChange> {
+        let text = self.document.submit_text();
+        let display_text = self.document.display_text();
+        let images = self.document.drain_images();
         let submission = InputSubmission {
-            text: self.document.expand_copied_text(),
-            display_text: self.document.display_text(),
-            attachments: self.attachments.clone(),
+            text,
+            display_text,
+            images,
         };
         self.history.entries.push(submission.display_text.clone());
         self.history.selected_index = None;
         self.history.saved_input.clear();
-        self.attachments.clear();
         self.completion.clear();
         self.mode = InputMode::Normal;
         self.document.clear();
         vec![
             InputChange::Submitted { submission },
-            InputChange::AttachmentChanged { count: 0 },
             InputChange::ModeChanged { mode: self.mode },
             InputChange::Cleared,
         ]

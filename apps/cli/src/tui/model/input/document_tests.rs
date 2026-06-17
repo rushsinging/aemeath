@@ -357,3 +357,132 @@ fn test_is_cursor_at_first_last_line() {
     assert!(!doc.is_cursor_at_first_line());
     assert!(!doc.is_cursor_at_last_line());
 }
+
+// === ImageSpan 测试 ===
+
+fn make_test_image(size: usize) -> sdk::ClipboardImageView {
+    sdk::ClipboardImageView {
+        base64: "img".to_string(),
+        media_type: "image/png".to_string(),
+        final_size: size,
+        display_path: None,
+        width: None,
+        height: None,
+    }
+}
+
+#[test]
+fn test_insert_image_adds_placeholder_and_span() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("hello ");
+    doc.insert_image(make_test_image(100));
+    assert_eq!(doc.buffer, "hello [Image #1]");
+    assert_eq!(doc.cursor, "hello [Image #1]".len());
+    assert_eq!(doc.image_spans.len(), 1);
+    assert_eq!(doc.image_spans[0].index, 1);
+}
+
+#[test]
+fn test_insert_multiple_images_assigns_sequential_index() {
+    let mut doc = InputDocument::default();
+    doc.insert_image(make_test_image(10));
+    doc.insert_text(" ");
+    doc.insert_image(make_test_image(20));
+    assert_eq!(doc.buffer, "[Image #1] [Image #2]");
+    assert_eq!(doc.image_spans.len(), 2);
+}
+
+#[test]
+fn test_delete_backward_atomically_removes_image() {
+    let mut doc = InputDocument::default();
+    doc.insert_image(make_test_image(10));
+    // cursor 在占位符末尾
+    assert_eq!(doc.cursor, "[Image #1]".len());
+    doc.delete_backward();
+    assert_eq!(doc.buffer, "");
+    assert!(doc.image_spans.is_empty());
+}
+
+#[test]
+fn test_delete_backward_removes_image_in_middle() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("a");
+    doc.insert_image(make_test_image(10));
+    doc.insert_text("b");
+    // a[Image #1]b, cursor 在末尾 'b' 之后
+    // 移到占位符末尾（'b' 之前）
+    doc.move_cursor("a[Image #1]".len());
+    doc.delete_backward();
+    assert_eq!(doc.buffer, "ab");
+    assert!(doc.image_spans.is_empty());
+}
+
+#[test]
+fn test_delete_image_preserves_index_hole() {
+    let mut doc = InputDocument::default();
+    doc.insert_image(make_test_image(10)); // #1
+    doc.insert_image(make_test_image(20)); // #2
+    doc.insert_image(make_test_image(30)); // #3
+    // buffer = "[Image #1][Image #2][Image #3]"
+    // 删除 #2（中间）
+    doc.move_cursor("[Image #1]".len());
+    doc.delete_backward(); // 删除 #1... 不对，这里删除的是光标前的 span
+    // 重新设计：移动光标到 #2 末尾后 delete_backward
+    let mut doc = InputDocument::default();
+    doc.insert_image(make_test_image(10));
+    doc.insert_image(make_test_image(20));
+    doc.insert_image(make_test_image(30));
+    // 光标在 #2 末尾（#3 之前）
+    let pos = "[Image #1][Image #2]".len();
+    doc.move_cursor(pos);
+    doc.delete_backward(); // 原子删除 #2
+    assert_eq!(doc.buffer, "[Image #1][Image #3]");
+    assert_eq!(doc.image_spans.len(), 2);
+    // 编号保留原始 index
+    assert_eq!(doc.image_spans[0].index, 1);
+    assert_eq!(doc.image_spans[1].index, 3);
+}
+
+#[test]
+fn test_submit_text_strips_image_placeholders() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("look at ");
+    doc.insert_image(make_test_image(10));
+    doc.insert_text(" this");
+    assert_eq!(doc.submit_text(), "look at  this".trim());
+}
+
+#[test]
+fn test_drain_images_returns_in_order() {
+    let mut doc = InputDocument::default();
+    doc.insert_image(make_test_image(10));
+    doc.insert_text(" mid ");
+    doc.insert_image(make_test_image(20));
+    let images = doc.drain_images();
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].final_size, 10);
+    assert_eq!(images[1].final_size, 20);
+    assert!(doc.image_spans.is_empty());
+}
+
+#[test]
+fn test_submit_text_expands_copied_text_and_strips_images() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("see ");
+    doc.insert_pasted_text("a\nb\nc\nd"); // 变成 [Copied 4 lines]
+    doc.insert_text(" and ");
+    doc.insert_image(make_test_image(10));
+    let text = doc.submit_text();
+    assert!(text.contains("see a\nb\nc\nd and"));
+    assert!(!text.contains("[Image #"));
+    assert!(!text.contains("[Copied"));
+}
+
+#[test]
+fn test_clear_removes_image_spans() {
+    let mut doc = InputDocument::default();
+    doc.insert_image(make_test_image(10));
+    doc.clear();
+    assert!(doc.image_spans.is_empty());
+    assert!(doc.buffer.is_empty());
+}

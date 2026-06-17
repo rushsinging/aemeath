@@ -145,9 +145,8 @@ impl App {
     }
 
     fn accept_pending_clipboard_image(&mut self, img: sdk::ClipboardImageView) {
-        let count = self.chat.add_pending_image(img);
         self.handle_input_intent(
-            crate::tui::model::input::intent::InputIntent::SetAttachmentCount(count),
+            crate::tui::model::input::intent::InputIntent::InsertImage(img),
         );
     }
 
@@ -279,6 +278,6 @@ mod tests {
             width: None,
             height: None,
         });
-        assert_eq!(app.chat.pending_images().len(), 1);
+        assert_eq!(app.model.input.document.image_spans.len(), 1);
     }
 }

@@ -100,7 +100,7 @@ async fn test_read_clipboard_image_effect_handles_failure_gracefully() {
     app.execute_effect(Effect::ReadClipboardImage, &tx).await;
 
     assert_eq!(
-        app.chat.pending_images().len(),
+        app.model.input.document.image_spans.len(),
         0,
         "剪贴板读取失败时不应添加待发送图片"
     );
@@ -119,7 +119,7 @@ async fn test_paste_dispatch_routes_to_read_clipboard_effect() {
 
     assert!(prompt.is_none(), "/paste 不应返回 LLM prompt");
     assert_eq!(
-        app.chat.pending_images().len(),
+        app.model.input.document.image_spans.len(),
         0,
         "mock 剪贴板失败时 /paste 不应添加图片"
     );

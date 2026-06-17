@@ -124,9 +124,8 @@ impl App {
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
-                let count = self.chat.add_pending_image(img);
                 self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(count),
+                    crate::tui::model::input::intent::InputIntent::InsertImage(img),
                 );
             }
             UiEvent::SystemMessage(msg) => {

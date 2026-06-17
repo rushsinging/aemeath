@@ -28,7 +28,7 @@ pub mod tests {
     fn vm(text: &str) -> InputAreaViewModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
-        InputViewAssembler::from_document(&document, None, 0, true)
+        InputViewAssembler::from_document(&document, None, true)
     }
 
     #[test]
