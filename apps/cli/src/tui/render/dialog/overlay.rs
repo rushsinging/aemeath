@@ -140,9 +140,7 @@ pub fn render_dialog_vm(vm: &DialogViewModel, area: Rect, buf: &mut Buffer) {
 
     // Border style based on severity
     let border_style = match vm.severity {
-        crate::tui::view_model::status::StatusSeverity::Error => {
-            Style::default().fg(theme::ERROR)
-        }
+        crate::tui::view_model::status::StatusSeverity::Error => Style::default().fg(theme::ERROR),
         crate::tui::view_model::status::StatusSeverity::Warning => {
             Style::default().fg(theme::WARNING)
         }

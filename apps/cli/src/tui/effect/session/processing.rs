@@ -157,22 +157,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::CurrentTurnChanged(turn)
         }
         sdk::ChatEvent::HookEvent(event) => UiEvent::HookEvent(event),
-        sdk::ChatEvent::AskUser {
-            id,
-            question,
-            options,
-            allow_free_input: _,
-            multi_select,
-            default,
-            reply_tx,
-        } => UiEvent::AskUser {
-            id: sdk::ids::ToolCallId::from_legacy_or_new(&id),
-            question,
-            options,
-            multi_select,
-            default,
-            reply_tx,
-        },
+        sdk::ChatEvent::AskUserBatch { items, reply_tx } => {
+            UiEvent::AskUserBatch { items, reply_tx }
+        }
         sdk::ChatEvent::AgentProgress {
             context,
             tool_id,

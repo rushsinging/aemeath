@@ -1,3 +1,4 @@
+use super::types::{ReflectionError, ReflectionResult};
 use super::{ReflectionEngine, ReflectionOutput};
 use std::path::{Path, PathBuf};
 use storage::api::MemoryStore;
@@ -25,7 +26,7 @@ pub async fn run_complete_reflection(
     cwd: &Path,
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
-) -> Option<CompleteReflectionResult> {
+) -> ReflectionResult<Option<CompleteReflectionResult>> {
     run_complete_reflection_with_base_dir(
         mode,
         config,
@@ -47,9 +48,9 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
-) -> Option<CompleteReflectionResult> {
+) -> ReflectionResult<Option<CompleteReflectionResult>> {
     if !should_run_reflection(mode, config) {
-        return None;
+        return Ok(None);
     }
 
     let mut store = MemoryStore::new(
@@ -58,7 +59,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
         config.max_entries,
         config.similarity_threshold,
     )
-    .ok()?;
+    .map_err(|e| ReflectionError::StoreInit(e.to_string()))?;
 
     let entries = store
         .list(Some(share::memory::MemoryLayer::Project))
@@ -72,7 +73,9 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
     let (full_response, input_tokens, output_tokens) =
         call_llm_for_reflection(client, &prompt, system_prompt_text).await?;
 
-    let output = ReflectionEngine::parse_output(&full_response).ok()?;
+    let output = ReflectionEngine::parse_output(&full_response).map_err(|e| {
+        ReflectionError::Unparseable(format!("{e}: {}", truncate_200(&full_response)))
+    })?;
 
     let mut formatted_content = ReflectionEngine::format_output(&output);
     let mut auto_applied = false;
@@ -91,13 +94,17 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
         }
     }
 
-    Some(CompleteReflectionResult {
+    Ok(Some(CompleteReflectionResult {
         output,
         formatted_content,
         input_tokens,
         output_tokens,
         auto_applied,
-    })
+    }))
+}
+
+fn truncate_200(s: &str) -> String {
+    s.chars().take(200).collect()
 }
 
 fn should_run_reflection(mode: ReflectionRunMode, config: &share::config::MemoryConfig) -> bool {
@@ -116,7 +123,7 @@ async fn call_llm_for_reflection(
     client: &provider::api::LlmClient,
     prompt: &str,
     system_prompt_text: &str,
-) -> Option<(String, u32, u32)> {
+) -> ReflectionResult<(String, u32, u32)> {
     use provider::api::StreamHandler;
     use provider::api::SystemBlock;
 
@@ -146,38 +153,11 @@ async fn call_llm_for_reflection(
         Ok(resp) => {
             let text = handler.text.trim().to_string();
             if text.is_empty() {
-                None
+                Err(ReflectionError::EmptyResponse)
             } else {
-                Some((
-                    extract_json(&text).unwrap_or(text),
-                    resp.usage.input_tokens,
-                    resp.usage.output_tokens,
-                ))
+                Ok((text, resp.usage.input_tokens, resp.usage.output_tokens))
             }
         }
-        Err(e) => {
-            log::debug!(target: "runtime::reflection", "Reflection LLM call failed: {e}");
-            None
-        }
+        Err(e) => Err(ReflectionError::LlmCall(e.to_string())),
     }
-}
-
-fn extract_json(text: &str) -> Option<String> {
-    let text = text.trim();
-    if let Some(start) = text.find("```json") {
-        let after = &text[start + 7..];
-        if let Some(end) = after.find("```") {
-            return Some(after[..end].trim().to_string());
-        }
-    }
-    if text.starts_with("```") && text.ends_with("```") {
-        let inner = &text[3..text.len() - 3];
-        if inner.trim().starts_with('{') {
-            return Some(inner.trim().to_string());
-        }
-    }
-    if text.starts_with('{') {
-        return Some(text.to_string());
-    }
-    None
 }

@@ -106,6 +106,22 @@ pub fn safe_byte_prefix(s: &str, offset: usize) -> &str {
     s.get(..offset).unwrap_or("")
 }
 
+/// 在 ASCII 前缀边界处安全切分字符串。
+///
+/// 返回 (前缀, 剩余部分)。前缀由满足谓词的连续 ASCII 字符组成。
+/// 由于只计数字节值 < 128 的 ASCII 字符，返回的字节偏移一定是 char 边界。
+///
+/// # Examples
+/// ```
+/// let (indent, rest) = split_at_ascii("  hello", |c| c.is_ascii_whitespace());
+/// assert_eq!(indent, "  ");
+/// assert_eq!(rest, "hello");
+/// ```
+pub fn split_at_ascii<F: Fn(char) -> bool>(s: &str, predicate: F) -> (&str, &str) {
+    let byte_len = s.bytes().take_while(|&b| predicate(b as char)).count();
+    s.split_at(byte_len)
+}
+
 fn char_display_width(ch: char) -> usize {
     ch.width().unwrap_or(0)
 }
@@ -282,5 +298,40 @@ mod tests {
         assert_eq!(clamp_split_index(0, 3), 0);
         assert_eq!(clamp_split_index(2, 3), 2);
         assert_eq!(clamp_split_index(9, 3), 3);
+    }
+
+    #[test]
+    fn test_split_at_ascii_whitespace() {
+        let (indent, rest) = split_at_ascii("  hello", |c| c.is_ascii_whitespace());
+        assert_eq!(indent, "  ");
+        assert_eq!(rest, "hello");
+    }
+
+    #[test]
+    fn test_split_at_ascii_digits() {
+        let (digits, rest) = split_at_ascii("123abc", |c| c.is_ascii_digit());
+        assert_eq!(digits, "123");
+        assert_eq!(rest, "abc");
+    }
+
+    #[test]
+    fn test_split_at_ascii_no_match() {
+        let (prefix, rest) = split_at_ascii("hello", |c| c.is_ascii_digit());
+        assert_eq!(prefix, "");
+        assert_eq!(rest, "hello");
+    }
+
+    #[test]
+    fn test_split_at_ascii_all_match() {
+        let (prefix, rest) = split_at_ascii("123", |c| c.is_ascii_digit());
+        assert_eq!(prefix, "123");
+        assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn test_split_at_ascii_empty() {
+        let (prefix, rest) = split_at_ascii("", |c| c.is_ascii_whitespace());
+        assert_eq!(prefix, "");
+        assert_eq!(rest, "");
     }
 }

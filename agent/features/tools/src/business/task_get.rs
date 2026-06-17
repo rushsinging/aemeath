@@ -109,10 +109,8 @@ impl Tool for TaskGetTool {
         // Dependencies
         if !task.blocked_by.is_empty() {
             let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
-            let blocked_by: Vec<String> = dep_displays
-                .iter()
-                .map(|id| format!("#{}", id))
-                .collect();
+            let blocked_by: Vec<String> =
+                dep_displays.iter().map(|id| format!("#{}", id)).collect();
             let is_blocked = self.store.is_blocked(&task).await;
             data["blocked_by"] = serde_json::json!(blocked_by);
             data["is_blocked"] = serde_json::json!(is_blocked);
@@ -120,10 +118,7 @@ impl Tool for TaskGetTool {
 
         if !task.blocks.is_empty() {
             let dep_displays = self.store.to_display_ids(&task.blocks).await;
-            let blocks: Vec<String> = dep_displays
-                .iter()
-                .map(|id| format!("#{}", id))
-                .collect();
+            let blocks: Vec<String> = dep_displays.iter().map(|id| format!("#{}", id)).collect();
             data["blocks"] = serde_json::json!(blocks);
         }
 

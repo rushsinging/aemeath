@@ -1,10 +1,9 @@
-//! ConversationModel 的 AskUserQuestion 交互块逻辑。
+//! ConversationModel 的 AskUserQuestion 批量交互块逻辑。
 //!
-//! AskUser 块同一时刻至多一个，使用固定 id `ASK_USER_BLOCK_ID`，
-//! 选项导航的可变状态（cursor/selected/chat_input_active）只在此块内维护，
-//! 作为渲染与交互的单一真相。
+//! AskUserBatch 块同一时刻至多一个，使用固定 id `ASK_USER_BLOCK_ID`，
+//! 管理多问 + 确认页的状态机（Answering → Confirming → Confirmed）。
 
-use super::block::ConversationBlock;
+use super::block::{AskUserPhase, AskUserSlot, ConversationBlock};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use crate::tui::model::conversation::ask_user_timeline::sync_ask_user_timeline_item;
@@ -13,29 +12,53 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 /// AskUser 交互块的固定 id（同一时刻至多一个）。
 pub const ASK_USER_BLOCK_ID: &str = "ask-user";
 
-/// AskUser 块的可变交互状态快照，供控制器在提交/导航时读取。
+/// AskUserBatch 块的可变交互状态快照，供控制器在提交/导航时读取。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AskUserSnapshot {
+    pub active_index: usize,
+    pub phase: AskUserPhase,
     pub cursor: usize,
     pub selected: Vec<bool>,
     pub chat_input_active: bool,
+    pub confirm_cursor: usize,
+    /// 当前激活问题的 LLM 选项数。
+    pub llm_option_count: usize,
+    /// 当前激活问题的全部选项数。
+    pub options_count: usize,
+    /// 当前激活问题的 multi_select 标志。
+    pub multi_select: bool,
+    /// 用户已确认提交（block 进入终态）。
+    pub confirmed: bool,
 }
 
 impl ConversationModel {
-    /// 读取当前 AskUser 块的交互状态快照（无块时返回 None）。
+    /// 读取当前 AskUserBatch 块的交互状态快照（无块时返回 None）。
     pub fn ask_user_snapshot(&self) -> Option<AskUserSnapshot> {
         self.blocks.iter().find_map(|block| {
-            if let ConversationBlock::AskUser {
+            if let ConversationBlock::AskUserBatch {
+                slots,
+                active_index,
+                phase,
                 cursor,
                 selected,
                 chat_input_active,
+                confirm_cursor,
+                confirmed,
                 ..
             } = block
             {
+                let slot = slots.get(*active_index);
                 Some(AskUserSnapshot {
+                    active_index: *active_index,
+                    phase: *phase,
                     cursor: *cursor,
                     selected: selected.clone(),
                     chat_input_active: *chat_input_active,
+                    confirm_cursor: *confirm_cursor,
+                    llm_option_count: slot.map(|s| s.llm_option_count).unwrap_or(0),
+                    options_count: slot.map(|s| s.options.len()).unwrap_or(0),
+                    multi_select: slot.map(|s| s.multi_select).unwrap_or(false),
+                    confirmed: *confirmed,
                 })
             } else {
                 None
@@ -43,45 +66,38 @@ impl ConversationModel {
         })
     }
 
-    /// 显示 AskUser 交互块；若已存在则替换。
-    pub(super) fn show_ask_user(
+    /// 显示 AskUserBatch 交互块；若已存在则替换。
+    pub(super) fn show_ask_user_batch(
         &mut self,
-        question: String,
-        options: Vec<sdk::OptionItem>,
-        llm_option_count: usize,
-        multi_select: bool,
-        cursor: usize,
-        default: Option<String>,
+        slots: Vec<AskUserSlot>,
     ) -> Vec<ConversationChange> {
-        let total = options.len();
-        let cursor = if total == 0 { 0 } else { cursor.min(total - 1) };
+        let first_total = slots.first().map(|s| s.options.len()).unwrap_or(0);
         self.clear_active_text_blocks();
         self.remove_ask_user_block();
-        self.blocks.push(ConversationBlock::AskUser {
+        let n = slots.len();
+        self.blocks.push(ConversationBlock::AskUserBatch {
             id: ASK_USER_BLOCK_ID.to_string(),
-            question: question.clone(),
-            options: options.clone(),
-            llm_option_count,
-            multi_select,
-            cursor,
-            selected: vec![false; total],
+            slots: slots.clone(),
+            active_index: 0,
+            phase: AskUserPhase::Answering,
+            cursor: 0,
+            selected: vec![false; first_total],
             chat_input_active: false,
             chat_input_text: String::new(),
-            default: default.clone(),
-            answer: None,
+            confirm_cursor: n, // 默认停在「全部确认提交」
+            confirmed: false,
         });
-        self.timeline.push(OutputTimelineItem::AskUser {
+        self.timeline.push(OutputTimelineItem::AskUserBatch {
             id: ASK_USER_BLOCK_ID.to_string(),
-            question,
-            options,
-            llm_option_count,
-            multi_select,
-            cursor,
-            selected: vec![false; total],
+            slots,
+            active_index: 0,
+            phase: AskUserPhase::Answering,
+            cursor: 0,
+            selected: vec![false; first_total],
             chat_input_active: false,
             chat_input_text: String::new(),
-            default,
-            answer: None,
+            confirm_cursor: n,
+            confirmed: false,
         });
         vec![
             ConversationChange::AskUserShown {
@@ -91,32 +107,112 @@ impl ConversationModel {
         ]
     }
 
-    /// 更新 AskUser 块光标位置（越界自动夹取）。
-    pub(super) fn set_ask_user_cursor(&mut self, cursor: usize) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUser {
-            cursor: current,
-            options,
+    /// 回答当前激活问题，自动前进到下一题或进入确认页。
+    pub(super) fn answer_current_ask_user(&mut self, answer: String) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUserBatch {
+            slots,
+            active_index,
+            phase,
+            cursor,
+            selected,
+            chat_input_active,
+            chat_input_text,
+            confirm_cursor,
+            confirmed,
             ..
         }) = self.ask_user_block_mut()
         {
-            if options.is_empty() {
-                return Vec::new();
+            // 设置当前问题答案
+            if let Some(slot) = slots.get_mut(*active_index) {
+                slot.answer = Some(answer);
             }
-            *current = cursor.min(options.len() - 1);
+            // 前进逻辑
+            if *active_index < slots.len() - 1 {
+                *active_index += 1;
+                let new_total = slots
+                    .get(*active_index)
+                    .map(|s| s.options.len())
+                    .unwrap_or(0);
+                *cursor = 0;
+                *selected = vec![false; new_total];
+                *chat_input_active = false;
+                chat_input_text.clear();
+            } else if slots.len() == 1 {
+                // 单问题：直接确认，跳过确认页
+                *confirmed = true;
+            } else {
+                *phase = AskUserPhase::Confirming;
+                *confirm_cursor = slots.len(); // 默认停在「全部确认提交」
+            }
             return self.ask_user_updated();
         }
         Vec::new()
     }
 
-    /// 切换 AskUser 块中某选项的勾选状态。内建选项（>= llm_option_count）不可勾选。
-    pub(super) fn toggle_ask_user_selected(&mut self, index: usize) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUser {
+    /// 确认页导航到某项（重新作答）。
+    pub(super) fn navigate_ask_user_to(&mut self, index: usize) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUserBatch {
+            slots,
+            active_index,
+            phase,
+            cursor,
             selected,
-            llm_option_count,
+            chat_input_active,
+            chat_input_text,
             ..
         }) = self.ask_user_block_mut()
         {
-            if index >= *llm_option_count {
+            if index >= slots.len() {
+                return Vec::new();
+            }
+            *active_index = index;
+            *phase = AskUserPhase::Answering;
+            let total = slots.get(index).map(|s| s.options.len()).unwrap_or(0);
+            *cursor = 0;
+            *selected = vec![false; total];
+            *chat_input_active = false;
+            chat_input_text.clear();
+            return self.ask_user_updated();
+        }
+        Vec::new()
+    }
+
+    /// 更新当前激活问题的选项光标（越界自动夹取）。
+    pub(super) fn set_ask_user_cursor(&mut self, cursor: usize) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUserBatch {
+            slots,
+            active_index,
+            cursor: current,
+            ..
+        }) = self.ask_user_block_mut()
+        {
+            let total = slots
+                .get(*active_index)
+                .map(|s| s.options.len())
+                .unwrap_or(0);
+            if total == 0 {
+                return Vec::new();
+            }
+            *current = cursor.min(total - 1);
+            return self.ask_user_updated();
+        }
+        Vec::new()
+    }
+
+    /// 切换当前激活问题中某选项的勾选状态。内建选项不可勾选。
+    pub(super) fn toggle_ask_user_selected(&mut self, index: usize) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUserBatch {
+            slots,
+            active_index,
+            selected,
+            ..
+        }) = self.ask_user_block_mut()
+        {
+            let llm_count = slots
+                .get(*active_index)
+                .map(|s| s.llm_option_count)
+                .unwrap_or(0);
+            if index >= llm_count {
                 return Vec::new();
             }
             if let Some(flag) = selected.get_mut(index) {
@@ -127,9 +223,9 @@ impl ConversationModel {
         Vec::new()
     }
 
-    /// 设置 AskUser 块是否处于自由输入子态。
+    /// 设置当前激活问题是否处于 Type something 子态。
     pub(super) fn set_ask_user_chat_input(&mut self, active: bool) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUser {
+        if let Some(ConversationBlock::AskUserBatch {
             chat_input_active,
             chat_input_text,
             ..
@@ -146,7 +242,7 @@ impl ConversationModel {
 
     /// 追加字符到 Type something 输入框。
     pub(super) fn append_ask_user_chat_char(&mut self, ch: char) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUser {
+        if let Some(ConversationBlock::AskUserBatch {
             chat_input_active,
             chat_input_text,
             ..
@@ -162,7 +258,7 @@ impl ConversationModel {
 
     /// 删除 Type something 输入框末尾字符。
     pub(super) fn delete_ask_user_chat_char(&mut self) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUser {
+        if let Some(ConversationBlock::AskUserBatch {
             chat_input_active,
             chat_input_text,
             ..
@@ -179,7 +275,7 @@ impl ConversationModel {
     /// 获取 Type something 输入框文本。
     pub fn ask_user_chat_text(&self) -> Option<String> {
         self.blocks.iter().find_map(|block| {
-            if let ConversationBlock::AskUser {
+            if let ConversationBlock::AskUserBatch {
                 chat_input_active: true,
                 chat_input_text,
                 ..
@@ -192,23 +288,37 @@ impl ConversationModel {
         })
     }
 
-    /// 移除 AskUser 交互块。
-    pub(super) fn dismiss_ask_user(&mut self) -> Vec<ConversationChange> {
+    /// 更新确认页导航光标（范围 0..=N+1）。
+    pub(super) fn set_ask_user_confirm_cursor(&mut self, cursor: usize) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUserBatch {
+            slots,
+            confirm_cursor,
+            ..
+        }) = self.ask_user_block_mut()
+        {
+            let max = slots.len() + 1; // N 个问题项 + 提交 + 取消
+            *confirm_cursor = cursor.min(max);
+            return self.ask_user_updated();
+        }
+        Vec::new()
+    }
+
+    /// 确认提交所有答案（block 进入终态）。
+    pub(super) fn confirm_ask_user_batch(&mut self) -> Vec<ConversationChange> {
+        if let Some(ConversationBlock::AskUserBatch { confirmed, .. }) = self.ask_user_block_mut() {
+            *confirmed = true;
+            return self.ask_user_updated();
+        }
+        Vec::new()
+    }
+
+    /// 移除 AskUserBatch 交互块。
+    pub(super) fn dismiss_ask_user_batch(&mut self) -> Vec<ConversationChange> {
         if self.remove_ask_user_block() {
             return vec![
                 ConversationChange::AskUserDismissed,
                 ConversationChange::OutputDirty,
             ];
-        }
-        Vec::new()
-    }
-
-    /// 设置用户回答内容，block 进入已回答状态（不再显示选项和键盘提示）。
-    pub(super) fn answer_ask_user(&mut self, answer: String) -> Vec<ConversationChange> {
-        self.clear_active_text_blocks();
-        if let Some(ConversationBlock::AskUser { answer: ans, .. }) = self.ask_user_block_mut() {
-            *ans = Some(answer);
-            return self.ask_user_updated();
         }
         Vec::new()
     }
@@ -226,16 +336,16 @@ impl ConversationModel {
     fn ask_user_block_mut(&mut self) -> Option<&mut ConversationBlock> {
         self.blocks
             .iter_mut()
-            .find(|block| matches!(block, ConversationBlock::AskUser { .. }))
+            .find(|block| matches!(block, ConversationBlock::AskUserBatch { .. }))
     }
 
-    /// 移除已存在的 AskUser 块，返回是否实际移除。
+    /// 移除已存在的 AskUserBatch 块，返回是否实际移除。
     fn remove_ask_user_block(&mut self) -> bool {
         let before = self.blocks.len();
         self.blocks
-            .retain(|block| !matches!(block, ConversationBlock::AskUser { .. }));
+            .retain(|block| !matches!(block, ConversationBlock::AskUserBatch { .. }));
         self.timeline
-            .retain(|item| !matches!(item, OutputTimelineItem::AskUser { .. }));
+            .retain(|item| !matches!(item, OutputTimelineItem::AskUserBatch { .. }));
         before != self.blocks.len()
     }
 }
@@ -243,185 +353,202 @@ impl ConversationModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::model::conversation::block::AskUserSlot;
     use crate::tui::model::conversation::intent::ConversationIntent;
 
-    fn show(model: &mut ConversationModel, options: &[&str], llm: usize, multi: bool) {
-        model.apply(ConversationIntent::ShowAskUser {
-            question: "选哪个?".to_string(),
-            options: options
-                .iter()
-                .map(|s| sdk::OptionItem::title_only(s.to_string()))
-                .collect(),
-            llm_option_count: llm,
-            multi_select: multi,
-            cursor: 0,
+    fn make_slot(id: &str, question: &str, options: &[&str]) -> AskUserSlot {
+        let llm_count = options.len();
+        let mut all = options
+            .iter()
+            .map(|s| sdk::OptionItem::title_only(s.to_string()))
+            .collect::<Vec<_>>();
+        if !all.is_empty() {
+            all.push(sdk::OptionItem::title_only("Type something...".to_string()));
+        }
+        AskUserSlot {
+            id: id.to_string(),
+            question: question.to_string(),
+            options: all,
+            llm_option_count: llm_count,
+            multi_select: false,
             default: None,
-        });
+            answer: None,
+        }
     }
 
-    fn ask_block(model: &ConversationModel) -> &ConversationBlock {
+    fn show_batch(model: &mut ConversationModel, slots: Vec<AskUserSlot>) {
+        model.apply(ConversationIntent::ShowAskUserBatch { slots });
+    }
+
+    fn batch_block(model: &ConversationModel) -> &ConversationBlock {
         model
             .blocks
             .iter()
-            .find(|b| matches!(b, ConversationBlock::AskUser { .. }))
-            .expect("ask user block")
+            .find(|b| matches!(b, ConversationBlock::AskUserBatch { .. }))
+            .expect("ask user batch block")
     }
 
     #[test]
-    fn test_show_ask_user_inserts_single_block() {
+    fn test_show_ask_user_batch_initializes_answering_phase() {
         let mut model = ConversationModel::default();
-        show(&mut model, &["A", "B"], 2, false);
-        // 再次 show 应替换而非新增
-        show(&mut model, &["C"], 1, false);
-        let count = model
-            .blocks
-            .iter()
-            .filter(|b| matches!(b, ConversationBlock::AskUser { .. }))
-            .count();
-        assert_eq!(count, 1);
-        if let ConversationBlock::AskUser { options, .. } = ask_block(&model) {
-            assert_eq!(options[0].title, "C");
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &["A", "B"])]);
+        if let ConversationBlock::AskUserBatch {
+            phase,
+            active_index,
+            ..
+        } = batch_block(&model)
+        {
+            assert_eq!(*phase, AskUserPhase::Answering);
+            assert_eq!(*active_index, 0);
         }
     }
 
     #[test]
-    fn test_set_ask_user_cursor_clamps_out_of_range() {
+    fn test_answer_current_advances_to_next_question() {
         let mut model = ConversationModel::default();
-        show(&mut model, &["A", "B"], 2, false);
-        model.apply(ConversationIntent::SetAskUserCursor { cursor: 99 });
-        if let ConversationBlock::AskUser { cursor, .. } = ask_block(&model) {
-            assert_eq!(*cursor, 1);
+        show_batch(
+            &mut model,
+            vec![
+                make_slot("q1", "问题1", &["A"]),
+                make_slot("q2", "问题2", &["B"]),
+            ],
+        );
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "A".to_string(),
+        });
+        if let ConversationBlock::AskUserBatch {
+            active_index,
+            phase,
+            slots,
+            ..
+        } = batch_block(&model)
+        {
+            assert_eq!(*active_index, 1);
+            assert_eq!(*phase, AskUserPhase::Answering);
+            assert_eq!(slots[0].answer.as_deref(), Some("A"));
         }
     }
 
     #[test]
-    fn test_set_ask_user_cursor_without_block_is_noop() {
+    fn test_answer_last_question_enters_confirming_phase() {
+        let mut model = ConversationModel::default();
+        show_batch(
+            &mut model,
+            vec![
+                make_slot("q1", "问题1", &["A"]),
+                make_slot("q2", "问题2", &["B"]),
+            ],
+        );
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "A".to_string(),
+        });
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "B".to_string(),
+        });
+        if let ConversationBlock::AskUserBatch {
+            phase,
+            confirm_cursor,
+            slots,
+            ..
+        } = batch_block(&model)
+        {
+            assert_eq!(*phase, AskUserPhase::Confirming);
+            assert_eq!(*confirm_cursor, 2); // 默认在「提交」
+            assert_eq!(slots[0].answer.as_deref(), Some("A"));
+            assert_eq!(slots[1].answer.as_deref(), Some("B"));
+        }
+    }
+
+    #[test]
+    fn test_confirm_sets_confirmed_flag() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "A".to_string(),
+        });
+        model.apply(ConversationIntent::ConfirmAskUserBatch);
+        if let ConversationBlock::AskUserBatch { confirmed, .. } = batch_block(&model) {
+            assert!(*confirmed);
+        }
+    }
+
+    #[test]
+    fn test_single_question_batch_answer_confirmed_immediately() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "A".to_string(),
+        });
+        if let ConversationBlock::AskUserBatch { confirmed, phase, .. } = batch_block(&model) {
+            assert!(*confirmed);
+            assert_eq!(*phase, AskUserPhase::Answering); // phase 不变，直接 confirmed
+        }
+    }
+
+    #[test]
+    fn test_single_question_batch_answer_no_options_confirmed_immediately() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "自由输入".to_string(),
+        });
+        if let ConversationBlock::AskUserBatch { confirmed, .. } = batch_block(&model) {
+            assert!(*confirmed);
+        }
+    }
+
+    #[test]
+    fn test_navigate_ask_user_to_resets_cursor_and_selected() {
+        let mut model = ConversationModel::default();
+        show_batch(
+            &mut model,
+            vec![
+                make_slot("q1", "问题1", &["A", "B"]),
+                make_slot("q2", "问题2", &["C"]),
+            ],
+        );
+        // 先答完两题进入确认页
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "A".to_string(),
+        });
+        model.apply(ConversationIntent::AnswerCurrentAskUser {
+            answer: "C".to_string(),
+        });
+        // 导航回第 0 题重新作答
+        model.apply(ConversationIntent::NavigateAskUserTo { index: 0 });
+        if let ConversationBlock::AskUserBatch {
+            active_index,
+            phase,
+            cursor,
+            chat_input_active,
+            ..
+        } = batch_block(&model)
+        {
+            assert_eq!(*active_index, 0);
+            assert_eq!(*phase, AskUserPhase::Answering);
+            assert_eq!(*cursor, 0);
+            assert!(!*chat_input_active);
+        }
+    }
+
+    #[test]
+    fn test_set_cursor_without_batch_is_noop() {
         let mut model = ConversationModel::default();
         let changes = model.apply(ConversationIntent::SetAskUserCursor { cursor: 0 });
         assert!(changes.is_empty());
     }
 
     #[test]
-    fn test_toggle_ask_user_selected_toggles_llm_option() {
+    fn test_dismiss_ask_user_batch_removes_block() {
         let mut model = ConversationModel::default();
-        show(&mut model, &["A", "B"], 2, true);
-        model.apply(ConversationIntent::ToggleAskUserSelected { index: 1 });
-        if let ConversationBlock::AskUser { selected, .. } = ask_block(&model) {
-            assert_eq!(selected, &vec![false, true]);
-        }
-    }
-
-    #[test]
-    fn test_toggle_ask_user_selected_rejects_builtin_option() {
-        let mut model = ConversationModel::default();
-        // 2 个 LLM 选项 + 内建项位于索引 2
-        show(&mut model, &["A", "B", "All"], 2, true);
-        let changes = model.apply(ConversationIntent::ToggleAskUserSelected { index: 2 });
-        assert!(changes.is_empty());
-        if let ConversationBlock::AskUser { selected, .. } = ask_block(&model) {
-            assert_eq!(selected, &vec![false, false, false]);
-        }
-    }
-
-    #[test]
-    fn test_dismiss_ask_user_removes_block() {
-        let mut model = ConversationModel::default();
-        show(&mut model, &["A"], 1, false);
-        let changes = model.apply(ConversationIntent::DismissAskUser);
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
+        let changes = model.apply(ConversationIntent::DismissAskUserBatch);
         assert!(changes
             .iter()
             .any(|c| matches!(c, ConversationChange::AskUserDismissed)));
         assert!(!model
             .blocks
             .iter()
-            .any(|b| matches!(b, ConversationBlock::AskUser { .. })));
-    }
-
-    #[test]
-    fn test_dismiss_ask_user_without_block_is_noop() {
-        let mut model = ConversationModel::default();
-        let changes = model.apply(ConversationIntent::DismissAskUser);
-        assert!(changes.is_empty());
-    }
-
-    #[test]
-    fn test_ask_user_snapshot_reflects_block_state() {
-        let mut model = ConversationModel::default();
-        // 无块时返回 None（错误路径）
-        assert!(model.ask_user_snapshot().is_none());
-        show(&mut model, &["A", "B"], 2, true);
-        model.apply(ConversationIntent::SetAskUserCursor { cursor: 1 });
-        model.apply(ConversationIntent::ToggleAskUserSelected { index: 0 });
-        let snap = model.ask_user_snapshot().expect("snapshot");
-        assert_eq!(snap.cursor, 1);
-        assert_eq!(snap.selected, vec![true, false]);
-        assert!(!snap.chat_input_active);
-    }
-
-    #[test]
-    fn test_set_ask_user_chat_input_toggles_flag() {
-        let mut model = ConversationModel::default();
-        show(&mut model, &["A"], 1, false);
-        model.apply(ConversationIntent::SetAskUserChatInput { active: true });
-        if let ConversationBlock::AskUser {
-            chat_input_active, ..
-        } = ask_block(&model)
-        {
-            assert!(*chat_input_active);
-        }
-    }
-
-    #[test]
-    fn test_assistant_text_after_answered_ask_user_stays_below_ask_user() {
-        let mut model = ConversationModel::default();
-        model.apply(ConversationIntent::StartChat {
-            submission: "需要选择".to_string(),
-        });
-        model.apply(ConversationIntent::ObserveAssistantText {
-            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-            text: "请选择：".to_string(),
-        });
-        show(&mut model, &["A", "B"], 2, false);
-        model.apply(ConversationIntent::AnswerAskUser {
-            answer: "A".to_string(),
-        });
-
-        model.apply(ConversationIntent::ObserveAssistantText {
-            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-            text: "继续生成".to_string(),
-        });
-
-        let assistant_texts = model
-            .blocks
-            .iter()
-            .filter_map(|block| match block {
-                ConversationBlock::AssistantText { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            assistant_texts,
-            vec!["请选择：", "继续生成"],
-            "AskUser 后的 assistant text 应创建新块，不应拼接到旧块"
-        );
-
-        let ask_position = model
-            .blocks
-            .iter()
-            .position(|block| matches!(block, ConversationBlock::AskUser { .. }))
-            .expect("ask user block");
-        let continued_position = model
-            .blocks
-            .iter()
-            .position(|block| {
-                matches!(block, ConversationBlock::AssistantText { text, .. } if text == "继续生成")
-            })
-            .expect("continued assistant text");
-        assert!(
-            continued_position > ask_position,
-            "AskUser 回答后的新 assistant text 应渲染在 AskUser 下方"
-        );
+            .any(|b| matches!(b, ConversationBlock::AskUserBatch { .. })));
     }
 }

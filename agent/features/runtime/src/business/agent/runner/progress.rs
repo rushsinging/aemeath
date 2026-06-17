@@ -14,7 +14,6 @@ pub(crate) fn build_tool_calls_progress_event(
                     id: call.id.to_string(),
                     name: call.name.clone(),
                     input: call.input.clone(),
-
                 })
                 .collect(),
         },
@@ -25,7 +24,10 @@ pub(crate) fn build_tool_calls_progress_event(
 pub(crate) fn format_grouped_tool_summaries(tool_calls: &[ToolCall]) -> String {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for call in tool_calls {
-        if let Some(entry) = counts.iter_mut().find(|(name, _)| *name == call.name.as_str()) {
+        if let Some(entry) = counts
+            .iter_mut()
+            .find(|(name, _)| *name == call.name.as_str())
+        {
             entry.1 += 1;
         } else {
             counts.push((call.name.as_str(), 1));
@@ -44,4 +46,3 @@ pub(crate) fn format_grouped_tool_summaries(tool_calls: &[ToolCall]) -> String {
         .collect::<Vec<_>>()
         .join(" | ")
 }
-

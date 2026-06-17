@@ -20,9 +20,6 @@ pub enum InputChange {
         text: String,
         cursor: usize,
     },
-    AttachmentChanged {
-        count: usize,
-    },
     ModeChanged {
         mode: InputMode,
     },
@@ -39,7 +36,6 @@ pub fn submitted_text_from_changes(changes: &[InputChange]) -> Option<String> {
         | InputChange::CursorMoved { .. }
         | InputChange::CompletionChanged { .. }
         | InputChange::HistorySelected { .. }
-        | InputChange::AttachmentChanged { .. }
         | InputChange::ModeChanged { .. }
         | InputChange::Cleared => None,
     })
@@ -52,9 +48,15 @@ pub fn submitted_display_text_from_changes(changes: &[InputChange]) -> Option<St
         | InputChange::CursorMoved { .. }
         | InputChange::CompletionChanged { .. }
         | InputChange::HistorySelected { .. }
-        | InputChange::AttachmentChanged { .. }
         | InputChange::ModeChanged { .. }
         | InputChange::Cleared => None,
+    })
+}
+
+pub fn submitted_submission_from_changes(changes: &[InputChange]) -> Option<InputSubmission> {
+    changes.iter().find_map(|change| match change {
+        InputChange::Submitted { submission } => Some(submission.clone()),
+        _ => None,
     })
 }
 
@@ -68,7 +70,7 @@ mod tests {
             submission: InputSubmission {
                 text: "run".to_string(),
                 display_text: "run".to_string(),
-                attachments: Vec::new(),
+                images: Vec::new(),
             },
         }];
 
@@ -100,14 +102,14 @@ mod tests {
                 submission: InputSubmission {
                     text: "first".to_string(),
                     display_text: "first".to_string(),
-                    attachments: Vec::new(),
+                    images: Vec::new(),
                 },
             },
             InputChange::Submitted {
                 submission: InputSubmission {
                     text: "second".to_string(),
                     display_text: "second".to_string(),
-                    attachments: Vec::new(),
+                    images: Vec::new(),
                 },
             },
         ];

@@ -72,7 +72,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         UiEvent::MessagesSync(messages) => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
-        UiEvent::AskUser { .. } => AgentEventMapping::default(),
+        UiEvent::AskUserBatch { .. } => AgentEventMapping::default(),
         UiEvent::AgentProgress {
             context,
             tool_id,
@@ -142,7 +142,8 @@ fn runtime_observation_from_ui_event(event: &UiEvent) -> Option<RuntimeObservati
             provider_id: provider_id.clone(),
             name: name.clone(),
             index: *index,
-            arguments: arguments_delta.clone()
+            arguments: arguments_delta
+                .clone()
                 .or_else(|| arguments.as_ref().map(ToString::to_string)),
             status: tool_call_status_from_sdk(*status),
         }),
@@ -282,7 +283,7 @@ mod tests {
                 index: 0,
                 arguments_delta: Some(r#"{"file_path":"Cargo.toml"}"#.to_string()),
                 arguments: None,
-                                status: sdk::ToolCallStatusView::Ready,
+                status: sdk::ToolCallStatusView::Ready,
             },
             UiEvent::ToolResult {
                 context,
@@ -382,9 +383,7 @@ mod tests {
         let mapping = map_agent_event(&event);
 
         match first_observation(&mapping) {
-            Some(ConversationIntent::ObserveToolCallUpdate {
-                arguments, ..
-            }) => {
+            Some(ConversationIntent::ObserveToolCallUpdate { arguments, .. }) => {
                 // arguments_delta 为 None 时，fallback 到 arguments JSON 字符串
                 assert!(arguments.is_some());
             }

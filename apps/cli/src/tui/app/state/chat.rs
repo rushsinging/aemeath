@@ -4,7 +4,6 @@
 #[derive(Debug)]
 pub(crate) struct ChatState {
     pub messages: Vec<sdk::ChatMessage>,
-    pub pending_images: Vec<sdk::ClipboardImageView>,
     pub system_prompt_text: String,
     pub context_size: usize,
     pub tool_call_active: bool,
@@ -44,19 +43,6 @@ impl ChatState {
         remaining
     }
 
-    pub(crate) fn add_pending_image(&mut self, image: sdk::ClipboardImageView) -> usize {
-        self.pending_images.push(image);
-        self.pending_images.len()
-    }
-
-    pub(crate) fn clear_pending_images(&mut self) {
-        self.pending_images.clear();
-    }
-
-    pub(crate) fn drain_pending_images(&mut self) -> Vec<sdk::ClipboardImageView> {
-        self.pending_images.drain(..).collect()
-    }
-
     pub(crate) fn start_input_event_buffer(
         &mut self,
     ) -> std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>> {
@@ -78,14 +64,6 @@ impl ChatState {
         };
         events.push(event);
         events.len()
-    }
-
-    pub(crate) fn pending_image_count(&self) -> usize {
-        self.pending_images.len()
-    }
-
-    pub(crate) fn pending_images(&self) -> &[sdk::ClipboardImageView] {
-        &self.pending_images
     }
 
     pub(crate) fn reset_runtime_state(&mut self) {
@@ -143,7 +121,6 @@ impl Default for ChatState {
     fn default() -> Self {
         Self {
             messages: Vec::new(),
-            pending_images: Vec::new(),
             system_prompt_text: String::new(),
             context_size: 200_000,
             tool_call_active: false,

@@ -30,7 +30,7 @@
 | 分片 | 角色 / 路径（主触发） | 同时加载（次触发） |
 |---|---|---|
 | `specs/rust-coding.md` | 横切，任意 `**/*.rs`、`**/Cargo.toml` —— 编码 / 测试 / 日志 / 验证门禁 / 错误处理 | 跑验证门禁、新增任何核心逻辑、调试构建或测试失败 |
-| `specs/tui-cli.md` | `apps/cli/src/**` —— TUI（ratatui）、旧版 REPL（rustyline） | 改输入 / 渲染 / 快捷键 / 选区复制，或新增工具显示（`ToolDisplayEntry`） |
+| `specs/tui-cli.md` | `apps/cli/src/**` —— TUI（ratatui）、旧版 REPL（rustyline）、主题色板（Catppuccin Macchiato） | 改输入 / 渲染 / 快捷键 / 选区复制，或新增工具显示（`ToolDisplayEntry`），或改颜色 / 主题 |
 | `specs/runtime.md` | `agent/features/runtime/**` —— Agent 循环、tool 执行编排、token budget、compact、成本、slash 命令 | 改暂停 / 恢复 / 重试（同步更新 `token_estimation`）、成本追踪（同步更新 `pricing.rs`）、新增 slash 命令 |
 | `specs/tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
 | `specs/provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `config-compat` 补默认值） |
@@ -40,6 +40,7 @@
 | `specs/storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
 | `specs/policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
 | `specs/bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；操作 GitHub Issues（迁移自 `docs/bug/`、`docs/snapshot/`） |
+| `docs/design/architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/architecture-guards.md` 本身 |
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
 
@@ -56,11 +57,18 @@ aemeath/                    # workspace root
 ├── packages/
 │   ├── sdk/                # AgentClient trait + 公共类型（CLI↔Runtime 通信契约）
 │   └── global/logging/     # 日志 projection 适配
-├── docs/                   # 设计稿与评审归档（`docs/snapshot/specs/` 等）；bug / feature 追踪改在 GitHub Issues
+├── docs/                   # 设计真相与历史归档
+│   ├── design/             #   设计真相源：outline / runtime / tui / server / file-split-plan / architecture-guards
+│   ├── snapshot/           #   历史 spec 快照（已废弃、不参与运行时）
+│   ├── superpowers/        #   brainstorm / superpowers 工作流产物
+│   ├── mockups/            #   UI 草图
+│   └── visual/             #   可视化资产
 ├── specs/                  # 渐进式披露分片：按需加载的 detailed 规则
 ├── TODO.md                 # 待办事项（通过 /todo 命令维护）
 └── AGENTS.md               # 本文件（CLAUDE.md 软链指向它）
 ```
+
+> bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），**NEVER** 再向 `docs/` 写入新的 bug / feature 条目。
 
 ## 运行时目录（`~/.agents`）
 

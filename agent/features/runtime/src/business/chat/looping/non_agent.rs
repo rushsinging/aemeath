@@ -17,6 +17,7 @@ pub(super) async fn execute_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -32,13 +33,30 @@ where
 
     if other_calls.len() == 1 {
         if agent.ctx.cancel.is_cancelled() {
-            return vec![cancelled_result(other_calls[0])];
+            return vec![cancelled_result(other_calls[0], language)];
         }
-        return execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, other_calls[0])
-            .await;
+        return execute_one_non_agent(
+            context,
+            agent,
+            sink,
+            hook_ui,
+            hook_runner,
+            other_calls[0],
+            language,
+        )
+        .await;
     }
 
-    execute_multiple_non_agent(context, agent, sink, hook_ui, hook_runner, &other_calls).await
+    execute_multiple_non_agent(
+        context,
+        agent,
+        sink,
+        hook_ui,
+        hook_runner,
+        &other_calls,
+        language,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -49,6 +67,7 @@ async fn execute_multiple_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     other_calls: &[&ToolCall],
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -73,9 +92,16 @@ where
                         return (pos, Vec::new());
                     }
                     let _permit = sem.acquire().await.expect("semaphore closed");
-                    let result =
-                        execute_one_non_agent(&context, agent, &sink, &hook_ui, &hook_runner, call)
-                            .await;
+                    let result = execute_one_non_agent(
+                        &context,
+                        agent,
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        call,
+                        language,
+                    )
+                    .await;
                     (pos, result)
                 }
             })
@@ -84,7 +110,7 @@ where
             if let Some(r) = result_vec.into_iter().next() {
                 results[pos] = Some(r);
             } else {
-                results[pos] = Some(cancelled_result(other_calls[pos]));
+                results[pos] = Some(cancelled_result(other_calls[pos], language));
             }
         }
     }
@@ -94,12 +120,12 @@ where
         let result_vec = if agent.ctx.cancel.is_cancelled() {
             Vec::new()
         } else {
-            execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, call).await
+            execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, call, language).await
         };
         if let Some(r) = result_vec.into_iter().next() {
             results[pos] = Some(r);
         } else {
-            results[pos] = Some(cancelled_result(call));
+            results[pos] = Some(cancelled_result(call, language));
         }
     }
 
@@ -132,12 +158,16 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
     (concurrent_positions, sequential_positions)
 }
 
-fn cancelled_result(call: &ToolCall) -> UiToolResult {
+fn cancelled_result(call: &ToolCall, language: &str) -> UiToolResult {
+    let msg = match language {
+        "zh" => "用户已取消",
+        _ => "Cancelled by user",
+    };
     (
         call.id.clone(),
         call.provider_id.clone(),
-        "Cancelled by user".to_string(),
-        serde_json::json!({ "text": "Cancelled by user" }),
+        msg.to_string(),
+        serde_json::json!({ "text": msg }),
         true,
         Vec::new(),
     )
@@ -151,6 +181,7 @@ async fn execute_one_non_agent<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
+    language: &str,
 ) -> Vec<UiToolResult>
 where
     S: ChatEventSink,
@@ -187,10 +218,11 @@ where
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
-        let error_detail = blocked_result
-            .error
-            .as_deref()
-            .unwrap_or("Blocked by PreToolUse hook");
+        let default_blocked = match language {
+            "zh" => "被 PreToolUse hook 阻止",
+            _ => "Blocked by PreToolUse hook",
+        };
+        let error_detail = blocked_result.error.as_deref().unwrap_or(default_blocked);
         let result = (
             owned_call.id.clone(),
             owned_call.provider_id.clone(),
@@ -202,7 +234,55 @@ where
         send_tool_result(sink, context, &owned_call, &result).await;
         return vec![result];
     }
-    let exec_results = agent.execute_tools(std::slice::from_ref(&owned_call)).await;
+    // Only Bash supports stdout streaming via progress_tx. For other tools,
+    // skip the channel setup to avoid unnecessary overhead.
+    let is_bash = owned_call.name == "Bash";
+
+    let exec_results = if is_bash {
+        // Set up progress channel for stdout streaming (mirrors agent_calls.rs
+        // pattern).
+        let (prog_tx, mut prog_rx) =
+            tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
+        let mut streaming_ctx = agent.ctx.clone();
+        streaming_ctx.progress_tx = Some(prog_tx);
+        let call_id = owned_call.id.clone();
+        let stream_sink = sink.clone();
+        let stream_context = context.clone();
+        let forward_handle = tokio::spawn(async move {
+            while let Some(event) = prog_rx.recv().await {
+                let _ = stream_sink
+                    .send_event(RuntimeStreamEvent::AgentProgress {
+                        context: stream_context.clone(),
+                        tool_id: call_id.clone(),
+                        event,
+                    })
+                    .await;
+            }
+        });
+
+        let results =
+            vec![agent.execute_one_with_ctx(&owned_call, &streaming_ctx).await];
+
+        // Drop the sender so the forwarding task can complete naturally.
+        streaming_ctx.progress_tx = None;
+
+        // Flush any remaining progress events before proceeding.
+        // Abort the forwarding task if it doesn't complete within 500ms
+        // to prevent task/resource leaks.
+        let mut forward_handle = forward_handle;
+        tokio::select! {
+            _ = &mut forward_handle => {}
+            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                forward_handle.abort();
+                let _ = forward_handle.await;
+            }
+        }
+        results
+    } else {
+        // Non-Bash tools: execute without progress streaming.
+        vec![agent.execute_one_with_ctx(&owned_call, &agent.ctx).await]
+    };
+
     let working_root = agent.ctx.workspace_read().current_root();
     let in_worktree = agent.ctx.workspace_read().in_worktree();
     hook_runner.set_project_context(working_root.display().to_string(), in_worktree);

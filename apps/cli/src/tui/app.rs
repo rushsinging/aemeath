@@ -211,12 +211,12 @@ impl App {
             let suggestions_height = self
                 .input_area
                 .suggestions_height(&self.model.input.completion);
-            let input_vm = crate::tui::view_assembler::input::InputViewAssembler::assemble_from_model(
-                &self.model.input,
-                0, // queued_count
-                self.chat.pending_image_count(),
-                true, // focused
-            );
+            let input_vm =
+                crate::tui::view_assembler::input::InputViewAssembler::assemble_from_model(
+                    &self.model.input,
+                    0, // queued_count
+                    true, // focused
+                );
             let input_height = InputArea::desired_height(size.width, &input_vm);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -299,6 +299,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::App;
+    use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
     use ratatui::layout::Rect;
 
     #[test]
@@ -310,7 +311,11 @@ mod tests {
         );
         app.layout.output_area_rect = Rect::new(0, 0, 80, 20);
 
-        assert_eq!(app.output_document_width(), 75);
+        assert_eq!(
+            app.output_document_width(),
+            80 - SCROLLBAR_RESERVE_COLS,
+            "文档预换行宽度 = 终端宽度 - 滚动条预留列数"
+        );
     }
 
     #[test]

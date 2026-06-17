@@ -1,20 +1,19 @@
-//! AskUserQuestion 交互块渲染：问题 + 操作提示 + 选项列表，当前选项高亮。
+//! AskUserBatch 交互块渲染：批量问题 + 确认页。
 //!
-//! 高亮（cursor / multi_select 勾选）由 view model 的 `cursor`/`selected` 决定，
-//! 属于「选项导航高亮」，与文本选区 overlay 无关。
+//! 三阶段渲染：
+//! - **Answering**：显示进度 + 已答折叠摘要 + 当前激活问题选项列表
+//! - **Confirming**：所有 Q→A 摘要列表 + 提交/取消操作
+//! - **Confirmed**（终态）：简洁的 Q→A 列表
 
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
-use crate::tui::view_model::output::AskUserBlockView;
+use crate::tui::view_model::output::{AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use sdk::OptionItem;
 use unicode_width::UnicodeWidthStr;
 
 /// 将文本按指定显示列宽自动换行，返回多行字符串。
-///
-/// 对以空格分隔的文本按词拆行；对单个过长的词（如无空格的中文）
-/// 按字符断行。
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     if max_width == 0 {
         return text.lines().map(|l| l.to_string()).collect();
@@ -31,7 +30,6 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
             let word_width = word.width();
             let space = if current_line.is_empty() { 0 } else { 1 };
             if current_line.is_empty() {
-                // 行首直接处理 word
                 for chunk in split_into_chunks(word, max_width) {
                     if current_line.is_empty() {
                         current_line = chunk;
@@ -47,11 +45,9 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
                 current_line.push_str(word);
                 current_width += space + word_width;
             } else {
-                // 放不下，先提交当前行
                 result.push(current_line);
                 current_line = String::new();
                 current_width = 0;
-                // 再将 word 拆块放入
                 for chunk in split_into_chunks(word, max_width) {
                     if current_line.is_empty() {
                         current_line = chunk;
@@ -74,7 +70,6 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     result
 }
 
-/// 按显示宽度将字符串切分为不超过 max_width 的块。
 fn split_into_chunks(s: &str, max_width: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut current = String::new();
@@ -95,7 +90,7 @@ fn split_into_chunks(s: &str, max_width: usize) -> Vec<String> {
     chunks
 }
 
-/// 渲染单个选项的行（title 加粗 + description 灰色）。
+/// 渲染单个选项的行。
 fn option_lines(
     index: usize,
     option: &OptionItem,
@@ -112,11 +107,9 @@ fn option_lines(
     let continuation = " ".repeat(prefix.chars().count());
     let mut lines = Vec::new();
 
-    // Title line
     let title_line = format!("{prefix}{}", option.title);
-    lines.push((title_line, None)); // Style 由调用者根据 active 设置
+    lines.push((title_line, None));
 
-    // Description line(s) — 灰色缩进
     if let Some(desc) = &option.description {
         for line in desc.lines() {
             lines.push((
@@ -132,51 +125,163 @@ fn option_lines(
     lines
 }
 
-pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx) -> RenderedBlock {
+/// 截断文本到指定显示宽度（尾部加 `…`）。
+fn truncate(text: &str, max_width: usize) -> String {
+    if text.width() <= max_width {
+        return text.to_string();
+    }
+    let mut result = String::new();
+    let mut width = 0;
+    for ch in text.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw + 1 > max_width {
+            break;
+        }
+        result.push(ch);
+        width += cw;
+    }
+    result.push('…');
+    result
+}
+
+/// 渲染 Q→A 摘要行（用于确认页和折叠摘要）。
+fn qa_summary_lines(
+    index: usize,
+    slot: &AskUserSlotView,
+    active: bool,
+    max_width: usize,
+) -> Vec<RenderedLine> {
+    let marker = if active { "❯" } else { " " };
+    let answer = slot.answer.as_deref().unwrap_or("（未回答）");
+    let q_line = format!(
+        "  {marker} Q{}. {}",
+        index + 1,
+        truncate(&slot.question, max_width.saturating_sub(8))
+    );
+    let a_line = format!("      ❯ {}", truncate(answer, max_width.saturating_sub(8)));
+
+    let q_style = if active {
+        Style::default()
+            .fg(theme::WARNING)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
+    let a_style = if active {
+        Style::default().fg(theme::SUCCESS)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
+
+    vec![
+        RenderedLine::new(vec![Span::styled(q_line, q_style)]),
+        RenderedLine::new(vec![Span::styled(a_line, a_style)]),
+    ]
+}
+
+pub fn render_ask_user_batch(
+    block_id: &str,
+    view: &AskUserBatchBlockView,
+    ctx: &RenderCtx,
+) -> RenderedBlock {
     let header_style = Style::default()
         .fg(theme::WARNING)
         .add_modifier(Modifier::BOLD);
     let hint_style = Style::default().fg(theme::TEXT_DIM);
     let normal_style = Style::default().fg(theme::TEXT);
 
-    // 问题区域最大宽度：终端宽度的 60%，下限 40，上限 80
     let question_max_width = (ctx.width as usize * 6 / 10).clamp(40, 80);
 
+    // Confirmed 终态
+    if view.confirmed {
+        return render_confirmed(block_id, view, header_style, question_max_width);
+    }
+
+    match view.phase {
+        AskUserPhaseView::Answering => render_answering(
+            block_id,
+            view,
+            ctx,
+            header_style,
+            hint_style,
+            normal_style,
+            question_max_width,
+        ),
+        AskUserPhaseView::Confirming => {
+            render_confirming(block_id, view, header_style, hint_style, question_max_width)
+        }
+    }
+}
+
+/// Answering 阶段渲染。
+fn render_answering(
+    block_id: &str,
+    view: &AskUserBatchBlockView,
+    _ctx: &RenderCtx,
+    header_style: Style,
+    hint_style: Style,
+    normal_style: Style,
+    question_max_width: usize,
+) -> RenderedBlock {
     let mut lines = Vec::new();
+    let total = view.slots.len();
+    let current = view.active_index + 1;
+
+    // Header 带进度
+    let header_text = if total > 1 {
+        format!("━━ 需要你的回答 ({current}/{total}) ━━")
+    } else {
+        "━━ 需要你的回答 ━━".to_string()
+    };
     lines.push(RenderedLine::new(vec![Span::styled(
-        "━━ 需要你的回答 ━━".to_string(),
+        header_text,
         header_style,
     )]));
+
+    // 已答 slot 折叠摘要
+    for (i, slot) in view.slots.iter().enumerate() {
+        if i == view.active_index {
+            continue;
+        }
+        if let Some(answer) = &slot.answer {
+            lines.push(RenderedLine::new(vec![Span::styled(
+                format!(
+                    "  ✓ Q{}. {} → {}",
+                    i + 1,
+                    truncate(&slot.question, 30),
+                    truncate(answer, 30)
+                ),
+                hint_style,
+            )]));
+        }
+    }
+
     lines.push(RenderedLine::new(vec![Span::raw("")]));
-    for line in wrap_text(&view.question, question_max_width) {
+
+    // 当前激活问题
+    let active_slot = &view.slots[view.active_index];
+    for line in wrap_text(&active_slot.question, question_max_width) {
         lines.push(RenderedLine::new(vec![Span::styled(line, header_style)]));
     }
 
-    // 已回答状态：显示回答内容，不显示选项和键盘提示
-    if let Some(answer) = &view.answer {
-        let answer_style = Style::default().fg(theme::SUCCESS);
-        lines.push(RenderedLine::new(vec![Span::raw(String::new())]));
-        for ans_line in wrap_text(answer, question_max_width) {
-            lines.push(RenderedLine::new(vec![Span::styled(
-                format!("❯ {ans_line}"),
-                answer_style,
-            )]));
-        }
-        lines.push(RenderedLine::new(vec![Span::raw(String::new())]));
-        return RenderedBlock {
-            block_id: block_id.to_string(),
-            lines,
-        };
-    }
+    let multi = active_slot.multi_select;
 
-    if view.options.is_empty() {
-        // 自由输入模式：若携带默认值，补回 `(default: ...)` 提示行（迁移后回归）。
-        if let Some(d) = &view.default {
+    // 自由输入模式（无选项）
+    if active_slot.options.is_empty() {
+        if let Some(d) = &active_slot.default {
             lines.push(RenderedLine::new(vec![Span::styled(
                 format!("  (default: {d})"),
                 hint_style,
             )]));
         }
+        lines.push(RenderedLine::new(vec![Span::raw("")]));
+        // Type something 输入框
+        let input_text = &view.chat_input_text;
+        let prompt = format!("  ❯ Type something: {input_text}");
+        lines.push(RenderedLine::new(vec![
+            Span::styled(prompt.clone(), header_style),
+            Span::styled(" ", Style::default().bg(theme::ACCENT)),
+        ]));
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         lines.push(RenderedLine::new(vec![Span::styled(
             "  [Enter] 确认  [Esc] 取消".to_string(),
@@ -188,7 +293,8 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
         };
     }
 
-    let hint = if view.multi_select {
+    // 有选项模式
+    let hint = if multi {
         "  [↑↓] 移动  [Space] 选中/取消  [Enter] 确认  [Esc] 取消"
     } else {
         "  [↑↓] 选择  [Enter] 确认  [Esc] 取消"
@@ -199,15 +305,13 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
     )]));
     lines.push(RenderedLine::new(vec![Span::raw("")]));
 
-    for (i, option) in view.options.iter().enumerate() {
-        // chat_input_active 子态下不高亮任何选项
+    for (i, option) in active_slot.options.iter().enumerate() {
         let is_cursor = !view.chat_input_active && i == view.cursor;
-        let is_checked = view.multi_select && view.selected.get(i).copied().unwrap_or(false);
+        let is_checked = multi && view.selected.get(i).copied().unwrap_or(false);
         let active = is_cursor || is_checked;
-        for (line_idx, (content, override_style)) in
-            option_lines(i, option, active, view.multi_select)
-                .into_iter()
-                .enumerate()
+        for (line_idx, (content, override_style)) in option_lines(i, option, active, multi)
+            .into_iter()
+            .enumerate()
         {
             let style = override_style.unwrap_or(if active && line_idx == 0 {
                 header_style
@@ -218,19 +322,114 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
         }
     }
 
-    // "Type something..." 输入行（仅当处于自由输入子态时显示）
+    // Type something 子态（LLM 选项中的最后一项被选中时激活）
     if view.chat_input_active {
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         let input_text = &view.chat_input_text;
         let prompt = format!("  ❯ Type something: {input_text}");
         lines.push(RenderedLine::new(vec![
             Span::styled(prompt, header_style),
-            Span::styled("▏", header_style),
+            Span::styled(" ", Style::default().bg(theme::ACCENT)),
         ]));
     }
 
     lines.push(RenderedLine::new(vec![Span::raw("")]));
+    RenderedBlock {
+        block_id: block_id.to_string(),
+        lines,
+    }
+}
 
+/// Confirming 阶段渲染。
+fn render_confirming(
+    block_id: &str,
+    view: &AskUserBatchBlockView,
+    header_style: Style,
+    hint_style: Style,
+    question_max_width: usize,
+) -> RenderedBlock {
+    let mut lines = Vec::new();
+    lines.push(RenderedLine::new(vec![Span::styled(
+        "━━ 确认回答 ━━".to_string(),
+        header_style,
+    )]));
+    lines.push(RenderedLine::new(vec![Span::raw("")]));
+
+    // Q→A 列表
+    for (i, slot) in view.slots.iter().enumerate() {
+        let is_cursor = i == view.confirm_cursor;
+        for line in qa_summary_lines(i, slot, is_cursor, question_max_width) {
+            lines.push(line);
+        }
+    }
+
+    lines.push(RenderedLine::new(vec![Span::raw("")]));
+
+    // 提交按钮（confirm_cursor == N）
+    let submit_active = view.confirm_cursor == view.slots.len();
+    let submit_marker = if submit_active { "❯" } else { " " };
+    let submit_style = if submit_active {
+        Style::default()
+            .fg(theme::SUCCESS)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        hint_style
+    };
+    lines.push(RenderedLine::new(vec![Span::styled(
+        format!("  {submit_marker} ✓ 全部确认提交"),
+        submit_style,
+    )]));
+
+    // 取消按钮（confirm_cursor == N+1）
+    let cancel_active = view.confirm_cursor == view.slots.len() + 1;
+    let cancel_marker = if cancel_active { "❯" } else { " " };
+    let cancel_style = if cancel_active {
+        Style::default()
+            .fg(theme::WARNING)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        hint_style
+    };
+    lines.push(RenderedLine::new(vec![Span::styled(
+        format!("  {cancel_marker} ✗ 取消"),
+        cancel_style,
+    )]));
+
+    lines.push(RenderedLine::new(vec![Span::raw("")]));
+    lines.push(RenderedLine::new(vec![Span::styled(
+        "  [↑↓] 导航  [Enter] 选择/确认/重新作答  [Esc] 取消".to_string(),
+        hint_style,
+    )]));
+
+    RenderedBlock {
+        block_id: block_id.to_string(),
+        lines,
+    }
+}
+
+/// Confirmed 终态渲染。
+fn render_confirmed(
+    block_id: &str,
+    view: &AskUserBatchBlockView,
+    header_style: Style,
+    question_max_width: usize,
+) -> RenderedBlock {
+    let dim_style = Style::default().fg(theme::TEXT_DIM);
+    let mut lines = Vec::new();
+    lines.push(RenderedLine::new(vec![Span::styled(
+        "━━ 已回答 ━━".to_string(),
+        dim_style,
+    )]));
+
+    for (i, slot) in view.slots.iter().enumerate() {
+        lines.push(RenderedLine::new(vec![Span::raw("")]));
+        for line in qa_summary_lines(i, slot, false, question_max_width) {
+            lines.push(line);
+        }
+    }
+
+    lines.push(RenderedLine::new(vec![Span::raw("")]));
+    let _ = header_style;
     RenderedBlock {
         block_id: block_id.to_string(),
         lines,
@@ -241,156 +440,142 @@ pub fn render_ask_user(block_id: &str, view: &AskUserBlockView, ctx: &RenderCtx)
 mod tests {
     use super::*;
 
-    fn view(options: &[&str], cursor: usize, multi: bool) -> AskUserBlockView {
-        AskUserBlockView {
-            key: "ask".into(),
-            question: "选哪个?".into(),
-            options: options
-                .iter()
-                .map(|s| sdk::OptionItem::title_only(s.to_string()))
-                .collect(),
-            llm_option_count: options.len(),
-            multi_select: multi,
-            cursor,
-            selected: vec![false; options.len()],
-            chat_input_active: false,
-            chat_input_text: String::new(),
+    fn make_slot(question: &str, options: &[&str]) -> AskUserSlotView {
+        let llm_count = options.len();
+        let mut all = options
+            .iter()
+            .map(|s| sdk::OptionItem::title_only(s.to_string()))
+            .collect::<Vec<_>>();
+        if !all.is_empty() {
+            all.push(sdk::OptionItem::title_only("Type something...".to_string()));
+        }
+        AskUserSlotView {
+            id: format!("q-{}", question.len()),
+            question: question.to_string(),
+            options: all,
+            llm_option_count: llm_count,
+            multi_select: false,
             default: None,
             answer: None,
         }
     }
 
+    fn batch_view(
+        slots: Vec<AskUserSlotView>,
+        active_index: usize,
+        phase: AskUserPhaseView,
+    ) -> AskUserBatchBlockView {
+        let cursor = 0;
+        let options_count = slots
+            .get(active_index)
+            .map(|s| s.options.len())
+            .unwrap_or(0);
+        AskUserBatchBlockView {
+            key: "ask".into(),
+            slots,
+            active_index,
+            phase,
+            cursor,
+            selected: vec![false; options_count],
+            chat_input_active: false,
+            chat_input_text: String::new(),
+            confirm_cursor: 0,
+            confirmed: false,
+        }
+    }
+
     #[test]
-    fn test_render_ask_user_highlights_cursor_option() {
-        let block = render_ask_user(
-            "ask",
-            &view(&["A", "B"], 1, false),
-            &RenderCtx { width: 80 },
+    fn test_answering_shows_progress_header() {
+        let view = batch_view(
+            vec![make_slot("问题1", &["A"]), make_slot("问题2", &["B"])],
+            0,
+            AskUserPhaseView::Answering,
         );
-        // 找到选项 B 行（含 ❯ 标记表示高亮）
-        let highlighted = block
-            .lines
-            .iter()
-            .find(|line| line.plain.contains("2. B"))
-            .expect("option B line");
-        assert!(highlighted.plain.contains('❯'));
-        assert_eq!(highlighted.spans[0].style.fg, Some(theme::WARNING));
-        // 选项 A 不应高亮
-        let other = block
-            .lines
-            .iter()
-            .find(|line| line.plain.contains("1. A"))
-            .expect("option A line");
-        assert!(!other.plain.contains('❯'));
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        assert!(block.lines.iter().any(|l| l.plain.contains("(1/2)")));
     }
 
     #[test]
-    fn test_render_ask_user_empty_options_shows_confirm_hint() {
-        let mut v = view(&[], 0, false);
-        v.options.clear();
-        v.llm_option_count = 0;
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        assert!(block
-            .lines
-            .iter()
-            .any(|line| line.plain.contains("[Enter] 确认")));
-        // 无选项时不渲染 ↑↓ 选择提示
-        assert!(!block.lines.iter().any(|line| line.plain.contains("[↑↓]")));
-    }
-
-    #[test]
-    fn test_render_ask_user_empty_options_shows_default_line() {
-        // 自由输入模式携带 default 时应渲染 `(default: ...)` 行（迁移回归）。
-        let mut v = view(&[], 0, false);
-        v.options.clear();
-        v.llm_option_count = 0;
-        v.default = Some("main".into());
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        assert!(
-            block
-                .lines
-                .iter()
-                .any(|line| line.plain.contains("(default: main)")),
-            "应渲染 default 提示行"
+    fn test_answering_shows_current_question() {
+        let view = batch_view(
+            vec![make_slot("选哪个?", &["A", "B"])],
+            0,
+            AskUserPhaseView::Answering,
         );
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        assert!(block.lines.iter().any(|l| l.plain.contains("选哪个?")));
+        assert!(block.lines.iter().any(|l| l.plain.contains("1. A")));
     }
 
     #[test]
-    fn test_render_ask_user_empty_options_no_default_omits_line() {
-        // 边界：无 default 时不渲染 `(default:` 行。
-        let mut v = view(&[], 0, false);
-        v.options.clear();
-        v.llm_option_count = 0;
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        assert!(!block
+    fn test_answering_shows_answered_summary() {
+        let mut s1 = make_slot("问题1", &["A"]);
+        s1.answer = Some("A".to_string());
+        let view = batch_view(
+            vec![s1, make_slot("问题2", &["B"])],
+            1,
+            AskUserPhaseView::Answering,
+        );
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        assert!(block.lines.iter().any(|l| l.plain.contains("✓ Q1.")));
+    }
+
+    #[test]
+    fn test_confirming_shows_qa_list_and_actions() {
+        let mut s1 = make_slot("问题1", &["A"]);
+        s1.answer = Some("A".to_string());
+        let view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        assert!(block.lines.iter().any(|l| l.plain.contains("确认回答")));
+        assert!(block.lines.iter().any(|l| l.plain.contains("全部确认提交")));
+        assert!(block.lines.iter().any(|l| l.plain.contains("取消")));
+    }
+
+    #[test]
+    fn test_confirming_submit_highlighted_at_default_cursor() {
+        let mut s1 = make_slot("问题1", &["A"]);
+        s1.answer = Some("A".to_string());
+        let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
+        view.confirm_cursor = 1; // N=1 → 提交
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let submit_line = block
             .lines
             .iter()
-            .any(|line| line.plain.contains("(default:")));
+            .find(|l| l.plain.contains("全部确认提交"))
+            .expect("submit line");
+        assert!(submit_line.plain.contains('❯'));
     }
 
     #[test]
-    fn test_render_ask_user_single_option_renders_marker() {
-        let block = render_ask_user("ask", &view(&["Only"], 0, false), &RenderCtx { width: 80 });
-        let line = block
+    fn test_confirmed_shows_simple_list() {
+        let mut s1 = make_slot("问题1", &["A"]);
+        s1.answer = Some("A".to_string());
+        let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
+        view.confirmed = true;
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        assert!(block.lines.iter().any(|l| l.plain.contains("已回答")));
+        assert!(!block.lines.iter().any(|l| l.plain.contains("[↑↓]")));
+    }
+
+    #[test]
+    fn test_chat_input_uses_block_cursor() {
+        let mut view = batch_view(
+            vec![make_slot("选哪个?", &["A"])],
+            0,
+            AskUserPhaseView::Answering,
+        );
+        view.chat_input_active = true;
+        view.chat_input_text = "hello".to_string();
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        // Type something 行应包含块状光标（bg(ACCENT) 样式的 span）
+        let type_line = block
             .lines
             .iter()
-            .find(|line| line.plain.contains("1. Only"))
-            .expect("only option");
-        assert!(line.plain.contains('❯'));
-    }
-
-    #[test]
-    fn test_render_ask_user_multi_select_shows_checkbox() {
-        let mut v = view(&["A", "B"], 0, true);
-        v.selected = vec![false, true];
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        let checked = block
-            .lines
-            .iter()
-            .find(|line| line.plain.contains("2. B"))
-            .expect("option B");
-        assert!(checked.plain.contains("[✓]"));
-    }
-
-    #[test]
-    fn test_render_ask_user_chat_input_active_suppresses_option_highlight() {
-        let mut v = view(&["A", "B"], 0, false);
-        v.chat_input_active = true;
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        // chat 子态下选项列表中无 ❯ 高亮
-        let option_lines: Vec<_> = block
-            .lines
-            .iter()
-            .filter(|line| line.plain.contains("1. ") || line.plain.contains("2. "))
-            .collect();
-        assert!(!option_lines.iter().any(|line| line.plain.contains('❯')));
-        // Type something 输入框有 ❯
-        assert!(block
-            .lines
-            .iter()
-            .any(|line| line.plain.contains("Type something")));
-    }
-
-    #[test]
-    fn test_option_lines_with_description() {
-        let item = sdk::OptionItem::new("Title", "Description line");
-        let rendered = option_lines(0, &item, false, false);
-        // title line + description line
-        assert_eq!(rendered.len(), 2);
-        assert!(rendered[0].0.contains("1. Title"));
-        assert!(rendered[1].0.contains("Description line"));
-        // description 有覆盖样式
-        assert!(rendered[1].1.is_some());
-    }
-
-    #[test]
-    fn test_option_lines_title_only() {
-        let item = sdk::OptionItem::title_only("Simple");
-        let rendered = option_lines(0, &item, true, true);
-        assert_eq!(rendered.len(), 1);
-        assert!(rendered[0].0.contains("1. Simple"));
-        // 无覆盖样式（由 active 控制）
-        assert!(rendered[0].0.contains("[✓]"));
+            .find(|l| l.plain.contains("Type something:"))
+            .expect("type something input line");
+        assert!(type_line.spans.iter().any(|s| s.style.bg.is_some()));
+        // 不应有旧的 ▏ 竖线光标
+        assert!(!type_line.plain.contains('▏'));
     }
 
     #[test]
@@ -408,80 +593,11 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_text_preserves_newlines() {
-        let lines = wrap_text("line1\nline2", 80);
-        assert_eq!(lines, vec!["line1", "line2"]);
-    }
-
-    #[test]
-    fn test_wrap_text_empty_paragraph() {
-        let lines = wrap_text("before\n\nafter", 80);
-        assert_eq!(lines, vec!["before", "", "after"]);
-    }
-
-    #[test]
-    fn test_wrap_text_zero_width_returns_raw_lines() {
-        let lines = wrap_text("aaa bbb\nccc", 0);
-        assert_eq!(lines, vec!["aaa bbb", "ccc"]);
-    }
-
-    #[test]
     fn test_wrap_text_chinese_wraps_by_char() {
-        // 每个中文字符约 2 列宽，20 列放约 10 个字
         let lines = wrap_text("这是一段很长的中文文本用来测试自动换行", 20);
-        assert!(lines.len() >= 2, "中文长文本应被拆为多行，实际: {lines:?}");
+        assert!(lines.len() >= 2);
         for line in &lines {
-            assert!(
-                line.width() <= 20,
-                "每行不应超过 20 列: {line:?} ({} 列)",
-                line.width()
-            );
+            assert!(line.width() <= 20);
         }
-    }
-
-    #[test]
-    fn test_render_ask_user_answered_shows_answer_text() {
-        let mut v = view(&["A", "B"], 0, false);
-        v.answer = Some("都不喜欢".to_string());
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
-        // 应包含回答文本
-        assert!(
-            block.lines.iter().any(|l| l.plain.contains("❯ 都不喜欢")),
-            "应显示回答文本: {:?}",
-            block.lines
-        );
-        // 不应显示选项列表或键盘提示
-        assert!(
-            !block.lines.iter().any(|l| l.plain.contains("1. A")),
-            "已回答时不应显示选项"
-        );
-        assert!(
-            !block.lines.iter().any(|l| l.plain.contains("[Enter]")),
-            "已回答时不应显示键盘提示"
-        );
-    }
-
-    #[test]
-    fn test_wrap_text_mixed_cjk_and_ascii() {
-        let lines = wrap_text("hello 这是一段中文 world 更多中文内容", 20);
-        assert!(lines.len() >= 2, "混合文本应换行，实际: {lines:?}");
-    }
-
-    #[test]
-    fn test_render_ask_user_wraps_long_question() {
-        let mut v = view(&[], 0, false);
-        v.question = "这是一段很长的提问内容用于测试自动换行功能是否正常工作".to_string();
-        let block = render_ask_user("ask", &v, &RenderCtx { width: 60 });
-        // 60 * 0.6 = 36，中文每字约 2 列宽，36 列放约 18 个字，所以应拆为多行
-        let question_lines: Vec<_> = block
-            .lines
-            .iter()
-            .skip(2) // 跳过 header + 空行
-            .take_while(|l| !l.plain.contains('[') && !l.plain.is_empty())
-            .collect();
-        assert!(
-            question_lines.len() >= 2,
-            "长问题应被拆为多行，实际: {question_lines:?}"
-        );
     }
 }

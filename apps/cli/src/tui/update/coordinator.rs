@@ -7,7 +7,6 @@ pub fn effects_for_input_change(change: &InputChange) -> Vec<Effect> {
         | InputChange::CursorMoved { .. }
         | InputChange::CompletionChanged { .. }
         | InputChange::HistorySelected { .. }
-        | InputChange::AttachmentChanged { .. }
         | InputChange::ModeChanged { .. }
         | InputChange::Submitted { .. }
         | InputChange::Cleared => vec![Effect::RequestRender],
@@ -28,7 +27,7 @@ mod tests {
             submission: InputSubmission {
                 text: "hello".to_string(),
                 display_text: "hello".to_string(),
-                attachments: Vec::new(),
+                images: Vec::new(),
             },
         });
         assert!(effects.contains(&Effect::RequestRender));

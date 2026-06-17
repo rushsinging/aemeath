@@ -2,6 +2,7 @@ use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLin
 use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
+use crate::tui::view_model::tool_name::tool_display_name;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
@@ -16,8 +17,19 @@ pub fn render_tool_call(
 ) -> RenderedBlock {
     let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty());
     let (header_line, detail_lines) = header_input
-        .map(|raw_json| format_tool_call(&view.title, raw_json))
-        .unwrap_or_else(|| (Line::from(Span::raw(format!("● {}", view.title))), Vec::new()));
+        .map(|raw_json| format_tool_call(&view.title, raw_json, view.result_summary.as_deref()))
+        .unwrap_or_else(|| {
+            (
+                Line::from(vec![
+                    Span::raw("● "),
+                    Span::styled(
+                        tool_display_name(&view.title).to_string(),
+                        Style::default().fg(theme::ACCENT_BRIGHT),
+                    ),
+                ]),
+                Vec::new(),
+            )
+        });
     crate::tui::log_debug!(
         "render tool_call block_id={} title={} status={:?} args_len={}  result_len={} detail_lines={} activity_present={}",
         block_id,
@@ -33,7 +45,8 @@ pub fn render_tool_call(
     // 通过 RenderedLine 的 line base style 让未显式着色的 span 继承 TEXT 色，
     // 已有显式颜色的 span（如 Read 的 summary 灰色）保留各自样式。
     let header_line = strip_leading_bullet(header_line);
-    let first_line = RenderedLine::new(header_line.spans).with_style(Style::default().fg(theme::TEXT));
+    let first_line =
+        RenderedLine::new(header_line.spans).with_style(Style::default().fg(theme::TEXT));
     let mut lines = vec![first_line];
     for detail in detail_lines {
         lines.push(RenderedLine::new(vec![Span::styled(
@@ -103,7 +116,7 @@ mod tests {
         );
         // header 行的 line base style 应为 TEXT
         assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
-        assert!(block.lines[0].plain.contains("Grep"));
+        assert!(block.lines[0].plain.contains("Search"));
         // header 行不再自写 marker 字形（gutter.rs 覆盖 marker）。
         assert!(
             !block.lines[0].plain.starts_with('●'),
@@ -119,7 +132,7 @@ mod tests {
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
         // header 行的 line base style 应为 TEXT
         assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
-        assert!(block.lines[0].plain.contains("Grep"));
+        assert!(block.lines[0].plain.contains("Search"));
         assert!(
             !block.lines[0].plain.starts_with('✓'),
             "header 不应自写 ✓ marker"
@@ -133,12 +146,11 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
-        
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
         // header 含工具名
-        assert!(block.lines[0].plain.contains("Grep"));
+        assert!(block.lines[0].plain.contains("Search"));
         // Grep header 现在包含 pattern 和 path
         assert!(block.lines[0].plain.contains("test"));
     }
@@ -148,11 +160,10 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
-        
 
         let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
 
-        assert!(block.lines[0].plain.contains("Grep"));
+        assert!(block.lines[0].plain.contains("Search"));
         assert!(
             block.lines[0].plain.contains("test"),
             "ToolArgumentsDelta 后应不等 ToolResult/最终 summary 就显示 header"

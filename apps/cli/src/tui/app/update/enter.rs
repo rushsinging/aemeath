@@ -2,7 +2,7 @@ use super::UpdateResult;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::ConversationIntent;
-use crate::tui::model::input::change::submitted_text_from_changes;
+use crate::tui::model::input::change::submitted_submission_from_changes;
 use tokio::sync::mpsc;
 
 impl App {
@@ -16,8 +16,11 @@ impl App {
             .model
             .input
             .apply(crate::tui::model::input::intent::InputIntent::Submit);
-        let input = submitted_text_from_changes(&changes).unwrap_or_default();
-        if input.is_empty() {
+        let Some(submission) = submitted_submission_from_changes(&changes) else {
+            return UpdateResult::none();
+        };
+        let input = submission.text;
+        if input.is_empty() && submission.images.is_empty() {
             return UpdateResult::none();
         }
         if input.starts_with('/') {
@@ -36,9 +39,8 @@ impl App {
             });
         self.mark_output_dirty();
 
-        let images: Vec<sdk::ToolResultImage> = self
-            .chat
-            .drain_pending_images()
+        let images: Vec<sdk::ToolResultImage> = submission
+            .images
             .into_iter()
             .map(Into::into)
             .collect();
@@ -111,7 +113,7 @@ mod tests {
         let mut app = test_app();
         app.model
             .input
-            .apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+            .apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
         let (ui_tx, _ui_rx) = mpsc::channel(1);
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
@@ -122,17 +124,17 @@ mod tests {
             matches!(
                 block,
                 crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. }
-                    if text == "a\nb\nc"
+                    if text == "a\nb\nc\nd"
             )
         });
         assert!(
             has_original_user_message,
-            "首轮 user message 应渲染复制原文，而不是 [Copied Text n] 占位符"
+            "首轮 user message 应渲染复制原文，而不是 [Copied N lines] 占位符"
         );
         assert!(app
             .chat
             .messages
             .iter()
-            .any(|message| { message.role == "user" && message.text_content() == "a\nb\nc" }));
+            .any(|message| { message.role == "user" && message.text_content() == "a\nb\nc\nd" }));
     }
 }

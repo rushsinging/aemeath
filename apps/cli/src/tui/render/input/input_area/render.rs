@@ -26,7 +26,8 @@ impl InputArea {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
-        let display_lines = wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
+        let display_lines =
+            wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
         let mut textarea = configured_textarea(view_model, &display_lines);
         textarea.set_block(Block::default());
         textarea.render(inner_area, buf);
@@ -35,21 +36,16 @@ impl InputArea {
 }
 
 fn input_block(view_model: &InputAreaViewModel) -> Block<'static> {
-    let title = if view_model.pending_images > 0 {
-        format!(" Input [{} image(s) pending] ", view_model.pending_images)
-    } else {
-        " Input ".to_string()
-    };
-    let border_style = if view_model.focused {
-        Style::default().fg(theme::ACCENT)
-    } else {
-        Style::default().fg(theme::BORDER)
-    };
-    Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style)
-}
+      let border_style = if view_model.focused {
+          Style::default().fg(theme::ACCENT)
+      } else {
+          Style::default().fg(theme::BORDER)
+      };
+      Block::default()
+          .title(" Input ")
+          .borders(Borders::ALL)
+          .border_style(border_style)
+  }
 
 fn render_selection(
     inner_area: Rect,
@@ -175,18 +171,17 @@ mod tests {
 
     fn render_vm_with_state(
         text: &str,
-        pending_images: usize,
         focused: bool,
     ) -> InputAreaViewModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
-        InputViewAssembler::from_document(&document, None, pending_images, focused)
+        InputViewAssembler::from_document(&document, None, focused)
     }
 
     #[test]
     fn test_render_selection_highlights_cjk_to_screen_width_end() {
         let mut input = InputArea::new();
-        let vm = render_vm_with_state("@docs/ bug 33，拖动选中后还是没有高亮", 0, true);
+        let vm = render_vm_with_state("@docs/ bug 33，拖动选中后还是没有高亮", true);
         let area = Rect {
             x: 0,
             y: 0,
@@ -216,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_projects_pending_images_and_focus_from_vm() {
+    fn test_render_projects_focus_from_vm() {
         let mut input = InputArea::new();
         let area = Rect {
             x: 0,
@@ -225,13 +220,10 @@ mod tests {
             height: 3,
         };
         let mut buf = Buffer::empty(area);
-        let vm = render_vm_with_state("hello", 2, false);
+        let vm = render_vm_with_state("hello", false);
 
         input.render(area, &mut buf, &vm, &InputSelectionViewState::default());
 
-        assert_eq!(buf.cell((2, 0)).unwrap().symbol(), "I");
-        assert_eq!(buf.cell((8, 0)).unwrap().symbol(), "[");
-        assert_eq!(buf.cell((9, 0)).unwrap().symbol(), "2");
         assert_eq!(buf.cell((0, 0)).unwrap().style().fg, Some(theme::BORDER));
     }
 
@@ -245,7 +237,7 @@ mod tests {
             height: 4,
         };
         let mut buf = Buffer::empty(area);
-        let vm = render_vm_with_state("abcdef", 0, true);
+        let vm = render_vm_with_state("abcdef", true);
         let mut selection = InputSelectionViewState::default();
         selection.begin_selection((0, 4));
         selection.update_selection((0, 6));

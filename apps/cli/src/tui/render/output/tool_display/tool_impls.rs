@@ -66,7 +66,10 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1; // 转为 1-based
         let end = offset + limit;
-        format!("Read {display_path} L{start}:L{end} ({limit} lines)")
+        format!(
+            "{} {display_path} L{start}:L{end} ({limit} lines)",
+            self.display_name()
+        )
     }
     fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
         let path = file_path(input);
@@ -77,7 +80,54 @@ impl ToolDisplay for ReadDisplay {
         let end = offset + limit;
         let range_info = format!("L{start}:L{end} ({limit} lines)");
         Line::from(vec![
-            Span::raw(format!("Read {display_path} ")),
+            Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ),
+            Span::raw(format!(" {display_path} ")),
+            Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
+        ])
+    }
+    /// 当 result 到达后，使用实际读取的行数更新 header。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_summary: Option<&str>,
+    ) -> Line<'static> {
+        let path = file_path(input);
+        let display_path = truncate_path(path, 60);
+        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let start = offset + 1;
+
+        // 尝试从 result_summary 中解析实际行数
+        // result_summary 格式: "Read {n} lines from {path}" 或完整 JSON
+        let actual_lines = result_summary.and_then(|summary| {
+            // 尝试解析 JSON
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
+                if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
+                    return parse_line_count_from_message(message);
+                }
+            }
+            // 直接解析文本
+            parse_line_count_from_message(summary)
+        });
+
+        let range_info = match actual_lines {
+            Some(actual) if actual < limit => {
+                // 实际行数小于请求的 limit，显示实际行数
+                let actual_end = offset + actual;
+                format!("L{start}:L{actual_end} ({actual} lines)")
+            }
+            _ => {
+                // 无法解析或实际行数等于 limit，显示请求的 limit
+                let end = offset + limit;
+                format!("L{start}:L{end} ({limit} lines)")
+            }
+        };
+
+        Line::from(vec![
+            Span::raw(format!("{} {display_path} ", self.display_name())),
             Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
         ])
     }
@@ -92,6 +142,14 @@ impl ToolDisplay for ReadDisplay {
             result: ResultPolicy::Hidden, // 不显示 result 子块
         }
     }
+}
+
+/// 从 message 中解析行数，如 "Read 340 lines from /path/to/file"
+fn parse_line_count_from_message(message: &str) -> Option<usize> {
+    let re = regex::Regex::new(r"Read (\d+) lines? from").ok()?;
+    re.captures(message)
+        .and_then(|cap| cap.get(1))
+        .and_then(|m| m.as_str().parse::<usize>().ok())
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Read",
@@ -114,7 +172,7 @@ impl ToolDisplay for WriteDisplay {
             .and_then(|v| v.as_str())
             .map(|s| s.len())
             .unwrap_or(0);
-        format!("Write {display_path} {bytes} bytes")
+        format!("{} {display_path} {bytes} bytes", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 字节数已在 summary 中，不再需要 details
@@ -154,7 +212,10 @@ impl ToolDisplay for EditDisplay {
             .and_then(|v| v.as_str())
             .map(|s| s.len())
             .unwrap_or(0);
-        format!("Edit {display_path} Changed {old_len} -> {new_len} chars")
+        format!(
+            "{} {display_path} Changed {old_len} -> {new_len} chars",
+            self.display_name()
+        )
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 变更统计已在 summary 中，不再需要 details
@@ -260,7 +321,7 @@ impl ToolDisplay for AgentDisplay {
         let desc = str_arg(input, "description", "sub-task");
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
-        let mut header = format!("Agent {desc}");
+        let mut header = format!("{} {desc}", self.display_name());
         if let Some(r) = role {
             header.push_str(&format!(" [role: {r}]"));
         }
@@ -309,7 +370,7 @@ impl ToolDisplay for EnterWorktreeDisplay {
             .and_then(|branch| branch.as_str())
             .or_else(|| input.get("path").and_then(|path| path.as_str()))
             .unwrap_or("worktree");
-        format!("EnterWorktree {target}")
+        format!("{} {target}", self.display_name())
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -339,7 +400,7 @@ impl ToolDisplay for ExitWorktreeDisplay {
         "ExitWorktree"
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
-        "ExitWorktree".to_string()
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

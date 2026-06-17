@@ -18,9 +18,7 @@ pub async fn build_static_prompt(
     let guidance_config = config_file
         .map(|c| c.models.guidance.clone())
         .unwrap_or_default();
-    let language = config_file
-        .map(|c| c.language.as_str())
-        .unwrap_or("en");
+    let language = config_file.map(|c| c.language.as_str()).unwrap_or("en");
     let instructions_hook = bootstrap::InstructionsLoadedHookRunner(hook_runner);
     let model_guidance = prompt::api::guidance::resolve_guidance_async(
         model,
@@ -32,9 +30,11 @@ pub async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(prompt::api::guidance::universal_execution_discipline(language));
-    append_skills(&mut prompt, &skills_guard);
-    append_agent_roles(&mut prompt, config_file);
+    prompt.push_str(prompt::api::guidance::universal_execution_discipline(
+        language,
+    ));
+    append_skills(&mut prompt, &skills_guard, language);
+    append_agent_roles(&mut prompt, config_file, language);
     if !model_guidance.is_empty() {
         prompt.push_str("\n\n");
         prompt.push_str(&model_guidance);
@@ -42,7 +42,11 @@ pub async fn build_static_prompt(
     prompt
 }
 
-fn append_skills(prompt: &mut String, skills_guard: &std::collections::HashMap<String, Skill>) {
+fn append_skills(
+    prompt: &mut String,
+    skills_guard: &std::collections::HashMap<String, Skill>,
+    lang: &str,
+) {
     if skills_guard.is_empty() {
         return;
     }
@@ -57,13 +61,14 @@ fn append_skills(prompt: &mut String, skills_guard: &std::collections::HashMap<S
             format!("- `{}{}`: {}", s.name, alias_str, s.description)
         })
         .collect();
-    prompt.push_str(&format!(
-        "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n{}",
-        skill_list.join("\n")
-    ));
+    let header = match lang {
+        "zh" => "\n\n# Available Skills\n以下 skill 可通过 Skill 工具调用：\n",
+        _ => "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n",
+    };
+    prompt.push_str(&format!("{}{}", header, skill_list.join("\n")));
 }
 
-fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>) {
+fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>, lang: &str) {
     let Some(cfg) = config_file else {
         return;
     };
@@ -88,8 +93,13 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>) {
             format!("- `{}`{}{}", name, desc, model_info)
         })
         .collect();
-    prompt.push_str(&format!(
-        "\n\n# Available Agent Roles\nThe following agent roles are available for the Agent tool's `role` parameter. Choose the most appropriate role for each task:\n{}\nWhen no role fits, omit the `role` parameter to use the default model.",
-        role_lines.join("\n")
-    ));
+    let footer = match lang {
+        "zh" => "\n没有合适的 role 时，省略 `role` 参数以使用默认模型。",
+        _ => "\nWhen no role fits, omit the `role` parameter to use the default model.",
+    };
+    let header = match lang {
+        "zh" => "\n\n# Available Agent Roles\n以下 agent role 可用于 Agent 工具的 `role` 参数。请为每个任务选择最合适的 role：\n",
+        _ => "\n\n# Available Agent Roles\nThe following agent roles are available for the Agent tool's `role` parameter. Choose the most appropriate role for each task:\n",
+    };
+    prompt.push_str(&format!("{}{}{}", header, role_lines.join("\n"), footer));
 }

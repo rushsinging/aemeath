@@ -3,7 +3,7 @@ use crate::utils::bootstrap::config_paths::TestEnvGuard;
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
-    let text = static_system_prompt_for_test("/tmp/project", true);
+    let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
     assert!(text.contains("BEFORE starting work on a task yourself"));
     assert!(text.contains("Read/Grep/Glob/Bash/Edit/Write"));
@@ -15,7 +15,7 @@ fn test_static_prompt_requires_task_update_for_direct_tools() {
 
 #[test]
 fn test_static_prompt_delegates_agent_task_status_to_task_id() {
-    let text = static_system_prompt_for_test("/tmp/project", true);
+    let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
     assert!(text.contains("pass `taskId` to the Agent tool"));
     assert!(text.contains("taskId is NOT required"));
@@ -24,7 +24,7 @@ fn test_static_prompt_delegates_agent_task_status_to_task_id() {
 
 #[test]
 fn test_static_prompt_says_task_reminders_may_be_unrelated() {
-    let text = static_system_prompt_for_test("/tmp/project", true);
+    let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
     assert!(text.contains("When the user says \"continue\""));
     assert!(text.contains("call TaskList first"));
@@ -34,7 +34,7 @@ fn test_static_prompt_says_task_reminders_may_be_unrelated() {
 
 #[test]
 fn test_static_prompt_mentions_memory_tool_without_memory_contents() {
-    let text = static_system_prompt_for_test("/tmp/project", true);
+    let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
     assert!(
         text.contains("Use the Memory tool to search and manage long-term memory when relevant")
@@ -45,8 +45,11 @@ fn test_static_prompt_mentions_memory_tool_without_memory_contents() {
 
 #[test]
 fn test_static_prompt_guides_worktree_relative_paths_without_fixed_workspace_root() {
-    let text =
-        static_system_prompt_for_test("/tmp/project/.worktrees/fix-bug-69-worktree-cwd", true);
+    let text = static_system_prompt_for_test(
+        "/tmp/project/.worktrees/fix-bug-69-worktree-cwd",
+        true,
+        "en",
+    );
 
     assert!(!text.contains("Current workspace root"));
     assert!(text.contains("Prefer relative paths"));
@@ -55,7 +58,7 @@ fn test_static_prompt_guides_worktree_relative_paths_without_fixed_workspace_roo
 
 #[test]
 fn test_build_commit_guidance_includes_provider_model_trailer() {
-    let guidance = build_commit_guidance(Some("zhipu"), Some("glm-5.1"));
+    let guidance = build_commit_guidance(Some("zhipu"), Some("glm-5.1"), "en");
 
     assert!(guidance.contains("# Commit Message Guidance"));
     assert!(guidance.contains("Before creating any git commit, invoke the built-in `commit` skill"));
@@ -68,7 +71,7 @@ fn test_build_commit_guidance_includes_provider_model_trailer() {
 
 #[test]
 fn test_build_commit_guidance_uses_unknown_fallback() {
-    let guidance = build_commit_guidance(None, None);
+    let guidance = build_commit_guidance(None, None, "en");
 
     assert!(
         guidance.contains("Co-Authored-By: Aemeath (unknown/unknown) <github:rushsinging/aemeath>")
@@ -193,7 +196,7 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     let memory_config = MemoryConfig::default();
     let context = PromptContext::new(&cwd, Some("deepseek"), Some("deepseek-chat"));
 
-    let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config).await;
+    let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config, "en").await;
 
     std::fs::remove_dir_all(cwd).unwrap();
 

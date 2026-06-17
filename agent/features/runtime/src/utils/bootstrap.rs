@@ -1,6 +1,7 @@
 pub mod claude_settings_adapter;
 pub mod concurrency;
 pub mod config_manager;
+pub mod config_patch;
 pub mod config_paths;
 pub mod logging_setup;
 pub mod mcp_loader;

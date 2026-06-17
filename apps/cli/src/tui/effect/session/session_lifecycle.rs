@@ -1,10 +1,7 @@
 use crate::tui::app::App;
 use crate::tui::effect::session::resume::apply_resume_input_history;
-use crossterm::{
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use crate::tui::effect::session::terminal_guard::TerminalGuard;
+use futures::FutureExt;
 use std::io;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -82,24 +79,17 @@ impl App {
         // Pre-load model list for /model dialog + completion suggestions（消除纯路径 block_on）
         self.refresh_model_cache().await;
 
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(
-            stdout,
-            EnterAlternateScreen,
-            crossterm::event::EnableBracketedPaste,
-            crossterm::event::EnableMouseCapture,
-        )?;
-        // 终端已切到 raw + alternate screen：此后 panic 只落 panic.log，不糊屏。
-        crate::panic_hook::set_tui_active(true);
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
-
+        // 进入 TUI：RAII guard 保证任何退出路径（正常 / ? / panic 展开）都恢复终端。
+        let mut guard = TerminalGuard::enter()?;
         let interrupted = Arc::new(AtomicBool::new(false));
 
-        let result = self.run_loop(&mut terminal, interrupted).await;
+        // catch_unwind 包裹主循环：panic 不再 abort 进程，捕获后仍可 auto-save。
+        let loop_result =
+            std::panic::AssertUnwindSafe(self.run_loop(guard.terminal_mut(), interrupted))
+                .catch_unwind()
+                .await;
 
-        // Auto-save session on exit
+        // 无论是否 panic，都尝试 auto-save，避免会话丢失。
         if !self.chat.messages.is_empty() {
             if let Err(e) = agent_client
                 .sync_current_messages(self.chat.messages.clone())
@@ -112,17 +102,16 @@ impl App {
             }
         }
 
-        // 退出 TUI，恢复终端：此后 panic 可正常打印到 stderr。
-        crate::panic_hook::set_tui_active(false);
-        disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            crossterm::event::DisableMouseCapture,
-            crossterm::event::DisableBracketedPaste,
-            LeaveAlternateScreen,
-        )?;
-        terminal.show_cursor()?;
+        // guard 离开作用域 → Drop 恢复终端；此后 panic 可正常打印到 stderr。
+        drop(guard);
 
-        result
+        match loop_result {
+            Ok(inner) => inner,
+            Err(panic) => {
+                let msg = crate::panic_hook::payload_message(panic.as_ref());
+                crate::tui::log_error!("TUI 事件循环 panic，已优雅退出: {msg}");
+                Ok(())
+            }
+        }
     }
 }

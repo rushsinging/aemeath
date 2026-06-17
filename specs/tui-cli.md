@@ -92,3 +92,40 @@ pub struct ToolRenderPolicy {
 - **Bash 使用 `tail_mode: true`**，只显示最后 5 行输出，避免长命令输出淹没 TUI。
 - **TaskCreate 使用 `Compact` 单行模式**，description 合并进 header（`TaskCreate {subject}: {description}`）。
 - **ToolResult 子块首行使用 `⎿` 圆角连接**作为 gutter marker（由 `gutter.rs` 按 `OutputBlockKind::ToolResult` 注入），连接到父 ToolCall header。
+- **Tool display name 着色为 `ACCENT_BRIGHT`（Mauve）**，与参数文本（`TEXT`）和元信息（`TEXT_MUTED`）形成视觉层次。`format_header_line` 默认实现按 `display_name` 前缀拆分；不支持前缀匹配的（如 emoji 前缀的 `CustomIcon`）自动 fallback 为整体 raw。
+
+## 主题色板（Catppuccin Macchiato）
+
+TUI 采用 **Catppuccin Macchiato** 暗色主题。原始色值定义在 `apps/cli/src/tui/render/theme/palette.rs`，各组件 **MUST** 引用语义色常量，**NEVER** 硬编码 `Color::Rgb(...)`（palette.rs 内部定义与少量自定义色除外）。
+
+### 语义色映射表
+
+| 语义色常量 | Macchiato 原色 | 色值 | 用途 |
+|---|---|---|---|
+| `TEXT` | text | rgb(202,211,245) | 主文本、tool header 参数文本 |
+| `TEXT_MUTED` | subtext0 | rgb(165,173,203) | 次级文本、tool header 元信息（如 `L1:L2000`） |
+| `TEXT_DIM` | overlay0 | rgb(110,115,141) | 弱化文本、tool result 预览 |
+| `BORDER` | surface1 | rgb(73,77,100) | 面板边框 |
+| `ACCENT` | blue | rgb(138,173,244) | 聚焦边框、status bar、cursor、品牌强调 |
+| `ACCENT_BRIGHT` | mauve | rgb(198,160,246) | syntax keyword、**tool display name** |
+| `SURFACE` | base | rgb(36,39,58) | 深色背景 |
+| `STATUS_BG` | base | rgb(36,39,58) | 状态栏背景 |
+| `SURFACE_ELEVATED` | surface0 | rgb(54,58,79) | 浮层背景 |
+| `SELECTION_BG` | surface1 | rgb(73,77,100) | 选中文本背景 |
+| `USER` | 自定义 | rgb(220,232,255) | 用户消息前景 |
+| `USER_BG` | 自定义 | rgb(63,95,143) | 用户消息背景 |
+| `TOOL_RUNNING` | peach | rgb(245,169,127) | 工具运行中状态、行内代码 |
+| `SUCCESS` | green | rgb(166,218,149) | 成功状态 marker（✓） |
+| `WARNING` | yellow | rgb(238,212,159) | 警告 |
+| `ERROR` | red | rgb(237,135,150) | 错误状态 marker（✗） |
+| `THINKING` | overlay1 | rgb(128,135,162) | thinking 文本 |
+| `LINK` | blue | rgb(138,173,244) | Markdown 链接 |
+| `SPINNER_BASE` | teal | rgb(139,213,202) | Spinner 基础色 |
+| `SPINNER_HIGHLIGHT` | green | rgb(166,218,149) | Spinner 高亮 |
+
+### 用色约定
+
+- **ACCENT (Blue)**：UI 框架级交互元素——聚焦边框、status bar、cursor、链接。**NEVER** 用于内容区文本着色。
+- **ACCENT_BRIGHT (Mauve)**：内容区强调——syntax keyword、tool display name。语义为"操作类型/关键字"。
+- **TEXT / TEXT_MUTED / TEXT_DIM**：三级文本层次，tool header 内 `name(Mauve) > args(TEXT) > meta(TEXT_MUTED)`。
+- **状态色**：`SUCCESS`(Green) / `TOOL_RUNNING`(Peach) / `ERROR`(Red) 专用于状态 marker，**NEVER** 用于普通文本。

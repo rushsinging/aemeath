@@ -1,4 +1,4 @@
-//! Path security utilities — shared by file_edit, file_read, file_write, glob, grep.
+//! Path security utilities — centralized path validation and normalization.
 //!
 //! All file-access tools **must** validate that the resolved path stays within
 //! the workspace boundary. This module centralises that logic so fixes only
@@ -92,15 +92,28 @@ pub fn validate_and_normalize_path_from_base(
 ///
 /// Used by `glob` and `grep` tools where the path is a directory to search.
 /// Returns the canonical directory path or an error.
-pub fn validate_search_path(path_str: &str, workspace_root: &Path) -> Result<PathBuf, String> {
-    validate_search_path_from_base(path_str, workspace_root, workspace_root)
+pub fn validate_search_path(
+    path_str: &str,
+    workspace_root: &Path,
+    allow_outside: bool,
+) -> Result<PathBuf, String> {
+    validate_search_path_from_base(path_str, workspace_root, workspace_root, allow_outside)
 }
 
 pub fn validate_search_path_from_base(
     path_str: &str,
     path_base: &Path,
     workspace_root: &Path,
+    allow_outside: bool,
 ) -> Result<PathBuf, String> {
+    // Reject traversal attempts early when workspace boundary is enforced
+    if !allow_outside && path_str.contains("..") {
+        return Err(format!(
+            "Path '{}' contains '..' which is not allowed. Only directories within the workspace are permitted.",
+            path_str
+        ));
+    }
+
     let abs_path = if Path::new(path_str).is_absolute() {
         PathBuf::from(path_str)
     } else {
@@ -115,7 +128,7 @@ pub fn validate_search_path_from_base(
         .canonicalize()
         .map_err(|e| format!("Cannot resolve search path '{}': {}", path_str, e))?;
 
-    if !resolved.starts_with(&workspace_abs) {
+    if !allow_outside && !resolved.starts_with(&workspace_abs) {
         return Err(outside_workspace_error(
             "Search path",
             &resolved,
@@ -133,22 +146,6 @@ fn outside_workspace_error(kind: &str, path: &Path, workspace_abs: &Path) -> Str
         workspace_abs.display(),
         workspace_abs.display()
     )
-}
-
-/// Validate that a tool_use_id is safe to use as a filename.
-///
-/// Prevents path traversal via `../` components.
-pub fn validate_tool_use_id(id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("tool_use_id must not be empty".to_string());
-    }
-    if id.contains('/') || id.contains('\\') || id.contains("..") {
-        return Err(format!(
-            "tool_use_id '{}' contains path separators or traversal — rejected for security.",
-            id
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -179,6 +176,7 @@ mod tests {
             other_checkout.path().to_str().unwrap(),
             workspace.path(),
             workspace.path(),
+            false,
         )
         .unwrap_err();
 
@@ -186,5 +184,55 @@ mod tests {
         assert!(err.contains("Prefer relative paths"));
         assert!(err.contains(&workspace.path().display().to_string()));
         assert!(err.contains("Do not retry the same absolute path"));
+    }
+
+    #[test]
+    fn test_validate_search_path_allow_outside_permits_external() {
+        let workspace = tempdir().unwrap();
+        let external = tempdir().unwrap();
+
+        let result = validate_search_path_from_base(
+            external.path().to_str().unwrap(),
+            workspace.path(),
+            workspace.path(),
+            true, // allow_outside
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), external.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_validate_and_normalize_path_allow_outside_permits_external() {
+        let workspace = tempdir().unwrap();
+        let external = tempdir().unwrap();
+        let external_file = external.path().join("config.toml");
+        std::fs::write(&external_file, "test").unwrap();
+
+        let result = validate_and_normalize_path_from_base(
+            external_file.to_str().unwrap(),
+            workspace.path(),
+            workspace.path(),
+            true, // allow_outside
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_search_path_allow_outside_allows_traversal() {
+        // With allow_outside, .. is permitted — canonicalize resolves it,
+        // and the boundary check is skipped.
+        let workspace = tempdir().unwrap();
+        let parent = workspace.path().parent().unwrap();
+        let result = validate_search_path_from_base(
+            "..",
+            workspace.path(),
+            workspace.path(),
+            true, // allow_outside
+        );
+        // Should resolve to the parent dir of workspace, which is outside.
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), parent.canonicalize().unwrap());
     }
 }

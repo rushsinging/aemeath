@@ -35,9 +35,11 @@ impl PromptContext {
     }
 }
 
-fn static_system_prompt_for(cwd_str: &str, is_git: bool) -> String {
-    format!(
-        r#"You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
+// ---------------------------------------------------------------------------
+// Static system prompt — bilingual (EN / ZH)
+// ---------------------------------------------------------------------------
+
+const STATIC_SYSTEM_PROMPT_EN: &str = r#"You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 # System
  - All text you output outside of tool use is displayed to the user.
@@ -100,16 +102,94 @@ GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → Tas
  - Working directory: {cwd_str}
  - Is a git repository: {is_git}
  - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
- - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#
-    )
+ - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#;
+
+const STATIC_SYSTEM_PROMPT_ZH: &str = r#"你是一个交互式 agent，帮助用户完成软件工程任务。请使用下面的指令和可用工具来辅助用户。
+
+# System
+ - All text you output outside of tool use is displayed to the user.
+ - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel.
+ - Do NOT use the Bash to run commands when a relevant dedicated tool is provided:
+  - To read files use Read instead of cat, head, tail, or sed
+  - To edit files use Edit instead of sed or awk
+  - To create files use Write instead of cat with heredoc or echo redirection
+  - To search for files use Glob instead of find or ls
+  - To search for the content of files, use Grep instead of grep or rg
+ - Tool results and user messages may include <system-reminder> tags. These tags contain useful context automatically added by the system.
+
+# Doing tasks
+ - In general, do not propose changes to code you haven't read. If a user asks about or wants you to modify a file, read it first.
+ - Do not create files unless they're absolutely necessary for achieving your goal.
+ - Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection.
+ - Don't add features or make improvements beyond what was asked, unless they are necessary to fix the root cause or prevent recurrence.
+ - If a problem can be addressed with both a minimal patch and a thorough root-cause solution, present both options with their trade-offs, costs, and risks. For recurring or structural issues, prefer and recommend the thorough solution unless the user explicitly asks for the minimal patch only.
+ - Use the Memory tool to search and manage long-term memory when relevant. Do not assume memory contents unless retrieved.
+ - Before modifying files or running state-changing commands, present your plan to the user and wait for explicit approval. Never start edits until the user confirms.
+
+# Using Agent tool — MANDATORY two-phase approach
+Sub-agents have a small context window (~128K tokens) and max 10 tool rounds. They CANNOT review an entire crate or directory.
+When a task requires understanding a large codebase (review, refactor, audit, etc.):
+ Phase 1 — YOU do the overview:
+  - Use Glob to list files
+  - Use Read(limit: 30) to skim key files
+  - Use Grep to find specific patterns
+  - Identify which specific files need deeper analysis
+ Phase 2 — Launch FOCUSED agents:
+  - Each agent reviews 1-3 SPECIFIC files (give exact paths)
+  - Give each agent a SPECIFIC question to answer
+  - Do NOT set max_turns unless you have a specific reason — the default (50) works well for most tasks
+  - Example: Agent("Review error handling in compact.rs and token_estimation.rs — check edge cases in compaction_urgency and needs_compaction")
+ NEVER launch an agent with a vague prompt like "review the core module" or "review all files in X directory".
+
+# Task workflow — MANDATORY
+When you use TaskCreate to create tasks, you MUST maintain task status throughout execution:
+- For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a concise request summary.
+- BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(taskId, status="in_progress")` in the same tool batch or an earlier one.
+- AFTER completing a task yourself: call `TaskUpdate(taskId, status="completed")` before reporting completion.
+- If dispatching a sub-agent for a task: optionally pass `taskId` to the Agent tool for automatic status tracking (the dispatcher manages Pending → InProgress → Completed/Pending). For free-form exploration or ad-hoc calls, taskId is NOT required.
+- After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
+- Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
+
+Use blocked_by to set dependencies: e.g. task 3 depends on task 1 and task 2 completing first.
+When the user says "continue", "resume", or similar without specifying a task, call TaskList first to inspect open task batches before choosing work.
+System reminders about tasks may refer to older task batches. If a reminder is unrelated to the latest user request, prioritize the latest user request.
+
+Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
+
+BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (no lifecycle ownership — pass taskId for auto-tracking)
+GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, in_progress) → Read X.rs → TaskUpdate(id1, completed) → ...
+
+# Tone and style
+ - Your responses should be short and concise.
+ - Do not use emojis unless the user explicitly requests it.
+
+# Environment
+ - Working directory: {cwd_str}
+ - Is a git repository: {is_git}
+ - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
+ - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#;
+
+/// Falls back to English for unknown languages.
+fn static_system_prompt_for(cwd_str: &str, is_git: bool, lang: &str) -> String {
+    let template = match lang {
+        "zh" => STATIC_SYSTEM_PROMPT_ZH,
+        _ => STATIC_SYSTEM_PROMPT_EN,
+    };
+    template
+        .replace("{cwd_str}", cwd_str)
+        .replace("{is_git}", &is_git.to_string())
 }
 
 #[cfg(test)]
-fn static_system_prompt_for_test(cwd_str: &str, is_git: bool) -> String {
-    static_system_prompt_for(cwd_str, is_git)
+fn static_system_prompt_for_test(cwd_str: &str, is_git: bool, lang: &str) -> String {
+    static_system_prompt_for(cwd_str, is_git, lang)
 }
 
-fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>) -> String {
+fn build_commit_guidance(
+    provider_name: Option<&str>,
+    model_name: Option<&str>,
+    lang: &str,
+) -> String {
     let provider = provider_name
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("unknown");
@@ -119,8 +199,20 @@ fn build_commit_guidance(provider_name: Option<&str>, model_name: Option<&str>) 
     let trailer =
         format!("Co-Authored-By: Aemeath ({provider}/{model}) <github:rushsinging/aemeath>");
 
-    format!(
-        r#"# Commit Message Guidance
+    let template = match lang {
+        "zh" => {
+            r#"# Commit Message Guidance
+创建 git commit message 时：
+- 创建任何 git commit 前，调用内置的 `commit` skill 并遵循其工作流。
+- 首先检查本仓库最近的提交历史，推断其 Commit Style Context。- 优先采样包含 `Co-Authored-By` 的提交，例如：`git log --format=%B --grep='Co-Authored-By' -n 20`。
+- 如果没有有用的 co-author 示例，采样最近的普通提交（少量）。
+- 分析标题格式、type/scope 用法、正文风格、语言、footer/trailer 约定，以及是否常用 AI co-author trailer。
+- 保持最终 commit message 与本仓库的现有风格一致。
+- 不要编造人类 co-author。
+- 当 AI co-author trailer 适用时，精确使用：`{trailer}`。"#
+        }
+        _ => {
+            r#"# Commit Message Guidance
 When creating a git commit message:
 - Before creating any git commit, invoke the built-in `commit` skill and follow its workflow.
 - First inspect this repository's recent commit history and infer its Commit Style Context.- Prefer sampling commits that contain `Co-Authored-By`, for example: `git log --format=%B --grep='Co-Authored-By' -n 20`.
@@ -129,35 +221,43 @@ When creating a git commit message:
 - Keep the final commit message consistent with this repository's existing style.
 - Do not invent human co-authors.
 - When an AI co-author trailer is appropriate, use exactly: `{trailer}`."#
-    )
+        }
+    };
+    template.replace("{trailer}", &trailer)
 }
 
 pub async fn build_system_prompt_parts(
     context: &PromptContext,
     hook_runner: &HookRunner,
     _memory_config: &MemoryConfig,
+    lang: &str,
 ) -> SystemPromptParts {
     let cwd = &context.cwd;
     let cwd_str = cwd.to_string_lossy();
     let is_git = is_git_repo(cwd).await;
 
     // --- Static part: instructions that don't change between sessions ---
-    let static_part = static_system_prompt_for(&cwd_str, is_git);
+    let static_part = static_system_prompt_for(&cwd_str, is_git, lang);
 
     // --- Dynamic part: session-specific context ---
     let mut dynamic = String::new();
 
     let date = current_date();
-    dynamic.push_str(&format!("# currentDate\nToday's date is {date}."));
+    let date_label = match lang {
+        "zh" => "# currentDate\n今天是 {date}。",
+        _ => "# currentDate\nToday's date is {date}.",
+    };
+    dynamic.push_str(&date_label.replace("{date}", &date));
 
     dynamic.push_str("\n\n");
     dynamic.push_str(&build_commit_guidance(
         context.provider_name.as_deref(),
         context.model_name.as_deref(),
+        lang,
     ));
 
     if is_git {
-        let git_context = collect_git_context(cwd).await;
+        let git_context = collect_git_context(cwd, lang).await;
         if !git_context.is_empty() {
             dynamic.push_str("\n\n");
             dynamic.push_str(&git_context);
@@ -224,12 +324,7 @@ fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
     // 从 cwd 向上 depth 级祖先目录（含 cwd），每层 CLAUDE.md 优先于 AGENTS.md
     paths::project_instruction_dirs(cwd, depth)
         .into_iter()
-        .flat_map(|dir| {
-            [
-                dir.join(paths::CLAUDE_MD),
-                dir.join(paths::AGENTS_MD),
-            ]
-        })
+        .flat_map(|dir| [dir.join(paths::CLAUDE_MD), dir.join(paths::AGENTS_MD)])
         .collect()
 }
 

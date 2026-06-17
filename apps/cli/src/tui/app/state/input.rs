@@ -9,7 +9,7 @@ pub(crate) struct InputState {
     pub just_pasted: bool,
     pub input_queue: VecDeque<String>,
     pub last_click: Option<(std::time::Instant, u16, u16)>,
-    pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<String>>,
+    pub ask_user_reply_tx: Option<tokio::sync::oneshot::Sender<Vec<String>>>,
     pub ask_user_state: Option<AskUserState>,
 }
 

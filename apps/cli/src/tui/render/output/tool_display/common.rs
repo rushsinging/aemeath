@@ -45,26 +45,3 @@ pub(super) fn truncate_ellipsis_tail(text: &str, max_width: usize) -> String {
 pub(super) fn truncate_json(raw: &str) -> String {
     truncate_ellipsis(raw, 100)
 }
-
-pub(super) fn format_todowrite_value(input: &serde_json::Value) -> Option<(String, Vec<String>)> {
-    let todos = input.get("todos").and_then(|todos| todos.as_array())?;
-    let count = todos.len();
-    let mut details = Vec::new();
-
-    for todo in todos.iter().take(3) {
-        let subject = str_arg(todo, "subject", "");
-        let status = str_arg(todo, "status", "pending");
-        let icon = match status {
-            "completed" => "✓",
-            "in_progress" => "◐",
-            _ => "○",
-        };
-        details.push(format!("{icon} {subject}"));
-    }
-
-    if count > 3 {
-        details.push(format!("... +{} more", count - 3));
-    }
-
-    Some((format!("● TodoWrite ({count} items)"), details))
-}

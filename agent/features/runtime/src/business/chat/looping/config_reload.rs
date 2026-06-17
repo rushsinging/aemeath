@@ -4,8 +4,8 @@
 //! 检测到变更时返回 `ConfigDiff`，由调用方决定如何处理。
 
 use super::snapshot_registry::SourceSnapshotRegistry;
-use share::config::snapshot::{FileChange, FileChangeKind};
 use share::config::paths;
+use share::config::snapshot::{FileChange, FileChangeKind};
 use share::config::GuidanceReloadPolicy;
 use std::path::{Path, PathBuf};
 
@@ -41,13 +41,13 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     files.push(global_config);
 
     // 项目级配置
-    let project_config = cwd.join(paths::AGENTS_DIR_NAME).join(paths::NEW_CONFIG_FILE);
+    let project_config = cwd
+        .join(paths::AGENTS_DIR_NAME)
+        .join(paths::NEW_CONFIG_FILE);
     files.push(project_config);
 
     // Claude Code 兼容配置
-    let claude_settings = cwd
-        .join(paths::CLAUDE_DIR_NAME)
-        .join(paths::SETTINGS_FILE);
+    let claude_settings = cwd.join(paths::CLAUDE_DIR_NAME).join(paths::SETTINGS_FILE);
     files.push(claude_settings);
 
     // ── 指令文件 ──
@@ -170,10 +170,10 @@ pub fn resolve_guidance_reload_policy() -> GuidanceReloadPolicy {
                     "remind" => GuidanceReloadPolicy::Remind,
                     "confirm" => GuidanceReloadPolicy::Confirm,
                     _ => {
-                          log::warn!(target: "runtime::config_reload",
-                              "[config_reload] unknown guidance.reload_policy '{}', using default",
-                              policy_str
-                          );
+                        log::warn!(target: "runtime::config_reload",
+                            "[config_reload] unknown guidance.reload_policy '{}', using default",
+                            policy_str
+                        );
                         GuidanceReloadPolicy::Remind
                     }
                 };
@@ -190,10 +190,8 @@ mod tests {
     use std::io::Write;
 
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "aemeath_config_reload_test_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("aemeath_config_reload_test_{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         dir
     }

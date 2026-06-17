@@ -5,14 +5,16 @@ pub mod nesting;
 pub mod output;
 pub mod status;
 pub mod style;
+pub mod tool_name;
 
 pub use dialog::{DialogActionViewModel, DialogKind, DialogViewModel};
 pub use input::InputAreaViewModel;
 pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
-    AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind,
-    OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode, HookNoticeBlockView,
+    HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, TextBlockView, ToolCallBlockView,
+    ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,

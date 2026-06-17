@@ -10,17 +10,6 @@ mod tests {
         sdk::MemoryConfigView::default()
     }
 
-    fn make_clipboard_image(size: usize) -> sdk::ClipboardImageView {
-        sdk::ClipboardImageView {
-            base64: "img".to_string(),
-            media_type: "image/png".to_string(),
-            final_size: size,
-            display_path: None,
-            width: None,
-            height: None,
-        }
-    }
-
     // === ChatState ===
 
     #[test]
@@ -39,24 +28,6 @@ mod tests {
     fn test_chat_state_default_context_size() {
         let state = ChatState::default();
         assert_eq!(state.context_size, 200_000);
-    }
-
-    #[test]
-    fn test_chat_state_pending_images_add_and_count() {
-        let mut state = ChatState::default();
-        let count = state.add_pending_image(make_clipboard_image(12));
-        assert_eq!(count, 1);
-        assert_eq!(state.pending_image_count(), 1);
-        assert_eq!(state.pending_images()[0].final_size, 12);
-    }
-
-    #[test]
-    fn test_chat_state_pending_images_drain_clears() {
-        let mut state = ChatState::default();
-        state.add_pending_image(make_clipboard_image(7));
-        let drained = state.drain_pending_images();
-        assert_eq!(drained.len(), 1);
-        assert_eq!(state.pending_image_count(), 0);
     }
 
     // === InputState ===
@@ -210,7 +181,6 @@ mod tests {
         assert_eq!(app.model.session.message_count, 0);
         assert_eq!(app.model.runtime.usage.input_tokens, 0);
         assert_eq!(app.model.runtime.usage.output_tokens, 0);
-        assert!(app.model.input.attachments.is_empty());
     }
 
     #[test]
@@ -282,7 +252,9 @@ mod tests {
         assert!(rendered.iter().any(|line| line == "  Aemeath - AI Agent"));
         assert!(rendered.iter().any(|line| line == "💭thinking"));
         // Grep header 现在包含 pattern 和 path
-        assert!(rendered.iter().any(|line| line.contains("Grep /76/") && line.contains("docs/bug/active.md")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.contains("Search /76/") && line.contains("docs/bug/active.md")));
         // Grep details 已隐藏（path 已在 header 中）
         // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(marker 槽) = 4 列前导。
         // 首行 marker 为 ⎿ 圆角连接（连接父 ToolCall），续行为 4 空格。
@@ -294,7 +266,9 @@ mod tests {
         assert!(rendered
             .iter()
             .any(|line| line == "    ... (1 lines omitted)"));
-        assert!(!rendered.iter().any(|line| line.contains("Grep completed")));
+        assert!(!rendered
+            .iter()
+            .any(|line| line.contains("Search completed")));
         assert!(!rendered.iter().any(|line| line.contains("You:")));
         assert!(!rendered
             .iter()

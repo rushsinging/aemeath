@@ -41,9 +41,8 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
                 self.chat.messages.clear();
-                self.chat.clear_pending_images();
                 self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
+                    crate::tui::model::input::intent::InputIntent::Clear,
                 );
                 self.output_area.clear();
                 self.reset_runtime_state().await;
@@ -151,26 +150,22 @@ impl super::App {
                 }
             }
             "/images" => {
-                if self.chat.pending_image_count() == 0 {
+                let spans = &self.model.input.document.image_spans;
+                if spans.is_empty() {
                     self.append_system_notice("No pending images.");
                 } else {
-                    let mut text = format!("Pending images: {}", self.chat.pending_image_count());
-                    for (i, img) in self.chat.pending_images().iter().enumerate() {
+                    let mut text = format!("Pending images: {}", spans.len());
+                    for span in spans.iter() {
                         text.push_str(&format!(
-                            "\n  {}. [image {}] ({} bytes)",
-                            i + 1,
-                            i + 1,
-                            img.final_size
+                            "\n  {}. [Image #{}] ({} bytes)",
+                            span.index, span.index, span.image.final_size
                         ));
                     }
                     self.append_system_notice(text);
                 }
             }
             "/clear-images" => {
-                self.chat.clear_pending_images();
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
-                );
+                self.model.input.document.remove_all_images();
                 self.append_system_notice("[pending images cleared]");
             }
             // Try to execute via AgentClient (delegates to CommandRegistry in runtime)
@@ -240,9 +235,8 @@ impl super::App {
             }
             sdk::CommandAction::Clear => {
                 self.chat.messages.clear();
-                self.chat.clear_pending_images();
                 self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(0),
+                    crate::tui::model::input::intent::InputIntent::Clear,
                 );
                 self.output_area.clear();
                 self.reset_runtime_state().await;

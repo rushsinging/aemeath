@@ -25,15 +25,15 @@
 | Guidance 文件（`_default.md` 等） | ✅ 已双语（`DEFAULT_FILES_EN` / `DEFAULT_FILES_ZH`） | `constants.rs` |
 | `UNIVERSAL_EXECUTION_DISCIPLINE` | ✅ 已双语（`universal_execution_discipline(lang)`） | `constants.rs` |
 | task reminder 模板 | ✅ 已双语（`build_reminder(lang)`） | `task_reminder.rs` |
-| `static_system_prompt_for()` | ❌ 硬编码英文，无 language 参数 | `prompt_build.rs` |
-| `build_commit_guidance()` | ❌ 硬编码英文 | `prompt_build.rs` |
-| `currentDate` 段 | ❌ 硬编码英文 | `prompt_build.rs` |
-| git context 标签 | ❌ 硬编码英文 | `git_context.rs` |
-| `# Available Skills` / `# Available Agent Roles` | ❌ 硬编码英文 | `prompt_build_ext.rs` |
-| claudeMd system-reminder 包裹文本 | ❌ 硬编码英文 | `loop_runner.rs` |
-| `Tool {} denied` / `Cancelled by user` / `Blocked by PreToolUse hook` | ❌ 硬编码英文 | `tools.rs` / `non_agent.rs` |
-| guidance 重载提示 | ❌ 硬编码中文 | `loop_runner.rs` |
-| Stop hook 反馈 | ❌ 硬编码中文 | `finalize.rs` |
+| `static_system_prompt_for()` | ✅ 已双语（`STATIC_SYSTEM_PROMPT_EN` / `_ZH`） | `prompt_build.rs` |
+| `build_commit_guidance()` | ✅ 已双语（match lang 模板） | `prompt_build.rs` |
+| `currentDate` 段 | ✅ 已双语 | `prompt_build.rs` |
+| git context 标签 | ✅ 已双语（`GitContextLabels`） | `git_context.rs` |
+| `# Available Skills` / `# Available Agent Roles` | ✅ 已双语 | `prompt_build_ext.rs` |
+| claudeMd system-reminder 包裹文本 | ✅ 已双语 | `loop_runner.rs` |
+| `Tool {} denied` / `Cancelled by user` / `Blocked by PreToolUse hook` | ✅ 已双语 | `tools.rs` / `non_agent.rs` |
+| guidance 重载提示 | ✅ 已双语 | `loop_runner.rs` |
+| Stop hook 反馈 | ✅ 已双语（`HookFeedbackLabels`） | `finalize.rs` |
 
 ### 改造原则
 

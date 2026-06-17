@@ -64,7 +64,7 @@ impl ConversationModel {
                 name,
                 index,
                 arguments,
-                                status,
+                status,
             } => self.observe_tool_call_update(ToolCallUpdateObservation {
                 chat_id,
                 turn_id,
@@ -73,7 +73,7 @@ impl ConversationModel {
                 name,
                 index,
                 arguments,
-                                status,
+                status,
             }),
             ConversationIntent::ObserveToolResult {
                 chat_id,
@@ -123,21 +123,7 @@ impl ConversationModel {
                 tool_id,
                 message,
             } => self.record_agent_progress(chat_id, turn_id, tool_id, message),
-            ConversationIntent::ShowAskUser {
-                question,
-                options,
-                llm_option_count,
-                multi_select,
-                cursor,
-                default,
-            } => self.show_ask_user(
-                question,
-                options,
-                llm_option_count,
-                multi_select,
-                cursor,
-                default,
-            ),
+            ConversationIntent::ShowAskUserBatch { slots } => self.show_ask_user_batch(slots),
             ConversationIntent::SetAskUserCursor { cursor } => self.set_ask_user_cursor(cursor),
             ConversationIntent::ToggleAskUserSelected { index } => {
                 self.toggle_ask_user_selected(index)
@@ -147,8 +133,15 @@ impl ConversationModel {
             }
             ConversationIntent::AppendAskUserChatChar { ch } => self.append_ask_user_chat_char(ch),
             ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
-            ConversationIntent::DismissAskUser => self.dismiss_ask_user(),
-            ConversationIntent::AnswerAskUser { answer } => self.answer_ask_user(answer),
+            ConversationIntent::AnswerCurrentAskUser { answer } => {
+                self.answer_current_ask_user(answer)
+            }
+            ConversationIntent::NavigateAskUserTo { index } => self.navigate_ask_user_to(index),
+            ConversationIntent::SetAskUserConfirmCursor { cursor } => {
+                self.set_ask_user_confirm_cursor(cursor)
+            }
+            ConversationIntent::ConfirmAskUserBatch => self.confirm_ask_user_batch(),
+            ConversationIntent::DismissAskUserBatch => self.dismiss_ask_user_batch(),
         }
     }
 
@@ -268,7 +261,7 @@ impl ConversationModel {
             name,
             index,
             arguments,
-                        status,
+            status,
         } = update;
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         let mut candidate_ids = vec![Some(id.to_string())];
@@ -284,9 +277,7 @@ impl ConversationModel {
         let mut bound = false;
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             for candidate_id in candidate_ids.into_iter().flatten() {
-                if let Some(preview) =
-                    turn.update_tool(&candidate_id, arguments.clone(), status)
-                {
+                if let Some(preview) = turn.update_tool(&candidate_id, arguments.clone(), status) {
                     args_preview = preview;
                     bound_id = ToolCallId::from_legacy_or_new(&candidate_id);
 
@@ -298,8 +289,7 @@ impl ConversationModel {
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
-                let _ =
-                    turn.update_tool(id.as_ref(), arguments.clone(), status);
+                let _ = turn.update_tool(id.as_ref(), arguments.clone(), status);
                 bound_id = id.clone();
             }
         }
@@ -455,6 +445,10 @@ impl ConversationModel {
         tool_id: ToolCallId,
         message: String,
     ) -> Vec<ConversationChange> {
+        // Maximum bytes of accumulated stdout to retain for live display.
+        // Older content is trimmed to keep memory bounded for high-volume output.
+        const STREAM_CAP: usize = 4 * 1024;
+
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
         // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
@@ -462,7 +456,23 @@ impl ConversationModel {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                call.activities.push(message.clone());
+                // For Bash streaming stdout: accumulate into a single activity
+                // entry so the TUI shows the full live output (up to STREAM_CAP)
+                // rather than just the latest chunk. Other tools (e.g. sub-agent
+                // status messages) use per-message push as before.
+                if call.name == "Bash" {
+                    if let Some(last) = call.activities.last_mut() {
+                        last.push_str(&message);
+                        // Trim oldest content if over cap (keep the tail).
+                        if last.len() > STREAM_CAP {
+                            *last = sdk::slice_tail(last, STREAM_CAP).to_string();
+                        }
+                    } else {
+                        call.activities.push(message.clone());
+                    }
+                } else {
+                    call.activities.push(message.clone());
+                }
             }
         }
         self.agent_progress.push(AgentProgressEntry::new(

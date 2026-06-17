@@ -13,6 +13,11 @@ use crate::tui::render::output::selection_overlay::{apply_selection_overlay, Sel
 use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::{OutputViewState, SelectionAnchor};
 
+/// 输出区内容为滚动条预留的列数：滚动条本身（1 列）+ 与内容之间的间距（2 列）。
+/// 此常量同时用于文档预换行宽度（`output_document_width`）与实际渲染区域
+/// （`content_area_for_scrollbar`），两侧 MUST 保持同步，避免二次折行。
+pub(crate) const SCROLLBAR_RESERVE_COLS: u16 = 3;
+
 impl OutputArea {
     /// 渲染输出区域
     pub fn render(
@@ -131,6 +136,10 @@ impl OutputArea {
             last_doc_line_plain
         );
 
+        // 根因修复（#196）：paragraph.render 复用 ratatui buffer cell 数组，
+        // 上一帧长行 → 本帧短行时尾部 cell 不会被清，导致"行重叠 / 残影"。
+        // 在 paint 背景与 paragraph 渲染之前先把 content_area 整片 reset。
+        clear_area(content_area, buf);
         paint_line_fill_styles(content_area, buf, &line_fill_styles);
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let paragraph = Paragraph::new(display_lines);
@@ -201,14 +210,14 @@ fn normalize_rendered_table_plain(plain: &str) -> String {
     format!("{}  │{}", left.trim_end(), right.trim_end())
 }
 
-fn content_area_for_scrollbar(area: Rect, needs_scrollbar: bool) -> Rect {
+pub(crate) fn content_area_for_scrollbar(area: Rect, needs_scrollbar: bool) -> Rect {
     if !needs_scrollbar || area.width == 0 {
         return area;
     }
     Rect {
         x: area.x,
         y: area.y,
-        width: area.width.saturating_sub(5).max(1),
+        width: area.width.saturating_sub(SCROLLBAR_RESERVE_COLS).max(1),
         height: area.height,
     }
 }
@@ -255,6 +264,10 @@ fn paint_line_fill_styles(
         let y = area.y + row as u16;
         for x in area.left()..area.right() {
             if let Some(cell) = buf.cell_mut((x, y)) {
+                // 最小修复（#196）：set_style 前先 reset 清空旧 symbol，
+                // 作为 paragraph.render 前 clear_area 之后的双保险。
+                // Cell::reset 签名是 &mut self，不能链式调用。
+                cell.reset();
                 cell.set_style(*style);
             }
         }
@@ -350,7 +363,10 @@ mod tests {
 
         assert_eq!(
             content_area.width,
-            area_rect.width.saturating_sub(5).max(1),
+            area_rect
+                .width
+                .saturating_sub(SCROLLBAR_RESERVE_COLS)
+                .max(1),
             "输出文档预换行宽度必须等于 Paragraph 实际渲染宽度，避免二次折行"
         );
     }
@@ -556,5 +572,54 @@ mod tests {
             Some("he"),
             "点击 gutter 钳到 plain 0，拖到列 4 选到内容字符 2"
         );
+    }
+
+    /// 回归 #196：ratatui 0.29 `Paragraph::render` 复用 buffer cell 数组，
+    /// 上一帧长行 → 本帧短行时尾部 cell 不会被覆盖。修复在 `paragraph.render`
+    /// 之前对 `content_area` 调一次 `clear_area`，确保行变短时不残留旧 symbol。
+    #[test]
+    fn test_render_clears_content_area_between_frames_preventing_cell_leak() {
+        let mut area = OutputArea::new();
+        let area_rect = Rect::new(0, 0, 10, 1);
+        let view = OutputViewState {
+            last_visible_height: 1,
+            ..Default::default()
+        };
+        let mut buf = Buffer::empty(area_rect);
+
+        // 第一帧：长行 "abcdefghij" 占满 10 列。
+        area.replace_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "first".into(),
+                lines: vec![RenderedLine::new(vec![Span::raw("abcdefghij")])],
+            }],
+        });
+        area.render(area_rect, &mut buf, &view, &no_live_status());
+
+        // 模拟帧间 buffer 复用：把第 0 行所有 cell 涂上易识别的 'L' 残留，
+        // 避免"恰好相同"误判。
+        for x in 0..10 {
+            buf[(x, 0)].set_symbol("L");
+        }
+
+        // 第二帧：短行 "xy" 只占 2 列。
+        area.replace_document(RenderedDocument {
+            blocks: vec![RenderedBlock {
+                block_id: "second".into(),
+                lines: vec![RenderedLine::new(vec![Span::raw("xy")])],
+            }],
+        });
+        area.render(area_rect, &mut buf, &view, &no_live_status());
+
+        assert_eq!(buf[(0, 0)].symbol(), "x");
+        assert_eq!(buf[(1, 0)].symbol(), "y");
+        // 关键断言：第 2..10 列必须被清空，不再保留上一帧的 'L'。
+        for x in 2..10 {
+            assert_eq!(
+                buf[(x, 0)].symbol(),
+                " ",
+                "列 {x} 残留了上一帧的 'L'（cell-leak regression #196）"
+            );
+        }
     }
 }

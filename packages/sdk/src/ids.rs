@@ -42,6 +42,57 @@ fn cache(uuid: Uuid) -> String {
     uuid.to_string()
 }
 
+/// Generates the shared trait impls for a UUIDv7-backed ID newtype whose
+/// tuple struct shape is `(Uuid, String)`.
+///
+/// Equality and hashing only consider the UUID so the cached string never
+/// affects identity semantics. `Display` and `AsRef<str>` expose the cached
+/// string for zero-allocation borrowed access. SerDe preserves the
+/// single-string wire format by serializing only the UUID.
+macro_rules! impl_id_type {
+    ($ty:ident) => {
+        impl PartialEq for $ty {
+            fn eq(&self, other: &Self) -> bool {
+                self.0 == other.0
+            }
+        }
+
+        impl Eq for $ty {}
+
+        impl Hash for $ty {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                self.0.hash(state);
+            }
+        }
+
+        impl fmt::Display for $ty {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.1)
+            }
+        }
+
+        impl AsRef<str> for $ty {
+            fn as_ref(&self) -> &str {
+                &self.1
+            }
+        }
+
+        impl Serialize for $ty {
+            fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+                // Preserve the single-string wire format.
+                self.0.serialize(ser)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $ty {
+            fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+                let uuid = Uuid::deserialize(de)?;
+                Ok(Self(uuid, cache(uuid)))
+            }
+        }
+    };
+}
+
 // ---------------------------------------------------------------------------
 // ChatId
 // ---------------------------------------------------------------------------
@@ -94,45 +145,7 @@ impl ChatId {
     }
 }
 
-impl PartialEq for ChatId {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for ChatId {}
-
-impl Hash for ChatId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl fmt::Display for ChatId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.1)
-    }
-}
-
-impl AsRef<str> for ChatId {
-    fn as_ref(&self) -> &str {
-        &self.1
-    }
-}
-
-impl Serialize for ChatId {
-    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        // Preserve the single-string wire format.
-        self.0.serialize(ser)
-    }
-}
-
-impl<'de> Deserialize<'de> for ChatId {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let uuid = Uuid::deserialize(de)?;
-        Ok(Self(uuid, cache(uuid)))
-    }
-}
+impl_id_type!(ChatId);
 
 // ---------------------------------------------------------------------------
 // ChatTurnId
@@ -185,44 +198,7 @@ impl ChatTurnId {
     }
 }
 
-impl PartialEq for ChatTurnId {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for ChatTurnId {}
-
-impl Hash for ChatTurnId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl fmt::Display for ChatTurnId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.1)
-    }
-}
-
-impl AsRef<str> for ChatTurnId {
-    fn as_ref(&self) -> &str {
-        &self.1
-    }
-}
-
-impl Serialize for ChatTurnId {
-    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(ser)
-    }
-}
-
-impl<'de> Deserialize<'de> for ChatTurnId {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let uuid = Uuid::deserialize(de)?;
-        Ok(Self(uuid, cache(uuid)))
-    }
-}
+impl_id_type!(ChatTurnId);
 
 // ---------------------------------------------------------------------------
 // ToolCallId
@@ -275,44 +251,7 @@ impl ToolCallId {
     }
 }
 
-impl PartialEq for ToolCallId {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for ToolCallId {}
-
-impl Hash for ToolCallId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl fmt::Display for ToolCallId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.1)
-    }
-}
-
-impl AsRef<str> for ToolCallId {
-    fn as_ref(&self) -> &str {
-        &self.1
-    }
-}
-
-impl Serialize for ToolCallId {
-    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(ser)
-    }
-}
-
-impl<'de> Deserialize<'de> for ToolCallId {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let uuid = Uuid::deserialize(de)?;
-        Ok(Self(uuid, cache(uuid)))
-    }
-}
+impl_id_type!(ToolCallId);
 
 // ---------------------------------------------------------------------------
 // Tests

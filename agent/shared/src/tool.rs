@@ -4,6 +4,38 @@ pub struct ImageData {
     pub media_type: String,
 }
 
+// ---------------------------------------------------------------------------
+// Path-policy types (shared so both `tools` and `policy` can reference them
+// without depending on each other).
+// ---------------------------------------------------------------------------
+
+/// Kind of path access a tool declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathKind {
+    /// Single file read/write.
+    File,
+    /// Directory to search.
+    SearchDir,
+}
+
+/// A declared path field inside a tool's input JSON.
+#[derive(Debug, Clone, Copy)]
+pub struct PathAccess {
+    /// JSON field name in the tool input (e.g. `"file_path"`, `"path"`).
+    pub field: &'static str,
+    /// How the path should be validated.
+    pub kind: PathKind,
+}
+
+/// The outcome of evaluating a single tool call against policy.
+#[derive(Debug)]
+pub enum PolicyDecision {
+    /// The call is allowed; `input` has been normalised (paths resolved).
+    Allow(serde_json::Value),
+    /// The call is denied; `reason` explains why.
+    Deny { reason: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub output: String,

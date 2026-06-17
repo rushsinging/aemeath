@@ -79,18 +79,24 @@ impl Tool for ReadMcpResourceTool {
             .unwrap_or_default();
 
         if server_name.is_empty() {
-            return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": "server parameter is required",
-                "data": null
-            }).to_string());
+            return ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "server parameter is required",
+                    "data": null
+                })
+                .to_string(),
+            );
         }
         if uri.is_empty() {
-            return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": "uri parameter is required",
-                "data": null
-            }).to_string());
+            return ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "uri parameter is required",
+                    "data": null
+                })
+                .to_string(),
+            );
         }
 
         let clients = self.clients.lock().await;
@@ -201,18 +207,24 @@ impl Tool for ReadMcpResourceTool {
                             "data": data
                         }).to_string())
                     }
-                    Err(e) => ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": format!("Invalid response: {}", e),
-                        "data": null
-                    }).to_string()),
+                    Err(e) => ToolResult::error(
+                        serde_json::json!({
+                            "status": "error",
+                            "message": format!("Invalid response: {}", e),
+                            "data": null
+                        })
+                        .to_string(),
+                    ),
                 }
             }
-            Err(e) => ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("Failed to read resource: {}", e),
-                "data": null
-            }).to_string()),
+            Err(e) => ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to read resource: {}", e),
+                    "data": null
+                })
+                .to_string(),
+            ),
         }
     }
 }

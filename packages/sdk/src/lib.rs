@@ -6,6 +6,9 @@
 pub mod bootstrap;
 pub mod change_set;
 pub mod chat;
+mod chat_event;
+mod chat_result;
+mod chat_view;
 pub mod client;
 pub mod commands;
 pub mod error;
@@ -20,8 +23,8 @@ pub mod ids;
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
-    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, ChatEvent,
-    ChatEventContext, ChatInput, ChatInputEvent, ChatRequest, ChatResult, ChatStream,
+    AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
+    ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatRequest, ChatResult, ChatStream,
     HookEventStatus, HookEventView, HookExecutionResultView, OptionItem, ToolCallStatusView,
     ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
 };
@@ -48,3 +51,4 @@ pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
     StrSlice, TaskState, TaskSummary,
 };
+pub use utils::{slice_head, slice_tail};

@@ -3,10 +3,11 @@ use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
-    allowed_child, AskUserBlockView, BlockNode, HookNoticeBlockView, HookNoticeSemanticKind,
-    OutputBlockKind, OutputViewModel, SemanticStyle, TextBlockView, ToolCallBlockView,
-    ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
+    allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
+    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
+    TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
 };
 
 pub struct OutputViewAssembler;
@@ -70,7 +71,8 @@ impl OutputViewAssembler {
                                 OutputBlockKind::ToolResult(ToolResultBlockView {
                                     key: result_id,
                                     tool_title: tool.title.clone(),
-                                    args_preview: tool.args_preview.clone(),                                    result_text,
+                                    args_preview: tool.args_preview.clone(),
+                                    result_text,
                                     style: tool.style,
                                 }),
                             );
@@ -187,33 +189,48 @@ impl OutputViewAssembler {
                         }),
                     ));
                 }
-                OutputTimelineItem::AskUser {
+                OutputTimelineItem::AskUserBatch {
                     id,
-                    question,
-                    options,
-                    llm_option_count,
-                    multi_select,
+                    slots,
+                    active_index,
+                    phase,
                     cursor,
                     selected,
                     chat_input_active,
                     chat_input_text,
-                    default,
-                    answer,
+                    confirm_cursor,
+                    confirmed,
                 } => {
+                    use crate::tui::model::conversation::block::AskUserPhase as MPhase;
+                    let phase_view = match phase {
+                        MPhase::Answering => AskUserPhaseView::Answering,
+                        MPhase::Confirming => AskUserPhaseView::Confirming,
+                    };
+                    let slots_view: Vec<_> = slots
+                        .iter()
+                        .map(|s| AskUserSlotView {
+                            id: s.id.clone(),
+                            question: s.question.clone(),
+                            options: s.options.clone(),
+                            llm_option_count: s.llm_option_count,
+                            multi_select: s.multi_select,
+                            default: s.default.clone(),
+                            answer: s.answer.clone(),
+                        })
+                        .collect();
                     roots.push(leaf(
                         id.clone(),
-                        OutputBlockKind::AskUser(AskUserBlockView {
+                        OutputBlockKind::AskUserBatch(AskUserBatchBlockView {
                             key: id.clone(),
-                            question: question.clone(),
-                            options: options.clone(),
-                            llm_option_count: *llm_option_count,
-                            multi_select: *multi_select,
+                            slots: slots_view,
+                            active_index: *active_index,
+                            phase: phase_view,
                             cursor: *cursor,
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
                             chat_input_text: chat_input_text.clone(),
-                            default: default.clone(),
-                            answer: answer.clone(),
+                            confirm_cursor: *confirm_cursor,
+                            confirmed: *confirmed,
                         }),
                     ));
                 }
@@ -312,7 +329,7 @@ fn summarize_non_embedded_result(tool_name: Option<&str>, output: &str, is_error
         return String::new();
     }
     // 无工具名时用占位名走通用完成摘要（如 `✓ Tool completed`），仍不泄漏正文。
-    let name = tool_name.unwrap_or("Tool");
+    let name = tool_name.map(tool_display_name).unwrap_or("Tool");
     default_tool_result_summary(name, is_error).join("\n")
 }
 
@@ -361,7 +378,16 @@ fn find_tool_view(
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-                activity_summary: call.activities.last().cloned(),
+        // 工具已完成时不再显示 activity_summary（结果已在 ToolResult 子块展示，
+        // 避免子代理最终输出同时出现在 activity 行和 result 子块中造成重复）。
+        activity_summary: if matches!(
+            call.status,
+            ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
+        ) {
+            None
+        } else {
+            call.activities.last().cloned()
+        },
         // result 子块展示实际工具 output（供渲染层 format_result_lines 按
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
         // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
@@ -471,6 +497,9 @@ fn display_text_for_tool_result(
     fallback_output: &str,
     content: &serde_json::Value,
 ) -> String {
+    // 建议同步（#196）：Bash/Read 工具结果在进入 TUI 渲染前把 `\t` 展开为 4 空格，
+    // 避免底层 buffer 写入把 `\t` 当控制字符过滤带来的列宽不一致。
+    // 不用 `sanitize_for_display` 是因为它会同时剥掉 `\n`，破坏多行 Read 输出。
     if matches!(tool_name, Some("EnterWorktree" | "ExitWorktree")) {
         let message = content
             .get("message")
@@ -482,19 +511,34 @@ fn display_text_for_tool_result(
             .filter(|value| !value.is_empty());
         match (message, branch) {
             (Some(message), Some(branch)) => {
-                return format!("{message}\n当前分支：{branch}");
+                return expand_tabs(&format!("{message}\n当前分支：{branch}"));
             }
-            (Some(message), None) => return message.to_string(),
+            (Some(message), None) => return expand_tabs(message).to_string(),
             _ => {}
         }
     }
-    content
+    let text = content
         .get("display")
         .and_then(|value| value.as_str())
         .or_else(|| content.get("message").and_then(|value| value.as_str()))
         .or_else(|| content.get("text").and_then(|value| value.as_str()))
         .map(str::to_string)
-        .unwrap_or_else(|| fallback_output.to_string())
+        .unwrap_or_else(|| fallback_output.to_string());
+    expand_tabs(&text).to_string()
+}
+
+/// 把 `\t` 展开为 4 空格（issue #196 建议同步专用）。其它控制字符与换行一律保留，
+/// 不调用 `sanitize_for_display` 以免破坏多行 tool result。
+fn expand_tabs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ch == '\t' {
+            out.push_str("    ");
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {

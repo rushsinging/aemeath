@@ -1,20 +1,16 @@
-use crate::utils::path_security::validate_and_normalize_path_from_base;
-fn safe_slice(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::string_idx::slice_head;
+use share::tool::{PathAccess, PathKind};
 use tokio::process::Command;
 
 pub struct LspTool;
+
+const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
+    field: "filePath",
+    kind: PathKind::File,
+}];
 
 #[async_trait]
 impl Tool for LspTool {
@@ -55,6 +51,9 @@ impl Tool for LspTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
+    fn path_accesses(&self) -> &'static [PathAccess] {
+        &FILE_ACCESS
+    }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let operation = match input.get("operation").and_then(|v| v.as_str()) {
@@ -73,18 +72,9 @@ impl Tool for LspTool {
             .map(|s| s.to_string())
             .unwrap_or_else(|| detect_language(file_path));
 
+        // Path has already been validated and normalised by PolicyEngine
         let path_base = ctx.workspace_read().current_path_base();
-        let working_root = ctx.workspace_read().current_root();
-        let file_path = match validate_and_normalize_path_from_base(
-            file_path,
-            &path_base,
-            &working_root,
-            ctx.allow_all,
-        ) {
-            Ok(path) => path,
-            Err(e) => return ToolResult::error(serde_json::json!({"status": "error", "message": e, "data": null}).to_string()),
-        };
-        let file_path = file_path.to_string_lossy().to_string();
+        let file_path = file_path.to_string();
 
         match operation {
             "diagnostics" => get_diagnostics(&file_path, &language, &path_base).await,
@@ -162,7 +152,7 @@ async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path)
 
             // Truncate very long output
             if combined.len() > 10000 {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": {"output": format!("{}...\n[truncated]", safe_slice(&combined, 10000))}}).to_string())
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": {"output": format!("{}...\n[truncated]", slice_head(&combined, 10000))}}).to_string())
             } else {
                 ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": {"output": combined}}).to_string())
             }

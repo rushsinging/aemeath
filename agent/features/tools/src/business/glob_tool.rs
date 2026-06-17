@@ -1,9 +1,14 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
-use crate::utils::path_security::validate_search_path_from_base;
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::{PathAccess, PathKind};
 
 pub struct GlobTool;
+
+const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
+    field: "path",
+    kind: PathKind::SearchDir,
+}];
 
 #[async_trait]
 impl Tool for GlobTool {
@@ -29,26 +34,31 @@ impl Tool for GlobTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
+    fn path_accesses(&self) -> &'static [PathAccess] {
+        &PATH_ACCESS
+    }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: pattern",
-                "data": {}
-            }).to_string()),
+            None => {
+                return ToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": "missing required parameter: pattern",
+                        "data": {}
+                    })
+                    .to_string(),
+                )
+            }
         };
-        let path_str = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let path_base = ctx.workspace_read().current_path_base();
-        let working_root = ctx.workspace_read().current_root();
-        let base_dir = match validate_search_path_from_base(path_str, &path_base, &working_root) {
-            Ok(p) => p,
-            Err(e) => return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("{e}"),
-                "data": {}
-            }).to_string()),
+        // Path has already been validated and normalised by PolicyEngine
+        let base_dir = match input.get("path").and_then(|v| v.as_str()) {
+            Some(p) => std::path::PathBuf::from(p),
+            None => {
+                // Fallback to cwd if path is missing
+                _ctx.workspace_read().current_path_base()
+            }
         };
         let full_pattern = base_dir.join(pattern).to_string_lossy().to_string();
         match glob::glob(&full_pattern) {
@@ -59,26 +69,35 @@ impl Tool for GlobTool {
                     .collect();
                 matches.sort();
                 if matches.is_empty() {
-                    ToolResult::success(serde_json::json!({
-                        "status": "success",
-                        "message": "No files matched",
-                        "data": { "files": [], "count": 0 }
-                    }).to_string())
+                    ToolResult::success(
+                        serde_json::json!({
+                            "status": "success",
+                            "message": "No files matched",
+                            "data": { "files": [], "count": 0 }
+                        })
+                        .to_string(),
+                    )
                 } else {
                     let count = matches.len();
                     let message = format!("Found {count} files");
-                    ToolResult::success(serde_json::json!({
-                        "status": "success",
-                        "message": message,
-                        "data": { "files": matches, "count": count }
-                    }).to_string())
+                    ToolResult::success(
+                        serde_json::json!({
+                            "status": "success",
+                            "message": message,
+                            "data": { "files": matches, "count": count }
+                        })
+                        .to_string(),
+                    )
                 }
             }
-            Err(e) => ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("invalid glob pattern: {e}"),
-                "data": {}
-            }).to_string()),
+            Err(e) => ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("invalid glob pattern: {e}"),
+                    "data": {}
+                })
+                .to_string(),
+            ),
         }
     }
 }

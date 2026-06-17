@@ -124,9 +124,8 @@ impl App {
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
-                let count = self.chat.add_pending_image(img);
                 self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::SetAttachmentCount(count),
+                    crate::tui::model::input::intent::InputIntent::InsertImage(img),
                 );
             }
             UiEvent::SystemMessage(msg) => {
@@ -200,52 +199,55 @@ impl App {
                     ));
                 }
             },
-            UiEvent::AskUser {
-                id,
-                question,
-                options,
-                multi_select,
-                default,
-                reply_tx,
-            } => {
-                self.chat.finish_tool_call(&id);
+            UiEvent::AskUserBatch { items, reply_tx } => {
+                // 完成每个 item 关联的 tool_call
+                for item in &items {
+                    self.chat
+                        .finish_tool_call(&sdk::ids::ToolCallId::new(&item.id));
+                }
                 self.spinner_stop();
 
-                // 构建内建选项：始终追加 Type something
-                // - ≥1 LLM 选项：Type something
-                // - 0 个选项：无内建选项（纯自由输入）
-                let llm_option_count = options.len();
-                let mut all_options = options.clone();
-                if llm_option_count >= 1 {
-                    all_options.push(sdk::OptionItem::title_only(
-                        crate::tui::app::state::BUILTIN_OPTION_CHAT,
-                    ));
-                }
-
-                if all_options.is_empty() {
-                    // 无选项：仍以 AskUser 块渲染问题（自由输入模式），应答走 reply_tx；
-                    // 携带 default 以渲染 `(default: ...)` 提示行。
-                    self.show_ask_user_block(question, Vec::new(), 0, multi_select, 0, default);
+                let n = items.len();
+                if n == 1 && items[0].options.is_empty() {
+                    // 单问 + 无选项：自由输入模式，走 reply_tx
+                    let item = &items[0];
+                    let slot = crate::tui::model::conversation::block::AskUserSlot {
+                        id: item.id.clone(),
+                        question: item.question.clone(),
+                        options: Vec::new(),
+                        llm_option_count: 0,
+                        multi_select: item.multi_select,
+                        default: item.default.clone(),
+                        answer: None,
+                    };
+                    self.show_ask_user_batch(vec![slot]);
                     self.input.ask_user_reply_tx = Some(reply_tx);
                 } else {
-                    let cursor = default
-                        .as_ref()
-                        .and_then(|d| all_options.iter().position(|o| o.title == *d))
-                        .unwrap_or(0);
-                    self.show_ask_user_block(
-                        question,
-                        all_options.clone(),
-                        llm_option_count,
-                        multi_select,
-                        cursor,
-                        None,
-                    );
-                    self.input.ask_user_state = Some(crate::tui::app::state::AskUserState {
-                        reply_tx,
-                        options: all_options,
-                        llm_option_count,
-                        multi_select,
-                    });
+                    // 构建 AskUserSlot 列表
+                    let slots: Vec<_> = items
+                        .iter()
+                        .map(|item| {
+                            let llm_count = item.options.len();
+                            let mut all_options = item.options.clone();
+                            if llm_count >= 1 {
+                                all_options.push(sdk::OptionItem::title_only(
+                                    crate::tui::app::state::BUILTIN_OPTION_CHAT,
+                                ));
+                            }
+                            crate::tui::model::conversation::block::AskUserSlot {
+                                id: item.id.clone(),
+                                question: item.question.clone(),
+                                options: all_options,
+                                llm_option_count: llm_count,
+                                multi_select: item.multi_select,
+                                default: item.default.clone(),
+                                answer: None,
+                            }
+                        })
+                        .collect();
+                    self.show_ask_user_batch(slots);
+                    self.input.ask_user_state =
+                        Some(crate::tui::app::state::AskUserState { reply_tx, items });
                 }
                 self.spinner_stop();
             }
@@ -296,89 +298,5 @@ fn reflection_outputs_same(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tui::effect::session::processing::SpawnContextRefs;
-    use crate::tui::model::conversation::block::ConversationBlock;
-    use std::path::PathBuf;
-
-    fn test_app() -> App {
-        App::new(
-            "test-session".to_string(),
-            PathBuf::from("/tmp"),
-            "test-model".to_string(),
-        )
-    }
-
-    #[test]
-    fn test_update_ui_drain_queued_input_clears_placeholder_without_user_echo() {
-        let mut app = test_app();
-        app.input.push_queue("a\nb\nc".to_string());
-        app.enqueue_submission_echo("[Copied Text 1]");
-        let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
-        let (ui_tx, _ui_rx) = mpsc::channel(1);
-        let spawn_refs = SpawnContextRefs { agent_client: None };
-
-        app.update_ui(UiEvent::DrainQueuedInput { reply_tx }, &ui_tx, &spawn_refs);
-
-        assert_eq!(reply_rx.try_recv(), Ok(vec!["a\nb\nc".to_string()]));
-        assert!(app
-            .model
-            .conversation
-            .blocks
-            .iter()
-            .all(|block| !matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")));
-        assert!(app
-            .model
-            .conversation
-            .blocks
-            .iter()
-            .all(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. })));
-    }
-
-    #[test]
-    fn test_update_ui_messages_sync_echoes_original_user_message() {
-        let mut app = test_app();
-        app.chat.messages.push(sdk::ChatMessage::user_text("first"));
-        app.input.push_queue("a\nb\nc".to_string());
-        app.enqueue_submission_echo("[Copied Text 1]");
-        let messages = vec![
-            sdk::ChatMessage::user_text("first"),
-            sdk::ChatMessage::user_text("a\nb\nc"),
-        ];
-        let (ui_tx, _ui_rx) = mpsc::channel(1);
-        let spawn_refs = SpawnContextRefs { agent_client: None };
-
-        app.update_ui(UiEvent::MessagesSync(messages), &ui_tx, &spawn_refs);
-
-        assert_eq!(app.input.queue_len(), 0);
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")
-        }));
-        assert!(app
-            .model
-            .conversation
-            .blocks
-            .iter()
-            .all(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. })));
-    }
-
-    #[test]
-    fn test_update_ui_messages_sync_does_not_echo_system_generated_user_message() {
-        let mut app = test_app();
-        app.chat.messages.push(sdk::ChatMessage::user_text("first"));
-        let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
-        let messages = vec![
-            sdk::ChatMessage::user_text("first"),
-            sdk::ChatMessage::system_generated_user_text(reminder),
-        ];
-        let (ui_tx, _ui_rx) = mpsc::channel(1);
-        let spawn_refs = SpawnContextRefs { agent_client: None };
-
-        app.update_ui(UiEvent::MessagesSync(messages), &ui_tx, &spawn_refs);
-
-        assert!(app.model.conversation.blocks.iter().all(|block| {
-            !matches!(block, ConversationBlock::UserMessage { text, .. } if text == reminder)
-        }));
-    }
-}
+#[path = "ui_event_tests.rs"]
+mod ui_event_tests;

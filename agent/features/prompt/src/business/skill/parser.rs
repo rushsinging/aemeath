@@ -183,7 +183,9 @@ mod tests {
         assert!(skill.aliases.is_empty());
         assert_eq!(skill.content, "content here");
 
-        std::fs::remove_dir_all(&base).unwrap();
+        // 清理是 best-effort：macOS/APFS 在并发编译或同步层干扰下偶发
+        // ENOTEMPTY（code 66），清理失败不代表被测逻辑有误。
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -201,7 +203,7 @@ mod tests {
         assert_eq!(skill.aliases, vec!["my-dir"]);
         assert_eq!(skill.content, "content");
 
-        std::fs::remove_dir_all(&base).unwrap();
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -223,6 +225,6 @@ mod tests {
         let content = read_skill_content(&skill);
         assert_eq!(content, "Full body content here!");
 
-        std::fs::remove_dir_all(&base).unwrap();
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

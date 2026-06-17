@@ -19,6 +19,7 @@ use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
 use crate::tui::view_assembler::output::OutputViewAssembler;
@@ -50,7 +51,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ReflectionUsage => "ReflectionUsage",
         UiEvent::ReflectionDone { .. } => "ReflectionDone",
         UiEvent::ReflectionApplyDone { .. } => "ReflectionApplyDone",
-        UiEvent::AskUser { .. } => "AskUser",
+        UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
@@ -256,7 +257,11 @@ impl App {
     }
 
     pub(crate) fn output_document_width(&self) -> u16 {
-        self.layout.output_area_rect.width.saturating_sub(5).max(1)
+        self.layout
+            .output_area_rect
+            .width
+            .saturating_sub(SCROLLBAR_RESERVE_COLS)
+            .max(1)
     }
 
     pub(crate) fn refresh_output_document_from_model(&mut self) {

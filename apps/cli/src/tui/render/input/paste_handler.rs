@@ -12,7 +12,7 @@ impl crate::tui::app::App {
                 self.append_system_notice("[cannot read clipboard image without SDK client]");
                 return;
             };
-            tokio::spawn(async move {
+            crate::tui::effect::spawn_guard::spawn_guarded("clipboard_image", async move {
                 match agent_client.read_clipboard_image().await {
                     Ok(img) => {
                         let size = img.final_size;
@@ -42,7 +42,7 @@ impl crate::tui::app::App {
                 return;
             };
             let tx = ui_tx.clone();
-            tokio::spawn(async move {
+            crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
                 match agent_client.process_image_file(path).await {
                     Ok(img) => {
                         let size = img.final_size;

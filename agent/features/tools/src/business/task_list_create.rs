@@ -44,19 +44,23 @@ impl Tool for TaskListCreateTool {
     async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: subject",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: subject",
+                    "data": {}
+                }))
+            }
         };
         let summary = match input.get("summary").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => return ToolResult::error_json(serde_json::json!({
-                "status": "error",
-                "message": "missing required parameter: summary",
-                "data": {}
-            })),
+            None => {
+                return ToolResult::error_json(serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: summary",
+                    "data": {}
+                }))
+            }
         };
 
         let batch = self.store.create_list(subject.clone(), summary).await;

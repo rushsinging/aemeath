@@ -136,3 +136,12 @@ composition → runtime, tools, provider, project, sdk
 | Runtime | [runtime-design.md](runtime-design.md) | 核心域，Agent Looping 主循环 |
 | TUI | [tui-design.md](tui-design.md) | 入站适配器，用户交互界面 |
 | Server | [server-design.md](server-design.md) | 入站适配器，多租户远端服务 |
+
+## 运维与治理
+
+| 主题 | 设计文档 | 角色 |
+|---|---|---|
+| 文件切分计划 | [file-split-plan.md](file-split-plan.md) | 把巨型文件按 COLA 边界拆到 `contract/gateway/business/utils` 的迁移路线图 |
+| 架构守卫 | [architecture-guards.md](architecture-guards.md) | 17 个 guard 脚本 + 全部白名单的单一真相（与 `.agents/hooks/*.sh` 字面同步） |
+
+> 架构守卫是"机械式宪法"——把上面所有设计原则固化为可执行的静态检查；任何对边界 / 分层 / 依赖方向的修改，**MUST** 同步核对 [architecture-guards.md](architecture-guards.md) 内的白名单。

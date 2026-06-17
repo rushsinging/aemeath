@@ -1,5 +1,6 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
+use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
 use crate::business::types::StreamResponse;
 use crate::core::provider::StreamHandler;
 use futures_util::StreamExt;
@@ -9,8 +10,8 @@ use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
-/// 流空闲超时：90 秒无数据则中止
-pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+/// 流空闲超时：180 秒无数据则中止
+pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 /// 停滞检测阈值：超过 30 秒无数据则记录警告
 pub(crate) const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -77,6 +78,31 @@ pub(crate) fn try_complete_truncated_json(raw: &str) -> Option<serde_json::Value
     serde_json::from_str(&candidate).ok()
 }
 
+/// 格式化流状态快照，用于 idle timeout / error 诊断日志。
+///
+/// 输出形如：`text=42B reasoning=0B tools=[Write: 12KB/45d, Read: 0B/0d]`
+fn format_stream_snapshot(
+    text: &str,
+    reasoning: &str,
+    tool_calls: &std::collections::HashMap<usize, (String, String, String, u32)>,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(format!("text={}B", text.len()));
+    parts.push(format!("reasoning={}B", reasoning.len()));
+    if !tool_calls.is_empty() {
+        let mut sorted: Vec<_> = tool_calls.iter().collect();
+        sorted.sort_by_key(|(i, _)| **i);
+        let tools_str: Vec<String> = sorted
+            .iter()
+            .map(|(_, (_, name, args, delta_count))| {
+                format!("{}: {}B/{}d", name, args.len(), delta_count)
+            })
+            .collect();
+        parts.push(format!("tools=[{}]", tools_str.join(", ")));
+    }
+    parts.join(" ")
+}
+
 /// 解析 OpenAI 风格的 SSE 流
 pub(crate) async fn parse_openai_stream(
     response: reqwest::Response,
@@ -85,7 +111,7 @@ pub(crate) async fn parse_openai_stream(
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
     let mut current_text = String::new();
-    let mut current_reasoning = String::new();
+    let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
     let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> =
         std::collections::HashMap::new();
@@ -95,6 +121,7 @@ pub(crate) async fn parse_openai_stream(
     };
     let mut stop_reason = crate::business::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
+    let mut chunk_index: u64 = 0;
 
     let byte_stream = response.bytes_stream().map(|r| {
         r.map_err(|e| {
@@ -119,7 +146,17 @@ pub(crate) async fn parse_openai_stream(
                 return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(STREAM_IDLE_TIMEOUT) => {
-                handler.on_error(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
+                let snapshot = format_stream_snapshot(
+                    &current_text, reasoning_normalizer.accumulated(), &current_tool_calls,
+                );
+                log::warn!(target: "provider::openai_stream",
+                    "[openai-compat stream] idle timeout: no data for {}s — {snapshot}",
+                    STREAM_IDLE_TIMEOUT.as_secs(),
+                );
+                handler.on_error(&format!(
+                    "Stream idle timeout: no data for {}s — {snapshot}",
+                    STREAM_IDLE_TIMEOUT.as_secs(),
+                ));
                 return Err(crate::LlmError::Stream(format!(
                     "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
                 )));
@@ -163,6 +200,7 @@ pub(crate) async fn parse_openai_stream(
             Ok(v) => v,
             Err(_) => continue,
         };
+        chunk_index += 1;
 
         // 检查错误
         if let Some(error) = chunk.get("error") {
@@ -210,19 +248,52 @@ pub(crate) async fn parse_openai_stream(
 
                 // 处理 delta
                 if let Some(delta) = choice.get("delta") {
-                    // Reasoning 内容（例如 glm-5.1, DeepSeek-R1）
+                    // Reasoning 内容（例如 glm-5.1, DeepSeek-R1, Mimo）
                     if let Some(reasoning) = delta.get("reasoning_content").and_then(|c| c.as_str())
                     {
                         if !reasoning.is_empty() {
-                            handler.on_thinking(reasoning);
-                            current_reasoning.push_str(reasoning);
+                            // chunk 级诊断日志（debug/trace 级，安全 preview）
+                            let raw_chars = reasoning.chars().count();
+                            let raw_bytes = reasoning.len();
+                            let acc_chars_before = reasoning_normalizer.accumulated_char_count();
+                            log::trace!(target: "provider::openai_stream",
+                                "[reasoning chunk] idx={} raw_chars={} raw_bytes={} \
+                                 acc_chars_before={} acc_chars_after={}",
+                                chunk_index, raw_chars, raw_bytes,
+                                acc_chars_before, acc_chars_before + raw_chars,
+                            );
+                            if log::log_enabled!(log::Level::Trace) {
+                                log::trace!(target: "provider::openai_stream",
+                                    "[reasoning chunk] idx={} preview={}",
+                                    chunk_index, reasoning_normalizer::safe_preview(reasoning),
+                                );
+                            }
+
+                            // 归一化：处理 snapshot / 重复片段
+                            let result = reasoning_normalizer.process(reasoning);
+                            if !result.delta.is_empty() {
+                                handler.on_thinking(result.delta);
+                            }
+                            log::debug!(target: "provider::openai_stream",
+                                "[reasoning chunk] idx={} dedup_action={:?} \
+                                 raw_chars={} emitted_chars={} acc_chars={}",
+                                chunk_index, result.action, raw_chars,
+                                result.delta.chars().count(),
+                                reasoning_normalizer.accumulated_char_count(),
+                            );
                         }
                     }
 
                     // 文本内容
                     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                        handler.on_text(content);
-                        current_text.push_str(content);
+                        if !content.is_empty() {
+                            log::trace!(target: "provider::openai_stream",
+                                "[content chunk] idx={} content_chars={} content_bytes={}",
+                                chunk_index, content.chars().count(), content.len(),
+                            );
+                            handler.on_text(content);
+                            current_text.push_str(content);
+                        }
                     }
 
                     // Tool calls
@@ -257,6 +328,10 @@ pub(crate) async fn parse_openai_stream(
                                         entry.0 = format!("call_{}", index);
                                     }
                                     if is_new {
+                                        log::debug!(target: "provider::openai_stream",
+                                            "[openai-compat stream] tool_use_start: name={} id={} index={}",
+                                            name, entry.0, index,
+                                        );
                                         handler.on_tool_use_start(name, Some(&entry.0), index);
                                     }
                                 }
@@ -265,6 +340,12 @@ pub(crate) async fn parse_openai_stream(
                                 {
                                     entry.2.push_str(args);
                                     entry.3 += 1;
+                                    if entry.3 == 1 {
+                                        log::debug!(target: "provider::openai_stream",
+                                            "[openai-compat stream] tool_args_first_delta: name={} index={} delta_bytes={}",
+                                            entry.1, index, args.len(),
+                                        );
+                                    }
                                     // Notify handler with accumulated arguments for
                                     // real-time UI updates (e.g. showing file path).
                                     if !entry.1.is_empty() {
@@ -287,7 +368,19 @@ pub(crate) async fn parse_openai_stream(
     // 构建最终的 content blocks。
     // Thinking 块必须在 Text 之前，以便 convert_messages 在重发 assistant 历史
     // 时能正确地将 reasoning_content 附加到拥有内容的消息上（对 DeepSeek thinking 模式很重要）。
+    let current_reasoning = reasoning_normalizer.accumulated().to_string();
+    let reasoning_stats = reasoning_normalizer.stats.clone();
+    let total_chunks = chunk_index;
     if !current_reasoning.is_empty() {
+        let reasoning_chars = current_reasoning.chars().count();
+        log::debug!(target: "provider::openai_stream",
+            "[openai-compat stream] reasoning summary: total_chunks={} \
+             thinking_chars={} thinking_bytes={} \
+             dedup={{none:{},snapshot_suffix:{},duplicate_drop:{},overlap_trim:{}}}",
+            total_chunks, reasoning_chars, current_reasoning.len(),
+            reasoning_stats.none, reasoning_stats.snapshot_suffix,
+            reasoning_stats.duplicate_drop, reasoning_stats.overlap_trim,
+        );
         content_blocks.push(ContentBlock::Thinking {
             thinking: current_reasoning,
         });
@@ -305,9 +398,9 @@ pub(crate) async fn parse_openai_stream(
     for (_, (id, name, arguments, delta_count)) in sorted_tool_calls {
         if name.is_empty() {
             log::warn!(target: "provider::openai_stream",
-                      "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
-                      id, arguments.len(), delta_count
-                  );
+                "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
+                id, arguments.len(), delta_count
+            );
             continue;
         }
         // Note: on_tool_use_start was already called during streaming
@@ -315,9 +408,9 @@ pub(crate) async fn parse_openai_stream(
         // call it again here.
         let input: serde_json::Value = if arguments.is_empty() {
             log::warn!(target: "provider::openai_stream",
-                          "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
-                          name, id, delta_count
-                      );
+                "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
+                name, id, delta_count
+            );
             serde_json::Value::Object(serde_json::Map::new())
         } else {
             match serde_json::from_str(&arguments) {
@@ -328,9 +421,9 @@ pub(crate) async fn parse_openai_stream(
                     // 先尝试启发式补全：仅当 JSON 在字符串字面量中间被截断时有效。
                     if let Some(recovered) = try_complete_truncated_json(&arguments) {
                         log::warn!(target: "provider::openai_stream",
-                                  "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
-                                  name, id, delta_count, arguments.len(), e
-                              );
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
+                            name, id, delta_count, arguments.len(), e
+                        );
                         recovered
                     } else {
                         let head: String = arguments.chars().take(300).collect();
@@ -338,9 +431,9 @@ pub(crate) async fn parse_openai_stream(
                             arguments.chars().rev().take(200).collect::<String>();
                         let tail: String = tail_rev.chars().rev().collect();
                         log::warn!(target: "provider::openai_stream",
-                                  "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
-                                  name, id, delta_count, arguments.len(), e
-                              );
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
+                            name, id, delta_count, arguments.len(), e
+                        );
                         log::warn!(target: "provider::openai_stream", "[openai-compat stream] truncated args head: {}", head);
                         log::warn!(target: "provider::openai_stream", "[openai-compat stream] truncated args tail: {}", tail);
                         if is_eof && truncated_tool.is_none() {
@@ -387,67 +480,5 @@ pub(crate) async fn parse_openai_stream(
 }
 
 #[cfg(test)]
-mod json_recovery_tests {
-    use super::try_complete_truncated_json;
-    use serde_json::json;
-
-    #[test]
-    fn recovers_when_string_value_is_truncated_mid_quote() {
-        // 模型写到 `"file_path":"/Users/...` 后流被切断
-        let raw = r#"{"file_path":"/Users/x"#;
-        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
-        assert_eq!(recovered, json!({"file_path": "/Users/x"}));
-    }
-
-    #[test]
-    fn recovers_when_string_value_contains_escape_sequences() {
-        // 字符串中含有 `\"` 和 `\\` 转义，不应让状态机误判
-        let raw = r#"{"content":"line1\nline2 \"with quote\""#;
-        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
-        assert_eq!(recovered["content"], "line1\nline2 \"with quote\"");
-    }
-
-    #[test]
-    fn recovers_nested_objects() {
-        // 嵌套对象，截断在最里层 string
-        let raw = r#"{"outer":{"inner":{"key":"val"#;
-        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
-        assert_eq!(recovered, json!({"outer": {"inner": {"key": "val"}}}));
-    }
-
-    #[test]
-    fn recovers_arrays_inside_object() {
-        // 数组作为 value，且 array 内的 string 也被截断
-        let raw = r#"{"items":["a","b","c"#;
-        let recovered = try_complete_truncated_json(raw).expect("应该能补全");
-        assert_eq!(recovered, json!({"items": ["a", "b", "c"]}));
-    }
-
-    #[test]
-    fn does_not_recover_when_truncated_outside_a_string() {
-        // 截断在结构符之后（缺逗号），不做猜测 — 避免 silent corruption
-        let raw = r#"{"a":1"#;
-        assert!(try_complete_truncated_json(raw).is_none());
-    }
-
-    #[test]
-    fn does_not_recover_well_formed_json() {
-        // 正常 JSON：状态机结束在 string 之外（in_string=false），不触发补全
-        let raw = r#"{"a":1,"b":"ok"}"#;
-        assert!(try_complete_truncated_json(raw).is_none());
-    }
-
-    #[test]
-    fn does_not_recover_when_closing_quote_would_be_invalid() {
-        // 流刚好在合法 string 末尾被切，再补一个 `"` 会破坏语法；
-        // 我们的状态机此时 in_string=false（最后一个 `"` 已关），所以不补。
-        // 这是 expected 行为 — 这种情况下 JSON 实际上是 well-formed 的（仅缺 closing brace）。
-        let raw = r#"{"a":"b""#;
-        assert!(try_complete_truncated_json(raw).is_none());
-    }
-
-    #[test]
-    fn does_not_recover_completely_empty_input() {
-        assert!(try_complete_truncated_json("").is_none());
-    }
-}
+#[path = "stream_tests.rs"]
+mod json_recovery_tests;

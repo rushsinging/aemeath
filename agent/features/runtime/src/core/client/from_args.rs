@@ -150,8 +150,16 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         Some(client_adapter.provider_name()),
         Some(client_adapter.model_name()),
     );
-    let prompt_parts =
-        build_system_prompt_parts(&prompt_context, &hook_runner, &prompt_memory_config).await;
+    let prompt_parts = build_system_prompt_parts(
+        &prompt_context,
+        &hook_runner,
+        &prompt_memory_config,
+        config_file
+            .as_ref()
+            .map(|c| c.language.as_str())
+            .unwrap_or("en"),
+    )
+    .await;
 
     let static_prompt = crate::business::prompt::prompt_build_ext::build_static_prompt(
         &cwd,

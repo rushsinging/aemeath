@@ -124,4 +124,16 @@ mod tests {
         assert_eq!(screen_col_to_char_idx("a🚀b", 1), CharIdx::new(1));
         assert_eq!(screen_col_to_char_idx("a🚀b", 3), CharIdx::new(2));
     }
+
+    /// 回归 #196：`sanitize_for_display` 必须把 `\t` 展开为 4 空格、剥离 ANSI 与控制字符，
+    /// 避免 ratatui `Buffer::set_stringn` 把 `\t` 当控制字符过滤造成的列宽不一致。
+    #[test]
+    fn test_sanitize_for_display_expands_tabs_and_strips_control_chars() {
+        assert_eq!(sanitize_for_display("a\tb"), "a    b");
+        assert_eq!(sanitize_for_display("col1\tcol2\tcol3"), "col1    col2    col3");
+        // ANSI CSI 序列（含 ESC + '[' + 参数 + 终止字母）整体剥离。
+        assert_eq!(sanitize_for_display("\x1b[31mred\x1b[0m"), "red");
+        // \r 单独被跳过；\n 走 is_control 分支也跳过（实际在 TUI 渲染前是预期行为）。
+        assert_eq!(sanitize_for_display("hi\r\nworld\x07"), "hiworld");
+    }
 }

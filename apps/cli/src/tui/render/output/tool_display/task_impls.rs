@@ -18,9 +18,13 @@ impl ToolDisplay for TaskCreateDisplay {
         }
         let desc = str_arg(input, "description", "");
         if desc.is_empty() {
-            format!("TaskCreate {subject}")
+            format!("{} {subject}", self.display_name())
         } else {
-            format!("TaskCreate {subject}: {}", truncate_ellipsis(desc, 60))
+            format!(
+                "{} {subject}: {}",
+                self.display_name(),
+                truncate_ellipsis(desc, 60)
+            )
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -53,9 +57,9 @@ impl ToolDisplay for TaskUpdateDisplay {
         }
         let status = str_arg(input, "status", "");
         if status.is_empty() {
-            format!("TaskUpdate {id}")
+            format!("{} {id}", self.display_name())
         } else {
-            format!("TaskUpdate {id} → {status}")
+            format!("{} {id} → {status}", self.display_name())
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -82,7 +86,7 @@ impl ToolDisplay for TaskListDisplay {
         "TaskList"
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
-        "TaskList".to_string()
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -143,7 +147,7 @@ impl ToolDisplay for TaskListCompleteDisplay {
         "TaskListComplete"
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
-        "TaskListComplete".to_string()
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -297,36 +301,6 @@ impl ToolDisplay for TaskStopDisplay {
 inventory::submit!(ToolDisplayEntry {
     name: "TaskStop",
     display: || Box::new(TaskStopDisplay)
-});
-
-// ── TaskOutput ───────────────────────────────────────────────────
-
-struct TaskOutputDisplay;
-impl ToolDisplay for TaskOutputDisplay {
-    fn name(&self) -> &str {
-        "TaskOutput"
-    }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
-        "TaskOutput".to_string()
-    }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
-    }
-    fn render_policy(&self) -> ToolRenderPolicy {
-        ToolRenderPolicy {
-            header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
-            result: ResultPolicy::Visible {
-                max_lines: Some(5),
-                render_kind: ResultRender::Plain,
-                tail_mode: false,
-            },
-        }
-    }
-}
-inventory::submit!(ToolDisplayEntry {
-    name: "TaskOutput",
-    display: || Box::new(TaskOutputDisplay)
 });
 
 // ── EnterPlanMode ────────────────────────────────────────────────

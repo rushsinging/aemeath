@@ -58,47 +58,64 @@ impl Tool for ConfigTool {
                     { "key": "mcp_servers", "description": "MCP server configurations" },
                 ]);
 
-                ToolResult::success(serde_json::json!({
-                    "status": "success",
-                    "message": "Available configuration options listed",
-                    "data": {
-                        "options": config_items
-                    }
-                }).to_string())
+                ToolResult::success(
+                    serde_json::json!({
+                        "status": "success",
+                        "message": "Available configuration options listed",
+                        "data": {
+                            "options": config_items
+                        }
+                    })
+                    .to_string(),
+                )
             }
             "get" => {
                 if key.is_none() {
-                    return ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": "Key is required for 'get' action",
-                        "data": {}
-                    }).to_string());
+                    return ToolResult::error(
+                        serde_json::json!({
+                            "status": "error",
+                            "message": "Key is required for 'get' action",
+                            "data": {}
+                        })
+                        .to_string(),
+                    );
                 }
                 let key = key.unwrap_or("unknown");
-                ToolResult::success(serde_json::json!({
-                    "status": "success",
-                    "message": format!("Config '{}' retrieved", key),
-                    "data": {
-                        "key": key,
-                        "hint": "Use environment variables or config file to set this value"
-                    }
-                }).to_string())
+                ToolResult::success(
+                    serde_json::json!({
+                        "status": "success",
+                        "message": format!("Config '{}' retrieved", key),
+                        "data": {
+                            "key": key,
+                            "hint": "Use environment variables or config file to set this value"
+                        }
+                    })
+                    .to_string(),
+                )
             }
             "set" => {
                 let key = match key {
                     Some(k) => k,
-                    None => return ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": "Key is required for 'set' action",
-                        "data": {}
-                    }).to_string()),
+                    None => {
+                        return ToolResult::error(
+                            serde_json::json!({
+                                "status": "error",
+                                "message": "Key is required for 'set' action",
+                                "data": {}
+                            })
+                            .to_string(),
+                        )
+                    }
                 };
                 if value.is_none() {
-                    return ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": "Value is required for 'set' action",
-                        "data": {}
-                    }).to_string());
+                    return ToolResult::error(
+                        serde_json::json!({
+                            "status": "error",
+                            "message": "Value is required for 'set' action",
+                            "data": {}
+                        })
+                        .to_string(),
+                    );
                 }
 
                 ToolResult::success(serde_json::json!({
@@ -113,11 +130,16 @@ impl Tool for ConfigTool {
             "reset" => {
                 let key = match key {
                     Some(k) => k,
-                    None => return ToolResult::error(serde_json::json!({
-                        "status": "error",
-                        "message": "Key is required for 'reset' action",
-                        "data": {}
-                    }).to_string()),
+                    None => {
+                        return ToolResult::error(
+                            serde_json::json!({
+                                "status": "error",
+                                "message": "Key is required for 'reset' action",
+                                "data": {}
+                            })
+                            .to_string(),
+                        )
+                    }
                 };
 
                 ToolResult::success(serde_json::json!({
@@ -129,13 +151,16 @@ impl Tool for ConfigTool {
                     }
                 }).to_string())
             }
-            _ => ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("Unknown action: {}", action),
-                "data": {
-                    "valid_actions": ["get", "set", "list", "reset"]
-                }
-            }).to_string()),
+            _ => ToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("Unknown action: {}", action),
+                    "data": {
+                        "valid_actions": ["get", "set", "list", "reset"]
+                    }
+                })
+                .to_string(),
+            ),
         }
     }
 }
