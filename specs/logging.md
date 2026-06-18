@@ -1,9 +1,9 @@
 # 日志规范
 
-> 路径触发：`packages/global/logging/**` —— 日志基础设施（UnifiedLogger、14 字段 schema、target 路由）
+> 路径触发：`packages/global/logging/**` —— 日志基础设施（UnifiedLogger、13 字段 schema、target 路由）
 > 场景触发：新增任何 `log::xxx!` 调用、修改日志字段或路由、新增日志文件
 
-**Scope**：日志 target 命名、14 字段 JSON Lines schema、event_type 枚举、日志级别策略、preview/脱敏策略。
+**Scope**：日志 target 命名、13 字段 JSON Lines schema、日志级别策略、preview/脱敏策略。
 **不适用**：日志 crate 内部实现细节（rotation、context 全局变量）见 `packages/global/logging/src/` 源码。
 
 ## target 命名
@@ -39,7 +39,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 1 | `aemeath:tui` | `tui.log` | `apps/cli` | TUI 渲染、输入处理、快捷键 |
 | 2 | `aemeath:shared` | `shared.log` | `agent/shared` | 横切基础设施 |
 | 3 | `aemeath:composition` | `composition.log` | `agent/composition` | 组合根装配 |
-| 4 | `aemeath:agent:provider` | `agent-provider.log` | `agent/features/provider` | provider HTTP / stream + LLM 输入/输出（`llm_input`/`llm_output`/`user_input`） |
+| 4 | `aemeath:agent:provider` | `agent-provider.log` | `agent/features/provider` | provider HTTP / stream + LLM 输入/输出（`llm_input`/`llm_output`/`user_input`，通过 `log::info!` 以 JSON 字符串作为 msg 传入） |
 | 5 | `aemeath:agent:runtime` | `agent-runtime.log` | `agent/features/runtime` | agent 循环、compact、token budget、成本 |
 | 6 | `aemeath:agent:tools` | `agent-tools.log` | `agent/features/tools` | tool 执行、MCP 通信 |
 | 7 | `aemeath:agent:prompt` | `agent-prompt.log` | `agent/features/prompt` | Guidance 选择、系统提示构建 |
@@ -62,9 +62,9 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | `tool.log` | tool 日志已路由到 `agent-tools.log`（`aemeath:agent:tools`） | `agent-tools.log` |
 | `audit.log` | 审计已路由到 `agent-audit.log`（`aemeath:agent:audit`） | `agent-audit.log` |
 
-## 14 字段 schema
+## 13 字段 schema
 
-诊断日志（`format_diag_json_line`）和审计日志（`format_audit_json_line`）统一使用 14 个字段，compact JSON Lines 格式：
+所有日志（诊断 + 审计）统一使用 13 个字段，compact JSON Lines 格式。所有日志统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。
 
 | # | 字段 | 类型 | 格式 | 来源 | 示例 |
 |---|------|------|------|------|------|
@@ -78,30 +78,30 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 8 | `model` | string | 模型 ID，未设置时 `"-"` | `context::current_model()` | `"claude-sonnet-4-20250514"` |
 | 9 | `provider` | string \| null | provider 名称 | `context::current_provider()` | `"claude"` |
 | 10 | `role` | string \| null | 消息角色 | `context::current_role()` | `"default"` / `"sub-agent-1"` |
-| 11 | `level` | string | 日志级别 / `"AUDIT"` | `record.level()` | `"INFO"` |
+| 11 | `level` | string | 日志级别 | `record.level()` | `"INFO"` |
 | 12 | `target` | string | 日志 target（`aemeath:` 前缀） | `record.target()` | `"aemeath:agent:runtime"` |
-| 13 | `event_type` | string \| null | 事件类型枚举（见下文） | 诊断行默认 `null`，审计行由调用方传入 | `"llm_input"` |
-| 14 | `msg` | string \| null | 日志消息 / 审计行为 `null` | `record.args()` | `"compact triggered"` |
+| 13 | `msg` | string \| null | 日志消息（诊断行为自由文本，审计行为 JSON 字符串） | `record.args()` | `"compact triggered"` |
 
-> 诊断行通过 `format_diag_json_line(record)` 生成；审计行通过 `format_audit_json_line(event_type, payload)` 生成，payload 字段会与上下文字段**平铺**到同一 JSON 对象。
+> 审计日志的 `msg` 字段包含序列化后的 JSON payload（如 `{"event_type":"llm_input","messages":[...]}`），
+> 消费者可用 `jq 'select(.msg | startswith("{")) | .msg | fromjson' *.log` 解析。
 
-## event_type 枚举
+## event_type 字段
 
-`event_type` 字段标识审计/生命周期事件类型，仅在审计行中由调用方显式设置。诊断行默认 `null`。
+`event_type` 作为审计日志 JSON payload 内的字段（嵌套在 `msg` 中），由调用方在序列化 payload 时自行设置。诊断日志的 `msg` 为自由文本，不含 `event_type`。
 
-| event_type | 语义 | 关键字段 | 写入方式 |
-|-----------|------|---------|---------|
-| `llm_request_start` | LLM 请求发起 | `model`, `provider`, `request_id` | `log::debug!` with `event_type =` |
-| `llm_input` | 发送给 LLM 的完整 prompt | `messages`, `tools`, `model` | `UnifiedLogger::log_input()` |
-| `llm_chunk` | LLM stream 每个 chunk | `request_id`, chunk 文本 | `log::trace!` |
-| `llm_output` | LLM 完整响应 | `stop_reason`, `input_tokens`, `output_tokens` | `UnifiedLogger::log_output()` |
-| `llm_error` | LLM 请求错误 | `error`, `status_code` | `log::error!` |
-| `tool_call` | tool 调用发起 | `tool_name`, `input` | `log::info!` |
-| `tool_result` | tool 执行结果 | `tool_name`, `output`, `duration_ms` | `log::info!` |
-| `turn_start` | 一轮对话开始 | `turn` | `log::info!` |
-| `turn_end` | 一轮对话结束 | `turn`, `duration_ms` | `log::info!` |
-| `compact` | 上下文压缩触发 | `reason`, `before_tokens`, `after_tokens` | `log::info!` |
-| `user_input` | 用户输入 | `input_text`, `input_length` | `UnifiedLogger::log_user_input()` |
+| event_type | 语义 | 写入方式 |
+|-----------|------|---------|
+| `llm_input` | 发送给 LLM 的完整 prompt | `log::info!(target, "{}", json!({"event_type":"llm_input", ...}))` |
+| `llm_output` | LLM 完整响应 | `log::info!(target, "{}", json!({"event_type":"llm_output", ...}))` |
+| `user_input` | 用户输入 | `log::info!(target, "{}", json!({"event_type":"user_input", ...}))` |
+| `llm_request_start` | LLM 请求发起 | `log::debug!` |
+| `llm_chunk` | LLM stream 每个 chunk | `log::trace!` |
+| `llm_error` | LLM 请求错误 | `log::error!` |
+| `tool_call` | tool 调用发起 | `log::info!` |
+| `tool_result` | tool 执行结果 | `log::info!` |
+| `turn_start` | 一轮对话开始 | `log::info!` |
+| `turn_end` | 一轮对话结束 | `log::info!` |
+| `compact` | 上下文压缩触发 | `log::info!` |
 
 ## 日志级别策略
 
@@ -128,7 +128,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 ### preview 函数
 
 - `preview_messages(messages)` — 遍历 messages 列表，每条只记 `role` + content 前 100 字符 + 总长度
-- 审计行（`log_input`/`log_output`）中的 `messages` 字段受 `role_logs_enabled` 配置控制，关闭时不记录
+- 审计日志（`llm_input`/`llm_output`/`user_input`）中的 `msg` 字段包含完整 JSON payload，由调用方通过 `log::info!` 传入
 
 ### request_id 生命周期
 

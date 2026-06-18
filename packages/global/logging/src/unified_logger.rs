@@ -1,4 +1,4 @@
-//! UnifiedLogger — 统一日志入口（feature #79 路径 C）。
+//! UnifiedLogger — 统一日志入口。
 //!
 //! ## 路由
 //!
@@ -20,27 +20,36 @@
 //! | `aemeath:agent:audit`  | `agent-audit.log`   |
 //! | 其他                    | `aemeath.log`（硬兜底）|
 //!
-//! 审计日志通过静态方法 `log_input` / `log_output` / `log_user_input` 直接写入
-//! `agent-provider.log`，绕过 `log::*!` 宏以保留 `serde_json::Value` 原始结构。
+//! ## 输出模式
+//!
+//! - `File`（默认）：按 target 路由到 13 个日志文件。
+//! - `Stderr`：所有日志统一输出到 stderr（JSON Lines 格式，`-q` 调试模式）。
 //!
 //! ## 过滤
 //!
 //! - `enabled()` 委托 `env_logger::Logger::enabled()`：保留 `RUST_LOG` + `config.level` 解析。
-//! - `log_input` / `log_output` / `log_user_input` 额外受 `role_logs_enabled` 控制。
 //!
 //! ## 输出格式
 //!
-//! 诊断 + 审计均走 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
+//! 统一走 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
 //! 消费者可用 `grep -E '^\{' *.log | jq` 统一处理。
 
-use crate::format::{format_audit_json_line, format_diag_json_line};
+use crate::format::format_diag_json_line;
 use crate::rotation::rotate_if_needed;
 use log::{LevelFilter, Log, Metadata, Record};
-use serde_json::Value;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, stderr, BufWriter, Stderr, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+
+/// 输出模式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputMode {
+    /// 按 target 路由到 13 个日志文件。
+    File,
+    /// 所有日志统一输出到 stderr（JSON Lines 格式）。
+    Stderr,
+}
 
 /// 合法日志 target 白名单（12 个）。
 /// 所有 `log::xxx!` 调用的 target 值必须 ∈ 此列表或以此为前缀。
@@ -142,8 +151,8 @@ impl SinkPaths {
 
 /// 统一 logger。
 ///
-/// 通过 `Box::leak` 获得 `'static` 引用并 `log::set_logger`，因此静态方法
-/// (`log_input` / `log_output` / `log_user_input`) 与 `log::log!` 宏调用均能命中同一实例。
+/// 通过 `Box::leak` 获得 `'static` 引用并 `log::set_logger`，
+/// `log::log!` 宏调用均能命中同一实例。
 pub struct UnifiedLogger {
     aemeath: Mutex<Option<BufWriter<File>>>,
     tui: Mutex<Option<BufWriter<File>>>,
@@ -158,10 +167,11 @@ pub struct UnifiedLogger {
     project: Mutex<Option<BufWriter<File>>>,
     policy: Mutex<Option<BufWriter<File>>>,
     audit: Mutex<Option<BufWriter<File>>>,
+    stderr: Mutex<BufWriter<Stderr>>,
+    output_mode: OutputMode,
     paths: SinkPaths,
     max_bytes: u64,
     max_backups: usize,
-    role_logs_enabled: bool,
     filter: env_logger::Logger,
 }
 
@@ -188,40 +198,52 @@ const ALL_SINK_FILENAMES: &[&str] = &[
 impl UnifiedLogger {
     /// 初始化全局 logger。该函数只能调用一次（`log::set_logger` 限制）。
     ///
-    /// - `logs_dir`：日志根目录（不存在则创建）
+    /// - `logs_dir`：日志根目录（`File` 模式时不存在则创建）
     /// - `max_bytes` / `max_backups`：单文件轮转阈值与保留份数
-    /// - `role_logs_enabled`：是否启用审计 API（input/output/tool）
     /// - `max_level`：最大日志级别（通常从 `config.level` 解析得到）
+    /// - `output_mode`：`File` 写文件 / `Stderr` 写 stderr
     pub fn init(
         logs_dir: &Path,
         max_bytes: u64,
         max_backups: usize,
-        role_logs_enabled: bool,
         max_level: LevelFilter,
+        output_mode: OutputMode,
     ) -> io::Result<()> {
-        fs::create_dir_all(logs_dir)?;
-        let paths = SinkPaths::from_logs_dir(logs_dir);
-        for file_name in ALL_SINK_FILENAMES {
-            rotate_if_needed(paths.path_for_file(file_name), max_bytes, max_backups)?;
+        if output_mode == OutputMode::File {
+            fs::create_dir_all(logs_dir)?;
         }
+        let paths = SinkPaths::from_logs_dir(logs_dir);
+        if output_mode == OutputMode::File {
+            for file_name in ALL_SINK_FILENAMES {
+                rotate_if_needed(paths.path_for_file(file_name), max_bytes, max_backups)?;
+            }
+        }
+        let open = |p: &Path| -> io::Result<Mutex<Option<BufWriter<File>>>> {
+            if output_mode == OutputMode::File {
+                Ok(Mutex::new(Some(open_buf(p)?)))
+            } else {
+                Ok(Mutex::new(None))
+            }
+        };
         let logger = UnifiedLogger {
-            aemeath: Mutex::new(Some(open_buf(&paths.aemeath)?)),
-            tui: Mutex::new(Some(open_buf(&paths.tui)?)),
-            shared: Mutex::new(Some(open_buf(&paths.shared)?)),
-            composition: Mutex::new(Some(open_buf(&paths.composition)?)),
-            provider: Mutex::new(Some(open_buf(&paths.provider)?)),
-            runtime: Mutex::new(Some(open_buf(&paths.runtime)?)),
-            tools: Mutex::new(Some(open_buf(&paths.tools)?)),
-            prompt: Mutex::new(Some(open_buf(&paths.prompt)?)),
-            hook: Mutex::new(Some(open_buf(&paths.hook)?)),
-            storage: Mutex::new(Some(open_buf(&paths.storage)?)),
-            project: Mutex::new(Some(open_buf(&paths.project)?)),
-            policy: Mutex::new(Some(open_buf(&paths.policy)?)),
-            audit: Mutex::new(Some(open_buf(&paths.audit)?)),
+            aemeath: open(&paths.aemeath)?,
+            tui: open(&paths.tui)?,
+            shared: open(&paths.shared)?,
+            composition: open(&paths.composition)?,
+            provider: open(&paths.provider)?,
+            runtime: open(&paths.runtime)?,
+            tools: open(&paths.tools)?,
+            prompt: open(&paths.prompt)?,
+            hook: open(&paths.hook)?,
+            storage: open(&paths.storage)?,
+            project: open(&paths.project)?,
+            policy: open(&paths.policy)?,
+            audit: open(&paths.audit)?,
+            stderr: Mutex::new(BufWriter::new(stderr())),
+            output_mode,
             paths,
             max_bytes,
             max_backups,
-            role_logs_enabled,
             filter: build_filter(max_level),
         };
         let leaked: &'static UnifiedLogger = Box::leak(Box::new(logger));
@@ -235,42 +257,6 @@ impl UnifiedLogger {
     /// 取得当前全局 logger（`init` 之后才非空）。
     pub fn current() -> Option<&'static UnifiedLogger> {
         LOGGER.get().copied()
-    }
-
-    /// 记录 LLM 输入到 `agent-provider.log`。
-    pub fn log_input(_role: &str, payload: Value) {
-        let Some(logger) = Self::current() else {
-            return;
-        };
-        if !logger.role_logs_enabled {
-            return;
-        }
-        let line = format_audit_json_line("llm_input", payload);
-        logger.write_line(&logger.provider, &logger.paths.provider, &line);
-    }
-
-    /// 记录 LLM 输出到 `agent-provider.log`。
-    pub fn log_output(_role: &str, payload: Value) {
-        let Some(logger) = Self::current() else {
-            return;
-        };
-        if !logger.role_logs_enabled {
-            return;
-        }
-        let line = format_audit_json_line("llm_output", payload);
-        logger.write_line(&logger.provider, &logger.paths.provider, &line);
-    }
-
-    /// 记录用户输入到 `agent-provider.log`（event_type="user_input"）。
-    pub fn log_user_input(payload: Value) {
-        let Some(logger) = Self::current() else {
-            return;
-        };
-        if !logger.role_logs_enabled {
-            return;
-        }
-        let line = format_audit_json_line("user_input", payload);
-        logger.write_line(&logger.provider, &logger.paths.provider, &line);
     }
 
     /// 按 target 查找对应的诊断 sink。
@@ -295,7 +281,12 @@ impl UnifiedLogger {
     }
 
     fn write_line(&self, sink: &Mutex<Option<BufWriter<File>>>, path: &Path, line: &str) {
-        if let Ok(mut guard) = sink.lock() {
+        if self.output_mode == OutputMode::Stderr {
+            if let Ok(mut w) = self.stderr.lock() {
+                let _ = writeln!(w, "{}", line);
+                let _ = w.flush();
+            }
+        } else if let Ok(mut guard) = sink.lock() {
             self.maybe_rotate(path, &mut guard);
             if let Some(writer) = guard.as_mut() {
                 let _ = writeln!(writer, "{}", line);
@@ -342,11 +333,17 @@ impl Log for UnifiedLogger {
     }
 
     fn flush(&self) {
-        for file_name in ALL_SINK_FILENAMES {
-            let (sink, _) = self.route_sink_by_file(file_name);
-            if let Ok(mut guard) = sink.lock() {
-                if let Some(w) = guard.as_mut() {
-                    let _ = w.flush();
+        if self.output_mode == OutputMode::Stderr {
+            if let Ok(mut w) = self.stderr.lock() {
+                let _ = w.flush();
+            }
+        } else {
+            for file_name in ALL_SINK_FILENAMES {
+                let (sink, _) = self.route_sink_by_file(file_name);
+                if let Ok(mut guard) = sink.lock() {
+                    if let Some(w) = guard.as_mut() {
+                        let _ = w.flush();
+                    }
                 }
             }
         }

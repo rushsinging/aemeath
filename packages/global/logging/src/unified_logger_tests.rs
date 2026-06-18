@@ -1,5 +1,4 @@
 use super::*;
-use serde_json::json;
 
 #[test]
 fn sink_paths_in_logs_dir() {
@@ -19,14 +18,6 @@ fn sink_paths_in_logs_dir() {
     assert_eq!(paths.audit, PathBuf::from("/tmp/logs/agent-audit.log"));
 }
 
-#[test]
-fn static_audit_methods_are_noop_without_init() {
-    // 未 init 时 log_input/output/user_input 应静默 no-op（不能 panic）
-    UnifiedLogger::log_input("default", json!({}));
-    UnifiedLogger::log_output("default", json!({}));
-    UnifiedLogger::log_user_input(json!({}));
-}
-
 /// 构造一个仅用于测试 `maybe_rotate` 的最小 logger（其余 sink 留空）。
 fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> UnifiedLogger {
     UnifiedLogger {
@@ -43,10 +34,11 @@ fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> Unified
         project: Mutex::new(None),
         policy: Mutex::new(None),
         audit: Mutex::new(None),
+        stderr: Mutex::new(BufWriter::new(stderr())),
+        output_mode: OutputMode::File,
         paths: SinkPaths::from_logs_dir(dir),
         max_bytes,
         max_backups,
-        role_logs_enabled: false,
         filter: build_filter(LevelFilter::Off),
     }
 }
