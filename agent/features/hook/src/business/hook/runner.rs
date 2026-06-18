@@ -165,11 +165,21 @@ impl HookRunner {
         use tokio::io::AsyncWriteExt;
         if let Some(stdin) = child.stdin.take() {
             let mut writer = tokio::io::BufWriter::new(stdin);
+            // stdin 写入或关闭失败不中断执行 — 快速 hook（如 echo）可能在
+            // 我们写入前就退出关闭了读端（EPIPE），但 stdout 仍可读取。
             if let Err(e) = writer.write_all(input_json.as_bytes()).await {
-                return HookResult::with_error(format!("写入 hook stdin 失败: {e}"));
+                log::warn!(
+                    target: LOG_TARGET,
+                    "hook stdin write failed (process may have exited early): event={:?} command={} error={}",
+                    input.event, command, e
+                );
             }
             if let Err(e) = writer.shutdown().await {
-                return HookResult::with_error(format!("关闭 hook stdin 失败: {e}"));
+                log::debug!(
+                    target: LOG_TARGET,
+                    "hook stdin shutdown: event={:?} command={} error={}",
+                    input.event, command, e
+                );
             }
             // stdin 在此处被关闭，进程看到 EOF
         }
