@@ -35,7 +35,7 @@ impl UpdateGateway {
     pub fn new(cache_path: PathBuf) -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .user_agent(format!("aemeath/{}", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("aemeath/{}", share::VERSION))
             .build()
             .unwrap_or_default();
         Self { http, cache_path }
@@ -249,7 +249,7 @@ fn strip_v_prefix(tag: &str) -> &str {
 
 /// 解析当前版本号。
 fn current_version() -> Version {
-    Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION 必须是合法 semver")
+    Version::parse(share::VERSION).expect("AEMEATH_VERSION / CARGO_PKG_VERSION 必须是合法 semver")
 }
 
 /// 判断缓存是否在有效期内。
@@ -427,8 +427,19 @@ mod tests {
     #[test]
     fn test_build_version_check_older_version() {
         // 模拟一个比当前版本旧的 release
+        let cur = current_version();
+        // 构造明确比 current 旧的版本；current == 0.0.0（无 tag fallback）时无更旧版本，跳过
+        let older_tag = if cur.patch > 0 {
+            format!("v{}.{}.{}", cur.major, cur.minor, cur.patch - 1)
+        } else if cur.minor > 0 {
+            format!("v{}.{}.0", cur.major, cur.minor - 1)
+        } else if cur.major > 0 {
+            format!("v{}.0.0", cur.major - 1)
+        } else {
+            return;
+        };
         let release = GitHubRelease {
-            tag_name: "v0.0.1".into(),
+            tag_name: older_tag,
             html_url: "https://example.com".into(),
             body: None,
             prerelease: false,

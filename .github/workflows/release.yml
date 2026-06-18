@@ -25,32 +25,23 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Check version consistency (tag vs Cargo.toml)
+      - name: Resolve release version
         id: version
         run: |
-          # 从触发来源提取版本号
+          # 从触发来源提取版本号（git tag 或 workflow_dispatch 输入）
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ inputs.version }}"
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
           fi
-          echo "Trigger version: $VERSION"
-
-          # 从 Cargo.toml [workspace.package] 提取版本号
-          CARGO_VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml \
-            | grep '^version' | head -1 | cut -d'"' -f2)
-          echo "Cargo.toml version: $CARGO_VERSION"
-
-          if [ "$VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::Version mismatch: expected $CARGO_VERSION (Cargo.toml), got $VERSION (${{ github.event_name }})"
-            exit 1
-          fi
-
+          echo "Release version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: cargo fmt --check
@@ -76,6 +67,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -113,6 +106,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
