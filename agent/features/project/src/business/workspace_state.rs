@@ -70,15 +70,26 @@ fn resolve_worktree_path(
     }
 }
 
-pub fn set_cwd(
+pub fn set_path_base(
     state: &mut WorkspaceState,
-    git: &dyn GitWorktreeOps,
     path: PathBuf,
 ) -> Result<(), WorkspaceError> {
-    if let Ok(root) = git.show_toplevel(&path) {
-        state.working_root = root;
-    }
+    // set_path_base 只更新 path_base（当前路径基准）
+    // working_root 只有在 enter/exit worktree 时才会改变
     state.path_base = path;
+    Ok(())
+}
+
+pub fn set_working_root(
+    state: &mut WorkspaceState,
+    root: PathBuf,
+    path: PathBuf,
+) -> Result<(), WorkspaceError> {
+    // set_working_root 更新 working_root（当前工作根目录）
+    // 同时更新 path_base（当前路径基准）
+    // 用于 enter/exit worktree 时更新工作根目录
+    state.working_root = root;
+    set_path_base(state, path)?;
     Ok(())
 }
 
