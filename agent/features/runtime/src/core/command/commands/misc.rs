@@ -204,7 +204,7 @@ inventory::submit! {
             |_args, _ctx| {
                 CommandResult::Success(format!(
                     "aemeath v{}\n\nBuild info:\n  Rust version: stable\n  Target: {}",
-                    env!("CARGO_PKG_VERSION"), std::env::consts::ARCH
+                    share::VERSION, std::env::consts::ARCH
                 ))
             },
         )

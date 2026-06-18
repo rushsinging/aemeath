@@ -45,7 +45,7 @@ impl AnthropicProvider {
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             thinking_max_tokens,
-            user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: format!("aemeath/{}", share::VERSION),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
                 .build()

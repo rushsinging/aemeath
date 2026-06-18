@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::LOG_TARGET;
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
+use crate::LOG_TARGET;
 
 mod conversion;
 mod non_stream;
@@ -58,7 +58,7 @@ impl OllamaProvider {
             api_key,
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
-            user_agent: format!("aemeath/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: format!("aemeath/{}", share::VERSION),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
                 .build()
