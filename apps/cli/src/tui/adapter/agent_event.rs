@@ -84,6 +84,10 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             message: format!("{event}"),
         }),
         UiEvent::HookEvent(event) => {
+            // PostCompact 事件停止 spinner
+            if event.hook_name == "PostCompact" {
+                return runtime(RuntimeIntent::StopSpinner);
+            }
             let mut mapping = runtime(RuntimeIntent::SetSpinnerPhase(hook_spinner_phase(event)));
             if let Some(notice) = hook_event_notice(event) {
                 mapping
