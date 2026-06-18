@@ -272,6 +272,15 @@ impl App {
             UiEvent::TaskStatusChanged => {
                 effects.push(Effect::FetchTaskStatus);
             }
+            UiEvent::UpdateAvailable {
+                current,
+                latest,
+                release_url,
+            } => {
+                self.append_system_notice(format!(
+                    "[aemeath v{latest} is available (you have v{current}); run `aemeath update` to upgrade | {release_url}]"
+                ));
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

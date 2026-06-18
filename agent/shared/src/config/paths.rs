@@ -20,6 +20,7 @@ pub const MCP_CONFIG_FILE: &str = "mcp.json";
 pub const HISTORY_FILE: &str = "history.json";
 pub const COST_HISTORY_FILE: &str = "cost_history.json";
 pub const SETTINGS_FILE: &str = "settings.json";
+pub const UPDATE_CHECK_FILE: &str = "update_check.json";
 
 pub fn global_agents_dir() -> PathBuf {
     PathBuf::from(AGENTS_DIR_NAME)
@@ -123,6 +124,10 @@ pub fn global_cost_history_path() -> PathBuf {
 
 pub fn global_settings_path() -> PathBuf {
     global_agents_dir().join(SETTINGS_FILE)
+}
+
+pub fn global_update_check_path() -> PathBuf {
+    global_agents_dir().join(UPDATE_CHECK_FILE)
 }
 
 pub fn old_global_skills_dir() -> PathBuf {

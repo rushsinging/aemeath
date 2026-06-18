@@ -8,5 +8,7 @@ runtime = { path = "../features/runtime" }
 tools = { path = "../features/tools" }
 provider = { path = "../features/provider" }
 project = { path = "../features/project" }
+update = { path = "../features/update" }
+share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
 async-trait = { workspace = true }

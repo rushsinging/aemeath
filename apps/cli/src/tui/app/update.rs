@@ -58,6 +58,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::TaskStatusChanged => "TaskStatusChanged",
         UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
         UiEvent::DrainQueuedInput { .. } => "DrainQueuedInput",
+        UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
     }
 }
 

@@ -162,12 +162,14 @@ fn format_result_lines_tail(
     let all_lines: Vec<&str> = result.lines().collect();
     let start = all_lines.len().saturating_sub(max_lines);
     let mut out: Vec<RenderedLine> = Vec::new();
-    // SAFETY: start ≤ all_lines.len()（saturating_sub 保证），Vec slice 不会越界
-    for line in &all_lines[start..] { // allow unsafe_text_op: start 从 Vec 下标推导，不涉及 str 字节偏移
-        out.extend(wrap_spans_to_rendered_lines(
-            vec![Span::styled(line.to_string(), base)],
-            width as usize,
-        ));
+    // get(start..) 返回 Option，不会 panic
+    if let Some(remaining) = all_lines.get(start..) {
+        for line in remaining {
+            out.extend(wrap_spans_to_rendered_lines(
+                vec![Span::styled(line.to_string(), base)],
+                width as usize,
+            ));
+        }
     }
     // 截断 wrap 展开后超出 max_lines 的渲染行
     if out.len() > max_lines {
