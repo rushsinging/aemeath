@@ -29,6 +29,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
+use crate::LOG_TARGET;
 
 pub struct ChatLoopContext<S, Q, I>
 where
@@ -104,7 +105,7 @@ where
     let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
     let in_worktree = project::api::WorkspaceRead::in_worktree(workspace.as_ref());
     hook_runner.set_project_context(cwd.display().to_string(), in_worktree);
-    log::info!(target: "runtime::loop_runner",
+    log::info!(target: LOG_TARGET,
         "chat loop hook runner ready: project_dir={} configured_events={}",
         hook_runner.project_dir(),
         hook_runner.hook_count()
@@ -272,6 +273,13 @@ where
             tool_identity.clone(),
             turn_context.clone(),
         );
+        // 设置日志 context（每次 LLM 调用前）
+        logging::context::set_current_model(client.model_name().to_string());
+        logging::context::set_current_provider(client.provider_name().to_string());
+        logging::context::set_current_role("default".to_string());
+        let request_id = uuid::Uuid::now_v7().to_string();
+        logging::context::set_current_request_id(request_id);
+
         log_llm_input(
             &messages_for_api,
             messages.len(),
@@ -290,7 +298,7 @@ where
             )
             .await;
         let api_elapsed = api_start.elapsed().as_secs_f64();
-        log::debug!(target: "runtime::loop_runner",
+        log::debug!(target: LOG_TARGET,
             "turn api finished: session={}, turn={}, elapsed_secs={:.3}",
             session_id,
             turn_count,

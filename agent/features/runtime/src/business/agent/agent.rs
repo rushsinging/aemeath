@@ -1,6 +1,7 @@
 use share::message::{ContentBlock, Message};
 use share::tool::{ImageData, ToolResult};
 use tools::api::{Tool, ToolExecutionContext, ToolRegistry};
+use crate::LOG_TARGET;
 
 /// (runtime_id, provider_id, output_text, json_content, is_error, images)
 pub type ToolResultTuple = (
@@ -51,7 +52,7 @@ async fn call_tool_with_timeout(
     tokio::select! {
         _ = ctx.cancel.cancelled() => {
             let message = tool_call_cancelled_message(name);
-            log::info!(target: "runtime::agent", "{message}");
+            log::info!(target: LOG_TARGET, "{message}");
             Err(message)
         }
         result = tokio::time::timeout(
@@ -60,7 +61,7 @@ async fn call_tool_with_timeout(
         ) => {
             match result {
                 Ok(result) => {
-                    log::debug!(target: "runtime::agent",
+                    log::debug!(target: LOG_TARGET,
                         "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
                         name,
                         timeout,
@@ -71,7 +72,7 @@ async fn call_tool_with_timeout(
                 Err(_) => {
                     let elapsed = started.elapsed();
                     let message = tool_call_timeout_message(name, timeout, elapsed);
-                    log::warn!(target: "runtime::agent", "{message}");
+                    log::warn!(target: LOG_TARGET, "{message}");
                     Err(message)
                 }
             }

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 use uuid::{NoContext, Timestamp, Uuid};
+use crate::LOG_TARGET;
 
 /// Session ID type
 pub type SessionId = String;
@@ -231,7 +232,7 @@ impl AppState {
         }
         let session = InternalSession::new(cwd);
         if let Err(e) = self.save_session(&session).await {
-            log::warn!(target: "runtime::state", "failed to persist new session {}: {e}", session.id);
+            log::warn!(target: LOG_TARGET, "failed to persist new session {}: {e}", session.id);
         }
         session
     }

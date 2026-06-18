@@ -3,6 +3,7 @@ use crate::business::chat::looping::events::{
 };
 use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
 use provider::api::StreamHandler;
+use crate::LOG_TARGET;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamingBlockKind {
@@ -97,7 +98,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
-        log::debug!(target: "runtime::stream_handler",
+        log::debug!(target: LOG_TARGET,
             "on_tool_use_start: name={} provider_id={:?} index={} turn_id={}",
             name, provider_id, index, self.context.turn_id,
         );

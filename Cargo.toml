@@ -29,3 +29,7 @@ futures-util = "0.3"
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["stream"] }
 inventory = "0.3"
+
+[workspace.package]
+version = "0.8.2"
+edition = "2021"

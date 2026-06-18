@@ -4,6 +4,7 @@ use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
+use crate::LOG_TARGET;
 
 impl<'a> SubAgentRun<'a> {
     pub(super) fn progress_tools_done(&self, turn_number: usize, result_count: usize) {
@@ -53,7 +54,7 @@ impl<'a> SubAgentRun<'a> {
         for (id, _provider_id, output, _content, is_error, _) in results.iter() {
             let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
             log::info!(
-                target: "tools::audit",
+                target: LOG_TARGET,
                 "tool_result: {}",
                 serde_json::to_string(&data).unwrap_or_default()
             );

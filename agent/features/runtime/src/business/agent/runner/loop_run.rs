@@ -15,6 +15,7 @@ use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
 use tools::api::ToolExecutionContext;
+use crate::LOG_TARGET;
 
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {
@@ -249,7 +250,7 @@ impl<'a> SubAgentRun<'a> {
         for tool_call in tool_calls {
             let data = build_json_logger_tool_call_data(tool_call);
             log::info!(
-                target: "tools::audit",
+                target: LOG_TARGET,
                 "tool_call: {}",
                 serde_json::to_string(&data).unwrap_or_default()
             );

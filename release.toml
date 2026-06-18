@@ -1,0 +1,12 @@
+# cargo-release 配置
+# 用法: cargo release <version> --execute
+# 例如: cargo release 0.8.3 --execute
+
+consolidate-commits = true
+consolidate-pushes = true
+allow-branch = ["main"]
+
+pre-release-hook = ["cargo", "build", "--workspace"]
+
+[[pre-release-replacements]]
+# 更新引用了版本号的文件（如有需要在此添加）

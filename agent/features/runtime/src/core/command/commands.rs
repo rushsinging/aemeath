@@ -42,6 +42,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use storage::api::TaskStore;
+use crate::LOG_TARGET;
 
 /// Result of executing a command
 #[derive(Debug, Clone)]
@@ -135,7 +136,7 @@ impl CommandContext {
     pub fn new(state: Arc<AppState>, config: Config, cwd: String, session_id: String) -> Self {
         let mut cost_tracker = CostTracker::new();
         if let Err(e) = cost_tracker.load() {
-            log::warn!(target: "runtime::commands", "Failed to load cost history: {}", e);
+            log::warn!(target: LOG_TARGET, "Failed to load cost history: {}", e);
         }
         Self {
             state,

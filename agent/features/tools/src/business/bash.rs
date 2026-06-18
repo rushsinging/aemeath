@@ -1,5 +1,6 @@
 mod safety;
 
+use crate::LOG_TARGET;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
@@ -96,7 +97,7 @@ impl Tool for BashTool {
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(
-            target: "tools::bash",
+            target: LOG_TARGET,
             "executing command: path_base={:?} timeout_ms={} command={:?}",
             path_base, timeout_ms, command
         );
@@ -301,7 +302,7 @@ impl Tool for BashTool {
                 let elapsed_ms = start.elapsed().as_millis();
                 if failure_detail.starts_with("signal") {
                     log::warn!(
-                        target: "tools::bash",
+                        target: LOG_TARGET,
                         "command terminated by signal: {}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
                         failure_detail,
                         command,
@@ -315,7 +316,7 @@ impl Tool for BashTool {
                     );
                 } else {
                     log::debug!(
-                        target: "tools::bash",
+                        target: LOG_TARGET,
                         "command finished: exit_code={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
                         exit_code,
                         command,
@@ -372,7 +373,7 @@ impl Tool for BashTool {
                 let stdout_lossy = String::from_utf8_lossy(&stdout);
                 let stderr_lossy = String::from_utf8_lossy(&stderr);
                 log::warn!(
-                    target: "tools::bash",
+                    target: LOG_TARGET,
                     "wait_result failed: error={}, command: {:?}, pid={:?} path_base={:?} elapsed_ms={} stdout_len={} stderr_len={} stdout_preview={:?} stderr_preview={:?}",
                     e,
                     command,

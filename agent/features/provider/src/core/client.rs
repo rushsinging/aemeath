@@ -3,6 +3,7 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
+use crate::LOG_TARGET;
 use crate::api::ProviderDriverKind;
 use crate::business::providers::openai_compatible::ReasoningConfig;
 use crate::business::types::{StreamResponse, SystemBlock};
@@ -318,9 +319,24 @@ impl LlmClient {
             .iter()
             .map(|b| truncate_preview(&b.text, 200))
             .collect();
-        log::debug!(target: "provider::client",
-            "[LLM REQUEST] provider={} model={} system_blocks={} messages={} tools={}\n  system: {:?}\n  messages: {}",
-            self.provider_name(), self.model_name(), system.len(), messages.len(), tool_schemas.len(),
+        // 计算 messages 总字符数用于 DEBUG 摘要
+        let total_chars: usize = messages
+            .iter()
+            .flat_map(|m| m.content.iter())
+            .map(|b| match b {
+                share::message::ContentBlock::Text { text } => text.len(),
+                share::message::ContentBlock::Thinking { thinking } => thinking.len(),
+                share::message::ContentBlock::ToolUse { input, .. } => input.to_string().len(),
+                share::message::ContentBlock::ToolResult { content, .. } => content.to_string().len(),
+                share::message::ContentBlock::Image { .. } => 0,
+            })
+            .sum();
+        log::debug!(target: LOG_TARGET,
+            "[LLM REQUEST] provider={} model={} system_blocks={} messages={}({} chars) tools={}",
+            self.provider_name(), self.model_name(), system.len(), messages.len(), total_chars, tool_schemas.len(),
+        );
+        log::trace!(target: LOG_TARGET,
+            "[LLM REQUEST] system: {:?}\n  messages: {}",
             system_preview, serde_json::to_string_pretty(&msg_summary).unwrap_or_default(),
         );
     }
@@ -365,16 +381,20 @@ impl LlmClient {
                     })
                     .collect();
 
-                log::debug!(target: "provider::client",
-                    "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}\n  text: {}\n  thinking: {}\n  tools: {}",
+                log::debug!(target: LOG_TARGET,
+                    "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}",
                     resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
-                    tool_uses.len(), thinking_info.len(), text_preview,
+                    tool_uses.len(), thinking_info.len(),
+                );
+                log::trace!(target: LOG_TARGET,
+                    "[LLM RESPONSE] text: {}\n  thinking: {}\n  tools: {}",
+                    text_preview,
                     serde_json::to_string_pretty(&thinking_info).unwrap_or_default(),
                     serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
                 );
             }
             Err(e) => {
-                log::warn!(target: "provider::client", "[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
+                log::warn!(target: LOG_TARGET, "[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
             }
         }
     }
@@ -390,7 +410,7 @@ impl LlmClient {
         let (text_blocks, thinking_blocks, tool_use_blocks, tool_result_blocks, image_blocks) =
             content_block_counts(messages);
         let (largest_idx, largest_role, largest_bytes) = largest_message_summary(messages);
-        log::warn!(target: "provider::client",
+        log::warn!(target: LOG_TARGET,
             "[LLM STREAM ERROR] phase={} provider={} model={} system_blocks={} messages={} tools={} messages_payload_bytes={} content_blocks={{text:{},thinking:{},tool_use:{},tool_result:{},image:{}}} largest_message={{index:{},role:{},bytes:{}}} error={}{}",
             phase,
             self.provider_name(),

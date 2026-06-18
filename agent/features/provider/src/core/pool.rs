@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::LOG_TARGET;
 use crate::api::ProviderDriverKind;
 use share::config::ModelsConfig;
 
@@ -64,11 +65,11 @@ impl LlmClientPool {
                     .lock()
                     .await
                     .insert(spec.to_string(), client.clone());
-                log::info!(target: "provider::pool", "[LlmClientPool] created new client for {:?}", spec);
+                log::info!(target: LOG_TARGET, "[LlmClientPool] created new client for {:?}", spec);
                 client
             }
             Err(e) => {
-                log::warn!(target: "provider::pool",
+                log::warn!(target: LOG_TARGET,
                     "[LlmClientPool] failed to create client for {:?}: {}. Falling back to default.",
                     spec,
                     e
@@ -162,7 +163,7 @@ impl LlmClientPool {
 
         let max_tokens = model_entry.max_tokens;
         if max_tokens == 0 {
-            log::warn!(target: "provider::pool",
+            log::warn!(target: LOG_TARGET,
                 "[LlmClientPool] max_tokens is 0 for '{}' — using 200000 default",
                 spec
             );

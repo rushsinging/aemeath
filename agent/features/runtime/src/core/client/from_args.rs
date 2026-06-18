@@ -22,6 +22,7 @@ use tools::api as tools_crate;
 use tools::api::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};
+use crate::LOG_TARGET;
 
 /// 从 Args 初始化 AgentClient。
 ///
@@ -88,7 +89,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     )
     .map_err(|e| SdkError::Init(e.to_string()))?;
 
-    log::info!(target: "runtime::from_args",
+    log::info!(target: LOG_TARGET,
         "[main] source={} api={} model={} reasoning={} effort={:?} args.no_think={}",
         resolved_model.source_key,
         driver.as_str(),
@@ -113,7 +114,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let task_store_before = task_store.clone();
     let skills_map = load_configured_skills(&cwd, config_file.as_ref().map(|c| &c.skills));
     if !skills_map.is_empty() {
-        log::info!(target: "runtime::from_args", "[Skills] loaded {} skills", skills_map.len());
+        log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let registry = {
@@ -188,7 +189,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         config_file.as_ref(),
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
-    log::info!(target: "runtime::from_args",
+    log::info!(target: LOG_TARGET,
         "concurrency limits: max_tool={}, max_agent={}",
         max_tool_concurrency,
         max_agent_concurrency

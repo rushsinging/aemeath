@@ -4,6 +4,7 @@ use hook::api::{CompactHookData, HookData, HookRunner};
 use share::config::hooks::HookEvent;
 use share::message::Message;
 use std::sync::Arc;
+use crate::LOG_TARGET;
 
 /// Run auto-compaction if the context is approaching the limit.
 /// Returns true if the messages were modified.
@@ -63,7 +64,7 @@ where
     }
 
     if pre_compact_blocked {
-        log::warn!(target: "runtime::compact", "PreCompact hook blocked compaction");
+        log::warn!(target: LOG_TARGET, "PreCompact hook blocked compaction");
         return false;
     }
 

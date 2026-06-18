@@ -4,6 +4,8 @@
 //! `~/.aemeath/tool-results/{session_id}/{tool_use_id}.txt` and replaced in-context with
 //! a compact `<persisted-output>` reference containing a preview.
 
+use crate::LOG_TARGET;
+
 use std::path::PathBuf;
 
 const MAX_TOOL_RESULT_CHARS: usize = 50_000;
@@ -66,7 +68,7 @@ pub fn persist_tool_result(
 
     // Validate tool_use_id to prevent path traversal
     if tool_use_id.contains('/') || tool_use_id.contains('\\') || tool_use_id.contains("..") {
-        log::warn!(target: "storage::tool_result",
+        log::warn!(target: LOG_TARGET,
             "rejecting tool_use_id with path separators: {}",
             tool_use_id
         );
@@ -75,7 +77,7 @@ pub fn persist_tool_result(
 
     let dir = tool_results_dir(session_id);
     if let Err(e) = std::fs::create_dir_all(&dir) {
-        log::warn!(target: "storage::tool_result", "failed to create tool-results dir: {e}");
+        log::warn!(target: LOG_TARGET, "failed to create tool-results dir: {e}");
         return None;
     }
 
@@ -84,7 +86,7 @@ pub fn persist_tool_result(
     // Write-once semantics: skip if already persisted (idempotent on resume)
     if !filepath.exists() {
         if let Err(e) = std::fs::write(&filepath, output) {
-            log::warn!(target: "storage::tool_result", "failed to persist tool result: {e}");
+            log::warn!(target: LOG_TARGET, "failed to persist tool result: {e}");
             return None;
         }
     }

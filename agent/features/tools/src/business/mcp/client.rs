@@ -1,3 +1,5 @@
+use crate::LOG_TARGET;
+
 use super::config::{McpServerConfig, McpToolDef, McpTransportKind};
 use super::sse::SseTransport;
 use super::validation::{filter_env, validate_command, validate_remote_url};
@@ -92,7 +94,7 @@ impl McpClient {
         tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = reader.next_line().await {
-                log::warn!(target: "tools::mcp_client", "[MCP:{}:stderr] {}", server_name, line);
+                log::warn!(target: LOG_TARGET, "[MCP:{}:stderr] {}", server_name, line);
             }
         });
 

@@ -6,6 +6,7 @@ use hook::api::HookRunner;
 use share::config::{paths, MemoryConfig};
 
 use super::git_context::{collect_git_context, is_git_repo};
+use crate::LOG_TARGET;
 
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
 #[derive(Clone)]
@@ -368,7 +369,7 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner) -> String {
     let warnings = policy::api::scan_content("AGENTS.md", &agents_md);
     if !warnings.is_empty() {
         for w in &warnings {
-            log::warn!(target: "runtime::prompt_build",
+            log::warn!(target: LOG_TARGET,
                 "[Security] {} in {} line {}: {}",
                 w.threat_type,
                 w.filename,

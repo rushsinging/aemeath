@@ -1,3 +1,5 @@
+use crate::LOG_TARGET;
+
 use serde::Deserialize;
 use share::skill_ops::Skill;
 use std::path::{Path, PathBuf};
@@ -56,7 +58,7 @@ pub fn parse_skill(path: &Path) -> Option<Skill> {
     let fm: SkillFrontmatter = match serde_yml::from_str(frontmatter_str) {
         Ok(fm) => fm,
         Err(e) => {
-            log::warn!(target: "prompt::parser",
+            log::warn!(target: LOG_TARGET,
                 "failed to parse YAML frontmatter in {}: {e}",
                 path.display()
             );
@@ -120,7 +122,7 @@ fn read_skill_content_from_path(path: &Path) -> String {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            log::warn!(target: "prompt::parser", "failed to read skill content from {}: {e}", path.display());
+            log::warn!(target: LOG_TARGET, "failed to read skill content from {}: {e}", path.display());
             return String::new();
         }
     };

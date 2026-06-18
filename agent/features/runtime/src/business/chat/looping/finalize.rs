@@ -5,6 +5,7 @@ use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::PathBuf;
 use storage::api::{BatchStatus, TaskStore};
+use crate::LOG_TARGET;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
@@ -114,7 +115,7 @@ pub(crate) async fn finish_completed_loop<S>(
             task_store
                 .set_batch_status(active.id, BatchStatus::Archived)
                 .await;
-            log::info!(target: "runtime::finalize",
+            log::info!(target: LOG_TARGET,
                 "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
                 active.id
             );

@@ -18,6 +18,7 @@ use share::config::{
 use std::{collections::HashMap, path::PathBuf};
 
 use super::config_manager::ConfigManager;
+use crate::LOG_TARGET;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct ConfigPatch {
@@ -601,7 +602,7 @@ impl ConfigManager {
                 "remind" => share::config::GuidanceReloadPolicy::Remind,
                 "confirm" => share::config::GuidanceReloadPolicy::Confirm,
                 _ => {
-                    log::warn!(target: "runtime::config_manager", "[config] unknown guidance.reload_policy '{}', keeping default", v);
+                    log::warn!(target: LOG_TARGET, "[config] unknown guidance.reload_policy '{}', keeping default", v);
                     base.reload_policy
                 }
             };

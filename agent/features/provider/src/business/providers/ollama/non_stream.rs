@@ -2,6 +2,7 @@
 
 use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
+use crate::LOG_TARGET;
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::StreamHandler;
 use share::message::{ContentBlock, Message, Role};
@@ -28,7 +29,7 @@ impl OllamaProviderNonStream for OllamaProvider {
         let headers = self.build_headers()?;
         let url = format!("{}/api/chat", self.base_url);
 
-        log::debug!(target: "provider::ollama_non_stream",
+        log::debug!(target: LOG_TARGET,
             "[ollama non-stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             self.model,

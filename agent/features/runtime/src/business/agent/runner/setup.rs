@@ -7,6 +7,7 @@ use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use storage::api::TaskStore;
 use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
+use crate::LOG_TARGET;
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -51,7 +52,7 @@ impl AgentRunner for CliAgentRunner {
             .and_then(|(_, _, entry)| entry.reasoning);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         client.set_reasoning(reasoning);
-        log::info!(target: "runtime::setup",
+        log::info!(target: LOG_TARGET,
             "[SubAgent] reasoning={} max_tokens={:?} (role={:?}, model={:?}, default={})",
             reasoning,
             max_tokens_override,
@@ -114,7 +115,7 @@ impl AgentRunner for CliAgentRunner {
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "-".to_string());
             log::info!(
-                target: "sub_agent",
+                target: LOG_TARGET,
                 "[role:{} model:{} turn:{}] {}",
                 role_name,
                 model_name,
@@ -150,7 +151,7 @@ impl AgentRunner for CliAgentRunner {
                     })
                 })
                 .collect();
-            log::info!(target: "runtime::setup",
+            log::info!(target: LOG_TARGET,
                 "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
                 session_id_for_log,
                 turn,

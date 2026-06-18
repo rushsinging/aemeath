@@ -2,6 +2,7 @@ use super::types::{ReflectionError, ReflectionResult};
 use super::{ReflectionEngine, ReflectionOutput};
 use std::path::{Path, PathBuf};
 use storage::api::MemoryStore;
+use crate::LOG_TARGET;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionRunMode {
@@ -89,7 +90,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
                 auto_applied = true;
             }
             Err(error) => {
-                log::warn!(target: "runtime::reflection", "Reflection auto apply failed: {error}");
+                log::warn!(target: LOG_TARGET, "Reflection auto apply failed: {error}");
             }
         }
     }

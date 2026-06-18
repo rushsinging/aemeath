@@ -14,7 +14,7 @@ mod architecture_tests;
 #[cfg(test)]
 mod log_scope_tests;
 
-pub(crate) const LOG_TARGET: &str = "cli::tui";
+pub const LOG_TARGET: &str = "aemeath:tui";
 
 #[macro_export]
 macro_rules! tui_log_debug {
@@ -65,6 +65,6 @@ pub use self::render::status::StatusBar;
 mod tests {
     #[test]
     fn test_log_target_uses_cli_prefix() {
-        assert_eq!(super::LOG_TARGET, "cli::tui");
+        assert_eq!(super::LOG_TARGET, "aemeath:tui");
     }
 }
