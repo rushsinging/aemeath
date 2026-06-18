@@ -45,12 +45,9 @@ fn exit_pops_and_restores() {
 }
 
 #[test]
-fn set_cwd_detects_root() {
-    let mut git = FakeGit::default();
-    git.toplevel
-        .insert(PathBuf::from("/repo/sub"), PathBuf::from("/repo"));
+fn set_path_base_detects_root() {
     let mut s = st("/repo");
-    set_cwd(&mut s, &git, PathBuf::from("/repo/sub")).unwrap();
+    set_path_base(&mut s, PathBuf::from("/repo/sub")).unwrap();
     assert_eq!(s.path_base, PathBuf::from("/repo/sub"));
     assert_eq!(s.working_root, PathBuf::from("/repo"));
 }
@@ -230,7 +227,8 @@ fn enter_happy_path_pushes_frame_and_swaps_cwd() {
     let common = PathBuf::from("/repo/.git");
 
     let mut git = FakeGit::default();
-    // show_toplevel: called twice — once inside enter (for canonical_tmp), once inside set_cwd.
+    // show_toplevel: called once inside enter (for canonical_tmp).
+    // set_path_base does not call show_toplevel.
     git.toplevel
         .insert(canonical_tmp.clone(), worktree_root.clone());
     // git_common_dir: checked for working_root ("/repo") and worktree_root.

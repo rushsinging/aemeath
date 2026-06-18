@@ -288,7 +288,7 @@ impl Tool for BashTool {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
-                    if let Err(e) = ctx.workspace_control().set_cwd(new_path_base) {
+                    if let Err(e) = ctx.workspace_control().set_path_base(new_path_base) {
                         return ToolResult::error_json(serde_json::json!({
                             "status": "error",
                             "message": e.to_string()

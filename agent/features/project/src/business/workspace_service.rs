@@ -61,8 +61,12 @@ impl WorkspaceRead for WorkspaceService {
 }
 
 impl WorkspaceControl for WorkspaceService {
-    fn set_cwd(&self, path: PathBuf) -> Result<(), WorkspaceError> {
-        rules::set_cwd(&mut self.lock(), self.git.as_ref(), path)
+    fn set_path_base(&self, path: PathBuf) -> Result<(), WorkspaceError> {
+        rules::set_path_base(&mut self.lock(), path)
+    }
+
+    fn set_working_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError> {
+        rules::set_working_root(&mut self.lock(), root, path)
     }
     fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError> {
         rules::switch_to(&mut self.lock(), self.git.as_ref(), path)
