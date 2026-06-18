@@ -99,7 +99,10 @@ pub trait ToolDisplay: Send + Sync {
         } else {
             // format_header 不以 display_name 开头（如 EnterPlanMode 用 📋 前缀），
             // 将整个文本作为 tool name 着色。
-            Line::from(Span::styled(text, Style::default().fg(theme::ACCENT_BRIGHT)))
+            Line::from(Span::styled(
+                text,
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
         }
     }
 

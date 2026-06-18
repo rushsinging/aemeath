@@ -17,9 +17,7 @@ impl App {
             id: session_id.to_string(),
         });
         self.chat.messages.clear();
-        self.handle_input_intent(
-            crate::tui::model::input::intent::InputIntent::Clear,
-        );
+        self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         for (i, message) in messages.iter().enumerate() {
             let subsequent = messages.get(i + 1);
             self.render_history_message(message, subsequent);

@@ -39,11 +39,8 @@ impl App {
             });
         self.mark_output_dirty();
 
-        let images: Vec<sdk::ToolResultImage> = submission
-            .images
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        let images: Vec<sdk::ToolResultImage> =
+            submission.images.into_iter().map(Into::into).collect();
         if images.is_empty() {
             self.chat.messages.push(sdk::ChatMessage::user_text(&input));
         } else {

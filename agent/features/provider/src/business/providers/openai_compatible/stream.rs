@@ -1,9 +1,9 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
-use crate::LOG_TARGET;
 use crate::business::types::StreamResponse;
 use crate::core::provider::StreamHandler;
+use crate::LOG_TARGET;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;

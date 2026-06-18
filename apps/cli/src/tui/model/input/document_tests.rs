@@ -423,11 +423,11 @@ fn test_delete_image_preserves_index_hole() {
     doc.insert_image(make_test_image(10)); // #1
     doc.insert_image(make_test_image(20)); // #2
     doc.insert_image(make_test_image(30)); // #3
-    // buffer = "[Image #1][Image #2][Image #3]"
-    // 删除 #2（中间）
+                                           // buffer = "[Image #1][Image #2][Image #3]"
+                                           // 删除 #2（中间）
     doc.move_cursor("[Image #1]".len());
     doc.delete_backward(); // 删除 #1... 不对，这里删除的是光标前的 span
-    // 重新设计：移动光标到 #2 末尾后 delete_backward
+                           // 重新设计：移动光标到 #2 末尾后 delete_backward
     let mut doc = InputDocument::default();
     doc.insert_image(make_test_image(10));
     doc.insert_image(make_test_image(20));

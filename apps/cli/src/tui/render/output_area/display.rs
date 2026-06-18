@@ -130,7 +130,10 @@ mod tests {
     #[test]
     fn test_sanitize_for_display_expands_tabs_and_strips_control_chars() {
         assert_eq!(sanitize_for_display("a\tb"), "a    b");
-        assert_eq!(sanitize_for_display("col1\tcol2\tcol3"), "col1    col2    col3");
+        assert_eq!(
+            sanitize_for_display("col1\tcol2\tcol3"),
+            "col1    col2    col3"
+        );
         // ANSI CSI 序列（含 ESC + '[' + 参数 + 终止字母）整体剥离。
         assert_eq!(sanitize_for_display("\x1b[31mred\x1b[0m"), "red");
         // \r 单独被跳过；\n 走 is_control 分支也跳过（实际在 TUI 渲染前是预期行为）。

@@ -196,10 +196,7 @@ mod tests {
         kind: PathKind::File,
     }];
 
-    fn engine<'e>(
-        base: &'e Path,
-        read_files: &'e Mutex<HashSet<String>>,
-    ) -> PolicyEngine<'e> {
+    fn engine<'e>(base: &'e Path, read_files: &'e Mutex<HashSet<String>>) -> PolicyEngine<'e> {
         PolicyEngine::new(base, base, true, read_files)
     }
 

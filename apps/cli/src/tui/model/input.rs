@@ -4,9 +4,9 @@ pub mod completion_item;
 pub mod copied_text;
 pub mod document;
 pub mod history;
+pub mod image_span;
 #[cfg(test)]
 mod input_model_tests;
-pub mod image_span;
 pub mod intent;
 pub mod mode;
 pub mod model;

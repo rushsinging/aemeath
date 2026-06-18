@@ -1,8 +1,8 @@
 //! List resources from connected MCP servers
 
-use crate::LOG_TARGET;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
+use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -7,6 +7,7 @@ use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
 use crate::business::compact::truncate_tool_result;
+use crate::LOG_TARGET;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
@@ -14,7 +15,6 @@ use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
 use tools::api::ToolExecutionContext;
-use crate::LOG_TARGET;
 
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {
@@ -204,8 +204,14 @@ impl<'a> SubAgentRun<'a> {
             &self.sub_schemas,
         );
         if let serde_json::Value::Object(ref mut map) = data {
-            map.insert("event_type".to_string(), serde_json::Value::String("llm_input".to_string()));
-            map.insert("role".to_string(), serde_json::Value::String(self.role_name_for_log.clone()));
+            map.insert(
+                "event_type".to_string(),
+                serde_json::Value::String("llm_input".to_string()),
+            );
+            map.insert(
+                "role".to_string(),
+                serde_json::Value::String(self.role_name_for_log.clone()),
+            );
         }
         log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
         logging::context::set_current_turn(turn_number);
@@ -228,8 +234,14 @@ impl<'a> SubAgentRun<'a> {
             self.client.provider_name(),
         );
         if let serde_json::Value::Object(ref mut map) = data {
-            map.insert("event_type".to_string(), serde_json::Value::String("llm_output".to_string()));
-            map.insert("role".to_string(), serde_json::Value::String(self.role_name_for_log.clone()));
+            map.insert(
+                "event_type".to_string(),
+                serde_json::Value::String("llm_output".to_string()),
+            );
+            map.insert(
+                "role".to_string(),
+                serde_json::Value::String(self.role_name_for_log.clone()),
+            );
         }
         log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
         logging::context::set_current_turn(turn_number);
