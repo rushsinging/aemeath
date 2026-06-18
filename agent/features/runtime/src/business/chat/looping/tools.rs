@@ -101,9 +101,9 @@ where
 
     ask_user_results
         .into_iter()
-        .chain(non_agent_results.into_iter())
-        .chain(agent_results.into_iter())
-        .chain(denied_results.into_iter())
+        .chain(non_agent_results)
+        .chain(agent_results)
+        .chain(denied_results)
         .collect()
 }
 

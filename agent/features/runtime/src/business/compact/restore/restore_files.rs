@@ -29,7 +29,7 @@ pub fn build_file_restoration(read_files: &HashSet<String>) -> Option<String> {
         })
         .collect();
 
-    files_with_mtime.sort_by(|a, b| b.1.cmp(&a.1));
+    files_with_mtime.sort_by_key(|item| std::cmp::Reverse(item.1));
 
     let mut restored_content = String::new();
     let mut total_tokens = 0usize;
