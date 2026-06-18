@@ -13,6 +13,7 @@ pub enum SpinnerPhase {
     AgentWorking,
     Reflecting,
     ThinkingQueued,
+    Compacting,
     CallingTool(String),
     CallingTools {
         remaining: usize,

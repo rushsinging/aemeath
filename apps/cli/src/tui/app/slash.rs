@@ -49,36 +49,50 @@ impl super::App {
                 self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                if let Some(ref ac) = self.agent_client {
-                    match ac
-                        .compact_messages(
-                            self.chat.messages.clone(),
-                            &self.chat.system_prompt_text,
-                            self.chat.context_size,
-                        )
-                        .await
-                    {
-                        Ok((compacted, was_compacted)) => {
-                            if was_compacted {
-                                let old_len = self.chat.messages.len();
-                                self.chat.messages = compacted;
-                                self.append_system_notice(format!(
-                                    "[compacted: {} → {} messages]",
-                                    old_len,
-                                    self.chat.messages.len()
-                                ));
-                            } else {
-                                self.append_system_notice("[no compaction needed]");
-                            }
-                        }
-                        Err(e) => {
-                            self.append_error_notice(format!("compact failed: {}", e));
-                        }
-                    }
-                } else {
-                    self.append_system_notice("[compact skipped: no agent client]");
-                }
-            }
+                  if let Some(ref ac) = self.agent_client {
+                      // 设置 spinner phase 为 Compacting
+                      self.model
+                          .runtime
+                          .apply(RuntimeIntent::SetSpinnerPhase(
+                              crate::tui::model::runtime::spinner::SpinnerPhase::Compacting,
+                          ));
+                      match ac
+                          .compact_messages(
+                              self.chat.messages.clone(),
+                              &self.chat.system_prompt_text,
+                              self.chat.context_size,
+                          )
+                          .await
+                      {
+                          Ok((compacted, was_compacted)) => {
+                              // 停止 spinner
+                              self.model
+                                  .runtime
+                                  .apply(RuntimeIntent::StopSpinner);
+                              if was_compacted {
+                                  let old_len = self.chat.messages.len();
+                                  self.chat.messages = compacted;
+                                  self.append_system_notice(format!(
+                                      "[compacted: {} → {} messages]",
+                                      old_len,
+                                      self.chat.messages.len()
+                                  ));
+                              } else {
+                                  self.append_system_notice("[no compaction needed]");
+                              }
+                          }
+                          Err(e) => {
+                              // 停止 spinner
+                              self.model
+                                  .runtime
+                                  .apply(RuntimeIntent::StopSpinner);
+                              self.append_error_notice(format!("compact failed: {}", e));
+                          }
+                      }
+                  } else {
+                      self.append_system_notice("[compact skipped: no agent client]");
+                  }
+              }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
                 let usage = &self.model.runtime.usage;
