@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# git pre-commit hook：自动 cargo fmt 暂存的 Rust 代码
+#
+# 启用（每个 clone/worktree 共享配置，只需执行一次）：
+#   git config core.hooksPath .cargo/hooks
+#
+# 原理：pre-commit 在 commit 创建前运行，cargo fmt 修改工作区后 `git add -u`
+# 把格式化结果重新暂存，使其进入当前 commit。无 .rs 改动时直接跳过。
+# 配合 CI 的 `cargo fmt --check` 门禁，形成"源头自动修复 + CI 兜底"双层保障。
+
+set -euo pipefail
+
+# cd 到当前 worktree 顶（pre-commit 执行时 PWD 已是 worktree 根，显式 cd 更稳妥）
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$top"
+
+# 只在有暂存的 .rs 文件时才格式化，避免无谓开销
+if ! git diff --cached --name-only --diff-filter=ACMR -- '*.rs' | grep -q .; then
+    exit 0
+fi
+
+cargo fmt
+# 把格式化后的改动重新暂存到当前 commit
+git add -u -- '*.rs'
