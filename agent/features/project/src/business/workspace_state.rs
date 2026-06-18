@@ -75,8 +75,9 @@ pub fn set_cwd(
     git: &dyn GitWorktreeOps,
     path: PathBuf,
 ) -> Result<(), WorkspaceError> {
-    let root = git.show_toplevel(&path).unwrap_or_else(|_| path.clone());
-    state.working_root = root;
+    if let Ok(root) = git.show_toplevel(&path) {
+        state.working_root = root;
+    }
     state.path_base = path;
     Ok(())
 }
