@@ -147,11 +147,12 @@ fn constrain_column_widths(natural: &[usize], num_cols: usize, available: usize)
         .map(|(c, n)| (c, *n - result[c]))
         .collect();
     let total_need: usize = need_more.iter().map(|(_, d)| *d).sum();
-    if total_need > 0 {
-        for (c, deficit) in &need_more {
-            let share = remaining_budget * *deficit / total_need;
-            result[*c] += share;
-        }
+    for (c, deficit) in &need_more {
+        let share = remaining_budget
+            .checked_mul(*deficit)
+            .and_then(|v| v.checked_div(total_need))
+            .unwrap_or(0);
+        result[*c] += share;
     }
 
     result
