@@ -507,9 +507,9 @@ feat(tools): migrate {ToolName} to ToolResult<ToolResult> with typed data
 相关 issue: #273, #325
 ```
 
-### 任务 0.4 — 迁移 18 个非核心 tool 的 typed result struct
+### 任务 0.4 — 迁移 20 个非核心 tool 的 typed result struct
 
-**目标**：18 个非核心 tool（brief/config_tool/lsp/...）也加 typed result，但字段集由各自语义决定（不必与 #273 头部需求绑定）。
+**目标**：20 个非核心 tool（brief/config_tool/lsp/...）也加 typed result，但字段集由各自语义决定（不必与 #273 头部需求绑定）。
 
 每个 tool 一个 commit，**结构同任务 0.3 但字段精简**（只覆盖最小必要字段）：
 
@@ -525,6 +525,8 @@ feat(tools): migrate {ToolName} to ToolResult<ToolResult> with typed data
 | task_create | `TaskCreateResult` | `task_id: String` |
 | task_get | `TaskGetResult` | `task: Task` |
 | task_list | `TaskListResult` | `tasks: Vec<Task>` |
+| task_list_create | `TaskListCreateResult` | `task_id: String` |
+| task_list_complete | `TaskListCompleteResult` | `task_id: String` |
 | task_stop | `TaskStopResult` | `task_id: String` |
 | task_update | `TaskUpdateResult` | `task_id: String`, `status: String` |
 | web_search | `WebSearchResult` | `results: Vec<SearchResult>` |
@@ -534,7 +536,7 @@ feat(tools): migrate {ToolName} to ToolResult<ToolResult> with typed data
 | read_mcp_resource | `ReadMcpResourceResult` | `uri: String`, `content: String` |
 | tool_search | `ToolSearchResult` | `tools: Vec<String>` |
 
-**commit 模板**（**18 个独立 commit**，每个 tool 一个）：
+**commit 模板**（**20 个独立 commit**，每个 tool 一个）：
 ```
 feat(tools): migrate {ToolName} to typed ToolResult
 
@@ -635,9 +637,9 @@ echo "{prompt}" | script -q /tmp/tui.log cargo run -- -qv
 | 维度 | 值 |
 |---|---|
 | 任务数 | 13（0a.1-0a.6 + 0.1-0.7） |
-| atomic commit 数 | 40（5 Phase 0a + 1 + 1 + 11 + 18 + 1 + 1 + 1 verify + 1 聚合） |
+| atomic commit 数 | 42（5 Phase 0a + 1 + 1 + 11 + 20 + 1 + 1 + 1 verify + 1 聚合） |
 | 读取点修改 | 100+（任务 0.5 集中处理） |
-| typed struct 数 | 29（11 核心 + 18 非核心，物理位置：`packages/sdk/src/tool_result/<tool>.rs`） |
+| typed struct 数 | 31（11 核心 + 20 非核心，物理位置：`packages/sdk/src/tool_result/<tool>.rs`） |
 | 适配层 | `agent/features/runtime/src/tool_adapter.rs`（29 个 from_raw + ToolResultAdapter trait） |
 | composition 桥接 | `pub use sdk::tool_result::*;`（可选 re-export，TUI 走 sdk 直接 dep） |
 | 持久化 schema 迁移 | 旧 `is_error/output/content` 读取自动映射为新 `ok/message/data` |

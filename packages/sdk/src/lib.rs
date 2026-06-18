@@ -17,6 +17,7 @@ pub mod project;
 pub mod session;
 pub mod tui;
 pub mod types;
+pub mod tool_result;
 pub mod update;
 
 pub mod ids;
