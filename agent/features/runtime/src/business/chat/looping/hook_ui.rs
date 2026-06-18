@@ -2,9 +2,9 @@ use crate::business::chat::looping::{
     ChatEventSink, RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookExecutionResult,
     RuntimeStreamEvent,
 };
+use crate::LOG_TARGET;
 use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner};
 use share::config::hooks::{HookEntry, HookEvent};
-use crate::LOG_TARGET;
 
 #[derive(Clone)]
 pub(crate) struct HookUi<S>

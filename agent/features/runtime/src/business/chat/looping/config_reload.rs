@@ -4,11 +4,11 @@
 //! 检测到变更时返回 `ConfigDiff`，由调用方决定如何处理。
 
 use super::snapshot_registry::SourceSnapshotRegistry;
+use crate::LOG_TARGET;
 use share::config::paths;
 use share::config::snapshot::{FileChange, FileChangeKind};
 use share::config::GuidanceReloadPolicy;
 use std::path::{Path, PathBuf};
-use crate::LOG_TARGET;
 
 /// 配置变更差异。
 #[derive(Debug, Clone)]

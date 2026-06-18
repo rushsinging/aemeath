@@ -6,8 +6,14 @@ fn sink_paths_in_logs_dir() {
     assert_eq!(paths.aemeath, PathBuf::from("/tmp/logs/aemeath.log"));
     assert_eq!(paths.tui, PathBuf::from("/tmp/logs/tui.log"));
     assert_eq!(paths.shared, PathBuf::from("/tmp/logs/shared.log"));
-    assert_eq!(paths.composition, PathBuf::from("/tmp/logs/composition.log"));
-    assert_eq!(paths.provider, PathBuf::from("/tmp/logs/agent-provider.log"));
+    assert_eq!(
+        paths.composition,
+        PathBuf::from("/tmp/logs/composition.log")
+    );
+    assert_eq!(
+        paths.provider,
+        PathBuf::from("/tmp/logs/agent-provider.log")
+    );
     assert_eq!(paths.runtime, PathBuf::from("/tmp/logs/agent-runtime.log"));
     assert_eq!(paths.tools, PathBuf::from("/tmp/logs/agent-tools.log"));
     assert_eq!(paths.prompt, PathBuf::from("/tmp/logs/agent-prompt.log"));

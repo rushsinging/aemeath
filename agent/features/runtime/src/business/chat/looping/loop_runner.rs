@@ -22,6 +22,7 @@ use crate::business::chat::looping::{
     InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeStreamHandler, RuntimeTurnContext,
 };
+use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
@@ -29,7 +30,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
-use crate::LOG_TARGET;
 
 pub struct ChatLoopContext<S, Q, I>
 where

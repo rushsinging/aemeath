@@ -70,10 +70,7 @@ fn resolve_worktree_path(
     }
 }
 
-pub fn set_path_base(
-    state: &mut WorkspaceState,
-    path: PathBuf,
-) -> Result<(), WorkspaceError> {
+pub fn set_path_base(state: &mut WorkspaceState, path: PathBuf) -> Result<(), WorkspaceError> {
     // set_path_base 只更新 path_base（当前路径基准）
     // working_root 只有在 enter/exit worktree 时才会改变
     state.path_base = path;

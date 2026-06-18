@@ -73,10 +73,7 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1; // 转为 1-based
         let end = offset + limit;
-        format!(
-            "{} {display_path} {start}:{end}",
-            self.display_name()
-        )
+        format!("{} {display_path} {start}:{end}", self.display_name())
     }
     fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
         let path = file_path(input);

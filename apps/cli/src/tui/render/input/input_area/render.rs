@@ -36,16 +36,16 @@ impl InputArea {
 }
 
 fn input_block(view_model: &InputAreaViewModel) -> Block<'static> {
-      let border_style = if view_model.focused {
-          Style::default().fg(theme::ACCENT)
-      } else {
-          Style::default().fg(theme::BORDER)
-      };
-      Block::default()
-          .title(" Input ")
-          .borders(Borders::ALL)
-          .border_style(border_style)
-  }
+    let border_style = if view_model.focused {
+        Style::default().fg(theme::ACCENT)
+    } else {
+        Style::default().fg(theme::BORDER)
+    };
+    Block::default()
+        .title(" Input ")
+        .borders(Borders::ALL)
+        .border_style(border_style)
+}
 
 fn render_selection(
     inner_area: Rect,
@@ -169,10 +169,7 @@ mod tests {
     use crate::tui::view_assembler::input::InputViewAssembler;
     use ratatui::buffer::Buffer;
 
-    fn render_vm_with_state(
-        text: &str,
-        focused: bool,
-    ) -> InputAreaViewModel {
+    fn render_vm_with_state(text: &str, focused: bool) -> InputAreaViewModel {
         let mut document = InputDocument::default();
         document.insert_text(text);
         InputViewAssembler::from_document(&document, None, focused)

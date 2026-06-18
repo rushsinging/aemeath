@@ -479,7 +479,10 @@ mod tests {
         model.apply(ConversationIntent::AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        if let ConversationBlock::AskUserBatch { confirmed, phase, .. } = batch_block(&model) {
+        if let ConversationBlock::AskUserBatch {
+            confirmed, phase, ..
+        } = batch_block(&model)
+        {
             assert!(*confirmed);
             assert_eq!(*phase, AskUserPhase::Answering); // phase 不变，直接 confirmed
         }

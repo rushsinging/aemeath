@@ -340,8 +340,8 @@ impl TaskScheduler {
     }
 }
 
-use types::current_timestamp;
 use crate::LOG_TARGET;
+use types::current_timestamp;
 
 /// Shared task scheduler
 pub type SharedTaskScheduler = Arc<TaskScheduler>;
