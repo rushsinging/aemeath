@@ -1,6 +1,7 @@
 use crate::business::agent::runner as agent_runner;
 #[cfg(test)]
 use crate::utils::bootstrap::config_paths;
+use crate::LOG_TARGET;
 use hook::api::HookRunner;
 use provider::api::LlmClient;
 use share::config::Config;
@@ -8,7 +9,6 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::LOG_TARGET;
 
 pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
     let cwd_str = cwd.display().to_string();

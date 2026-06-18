@@ -2,9 +2,9 @@
 
 use crate::business::reflection::runner::run_complete_reflection_with_base_dir;
 use crate::business::reflection::ReflectionRunMode;
+use crate::LOG_TARGET;
 use provider::api::StopReason;
 use std::path::{Path, PathBuf};
-use crate::LOG_TARGET;
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
 ///

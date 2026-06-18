@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::LOG_TARGET;
 use crate::api::ProviderDriverKind;
+use crate::LOG_TARGET;
 use share::config::ModelsConfig;
 
 use crate::core::client::{LlmClient, OpenAIProviderConfig};

@@ -19,6 +19,7 @@ pub mod snapshot;
 pub mod storage;
 pub mod tools;
 pub mod ui;
+pub mod update;
 
 // Re-exports for backward compatibility
 pub use hooks::HooksConfig;
@@ -32,6 +33,7 @@ pub use snapshot::{FileChange, FileChangeKind, FileSnapshot};
 pub use storage::StorageConfig;
 pub use tools::{AgentRoleConfig, AgentsConfig, ToolsConfig};
 pub use ui::{TaskLifecycleConfig, TaskListConfig, UiConfig};
+pub use update::UpdateConfig;
 
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +137,10 @@ pub struct Config {
     #[serde(default)]
     pub guidance: GuidanceConfig,
 
+    /// Update check configuration
+    #[serde(default)]
+    pub update: UpdateConfig,
+
     /// Language preference for guidance files. Supported values: "en", "zh".
     /// Default: "en". Guidance files are loaded from `{language}/` subdirectory first,
     /// then fallback to root directory files.
@@ -158,6 +164,7 @@ impl Default for Config {
             memory: MemoryConfig::default(),
             logging: LoggingConfig::default(),
             guidance: GuidanceConfig::default(),
+            update: UpdateConfig::default(),
             language: default_language(),
         }
     }

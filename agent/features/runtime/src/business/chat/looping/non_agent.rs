@@ -260,8 +260,11 @@ where
             }
         });
 
-        let results =
-            vec![agent.execute_one_with_ctx(&owned_call, &streaming_ctx).await];
+        let results = vec![
+            agent
+                .execute_one_with_ctx(&owned_call, &streaming_ctx)
+                .await,
+        ];
 
         // Drop the sender so the forwarding task can complete naturally.
         streaming_ctx.progress_tx = None;

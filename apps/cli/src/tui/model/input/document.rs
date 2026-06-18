@@ -296,9 +296,12 @@ impl InputDocument {
             .map(|pos| pos + 1)
             .unwrap_or(0);
         let prev_line_end = line_start.saturating_sub(1); // 当前行开头的 \n 位置
-        // SAFETY: prev_line_start/prev_line_end 由 \n 搜索推算，\n 是单字节 ASCII，
-        // 因此偏移一定在 char 边界上。
-        let prev_line = self.buffer.get(prev_line_start..prev_line_end).unwrap_or("");
+                                                          // SAFETY: prev_line_start/prev_line_end 由 \n 搜索推算，\n 是单字节 ASCII，
+                                                          // 因此偏移一定在 char 边界上。
+        let prev_line = self
+            .buffer
+            .get(prev_line_start..prev_line_end)
+            .unwrap_or("");
         let new_col = col.min(prev_line.chars().count());
         let new_cursor = prev_line_start
             + prev_line
@@ -329,7 +332,10 @@ impl InputDocument {
             .unwrap_or(self.buffer.len());
         // SAFETY: next_line_start/next_line_end 由 \n 搜索推算，\n 是单字节 ASCII，
         // 因此偏移一定在 char 边界上。
-        let next_line = self.buffer.get(next_line_start..next_line_end).unwrap_or("");
+        let next_line = self
+            .buffer
+            .get(next_line_start..next_line_end)
+            .unwrap_or("");
         let new_col = col.min(next_line.chars().count());
         let new_cursor = next_line_start
             + next_line

@@ -1,11 +1,11 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::business::chat::looping::queue::{QueueDrainPort, QueueFuture};
+use crate::LOG_TARGET;
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::collections::{HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
-use crate::LOG_TARGET;
 
 pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>> + Send + 'a>>;
 

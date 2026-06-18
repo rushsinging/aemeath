@@ -214,7 +214,7 @@ impl App {
             let input_vm =
                 crate::tui::view_assembler::input::InputViewAssembler::assemble_from_model(
                     &self.model.input,
-                    0, // queued_count
+                    0,    // queued_count
                     true, // focused
                 );
             let input_height = InputArea::desired_height(size.width, &input_vm);

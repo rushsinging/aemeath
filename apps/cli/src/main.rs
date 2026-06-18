@@ -43,6 +43,9 @@ async fn main() {
         Some(Commands::Run { run_args }) => {
             chat::run_chat(run_args.into()).await;
         }
+        Some(Commands::Update { check }) => {
+            subcommand::update_command::run_update_command(check).await;
+        }
         None => {
             // 无子命令 — 默认调用 run，使用顶层参数
             chat::run_chat(cli.run_args.into()).await;

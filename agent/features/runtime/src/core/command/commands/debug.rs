@@ -59,7 +59,7 @@ fn doctor_execute(_args: &str, _ctx: &mut CommandContext) -> CommandResult {
         "Git repo: {}\n",
         if is_git { "✓ yes" } else { "✗ no" }
     ));
-    output.push_str(&format!("Version: {}\n", env!("CARGO_PKG_VERSION")));
+    output.push_str(&format!("Version: {}\n", share::VERSION));
     output.push_str("\nSystem OK\n");
     CommandResult::Success(output)
 }

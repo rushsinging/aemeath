@@ -3,11 +3,11 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
-use crate::LOG_TARGET;
 use crate::api::ProviderDriverKind;
 use crate::business::providers::openai_compatible::ReasoningConfig;
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::{CallbackHandler, LlmProvider, StreamHandler};
+use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -327,7 +327,9 @@ impl LlmClient {
                 share::message::ContentBlock::Text { text } => text.len(),
                 share::message::ContentBlock::Thinking { thinking } => thinking.len(),
                 share::message::ContentBlock::ToolUse { input, .. } => input.to_string().len(),
-                share::message::ContentBlock::ToolResult { content, .. } => content.to_string().len(),
+                share::message::ContentBlock::ToolResult { content, .. } => {
+                    content.to_string().len()
+                }
                 share::message::ContentBlock::Image { .. } => 0,
             })
             .sum();

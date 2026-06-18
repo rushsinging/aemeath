@@ -6,11 +6,11 @@ pub mod settings;
 pub use settings::{PermissionMode, Settings};
 
 use crate::utils::bootstrap::config_paths as paths;
+use crate::LOG_TARGET;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::RwLock;
 use uuid::{NoContext, Timestamp, Uuid};
-use crate::LOG_TARGET;
 
 /// Session ID type
 pub type SessionId = String;

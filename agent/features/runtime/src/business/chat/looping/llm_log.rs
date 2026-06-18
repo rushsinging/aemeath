@@ -1,8 +1,8 @@
 use crate::business::agent::ToolCall;
 use crate::business::chat::looping::input_log::logged_input_messages;
+use crate::LOG_TARGET;
 use provider::api::{StreamResponse, SystemBlock};
 use share::message::Message;
-use crate::LOG_TARGET;
 
 /// 记录 LLM 输入到 `input.log`。
 ///

@@ -55,6 +55,8 @@ pub enum Effect {
     StopTimer {
         id: String,
     },
+    /// 执行自动更新（`/update` 命令触发）。
+    RunSelfUpdate,
 }
 
 impl Effect {

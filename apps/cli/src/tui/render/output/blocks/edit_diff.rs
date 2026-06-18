@@ -38,10 +38,8 @@ pub fn parse_edit_diff(result: &str) -> Option<EditDiff> {
     let second_end = after_first + second.end;
 
     Some(EditDiff {
-        old: strip_edge_newlines(result.get(after_first..second_start)?)
-            .to_string(),
-        new: strip_edge_newlines(result.get(second_end..)?)
-            .to_string(),
+        old: strip_edge_newlines(result.get(after_first..second_start)?).to_string(),
+        new: strip_edge_newlines(result.get(second_end..)?).to_string(),
         start_line: first.start_line,
     })
 }

@@ -64,6 +64,7 @@ fn phase_text(phase: &SpinnerPhase) -> String {
         SpinnerPhase::AgentWorking => "Agent working...".to_string(),
         SpinnerPhase::Reflecting => "Reflecting...".to_string(),
         SpinnerPhase::ThinkingQueued => "Thinking with queued input...".to_string(),
+        SpinnerPhase::Compacting => "Compacting...".to_string(),
         SpinnerPhase::CallingTool(name) => format!("Calling {name}..."),
         SpinnerPhase::CallingTools { remaining } => {
             format!("Calling tools... ({remaining} running)")

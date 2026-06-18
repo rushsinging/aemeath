@@ -23,6 +23,17 @@ pub fn hook_spinner_phase(
     event: &sdk::HookEventView,
 ) -> crate::tui::model::runtime::spinner::SpinnerPhase {
     use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
+
+    // PreCompact 事件使用专门的 Compacting phase
+    if event.hook_name == "PreCompact" {
+        return SpinnerPhase::Compacting;
+    }
+
+    // PostCompact 事件停止 spinner（通过返回 None 的方式，但这里需要特殊处理）
+    // 由于函数签名要求返回 SpinnerPhase，我们使用一个特殊的方式
+    // 实际上，PostCompact 事件会在 hook_spinner_phase 中被调用，
+    // 但我们需要在调用方处理停止 spinner 的逻辑
+
     let outcome = match event.status {
         sdk::HookEventStatus::Running => HookOutcome::Running,
         sdk::HookEventStatus::Succeeded => HookOutcome::Done,

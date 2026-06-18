@@ -1,11 +1,11 @@
 use crate::utils::bootstrap::config_paths as paths;
+use crate::LOG_TARGET;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tools::api::McpConnectionManager;
 use tools::api::McpServerConfig;
 use tools::api::ToolRegistry;
-use crate::LOG_TARGET;
 
 pub fn parse_mcp_servers_config(
     config: &serde_json::Value,

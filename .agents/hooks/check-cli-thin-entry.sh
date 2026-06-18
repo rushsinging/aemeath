@@ -29,6 +29,7 @@ FORBIDDEN_DOMAIN_CRATES = {
     "hook",
     "audit",
     "share",
+    "update",
 }
 BOOTSTRAP_DETAIL = re.compile(
     r"\bAgentClientImpl\b|"
@@ -62,12 +63,21 @@ def manifest_violations(manifest_text: str) -> list[str]:
     return violations
 
 
-def source_line_violations(line: str) -> list[str]:
+def source_line_violations(line: str, local_modules: set[str] | None = None) -> list[str]:
     stripped = line.strip()
     if not stripped or stripped.startswith("//"):
         return []
     violations: list[str] = []
-    if DIRECT_IMPORT.search(line):
+    # 排除文件中声明了同名 mod 的本地模块（如 TUI 的 update 模块）
+    forbidden = FORBIDDEN_DOMAIN_CRATES
+    if local_modules:
+        forbidden = forbidden - local_modules
+    direct_import = re.compile(
+        r"(?<![A-Za-z0-9_:])(?:use\s+)?("
+        + "|".join(sorted(map(re.escape, forbidden)))
+        + r")::"
+    )
+    if direct_import.search(line):
         violations.append(
             "CLI must not import runtime/supporting/shared crates directly; use composition + sdk"
         )
@@ -114,8 +124,11 @@ violations.extend(workspace_dependency_violations())
 
 for path in sorted(Path("apps/cli/src").rglob("*.rs")):
     rel = path.as_posix()
-    for lineno, line in enumerate(path.read_text().splitlines(), 1):
-        for violation in source_line_violations(line):
+    text = path.read_text()
+    # 解析文件中声明的本地模块（如 `pub mod update;`），排除同名 crate 的误报
+    local_modules = set(re.findall(r'\b(?:pub\s+)?mod\s+(\w+)\s*;', text))
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for violation in source_line_violations(line, local_modules):
             violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
 
 if violations:

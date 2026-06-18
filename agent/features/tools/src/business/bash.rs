@@ -1,7 +1,7 @@
 mod safety;
 
-use crate::LOG_TARGET;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::LOG_TARGET;
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
 use share::tool::{AgentProgressEvent, AgentProgressKind};
@@ -408,10 +408,7 @@ fn exit_status_description(status: &std::process::ExitStatus) -> (i32, String) {
     {
         let signal = status.signal().unwrap_or(0);
         let sig_name = signal_name(signal);
-        (
-            -1,
-            format!("signal {signal} ({sig_name})"),
-        )
+        (-1, format!("signal {signal} ({sig_name})"))
     }
     #[cfg(not(unix))]
     {
@@ -721,7 +718,10 @@ mod tests {
             .arg("kill -9 $$")
             .status()
             .unwrap();
-        assert!(status.code().is_none(), "signal termination should have no exit code");
+        assert!(
+            status.code().is_none(),
+            "signal termination should have no exit code"
+        );
         let (code, detail) = exit_status_description(&status);
         assert_eq!(code, -1);
         assert!(
@@ -759,8 +759,14 @@ mod tests {
         // 长字符串（>= PREVIEW_MAX）按 char boundary 截断，附加截断标记
         let s: String = "a".repeat(PREVIEW_MAX + 100);
         let result = preview(&s);
-        assert!(result.starts_with(&"a".repeat(PREVIEW_MAX)), "should keep first PREVIEW_MAX bytes");
-        assert!(result.contains("...[truncated"), "should include truncation marker");
+        assert!(
+            result.starts_with(&"a".repeat(PREVIEW_MAX)),
+            "should keep first PREVIEW_MAX bytes"
+        );
+        assert!(
+            result.contains("...[truncated"),
+            "should include truncation marker"
+        );
         assert!(
             result.contains("100 bytes"),
             "should report truncated byte count, got: {result}"
@@ -776,7 +782,10 @@ mod tests {
         // 但 PREVIEW_MAX = 512 不是 3 的倍数，可能在某个字符中间；切到最近的 char boundary
         let result = preview(&s);
         // 不应该 panic
-        assert!(result.contains("...[truncated"), "should include truncation marker");
+        assert!(
+            result.contains("...[truncated"),
+            "should include truncation marker"
+        );
     }
 
     #[cfg(unix)]

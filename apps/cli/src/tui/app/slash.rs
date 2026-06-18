@@ -41,15 +41,17 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
                 self.chat.messages.clear();
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::Clear,
-                );
+                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
                 self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
                 if let Some(ref ac) = self.agent_client {
+                    // 设置 spinner phase 为 Compacting
+                    self.model.runtime.apply(RuntimeIntent::SetSpinnerPhase(
+                        crate::tui::model::runtime::spinner::SpinnerPhase::Compacting,
+                    ));
                     match ac
                         .compact_messages(
                             self.chat.messages.clone(),
@@ -59,6 +61,8 @@ impl super::App {
                         .await
                     {
                         Ok((compacted, was_compacted)) => {
+                            // 停止 spinner
+                            self.model.runtime.apply(RuntimeIntent::StopSpinner);
                             if was_compacted {
                                 let old_len = self.chat.messages.len();
                                 self.chat.messages = compacted;
@@ -72,6 +76,8 @@ impl super::App {
                             }
                         }
                         Err(e) => {
+                            // 停止 spinner
+                            self.model.runtime.apply(RuntimeIntent::StopSpinner);
                             self.append_error_notice(format!("compact failed: {}", e));
                         }
                     }
@@ -142,6 +148,11 @@ impl super::App {
             {
                 if let Some(tx) = ui_tx.clone() {
                     self.execute_effect(Effect::FetchMemoryList, &tx).await;
+                }
+            }
+            "/update" => {
+                if let Some(tx) = ui_tx.clone() {
+                    self.execute_effect(Effect::RunSelfUpdate, &tx).await;
                 }
             }
             "/paste" => {
@@ -235,9 +246,7 @@ impl super::App {
             }
             sdk::CommandAction::Clear => {
                 self.chat.messages.clear();
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::Clear,
-                );
+                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
                 self.append_system_notice("[cleared]");

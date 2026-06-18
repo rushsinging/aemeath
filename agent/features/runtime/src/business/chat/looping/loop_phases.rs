@@ -9,9 +9,9 @@ use crate::business::chat::looping::config_reload::{
 use crate::business::chat::looping::snapshot_registry::SourceSnapshotRegistry;
 use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::LOG_TARGET;
 use share::config::GuidanceReloadPolicy;
 use share::message::Message;
-use crate::LOG_TARGET;
 
 /// Turn 边界配置变更检测与 guidance 注入。
 ///

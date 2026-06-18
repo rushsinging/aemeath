@@ -2,8 +2,8 @@ use crate::business::chat::looping::events::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
-use provider::api::StreamHandler;
 use crate::LOG_TARGET;
+use provider::api::StreamHandler;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamingBlockKind {

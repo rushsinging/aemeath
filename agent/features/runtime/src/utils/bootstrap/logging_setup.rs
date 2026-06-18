@@ -1,7 +1,7 @@
 use crate::utils::bootstrap::config_paths as paths;
+use crate::LOG_TARGET;
 use logging::{self, OutputMode, UnifiedLogger};
 use share::config::LoggingConfig;
-use crate::LOG_TARGET;
 
 /// 设置全局 session ID（只能调用一次）。委托 `logging::set_session_id`。
 pub fn set_session_id(id: String) {
@@ -47,7 +47,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
 
     // 注入 boot_ts 和 app_version 到全局上下文
     logging::set_boot_ts(logging::timestamp_local_rfc3339());
-    logging::set_app_version(env!("CARGO_PKG_VERSION").to_string());
+    logging::set_app_version(share::VERSION.to_string());
 }
 
 fn use_stderr_log_target() -> bool {

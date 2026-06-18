@@ -1,10 +1,10 @@
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent};
+use crate::LOG_TARGET;
 use hook::api::{CompactHookData, HookData, HookRunner};
 use share::config::hooks::HookEvent;
 use share::message::Message;
 use std::sync::Arc;
-use crate::LOG_TARGET;
 
 /// Run auto-compaction if the context is approaching the limit.
 /// Returns true if the messages were modified.
