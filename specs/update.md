@@ -37,7 +37,44 @@ pub trait UpdateService: Send + Sync + 'static {
 | TUI 启动 | `force_check()` | 忽略，每次查 API |
 | Quiet 模式 `-q` | `check_latest()` | 24h 门控 |
 | `aemeath update --check` | `force_check()` | 忽略 |
-| `aemeath update`（未来 PR3） | `force_check()` → `perform_update()` | 忽略 |
+| `aemeath update` | `force_check()` → `perform_update()` | 忽略 |
+| TUI `/update` | `perform_update()` | 忽略 |
+
+## 自动更新流程（`perform_update`）
+
+```
+1. force_check() → 确认有新版本
+2. 平台匹配（std::env::consts::{OS, ARCH}）→ 确定 artifact 文件名
+3. 下载 checksums.txt → 解析对应文件的 SHA256
+4. 下载 tar.gz
+5. SHA256 校验 → 不匹配则报错退出
+6. 解压 tar.gz → 提取 aemeath 二进制
+7. 原子替换：current_exe().with_extension("new") → fs::rename
+8. 提示用户重启
+```
+
+### 支持的平台
+
+| OS | ARCH | Target Triple |
+|---|---|---|
+| macOS | aarch64 | `aarch64-apple-darwin` |
+| macOS | x86_64 | `x86_64-apple-darwin` |
+| Linux | x86_64 | `x86_64-unknown-linux-gnu` |
+
+### Artifact 命名
+
+- 文件：`aemeath-{version}-{target}.tar.gz`
+- 下载 URL：`https://github.com/rushsinging/aemeath/releases/download/v{version}/{filename}`
+- checksums.txt 格式：`{sha256}  {filename}`（sha256sum 输出）
+
+### 错误处理
+
+| 错误场景 | 处理 |
+|---|---|
+| 网络失败 | 清晰提示，保留原二进制 |
+| checksum 不匹配 | 报错，不执行替换 |
+| 权限不足 | 提示「原子替换失败」 |
+| 平台不支持 | 提示当前平台无对应 artifact |
 
 ## 缓存
 

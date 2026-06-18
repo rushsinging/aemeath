@@ -36,6 +36,7 @@ impl App {
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::FetchTaskStatus => self.update_task_status(self.chat.is_processing).await,
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
+            Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
         }
     }
 
@@ -241,6 +242,38 @@ impl App {
                 Ok(_) => {} // 已是最新，不提示
                 Err(e) => {
                     crate::tui::log_warn!("版本检查失败（已忽略）: {e}");
+                }
+            }
+        });
+    }
+
+    /// `/update` 命令触发的自动更新执行器。
+    /// 在后台执行 perform_update，结果通过 UiEvent 回灌。
+    async fn run_self_update_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        self.append_system_notice("[checking for updates...]".to_string());
+        let service = composition::update::wire_update();
+        let ui_tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("self_update", async move {
+            match service.perform_update().await {
+                Ok(sdk::UpdateResult::Updated { from, to }) => {
+                    let _ = ui_tx
+                        .send(UiEvent::SystemMessage(format!(
+                            "✓ Updated aemeath {from} → {to}\nPlease restart aemeath to use the new version."
+                        )))
+                        .await;
+                }
+                Ok(sdk::UpdateResult::UpToDate { version }) => {
+                    let _ = ui_tx
+                        .send(UiEvent::SystemMessage(format!(
+                            "Already up to date ({version})."
+                        )))
+                        .await;
+                }
+                Ok(sdk::UpdateResult::CheckOnly(_)) => {}
+                Err(e) => {
+                    let _ = ui_tx
+                        .send(UiEvent::SystemMessage(format!("Update failed: {e}")))
+                        .await;
                 }
             }
         });

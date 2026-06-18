@@ -41,9 +41,7 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
                 self.chat.messages.clear();
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::Clear,
-                );
+                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
                 self.append_system_notice("[conversation cleared]");
@@ -144,6 +142,11 @@ impl super::App {
                     self.execute_effect(Effect::FetchMemoryList, &tx).await;
                 }
             }
+            "/update" => {
+                if let Some(tx) = ui_tx.clone() {
+                    self.execute_effect(Effect::RunSelfUpdate, &tx).await;
+                }
+            }
             "/paste" => {
                 if let Some(tx) = ui_tx.clone() {
                     self.execute_effect(Effect::ReadClipboardImage, &tx).await;
@@ -235,9 +238,7 @@ impl super::App {
             }
             sdk::CommandAction::Clear => {
                 self.chat.messages.clear();
-                self.handle_input_intent(
-                    crate::tui::model::input::intent::InputIntent::Clear,
-                );
+                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.output_area.clear();
                 self.reset_runtime_state().await;
                 self.append_system_notice("[cleared]");
