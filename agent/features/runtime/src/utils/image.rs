@@ -12,6 +12,7 @@ pub const IMAGE_TARGET_RAW_SIZE: usize = (API_IMAGE_MAX_BASE64_SIZE * 3) / 4; //
 
 /// Client-side maximum dimensions for image resizing
 pub const IMAGE_MAX_WIDTH: u32 = 2000;
+pub const IMAGE_MAX_HEIGHT: u32 = 2000;
 
 /// Supported image formats
 #[derive(Debug, Clone, Copy, PartialEq)]
