@@ -1,7 +1,7 @@
 # 发布与自动更新设计
 
 > 对应 Issue: <https://github.com/rushsinging/aemeath/issues/307>
-> 状态：**草案**（代码未实现）
+> 状态：**已落地**——实现见 `agent/features/update`。本文档为设计归档快照，运行规则以 `specs/update.md` 为准。
 
 ## 定位
 

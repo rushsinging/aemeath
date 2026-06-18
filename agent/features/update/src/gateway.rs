@@ -1,7 +1,7 @@
 //! 版本检查与自动更新 Gateway。
 //!
-//! 对应设计文档：`docs/design/release-update-design.md` 子系统 2（版本检查）。
-//! 子系统 3（自动更新）在 PR 3 中实现 `perform_update`。
+//! 对应设计文档：`docs/snapshot/release-update-design.md` 子系统 2（版本检查）。
+//! 子系统 3（自动更新）见本文件 `perform_update`。
 
 use std::path::PathBuf;
 

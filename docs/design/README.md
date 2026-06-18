@@ -10,7 +10,6 @@
 | [runtime-design.md](runtime-design.md) | 核心域 Runtime：Agent Looping、Token Budget、Compact、Cost、Slash Command | 已落地 |
 | [tui-design.md](tui-design.md) | 入站适配器 TUI：六边形边界、Model/View Model/Render、Effect 编排 | 已落地 |
 | [server-design.md](server-design.md) | 入站适配器 Server：多租户远端服务、WSS 协议、Session 多路复用 | 草案（无 server crate） |
-| [release-update-design.md](release-update-design.md) | GHA 自动发布、版本检查、自动更新（`update` feature crate） | 草案（对应 Issue #307） |
 | [file-split-plan.md](file-split-plan.md) | 文件级切分计划：把巨型文件按 COLA 边界分到 `contract/gateway/business/utils` | 演进中 |
 | [architecture-guards.md](architecture-guards.md) | 17 个架构守卫 + 全部白名单的单一真相（与 `.agents/hooks/*.sh` 字面同步） | 已落地 |
 | [README.md](README.md) | 本文件 | — |
@@ -27,7 +26,6 @@
 | Stop 钩子失败排查 | [architecture-guards.md](architecture-guards.md) §"守卫索引" + 相关小节 |
 | 把巨型文件按层切分 | [file-split-plan.md](file-split-plan.md) |
 | 准备做 server | [server-design.md](server-design.md) + [AGENTS.md](../../AGENTS.md) §开放决策 |
-| 做发布 / 版本检查 / 自动更新 | [release-update-design.md](release-update-design.md) |
 
 ## 状态约定
 
