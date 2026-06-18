@@ -158,7 +158,7 @@ GET https://api.github.com/repos/rushsinging/aemeath/releases/latest
 }
 ```
 
-检查频率：距 `last_check` 超过 24 小时才发网络请求。
+缓存仅用于 Quiet 模式（`-q`），距 `last_check` 超过 24 小时才发网络请求。**TUI 模式每次启动都强制查 API，不走 24h 门控。**
 
 ### 网络失败降级
 
@@ -190,9 +190,7 @@ GET https://api.github.com/repos/rushsinging/aemeath/releases/latest
 TUI 启动
   └─ spawn tokio task（后台）
        ├─ 读配置 → check_on_startup == false → 跳过
-       ├─ 读缓存 → 是否超过 24h？
-       │   ├─ 否 → 从缓存读 latest_version，判断是否新版本
-       │   └─ 是 → 调 GitHub API → 更新缓存
+       ├─ 调 GitHub API（每次启动都查，不走缓存门控）→ 更新缓存
        ├─ 发现新版本
        │   └─ 通过 event channel 发 UiEvent::UpdateAvailable { version, url }
        └─ TUI 收到事件 → 显示交互式 dialog
@@ -320,10 +318,10 @@ pub struct UpdateGateway {
 }
 
 impl UpdateGateway {
-    /// 检查最新版本（带缓存逻辑）。
+    /// 检查最新版本（Quiet 模式用，带 24h 缓存）。
     pub async fn check_latest(&self) -> Result<VersionCheck>;
 
-    /// 强制检查（忽略缓存，用于 `aemeath update --check`）。
+    /// 强制检查（忽略缓存，用于 TUI 启动 + `aemeath update --check`）。
     pub async fn force_check(&self) -> Result<VersionCheck>;
 
     /// 执行更新：下载 → 校验 → 原子替换。
@@ -550,7 +548,8 @@ RunSelfUpdate,
 // 伪代码
 let update_service = bootstrap.update.clone();
 tokio::spawn(async move {
-    if let Ok(check) = update_service.check_latest().await {
+    // TUI 每次启动都强制查 API，不走缓存门控
+    if let Ok(check) = update_service.force_check().await {
         if check.is_update_available {
             let _ = event_tx.send(UiEvent::UpdateAvailable {
                 version: check.latest.to_string(),
