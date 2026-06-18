@@ -106,98 +106,40 @@
 
 ---
 
-## Phase 0a 新建 `packages/global/types` crate（TUI / tools 共享类型层）
+## Phase 0a 29 个 typed result struct 物理位置（SDK + runtime 适配层 + composition re-export）
 
-> **本章节是范围扩展后新增（2026-06-18）**。29 个 R struct 不放在 `agent/features/tools/src/business/`（避免 TUI 跨边界依赖 agent 业务层），改为放新建的 `packages/global/types` crate。`apps/cli` + `agent/features/tools` 均直接依赖 `types`——**TUI 真正解耦 agent 业务层**。
+> **本章节是范围扩展后新增（2026-06-18）**。29 个 R struct 物理位置选 **方案 B**（`packages/sdk/src/tool_result/<tool>.rs`），适配层放 `agent/features/runtime`（保持 SDK 纯数据定位）。
+>
+> **决策依据（2026-06-18）**：项目后续将推出 server 模式（AGENTS.md 触发表预留 `agent/features/server/**`）。Server 作为横切 RPC 层需序列化 typed struct 给多端消费者，**必须 dep 平台层（sdk）而非业务层（tools / composition）**。方案 B 让 server 走 `use sdk::tool_result::XxxResult` 零成本消费；方案 A（`tools/business`）会让 server 间接依赖 agent 业务层，破坏 DDD 边界。
+>
+> **方案 B 物理位置**：
+> - **R struct** → `packages/sdk/src/tool_result/<tool>.rs`（29 个独立 .rs，纯数据 + serde derive）
+> - **适配层** → `agent/features/runtime/src/tool_adapter.rs`（29 个 `R::from_raw(Value) → R` 函数 + `ToolResultAdapter` trait）
+> - **composition 桥接** → `agent/composition/src/lib.rs` 加 `pub use sdk::tool_result::*;`（保留可选 re-export 出口，但 TUI 走 sdk 不走 composition）
+> - **TUI 消费** → `use sdk::tool_result::XxxResult;`（cli 已有 sdk dep）
+>
+> **依赖图**（Phase 0a 后）：
+>
+> ```
+> packages/sdk                                  ← 29 个 XxxResult struct（纯数据，serde derive）
+>         ↑ dep by
+>    ┌────┼────┬────────────┐
+>    │    │    │            │
+> apps/cli  agent/composition  agent/features/tools
+> (TUI Display)  (re-export)  (Tool::Result = XxxResult)
+>                      ↑ dep by
+>                agent/features/runtime
+>                (适配层 29 个 from_raw 函数)
+> ```
+>
+> - `agent/shared` **不** dep sdk（`type Result: Serialize + Deserialize` 是 serde bound，不需具体 struct）
+> - `agent/features/server`（未来）将 dep sdk，**DDD 边界 0 破坏**
 
-**依赖图**（Phase 0a 后）：
+### 任务 0a.1 — `packages/sdk/src/tool_result/<tool>.rs` 29 个 struct 骨架
 
-```
-packages/global/types                  ← 29 个 XxxResult struct（纯数据，无业务实现）
-        ↑ dep by
-   ┌────┴────┐
-   │         │
-agent/features/tools     apps/cli
-(Tool::Result=ReadResult) (TUI Display 反序列化)
-```
+**目标**：在 `packages/sdk/src/tool_result/` 创建 29 个子模块文件，每个含 `pub struct XxxResult` 骨架（占位字段，Phase 0 任务 0.3/0.4 填充）。
 
-- `agent/shared` **不** dep types（`type Result: Serialize + Deserialize` 是 serde bound，不需具体 struct）
-- `agent/features/runtime` **不** dep types（runtime 只看 `Value`，跨 `Box<dyn Tool>` 边界由 `ToolResult::to_value()` 抹平）
-
-### 任务 0a.1 — 创建 `packages/global/types` crate 骨架
-
-**文件**：
-- 新建 `packages/global/types/Cargo.toml`：
-  ```toml
-  [package]
-  name = "types"
-  version.workspace = true
-  edition.workspace = true
-
-  [dependencies]
-  serde = { workspace = true }
-  serde_json = { workspace = true }
-  ```
-- 新建 `packages/global/types/src/lib.rs`：
-  ```rust
-  pub mod tool_result;
-  ```
-- 修改根 `Cargo.toml` `members` 列表追加 `"packages/global/types"`。
-
-**commit 模板**：
-```
-feat(types): scaffold types crate for shared tool result types
-
-新建 packages/global/types/ 承载 29 个 XxxResult struct，
-供 apps/cli + agent/features/tools 共享使用。
-
-- 依赖: serde + serde_json
-- lib.rs: pub mod tool_result
-- 注册到 workspace members
-
-相关 issue: #273, #325
-```
-
-### 任务 0a.2 — `agent/features/tools/Cargo.toml` 加 `types` 依赖
-
-- 修改 `agent/features/tools/Cargo.toml`，`[dependencies]` 加：
-  ```toml
-  types = { path = "../../../packages/global/types" }
-  ```
-
-**commit 模板**：
-```
-feat(tools): depend on types crate for shared result structs
-
-为 #273 typed refactor 准备：tools 业务实现将通过
-`use types::tool_result::ReadResult;` 引用 result struct。
-
-相关 issue: #273, #325
-```
-
-### 任务 0a.3 — `apps/cli/Cargo.toml` 加 `types` 依赖
-
-- 修改 `apps/cli/Cargo.toml`，`[dependencies]` 加：
-  ```toml
-  types = { path = "../../packages/global/types" }
-  ```
-
-**commit 模板**：
-```
-feat(cli): depend on types crate for typed Display deserialization
-
-apps/cli TUI 不再跨边界依赖 agent/features/tools。
-Display 通过 `use types::tool_result::ReadResult;` +
-`serde_json::from_value::<ReadResult>(data)` 拿 typed 字段。
-
-相关 issue: #273, #325
-```
-
-### 任务 0a.4 — 创建 `packages/global/types/src/tool_result/mod.rs`
-
-**目标**：声明 29 个子模块入口（每个 struct 一文件，文件名 = tool 名）。
-
-- 新建 `packages/global/types/src/tool_result/mod.rs`：
+- 新建 `packages/sdk/src/tool_result/mod.rs`：
   ```rust
   pub mod read;
   pub mod write;
@@ -231,42 +173,174 @@ Display 通过 `use types::tool_result::ReadResult;` +
   pub mod list_mcp_resources;
   pub mod read_mcp_resource;
   ```
-  （29 个子模块，对应 29 个 struct；子模块体由 Phase 0 任务 0.3/0.4 填充）
+- 新建 29 个 `packages/sdk/src/tool_result/<tool>.rs`（每个含占位 `pub struct` + serde derive）：
+  ```rust
+  use serde::{Deserialize, Serialize};
+
+  #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+  pub struct ReadResult {
+      // 字段由 Phase 0 任务 0.3 填充
+      pub _placeholder: (),
+  }
+  ```
+- 修改 `packages/sdk/src/lib.rs` 加 `pub mod tool_result;`
 
 **commit 模板**：
 ```
-feat(types): declare 29 tool_result submodules
+feat(sdk): add 29 typed tool result struct skeletons
 
-29 个 R struct 各占一文件，文件名与 tool 名一一对应。
-子模块体由 Phase 0 任务 0.3/0.4 填充。
+为 #273 typed refactor + #325 扁平重构准备：29 个 R struct 物理位置
+选 **方案 B**（SDK 而非 tools/business），server 模式（未来）可直接
+dep sdk 反序列化 typed result 给多端消费者，DDD 边界 0 破坏。
+
+- 新建 packages/sdk/src/tool_result/{29 个 .rs}：纯数据 + serde derive
+- 子模块 mod.rs 统一注册
+- lib.rs 加 pub mod tool_result
+- 字段由 Phase 0 任务 0.3/0.4 填充
 
 相关 issue: #273, #325
 ```
 
-### 任务 0a.5 — Phase 0a 验证
+### 任务 0a.2 — `agent/features/runtime/src/tool_adapter.rs` 29 个适配函数
+
+**目标**：runtime 在 tool call 边界做 R 反序列化适配，每个 tool 一个 `from_raw` 函数 + 统一 trait。
+
+- 新建 `agent/features/runtime/src/tool_adapter.rs`：
+  ```rust
+  use sdk::tool_result::{
+      AgentResult, AskUserResult, BashResult, BriefResult, ConfigToolResult, EditResult,
+      EnterWorktreeResult, ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult,
+      LspResult, McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult,
+      ReadResult, SkillResult, SleepResult, TaskCreateResult, TaskGetResult, TaskListResult,
+      TaskListCompleteResult, TaskListCreateResult, TaskStopResult, TaskUpdateResult,
+      ToolSearchResult, WebFetchResult, WebSearchResult, WriteResult,
+  };
+  use serde::de::DeserializeOwned;
+
+  /// 工具结果适配器：把 serde_json::Value 反序列化为 typed R struct
+  pub trait ToolResultAdapter: DeserializeOwned + Default {
+      fn from_raw(data: &serde_json::Value) -> Self {
+          serde_json::from_value(data.clone()).unwrap_or_default()
+      }
+  }
+
+  // 为 29 个 R struct 实现 ToolResultAdapter
+  impl ToolResultAdapter for ReadResult {}
+  impl ToolResultAdapter for WriteResult {}
+  // ... (29 个 impl)
+  ```
+- 修改 `agent/features/runtime/src/lib.rs` 加 `pub mod tool_adapter;`
+
+**commit 模板**：
+```
+feat(runtime): add 29 tool result adapters for typed conversion
+
+为 #273 typed refactor 准备：runtime 在 tool call 边界做 R 反序列化
+适配，工具实现仍返回 serde_json::Value，runtime 调用 adapter 转为 typed。
+
+- 新建 agent/features/runtime/src/tool_adapter.rs
+- 29 个 from_raw 函数（默认 serde_json::from_value，失败回退 Default）
+- ToolResultAdapter trait：统一签名
+- 适配层放 runtime 而非 sdk（保持 sdk 纯数据定位）
+- lib.rs 加 pub mod tool_adapter
+
+相关 issue: #273, #325
+```
+
+### 任务 0a.3 — `agent/features/tools/Cargo.toml` 加 `sdk` 依赖
+
+**目标**：tools 业务实现通过 `use sdk::tool_result::XxxResult;` 引用 R struct。
+
+- 修改 `agent/features/tools/Cargo.toml`，`[dependencies]` 加：
+  ```toml
+  sdk = { path = "../../../packages/sdk" }
+  ```
+  （runtime / composition / cli 已有 sdk dep，无需修改）
+
+**commit 模板**：
+```
+feat(tools): depend on sdk for typed result structs
+
+为 #273 typed refactor 准备：tool impl 通过
+`use sdk::tool_result::XxxResult;` 引用 result struct。
+适配层（from_raw）由 runtime 提供，tool 仅 dep sdk 取类型。
+
+相关 issue: #273, #325
+```
+
+### 任务 0a.4 — `agent/composition/src/lib.rs` 加 `pub use sdk::tool_result::*;`
+
+**目标**：composition 作为可选 re-export 出口，让其他业务模块可走 `use composition::XxxResult`（**但 TUI 仍走 sdk 直接 dep**）。
+
+- 修改 `agent/composition/src/lib.rs`，在已有 re-export 段加：
+  ```rust
+  pub use sdk::tool_result::{
+      AgentResult, AskUserResult, BashResult, /* ... 29 个 ... */
+  };
+  ```
+
+**commit 模板**：
+```
+feat(composition): re-export 29 typed tool results
+
+composition 作为横切层桥接点，re-export sdk::tool_result::* 让
+agent 业务模块（runtime/compact/storage）可走 `use composition::XxxResult`
+统一引用。TUI 仍走 sdk 直接 dep（cli 已有 sdk dep）。
+
+相关 issue: #273, #325
+```
+
+### 任务 0a.5 — `docs/design/architecture-guards.md` §6 登记 29 个 R struct + runtime 适配层
+
+**目标**：架构守卫 §6 `ROOT_REEXPORT_ALLOW` 追加 29 条 R struct + 1 条 runtime adapter 登记。
+
+- 修改 `docs/design/architecture-guards.md` §6（具体格式按守卫规则）：
+  ```yaml
+  # SDK 29 个 typed tool result
+  sdk: [AgentResult, AskUserResult, BashResult, BriefResult, ConfigToolResult, EditResult, EnterWorktreeResult, ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult, LspResult, McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult, ReadResult, SkillResult, SleepResult, TaskCreateResult, TaskGetResult, TaskListResult, TaskListCompleteResult, TaskListCreateResult, TaskStopResult, TaskUpdateResult, ToolSearchResult, WebFetchResult, WebSearchResult, WriteResult]
+  # runtime 适配层
+  runtime: [tool_adapter]
+  ```
+
+**commit 模板**：
+```
+chore(architecture): register sdk:29 typed tool results + runtime adapter
+
+- SDK 新增 29 个 typed tool result（§6 ROOT_REEXPORT_ALLOW 追加）
+- runtime 新增 tool_adapter 模块
+- 守卫白名单更新，确保 sdk 与 runtime 的对外暴露符合 DDD 边界
+
+相关 issue: #273, #325
+```
+
+### 任务 0a.6 — Phase 0a 验证
 
 ```bash
-cargo check -p types       # types crate 自检
-cargo check -p tools       # 验证 types 依赖不破坏 tools
-cargo check -p cli         # 验证 types 依赖不破坏 apps/cli
-cargo check --workspace    # 全 workspace 编译通过
+cargo check -p sdk          # sdk crate 自检
+cargo check -p tools        # 验证 sdk 依赖不破坏 tools
+cargo check -p runtime      # 验证 runtime 适配层编译
+cargo check -p composition  # 验证 composition re-export
+cargo check -p cli          # 验证 cli 仍能通过 sdk 反序列化
+cargo check --workspace     # 全 workspace 编译通过
+.agents/hooks/check-architecture-guards.sh  # 架构守卫通过
 ```
 
 ### Phase 0a 总结
 
 | 维度 | 值 |
 |---|---|
-| 任务数 | 5（0a.1 - 0a.5） |
-| atomic commit 数 | 4（scaffold + tools-deps + cli-deps + submodules 声明；验证不单独 commit） |
-| 新 crate | `packages/global/types`（name="types"） |
-| 跨 crate 依赖 | types ← tools, types ← cli |
-| TUI 跨边界依赖 | **消除**（TUI 不再 dep agent/features/tools） |
+| 任务数 | 6（0a.1 - 0a.6） |
+| atomic commit 数 | 5（0a.1 sdk struct + 0a.2 runtime adapter + 0a.3 tools-deps + 0a.4 composition re-export + 0a.5 守卫登记；验证不单独 commit） |
+| 新模块 | `packages/sdk/src/tool_result/`（29 个 .rs）+ `agent/features/runtime/src/tool_adapter.rs` |
+| 跨 crate 依赖 | tools ← sdk（新增）；runtime → sdk（已有）；composition → sdk（已有）；cli → sdk（已有） |
+| TUI 跨边界依赖 | **消除**（TUI 走 sdk 不走 agent 业务层） |
+| Server 模式友好 | ⭐⭐⭐（server 未来 dep sdk 零成本消费，DDD 干净） |
 
 ---
 
 ## Phase 0 ToolResult 重构与 typed result 关联类型
 
-> **本章节是范围扩展后新增（2026-06-18）**。原 plan 的 4 个 typed-helpers 任务（Task 1-4 范围）被本阶段替代——typed struct 直接提供 `.field` 访问，无需链式 `data_field_*()` 辅助函数。本 Phase 0 的 29 个 R struct 物理位置在 `packages/global/types/src/tool_result/`（由 Phase 0a 任务 0a.4 创建），tool impl 通过 `use types::tool_result::XxxResult;` 引用。
+> **本章节是范围扩展后新增（2026-06-18）**。原 plan 的 4 个 typed-helpers 任务（Task 1-4 范围）被本阶段替代——typed struct 直接提供 `.field` 访问，无需链式 `data_field_*()` 辅助函数。本 Phase 0 的 29 个 R struct 物理位置在 `packages/sdk/src/tool_result/`（由 Phase 0a 任务 0a.1 创建，**方案 B 决策**），tool impl 通过 `use sdk::tool_result::XxxResult;` 引用；适配层（29 个 from_raw）由 `agent/features/runtime/src/tool_adapter.rs` 提供（任务 0a.2）；TUI Display 通过 `use sdk::tool_result::XxxResult;` + `serde_json::from_value::<XxxResult>(data)` 拿 typed 字段。
 
 ### 任务 0.1 — `agent/shared/src/tool.rs` 新 `ToolResult<R>`
 
@@ -422,9 +496,9 @@ fn result_roundtrip() {
 ```
 feat(tools): migrate {ToolName} to ToolResult<ToolResult> with typed data
 
-- 新增 packages/global/types/src/tool_result/{tool_name}.rs 中的 {ToolResult} struct
+- 新增 packages/sdk/src/tool_result/{tool_name}.rs 中的 {ToolResult} struct
   （pub struct with Serialize/Deserialize/Debug/Default + Clone）
-- agent/features/tools/src/business/{tool_name}.rs 改 use types::tool_result::{ToolResult};
+- agent/features/tools/src/business/{tool_name}.rs 改 use sdk::tool_result::{ToolResult};
 - 改 Tool::Result = {ToolResult} impl
 - 改 Tool::call 返回 ToolResult<{ToolResult}>
 - 旧 success_json/error_json → ok/err (with #[allow(deprecated)])
@@ -464,8 +538,8 @@ feat(tools): migrate {ToolName} to ToolResult<ToolResult> with typed data
 ```
 feat(tools): migrate {ToolName} to typed ToolResult
 
-- 新增 packages/global/types/src/tool_result/{tool_name}.rs 中的 {ToolResult} struct
-- agent/features/tools/src/business/{tool_name}.rs 改 use types::tool_result::{ToolResult};
+- 新增 packages/sdk/src/tool_result/{tool_name}.rs 中的 {ToolResult} struct
+- agent/features/tools/src/business/{tool_name}.rs 改 use sdk::tool_result::{ToolResult};
 - 改 Tool::Result = {ToolResult} impl
 - 改 Tool::call 返回 ToolResult<{ToolResult}>
 - 旧 success_json/error_json → ok/err (with #[allow(deprecated)])
@@ -560,12 +634,15 @@ echo "{prompt}" | script -q /tmp/tui.log cargo run -- -qv
 
 | 维度 | 值 |
 |---|---|
-| 任务数 | 12（0a.1-0a.5 + 0.1-0.7） |
-| atomic commit 数 | 39（4 Phase 0a + 1 + 1 + 11 + 18 + 1 + 1 + 1 verify + 1 聚合） |
+| 任务数 | 13（0a.1-0a.6 + 0.1-0.7） |
+| atomic commit 数 | 40（5 Phase 0a + 1 + 1 + 11 + 18 + 1 + 1 + 1 verify + 1 聚合） |
 | 读取点修改 | 100+（任务 0.5 集中处理） |
-| typed struct 数 | 29（11 核心 + 18 非核心） |
+| typed struct 数 | 29（11 核心 + 18 非核心，物理位置：`packages/sdk/src/tool_result/<tool>.rs`） |
+| 适配层 | `agent/features/runtime/src/tool_adapter.rs`（29 个 from_raw + ToolResultAdapter trait） |
+| composition 桥接 | `pub use sdk::tool_result::*;`（可选 re-export，TUI 走 sdk 直接 dep） |
 | 持久化 schema 迁移 | 旧 `is_error/output/content` 读取自动映射为新 `ok/message/data` |
-| 跨 crate 影响 | 6 个（shared/tools/runtime/provider/sdk/apps/cli） |
+| 跨 crate 影响 | 6 个（shared/tools/runtime/composition/sdk/apps/cli） |
+| server 模式 | ⭐⭐⭐（未来 dep sdk 零成本消费，DDD 干净） |
 | 风险等级 | 高（破坏性 API 变更） |
 | 缓解 | 旧 method 标 `#[deprecated]` 保留 1 release；持久化读时自动迁移 |
 
