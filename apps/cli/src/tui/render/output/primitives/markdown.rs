@@ -97,10 +97,7 @@ fn strip_blockquote(line: &str) -> Option<(usize, &str)> {
     }
     let mut rest = trimmed;
     let mut bars = 0usize;
-    loop {
-        let Some(after) = rest.strip_prefix('>') else {
-            break;
-        };
+    while let Some(after) = rest.strip_prefix('>') {
         bars += 1;
         rest = after.strip_prefix(' ').unwrap_or(after);
     }
