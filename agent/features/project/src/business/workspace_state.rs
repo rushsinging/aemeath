@@ -72,12 +72,11 @@ fn resolve_worktree_path(
 
 pub fn set_cwd(
     state: &mut WorkspaceState,
-    git: &dyn GitWorktreeOps,
+    _git: &dyn GitWorktreeOps,
     path: PathBuf,
 ) -> Result<(), WorkspaceError> {
-    if let Ok(root) = git.show_toplevel(&path) {
-        state.working_root = root;
-    }
+    // set_cwd 只更新 path_base（当前路径基准）
+    // working_root 只有在 enter/exit worktree 时才会改变
     state.path_base = path;
     Ok(())
 }
