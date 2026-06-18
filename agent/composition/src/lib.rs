@@ -7,3 +7,4 @@ pub mod app;
 pub mod provider;
 pub mod runtime;
 pub mod tools;
+pub mod update;

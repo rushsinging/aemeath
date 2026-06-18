@@ -145,9 +145,9 @@ impl App {
     }
 
     fn accept_pending_clipboard_image(&mut self, img: sdk::ClipboardImageView) {
-        self.handle_input_intent(
-            crate::tui::model::input::intent::InputIntent::InsertImage(img),
-        );
+        self.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertImage(
+            img,
+        ));
     }
 
     /// 将文本复制到系统剪贴板，并据结果在 status bar 给出反馈。
@@ -219,6 +219,30 @@ impl App {
             let _ = tx
                 .send(UiEvent::ReflectionApplyDone { output, result })
                 .await;
+        });
+    }
+
+    /// 启动时后台检查版本更新（非阻塞）。
+    /// 使用 `force_check` 忽略缓存，确保每次启动都查最新状态。
+    /// 失败时静默降级——版本检查不应影响正常使用。
+    pub(crate) fn spawn_update_check(&self, ui_tx: mpsc::Sender<UiEvent>) {
+        let service = composition::update::wire_update();
+        crate::tui::effect::spawn_guard::spawn_guarded("update_check", async move {
+            match service.force_check().await {
+                Ok(check) if check.is_update_available => {
+                    let _ = ui_tx
+                        .send(UiEvent::UpdateAvailable {
+                            current: check.current_version,
+                            latest: check.latest_version,
+                            release_url: check.release_url,
+                        })
+                        .await;
+                }
+                Ok(_) => {} // 已是最新，不提示
+                Err(e) => {
+                    crate::tui::log_warn!("版本检查失败（已忽略）: {e}");
+                }
+            }
         });
     }
 

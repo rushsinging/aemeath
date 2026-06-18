@@ -27,6 +27,7 @@ FEATURE_CRATES = {
     "storage",
     "hook",
     "audit",
+    "update",
 }
 INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
@@ -85,7 +86,9 @@ def top_level_items(inner: str) -> list[str]:
     return items
 
 
-def check_cross_crate_line(current_crate: str | None, line: str) -> list[str]:
+def check_cross_crate_line(
+    current_crate: str | None, line: str, local_modules: set[str] | None = None
+) -> list[str]:
     stripped = line.strip()
     if not stripped or stripped.startswith("//") or stripped.startswith("*"):
         return []
@@ -103,6 +106,9 @@ def check_cross_crate_line(current_crate: str | None, line: str) -> list[str]:
         ):
             continue
         target, segment = match.groups()
+        # 跳过文件内声明的本地模块（如 TUI 的 update 模块、sdk 的 update 模块）
+        if local_modules and target in local_modules:
+            continue
         if target == current_crate or current_crate == "share":
             continue
         if segment in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
@@ -120,6 +126,8 @@ def check_cross_crate_line(current_crate: str | None, line: str) -> list[str]:
         ):
             continue
         target, inner = match.groups()
+        if local_modules and target in local_modules:
+            continue
         if target == current_crate or current_crate == "share":
             continue
         for item in top_level_items(inner):
@@ -190,8 +198,11 @@ for base in [root / "agent", root / "apps", root / "packages"]:
             continue
         rel = path.relative_to(root)
         current = crate_for(rel)
-        for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            for violation in check_cross_crate_line(current, line):
+        text = path.read_text()
+        # 解析文件中声明的本地模块，排除同名 crate 的误报
+        local_modules = set(re.findall(r'\b(?:pub\s+)?mod\s+(\w+)\s*;', text))
+        for lineno, line in enumerate(text.splitlines(), 1):
+            for violation in check_cross_crate_line(current, line, local_modules):
                 violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
 if violations:
     reason = "Crate API boundary guard FAILED:\n" + "\n".join(violations[:100])

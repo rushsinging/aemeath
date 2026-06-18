@@ -58,7 +58,7 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `prompt`, `provider`, `tools`, `storage`, `hook`, `audit`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `prompt`, `provider`, `tools`, `storage`, `hook`, `audit`, `update`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
@@ -68,6 +68,7 @@
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
+| `update` | `share`, `sdk` |
 | `sdk` | `utils` |
 | `logging` | ∅ |
 | `utils` | ∅ |
@@ -179,7 +180,7 @@
 - **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
 - **守护**：[outline.md](./outline.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
 - **常量**：
-  - `FEATURE_CRATES = {runtime, project, policy, prompt, provider, tools, storage, hook, audit}`
+  - `FEATURE_CRATES = {runtime, project, policy, prompt, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`（project 可在根级 `pub use project::ProjectContext`，如 `sdk` 投影）

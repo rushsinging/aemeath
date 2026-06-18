@@ -305,7 +305,9 @@ dependencies = [
  "provider",
  "runtime",
  "sdk",
+ "share",
  "tools",
+ "update",
 ]
 
 [[package]]
@@ -2769,6 +2771,24 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "update"
+version = "0.8.2"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "log",
+ "logging",
+ "reqwest",
+ "sdk",
+ "semver",
+ "serde",
+ "serde_json",
+ "share",
+ "thiserror 2.0.18",
+ "tokio",
+]
 
 [[package]]
 name = "url"

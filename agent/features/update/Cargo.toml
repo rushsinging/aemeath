@@ -1,0 +1,18 @@
+[package]
+name = "update"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+share = { path = "../../shared" }
+sdk = { path = "../../../packages/sdk" }
+semver = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+log = "0.4"
+logging = { path = "../../../packages/global/logging" }
+chrono = { workspace = true }
