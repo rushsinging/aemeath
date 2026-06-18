@@ -3,6 +3,7 @@ pub const LOG_TARGET: &str = "aemeath:agent:runtime";
 
 pub mod api;
 pub mod business;
+pub mod tool_adapter;
 pub mod contract;
 pub mod core;
 pub mod gateway;
