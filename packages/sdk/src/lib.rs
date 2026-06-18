@@ -17,6 +17,7 @@ pub mod project;
 pub mod session;
 pub mod tui;
 pub mod types;
+pub mod update;
 
 pub mod ids;
 
@@ -51,4 +52,5 @@ pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,
     StrSlice, TaskState, TaskSummary,
 };
+pub use update::{UpdateResult, UpdateService, VersionCheck};
 pub use utils::{slice_head, slice_tail};

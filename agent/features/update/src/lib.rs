@@ -1,0 +1,9 @@
+//! 版本检查与自动更新 feature。
+//!
+//! 对应设计文档：`docs/design/release-update-design.md`
+
+pub mod api;
+mod contract;
+mod gateway;
+
+pub const LOG_TARGET: &str = "aemeath:agent:update";

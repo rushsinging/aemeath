@@ -58,6 +58,9 @@ impl App {
         let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
         self.chat.stop_processing();
 
+        // 启动时后台检查版本更新（非阻塞，失败静默降级）。
+        self.spawn_update_check(ui_tx.clone());
+
         let mut event_stream = EventStream::new();
         let mut change_rx = self.agent_client.as_ref().map(|client| client.changes());
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));

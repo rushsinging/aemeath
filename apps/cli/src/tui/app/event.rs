@@ -135,5 +135,11 @@ pub enum AppEvent {
     WorkingDirectoryChanged(StatusContextUpdate),
     /// Runtime task store changed; refresh TUI task list window.
     TaskStatusChanged,
+    /// 版本检查结果（后台 spawn 完成后回送）。
+    UpdateAvailable {
+        current: String,
+        latest: String,
+        release_url: String,
+    },
 }
 pub type UiEvent = AppEvent;

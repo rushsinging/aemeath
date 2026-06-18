@@ -106,6 +106,13 @@ pub enum Commands {
         #[arg(long, default_value = "20")]
         limit: usize,
     },
+
+    /// Check for and install updates
+    Update {
+        /// Only check for available updates, don't install
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.
