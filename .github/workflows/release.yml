@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without v prefix (e.g. 0.8.3)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Job 1: 版本一致性校验 + 发布前门禁 ──────────────────────────
+  validate:
+    name: Validate & Gate
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check version consistency (tag vs Cargo.toml)
+        id: version
+        run: |
+          # 从触发来源提取版本号
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "Trigger version: $VERSION"
+
+          # 从 Cargo.toml [workspace.package] 提取版本号
+          CARGO_VERSION=$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml \
+            | grep '^version' | head -1 | cut -d'"' -f2)
+          echo "Cargo.toml version: $CARGO_VERSION"
+
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Version mismatch: expected $CARGO_VERSION (Cargo.toml), got $VERSION (${{ github.event_name }})"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  # ── Job 2: macOS 双架构构建 ─────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14          # Apple Silicon runner
+          - target: x86_64-apple-darwin
+            runner: macos-13          # Intel runner
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package tarball
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          DIRNAME="aemeath-${VERSION}-${TARGET}"
+
+          mkdir "$DIRNAME"
+          cp "target/${TARGET}/release/aemeath" "$DIRNAME/aemeath"
+          tar czf "${DIRNAME}.tar.gz" "$DIRNAME"
+          echo "Packaged: ${DIRNAME}.tar.gz"
+          ls -lh "${DIRNAME}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aemeath-${{ matrix.target }}
+          path: aemeath-*.tar.gz
+
+  # ── Job 3: 生成 checksums + 创建 GitHub Release ─────────────────
+  release:
+    name: Create Release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum aemeath-*.tar.gz > ../checksums.txt
+          echo "=== checksums.txt ==="
+          cat ../checksums.txt
+
+      - name: Determine tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=v${{ needs.validate.outputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/aemeath-*.tar.gz
+            checksums.txt
