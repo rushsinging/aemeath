@@ -99,7 +99,7 @@ aemeath/                    # workspace root
 │   └── agent-audit.log      #   aemeath:agent:audit — 审计事件
 > **废弃文件**：`input.log` / `output.log` / `tool.log` / `audit.log` / `agent.log` 已废弃，NEVER 再使用。详见 `specs/logging.md`。
 >
-> 注意：`-v` / `--verbose` 参数将应用日志输出到 stderr（常与 `-q` 配合用于 CLI 测试：`echo "hello" | aemeath -q -v --allow-all`）。不加 `-v` 时日志始终写入 `~/.agents/logs/aemeath.log`。
+> **终端测试**：`echo "{prompt}" | cargo run -- -q -v`（`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试）。
 ├── memory/                  # 持久化记忆存储
 ├── sessions/                # 会话持久化
 ├── skills/                  # 全局 Skills
