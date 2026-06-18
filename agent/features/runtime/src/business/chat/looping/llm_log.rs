@@ -1,6 +1,5 @@
 use crate::business::agent::ToolCall;
 use crate::business::chat::looping::input_log::logged_input_messages;
-use logging::UnifiedLogger;
 use provider::api::{StreamResponse, SystemBlock};
 use share::message::Message;
 use crate::LOG_TARGET;
@@ -29,13 +28,14 @@ pub(super) fn log_llm_input(
         .map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?"))
         .collect();
     let data = serde_json::json!({
+        "event_type": "llm_input",
         "messages": new_msgs,
         "system_blocks_count": system_blocks.len(),
         "system_blocks": sb_summary,
         "tool_schemas_count": tool_schemas.len(),
         "tool_schemas_names": schema_names,
     });
-    UnifiedLogger::log_input("default", data);
+    log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
 }
 
 /// 记录 LLM 完整输出 + tool_call 到 `output.log` / `tool.log`。
@@ -52,6 +52,7 @@ pub(super) fn log_llm_output_and_tool_calls(
         .filter_map(|block| serde_json::to_value(block).ok())
         .collect();
     let data = serde_json::json!({
+        "event_type": "llm_output",
         "stop_reason": format!("{:?}", resp.stop_reason),
         "input_tokens": resp.usage.input_tokens,
         "output_tokens": resp.usage.output_tokens,
@@ -59,7 +60,7 @@ pub(super) fn log_llm_output_and_tool_calls(
         "provider": provider_name,
         "content_blocks": blocks,
     });
-    UnifiedLogger::log_output("default", data);
+    log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
 
     for tc in tool_calls {
         let tc_data = serde_json::json!({

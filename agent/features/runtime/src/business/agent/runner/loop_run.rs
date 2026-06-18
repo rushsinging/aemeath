@@ -7,7 +7,6 @@ use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
 use crate::business::compact::truncate_tool_result;
-use logging::UnifiedLogger;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
@@ -199,12 +198,16 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_input(&self, turn_number: usize) {
-        let data = build_json_logger_input_data(
+        let mut data = build_json_logger_input_data(
             &self.messages,
             self.system_blocks.len(),
             &self.sub_schemas,
         );
-        UnifiedLogger::log_input(&self.role_name_for_log, data);
+        if let serde_json::Value::Object(ref mut map) = data {
+            map.insert("event_type".to_string(), serde_json::Value::String("llm_input".to_string()));
+            map.insert("role".to_string(), serde_json::Value::String(self.role_name_for_log.clone()));
+        }
+        log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
         logging::context::set_current_turn(turn_number);
     }
 
@@ -219,12 +222,16 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn log_output(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
-        let data = build_json_logger_output_data(
+        let mut data = build_json_logger_output_data(
             resp,
             self.start_time.elapsed().as_secs_f64(),
             self.client.provider_name(),
         );
-        UnifiedLogger::log_output(&self.role_name_for_log, data);
+        if let serde_json::Value::Object(ref mut map) = data {
+            map.insert("event_type".to_string(), serde_json::Value::String("llm_output".to_string()));
+            map.insert("role".to_string(), serde_json::Value::String(self.role_name_for_log.clone()));
+        }
+        log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
         logging::context::set_current_turn(turn_number);
     }
 

@@ -1,6 +1,8 @@
 //! # 日志文件职责
 //!
-//! ## 诊断日志（UnifiedLogger 按 target 前缀路由）
+//! 所有日志（诊断 + 审计）统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。
+//!
+//! ## 文件路由（按 target 前缀匹配）
 //!
 //! | 文件 | target 前缀 | 来源 |
 //! |------|-------------|------|
@@ -18,11 +20,10 @@
 //! | `agent-policy.log` | `aemeath:agent:policy` | policy 层 |
 //! | `agent-audit.log` | `aemeath:agent:audit` | audit 层 |
 //!
-//! ## 审计日志（静态方法直写）
+//! ## 输出模式
 //!
-//! | 文件 | 数据 | 写入方法 |
-//! |------|------|----------|
-//! | `agent-provider.log` | 用户输入 + LLM 输入 + LLM 输出 | `log_input` / `log_user_input` / `log_output` |
+//! - `File`（默认）：写入上述日志文件。
+//! - `Stderr`：所有日志统一输出到 stderr（JSON Lines 格式）。
 //!
 //! ## 不变
 //!
@@ -43,9 +44,9 @@ pub use context::{
     set_current_model, set_current_provider, set_current_request_id, set_current_role,
     set_current_turn, set_session_id,
 };
-pub use format::{format_text_line_with_turn, timestamp_local_rfc3339};
+pub use format::timestamp_local_rfc3339;
 pub use rotation::{is_rotated_log_path, rotated_path, timestamp_rfc3339};
-pub use unified_logger::UnifiedLogger;
+pub use unified_logger::{OutputMode, UnifiedLogger};
 
 /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
 pub fn level_filter_from_str(level: &str) -> log::LevelFilter {
