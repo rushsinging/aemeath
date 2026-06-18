@@ -36,5 +36,5 @@ tar = "0.4"
 inventory = "0.3"
 
 [workspace.package]
-version = "0.8.2"
+version = "0.0.1"
 edition = "2021"
