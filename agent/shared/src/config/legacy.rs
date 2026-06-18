@@ -49,7 +49,7 @@ impl Default for ApiConfig {
 }
 
 pub(crate) fn default_user_agent() -> String {
-    format!("aemeath/{}", crate::VERSION)
+    format!("aemeath/{}", crate::version())
 }
 
 pub(crate) fn default_timeout() -> u64 {

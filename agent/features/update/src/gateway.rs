@@ -35,7 +35,7 @@ impl UpdateGateway {
     pub fn new(cache_path: PathBuf) -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .user_agent(format!("aemeath/{}", share::VERSION))
+            .user_agent(format!("aemeath/{}", share::version()))
             .build()
             .unwrap_or_default();
         Self { http, cache_path }
@@ -249,7 +249,7 @@ fn strip_v_prefix(tag: &str) -> &str {
 
 /// 解析当前版本号。
 fn current_version() -> Version {
-    Version::parse(share::VERSION).expect("AEMEATH_VERSION / CARGO_PKG_VERSION 必须是合法 semver")
+    Version::parse(share::version()).expect("AEMEATH_VERSION / CARGO_PKG_VERSION 必须是合法 semver")
 }
 
 /// 判断缓存是否在有效期内。
