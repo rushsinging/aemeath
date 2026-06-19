@@ -91,7 +91,7 @@ impl<'a> SubAgentRun<'a> {
                 );
             }
         } else if urgency >= 1 {
-            crate::business::compact::microcompact(&mut self.messages, 4);
+            self.messages = crate::business::compact::microcompact(&self.messages, 4);
             (self.progress)(Some(turn_number), "Agent microcompacted");
         }
     }

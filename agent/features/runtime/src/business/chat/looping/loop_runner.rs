@@ -217,12 +217,14 @@ where
         }
 
         loop_fsm.transition(ChatLoopTransition::Compact);
-        auto_compact(
+        // LLM 视图：compact/microcompact 产生的截断视图，None 时用原始 messages。
+        // 真相源 messages 永不截断，保证 session 持久化的是完整对话。
+        let llm_view = auto_compact(
             &sink,
             &hook_ui,
             &hook_runner,
             turn_count,
-            &mut messages,
+            &messages,
             &system_prompt_text,
             context_size,
             tool_schema_tokens,
@@ -264,13 +266,15 @@ where
         // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
         task_reminder_state.update_from_messages(turn_count as u64, &messages);
 
+        // 使用 LLM 视图（compact 后的截断版本）；无 compact 时用原始 messages
+        let view_messages: &[Message] = llm_view.as_deref().unwrap_or(&messages);
         let messages_for_api: Vec<Message> = build_api_messages(
             &user_context,
             &language,
             &mut task_reminder_state,
             turn_count as u64,
             &task_store,
-            &messages,
+            view_messages,
         )
         .await;
 

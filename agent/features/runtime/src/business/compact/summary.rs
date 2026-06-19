@@ -63,8 +63,7 @@ pub fn compact_messages(
     }
 
     // 第一步：先尝试微压缩（保留最近 10 条消息的工具结果）
-    let mut result = messages.to_vec();
-    microcompact(&mut result, 10);
+    let result = microcompact(messages, 10);
 
     if !needs_compaction(&result, system_prompt, context_size) {
         return (result, true);
@@ -249,9 +248,8 @@ pub async fn compact_messages_with_llm(
         return (messages.to_vec(), false);
     }
 
-    // 第一步：微压缩
-    let mut result = messages.to_vec();
-    microcompact(&mut result, 10);
+    // 第一步：微压缩（返回克隆视图，不修改原始 messages）
+    let result = microcompact(messages, 10);
 
     if !needs_compaction(&result, system_prompt, context_size) {
         return (result, true);

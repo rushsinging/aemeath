@@ -6,13 +6,16 @@ use share::message::{ContentBlock, Message};
 
 /// 微压缩：清除旧工具结果以节省 token。
 /// 仅保留最近 `keep_recent` 条消息的工具结果内容不变。
-pub fn microcompact(messages: &mut [Message], keep_recent: usize) {
-    if messages.len() <= keep_recent {
-        return;
+///
+/// 返回截断后的 **克隆视图**，不修改原始 messages（真相源不可变）。
+pub fn microcompact(messages: &[Message], keep_recent: usize) -> Vec<Message> {
+    let mut result = messages.to_vec();
+    if result.len() <= keep_recent {
+        return result;
     }
 
-    let cutoff = messages.len() - keep_recent;
-    for msg in messages[..cutoff].iter_mut() {
+    let cutoff = result.len() - keep_recent;
+    for msg in result[..cutoff].iter_mut() {
         for block in msg.content.iter_mut() {
             if let ContentBlock::ToolResult {
                 ref mut content, ..
@@ -31,4 +34,5 @@ pub fn microcompact(messages: &mut [Message], keep_recent: usize) {
             }
         }
     }
+    result
 }

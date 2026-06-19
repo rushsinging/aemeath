@@ -7,14 +7,18 @@ use share::message::Message;
 use std::sync::Arc;
 
 /// Run auto-compaction if the context is approaching the limit.
-/// Returns true if the messages were modified.
+///
+/// Returns `Some(compacted_view)` when compaction was applied — the caller
+/// should use this view for LLM API calls instead of the original `messages`.
+/// Returns `None` when no compaction is needed. **Never mutates `messages`**
+/// (the truth source stays intact for session persistence).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn auto_compact<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &HookRunner,
     turn_count: usize,
-    messages: &mut Vec<Message>,
+    messages: &[Message],
     system_prompt_text: &str,
     context_size: usize,
     tool_schema_tokens: usize,
@@ -25,7 +29,7 @@ pub(crate) async fn auto_compact<S>(
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
-) -> bool
+) -> Option<Vec<Message>>
 where
     S: ChatEventSink,
 {
@@ -68,7 +72,7 @@ where
 
     if pre_compact_blocked {
         log::warn!(target: LOG_TARGET, "PreCompact hook blocked compaction");
-        return false;
+        return None;
     }
 
     let should_compact = if last_api_input_tokens > 0 {
@@ -89,28 +93,24 @@ where
     };
 
     if !should_compact || messages.len() <= 4 {
-        return false;
+        return None;
     }
 
     let old_len = messages.len();
-    compact::microcompact(messages, 10);
-    if compact::needs_compaction_full(
-        messages,
-        system_prompt_text,
-        context_size,
-        tool_schema_tokens,
-    ) || (last_api_input_tokens > 0
-        && compact::needs_compaction_actual(
-            last_api_input_tokens,
-            last_api_output_tokens,
-            cached_tokens,
-            reasoning_tokens,
-            context_size,
-        ))
+    let mut view = compact::microcompact(messages, 10);
+    if compact::needs_compaction_full(&view, system_prompt_text, context_size, tool_schema_tokens)
+        || (last_api_input_tokens > 0
+            && compact::needs_compaction_actual(
+                last_api_input_tokens,
+                last_api_output_tokens,
+                cached_tokens,
+                reasoning_tokens,
+                context_size,
+            ))
     {
         if let Some(text) = crate::business::chat::looping::reflection::run_precompact_reflection(
             memory_config,
-            messages,
+            &view,
             cwd,
             llm_client.as_ref(),
             system_prompt_text,
@@ -123,7 +123,7 @@ where
         }
 
         let (compacted, was_compacted) = compact::compact_messages_with_llm(
-            messages,
+            &view,
             system_prompt_text,
             context_size,
             Some(llm_client.as_ref()),
@@ -131,7 +131,7 @@ where
         .await;
         if was_compacted {
             let new_len = compacted.len();
-            *messages = compacted;
+            view = compacted;
             let _ = sink
                 .send_event(RuntimeStreamEvent::SystemMessage(format!(
                     "[auto-compacted: {} → {} messages]",
@@ -167,8 +167,7 @@ where
                     }
                 }
             }
-            return true;
         }
     }
-    false
+    Some(view)
 }
