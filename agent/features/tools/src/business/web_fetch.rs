@@ -96,6 +96,7 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
 
 #[async_trait]
 impl Tool for WebFetchTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "WebFetch"
     }

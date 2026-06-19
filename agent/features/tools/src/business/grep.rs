@@ -13,6 +13,7 @@ const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
 
 #[async_trait]
 impl Tool for GrepTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "Grep"
     }

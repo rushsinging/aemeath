@@ -10,6 +10,7 @@ pub struct TaskGetTool {
 
 #[async_trait]
 impl Tool for TaskGetTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskGet"
     }

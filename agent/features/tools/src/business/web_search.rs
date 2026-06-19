@@ -7,6 +7,7 @@ pub struct WebSearchTool;
 
 #[async_trait]
 impl Tool for WebSearchTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "WebSearch"
     }

@@ -10,6 +10,7 @@ pub struct TaskListCompleteTool {
 
 #[async_trait]
 impl Tool for TaskListCompleteTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskListComplete"
     }

@@ -10,6 +10,7 @@ pub struct TaskStopTool {
 
 #[async_trait]
 impl Tool for TaskStopTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskStop"
     }

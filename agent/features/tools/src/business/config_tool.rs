@@ -6,6 +6,7 @@ pub struct ConfigTool;
 
 #[async_trait]
 impl Tool for ConfigTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "Config"
     }

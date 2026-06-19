@@ -12,6 +12,7 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 
 #[async_trait]
 impl Tool for FileWriteTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "Write"
     }

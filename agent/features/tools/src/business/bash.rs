@@ -25,6 +25,7 @@ pub struct BashTool;
 
 #[async_trait]
 impl Tool for BashTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "Bash"
     }

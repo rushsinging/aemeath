@@ -12,6 +12,7 @@ pub struct SkillTool {
 
 #[async_trait]
 impl Tool for SkillTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "Skill"
     }

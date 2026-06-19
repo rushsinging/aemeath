@@ -32,6 +32,7 @@ pub struct McpResource {
 
 #[async_trait]
 impl Tool for ListMcpResourcesTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "ListMcpResources"
     }

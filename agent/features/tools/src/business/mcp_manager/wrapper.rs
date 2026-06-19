@@ -65,6 +65,7 @@ fn validate_mcp_input(input: &Value, schema: &Value) -> Result<(), String> {
 
 #[async_trait]
 impl Tool for McpToolWrapper {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         &self.qualified_name
     }

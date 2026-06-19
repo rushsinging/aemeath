@@ -35,6 +35,7 @@ pub struct ReadMcpResourceOutput {
 
 #[async_trait]
 impl Tool for ReadMcpResourceTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "ReadMcpResource"
     }

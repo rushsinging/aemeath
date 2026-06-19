@@ -16,6 +16,7 @@ pub struct McpTool {
 
 #[async_trait]
 impl Tool for McpTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         &self.qualified_name
     }

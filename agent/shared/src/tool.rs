@@ -46,49 +46,94 @@ pub enum PolicyDecision {
     Deny { reason: String },
 }
 
+/// Generic tool result, parameterised over the typed payload `R`.
+///
+/// The default `R = serde_json::Value` preserves full backward
+/// compatibility: existing call sites that build
+/// `ToolResult::success(...)` / `ToolResult::error_json(...)` keep
+/// compiling without change, because `ToolResult<Value>` is structurally
+/// the same shape they used before.
+///
+/// Going forward, a tool `T` declares
+/// `impl Tool for T { type Result = ToolResult<MyResult>; }` so that
+/// downstream consumers (TUI, server, persistence) can read the typed
+/// payload directly from `ToolResult::data`.
+///
+/// `data` is wrapped in `Option<R>` so that:
+///
+/// - the constructors (`success`, `error`, `success_json`, `error_json`,
+///   `text`, `json`) can populate the legacy `output` / `content` fields
+///   without forcing every `R` to implement `Default`, and
+/// - new tool impls that opt into a typed `R` can still leave `data`
+///   as `None` while the migration to typed payloads is in flight.
+///
+/// See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+/// (plan 方案 D) for the design rationale.
 #[derive(Debug, Clone)]
-pub struct ToolResult {
+pub struct ToolResult<R = serde_json::Value> {
     pub output: String,
     pub content: serde_json::Value,
     pub is_error: bool,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
+    /// Typed payload (see struct docs).
+    pub data: Option<R>,
 }
 
-impl ToolResult {
-    pub fn success(output: impl Into<String>) -> Self {
+impl<R> ToolResult<R> {
+    pub fn success(output: impl Into<String>) -> Self
+    where
+        R: Default,
+    {
         Self::text(output, false)
     }
 
-    pub fn error(output: impl Into<String>) -> Self {
+    pub fn error(output: impl Into<String>) -> Self
+    where
+        R: Default,
+    {
         Self::text(output, true)
     }
 
-    pub fn success_json(content: serde_json::Value) -> Self {
+    pub fn success_json(content: serde_json::Value) -> Self
+    where
+        R: Default,
+    {
         Self::json(content, false)
     }
 
-    pub fn error_json(content: serde_json::Value) -> Self {
+    pub fn error_json(content: serde_json::Value) -> Self
+    where
+        R: Default,
+    {
         Self::json(content, true)
     }
 
-    pub fn text(output: impl Into<String>, is_error: bool) -> Self {
+    pub fn text(output: impl Into<String>, is_error: bool) -> Self
+    where
+        R: Default,
+    {
         let output = output.into();
         Self {
             content: serde_json::json!({ "text": output }),
             output,
             is_error,
             images: Vec::new(),
+            data: None,
         }
     }
 
-    pub fn json(content: serde_json::Value, is_error: bool) -> Self {
+    pub fn json(content: serde_json::Value, is_error: bool) -> Self
+    where
+        R: Default,
+    {
         let output = display_text_from_content(&content);
         Self {
             output,
             content,
             is_error,
             images: Vec::new(),
+            data: None,
         }
     }
 
@@ -97,10 +142,34 @@ impl ToolResult {
         self
     }
 
+    /// Attach a typed payload to this result.
+    pub fn with_data(mut self, data: R) -> Self {
+        self.data = Some(data);
+        self
+    }
+
     /// 获取显示文本（从 content 中提取）
     /// 优先级：display > message > text > 序列化 JSON
     pub fn display_text(&self) -> String {
         display_text_from_content(&self.content)
+    }
+}
+
+// Manual `Default` impl covers `R: Default` (the common case). The
+// convenience constructors above also require `R: Default` so that
+// `R::default()` can be used for the `data` field if the caller wants
+// a non-`Option` initial value; the wrapper `Option<R>` makes this
+// trivially `None`, so the bound is satisfied by `Default` for any
+// `R`. To opt out, callers can construct via `ToolResult { ... }` directly.
+impl<R: Default> Default for ToolResult<R> {
+    fn default() -> Self {
+        Self {
+            output: String::new(),
+            content: serde_json::Value::Null,
+            is_error: false,
+            images: Vec::new(),
+            data: None,
+        }
     }
 }
 

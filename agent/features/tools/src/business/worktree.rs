@@ -63,6 +63,7 @@ fn workspace_context_payload(
 
 #[async_trait]
 impl Tool for EnterWorktreeTool {
+    type Result = ToolResult;
     fn name(&self) -> &'static str {
         "EnterWorktree"
     }
@@ -145,6 +146,7 @@ impl Tool for EnterWorktreeTool {
 
 #[async_trait]
 impl Tool for ExitWorktreeTool {
+    type Result = ToolResult;
     fn name(&self) -> &'static str {
         "ExitWorktree"
     }

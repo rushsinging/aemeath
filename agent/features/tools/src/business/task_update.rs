@@ -19,6 +19,7 @@ pub struct TaskUpdateTool {
 
 #[async_trait]
 impl Tool for TaskUpdateTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskUpdate"
     }

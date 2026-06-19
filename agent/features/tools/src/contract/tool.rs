@@ -1,10 +1,22 @@
 use super::ToolExecutionContext;
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{PathAccess, ToolResult};
+use share::tool::PathAccess;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
+    /// Typed tool result, parameterised over the tool's structured payload.
+    ///
+    /// Tools should set this to `ToolResult<MyResult>` (where `MyResult`
+    /// is the typed payload defined in `share::tool::types::...`). Tools
+    /// that have not yet opted in to a typed payload can set it to the
+    /// default-untyped alias `ToolResult` (i.e. `ToolResult<Value>`) for
+    /// backward compatibility.
+    ///
+    /// See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+    /// (plan 方案 D) for the rationale.
+    type Result;
+
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
@@ -48,5 +60,11 @@ pub trait Tool: Send + Sync {
         false
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult;
+    /// Execute the tool.
+    ///
+    /// The return type is `Self::Result`, which defaults to
+    /// `ToolResult<serde_json::Value>` for backward compatibility. Tools
+    /// that opt into a typed payload override the `Result` associated
+    /// type and return `ToolResult<MyResult>` directly.
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> Self::Result;
 }

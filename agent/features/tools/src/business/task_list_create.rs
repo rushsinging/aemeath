@@ -10,6 +10,7 @@ pub struct TaskListCreateTool {
 
 #[async_trait]
 impl Tool for TaskListCreateTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskListCreate"
     }

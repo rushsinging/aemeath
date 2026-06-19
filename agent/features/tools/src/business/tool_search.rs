@@ -9,6 +9,7 @@ pub struct ToolSearchTool;
 
 #[async_trait]
 impl Tool for ToolSearchTool {
+    type Result = ToolResult;
     fn name(&self) -> &str {
         "ToolSearch"
     }
