@@ -1,6 +1,7 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::tool_search::ToolSearchResult;
 
 /// ToolSearch tool - searches for available tools.
 /// Note: This tool provides a static list of known tools since the registry
@@ -8,7 +9,8 @@ use serde_json::Value;
 pub struct ToolSearchTool;
 
 #[async_trait]
-impl Tool for ToolSearchTool {
+impl TypedTool for ToolSearchTool {
+    type Output = ToolSearchResult;
     fn name(&self) -> &str {
         "ToolSearch"
     }
@@ -34,7 +36,11 @@ impl Tool for ToolSearchTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<ToolSearchResult> {
         let query = input["query"].as_str().unwrap_or("").to_lowercase();
 
         // 预定义的工具列表及其描述
@@ -70,7 +76,7 @@ impl Tool for ToolSearchTool {
 
         if query.is_empty() {
             // Return all available tools
-            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("Available tools ({})", all_tools.len()), "data": {"tools": all_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string());
+            return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": format!("Available tools ({})", all_tools.len()), "data": {"tools": all_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string());
         }
 
         // Search for matching tools
@@ -87,10 +93,10 @@ impl Tool for ToolSearchTool {
             .collect();
 
         if matching_tools.is_empty() {
-            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("No tools found matching '{}'", query), "data": {"tools": []}}).to_string());
+            return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": format!("No tools found matching '{}'", query), "data": {"tools": []}}).to_string());
         }
 
-        ToolResult::success(serde_json::json!({"status": "success", "message": format!("Found {} tool(s) matching '{}'", matching_tools.len(), query), "data": {"tools": matching_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string())
+        TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": format!("Found {} tool(s) matching '{}'", matching_tools.len(), query), "data": {"tools": matching_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string())
     }
 }
 

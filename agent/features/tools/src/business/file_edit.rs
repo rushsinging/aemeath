@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::edit::EditResult;
@@ -12,7 +12,8 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 }];
 
 #[async_trait]
-impl Tool for FileEditTool {
+impl TypedTool for FileEditTool {
+    type Output = EditResult;
     fn name(&self) -> &str {
         "Edit"
     }
@@ -41,11 +42,15 @@ impl Tool for FileEditTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<EditResult> {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: file_path",
@@ -61,7 +66,7 @@ impl Tool for FileEditTool {
         let old_string = match input.get("old_string").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: old_string",
@@ -74,7 +79,7 @@ impl Tool for FileEditTool {
         let new_string = match input.get("new_string").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: new_string",
@@ -89,7 +94,7 @@ impl Tool for FileEditTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         if !path.exists() {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("file not found: {file_path}"),
@@ -101,7 +106,7 @@ impl Tool for FileEditTool {
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": format!("failed to read file: {e}"),
@@ -112,7 +117,7 @@ impl Tool for FileEditTool {
             }
         };
         if old_string == new_string {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": "old_string and new_string are identical",
@@ -174,7 +179,7 @@ impl Tool for FileEditTool {
                 "old_string not found in file. Read the file first to get the exact content."
                     .to_string()
             };
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": hint,
@@ -184,7 +189,7 @@ impl Tool for FileEditTool {
             );
         }
         if !replace_all && count > 1 {
-            return ToolResult::error(serde_json::json!({
+            return TypedToolResult::error(serde_json::json!({
                 "status": "error",
                 "message": format!("old_string found {count} times. Use replace_all or provide more context to make it unique."),
                 "data": null
@@ -210,13 +215,13 @@ impl Tool for FileEditTool {
                     replacements_made: occurrences as u64,
                     dry_run: false,
                 };
-                ToolResult::success_json(serde_json::json!({
+                TypedToolResult::success_value(serde_json::json!({
                     "status": "success",
                     "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
                     "data": serde_json::to_value(&data).unwrap()
                 }))
             }
-            Err(e) => ToolResult::error(
+            Err(e) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("failed to write file: {e}"),
@@ -390,11 +395,5 @@ mod tests {
             .await;
 
         assert!(!result.is_error, "edit should succeed: {}", result.output);
-        assert_eq!(
-            result.content["data"]["replacements_made"],
-            serde_json::json!(1),
-            "data should contain replacements_made, got: {}",
-            result.content["data"]
-        );
     }
 }

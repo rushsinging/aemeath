@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::sleep::SleepResult;
@@ -6,7 +6,8 @@ use share::tool::types::sleep::SleepResult;
 pub struct SleepTool;
 
 #[async_trait]
-impl Tool for SleepTool {
+impl TypedTool for SleepTool {
+    type Output = SleepResult;
     fn name(&self) -> &str {
         "Sleep"
     }
@@ -34,7 +35,7 @@ impl Tool for SleepTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<SleepResult> {
         let duration_ms = input["duration_ms"].as_u64().unwrap_or(1000);
 
         // Limit sleep duration to 60 seconds
@@ -42,7 +43,7 @@ impl Tool for SleepTool {
 
         // Check for cancellation
         if ctx.cancel.is_cancelled() {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": "Sleep cancelled",
@@ -56,7 +57,7 @@ impl Tool for SleepTool {
 
         // Check again after sleep
         if ctx.cancel.is_cancelled() {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": "Sleep cancelled",
@@ -66,7 +67,7 @@ impl Tool for SleepTool {
             );
         }
 
-        ToolResult::success(
+        TypedToolResult::success_msg(
             serde_json::json!({
                 "status": "success",
                 "message": format!("Slept for {}ms", duration_ms),

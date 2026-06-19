@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::web_fetch::WebFetchResult;
@@ -96,7 +96,8 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
 }
 
 #[async_trait]
-impl Tool for WebFetchTool {
+impl TypedTool for WebFetchTool {
+    type Output = WebFetchResult;
     fn name(&self) -> &str {
         "WebFetch"
     }
@@ -130,11 +131,15 @@ impl Tool for WebFetchTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<WebFetchResult> {
         let raw_url = match input.get("url").and_then(|v| v.as_str()) {
             Some(u) => u,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: url",
@@ -154,7 +159,7 @@ impl Tool for WebFetchTool {
         let mut url = match validate_url(raw_url) {
             Ok(u) => u,
             Err(e) => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": format!("URL rejected: {e}"),
@@ -203,7 +208,7 @@ impl Tool for WebFetchTool {
                             truncated.chars().count(),
                             body.chars().count()
                         );
-                        ToolResult::success(serde_json::json!({
+                        TypedToolResult::success_msg(serde_json::json!({
                             "status": "success",
                             "message": format!("Fetched {} (truncated, showing first {} chars of {} total)", url, truncated.chars().count(), body.chars().count()),
                             "data": serde_json::to_value(WebFetchResult {
@@ -214,7 +219,7 @@ impl Tool for WebFetchTool {
                             }).unwrap()
                         }).to_string())
                     } else {
-                        ToolResult::success(
+                        TypedToolResult::success_msg(
                             serde_json::json!({
                                 "status": "success",
                                 "message": format!("Fetched {}", url),
@@ -230,7 +235,7 @@ impl Tool for WebFetchTool {
                     }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    ToolResult::error(
+                    TypedToolResult::error(
                         serde_json::json!({
                             "status": "error",
                             "message": format!("fetch failed: {stderr}"),
@@ -240,7 +245,7 @@ impl Tool for WebFetchTool {
                     )
                 }
             }
-            Ok(Err(e)) => ToolResult::error(
+            Ok(Err(e)) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("failed to execute curl: {e}"),
@@ -248,7 +253,7 @@ impl Tool for WebFetchTool {
                 })
                 .to_string(),
             ),
-            Err(_) => ToolResult::error(
+            Err(_) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("request timed out after {timeout_ms}ms"),

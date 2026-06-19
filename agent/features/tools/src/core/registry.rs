@@ -23,64 +23,78 @@ pub fn register_all_tools(
 ) {
     // Core tools
     registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
-    registry.register(Box::new(file_read::FileReadTool));
-    registry.register(Box::new(file_write::FileWriteTool));
-    registry.register(Box::new(file_edit::FileEditTool));
-    registry.register(Box::new(glob_tool::GlobTool));
-    registry.register(Box::new(grep::GrepTool));
-    registry.register(Box::new(lsp::LspTool));
+    registry.register(Box::new(TypedToolAdapter::new(file_read::FileReadTool)));
+    registry.register(Box::new(TypedToolAdapter::new(file_write::FileWriteTool)));
+    registry.register(Box::new(TypedToolAdapter::new(file_edit::FileEditTool)));
+    registry.register(Box::new(TypedToolAdapter::new(glob_tool::GlobTool)));
+    registry.register(Box::new(TypedToolAdapter::new(grep::GrepTool)));
+    registry.register(Box::new(TypedToolAdapter::new(lsp::LspTool)));
 
     // Web tools
-    registry.register(Box::new(web_fetch::WebFetchTool));
-    registry.register(Box::new(web_search::WebSearchTool));
+    registry.register(Box::new(TypedToolAdapter::new(web_fetch::WebFetchTool)));
+    registry.register(Box::new(TypedToolAdapter::new(web_search::WebSearchTool)));
 
     // Agent tools
-    registry.register(Box::new(agent_tool::AgentTool {
+    registry.register(Box::new(TypedToolAdapter::new(agent_tool::AgentTool {
         store: task_store.clone(),
-    }));
+    })));
 
     // Task management tools
-    registry.register(Box::new(task_create::TaskCreateTool {
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_create::TaskCreateTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_update::TaskUpdateTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(task_list::TaskListTool {
         store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_update::TaskUpdateTool {
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_list_create::TaskListCreateTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_list_complete::TaskListCompleteTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(task_get::TaskGetTool {
         store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_list::TaskListTool {
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(task_stop::TaskStopTool {
         store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_list_create::TaskListCreateTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_list_complete::TaskListCompleteTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_get::TaskGetTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_stop::TaskStopTool {
-        store: task_store.clone(),
-    }));
+    })));
 
     // Skill and memory tools (MCP tools are dynamically registered)
-    registry.register(Box::new(skill_tool::SkillTool { skills }));
-    registry.register(Box::new(memory_tool::MemoryTool));
+    registry.register(Box::new(TypedToolAdapter::new(skill_tool::SkillTool {
+        skills,
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(memory_tool::MemoryTool)));
 
     // Utility tools
-    registry.register(Box::new(sleep::SleepTool));
-    registry.register(Box::new(ask_user::AskUserQuestionTool));
-    registry.register(Box::new(brief::BriefTool));
+    registry.register(Box::new(TypedToolAdapter::new(sleep::SleepTool)));
+    registry.register(Box::new(TypedToolAdapter::new(
+        ask_user::AskUserQuestionTool,
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(brief::BriefTool)));
 
     // Tool discovery
-    registry.register(Box::new(tool_search::ToolSearchTool));
+    registry.register(Box::new(TypedToolAdapter::new(tool_search::ToolSearchTool)));
 
     // Plan mode tools
-    registry.register(Box::new(plan_mode::EnterPlanModeTool));
-    registry.register(Box::new(plan_mode::ExitPlanModeTool));
+    registry.register(Box::new(TypedToolAdapter::new(
+        plan_mode::EnterPlanModeTool,
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(plan_mode::ExitPlanModeTool)));
 
     // Worktree tools
-    registry.register(Box::new(worktree::EnterWorktreeTool));
-    registry.register(Box::new(worktree::ExitWorktreeTool));
+    registry.register(Box::new(TypedToolAdapter::new(worktree::EnterWorktreeTool)));
+    registry.register(Box::new(TypedToolAdapter::new(worktree::ExitWorktreeTool)));
 }
 
 pub fn register_subagent_tools(
@@ -90,25 +104,27 @@ pub fn register_subagent_tools(
 ) {
     // Core tools
     registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
-    registry.register(Box::new(file_read::FileReadTool));
-    registry.register(Box::new(file_write::FileWriteTool));
-    registry.register(Box::new(file_edit::FileEditTool));
-    registry.register(Box::new(glob_tool::GlobTool));
-    registry.register(Box::new(grep::GrepTool));
-    registry.register(Box::new(lsp::LspTool));
+    registry.register(Box::new(TypedToolAdapter::new(file_read::FileReadTool)));
+    registry.register(Box::new(TypedToolAdapter::new(file_write::FileWriteTool)));
+    registry.register(Box::new(TypedToolAdapter::new(file_edit::FileEditTool)));
+    registry.register(Box::new(TypedToolAdapter::new(glob_tool::GlobTool)));
+    registry.register(Box::new(TypedToolAdapter::new(grep::GrepTool)));
+    registry.register(Box::new(TypedToolAdapter::new(lsp::LspTool)));
 
     // Web tools
-    registry.register(Box::new(web_fetch::WebFetchTool));
-    registry.register(Box::new(web_search::WebSearchTool));
+    registry.register(Box::new(TypedToolAdapter::new(web_fetch::WebFetchTool)));
+    registry.register(Box::new(TypedToolAdapter::new(web_search::WebSearchTool)));
 
     // Skill and memory tools (MCP tools are dynamically registered)
-    registry.register(Box::new(skill_tool::SkillTool { skills }));
-    registry.register(Box::new(memory_tool::MemoryTool));
+    registry.register(Box::new(TypedToolAdapter::new(skill_tool::SkillTool {
+        skills,
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(memory_tool::MemoryTool)));
 
     // Utility tools that do not coordinate with the user or parent task list
-    registry.register(Box::new(sleep::SleepTool));
-    registry.register(Box::new(brief::BriefTool));
-    registry.register(Box::new(tool_search::ToolSearchTool));
+    registry.register(Box::new(TypedToolAdapter::new(sleep::SleepTool)));
+    registry.register(Box::new(TypedToolAdapter::new(brief::BriefTool)));
+    registry.register(Box::new(TypedToolAdapter::new(tool_search::ToolSearchTool)));
 }
 
 pub fn register_all_tools_except_agent(
@@ -118,50 +134,64 @@ pub fn register_all_tools_except_agent(
 ) {
     // Core tools
     registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
-    registry.register(Box::new(file_read::FileReadTool));
-    registry.register(Box::new(file_write::FileWriteTool));
-    registry.register(Box::new(file_edit::FileEditTool));
-    registry.register(Box::new(glob_tool::GlobTool));
-    registry.register(Box::new(grep::GrepTool));
-    registry.register(Box::new(lsp::LspTool));
+    registry.register(Box::new(TypedToolAdapter::new(file_read::FileReadTool)));
+    registry.register(Box::new(TypedToolAdapter::new(file_write::FileWriteTool)));
+    registry.register(Box::new(TypedToolAdapter::new(file_edit::FileEditTool)));
+    registry.register(Box::new(TypedToolAdapter::new(glob_tool::GlobTool)));
+    registry.register(Box::new(TypedToolAdapter::new(grep::GrepTool)));
+    registry.register(Box::new(TypedToolAdapter::new(lsp::LspTool)));
 
     // Web tools
-    registry.register(Box::new(web_fetch::WebFetchTool));
-    registry.register(Box::new(web_search::WebSearchTool));
+    registry.register(Box::new(TypedToolAdapter::new(web_fetch::WebFetchTool)));
+    registry.register(Box::new(TypedToolAdapter::new(web_search::WebSearchTool)));
 
     // Task management tools
-    registry.register(Box::new(task_create::TaskCreateTool {
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_create::TaskCreateTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_update::TaskUpdateTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(task_list::TaskListTool {
         store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_update::TaskUpdateTool {
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_list_create::TaskListCreateTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(
+        task_list_complete::TaskListCompleteTool {
+            store: task_store.clone(),
+        },
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(task_get::TaskGetTool {
         store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_list::TaskListTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_list_create::TaskListCreateTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_list_complete::TaskListCompleteTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_get::TaskGetTool {
-        store: task_store.clone(),
-    }));
-    registry.register(Box::new(task_stop::TaskStopTool { store: task_store }));
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(task_stop::TaskStopTool {
+        store: task_store,
+    })));
 
     // Skill and memory tools (MCP tools are dynamically registered)
-    registry.register(Box::new(skill_tool::SkillTool { skills }));
-    registry.register(Box::new(memory_tool::MemoryTool));
+    registry.register(Box::new(TypedToolAdapter::new(skill_tool::SkillTool {
+        skills,
+    })));
+    registry.register(Box::new(TypedToolAdapter::new(memory_tool::MemoryTool)));
 
     // Utility tools
-    registry.register(Box::new(sleep::SleepTool));
-    registry.register(Box::new(ask_user::AskUserQuestionTool));
-    registry.register(Box::new(brief::BriefTool));
+    registry.register(Box::new(TypedToolAdapter::new(sleep::SleepTool)));
+    registry.register(Box::new(TypedToolAdapter::new(
+        ask_user::AskUserQuestionTool,
+    )));
+    registry.register(Box::new(TypedToolAdapter::new(brief::BriefTool)));
 
     // Worktree tools
-    registry.register(Box::new(worktree::EnterWorktreeTool));
-    registry.register(Box::new(worktree::ExitWorktreeTool));
+    registry.register(Box::new(TypedToolAdapter::new(worktree::EnterWorktreeTool)));
+    registry.register(Box::new(TypedToolAdapter::new(worktree::ExitWorktreeTool)));
 }
 
 #[cfg(test)]

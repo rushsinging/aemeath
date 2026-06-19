@@ -5,14 +5,16 @@ mod schema;
 #[cfg(test)]
 mod tests;
 
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::memory::MemoryResult;
 
 pub struct MemoryTool;
 
 #[async_trait]
-impl Tool for MemoryTool {
+impl TypedTool for MemoryTool {
+    type Output = MemoryResult;
     fn name(&self) -> &str {
         "Memory"
     }
@@ -33,7 +35,11 @@ impl Tool for MemoryTool {
         false
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<MemoryResult> {
         let action = input
             .get("action")
             .and_then(|value| value.as_str())
@@ -47,12 +53,12 @@ impl Tool for MemoryTool {
             "list" => handlers::list_memory(input, ctx),
             "add_reminder" => handlers::add_reminder(input, ctx),
             "complete_reminder" => handlers::complete_reminder(input, ctx),
-            "" => ToolResult::error_json(serde_json::json!({
+            "" => TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": "缺少必需参数: action",
                 "data": {}
             })),
-            other => ToolResult::error_json(serde_json::json!({
+            other => TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": format!("未知 memory action: {other}"),
                 "data": { "action": other }

@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::string_idx::slice_head;
@@ -14,7 +14,8 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 }];
 
 #[async_trait]
-impl Tool for LspTool {
+impl TypedTool for LspTool {
+    type Output = LspResult;
     fn name(&self) -> &str {
         "LSP"
     }
@@ -56,15 +57,15 @@ impl Tool for LspTool {
         &FILE_ACCESS
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<LspResult> {
         let operation = match input.get("operation").and_then(|v| v.as_str()) {
             Some(op) => op,
-            None => return ToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: operation", "data": null}).to_string()),
+            None => return TypedToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: operation", "data": null}).to_string()),
         };
 
         let file_path = match input.get("filePath").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: filePath", "data": null}).to_string()),
+            None => return TypedToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: filePath", "data": null}).to_string()),
         };
 
         let language = input
@@ -80,7 +81,7 @@ impl Tool for LspTool {
         match operation {
             "diagnostics" => get_diagnostics(&file_path, &language, &path_base).await,
             "symbols" => get_symbols(&file_path, &language, &path_base).await,
-            _ => ToolResult::error(serde_json::json!({"status": "error", "message": format!("unsupported operation: {operation}"), "data": null}).to_string()),
+            _ => TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("unsupported operation: {operation}"), "data": null}).to_string()),
         }
     }
 }
@@ -102,7 +103,11 @@ fn detect_language(file_path: &str) -> String {
     .to_string()
 }
 
-async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path) -> ToolResult {
+async fn get_diagnostics(
+    file_path: &str,
+    language: &str,
+    cwd: &std::path::Path,
+) -> TypedToolResult<LspResult> {
     let output = match language {
         "rust" => {
             Command::new("cargo")
@@ -133,7 +138,7 @@ async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path)
                 .await
         }
         _ => {
-            return ToolResult::error(serde_json::json!({"status": "error", "message": format!("diagnostics not supported for language: {language}"), "data": null}).to_string());
+            return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("diagnostics not supported for language: {language}"), "data": null}).to_string());
         }
     };
 
@@ -153,16 +158,20 @@ async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path)
 
             // Truncate very long output
             if combined.len() > 10000 {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": serde_json::to_value(LspResult { output: format!("{}...\n[truncated]", slice_head(&combined, 10000)) }).unwrap()}).to_string())
+                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": serde_json::to_value(LspResult { output: format!("{}...\n[truncated]", slice_head(&combined, 10000)) }).unwrap()}).to_string())
             } else {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": serde_json::to_value(LspResult { output: combined }).unwrap()}).to_string())
+                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": serde_json::to_value(LspResult { output: combined }).unwrap()}).to_string())
             }
         }
-        Err(e) => ToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to run diagnostics: {e}"), "data": null}).to_string()),
+        Err(e) => TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to run diagnostics: {e}"), "data": null}).to_string()),
     }
 }
 
-async fn get_symbols(file_path: &str, language: &str, cwd: &std::path::Path) -> ToolResult {
+async fn get_symbols(
+    file_path: &str,
+    language: &str,
+    cwd: &std::path::Path,
+) -> TypedToolResult<LspResult> {
     let output = match language {
         "rust" => {
             // Use grep to find fn/struct/enum/impl/trait/mod definitions
@@ -222,11 +231,11 @@ async fn get_symbols(file_path: &str, language: &str, cwd: &std::path::Path) -> 
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if stdout.is_empty() {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "no symbols found", "data": serde_json::to_value(LspResult { output: String::new() }).unwrap()}).to_string())
+                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "no symbols found", "data": serde_json::to_value(LspResult { output: String::new() }).unwrap()}).to_string())
             } else {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Symbols found", "data": serde_json::to_value(LspResult { output: stdout.to_string() }).unwrap()}).to_string())
+                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Symbols found", "data": serde_json::to_value(LspResult { output: stdout.to_string() }).unwrap()}).to_string())
             }
         }
-        Err(e) => ToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to get symbols: {e}"), "data": null}).to_string()),
+        Err(e) => TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to get symbols: {e}"), "data": null}).to_string()),
     }
 }

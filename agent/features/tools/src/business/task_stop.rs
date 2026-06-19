@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_stop::TaskStopResult;
@@ -10,7 +10,8 @@ pub struct TaskStopTool {
 }
 
 #[async_trait]
-impl Tool for TaskStopTool {
+impl TypedTool for TaskStopTool {
+    type Output = TaskStopResult;
     fn name(&self) -> &str {
         "TaskStop"
     }
@@ -36,11 +37,15 @@ impl Tool for TaskStopTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskStopResult> {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {
-            return ToolResult::error_json(serde_json::json!({
+            return TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": "Task ID is required",
                 "data": {}
@@ -51,7 +56,7 @@ impl Tool for TaskStopTool {
         let task_id = match self.store.resolve_display_id(input_id).await {
             Some(global_id) => global_id,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("Task not found: {}", input_id),
                     "data": {}
@@ -63,7 +68,7 @@ impl Tool for TaskStopTool {
         let task = self.store.get(&task_id).await;
 
         if task.is_none() {
-            return ToolResult::error_json(serde_json::json!({
+            return TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": format!("Task not found: {}", display_id),
                 "data": {}
@@ -74,14 +79,14 @@ impl Tool for TaskStopTool {
         // Check if task can be stopped
         match task.status {
             TaskStatus::Completed => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("Task #{} is already completed and cannot be stopped", display_id),
                     "data": { "task_id": display_id, "status": "completed" }
                 }));
             }
             TaskStatus::Deleted => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("Task #{} is already deleted", display_id),
                     "data": { "task_id": display_id, "status": "deleted" }
@@ -97,7 +102,7 @@ impl Tool for TaskStopTool {
             })
             .await;
 
-        ToolResult::success_json(serde_json::json!({
+        TypedToolResult::success_value(serde_json::json!({
             "status": "success",
             "message": format!("Task #{} stopped and marked as deleted", display_id),
             "data": serde_json::to_value(TaskStopResult { task_id: display_id }).unwrap()

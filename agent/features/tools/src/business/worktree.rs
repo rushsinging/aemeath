@@ -3,10 +3,12 @@
 //! These tools allow the agent to switch between git worktree directories
 //! while maintaining a context stack for nested worktree navigation.
 
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
+use share::tool::types::enter_worktree::EnterWorktreeResult;
+use share::tool::types::exit_worktree::ExitWorktreeResult;
 use std::path::{Path, PathBuf};
 
 /// Tool to enter a git worktree directory
@@ -62,7 +64,8 @@ fn workspace_context_payload(
 }
 
 #[async_trait]
-impl Tool for EnterWorktreeTool {
+impl TypedTool for EnterWorktreeTool {
+    type Output = EnterWorktreeResult;
     fn name(&self) -> &'static str {
         "EnterWorktree"
     }
@@ -95,11 +98,15 @@ impl Tool for EnterWorktreeTool {
         })
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<EnterWorktreeResult> {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => {
-                return ToolResult::error_json(
+                return TypedToolResult::error_value(
                     serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e)}),
                 )
             }
@@ -121,14 +128,14 @@ impl Tool for EnterWorktreeTool {
                 let working_root = ctx.workspace_read().current_root();
                 let branch = get_current_branch(&working_root);
                 let headline = format!("已进入 worktree：{}", display_target);
-                ToolResult::success_json(workspace_context_payload(
+                TypedToolResult::success_value(workspace_context_payload(
                     &headline,
                     &branch,
                     &path_base,
                     &working_root,
                 ))
             }
-            Err(e) => ToolResult::error_json(
+            Err(e) => TypedToolResult::error_value(
                 serde_json::json!({"status": "error", "message": format!("进入 worktree 失败：{}", e)}),
             ),
         }
@@ -144,7 +151,8 @@ impl Tool for EnterWorktreeTool {
 }
 
 #[async_trait]
-impl Tool for ExitWorktreeTool {
+impl TypedTool for ExitWorktreeTool {
+    type Output = ExitWorktreeResult;
     fn name(&self) -> &'static str {
         "ExitWorktree"
     }
@@ -169,11 +177,15 @@ impl Tool for ExitWorktreeTool {
         })
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<ExitWorktreeResult> {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => {
-                return ToolResult::error_json(
+                return TypedToolResult::error_value(
                     serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e)}),
                 )
             }
@@ -187,14 +199,14 @@ impl Tool for ExitWorktreeTool {
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
                     let headline = format!("已切换到：{}", path);
-                    ToolResult::success_json(workspace_context_payload(
+                    TypedToolResult::success_value(workspace_context_payload(
                         &headline,
                         &branch,
                         &path_base,
                         &working_root,
                     ))
                 }
-                Err(e) => ToolResult::error_json(
+                Err(e) => TypedToolResult::error_value(
                     serde_json::json!({"status": "error", "message": format!("切换路径失败：{}", e)}),
                 ),
             }
@@ -206,14 +218,14 @@ impl Tool for ExitWorktreeTool {
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
                     let headline = format!("已退出 worktree，恢复到：{}", prev.path_base.display());
-                    ToolResult::success_json(workspace_context_payload(
+                    TypedToolResult::success_value(workspace_context_payload(
                         &headline,
                         &branch,
                         &path_base,
                         &working_root,
                     ))
                 }
-                Err(e) => ToolResult::error_json(
+                Err(e) => TypedToolResult::error_value(
                     serde_json::json!({"status": "error", "message": format!("退出 worktree 失败：{}", e)}),
                 ),
             }
@@ -232,7 +244,6 @@ impl Tool for ExitWorktreeTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_enter_worktree_schema() {
         let tool = EnterWorktreeTool;

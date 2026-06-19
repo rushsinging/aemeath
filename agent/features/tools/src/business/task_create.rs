@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_create::TaskCreateResult;
@@ -10,7 +10,8 @@ pub struct TaskCreateTool {
 }
 
 #[async_trait]
-impl Tool for TaskCreateTool {
+impl TypedTool for TaskCreateTool {
+    type Output = TaskCreateResult;
     fn name(&self) -> &str {
         "TaskCreate"
     }
@@ -67,11 +68,15 @@ impl Tool for TaskCreateTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskCreateResult> {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: subject",
@@ -84,7 +89,7 @@ impl Tool for TaskCreateTool {
         let description = match input.get("description").and_then(|v| v.as_str()) {
             Some(d) => d.to_string(),
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: description",
@@ -136,7 +141,7 @@ impl Tool for TaskCreateTool {
         let task = match self.store.get(&task.id).await {
             Some(t) => t,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "Failed to retrieve created task",
@@ -149,7 +154,7 @@ impl Tool for TaskCreateTool {
 
         let display_id = self.store.format_display_id(&task.id).await;
 
-        ToolResult::success(
+        TypedToolResult::success_msg(
             serde_json::json!({
                 "status": "success",
                 "message": format!("Task #{} created: {}", display_id, task.subject),

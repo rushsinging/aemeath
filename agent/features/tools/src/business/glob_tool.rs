@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::glob::GlobResult;
@@ -12,7 +12,8 @@ const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
 }];
 
 #[async_trait]
-impl Tool for GlobTool {
+impl TypedTool for GlobTool {
+    type Output = GlobResult;
     fn name(&self) -> &str {
         "Glob"
     }
@@ -39,11 +40,15 @@ impl Tool for GlobTool {
         &PATH_ACCESS
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<GlobResult> {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: pattern",
@@ -70,7 +75,7 @@ impl Tool for GlobTool {
                     .collect();
                 matches.sort();
                 if matches.is_empty() {
-                    ToolResult::success(
+                    TypedToolResult::success_msg(
                         serde_json::json!({
                             "status": "success",
                             "message": "No files matched",
@@ -81,7 +86,7 @@ impl Tool for GlobTool {
                 } else {
                     let count = matches.len();
                     let message = format!("Found {count} files");
-                    ToolResult::success(
+                    TypedToolResult::success_msg(
                         serde_json::json!({
                             "status": "success",
                             "message": message,
@@ -91,7 +96,7 @@ impl Tool for GlobTool {
                     )
                 }
             }
-            Err(e) => ToolResult::error(
+            Err(e) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("invalid glob pattern: {e}"),

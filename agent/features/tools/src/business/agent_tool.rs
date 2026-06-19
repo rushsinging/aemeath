@@ -1,6 +1,7 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::agent::AgentResult;
 use std::path::Path;
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
@@ -13,7 +14,8 @@ pub struct AgentTool {
 }
 
 #[async_trait]
-impl Tool for AgentTool {
+impl TypedTool for AgentTool {
+    type Output = AgentResult;
     fn name(&self) -> &str {
         "Agent"
     }
@@ -66,11 +68,11 @@ impl Tool for AgentTool {
         600 // 10 minutes — sub-agents run multi-turn LLM conversations
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<AgentResult> {
         let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "missing required parameter: prompt",
                     "data": {}
@@ -81,7 +83,7 @@ impl Tool for AgentTool {
         let _description = match input.get("description").and_then(|v| v.as_str()) {
             Some(d) => d,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "missing required parameter: description",
                     "data": {}
@@ -115,7 +117,7 @@ impl Tool for AgentTool {
         let runner = match &ctx.agent_runner {
             Some(r) => r.clone(),
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "agent runner not available",
                     "data": {}
@@ -145,7 +147,7 @@ impl Tool for AgentTool {
 
         if let Some(ref tid) = task_id {
             if self.store.get(tid).await.is_none() {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("task not found: {tid}"),
                     "data": { "task_id": tid }
@@ -227,7 +229,7 @@ Instructions:- Complete the task described in the user message
                 .await;
         }
 
-        ToolResult::success_json(serde_json::json!({
+        TypedToolResult::success_value(serde_json::json!({
             "status": "success",
             "message": "子代理执行完成",
             "data": {

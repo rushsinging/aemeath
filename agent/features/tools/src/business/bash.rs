@@ -449,7 +449,6 @@ fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::Tool;
     use serde_json::json;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};

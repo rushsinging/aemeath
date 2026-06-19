@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::Value;
@@ -7,7 +7,8 @@ use share::tool::types::web_search::WebSearchResult;
 pub struct WebSearchTool;
 
 #[async_trait]
-impl Tool for WebSearchTool {
+impl TypedTool for WebSearchTool {
+    type Output = WebSearchResult;
     fn name(&self) -> &str {
         "WebSearch"
     }
@@ -39,12 +40,16 @@ impl Tool for WebSearchTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<WebSearchResult> {
         let query = input["query"].as_str().unwrap_or("");
         let limit = input["limit"].as_u64().unwrap_or(5).min(10) as usize;
 
         if query.is_empty() {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": "Search query is required",
@@ -64,7 +69,7 @@ impl Tool for WebSearchTool {
         {
             Ok(c) => c,
             Err(e) => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": format!("Failed to create HTTP client: {}", e),
@@ -78,7 +83,7 @@ impl Tool for WebSearchTool {
         match client.get(&url).send().await {
             Ok(resp) => {
                 if !resp.status().is_success() {
-                    return ToolResult::error(
+                    return TypedToolResult::error(
                         serde_json::json!({
                             "status": "error",
                             "message": format!("Search failed with status: {}", resp.status()),
@@ -98,7 +103,7 @@ impl Tool for WebSearchTool {
 
                         format_search_results(query, results)
                     }
-                    Err(e) => ToolResult::error(
+                    Err(e) => TypedToolResult::error(
                         serde_json::json!({
                             "status": "error",
                             "message": format!("Failed to read response: {}", e),
@@ -108,7 +113,7 @@ impl Tool for WebSearchTool {
                     ),
                 }
             }
-            Err(e) => ToolResult::error(
+            Err(e) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("Search request failed: {}", e),
@@ -120,14 +125,18 @@ impl Tool for WebSearchTool {
     }
 }
 
-async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> ToolResult {
+async fn search_bing(
+    client: &reqwest::Client,
+    query: &str,
+    limit: usize,
+) -> TypedToolResult<WebSearchResult> {
     let encoded_query = utf8_percent_encode(query, NON_ALPHANUMERIC).to_string();
     let url = format!("https://www.bing.com/search?q={}", encoded_query);
 
     match client.get(&url).send().await {
         Ok(resp) => {
             if !resp.status().is_success() {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": format!("Bing fallback failed with status: {}", resp.status()),
@@ -141,7 +150,7 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
                 Ok(html_content) => {
                     format_search_results(query, parse_bing_html(&html_content, limit))
                 }
-                Err(e) => ToolResult::error(
+                Err(e) => TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": format!("Failed to read Bing response: {}", e),
@@ -151,7 +160,7 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
                 ),
             }
         }
-        Err(e) => ToolResult::error(
+        Err(e) => TypedToolResult::error(
             serde_json::json!({
                 "status": "error",
                 "message": format!("Bing fallback request failed: {}", e),
@@ -162,10 +171,13 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
     }
 }
 
-fn format_search_results(_query: &str, results: Vec<SearchResult>) -> ToolResult {
+fn format_search_results(
+    _query: &str,
+    results: Vec<SearchResult>,
+) -> TypedToolResult<WebSearchResult> {
     if results.is_empty() {
         let data = serde_json::to_value(WebSearchResult { results: vec![] }).unwrap_or_default();
-        return ToolResult::success(
+        return TypedToolResult::success_msg(
             serde_json::json!({
                 "status": "success",
                 "message": "No search results found",
@@ -191,7 +203,7 @@ fn format_search_results(_query: &str, results: Vec<SearchResult>) -> ToolResult
     })
     .unwrap_or_default();
 
-    ToolResult::success(
+    TypedToolResult::success_msg(
         serde_json::json!({
             "status": "success",
             "message": format!("Found {} search results", results.len()),

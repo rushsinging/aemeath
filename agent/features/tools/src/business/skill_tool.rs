@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::skill_ops::Skill;
@@ -12,7 +12,8 @@ pub struct SkillTool {
 }
 
 #[async_trait]
-impl Tool for SkillTool {
+impl TypedTool for SkillTool {
+    type Output = SkillResult;
     fn name(&self) -> &str {
         "Skill"
     }
@@ -46,11 +47,15 @@ impl Tool for SkillTool {
         false
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<SkillResult> {
         let skill_name = match input.get("skill").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "missing required parameter: skill",
@@ -66,7 +71,7 @@ impl Tool for SkillTool {
             Some(s) => s.clone(),
             None => {
                 let available: Vec<&str> = skills.keys().map(|s| s.as_str()).collect();
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": format!("skill '{}' not found", skill_name),
@@ -81,7 +86,7 @@ impl Tool for SkillTool {
         drop(skills);
 
         // Skill content is materialized by prompt domain before registration.
-        ToolResult::success(
+        TypedToolResult::success_msg(
             serde_json::json!({
                 "status": "success",
                 "message": format!("Skill '{}' loaded", skill.name),

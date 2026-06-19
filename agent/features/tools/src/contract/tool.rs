@@ -72,6 +72,16 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
         }
     }
 
+    /// 从字符串构造成功结果（data 为 None）。
+    pub fn success_msg(output: impl Into<String>) -> Self {
+        Self {
+            output: output.into(),
+            data: None,
+            is_error: false,
+            images: vec![],
+        }
+    }
+
     /// 从 JSON Value 构造成功结果（兼容旧代码）。
     pub fn success_value(json: Value) -> Self {
         let output = json

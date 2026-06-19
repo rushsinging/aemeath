@@ -1,6 +1,7 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_list::TaskListResult;
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
@@ -9,7 +10,8 @@ pub struct TaskListTool {
 }
 
 #[async_trait]
-impl Tool for TaskListTool {
+impl TypedTool for TaskListTool {
+    type Output = TaskListResult;
     fn name(&self) -> &str {
         "TaskList"
     }
@@ -48,7 +50,11 @@ impl Tool for TaskListTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskListResult> {
         // Parse filters
         let status_filter = input
             .get("status")
@@ -82,7 +88,7 @@ impl Tool for TaskListTool {
         }
 
         if tasks.is_empty() {
-            return ToolResult::success_json(serde_json::json!({
+            return TypedToolResult::success_value(serde_json::json!({
                 "status": "success",
                 "message": "No tasks found",
                 "data": { "tasks": [] }
@@ -172,7 +178,7 @@ impl Tool for TaskListTool {
             stats.completed
         );
 
-        ToolResult::success_json(serde_json::json!({
+        TypedToolResult::success_value(serde_json::json!({
             "status": "success",
             "message": msg,
             "data": {
