@@ -34,7 +34,12 @@ business_allow = {
     "storage": {"share"},
     "hook": {"share"},
     "audit": {"share"},
-    "sdk": {"utils"},
+    # sdk is a thin re-export / protocol facade: it may depend on `share` (horizontal
+    # shared types in agent/shared) so it can re-export typed result structs from
+    # `share::tool::types::*` for `cli` / future `server` consumers. sdk must not
+    # depend on any business feature (tools/policy/etc.) — that would invert the
+    # business → platform boundary (spec §6.4.7 + tool-display plan).
+    "sdk": {"share", "utils"},
     "update": {"share", "sdk", "logging"},
     "logging": set(),
     "utils": set(),
