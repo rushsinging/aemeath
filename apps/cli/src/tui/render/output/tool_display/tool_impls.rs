@@ -83,6 +83,48 @@ impl ToolDisplay for BashDisplay {
             },
         }
     }
+    /// 当 result 到达后，从 `payload.content.data.exit_code` (i64) 读取
+    /// exit code 显示后缀：0/None 空；< 0 `(signal N)`；> 0 `(exit N)`。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+        let exit = data_field_i64(result_payload, "data.exit_code");
+        let suffix = match exit {
+            Some(0) | None => String::new(),
+            Some(code) if code < 0 => format!(" (signal {})", -code),
+            Some(code) => format!(" (exit {code})"),
+        };
+        if cmd.is_empty() && suffix.is_empty() {
+            Line::from(Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
+        } else if cmd.is_empty() {
+            Line::from(vec![
+                Span::styled(
+                    self.display_name().to_string(),
+                    Style::default().fg(theme::ACCENT_BRIGHT),
+                ),
+                Span::styled(suffix, Style::default().fg(theme::TEXT_MUTED)),
+            ])
+        } else {
+            let display_cmd = truncate_ellipsis(cmd, 80);
+            let mut spans = vec![
+                Span::styled(
+                    self.display_name().to_string(),
+                    Style::default().fg(theme::ACCENT_BRIGHT),
+                ),
+                Span::raw(format!(" {display_cmd}")),
+            ];
+            if !suffix.is_empty() {
+                spans.push(Span::styled(suffix, Style::default().fg(theme::TEXT_MUTED)));
+            }
+            Line::from(spans)
+        }
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Bash",
