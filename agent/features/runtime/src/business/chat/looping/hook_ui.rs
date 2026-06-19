@@ -3,7 +3,7 @@ use crate::business::chat::looping::{
     RuntimeStreamEvent,
 };
 use crate::LOG_TARGET;
-use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner};
+use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner};
 use share::config::hooks::{HookEntry, HookEvent};
 
 #[derive(Clone)]
@@ -132,11 +132,7 @@ fn runtime_hook_event_status(
     if result.error.is_some() && !result.blocked {
         return RuntimeHookEventStatus::Failed;
     }
-    if result.blocked
-        || json_output
-            .as_ref()
-            .is_some_and(|json| json.decision.as_deref() == Some("block") || !json.r#continue)
-    {
+    if is_blocking(result, json_output) {
         return RuntimeHookEventStatus::Blocked;
     }
     RuntimeHookEventStatus::Succeeded

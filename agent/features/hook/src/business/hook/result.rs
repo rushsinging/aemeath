@@ -65,3 +65,19 @@ pub struct HookJsonOutput {
 fn default_true() -> bool {
     true
 }
+
+/// 统一的 hook 阻断判定。
+///
+/// 满足以下任一条件即视为阻断：
+/// - `result.blocked`：hook 以非零退出码退出
+/// - JSON `decision: "block"`
+/// - JSON `continue: false`（Stop hook 语境下表示"不允许停止，须继续"）
+///
+/// 所有需要判定 hook 是否阻断的位置（finalize / hook_ui 等）都 **MUST** 调用本函数，
+/// 避免判定条件分散导致不一致（参见 issue #372）。
+pub fn is_blocking(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
+    result.blocked
+        || json
+            .as_ref()
+            .is_some_and(|j| j.decision.as_deref() == Some("block") || !j.r#continue)
+}

@@ -1,13 +1,19 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
+use crate::business::chat::looping::{
+    ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, RuntimeStreamEvent,
+    RuntimeTurnContext,
+};
 use crate::LOG_TARGET;
-use hook::api::{HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
+use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::PathBuf;
 use storage::api::{BatchStatus, TaskStore};
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
+
+/// Stop hook 连续阻断的最大次数，超过后强制停止以避免无限循环（#372）。
+pub(crate) const MAX_STOP_HOOK_BLOCKS: usize = 5;
 
 /// Run stop/failure hooks and return feedback if the loop should continue.
 ///
@@ -46,7 +52,7 @@ where
             None
         }
         AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
-            hook_ui
+            let failure_results = hook_ui
                 .run_json(
                     hook_runner,
                     HookEvent::StopFailure,
@@ -56,6 +62,11 @@ where
                     }),
                 )
                 .await;
+            // #372: StopFailure hook 阻断时回流反馈，让 loop 有机会恢复
+            if let Some(feedback) = stop_hook_feedback(&failure_results, session_id, language).await
+            {
+                return Some(feedback);
+            }
             let _ = sink
                 .send_event(RuntimeStreamEvent::Done {
                     context: context.clone(),
@@ -158,21 +169,14 @@ fn stop_hook_blocking_result(
 )> {
     hook_results
         .iter()
-        .filter(|(_, result, json)| is_stop_blocked(result, json))
+        .filter(|(_, result, json)| is_blocking(result, json))
         .find(|(_, result, json)| has_hook_feedback(result, json))
         .or_else(|| {
             hook_results
                 .iter()
-                .find(|(_, result, json)| is_stop_blocked(result, json))
+                .find(|(_, result, json)| is_blocking(result, json))
         })
         .map(|(entry, result, json)| (entry, result, json))
-}
-
-fn is_stop_blocked(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
-    result.blocked
-        || json
-            .as_ref()
-            .is_some_and(|j| j.decision.as_deref() == Some("block"))
 }
 
 fn has_hook_feedback(result: &HookResult, json: &Option<HookJsonOutput>) -> bool {
@@ -316,6 +320,32 @@ struct HookFeedbackLabels {
     no_reason: &'static str,
     output_too_long_file: &'static str,
     output_too_long_preview: &'static str,
+}
+
+/// 检查 Stop hook 连续阻断是否超过上限。
+///
+/// 超过则发送 SystemMessage 提示、状态机转到 Done 并返回 `true`（调用方应 `break`）。
+/// 未超过返回 `false`，调用方继续正常的阻断反馈注入与 `continue`。
+pub(crate) async fn stop_hook_block_limit_reached<S>(
+    block_count: usize,
+    sink: &S,
+    loop_fsm: &mut ChatLoopFsm,
+) -> bool
+where
+    S: ChatEventSink,
+{
+    if block_count > MAX_STOP_HOOK_BLOCKS {
+        sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
+            "[stop hook blocked {MAX_STOP_HOOK_BLOCKS} times in a row; \
+             stopping to avoid infinite loop]"
+        )))
+        .await;
+        loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+        loop_fsm.assert_state(ChatLoopState::Done, "stop hook block limit exceeded");
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]
