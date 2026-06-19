@@ -29,7 +29,15 @@ mod tests {
     #[test]
     fn test_tracker_record() {
         let mut tracker = CostTracker::new();
-        let cost = tracker.record("test-session", "claude-sonnet-4", 10_000, 5_000, None, None);
+        let cost = tracker.record(
+            "test-session",
+            "claude-sonnet-4",
+            10_000,
+            5_000,
+            None,
+            None,
+            None,
+        );
         assert!((cost - 0.105).abs() < 0.01);
         assert_eq!(tracker.total_calls(), 1);
     }
@@ -37,9 +45,33 @@ mod tests {
     #[test]
     fn test_tracker_session_cost() {
         let mut tracker = CostTracker::new();
-        tracker.record("session1", "claude-sonnet-4", 10_000, 5_000, None, None);
-        tracker.record("session1", "claude-sonnet-4", 20_000, 10_000, None, None);
-        tracker.record("session2", "claude-sonnet-4", 5_000, 2_500, None, None);
+        tracker.record(
+            "session1",
+            "claude-sonnet-4",
+            10_000,
+            5_000,
+            None,
+            None,
+            None,
+        );
+        tracker.record(
+            "session1",
+            "claude-sonnet-4",
+            20_000,
+            10_000,
+            None,
+            None,
+            None,
+        );
+        tracker.record(
+            "session2",
+            "claude-sonnet-4",
+            5_000,
+            2_500,
+            None,
+            None,
+            None,
+        );
 
         let session1_cost = tracker.session_cost("session1");
         assert!(session1_cost > 0.0);

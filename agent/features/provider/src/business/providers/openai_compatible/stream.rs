@@ -119,6 +119,8 @@ pub(crate) async fn parse_openai_stream(
     let mut usage = crate::business::types::Usage {
         input_tokens: 0,
         output_tokens: 0,
+        cached_tokens: None,
+        reasoning_tokens: None,
     };
     let mut stop_reason = crate::business::types::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
@@ -227,9 +229,26 @@ pub(crate) async fn parse_openai_stream(
                     .get("completion_tokens")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as u32;
+
+                // 提取 cached_tokens from prompt_tokens_details.cached_tokens
+                let cached_tok = usage_obj
+                    .get("prompt_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+
+                // 提取 reasoning_tokens from completion_tokens_details.reasoning_tokens
+                let reasoning_tok = usage_obj
+                    .get("completion_tokens_details")
+                    .and_then(|d| d.get("reasoning_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+
                 if in_tok > 0 || out_tok > 0 {
                     usage.input_tokens = in_tok;
                     usage.output_tokens = out_tok;
+                    usage.cached_tokens = Some(cached_tok);
+                    usage.reasoning_tokens = Some(reasoning_tok);
                 }
             }
         }

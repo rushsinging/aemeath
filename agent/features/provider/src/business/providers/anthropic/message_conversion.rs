@@ -177,6 +177,12 @@ pub(crate) async fn send_message_non_stream(
             .and_then(|u| u.get("output_tokens"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u32,
+        cached_tokens: body
+            .get("usage")
+            .and_then(|u| u.get("cache_read_input_tokens"))
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32),
+        reasoning_tokens: None, // Anthropic 不返回 reasoning_tokens
     };
 
     let stop_reason_str = body

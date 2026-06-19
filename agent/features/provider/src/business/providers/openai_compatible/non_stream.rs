@@ -148,6 +148,8 @@ impl OpenAICompatibleProvider {
             usage: crate::business::types::Usage {
                 input_tokens,
                 output_tokens,
+                cached_tokens: None,
+                reasoning_tokens: None,
             },
             stop_reason,
         })

@@ -27,6 +27,8 @@ pub async fn parse_stream(
     let mut usage = Usage {
         input_tokens: 0,
         output_tokens: 0,
+        cached_tokens: None,
+        reasoning_tokens: None,
     };
     let mut stop_reason = StopReason::EndTurn;
 

@@ -303,12 +303,27 @@ pub fn needs_compaction_with_output(
 }
 
 /// Check if compaction is needed using actual API-reported token count.
+///
+/// - `last_input_tokens`: Total input tokens reported by the API (includes cached tokens).
+/// - `last_output_tokens`: Total output tokens reported by the API (includes reasoning tokens).
+/// - `cached_tokens`: Tokens served from prompt cache (deducted from input, as they don't consume new context).
+/// - `reasoning_tokens`: Tokens consumed by reasoning/thinking (added to total, as they consume context).
+/// - `context_size`: The model's context window size.
 pub fn needs_compaction_actual(
     last_input_tokens: u64,
     last_output_tokens: u64,
+    cached_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
     context_size: usize,
 ) -> bool {
-    let total = last_input_tokens + last_output_tokens;
+    let cached = cached_tokens.unwrap_or(0);
+    let reasoning = reasoning_tokens.unwrap_or(0);
+
+    // Deduct cached tokens (already in cache, don't consume new context)
+    // Add reasoning tokens (consume context but are included in output_tokens)
+    let actual_input = last_input_tokens.saturating_sub(cached);
+    let total = actual_input + last_output_tokens + reasoning;
+
     let threshold = autocompact_threshold(context_size, 8192) as u64;
     total > threshold
 }
@@ -320,9 +335,24 @@ pub fn needs_compaction_actual(
 /// - 1: Approaching limit, microcompact recommended (70-80%)
 /// - 2: At limit, full compaction needed (80-90%)
 /// - 3: Critical, blocking — must compact before next query (> 90%)
-pub fn compaction_urgency(last_input_tokens: u64, context_size: usize) -> u8 {
+///
+/// - `last_input_tokens`: Total input tokens reported by the API (includes cached tokens).
+/// - `cached_tokens`: Tokens served from prompt cache (deducted from input).
+/// - `reasoning_tokens`: Tokens consumed by reasoning/thinking (added to total).
+/// - `context_size`: The model's context window size.
+pub fn compaction_urgency(
+    last_input_tokens: u64,
+    cached_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    context_size: usize,
+) -> u8 {
+    let cached = cached_tokens.unwrap_or(0);
+    let reasoning = reasoning_tokens.unwrap_or(0);
+    let actual_input = last_input_tokens.saturating_sub(cached);
+    let total = actual_input + reasoning;
+
     let effective = effective_context_window(context_size, 8192) as u64;
-    let pct = last_input_tokens * 100 / effective.max(1);
+    let pct = total * 100 / effective.max(1);
     match pct {
         0..=69 => 0,
         70..=79 => 1,
