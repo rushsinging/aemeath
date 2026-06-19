@@ -1,0 +1,11 @@
+//! Typed result for the `plan_mode` tool (non-core tool).
+
+use serde::{Deserialize, Serialize};
+
+/// Typed result returned by the `plan_mode` tool.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+// tool_schema: {reason: string, execute: boolean?}
+pub struct PlanModeResult {
+    pub reason: String,
+    pub execute: Option<bool>,
+}

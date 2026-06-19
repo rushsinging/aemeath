@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::ask_user::AskUserQuestionResult;
 
 pub struct AskUserQuestionTool;
 
@@ -122,11 +123,11 @@ impl Tool for AskUserQuestionTool {
                 serde_json::json!({
                     "status": "success",
                     "message": format!("__ASK_USER_SELECT__: {}", question),
-                    "data": {
-                        "type": "select",
-                        "question": question,
-                        "options": options
-                    }
+                    "data": serde_json::to_value(AskUserQuestionResult {
+                        question_type: "select".to_string(),
+                        options: options.iter().map(|o| Value::String(o.clone())).collect(),
+                        allow_free_input: false,
+                    }).unwrap()
                 })
                 .to_string(),
             )
@@ -135,10 +136,11 @@ impl Tool for AskUserQuestionTool {
                 serde_json::json!({
                     "status": "success",
                     "message": format!("__ASK_USER__: {}", question),
-                    "data": {
-                        "type": "free_input",
-                        "question": question
-                    }
+                    "data": serde_json::to_value(AskUserQuestionResult {
+                        question_type: "free_input".to_string(),
+                        options: options.iter().map(|o| Value::String(o.clone())).collect(),
+                        allow_free_input: true,
+                    }).unwrap()
                 })
                 .to_string(),
             )

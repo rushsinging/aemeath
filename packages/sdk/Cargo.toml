@@ -12,3 +12,9 @@ bitflags = "2"
 uuid = { version = "1", features = ["v5", "v7", "serde"] }
 thiserror = { workspace = true }
 utils = { path = "../global/utils" }
+# Plan 方案 D: sdk is a thin re-export layer over `share::tool::types`,
+# so the TUI (and any future server consumer) can read typed payloads
+# without depending on the business layer (`agent/features/tools`).
+# See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+# Phase 0a (方案 D) for the full design.
+share = { path = "../../agent/shared" }

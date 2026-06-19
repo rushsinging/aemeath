@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::write::WriteResult;
 use share::tool::{PathAccess, PathKind};
 
 pub struct FileWriteTool;
@@ -46,7 +47,7 @@ impl Tool for FileWriteTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error(serde_json::json!({
@@ -89,17 +90,20 @@ impl Tool for FileWriteTool {
             }
         }
         match tokio::fs::write(path, content).await {
-            Ok(()) => ToolResult::success(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("Wrote {} bytes to {file_path}", content.len()),
-                    "data": {
-                        "file_path": file_path,
-                        "bytes_written": content.len()
-                    }
-                })
-                .to_string(),
-            ),
+            Ok(()) => {
+                let data = WriteResult {
+                    file_path: file_path.to_string(),
+                    bytes_written: content.len() as u64,
+                };
+                ToolResult::success(
+                    serde_json::json!({
+                        "status": "success",
+                        "message": format!("Wrote {} bytes to {file_path}", content.len()),
+                        "data": serde_json::to_value(&data).unwrap()
+                    })
+                    .to_string(),
+                )
+            }
             Err(e) => ToolResult::error(
                 serde_json::json!({
                     "status": "error",

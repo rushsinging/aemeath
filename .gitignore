@@ -52,3 +52,4 @@ coverage/
 *.temp
 .cache/
 tmp/
+agent/shared/build

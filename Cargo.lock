@@ -2123,6 +2123,7 @@ dependencies = [
  "bitflags",
  "serde",
  "serde_json",
+ "share",
  "thiserror 2.0.18",
  "tokio",
  "utils",
@@ -2251,6 +2252,7 @@ version = "0.0.0"
 dependencies = [
  "log",
  "logging",
+ "regex",
  "serde",
  "serde_json",
  "serde_yml",

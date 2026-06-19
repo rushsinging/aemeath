@@ -4,6 +4,16 @@ pub struct ImageData {
     pub media_type: String,
 }
 
+/// Typed result structs for tools, one per tool. These are the canonical,
+/// "horizontal shared" representation of what a tool produced; the same types
+/// are re-exported by `packages/sdk::tool_result` for `cli` and the future
+/// `server` consumer, while tools themselves reference them via
+/// `share::tool::types::XxxResult`.
+///
+/// See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+/// (plan 方案 D) for the design rationale.
+pub mod types;
+
 // ---------------------------------------------------------------------------
 // Path-policy types (shared so both `tools` and `policy` can reference them
 // without depending on each other).
@@ -36,16 +46,41 @@ pub enum PolicyDecision {
     Deny { reason: String },
 }
 
+/// Generic tool result, parameterised over the typed payload `R`.
+///
+/// The default `R = serde_json::Value` preserves full backward
+/// compatibility: existing call sites that build
+/// `ToolResult::success(...)` / `ToolResult::error_json(...)` keep
+/// compiling without change, because `ToolResult<Value>` is structurally
+/// the same shape they used before.
+///
+/// Going forward, a tool `T` declares
+/// `impl Tool for T { type Result = ToolResult<MyResult>; }` so that
+/// downstream consumers (TUI, server, persistence) can read the typed
+/// payload directly from `ToolResult::data`.
+///
+/// `data` is wrapped in `Option<R>` so that:
+///
+/// - the constructors (`success`, `error`, `success_json`, `error_json`,
+///   `text`, `json`) can populate the legacy `output` / `content` fields
+///   without forcing every `R` to implement `Default`, and
+/// - new tool impls that opt into a typed `R` can still leave `data`
+///   as `None` while the migration to typed payloads is in flight.
+///
+/// See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+/// (plan 方案 D) for the design rationale.
 #[derive(Debug, Clone)]
-pub struct ToolResult {
+pub struct ToolResult<R = serde_json::Value> {
     pub output: String,
     pub content: serde_json::Value,
     pub is_error: bool,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
+    /// Typed payload (see struct docs).
+    pub data: Option<R>,
 }
 
-impl ToolResult {
+impl<R> ToolResult<R> {
     pub fn success(output: impl Into<String>) -> Self {
         Self::text(output, false)
     }
@@ -69,6 +104,7 @@ impl ToolResult {
             output,
             is_error,
             images: Vec::new(),
+            data: None,
         }
     }
 
@@ -79,6 +115,7 @@ impl ToolResult {
             content,
             is_error,
             images: Vec::new(),
+            data: None,
         }
     }
 
@@ -87,10 +124,31 @@ impl ToolResult {
         self
     }
 
+    /// Attach a typed payload to this result.
+    pub fn with_data(mut self, data: R) -> Self {
+        self.data = Some(data);
+        self
+    }
+
     /// 获取显示文本（从 content 中提取）
     /// 优先级：display > message > text > 序列化 JSON
     pub fn display_text(&self) -> String {
         display_text_from_content(&self.content)
+    }
+}
+
+// Manual `Default` impl covers any `R`. The legacy `data: Value` ergonomics
+// are preserved by initialising `data` to `None` (see the constructors
+// above) and letting callers opt-in with `with_data`.
+impl<R> Default for ToolResult<R> {
+    fn default() -> Self {
+        Self {
+            output: String::new(),
+            content: serde_json::Value::Null,
+            is_error: false,
+            images: Vec::new(),
+            data: None,
+        }
     }
 }
 
@@ -113,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_tool_result_success_wraps_text_payload() {
-        let result = ToolResult::success("ok");
+        let result: ToolResult = ToolResult::success("ok");
 
         assert_eq!(result.output, "ok");
         assert!(!result.is_error);
@@ -122,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_tool_result_json_prefers_display_text() {
-        let result = ToolResult::success_json(serde_json::json!({
+        let result: ToolResult = ToolResult::success_json(serde_json::json!({
             "display": "shown in tui",
             "message": "message for llm",
             "data": { "value": 1 }
@@ -134,9 +192,9 @@ mod tests {
 
     #[test]
     fn test_tool_result_json_falls_back_to_message_text_or_serialized_json() {
-        let message = ToolResult::success_json(serde_json::json!({ "message": "msg" }));
-        let text = ToolResult::success_json(serde_json::json!({ "text": "txt" }));
-        let other = ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
+        let message: ToolResult = ToolResult::success_json(serde_json::json!({ "message": "msg" }));
+        let text: ToolResult = ToolResult::success_json(serde_json::json!({ "text": "txt" }));
+        let other: ToolResult = ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
 
         assert_eq!(message.output, "msg");
         assert_eq!(text.output, "txt");

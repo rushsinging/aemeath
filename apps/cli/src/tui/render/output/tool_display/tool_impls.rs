@@ -1,5 +1,6 @@
 use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
 use super::common::{file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
 use super::{
@@ -8,6 +9,41 @@ use super::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+
+/// 从 `payload.content` (typed JSON Value) 中按 dotted path 提取 u64 字段。
+///
+/// path 形如 `"data.line_count"`，先走 `content` 的子对象查找再逐层下钻；
+/// 任一节点缺失或类型不匹配返回 `None`。TUI 渲染层 inline helper，避免引入
+/// 对 share/sdk 类型的硬依赖（typed 字段在 share::tool::types::read 中定义，
+/// 但本模块不 import share，确保渲染层可独立编译与测试）。
+fn data_field_u64(payload: Option<&ToolResultPayload>, path: &str) -> Option<u64> {
+    let payload = payload?;
+    let mut current: &serde_json::Value = &payload.content;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_u64()
+}
+
+/// 同 `data_field_u64`，但提取 i64 字段（Bash exit_code 等可为负值，标识 signal）。
+fn data_field_i64(payload: Option<&ToolResultPayload>, path: &str) -> Option<i64> {
+    let payload = payload?;
+    let mut current: &serde_json::Value = &payload.content;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_i64()
+}
+
+/// 同 `data_field_u64`，但提取 String 字段（branch / agent_id / working_root 等）。
+fn data_field_string(payload: Option<&ToolResultPayload>, path: &str) -> Option<String> {
+    let payload = payload?;
+    let mut current: &serde_json::Value = &payload.content;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_str().map(|s| s.to_string())
+}
 
 // ── Bash ─────────────────────────────────────────────────────────
 
@@ -47,6 +83,48 @@ impl ToolDisplay for BashDisplay {
             },
         }
     }
+    /// 当 result 到达后，从 `payload.content.data.exit_code` (i64) 读取
+    /// exit code 显示后缀：0/None 空；< 0 `(signal N)`；> 0 `(exit N)`。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+        let exit = data_field_i64(result_payload, "data.exit_code");
+        let suffix = match exit {
+            Some(0) | None => String::new(),
+            Some(code) if code < 0 => format!(" (signal {})", -code),
+            Some(code) => format!(" (exit {code})"),
+        };
+        if cmd.is_empty() && suffix.is_empty() {
+            Line::from(Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
+        } else if cmd.is_empty() {
+            Line::from(vec![
+                Span::styled(
+                    self.display_name().to_string(),
+                    Style::default().fg(theme::ACCENT_BRIGHT),
+                ),
+                Span::styled(suffix, Style::default().fg(theme::TEXT_MUTED)),
+            ])
+        } else {
+            let display_cmd = truncate_ellipsis(cmd, 80);
+            let mut spans = vec![
+                Span::styled(
+                    self.display_name().to_string(),
+                    Style::default().fg(theme::ACCENT_BRIGHT),
+                ),
+                Span::raw(format!(" {display_cmd}")),
+            ];
+            if !suffix.is_empty() {
+                spans.push(Span::styled(suffix, Style::default().fg(theme::TEXT_MUTED)));
+            }
+            Line::from(spans)
+        }
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Bash",
@@ -59,6 +137,35 @@ inventory::submit!(ToolDisplayEntry {
 /// 故委托给 char 边界安全的 `truncate_ellipsis_tail`。
 fn truncate_path(path: &str, max_width: usize) -> String {
     truncate_ellipsis_tail(path, max_width)
+}
+
+/// 构造 `ToolDisplay` 通用 header line 模板：`<name> <path> [<suffix>]`。
+///
+/// - `<name>`：工具 display name（如 "Read"），使用 `theme::ACCENT_BRIGHT` 高亮
+/// - `<path>`：truncate_path 截断到 60 字符，使用 `theme::TEXT` 普通色
+/// - `<suffix>`：可选尾部后缀（如 "1:340 (340 lines)"、"1234 bytes"），使用
+///   `theme::TEXT_MUTED` 弱化色；空串则不输出后缀 span
+///
+/// 此 helper 是 Phase A Task 4 抽取：原 Read/Write/未来 9 个 Display 都重复
+/// `Line::from(vec![Span::styled(name, ACCENT), Span::raw(" "), Span::styled(path, ...),
+/// Span::styled(suffix, MUTED)])` 模板，DRY 化后由 helper 统一处理。
+fn build_header_line(name: &str, path: &str, suffix: &str) -> Line<'static> {
+    let display_path = truncate_path(path, 60);
+    let mut spans = vec![Span::styled(
+        name.to_string(),
+        Style::default().fg(theme::ACCENT_BRIGHT),
+    )];
+    if !display_path.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(display_path, Style::default().fg(theme::TEXT)));
+    }
+    if !suffix.is_empty() {
+        spans.push(Span::styled(
+            suffix.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
+    }
+    Line::from(spans)
 }
 
 struct ReadDisplay;
@@ -93,10 +200,12 @@ impl ToolDisplay for ReadDisplay {
         ])
     }
     /// 当 result 到达后，使用实际读取的行数更新 header。
+    /// typed 路径优先：直接从 `payload.content.data.line_count` 读取；
+    /// typed 字段缺失时回退到原 regex 解析 `output` 文本（兼容旧 ToolResult）。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
-        result_summary: Option<&str>,
+        result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
@@ -104,15 +213,11 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
 
-        // 尝试从 result_summary 中解析实际行数
-        let actual_lines = result_summary.and_then(|summary| {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
-                if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
-                    return parse_line_count_from_message(message);
-                }
-            }
-            parse_line_count_from_message(summary)
-        });
+        // typed 优先：data.line_count (issue #273 引入的 typed R 字段)
+        let actual_lines = data_field_u64(result_payload, "data.line_count")
+            .map(|n| n as usize)
+            // regex 回退：旧 ToolResult 仅 message 含 "Read N lines from ..."
+            .or_else(|| result_payload.and_then(|p| parse_line_count_from_message(&p.output)));
 
         let range_info = match actual_lines {
             Some(actual) => {
@@ -179,34 +284,21 @@ impl ToolDisplay for WriteDisplay {
         format!("{} {display_path} {bytes} bytes", self.display_name())
     }
     /// 当 result 到达后，使用实际写入的字节数更新 header。
+    /// typed 路径优先：直接从 `payload.content.data.bytes_written` 读取；
+    /// typed 字段缺失时回退到原 regex 解析 `output` 文本（兼容旧 ToolResult）。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
-        result_summary: Option<&str>,
+        result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
 
-        // 尝试从 result_summary 中解析实际写入字节数
-        let actual_bytes = result_summary.and_then(|summary| {
-            // 尝试解析 JSON: {"message":"Wrote N bytes to ...", "data":{"bytes_written":N}}
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
-                // 优先从 data.bytes_written 获取
-                if let Some(b) = json
-                    .get("data")
-                    .and_then(|d| d.get("bytes_written"))
-                    .and_then(|v| v.as_u64())
-                {
-                    return Some(b as usize);
-                }
-                // 回退：从 message 解析 "Wrote N bytes to"
-                if let Some(msg) = json.get("message").and_then(|v| v.as_str()) {
-                    return parse_bytes_from_message(msg);
-                }
-            }
-            // 直接解析文本
-            parse_bytes_from_message(summary)
-        });
+        // typed 优先：data.bytes_written (issue #273 引入的 typed R 字段)
+        let actual_bytes = data_field_u64(result_payload, "data.bytes_written")
+            .map(|n| n as usize)
+            // regex 回退：旧 ToolResult 仅 message 含 "Wrote N bytes to ..."
+            .or_else(|| result_payload.and_then(|p| parse_bytes_from_message(&p.output)));
 
         // 计算入参中的字节数（回退值）
         let input_bytes = input
@@ -278,6 +370,17 @@ impl ToolDisplay for EditDisplay {
             self.display_name()
         )
     }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let path = file_path(input);
+        let suffix = data_field_u64(result_payload, "data.occurrences")
+            .map(|n| format!(" (Replaced {n})"))
+            .unwrap_or_default();
+        build_header_line(self.display_name(), path, &suffix)
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // old/new 内容由 result 子块的 diff 渲染展示
         vec![]
@@ -312,6 +415,27 @@ impl ToolDisplay for GlobDisplay {
             self.display_name().to_string()
         } else {
             format!("{} {pattern}", self.display_name())
+        }
+    }
+    /// result 到达后，使用结构化 payload 中的匹配文件数更新 header。
+    /// typed 路径优先：`data.match_count`（issue #273 引入），fallback 到
+    /// `data.count`（旧字段，1 release 兼容期）。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let pattern = str_arg(input, "pattern", "");
+        let n = data_field_u64(result_payload, "data.match_count")
+            .or_else(|| data_field_u64(result_payload, "data.count"));
+        let suffix = n.map(|c| format!(" ({c} files)")).unwrap_or_default();
+        if pattern.is_empty() && suffix.is_empty() {
+            Line::from(Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
+        } else {
+            build_header_line(self.display_name(), pattern, &suffix)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -350,6 +474,22 @@ impl ToolDisplay for GrepDisplay {
         } else {
             format!("{} /{pattern}/ in {display_path}", self.display_name())
         }
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let arg = if pattern.is_empty() {
+            format!("in {path}")
+        } else {
+            format!("/{pattern}/, path={path}")
+        };
+        let n = data_field_u64(result_payload, "data.match_count");
+        let suffix = n.map(|c| format!(" ({c} matches)")).unwrap_or_default();
+        build_header_line(self.display_name(), &arg, &suffix)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -412,6 +552,20 @@ impl ToolDisplay for AgentDisplay {
             },
         }
     }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let description = input
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let target =
+            data_field_string(result_payload, "data.agent_id").unwrap_or_else(|| "?".to_string());
+        let arg = format!("{description} -> [{target}]");
+        build_header_line(self.display_name(), &arg, "")
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "Agent",
@@ -435,6 +589,19 @@ impl ToolDisplay for EnterWorktreeDisplay {
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
+    }
+    fn format_header_line_with_result(
+        &self,
+        _input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let branch = data_field_string(result_payload, "data.branch")
+            .unwrap_or_else(|| "(default)".to_string());
+        let arg = format!("branch={branch}");
+        let path_suffix = data_field_string(result_payload, "data.working_root")
+            .map(|p| format!(" ({p})"))
+            .unwrap_or_default();
+        build_header_line(self.display_name(), &arg, &path_suffix)
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
@@ -462,6 +629,16 @@ impl ToolDisplay for ExitWorktreeDisplay {
     }
     fn format_header(&self, _input: &serde_json::Value) -> String {
         self.display_name().to_string()
+    }
+    fn format_header_line_with_result(
+        &self,
+        _input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let path_suffix = data_field_string(result_payload, "data.working_root")
+            .map(|p| format!(" (back to {p})"))
+            .unwrap_or_default();
+        build_header_line(self.display_name(), "", &path_suffix)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -497,6 +674,23 @@ impl ToolDisplay for WebFetchDisplay {
         } else {
             let display_url = truncate_ellipsis(url, 60);
             format!("{} {display_url}", self.display_name())
+        }
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        let bytes = data_field_u64(result_payload, "data.byte_count");
+        let suffix = bytes.map(|b| format!(" ({b} bytes)")).unwrap_or_default();
+        if url.is_empty() && suffix.is_empty() {
+            Line::from(Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
+        } else {
+            build_header_line(self.display_name(), url, &suffix)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -545,8 +739,60 @@ impl ToolDisplay for AskUserQuestionDisplay {
             result: ResultPolicy::Hidden, // answer is already echoed via App::append_user_echo
         }
     }
+    /// result 到达后，从 `payload.content.data.option_count` (u64) 读取选项数，
+    /// suffix 形如 ` (N options)`。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+        let n = data_field_u64(result_payload, "data.option_count");
+        let suffix = n.map(|c| format!(" ({c} options)")).unwrap_or_default();
+        build_header_line(self.display_name(), question, &suffix)
+    }
 }
 inventory::submit!(ToolDisplayEntry {
     name: "AskUserQuestion",
     display: || Box::new(AskUserQuestionDisplay)
 });
+
+#[cfg(test)]
+mod tests {
+    use super::build_header_line;
+
+    /// 基础：name + path，suffix 为空时不应输出尾部 span
+    #[test]
+    fn build_header_line_no_suffix() {
+        let line = build_header_line("Read", "/foo/bar/baz.txt", "");
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "Read /foo/bar/baz.txt");
+    }
+
+    /// 有 suffix 时尾部追加弱化色 span
+    #[test]
+    fn build_header_line_with_suffix() {
+        let line = build_header_line("Read", "/foo/bar/baz.txt", " (5 lines)");
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "Read /foo/bar/baz.txt (5 lines)");
+    }
+
+    /// 长路径应触发 truncate_path 截断（带 ...）
+    #[test]
+    fn build_header_line_truncates_long_path() {
+        // 90+ 字符的路径以确保超过 truncate_path(60) 阈值
+        let long =
+            "/very/very/very/very/very/very/very/very/very/very/very/very/very/long/path/file.txt";
+        let line = build_header_line("Read", long, "");
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.starts_with("Read "), "expected Read prefix: {text}");
+        assert!(
+            text.contains("..."),
+            "expected ellipsis in long path: {text}"
+        );
+        assert!(
+            text.len() < long.len() + 10,
+            "long path should be truncated: {text}"
+        );
+    }
+}

@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_update::TaskUpdateResult;
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
@@ -57,7 +58,7 @@ impl Tool for TaskUpdateTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
@@ -179,73 +180,13 @@ impl Tool for TaskUpdateTool {
         match result {
             Some(task) => {
                 let display_id = self.store.format_display_id(&task.id).await;
-
-                let mut data = serde_json::json!({
-                    "task_id": display_id,
-                    "subject": task.subject,
-                    "status": format!("{:?}", task.status),
-                    "priority": task.priority.as_str(),
-                    "progress": task.progress,
-                });
-
-                if let Some(ref pm) = task.progress_message {
-                    data["progress_message"] = serde_json::Value::String(pm.clone());
-                }
-                if let Some(ref af) = task.active_form {
-                    data["active_form"] = serde_json::Value::String(af.clone());
-                }
-                if let Some(ref owner) = task.owner {
-                    data["owner"] = serde_json::Value::String(owner.clone());
-                }
-
-                // When a task is completed, show which downstream tasks are now unblocked
-                if task.status == TaskStatus::Completed {
-                    let all_tasks = self.store.list().await;
-                    // Collect all completed task IDs for dependency resolution
-                    let completed_ids: std::collections::HashSet<&str> = all_tasks
-                        .iter()
-                        .filter(|t| t.status == TaskStatus::Completed)
-                        .map(|t| t.id.as_str())
-                        .collect();
-
-                    let newly_unblocked: Vec<_> = all_tasks
-                        .iter()
-                        .filter(|t| {
-                            t.status == TaskStatus::Pending
-                                && !t.blocked_by.is_empty()
-                                && t.blocked_by.iter().any(|dep| dep == &task_id)
-                                && t.blocked_by
-                                    .iter()
-                                    .all(|dep| completed_ids.contains(dep.as_str()))
-                        })
-                        .collect();
-
-                    let mut unblocked_list = Vec::new();
-                    for t in &newly_unblocked {
-                        let t_display = self.store.format_display_id(&t.id).await;
-                        let dep_displays = self.store.to_display_ids(&t.blocked_by).await;
-                        let deps: Vec<String> =
-                            dep_displays.iter().map(|d| format!("#{d}")).collect();
-                        unblocked_list.push(serde_json::json!({
-                            "task_id": t_display,
-                            "subject": t.subject,
-                            "blocked_by": deps
-                        }));
-                    }
-                    data["unblocked_tasks"] = serde_json::json!(unblocked_list);
-
-                    let remaining_pending = all_tasks
-                        .iter()
-                        .filter(|t| t.status == TaskStatus::Pending)
-                        .count();
-                    data["remaining_pending"] = serde_json::json!(remaining_pending);
-                }
+                let status = format!("{:?}", task.status);
 
                 let message = format!("Task #{} updated", display_id);
                 ToolResult::success_json(serde_json::json!({
                     "status": "success",
                     "message": message,
-                    "data": data
+                    "data": serde_json::to_value(TaskUpdateResult { task_id: display_id, status }).unwrap()
                 }))
             }
             None => ToolResult::error_json(serde_json::json!({

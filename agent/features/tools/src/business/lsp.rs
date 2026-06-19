@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::string_idx::slice_head;
+use share::tool::types::lsp::LspResult;
 use share::tool::{PathAccess, PathKind};
 use tokio::process::Command;
 
@@ -152,9 +153,9 @@ async fn get_diagnostics(file_path: &str, language: &str, cwd: &std::path::Path)
 
             // Truncate very long output
             if combined.len() > 10000 {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": {"output": format!("{}...\n[truncated]", slice_head(&combined, 10000))}}).to_string())
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": serde_json::to_value(LspResult { output: format!("{}...\n[truncated]", slice_head(&combined, 10000)) }).unwrap()}).to_string())
             } else {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": {"output": combined}}).to_string())
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": serde_json::to_value(LspResult { output: combined }).unwrap()}).to_string())
             }
         }
         Err(e) => ToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to run diagnostics: {e}"), "data": null}).to_string()),
@@ -221,9 +222,9 @@ async fn get_symbols(file_path: &str, language: &str, cwd: &std::path::Path) -> 
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if stdout.is_empty() {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "no symbols found", "data": {"symbols": []}}).to_string())
+                ToolResult::success(serde_json::json!({"status": "success", "message": "no symbols found", "data": serde_json::to_value(LspResult { output: String::new() }).unwrap()}).to_string())
             } else {
-                ToolResult::success(serde_json::json!({"status": "success", "message": "Symbols found", "data": {"symbols": stdout.to_string()}}).to_string())
+                ToolResult::success(serde_json::json!({"status": "success", "message": "Symbols found", "data": serde_json::to_value(LspResult { output: stdout.to_string() }).unwrap()}).to_string())
             }
         }
         Err(e) => ToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to get symbols: {e}"), "data": null}).to_string()),

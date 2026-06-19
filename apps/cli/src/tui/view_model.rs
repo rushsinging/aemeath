@@ -1,3 +1,4 @@
+pub mod conversation;
 pub mod dialog;
 pub mod input;
 pub mod live_status;
@@ -43,6 +44,7 @@ mod tests {
             args_preview: Some("src/main.rs".to_string()),
             activity_summary: None,
             result_summary: None,
+            result_payload: None,
             collapsible: true,
             collapsed: false,
         });

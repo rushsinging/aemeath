@@ -1,6 +1,7 @@
 use crate::api::{ToolExecutionContext, ToolResult};
 use serde_json::Value;
 use share::memory_ops::{AddResult, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+use share::tool::types::memory::MemoryResult;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::helpers::{
@@ -89,12 +90,12 @@ pub(super) fn add_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult
         Ok(AddResult::Added { id }) => ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": format!("记忆已添加。ID: {}", &id[..8.min(id.len())]),
-            "data": { "action": "added", "id": id }
+            "data": serde_json::to_value(MemoryResult { action: "added".to_string() }).unwrap()
         })),
         Ok(AddResult::Merged { existing_id }) => ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": format!("已与相似记忆合并: {}", &existing_id[..8.min(existing_id.len())]),
-            "data": { "action": "merged", "existing_id": existing_id }
+            "data": serde_json::to_value(MemoryResult { action: "merged".to_string() }).unwrap()
         })),
         Ok(AddResult::NeedsEviction { candidates }) => ToolResult::error_json(serde_json::json!({
             "status": "error",
@@ -135,7 +136,7 @@ pub(super) fn delete_memory(input: Value, ctx: &ToolExecutionContext) -> ToolRes
         Ok(()) => ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": "记忆已删除。",
-            "data": { "id": id }
+            "data": serde_json::to_value(MemoryResult { action: "delete".to_string() }).unwrap()
         })),
         Err(error) => ToolResult::error_json(serde_json::json!({
             "status": "error",
@@ -181,7 +182,7 @@ pub(super) fn search_memory(input: Value, ctx: &ToolExecutionContext) -> ToolRes
             ToolResult::success_json(serde_json::json!({
                 "status": "success",
                 "message": message,
-                "data": { "entries": entries }
+                "data": serde_json::to_value(MemoryResult { action: "search".to_string() }).unwrap()
             }))
         }
         Err(error) => ToolResult::error_json(serde_json::json!({
@@ -222,7 +223,7 @@ pub(super) fn pin_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResult
         Ok(()) => ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": if pinned { "记忆已固定。" } else { "记忆已取消固定。" },
-            "data": { "id": id, "pinned": pinned }
+            "data": serde_json::to_value(MemoryResult { action: "pin".to_string() }).unwrap()
         })),
         Err(error) => ToolResult::error_json(serde_json::json!({
             "status": "error",
@@ -264,7 +265,7 @@ pub(super) fn list_memory(input: Value, ctx: &ToolExecutionContext) -> ToolResul
             ToolResult::success_json(serde_json::json!({
                 "status": "success",
                 "message": message,
-                "data": { "entries": entries }
+                "data": serde_json::to_value(MemoryResult { action: "list".to_string() }).unwrap()
             }))
         }
         Err(error) => ToolResult::error_json(serde_json::json!({
@@ -326,7 +327,7 @@ pub(super) fn add_reminder(input: Value, ctx: &ToolExecutionContext) -> ToolResu
                 Ok(id) => ToolResult::success_json(serde_json::json!({
                     "status": "success",
                     "message": format!("已添加会话提醒: {id}"),
-                    "data": { "id": id, "content": content, "priority": priority }
+                    "data": serde_json::to_value(MemoryResult { action: "add_reminder".to_string() }).unwrap()
                 })),
                 Err(error) => ToolResult::error_json(serde_json::json!({
                     "status": "error",
@@ -366,7 +367,7 @@ pub(super) fn complete_reminder(input: Value, ctx: &ToolExecutionContext) -> Too
             Ok(()) => ToolResult::success_json(serde_json::json!({
                 "status": "success",
                 "message": "会话提醒已完成。",
-                "data": { "id": id }
+                "data": serde_json::to_value(MemoryResult { action: "complete_reminder".to_string() }).unwrap()
             })),
             Err(error) => ToolResult::error_json(serde_json::json!({
                 "status": "error",

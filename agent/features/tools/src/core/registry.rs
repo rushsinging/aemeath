@@ -1,8 +1,8 @@
 //! Tool 注册编排：将各 business 层 Tool 实现注册到 `ToolRegistry`。
 
 use crate::business::{
-    agent_tool, ask_user, bash, brief, config_tool, file_edit, file_read, file_write, glob_tool,
-    grep, lsp, memory_tool, plan_mode, skill_tool, sleep, task_create, task_get, task_list,
+    agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep, lsp,
+    memory_tool, plan_mode, skill_tool, sleep, task_create, task_get, task_list,
     task_list_complete, task_list_create, task_stop, task_update, tool_search, web_fetch,
     web_search, worktree,
 };
@@ -65,7 +65,6 @@ pub fn register_all_tools(
     registry.register(Box::new(memory_tool::MemoryTool));
 
     // Utility tools
-    registry.register(Box::new(config_tool::ConfigTool));
     registry.register(Box::new(sleep::SleepTool));
     registry.register(Box::new(ask_user::AskUserQuestionTool));
     registry.register(Box::new(brief::BriefTool));
@@ -105,7 +104,6 @@ pub fn register_subagent_tools(
     registry.register(Box::new(memory_tool::MemoryTool));
 
     // Utility tools that do not coordinate with the user or parent task list
-    registry.register(Box::new(config_tool::ConfigTool));
     registry.register(Box::new(sleep::SleepTool));
     registry.register(Box::new(brief::BriefTool));
     registry.register(Box::new(tool_search::ToolSearchTool));
@@ -155,7 +153,6 @@ pub fn register_all_tools_except_agent(
     registry.register(Box::new(memory_tool::MemoryTool));
 
     // Utility tools
-    registry.register(Box::new(config_tool::ConfigTool));
     registry.register(Box::new(sleep::SleepTool));
     registry.register(Box::new(ask_user::AskUserQuestionTool));
     registry.register(Box::new(brief::BriefTool));

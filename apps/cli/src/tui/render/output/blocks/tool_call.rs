@@ -17,7 +17,7 @@ pub fn render_tool_call(
 ) -> RenderedBlock {
     let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty());
     let (header_line, detail_lines) = header_input
-        .map(|raw_json| format_tool_call(&view.title, raw_json, view.result_summary.as_deref()))
+        .map(|raw_json| format_tool_call(&view.title, raw_json, view.result_payload.as_ref()))
         .unwrap_or_else(|| {
             (
                 Line::from(vec![
@@ -100,6 +100,7 @@ mod tests {
             args_preview: Some("/foo/".into()),
             activity_summary: None,
             result_summary: None,
+            result_payload: None,
             collapsible: false,
             collapsed: false,
         }

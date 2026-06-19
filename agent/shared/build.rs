@@ -1,33 +1,156 @@
-//! 从 git tag 注入版本号到编译期常量。
-//!
-//! 用 `git describe --tags --abbrev=0` 取最近 tag，strip `v` 前缀后通过
-//! `cargo:rustc-env=AEMEATH_VERSION=<x.y.z>` 注入。
-//! 运行时通过 `share::version()` 访问：优先读 `AEMEATH_VERSION` 环境变量
-//! （方便本地测试覆盖），fallback 到编译期注入的 `option_env!("AEMEATH_VERSION")`，
-//! 再 fallback 到 `Cargo.toml` 的 `version`（占位符 `0.0.0`）。
+//! build.rs: 两个职责
+//! 1. 从 git tag 注入版本号到编译期常量（`cargo:rustc-env=AEMEATH_VERSION`）
+//! 2. 从 `// tool_schema: {...}` 注释生成 ToolSchema impl
 
+use std::env;
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
+/// 解析 `// tool_schema: {...}` 注释，生成 ToolSchema impl 代码。
+fn parse_tool_schema_comment(content: &str, struct_name: &str) -> Option<String> {
+    let struct_pattern = format!("pub struct {}", struct_name);
+    let struct_pos = content.find(&struct_pattern)?;
+    let before_struct = &content[..struct_pos];
+    let marker = "// tool_schema:";
+    let marker_pos = before_struct.rfind(marker)?;
+    let line_start = before_struct[..marker_pos]
+        .rfind('\n')
+        .map(|p| p + 1)
+        .unwrap_or(0);
+    let comment_line = before_struct[line_start..].lines().next()?;
+    let json_start = comment_line.find('{')?;
+    let json_end = comment_line.find('}')?;
+    let fields_str = &comment_line[json_start + 1..json_end];
+
+    let mut properties = Vec::new();
+    let mut required = Vec::new();
+
+    for field_def in fields_str.split(',') {
+        let field_def = field_def.trim();
+        if field_def.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = field_def.split(':').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let field_name = parts[0].trim();
+        let type_str = parts[1].trim();
+        let is_optional = type_str.ends_with('?');
+        let base_type = if is_optional {
+            type_str[..type_str.len() - 1].trim()
+        } else {
+            type_str
+        };
+        let schema_type = match base_type {
+            "string" => r#"{"type": "string"}"#,
+            "integer" => r#"{"type": "integer"}"#,
+            "number" => r#"{"type": "number"}"#,
+            "boolean" => r#"{"type": "boolean"}"#,
+            "object" => r#"{"type": "object"}"#,
+            "array" => r#"{"type": "array"}"#,
+            _ => r#"{"type": "object"}"#,
+        };
+        properties.push(format!("            \"{}\": {}", field_name, schema_type));
+        if !is_optional {
+            required.push(format!("            \"{}\"", field_name));
+        }
+    }
+
+    let properties_str = properties.join(",\n");
+    let required_str = required.join(",\n");
+
+    let schema = if required.is_empty() {
+        format!(
+            "{{\n\
+             {sp}\"type\": \"object\",\n\
+             {sp}\"properties\": {{\n\
+             {properties_str}\n\
+             {sp}}}\n\
+             }}",
+            sp = "    "
+        )
+    } else {
+        format!(
+            "{{\n\
+             {sp}\"type\": \"object\",\n\
+             {sp}\"properties\": {{\n\
+             {properties_str}\n\
+             {sp}}},\n\
+             {sp}\"required\": [\n\
+             {required_str}\n\
+             {sp}]\n\
+             }}",
+            sp = "    "
+        )
+    };
+
+    Some(format!(
+        "\nimpl ToolSchema for {struct_name} {{\n    fn data_schema() -> Value {{\n        serde_json::json!({schema})\n    }}\n}}\n"
+    ))
+}
+
 fn main() {
-    // tag 变化时重新构建
+    // --- 1. 版本注入 ---
     println!("cargo:rerun-if-changed=.git/refs/tags");
     println!("cargo:rerun-if-changed=.git/HEAD");
 
-    // git describe --tags --abbrev=0：取最近的 reachable tag
     let output = Command::new("git")
         .args(["describe", "--tags", "--abbrev=0"])
         .output();
 
     let tag = match output {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => {
-            // 无 tag 或 git 不可用：不设 AEMEATH_VERSION，编译时 fallback 到 CARGO_PKG_VERSION
-            return;
-        }
+        _ => String::new(),
     };
+    if !tag.is_empty() {
+        let version = tag.strip_prefix(['v', 'V']).unwrap_or(&tag);
+        println!("cargo:rustc-env=AEMEATH_VERSION={version}");
+    }
 
-    // strip 前缀 'v' 或 'V'
-    let version = tag.strip_prefix(['v', 'V']).unwrap_or(&tag);
+    // --- 2. ToolSchema 代码生成 ---
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let types_dir = Path::new("src/tool/types");
 
-    println!("cargo:rustc-env=AEMEATH_VERSION={version}");
+    if !types_dir.exists() {
+        return;
+    }
+
+    println!("cargo:rerun-if-changed=src/tool/types");
+
+    let mut impls = Vec::new();
+    let skip_files = ["mod.rs", "support.rs"];
+    let struct_re = regex::Regex::new(r"pub struct (\w+)").unwrap();
+
+    for entry in fs::read_dir(types_dir).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "rs") {
+            continue;
+        }
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        if skip_files.contains(&filename) {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).unwrap();
+
+        // 找所有 struct 定义
+        for caps in struct_re.captures_iter(&content) {
+            let struct_name = caps.get(1).unwrap().as_str();
+            if let Some(impl_code) = parse_tool_schema_comment(&content, struct_name) {
+                impls.push(impl_code);
+            }
+        }
+    }
+
+    let output_path = Path::new(&out_dir).join("generated_impls.rs");
+    let mut output = String::new();
+    output.push_str("// Generated by build.rs — do not edit manually.\n");
+    output.push_str("use serde_json::Value;\n");
+    for impl_code in &impls {
+        output.push_str(impl_code);
+    }
+    fs::write(&output_path, output).unwrap();
 }

@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::edit::EditResult;
 use share::tool::{PathAccess, PathKind};
 
 pub struct FileEditTool;
@@ -40,7 +41,7 @@ impl Tool for FileEditTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
@@ -196,7 +197,6 @@ impl Tool for FileEditTool {
         } else {
             new_string.to_string()
         };
-        let diff_start_line = start_line_of_match(&content, &matched_old).unwrap_or(1);
         let new_content = if replace_all {
             content.replace(&matched_old, &actual_new)
         } else {
@@ -205,31 +205,16 @@ impl Tool for FileEditTool {
         match tokio::fs::write(path, &new_content).await {
             Ok(()) => {
                 let occurrences = if replace_all { count } else { 1 };
-                let fuzzy_note = if is_fuzzy {
-                    " (fuzzy matched, indentation adapted)"
-                } else {
-                    ""
+                let data = EditResult {
+                    file_path: file_path.to_string(),
+                    replacements_made: occurrences as u64,
+                    dry_run: false,
                 };
-                let diff_text = format!(
-                    "---DIFF:LINE:{diff_start_line}---\n{}\n---DIFF:LINE:{diff_start_line}---\n{}",
-                    matched_old, actual_new,
-                );
-                ToolResult::success(
-                    serde_json::json!({
-                        "status": "success",
-                        "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
-                        "data": {
-                            "file_path": file_path,
-                            "occurrences": occurrences,
-                            "fuzzy_note": fuzzy_note,
-                            "diff_start_line": diff_start_line,
-                            "old_content": matched_old,
-                            "new_content": actual_new,
-                            "diff": diff_text,
-                        }
-                    })
-                    .to_string(),
-                )
+                ToolResult::success_json(serde_json::json!({
+                    "status": "success",
+                    "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
+                    "data": serde_json::to_value(&data).unwrap()
+                }))
             }
             Err(e) => ToolResult::error(
                 serde_json::json!({
@@ -244,6 +229,7 @@ impl Tool for FileEditTool {
 }
 
 /// Return the 1-based line number where `needle` starts in `content`.
+#[cfg(test)]
 fn start_line_of_match(content: &str, needle: &str) -> Option<usize> {
     let byte_pos = content.find(needle)?;
     Some(content[..byte_pos].lines().count() + 1)
@@ -404,10 +390,11 @@ mod tests {
             .await;
 
         assert!(!result.is_error, "edit should succeed: {}", result.output);
-        assert!(
-            result.output.contains("---DIFF:LINE:2---"),
-            "diff marker should include real line number, got: {}",
-            result.output
+        assert_eq!(
+            result.content["data"]["replacements_made"],
+            serde_json::json!(1),
+            "data should contain replacements_made, got: {}",
+            result.content["data"]
         );
     }
 }
