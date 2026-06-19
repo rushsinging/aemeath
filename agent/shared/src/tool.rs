@@ -4,6 +4,16 @@ pub struct ImageData {
     pub media_type: String,
 }
 
+/// Typed result structs for tools, one per tool. These are the canonical,
+/// "horizontal shared" representation of what a tool produced; the same types
+/// are re-exported by `packages/sdk::tool_result` for `cli` and the future
+/// `server` consumer, while tools themselves reference them via
+/// `share::tool::types::XxxResult`.
+///
+/// See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+/// (plan 方案 D) for the design rationale.
+pub mod types;
+
 // ---------------------------------------------------------------------------
 // Path-policy types (shared so both `tools` and `policy` can reference them
 // without depending on each other).
