@@ -61,9 +61,9 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            runner: macos-14          # Apple Silicon runner
+            runner: macos-14          # Apple Silicon runner (native)
           - target: x86_64-apple-darwin
-            runner: macos-13          # Intel runner
+            runner: macos-14          # Apple Silicon runner (cross-compile)
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
