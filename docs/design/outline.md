@@ -115,6 +115,11 @@ project     → share
 tools       → share, project, storage
 runtime     → 全部 feature + share + sdk + logging
 composition → runtime, tools, provider, project, sdk
+# sdk 是 thin re-export / protocol facade：可引 share 以 re-export 业务 typed
+# result structs（`share::tool::types::*`）给 cli / 未来 server consumer。
+# sdk 仍不能引任何 business feature（tools/policy/...）—— business → platform
+# 边界不破（spec §6.4.7 + tool-display plan）。
+sdk         → share, utils
 ```
 
 - 无任何 feature 能依赖 runtime。
