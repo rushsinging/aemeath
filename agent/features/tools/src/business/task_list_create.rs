@@ -65,7 +65,6 @@ impl Tool for TaskListCreateTool {
         };
 
         let batch = self.store.create_list(subject.clone(), summary).await;
-        let summary_text = batch.summary.as_deref().unwrap_or_default();
         ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": format!(

@@ -61,8 +61,6 @@ impl Tool for SkillTool {
             }
         };
 
-        let args = input.get("args").and_then(|v| v.as_str()).unwrap_or("");
-
         let skills = self.skills.lock().await;
         let skill = match skills.get(skill_name) {
             Some(s) => s.clone(),
@@ -83,11 +81,6 @@ impl Tool for SkillTool {
         drop(skills);
 
         // Skill content is materialized by prompt domain before registration.
-        let mut content = skill.content.clone();
-        if !args.is_empty() {
-            content = format!("{content}\n\nArguments: {args}");
-        }
-
         ToolResult::success(
             serde_json::json!({
                 "status": "success",

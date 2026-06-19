@@ -147,7 +147,6 @@ impl Tool for TaskCreateTool {
             }
         };
 
-        let priority_str = task.priority.as_str();
         let display_id = self.store.format_display_id(&task.id).await;
 
         ToolResult::success(

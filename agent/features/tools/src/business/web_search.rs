@@ -162,7 +162,7 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
     }
 }
 
-fn format_search_results(query: &str, results: Vec<SearchResult>) -> ToolResult {
+fn format_search_results(_query: &str, results: Vec<SearchResult>) -> ToolResult {
     if results.is_empty() {
         let data = serde_json::to_value(WebSearchResult { results: vec![] }).unwrap_or_default();
         return ToolResult::success(

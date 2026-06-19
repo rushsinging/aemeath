@@ -229,6 +229,7 @@ impl Tool for FileEditTool {
 }
 
 /// Return the 1-based line number where `needle` starts in `content`.
+#[cfg(test)]
 fn start_line_of_match(content: &str, needle: &str) -> Option<usize> {
     let byte_pos = content.find(needle)?;
     Some(content[..byte_pos].lines().count() + 1)

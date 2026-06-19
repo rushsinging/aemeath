@@ -121,11 +121,12 @@ fn main() {
 
     let mut impls = Vec::new();
     let skip_files = ["mod.rs", "support.rs"];
+    let struct_re = regex::Regex::new(r"pub struct (\w+)").unwrap();
 
     for entry in fs::read_dir(types_dir).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
-        if !path.extension().map_or(false, |ext| ext == "rs") {
+        if path.extension().is_none_or(|ext| ext != "rs") {
             continue;
         }
         let filename = path.file_name().unwrap().to_str().unwrap();
@@ -136,7 +137,6 @@ fn main() {
         let content = fs::read_to_string(&path).unwrap();
 
         // 找所有 struct 定义
-        let struct_re = regex::Regex::new(r"pub struct (\w+)").unwrap();
         for caps in struct_re.captures_iter(&content) {
             let struct_name = caps.get(1).unwrap().as_str();
             if let Some(impl_code) = parse_tool_schema_comment(&content, struct_name) {
