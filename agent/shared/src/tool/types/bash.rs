@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// Typed result returned by the `bash` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-// tool_schema: {stdout: string, stderr: string, exit_code: integer, signal: integer?}
 pub struct BashResult {
     pub stdout: String,
     pub stderr: String,

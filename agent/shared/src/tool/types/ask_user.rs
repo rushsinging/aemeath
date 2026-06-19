@@ -7,7 +7,6 @@ use serde_json::Value;
 ///
 /// `options` is the list of answer choices presented to the user.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-// tool_schema: {question_type: string, options: array, allow_free_input: boolean}
 pub struct AskUserQuestionResult {
     pub question_type: String,
     pub options: Vec<Value>,

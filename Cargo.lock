@@ -2253,10 +2253,11 @@ version = "0.0.0"
 dependencies = [
  "log",
  "logging",
- "regex",
+ "proc-macro2",
  "serde",
  "serde_json",
  "serde_yml",
+ "syn",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",

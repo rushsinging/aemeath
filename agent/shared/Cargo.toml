@@ -20,5 +20,6 @@ logging = { path = "../../packages/global/logging" }
 utils = { path = "../../packages/global/utils" }
 
 [build-dependencies]
-regex = "1"
+syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
+proc-macro2 = "1"
 

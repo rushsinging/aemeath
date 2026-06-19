@@ -1,6 +1,6 @@
 mod safety;
 
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
@@ -25,7 +25,8 @@ const CWD_MARKER: &str = "__AEMEATH_CWD__=";
 pub struct BashTool;
 
 #[async_trait]
-impl Tool for BashTool {
+impl TypedTool for BashTool {
+    type Output = BashResult;
     fn name(&self) -> &str {
         "Bash"
     }
@@ -64,31 +65,20 @@ impl Tool for BashTool {
             .unwrap_or(false)
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<BashResult> {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => {
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": "missing required parameter: command"
-                }))
-            }
+            None => return TypedToolResult::error("missing required parameter: command"),
         };
         if let Some(reason) = check_command_safety(command) {
             if !ctx.allow_all {
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually.")
-                }));
+                return TypedToolResult::error(format!("Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."));
             }
         }
         // Check for shell injection patterns (skip when allow_all is set)
         if !ctx.allow_all {
             if let Some(reason) = check_shell_injection(command) {
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead.")
-                }));
+                return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
         let timeout_ms = input
@@ -114,12 +104,7 @@ impl Tool for BashTool {
             .spawn()
         {
             Ok(c) => c,
-            Err(e) => {
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("failed to execute: {e}")
-                }))
-            }
+            Err(e) => return TypedToolResult::error(format!("failed to execute: {e}")),
         };
         // [DIAG] 记录耗时起点与子进程 PID，便于 #286 / 复现诊断
         let start = Instant::now();
@@ -249,10 +234,7 @@ impl Tool for BashTool {
                 let _ = child.kill().await;
                 stdout_handle.abort();
                 stderr_handle.abort();
-                return ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": "[interrupted by user]"
-                }));
+                return TypedToolResult::error("[interrupted by user]");
             }
             result = tokio::time::timeout(
                 Duration::from_millis(timeout_ms),
@@ -270,12 +252,7 @@ impl Tool for BashTool {
                         stderr_handle.abort();
                         // Return early — no point awaiting aborted
                         // handles.
-                        return ToolResult::error_json(serde_json::json!({
-                            "status": "error",
-                            "message": format!(
-                                "command timed out after {timeout_ms}ms"
-                            )
-                        }));
+                        return TypedToolResult::error(format!("command timed out after {timeout_ms}ms"));
                     }
                 }
             }
@@ -290,10 +267,7 @@ impl Tool for BashTool {
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 if let Some(new_path_base) = new_path_base {
                     if let Err(e) = ctx.workspace_control().set_path_base(new_path_base) {
-                        return ToolResult::error_json(serde_json::json!({
-                            "status": "error",
-                            "message": e.to_string()
-                        }));
+                        return TypedToolResult::error(e.to_string());
                     }
                 }
                 let stderr = String::from_utf8_lossy(&stderr);
@@ -331,7 +305,7 @@ impl Tool for BashTool {
                     );
                 }
 
-                let data = serde_json::to_value(BashResult {
+                let bash_result = BashResult {
                     stdout: stdout.to_string(),
                     stderr: if stderr.is_empty() {
                         String::new()
@@ -343,8 +317,7 @@ impl Tool for BashTool {
                     signal: status.signal(),
                     #[cfg(not(unix))]
                     signal: None,
-                })
-                .unwrap_or_default();
+                };
                 // 构造 TUI 显示文本：stdout + stderr（如有），让 TUI 显示实际命令输出
                 // 而非 "Command executed successfully" 这类元信息（display > message 优先级）
                 let display = {
@@ -357,22 +330,21 @@ impl Tool for BashTool {
                     }
                     parts.join("\n")
                 };
-                let mut result_json = serde_json::json!({
-                    "status": if status.success() { "success" } else { "error" },
-                    "message": if status.success() {
+                let output = if display.is_empty() {
+                    if status.success() {
                         "Command executed successfully".to_string()
                     } else {
                         format!("Command failed: {failure_detail}")
-                    },
-                    "data": data,
-                });
-                if !display.is_empty() {
-                    result_json["display"] = serde_json::Value::String(display);
-                }
-                if status.success() {
-                    ToolResult::success_json(result_json)
+                    }
                 } else {
-                    ToolResult::error_json(result_json)
+                    display
+                };
+                if status.success() {
+                    TypedToolResult::success(output, bash_result)
+                } else {
+                    let mut result = TypedToolResult::error(output);
+                    result.data = Some(bash_result);
+                    result
                 }
             }
             Err(e) => {
@@ -393,10 +365,7 @@ impl Tool for BashTool {
                     preview(&stdout_lossy),
                     preview(&stderr_lossy),
                 );
-                ToolResult::error_json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("failed to execute: {e}")
-                }))
+                TypedToolResult::error(format!("failed to execute: {e}"))
             }
         }
     }
@@ -564,12 +533,9 @@ mod tests {
             "output 不应是元信息 'Command executed successfully'，实际: {}",
             result.output
         );
-        // content 中应有 display 字段
-        assert_eq!(
-            result.content["display"].as_str(),
-            Some("hello_world_12345"),
-            "content[display] 应为 stdout 内容"
-        );
+        // data 中应有 stdout 字段
+        let data = result.data.expect("应有 data");
+        assert_eq!(data.stdout, "hello_world_12345", "data.stdout 应为命令输出");
     }
 
     #[tokio::test]

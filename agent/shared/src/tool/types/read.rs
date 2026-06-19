@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 /// Fields cover the `(N lines)` / `(N bytes)` / offset / limit metadata that
 /// the TUI header needs, plus the truncated flag for streaming reads.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-// tool_schema: {content: string, file_path: string, line_count: integer, start_line: integer, total_lines: integer}
 pub struct ReadResult {
     pub content: String,
     pub file_path: String,

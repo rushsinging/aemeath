@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// Typed result returned by the `task_stop` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-// tool_schema: {task_id: string}
 pub struct TaskStopResult {
     pub task_id: String,
 }

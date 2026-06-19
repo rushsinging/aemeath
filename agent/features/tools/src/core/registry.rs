@@ -14,13 +14,15 @@ use tokio::sync::Mutex;
 
 use super::tool_registry::ToolRegistry;
 
+use crate::contract::tool::TypedToolAdapter;
+
 pub fn register_all_tools(
     registry: &ToolRegistry,
     task_store: Arc<TaskStore>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
     // Core tools
-    registry.register(Box::new(bash::BashTool));
+    registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
     registry.register(Box::new(file_read::FileReadTool));
     registry.register(Box::new(file_write::FileWriteTool));
     registry.register(Box::new(file_edit::FileEditTool));
@@ -87,7 +89,7 @@ pub fn register_subagent_tools(
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
     // Core tools
-    registry.register(Box::new(bash::BashTool));
+    registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
     registry.register(Box::new(file_read::FileReadTool));
     registry.register(Box::new(file_write::FileWriteTool));
     registry.register(Box::new(file_edit::FileEditTool));
@@ -115,7 +117,7 @@ pub fn register_all_tools_except_agent(
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
     // Core tools
-    registry.register(Box::new(bash::BashTool));
+    registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
     registry.register(Box::new(file_read::FileReadTool));
     registry.register(Box::new(file_write::FileWriteTool));
     registry.register(Box::new(file_edit::FileEditTool));

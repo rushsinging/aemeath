@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 /// `tools` lists the names of all tools whose name/description matched
 /// the search query, in stable sort order.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-// tool_schema: {tools: array}
 pub struct ToolSearchResult {
     pub tools: Vec<String>,
 }
