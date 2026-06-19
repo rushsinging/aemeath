@@ -546,3 +546,266 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     assert!(queued_sync < handled_text);
     assert!(handled_text < done);
 }
+
+/// Hook 首次输出 `{"continue": false}` JSON (exit 0)，之后放行。
+/// 用于验证 `continue:false` 被识别为阻断（#372 缺陷 1）。
+fn continue_false_then_allow_hook_runner(flag_path: &std::path::Path) -> HookRunner {
+    let flag_path_str = flag_path.to_string_lossy().to_string();
+    let mut events = HashMap::new();
+    events.insert(
+        HookEvent::Stop,
+        vec![HookEntry {
+            matcher: String::new(),
+            command: format!(
+                "python3 -c 'import json,sys,pathlib; \
+                 p=pathlib.Path(\"{flag_path}\"); \
+                 sys.exit(0 if p.exists() else \
+                 (p.parent.mkdir(parents=True, exist_ok=True), \
+                 p.write_text(\"1\"), \
+                 print(json.dumps({{\"continue\": False, \"stopReason\": \"must keep working\"}})), 0)[3])'",
+                flag_path = flag_path_str,
+            ),
+            timeout: 5,
+        }],
+    );
+    HookRunner::new(HooksConfig { events }, ".".to_string())
+}
+
+/// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
+fn block_n_times_hook_runner(counter_path: &std::path::Path, n: usize) -> HookRunner {
+    let counter_path_str = counter_path.to_string_lossy().to_string();
+    let mut events = HashMap::new();
+    events.insert(
+        HookEvent::Stop,
+        vec![HookEntry {
+            matcher: String::new(),
+            command: format!(
+                "python3 -c 'import pathlib,sys; \
+                 p=pathlib.Path(\"{path}\"); \
+                 c=int(p.read_text()) if p.exists() else 0; \
+                 p.parent.mkdir(parents=True, exist_ok=True); \
+                 p.write_text(str(c+1)); \
+                 sys.exit(2 if c < {n} else 0)'",
+                path = counter_path_str,
+                n = n,
+            ),
+            timeout: 5,
+        }],
+    );
+    HookRunner::new(HooksConfig { events }, ".".to_string())
+}
+
+/// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
+fn always_blocking_hook_runner() -> HookRunner {
+    let mut events = HashMap::new();
+    events.insert(
+        HookEvent::Stop,
+        vec![HookEntry {
+            matcher: String::new(),
+            command: "echo always blocked; exit 2".to_string(),
+            timeout: 5,
+        }],
+    );
+    HookRunner::new(HooksConfig { events }, ".".to_string())
+}
+
+#[tokio::test]
+async fn test_continue_false_json_treated_as_block() {
+    // #372 缺陷 1：Stop hook 输出 {"continue": false} (exit 0) 应被识别为阻断
+    let flag_path = std::env::temp_dir().join(format!(
+        "aemeath_continue_false_{}.flag",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&flag_path);
+    let sink = RecordingSink::default();
+
+    process_chat_loop(ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![None, None, None, None]),
+        input_events: EmptyInputEvents,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            SequenceProvider::new(vec!["first response", "second response"]),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: vec![Message::user("hello")],
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-continue-false".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: CancellationToken::new(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: continue_false_then_allow_hook_runner(&flag_path),
+        memory_config: share::config::MemoryConfig::default(),
+        language: "en".to_string(),
+    })
+    .await;
+    let _ = std::fs::remove_file(&flag_path);
+
+    let events = sink.events();
+    // continue:false 应触发 HookEvent:Stop:Blocked
+    assert!(
+        events.iter().any(|e| e == "HookEvent:Stop:Blocked"),
+        "continue:false JSON should be recognized as block: {:?}",
+        events
+    );
+    // 应有反馈注入（stopReason 内容）
+    assert!(
+        events.iter().any(|e| e.contains("must keep working")),
+        "stopReason should appear in feedback: {:?}",
+        events
+    );
+    // 应有第 2 次 LLM 响应（说明阻断后 loop 继续）
+    assert!(
+        events.iter().any(|e| e == "Text:second response"),
+        "loop should continue to second LLM turn: {:?}",
+        events
+    );
+    // 最终应完成
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.as_str() == "DoneWithDuration")
+            .count(),
+        1,
+        "loop should finish after hook allows: {:?}",
+        events
+    );
+}
+
+#[tokio::test]
+async fn test_stall_triggers_stop_hook_check() {
+    // #372 缺陷 2：stall 终止前应调用 Stop hook，阻断则重置 detector 并继续
+    let counter_path = std::env::temp_dir().join(format!(
+        "aemeath_stall_hook_{}.counter",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&counter_path);
+    let sink = RecordingSink::default();
+
+    // LLM 前 3 次返回相同输出（触发 stall），第 4 次返回不同输出
+    // Stop hook 前 3 次阻断，第 4 次放行
+    process_chat_loop(ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![None, None, None, None, None, None]),
+        input_events: EmptyInputEvents,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            SequenceProvider::new(vec![
+                "same output",
+                "same output",
+                "same output",
+                "final ok",
+            ]),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: vec![Message::user("hello")],
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-stall-hook".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: CancellationToken::new(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: block_n_times_hook_runner(&counter_path, 3),
+        memory_config: share::config::MemoryConfig::default(),
+        language: "en".to_string(),
+    })
+    .await;
+    let _ = std::fs::remove_file(&counter_path);
+
+    let events = sink.events();
+    // stall 分支被触发（有 stall 的 SystemMessage）
+    assert!(
+        events.iter().any(|e| e.contains("repetitive output")),
+        "stall should be detected: {:?}",
+        events
+    );
+    // stall 后 Stop hook 阻断，应有第 4 次 LLM 响应（说明 detector 重置并继续了）
+    assert!(
+        events.iter().any(|e| e == "Text:final ok"),
+        "loop should continue after stall + Stop hook block: {:?}",
+        events
+    );
+    // 最终应完成
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.as_str() == "DoneWithDuration")
+            .count(),
+        1,
+        "loop should finish: {:?}",
+        events
+    );
+}
+
+#[tokio::test]
+async fn test_stop_hook_block_limit_stops_loop() {
+    // #372 缺陷 3：Stop hook 连续阻断超过 MAX_STOP_HOOK_BLOCKS(5) 强制停止
+    let sink = RecordingSink::default();
+
+    // 每次返回不同输出避免 stall；Stop hook 每次阻断
+    process_chat_loop(ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![None, None, None, None, None, None, None, None]),
+        input_events: EmptyInputEvents,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: vec![Message::user("hello")],
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-block-limit".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: CancellationToken::new(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: always_blocking_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        language: "en".to_string(),
+    })
+    .await;
+
+    let events = sink.events();
+    // 超过上限应发出 SystemMessage 提示
+    assert!(
+        events
+            .iter()
+            .any(|e| e.contains("stop hook blocked 5 times in a row")),
+        "should emit block-limit SystemMessage: {:?}",
+        events
+    );
+}
