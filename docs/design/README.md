@@ -12,6 +12,7 @@
 | [server-design.md](server-design.md) | 入站适配器 Server：多租户远端服务、WSS 协议、Session 多路复用 | 草案（无 server crate） |
 | [file-split-plan.md](file-split-plan.md) | 文件级切分计划：把巨型文件按 COLA 边界分到 `contract/gateway/business/utils` | 演进中 |
 | [architecture-guards.md](architecture-guards.md) | 17 个架构守卫 + 全部白名单的单一真相（与 `.agents/hooks/*.sh` 字面同步） | 已落地 |
+| [agent-orchestration.md](agent-orchestration.md) | Agent 编排范式知识地图：Context/Harness/Loop/Workflow/Graph 五主线 + ReAct + 现状评估 + 演进决策框架 | 知识储备 |
 | [README.md](README.md) | 本文件 | — |
 
 ## 阅读路径
@@ -26,12 +27,14 @@
 | Stop 钩子失败排查 | [architecture-guards.md](architecture-guards.md) §"守卫索引" + 相关小节 |
 | 把巨型文件按层切分 | [file-split-plan.md](file-split-plan.md) |
 | 准备做 server | [server-design.md](server-design.md) + [AGENTS.md](../../AGENTS.md) §开放决策 |
+| 理解 Agent 编排范式 / 评估 workflow / graph 演进 | [agent-orchestration.md](agent-orchestration.md)（对应 Issue #358） |
 
 ## 状态约定
 
 - **已落地**：文档描述的状态机 / 规则 / 守卫**在当前 main 分支中已实现**；如发现与代码不符，按 [architecture-guards.md](architecture-guards.md) 流程处理（修文档或修代码，二选一并在 PR 中说明）。
 - **演进中**：文档已定稿、配套迁移工作未完成；阅读时同时关注对应 GitHub Issue 进展。
 - **草案**：文档在 `docs/snapshot/` 留有快照但代码未实现；落地时 **MUST** 同步在 [AGENTS.md](../../AGENTS.md) 触发表追加对应行。
+- **知识储备**：文档整理领域知识 / 范式地图 / 决策框架，不直接约束代码，仅作设计参考与术语底座；不强制与 main 分支代码逐行对齐，但 **SHOULD** 在引用代码现状时保持准确。
 
 ## 维护规则
 
