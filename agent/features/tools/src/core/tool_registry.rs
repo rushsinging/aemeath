@@ -56,6 +56,7 @@ impl ToolRegistry {
                     "name": tool.name(),
                     "description": tool.description(),
                     "input_schema": tool.input_schema(),
+                    "data_schema": tool.data_schema(),
                 })
             })
             .collect()

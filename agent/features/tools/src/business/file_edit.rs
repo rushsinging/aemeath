@@ -32,6 +32,10 @@ impl TypedTool for FileEditTool {
             "required": ["file_path", "old_string", "new_string"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        EditResult::data_schema()
+    }
     fn is_concurrency_safe(&self) -> bool {
         false
     }

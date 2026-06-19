@@ -23,6 +23,10 @@ impl TypedTool for TaskListCompleteTool {
     fn input_schema(&self) -> Value {
         serde_json::json!({"type": "object", "properties": {}})
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        TaskListCompleteResult::data_schema()
+    }
 
     fn is_read_only(&self) -> bool {
         false

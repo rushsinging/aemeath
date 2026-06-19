@@ -29,6 +29,10 @@ impl TypedTool for ToolSearchTool {
             "required": ["query"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        ToolSearchResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         true
     }

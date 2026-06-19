@@ -38,6 +38,10 @@ impl TypedTool for FileWriteTool {
             "additionalProperties": false
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        WriteResult::data_schema()
+    }
     fn is_concurrency_safe(&self) -> bool {
         false
     }

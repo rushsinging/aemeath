@@ -32,6 +32,10 @@ impl TypedTool for FileReadTool {
             "required": ["file_path"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        ReadResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         true
     }

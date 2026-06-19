@@ -106,6 +106,10 @@ impl TypedTool for ExitPlanModeTool {
             "required": []
         })
     }
+    fn data_schema(&self) -> serde_json::Value {
+        use share::tool::types::ToolSchema;
+        PlanModeResult::data_schema()
+    }
 
     async fn call(
         &self,

@@ -30,6 +30,10 @@ impl TypedTool for TaskStopTool {
             "required": ["taskId"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        TaskStopResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         false
     }

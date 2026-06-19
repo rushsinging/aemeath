@@ -26,6 +26,10 @@ impl TypedTool for MemoryTool {
     fn input_schema(&self) -> Value {
         schema::input_schema()
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        MemoryResult::data_schema()
+    }
 
     fn is_read_only(&self) -> bool {
         false
