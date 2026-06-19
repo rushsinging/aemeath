@@ -29,8 +29,13 @@ pub(crate) async fn run_update_command(check: bool) {
 
                 if !check {
                     match service.perform_update().await {
-                        Ok(UpdateResult::Updated { from, to }) => {
+                        Ok(UpdateResult::Updated {
+                            from,
+                            to,
+                            installed_path,
+                        }) => {
                             println!("\n✓ Updated {from} → {to}");
+                            println!("Installed to: {installed_path}");
                             println!("Please restart aemeath to use the new version.");
                         }
                         Ok(UpdateResult::UpToDate { version }) => {
