@@ -34,13 +34,25 @@ jobs:
 
       - name: Resolve release version
         id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
+          set -euo pipefail
+
           # 从触发来源提取版本号（git tag 或 workflow_dispatch 输入）
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
           fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
+
           echo "Release version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -88,14 +100,27 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package tarball
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
-          TARGET="${{ matrix.target }}"
-          DIRNAME="aemeath-${VERSION}-${TARGET}"
+          set -euo pipefail
 
+          DIRNAME="aemeath-${VERSION}-${TARGET}"
           mkdir "$DIRNAME"
-          cp "target/${TARGET}/release/aemeath" "$DIRNAME/aemeath"
+          install -m 755 "target/${TARGET}/release/aemeath" "$DIRNAME/aemeath"
+          test -x "$DIRNAME/aemeath"
+          ls -l "$DIRNAME/aemeath"
+
           tar czf "${DIRNAME}.tar.gz" "$DIRNAME"
+
+          VERIFY_DIR="$(mktemp -d)"
+          trap 'rm -rf "$VERIFY_DIR"' EXIT
+          tar xzf "${DIRNAME}.tar.gz" -C "$VERIFY_DIR"
+          test -x "$VERIFY_DIR/$DIRNAME/aemeath"
+          ls -l "$VERIFY_DIR/$DIRNAME/aemeath"
+
           echo "Packaged: ${DIRNAME}.tar.gz"
           ls -lh "${DIRNAME}.tar.gz"
 
@@ -130,11 +155,18 @@ jobs:
 
       - name: Determine tag name
         id: tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=v${{ needs.validate.outputs.version }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub Release
