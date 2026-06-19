@@ -501,6 +501,19 @@ impl ToolDisplay for EnterWorktreeDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
+    fn format_header_line_with_result(
+        &self,
+        _input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let branch = data_field_string(result_payload, "data.branch")
+            .unwrap_or_else(|| "(default)".to_string());
+        let arg = format!("branch={branch}");
+        let path_suffix = data_field_string(result_payload, "data.working_root")
+            .map(|p| format!(" ({p})"))
+            .unwrap_or_default();
+        build_header_line(self.display_name(), &arg, &path_suffix)
+    }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
