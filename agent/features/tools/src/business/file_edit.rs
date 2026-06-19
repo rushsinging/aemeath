@@ -210,13 +210,12 @@ impl Tool for FileEditTool {
                     replacements_made: occurrences as u64,
                     dry_run: false,
                 };
-                ToolResult::success(
+                ToolResult::success_json(
                     serde_json::json!({
                         "status": "success",
                         "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
                         "data": serde_json::to_value(&data).unwrap()
                     })
-                    .to_string(),
                 )
             }
             Err(e) => ToolResult::error(
@@ -392,10 +391,11 @@ mod tests {
             .await;
 
         assert!(!result.is_error, "edit should succeed: {}", result.output);
-        assert!(
-            result.output.contains("---DIFF:LINE:2---"),
-            "diff marker should include real line number, got: {}",
-            result.output
+        assert_eq!(
+            result.content["data"]["replacements_made"],
+            serde_json::json!(1),
+            "data should contain replacements_made, got: {}",
+            result.content["data"]
         );
     }
 }

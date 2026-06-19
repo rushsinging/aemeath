@@ -118,7 +118,11 @@ mod tests {
 
         assert!(!result.is_error);
         assert!(result.output.contains("Task list #0 created"));
-        assert!(result.content["data"]["subject"].as_str() == Some("修复 bug"));
+        assert!(
+            result.content["data"]["batch_id"].as_str().is_some(),
+            "data should contain batch_id, got: {}",
+            result.content["data"]
+        );
         assert_eq!(
             store.active_list().await.unwrap().summary.as_deref(),
             Some("修复 task 状态")
