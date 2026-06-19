@@ -3,10 +3,12 @@
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// block cache key。`text_width` 与 `RenderCtx.text_width` 同义：
+/// 已扣除 gutter 的可用文本宽度（参见 #329 语义约定）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CacheKey {
     pub version: u64,
-    pub width: u16,
+    pub text_width: u16,
 }
 
 struct CachedBlock {
@@ -32,7 +34,9 @@ impl BlockCache {
                 return cached.rendered.clone();
             }
         }
-        let ctx = RenderCtx { width: key.width };
+        let ctx = RenderCtx {
+            text_width: key.text_width,
+        };
         let rendered = render(&ctx);
         self.map.insert(
             block_id.to_string(),
@@ -73,7 +77,7 @@ mod tests {
         let mut calls = 0;
         let key = CacheKey {
             version: 1,
-            width: 80,
+            text_width: 80,
         };
         cache.get_or_render("a", key, |_| {
             calls += 1;
@@ -95,7 +99,7 @@ mod tests {
             "a",
             CacheKey {
                 version: 1,
-                width: 80,
+                text_width: 80,
             },
             |_| {
                 calls += 1;
@@ -106,7 +110,7 @@ mod tests {
             "a",
             CacheKey {
                 version: 2,
-                width: 80,
+                text_width: 80,
             },
             |_| {
                 calls += 1;
@@ -124,7 +128,7 @@ mod tests {
             "a",
             CacheKey {
                 version: 1,
-                width: 80,
+                text_width: 80,
             },
             |_| block("a", 1),
         );
@@ -132,7 +136,7 @@ mod tests {
             "b",
             CacheKey {
                 version: 1,
-                width: 80,
+                text_width: 80,
             },
             |_| block("b", 1),
         );

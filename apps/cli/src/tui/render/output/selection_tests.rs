@@ -60,7 +60,7 @@ fn set_assistant_markdown(output: &mut OutputArea, text: &str, width: u16) {
         text: text.to_string(),
         style: SemanticStyle::Normal,
     };
-    let block = render_assistant_message("md", &view, &RenderCtx { width });
+    let block = render_assistant_message("md", &view, &RenderCtx { text_width: width });
     output.replace_document(RenderedDocument {
         blocks: vec![block],
     });

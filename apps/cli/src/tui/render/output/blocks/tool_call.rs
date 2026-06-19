@@ -113,7 +113,7 @@ mod tests {
         let block = render_tool_call(
             "t1",
             &tool(ToolSemanticStatus::Running),
-            &RenderCtx { width: 80 },
+            &RenderCtx { text_width: 80 },
         );
         // header 行的 line base style 应为 TEXT
         assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
@@ -130,7 +130,7 @@ mod tests {
         let mut view = tool(ToolSemanticStatus::Success);
         view.style = SemanticStyle::Success;
         view.icon = "✓".into();
-        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
         // header 行的 line base style 应为 TEXT
         assert_eq!(block.lines[0].style.fg, Some(theme::TEXT));
         assert!(block.lines[0].plain.contains("Search"));
@@ -148,7 +148,7 @@ mod tests {
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
 
-        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
 
         // header 含工具名
         assert!(block.lines[0].plain.contains("Search"));
@@ -162,7 +162,7 @@ mod tests {
         view.title = "Grep".into();
         view.args_preview = Some(r#"{"pattern":"test","path":"src"}"#.into());
 
-        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
 
         assert!(block.lines[0].plain.contains("Search"));
         assert!(
@@ -180,7 +180,7 @@ mod tests {
         view.result_summary = Some("done: 3 matches".into());
         view.args_preview = None;
 
-        let block = render_tool_call("t1", &view, &RenderCtx { width: 80 });
+        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
 
         assert_eq!(block.lines.len(), 1, "无 summary 时只应有 header 行");
         assert!(

@@ -56,7 +56,7 @@ pub fn render_tool_result(
         view.tool_title,
         view.result_text.len(),
         display_text.len(),
-        ctx.width,
+        ctx.text_width,
         view.style,
         policy,
     );
@@ -71,16 +71,26 @@ pub fn render_tool_result(
             let limit = max_lines.unwrap_or(usize::MAX);
             match render_kind {
                 ResultRender::Diff => {
-                    render_edit_diff(view.args_preview.as_deref(), &display_text, ctx.width)
+                    render_edit_diff(view.args_preview.as_deref(), &display_text, ctx.text_width)
                         .unwrap_or_else(|| {
-                            format_result_lines(&view.tool_title, &display_text, ctx.width, limit)
+                            format_result_lines(
+                                &view.tool_title,
+                                &display_text,
+                                ctx.text_width,
+                                limit,
+                            )
                         })
                 }
                 ResultRender::Plain => {
                     if tail_mode {
-                        format_result_lines_tail(&view.tool_title, &display_text, ctx.width, limit)
+                        format_result_lines_tail(
+                            &view.tool_title,
+                            &display_text,
+                            ctx.text_width,
+                            limit,
+                        )
                     } else {
-                        format_result_lines(&view.tool_title, &display_text, ctx.width, limit)
+                        format_result_lines(&view.tool_title, &display_text, ctx.text_width, limit)
                     }
                 }
             }
@@ -210,7 +220,7 @@ mod tests {
     fn test_render_tool_result_renders_result_text_lines() {
         // 正常路径：result_text 应作为结果行渲染。
         let view = result("Grep", "done: 3 matches");
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert_eq!(block.block_id, "t1-result");
         assert!(block
@@ -222,7 +232,7 @@ mod tests {
     #[test]
     fn test_render_tool_result_plain_wraps_long_lines_to_render_width() {
         let view = result("Bash", "abcdef");
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 4 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 4 });
 
         assert_eq!(block.lines[0].plain, "abcd");
         assert_eq!(block.lines[1].plain, "ef");
@@ -238,7 +248,7 @@ mod tests {
         // 格式的文档/源码）不得被误解析为 diff，应按普通预览保留原文。
         // Read 的 result 策略现在是 Hidden，所以改用 Grep 测试
         let view = result("Grep", "intro\n---DIFF---\nold\n---DIFF---\nnew");
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert!(
             block.lines.iter().any(|l| l.plain.contains("---DIFF---")),
@@ -256,7 +266,7 @@ mod tests {
         // Plain 纯文本原样（#91）：result 里的 ``` fence、code、after 全作普通文本保留，
         // 不做 markdown 重渲染（无 CODE 色），整体用暗色 TEXT_DIM（不跟随状态绿/红）。
         let view = result("Bash", "```\ncode\n```\nafter");
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert!(
             block.lines.iter().any(|l| l.plain.contains("```")),
@@ -279,7 +289,7 @@ mod tests {
         // 边界：纯文本预览对无闭合 fence 不 panic，原样逐行保留。
         let view = result("Bash", "```\nline1\nline2");
 
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert!(block.lines.iter().any(|l| l.plain == "line1"));
         assert!(block.lines.iter().any(|l| l.plain == "line2"));
@@ -290,7 +300,7 @@ mod tests {
         // Read 的 result 策略是 Hidden，应渲染空。
         let view = result("Read", "file content");
 
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert!(block.lines.is_empty(), "Hidden 策略应渲染空");
     }
@@ -302,7 +312,7 @@ mod tests {
 
         for tool_title in ["EnterWorktree", "ExitWorktree"] {
             let view = result(tool_title, result_text);
-            let block = render_tool_result("worktree-result", &view, &RenderCtx { width: 80 });
+            let block = render_tool_result("worktree-result", &view, &RenderCtx { text_width: 80 });
 
             assert!(
                 block
@@ -337,7 +347,7 @@ mod tests {
         let result_text = "line\n".repeat(OMITTED_LINE_COUNT_LIMIT + 20);
         let view = result("Grep", &result_text);
 
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert!(block
             .lines
@@ -354,7 +364,7 @@ mod tests {
             "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
         );
 
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         assert!(
             block
@@ -395,7 +405,7 @@ mod tests {
         let result_text = "line1\nline2\nline3\nline4\nline5\nline6\nline7";
         let view = result("Bash", result_text);
 
-        let block = render_tool_result("t1-result", &view, &RenderCtx { width: 80 });
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
         // Bash 默认 5 行 tail 模式
         assert!(block

@@ -190,7 +190,7 @@ pub fn render_ask_user_batch(
     let hint_style = Style::default().fg(theme::TEXT_DIM);
     let normal_style = Style::default().fg(theme::TEXT);
 
-    let question_max_width = (ctx.width as usize * 6 / 10).clamp(40, 80);
+    let question_max_width = (ctx.text_width as usize * 6 / 10).clamp(40, 80);
 
     // Confirmed 终态
     if view.confirmed {
@@ -491,7 +491,7 @@ mod tests {
             0,
             AskUserPhaseView::Answering,
         );
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("(1/2)")));
     }
 
@@ -502,7 +502,7 @@ mod tests {
             0,
             AskUserPhaseView::Answering,
         );
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("选哪个?")));
         assert!(block.lines.iter().any(|l| l.plain.contains("1. A")));
     }
@@ -516,7 +516,7 @@ mod tests {
             1,
             AskUserPhaseView::Answering,
         );
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("✓ Q1.")));
     }
 
@@ -525,7 +525,7 @@ mod tests {
         let mut s1 = make_slot("问题1", &["A"]);
         s1.answer = Some("A".to_string());
         let view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("确认回答")));
         assert!(block.lines.iter().any(|l| l.plain.contains("全部确认提交")));
         assert!(block.lines.iter().any(|l| l.plain.contains("取消")));
@@ -537,7 +537,7 @@ mod tests {
         s1.answer = Some("A".to_string());
         let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
         view.confirm_cursor = 1; // N=1 → 提交
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         let submit_line = block
             .lines
             .iter()
@@ -552,7 +552,7 @@ mod tests {
         s1.answer = Some("A".to_string());
         let mut view = batch_view(vec![s1], 0, AskUserPhaseView::Confirming);
         view.confirmed = true;
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         assert!(block.lines.iter().any(|l| l.plain.contains("已回答")));
         assert!(!block.lines.iter().any(|l| l.plain.contains("[↑↓]")));
     }
@@ -566,7 +566,7 @@ mod tests {
         );
         view.chat_input_active = true;
         view.chat_input_text = "hello".to_string();
-        let block = render_ask_user_batch("ask", &view, &RenderCtx { width: 80 });
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 80 });
         // Type something 行应包含块状光标（bg(ACCENT) 样式的 span）
         let type_line = block
             .lines

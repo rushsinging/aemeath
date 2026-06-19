@@ -57,7 +57,7 @@ mod tests {
             text: "boom".into(),
             style: SemanticStyle::Error,
         };
-        let block = render_diagnostic("e", &view, &RenderCtx { width: 80 });
+        let block = render_diagnostic("e", &view, &RenderCtx { text_width: 80 });
 
         assert_eq!(block.lines[0].plain, "boom");
         assert_eq!(block.lines[0].spans[0].style.fg, Some(theme::ERROR));
@@ -71,7 +71,7 @@ mod tests {
             text: "✻ Sautéed for 3s\n".into(),
             style: SemanticStyle::Muted,
         };
-        let block = render_diagnostic("d", &view, &RenderCtx { width: 80 });
+        let block = render_diagnostic("d", &view, &RenderCtx { text_width: 80 });
 
         assert_eq!(block.lines.len(), 2, "应有提示行 + 尾随空行");
         assert_eq!(block.lines[0].plain, "✻ Sautéed for 3s");
@@ -86,7 +86,7 @@ mod tests {
             text: "plain".into(),
             style: SemanticStyle::Muted,
         };
-        let block = render_diagnostic("d", &view, &RenderCtx { width: 80 });
+        let block = render_diagnostic("d", &view, &RenderCtx { text_width: 80 });
 
         assert_eq!(block.lines.len(), 1);
         assert_eq!(block.lines[0].plain, "plain");

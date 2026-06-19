@@ -205,7 +205,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     let rendered = result_child
         .kind
         .component()
-        .render_self(&result_child.block_id, &RenderCtx { width: 80 });
+        .render_self(&result_child.block_id, &RenderCtx { text_width: 80 });
     let plains: Vec<&str> = rendered.lines.iter().map(|l| l.plain.as_str()).collect();
 
     assert!(
@@ -325,7 +325,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     assert!(tool.result_summary.is_none(), "ToolResult 尚未到达");
     let rendered = OutputBlockKind::ToolCall(tool.clone())
         .component()
-        .render_self("tool-1", &RenderCtx { width: 80 });
+        .render_self("tool-1", &RenderCtx { text_width: 80 });
     assert!(
         rendered
             .lines

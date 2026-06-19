@@ -20,7 +20,7 @@ mod tests {
     fn test_render_block_assistant_after_system_does_not_inherit_dark() {
         // #74 回归：System 样式 block（Muted）后渲染 Assistant block 时，
         // 每个 block 独立从自身 kind/style 派生颜色，Assistant 不继承前一 block 的暗色。
-        let ctx = RenderCtx { width: 80 };
+        let ctx = RenderCtx { text_width: 80 };
         let _system = OutputBlockKind::SystemNotice(TextBlockView {
             key: "s".into(),
             text: "system muted".into(),
@@ -52,7 +52,7 @@ mod tests {
             style: SemanticStyle::Muted,
         })
         .component()
-        .render_self("s", &RenderCtx { width: 80 });
+        .render_self("s", &RenderCtx { text_width: 80 });
 
         assert_eq!(block.block_id, "s");
         assert_eq!(block.lines[0].plain, "ok");
