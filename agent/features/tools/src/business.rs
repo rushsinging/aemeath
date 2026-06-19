@@ -3,7 +3,6 @@ pub mod agent_tool;
 pub mod ask_user;
 pub mod bash;
 pub mod brief;
-pub mod config_tool;
 pub mod file_edit;
 pub mod file_read;
 pub mod file_write;

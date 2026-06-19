@@ -51,7 +51,6 @@ pub use web_fetch::WebFetchResult;
 pub use write::WriteResult;
 // Non-core tool result structs (Phase 0a 任务 0.4).
 pub mod brief;
-pub mod config_tool;
 pub mod list_mcp_resources;
 pub mod lsp;
 pub mod mcp_manager;
@@ -73,7 +72,6 @@ pub mod web_search;
 
 // Re-exports for non-core tool result structs.
 pub use brief::BriefResult;
-pub use config_tool::ConfigResult;
 pub use list_mcp_resources::ListMcpResourcesResult;
 pub use lsp::LspResult;
 pub use mcp_manager::McpManagerResult;
