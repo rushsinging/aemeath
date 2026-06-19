@@ -14,7 +14,6 @@ pub struct AgentTool {
 
 #[async_trait]
 impl Tool for AgentTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Agent"
     }

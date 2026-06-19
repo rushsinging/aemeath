@@ -6,7 +6,6 @@ pub struct SleepTool;
 
 #[async_trait]
 impl Tool for SleepTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Sleep"
     }

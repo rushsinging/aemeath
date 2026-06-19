@@ -16,7 +16,6 @@ pub struct McpTool {
 
 #[async_trait]
 impl Tool for McpTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         &self.qualified_name
     }
@@ -37,7 +36,7 @@ impl Tool for McpTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
             Ok(output) => {

@@ -32,7 +32,6 @@ pub struct McpResource {
 
 #[async_trait]
 impl Tool for ListMcpResourcesTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "ListMcpResources"
     }
@@ -61,7 +60,7 @@ impl Tool for ListMcpResourcesTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let server_filter = input.get("server").and_then(|s| s.as_str());
 
         let clients = self.clients.lock().await;

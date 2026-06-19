@@ -12,7 +12,6 @@ const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
 
 #[async_trait]
 impl Tool for GlobTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Glob"
     }
@@ -39,7 +38,7 @@ impl Tool for GlobTool {
         &PATH_ACCESS
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {

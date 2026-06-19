@@ -12,7 +12,6 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 
 #[async_trait]
 impl Tool for FileWriteTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Write"
     }
@@ -47,7 +46,7 @@ impl Tool for FileWriteTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => return ToolResult::error(serde_json::json!({

@@ -7,7 +7,6 @@ pub struct WebSearchTool;
 
 #[async_trait]
 impl Tool for WebSearchTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "WebSearch"
     }
@@ -39,7 +38,7 @@ impl Tool for WebSearchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("");
         let limit = input["limit"].as_u64().unwrap_or(5).min(10) as usize;
 

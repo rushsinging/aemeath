@@ -10,7 +10,6 @@ pub struct TaskListTool {
 
 #[async_trait]
 impl Tool for TaskListTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskList"
     }
@@ -49,7 +48,7 @@ impl Tool for TaskListTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         // Parse filters
         let status_filter = input
             .get("status")

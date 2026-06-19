@@ -7,7 +7,6 @@ pub struct BriefTool;
 
 #[async_trait]
 impl Tool for BriefTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Brief"
     }

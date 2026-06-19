@@ -19,7 +19,6 @@ pub struct TaskUpdateTool {
 
 #[async_trait]
 impl Tool for TaskUpdateTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskUpdate"
     }
@@ -58,7 +57,7 @@ impl Tool for TaskUpdateTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),

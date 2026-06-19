@@ -10,7 +10,6 @@ pub struct TaskStopTool {
 
 #[async_trait]
 impl Tool for TaskStopTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskStop"
     }
@@ -36,7 +35,7 @@ impl Tool for TaskStopTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {

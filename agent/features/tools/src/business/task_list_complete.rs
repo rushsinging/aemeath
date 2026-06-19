@@ -10,7 +10,6 @@ pub struct TaskListCompleteTool {
 
 #[async_trait]
 impl Tool for TaskListCompleteTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskListComplete"
     }
@@ -31,7 +30,7 @@ impl Tool for TaskListCompleteTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, _input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         match self.store.complete_list().await {
             Some(batch) => ToolResult::success_json(serde_json::json!({
                 "status": "success",

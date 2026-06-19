@@ -29,7 +29,6 @@ pub struct ExitPlanModeInput {
 
 #[async_trait]
 impl Tool for EnterPlanModeTool {
-    type Result = ToolResult;
     fn name(&self) -> &'static str {
         "EnterPlanMode"
     }
@@ -78,7 +77,6 @@ impl Tool for EnterPlanModeTool {
 
 #[async_trait]
 impl Tool for ExitPlanModeTool {
-    type Result = ToolResult;
     fn name(&self) -> &'static str {
         "ExitPlanMode"
     }

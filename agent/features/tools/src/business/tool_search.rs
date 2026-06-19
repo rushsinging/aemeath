@@ -9,7 +9,6 @@ pub struct ToolSearchTool;
 
 #[async_trait]
 impl Tool for ToolSearchTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "ToolSearch"
     }
@@ -35,7 +34,7 @@ impl Tool for ToolSearchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("").to_lowercase();
 
         // 预定义的工具列表及其描述

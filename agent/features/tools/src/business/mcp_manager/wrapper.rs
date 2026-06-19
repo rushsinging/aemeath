@@ -65,7 +65,6 @@ fn validate_mcp_input(input: &Value, schema: &Value) -> Result<(), String> {
 
 #[async_trait]
 impl Tool for McpToolWrapper {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         &self.qualified_name
     }
@@ -88,7 +87,7 @@ impl Tool for McpToolWrapper {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         // Validate input against schema before calling MCP tool
         if let Err(e) = validate_mcp_input(&input, &self.schema) {
             log::warn!(target: LOG_TARGET, "MCP tool {} input validation failed: {}", self.tool_name, e);

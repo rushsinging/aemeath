@@ -6,7 +6,6 @@ pub struct AskUserQuestionTool;
 
 #[async_trait]
 impl Tool for AskUserQuestionTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "AskUserQuestion"
     }

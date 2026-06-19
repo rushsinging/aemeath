@@ -10,7 +10,6 @@ pub struct TaskCreateTool {
 
 #[async_trait]
 impl Tool for TaskCreateTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskCreate"
     }
@@ -67,7 +66,7 @@ impl Tool for TaskCreateTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {

@@ -13,7 +13,6 @@ pub struct MemoryTool;
 
 #[async_trait]
 impl Tool for MemoryTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Memory"
     }

@@ -64,7 +64,7 @@ impl<'a> PolicyEngine<'a> {
     ///
     /// If allowed, the returned `PolicyDecision::Allow` contains the input
     /// with all path fields normalised to absolute paths.
-    pub fn evaluate(&self, input: &Value, tool: Option<&dyn Tool<Result = share::tool::ToolResult>>) -> PolicyDecision {
+    pub fn evaluate(&self, input: &Value, tool: Option<&dyn Tool>) -> PolicyDecision {
         // Step 1: tool-level auto-approval
         let auto_approved = match tool {
             Some(t) => self.allow_all || t.is_read_only() || t.is_input_safe(input),

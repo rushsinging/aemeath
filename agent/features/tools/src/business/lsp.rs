@@ -14,7 +14,6 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 
 #[async_trait]
 impl Tool for LspTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "LSP"
     }

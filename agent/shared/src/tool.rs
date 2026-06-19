@@ -81,38 +81,23 @@ pub struct ToolResult<R = serde_json::Value> {
 }
 
 impl<R> ToolResult<R> {
-    pub fn success(output: impl Into<String>) -> Self
-    where
-        R: Default,
-    {
+    pub fn success(output: impl Into<String>) -> Self {
         Self::text(output, false)
     }
 
-    pub fn error(output: impl Into<String>) -> Self
-    where
-        R: Default,
-    {
+    pub fn error(output: impl Into<String>) -> Self {
         Self::text(output, true)
     }
 
-    pub fn success_json(content: serde_json::Value) -> Self
-    where
-        R: Default,
-    {
+    pub fn success_json(content: serde_json::Value) -> Self {
         Self::json(content, false)
     }
 
-    pub fn error_json(content: serde_json::Value) -> Self
-    where
-        R: Default,
-    {
+    pub fn error_json(content: serde_json::Value) -> Self {
         Self::json(content, true)
     }
 
-    pub fn text(output: impl Into<String>, is_error: bool) -> Self
-    where
-        R: Default,
-    {
+    pub fn text(output: impl Into<String>, is_error: bool) -> Self {
         let output = output.into();
         Self {
             content: serde_json::json!({ "text": output }),
@@ -123,10 +108,7 @@ impl<R> ToolResult<R> {
         }
     }
 
-    pub fn json(content: serde_json::Value, is_error: bool) -> Self
-    where
-        R: Default,
-    {
+    pub fn json(content: serde_json::Value, is_error: bool) -> Self {
         let output = display_text_from_content(&content);
         Self {
             output,
@@ -155,13 +137,10 @@ impl<R> ToolResult<R> {
     }
 }
 
-// Manual `Default` impl covers `R: Default` (the common case). The
-// convenience constructors above also require `R: Default` so that
-// `R::default()` can be used for the `data` field if the caller wants
-// a non-`Option` initial value; the wrapper `Option<R>` makes this
-// trivially `None`, so the bound is satisfied by `Default` for any
-// `R`. To opt out, callers can construct via `ToolResult { ... }` directly.
-impl<R: Default> Default for ToolResult<R> {
+// Manual `Default` impl covers any `R`. The legacy `data: Value` ergonomics
+// are preserved by initialising `data` to `None` (see the constructors
+// above) and letting callers opt-in with `with_data`.
+impl<R> Default for ToolResult<R> {
     fn default() -> Self {
         Self {
             output: String::new(),
@@ -192,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_tool_result_success_wraps_text_payload() {
-        let result = ToolResult::success("ok");
+        let result: ToolResult = ToolResult::success("ok");
 
         assert_eq!(result.output, "ok");
         assert!(!result.is_error);
@@ -201,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_tool_result_json_prefers_display_text() {
-        let result = ToolResult::success_json(serde_json::json!({
+        let result: ToolResult = ToolResult::success_json(serde_json::json!({
             "display": "shown in tui",
             "message": "message for llm",
             "data": { "value": 1 }
@@ -213,9 +192,12 @@ mod tests {
 
     #[test]
     fn test_tool_result_json_falls_back_to_message_text_or_serialized_json() {
-        let message = ToolResult::success_json(serde_json::json!({ "message": "msg" }));
-        let text = ToolResult::success_json(serde_json::json!({ "text": "txt" }));
-        let other = ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
+        let message: ToolResult =
+            ToolResult::success_json(serde_json::json!({ "message": "msg" }));
+        let text: ToolResult =
+            ToolResult::success_json(serde_json::json!({ "text": "txt" }));
+        let other: ToolResult =
+            ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
 
         assert_eq!(message.output, "msg");
         assert_eq!(text.output, "txt");

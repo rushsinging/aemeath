@@ -10,7 +10,6 @@ pub struct TaskGetTool {
 
 #[async_trait]
 impl Tool for TaskGetTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "TaskGet"
     }
@@ -36,7 +35,7 @@ impl Tool for TaskGetTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {

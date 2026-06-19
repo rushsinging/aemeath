@@ -13,7 +13,6 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 
 #[async_trait]
 impl Tool for FileReadTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Read"
     }

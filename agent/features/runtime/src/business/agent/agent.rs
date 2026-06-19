@@ -38,7 +38,7 @@ fn tool_call_cancelled_message(name: &str) -> String {
 }
 
 async fn call_tool_with_timeout(
-    tool: std::sync::Arc<dyn Tool<Result = share::tool::ToolResult>>,
+    tool: std::sync::Arc<dyn Tool>,
     name: &str,
     input: serde_json::Value,
     ctx: &ToolExecutionContext,

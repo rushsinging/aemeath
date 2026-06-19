@@ -6,7 +6,6 @@ pub struct ConfigTool;
 
 #[async_trait]
 impl Tool for ConfigTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Config"
     }
@@ -41,7 +40,7 @@ impl Tool for ConfigTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let action = input["action"].as_str().unwrap_or("list");
         let key = input["key"].as_str();
         let value = input["value"].as_str();

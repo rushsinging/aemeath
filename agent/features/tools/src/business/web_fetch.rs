@@ -96,7 +96,6 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
 
 #[async_trait]
 impl Tool for WebFetchTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "WebFetch"
     }
@@ -130,7 +129,7 @@ impl Tool for WebFetchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let raw_url = match input.get("url").and_then(|v| v.as_str()) {
             Some(u) => u,
             None => {

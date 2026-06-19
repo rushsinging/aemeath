@@ -12,7 +12,6 @@ pub struct SkillTool {
 
 #[async_trait]
 impl Tool for SkillTool {
-    type Result = ToolResult;
     fn name(&self) -> &str {
         "Skill"
     }
@@ -46,7 +45,7 @@ impl Tool for SkillTool {
         false
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let skill_name = match input.get("skill").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {

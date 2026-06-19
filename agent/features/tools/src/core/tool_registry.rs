@@ -1,12 +1,11 @@
 use crate::contract::Tool;
 use parking_lot::RwLock;
 use serde_json::Value;
-use share::tool::ToolResult;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct ToolRegistry {
-    tools: RwLock<HashMap<String, Arc<dyn Tool<Result = ToolResult>>>>,
+    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
 }
 
 impl Default for ToolRegistry {
@@ -22,7 +21,7 @@ impl ToolRegistry {
         }
     }
 
-    pub fn register(&self, tool: Box<dyn Tool<Result = ToolResult>>) {
+    pub fn register(&self, tool: Box<dyn Tool>) {
         self.tools
             .write()
             .insert(tool.name().to_string(), Arc::from(tool));
@@ -44,7 +43,7 @@ impl ToolRegistry {
         self.tools.read().is_empty()
     }
 
-    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool<Result = ToolResult>>> {
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.read().get(name).cloned()
     }
 
@@ -89,7 +88,6 @@ mod tests {
 
     #[async_trait]
     impl Tool for DummyTool {
-    type Result = ToolResult;
         fn name(&self) -> &str {
             &self.name
         }
