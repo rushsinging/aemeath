@@ -57,16 +57,8 @@ impl TypedTool for MemoryTool {
             "list" => handlers::list_memory(input, ctx),
             "add_reminder" => handlers::add_reminder(input, ctx),
             "complete_reminder" => handlers::complete_reminder(input, ctx),
-            "" => TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": "缺少必需参数: action",
-                "data": {}
-            })),
-            other => TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": format!("未知 memory action: {other}"),
-                "data": { "action": other }
-            })),
+            "" => TypedToolResult::error("缺少必需参数: action"),
+            other => TypedToolResult::error(format!("未知 memory action: {other}")),
         }
     }
 }

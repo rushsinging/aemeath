@@ -49,33 +49,21 @@ impl TypedTool for TaskGetTool {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": "Task ID is required",
-                "data": {}
-            }));
+            return TypedToolResult::error("Task ID is required");
         }
 
         // Resolve display number to global id
         let task_id = match self.store.resolve_display_id(input_id).await {
             Some(global_id) => global_id,
             None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Task not found: {}", input_id),
-                    "data": {}
-                }));
+                return TypedToolResult::error(format!("Task not found: {}", input_id));
             }
         };
 
         let task = match self.store.get(&task_id).await {
             Some(t) => t,
             None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Task not found: {}", input_id),
-                    "data": {}
-                }));
+                return TypedToolResult::error(format!("Task not found: {}", input_id));
             }
         };
 
@@ -132,13 +120,10 @@ impl TypedTool for TaskGetTool {
             task_data["blocks"] = serde_json::json!(blocks);
         }
 
-        TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": format!("Task #{}: {}", display_id, task.subject),
-            "data": {
-                "task": task_data
-            }
-        }))
+        TypedToolResult::success(
+            format!("Task #{}: {}", display_id, task.subject),
+            TaskGetResult { task },
+        )
     }
 }
 

@@ -44,23 +44,17 @@ fn get_current_branch(dir: &Path) -> String {
 }
 
 fn workspace_context_payload(
-    headline: &str,
+    _headline: &str,
     branch: &str,
     path_base: &Path,
     working_root: &Path,
-) -> Value {
-    serde_json::json!({
-        "status": "success",
-        "message": headline,
-        "branch": branch,
-        "path_base": path_base.display().to_string(),
-        "working_root": working_root.display().to_string(),
-        "guidance": [
-            "后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。",
-            "如果必须使用绝对路径，必须位于当前 working_root 下。",
-            "不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。"
-        ]
-    })
+) -> EnterWorktreeResult {
+    EnterWorktreeResult {
+        branch: branch.to_string(),
+        path_base: path_base.to_path_buf(),
+        working_root: working_root.to_path_buf(),
+        guidance: "后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。如果必须使用绝对路径，必须位于当前 working_root 下。不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。".to_string(),
+    }
 }
 
 #[async_trait]
@@ -124,12 +118,10 @@ impl TypedTool for EnterWorktreeTool {
                 let working_root = ctx.workspace_read().current_root();
                 let branch = get_current_branch(&working_root);
                 let headline = format!("已进入 worktree：{}", display_target);
-                TypedToolResult::success_value(workspace_context_payload(
-                    &headline,
-                    &branch,
-                    &path_base,
-                    &working_root,
-                ))
+                TypedToolResult::success(
+                    headline.clone(),
+                    workspace_context_payload(&headline, &branch, &path_base, &working_root),
+                )
             }
             Err(e) => TypedToolResult::error(format!("进入 worktree 失败：{}", e)),
         }
@@ -193,16 +185,16 @@ impl TypedTool for ExitWorktreeTool {
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
                     let headline = format!("已切换到：{}", path);
-                    TypedToolResult::success_value(workspace_context_payload(
-                        &headline,
-                        &branch,
-                        &path_base,
-                        &working_root,
-                    ))
+                    TypedToolResult::success(
+                        headline.clone(),
+                        ExitWorktreeResult {
+                            branch: branch.clone(),
+                            path_base: path_base.clone(),
+                            working_root: working_root.clone(),
+                        },
+                    )
                 }
-                Err(e) => TypedToolResult::error_value(
-                    serde_json::json!({"status": "error", "message": format!("切换路径失败：{}", e)}),
-                ),
+                Err(e) => TypedToolResult::error(format!("切换路径失败：{}", e)),
             }
         } else {
             // 恢复上一上下文
@@ -212,16 +204,16 @@ impl TypedTool for ExitWorktreeTool {
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
                     let headline = format!("已退出 worktree，恢复到：{}", prev.path_base.display());
-                    TypedToolResult::success_value(workspace_context_payload(
-                        &headline,
-                        &branch,
-                        &path_base,
-                        &working_root,
-                    ))
+                    TypedToolResult::success(
+                        headline.clone(),
+                        ExitWorktreeResult {
+                            branch: branch.clone(),
+                            path_base: path_base.clone(),
+                            working_root: working_root.clone(),
+                        },
+                    )
                 }
-                Err(e) => TypedToolResult::error_value(
-                    serde_json::json!({"status": "error", "message": format!("退出 worktree 失败：{}", e)}),
-                ),
+                Err(e) => TypedToolResult::error(format!("退出 worktree 失败：{}", e)),
             }
         }
     }
@@ -303,16 +295,14 @@ mod tests {
             Path::new("/repo/.worktrees/feature"),
         );
 
+        assert_eq!(payload.branch, "feature");
         assert_eq!(
-            payload["message"],
-            "已进入 worktree：/repo/.worktrees/feature"
+            payload.path_base,
+            Path::new("/repo/.worktrees/feature/subdir")
         );
-        assert_eq!(payload["branch"], "feature");
-        assert_eq!(payload["path_base"], "/repo/.worktrees/feature/subdir");
-        assert_eq!(payload["working_root"], "/repo/.worktrees/feature");
-        assert!(payload["guidance"][0]
-            .as_str()
-            .unwrap()
+        assert_eq!(payload.working_root, Path::new("/repo/.worktrees/feature"));
+        assert!(payload
+            .guidance
             .contains("后续 Read/Edit/Write/Glob/Grep/Bash"));
     }
 }
