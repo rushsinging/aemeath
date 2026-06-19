@@ -31,7 +31,7 @@ impl TypedTool for BashTool {
         "Bash"
     }
     fn description(&self) -> &str {
-        "Executes a given bash command and returns its output.\n\nThe working directory persists between commands, but shell state does not.\n\nIMPORTANT: Avoid using this tool to run `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands. Instead, use the appropriate dedicated tool:\n\n - File search: Use Glob (NOT find or ls)\n - Content search: Use Grep (NOT grep or rg)\n - Read files: Use Read (NOT cat/head/tail)\n - Edit files: Use Edit (NOT sed/awk)\n - Write files: Use Write (NOT echo >/cat <<EOF)\n\n# Instructions\n - Always quote file paths that contain spaces with double quotes\n - You may specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). Default timeout is 120000ms (2 minutes).\n - When issuing multiple commands, use && to chain them together.\n - For git commands, prefer creating a new commit rather than amending."
+        "Executes a bash command and returns its output. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s)."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
@@ -481,6 +481,7 @@ mod tests {
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         };
 
         let result = BashTool
@@ -518,6 +519,7 @@ mod tests {
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         };
 
         let result = BashTool
@@ -563,6 +565,7 @@ mod tests {
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: Some(tx),
             parent_session_id: None,
+            registry: None,
         };
 
         let result = BashTool
@@ -645,6 +648,7 @@ mod tests {
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         };
 
         let result = BashTool
@@ -787,6 +791,7 @@ mod tests {
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         };
 
         let result = BashTool

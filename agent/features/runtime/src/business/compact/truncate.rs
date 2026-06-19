@@ -18,6 +18,17 @@ pub const TRUNCATION_PREVIEW_TAIL: usize = 500;
 /// 超过时优先截断最大的结果。
 pub const MAX_TOOL_RESULTS_PER_MESSAGE_CHARS: usize = 200_000;
 
+// ── offload（存指针）参数 ──────────────────────────────────
+
+/// 超过此字符数时，工具结果落盘到文件，消息里只放预览 + 文件指针。
+pub const OFFLOAD_THRESHOLD_CHARS: usize = 2_000;
+
+/// 落盘后保留的头部预览字符数。
+pub const OFFLOAD_PREVIEW_HEAD: usize = 1_500;
+
+/// 落盘后保留的尾部字符数。
+pub const OFFLOAD_PREVIEW_TAIL: usize = 300;
+
 /// 对单条工具结果进行截断。如果未超过 `MAX_TOOL_RESULT_CHARS` 则原样返回。
 pub fn truncate_tool_result(output: &str) -> String {
     if output.len() <= MAX_TOOL_RESULT_CHARS {
@@ -32,6 +43,39 @@ pub fn truncate_tool_result(output: &str) -> String {
         output.len(),
         head.len(),
         tail.len(),
+    )
+}
+
+/// 将超长工具结果落盘到 `~/.agents/tool_outputs/{session_id}/{tool_call_id}.txt`，
+/// 消息里只保留预览 + 文件指针。
+///
+/// - `output` ≤ `OFFLOAD_THRESHOLD_CHARS` 时原样返回。
+/// - 写盘失败退化为 `truncate_tool_result`（纯截断兜底）。
+///
+/// agent 需要完整内容时可用 Read 工具读取文件指针指向的路径。
+pub fn offload_tool_result(output: &str, tool_call_id: &str, session_id: &str) -> String {
+    if output.len() <= OFFLOAD_THRESHOLD_CHARS {
+        return output.to_string();
+    }
+
+    let dir = share::config::paths::session_tool_outputs_dir(session_id);
+    let path = dir.join(format!("{tool_call_id}.txt"));
+
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, output)) {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "offload_tool_result: 写盘失败 {path:?}: {e}, 退化为截断"
+        );
+        return truncate_tool_result(output);
+    }
+
+    let head = slice_head(output, OFFLOAD_PREVIEW_HEAD);
+    let tail = slice_tail(output, OFFLOAD_PREVIEW_TAIL);
+
+    format!(
+        "{head}\n\n[Full output ({} chars) saved to {}]\nUse the Read tool to view the complete output.\n\n{tail}",
+        output.len(),
+        path.display()
     )
 }
 

@@ -313,6 +313,8 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: blocking_then_success_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;
@@ -390,6 +392,8 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: blocking_then_success_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;
@@ -471,6 +475,8 @@ async fn test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env() 
             path_base.path().display().to_string(),
         ),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;
@@ -525,6 +531,8 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;
@@ -649,6 +657,8 @@ async fn test_continue_false_json_treated_as_block() {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: continue_false_then_allow_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;
@@ -732,6 +742,8 @@ async fn test_stall_triggers_stop_hook_check() {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: block_n_times_hook_runner(&counter_path, 3),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;
@@ -795,6 +807,8 @@ async fn test_stop_hook_block_limit_stops_loop() {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: always_blocking_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         language: "en".to_string(),
     })
     .await;

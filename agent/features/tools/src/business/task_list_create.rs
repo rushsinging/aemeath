@@ -17,7 +17,7 @@ impl TypedTool for TaskListCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a task list for one coherent complex user request. Use before TaskCreate only when starting complex multi-step work that has at least 3 substantial execution steps, multiple dependent changes, or parallel sub-agent coordination. Do NOT use for simple one-step requests such as answering a question, inspecting a file, checking bug status, running a single command, or making a tiny localized edit; for those, execute directly without task management. After successful creation, you can immediately call TaskCreate to add tasks — they automatically attach to this list. The summary helps future reminders avoid overriding unrelated new user requests."
+        "Create a task list for a complex multi-step request (3+ steps, multiple dependencies, or parallel sub-agent coordination). Tasks created afterwards auto-attach to this list."
     }
 
     fn input_schema(&self) -> Value {
@@ -93,6 +93,7 @@ mod tests {
             agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         }
     }
 
