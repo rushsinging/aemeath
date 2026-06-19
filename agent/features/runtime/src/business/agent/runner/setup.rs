@@ -183,6 +183,7 @@ impl AgentRunner for CliAgentRunner {
             agent_semaphore: ctx.agent_semaphore.clone(), // 全局限流共享
             progress_tx: None,                            // sub-agents don't stream progress (yet)
             parent_session_id: ctx.parent_session_id.clone(),
+            registry: ctx.registry.clone(),
         };
         let agent = Agent {
             registry: &sub_registry,

@@ -21,7 +21,7 @@ impl TypedTool for GrepTool {
         "Grep"
     }
     fn description(&self) -> &str {
-        "A powerful search tool built on ripgrep.\n\nUsage:\n- ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command.\n- Supports full regex syntax (e.g., \"log.*Error\", \"function\\\\s+\\\\w+\")\n- Filter files with glob parameter (e.g., \"*.js\", \"**/*.tsx\")\n- Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping\n- Use Agent tool for open-ended searches requiring multiple rounds"
+        "Search file contents using ripgrep regex syntax. Supports glob file filters."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({

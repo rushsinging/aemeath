@@ -18,7 +18,7 @@ impl TypedTool for FileEditTool {
         "Edit"
     }
     fn description(&self) -> &str {
-        "Performs exact string replacements in files.\n\nUsage:\n- You must use your Read tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file.\n- When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces).\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.\n- The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`.\n- Use `replace_all` for replacing and renaming strings across the file."
+        "Performs exact string replacements in files. Read must be called first. Fails if `old_string` is not unique — use `replace_all` for multiple occurrences."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
@@ -357,6 +357,7 @@ mod tests {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         }
     }
 
