@@ -18,4 +18,5 @@ log = "0.4"
 unicode-width = "0.2"
 logging = { path = "../../packages/global/logging" }
 utils = { path = "../../packages/global/utils" }
+tool-schema-macros = { path = "../../packages/tool-schema-macros" }
 

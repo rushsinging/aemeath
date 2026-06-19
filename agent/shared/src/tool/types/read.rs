@@ -1,13 +1,14 @@
 //! Typed result for the `read` tool (issue #273 core tool).
 
 use serde::{Deserialize, Serialize};
+use tool_schema_macros::ToolSchema;
 use std::path::PathBuf;
 
 /// Typed result returned by the `read` tool.
 ///
 /// Fields cover the `(N lines)` / `(N bytes)` / offset / limit metadata that
 /// the TUI header needs, plus the truncated flag for streaming reads.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ToolSchema)]
 pub struct ReadResult {
     pub line_count: u64,
     pub file_path: PathBuf,
