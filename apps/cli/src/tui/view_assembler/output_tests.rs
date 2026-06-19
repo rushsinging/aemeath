@@ -534,7 +534,7 @@ fn add_completed_tool(
     conversation: &mut ConversationModel,
     id: &str,
     name: &str,
-    summary: &str,
+    _summary: &str,
     output: &str,
     is_error: bool,
 ) {

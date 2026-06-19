@@ -402,6 +402,6 @@ mod tests {
         let items: Vec<u8> = vec![1, 2, 3];
         assert!(items.get(99).is_none());
         assert!(items.get(3).is_none());
-        assert_eq!(items.get(0), Some(&1));
+        assert_eq!(items.first(), Some(&1));
     }
 }

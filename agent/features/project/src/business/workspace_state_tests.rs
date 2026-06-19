@@ -104,8 +104,8 @@ fn enter_rejects_nested_when_in_worktree() {
         Err(WorkspaceError::NestedWorktree {
             current_working_root,
             current_path_base,
-        }) if current_working_root == PathBuf::from("/repo")
-           && current_path_base == PathBuf::from("/repo")
+        }) if current_working_root == Path::new("/repo")
+           && current_path_base == Path::new("/repo")
     ));
 }
 

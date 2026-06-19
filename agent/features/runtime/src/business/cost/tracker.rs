@@ -76,6 +76,7 @@ impl CostTracker {
     }
 
     /// 记录一次 API 使用
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &mut self,
         session_id: &str,
