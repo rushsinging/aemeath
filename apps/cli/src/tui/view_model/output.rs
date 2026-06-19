@@ -1,7 +1,6 @@
+use super::conversation::tool_result_payload::ToolResultPayload;
 use super::style::SemanticStyle;
 use std::hash::Hash;
-
-use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputViewModel {

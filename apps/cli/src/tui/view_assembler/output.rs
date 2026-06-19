@@ -2,8 +2,8 @@ use crate::tui::model::conversation::block::HookNoticeKind;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
-use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
 use crate::tui::model::output_timeline::OutputTimelineItem;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,

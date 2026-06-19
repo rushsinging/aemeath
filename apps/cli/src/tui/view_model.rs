@@ -1,3 +1,4 @@
+pub mod conversation;
 pub mod dialog;
 pub mod input;
 pub mod live_status;
