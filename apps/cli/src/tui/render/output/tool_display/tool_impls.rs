@@ -77,6 +77,35 @@ fn truncate_path(path: &str, max_width: usize) -> String {
     truncate_ellipsis_tail(path, max_width)
 }
 
+/// 构造 `ToolDisplay` 通用 header line 模板：`<name> <path> [<suffix>]`。
+///
+/// - `<name>`：工具 display name（如 "Read"），使用 `theme::ACCENT_BRIGHT` 高亮
+/// - `<path>`：truncate_path 截断到 60 字符，使用 `theme::TEXT` 普通色
+/// - `<suffix>`：可选尾部后缀（如 "1:340 (340 lines)"、"1234 bytes"），使用
+///   `theme::TEXT_MUTED` 弱化色；空串则不输出后缀 span
+///
+/// 此 helper 是 Phase A Task 4 抽取：原 Read/Write/未来 9 个 Display 都重复
+/// `Line::from(vec![Span::styled(name, ACCENT), Span::raw(" "), Span::styled(path, ...),
+/// Span::styled(suffix, MUTED)])` 模板，DRY 化后由 helper 统一处理。
+fn build_header_line(name: &str, path: &str, suffix: &str) -> Line<'static> {
+    let display_path = truncate_path(path, 60);
+    let mut spans = vec![
+        Span::styled(
+            name.to_string(),
+            Style::default().fg(theme::ACCENT_BRIGHT),
+        ),
+        Span::raw(" "),
+        Span::styled(display_path, Style::default().fg(theme::TEXT)),
+    ];
+    if !suffix.is_empty() {
+        spans.push(Span::styled(
+            suffix.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
+    }
+    Line::from(spans)
+}
+
 struct ReadDisplay;
 impl ToolDisplay for ReadDisplay {
     fn name(&self) -> &str {
@@ -555,3 +584,36 @@ inventory::submit!(ToolDisplayEntry {
     name: "AskUserQuestion",
     display: || Box::new(AskUserQuestionDisplay)
 });
+
+#[cfg(test)]
+mod tests {
+    use super::build_header_line;
+
+    /// 基础：name + path，suffix 为空时不应输出尾部 span
+    #[test]
+    fn build_header_line_no_suffix() {
+        let line = build_header_line("Read", "/foo/bar/baz.txt", "");
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "Read /foo/bar/baz.txt");
+    }
+
+    /// 有 suffix 时尾部追加弱化色 span
+    #[test]
+    fn build_header_line_with_suffix() {
+        let line = build_header_line("Read", "/foo/bar/baz.txt", " (5 lines)");
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "Read /foo/bar/baz.txt (5 lines)");
+    }
+
+    /// 长路径应触发 truncate_path 截断（带 ...）
+    #[test]
+    fn build_header_line_truncates_long_path() {
+        // 90+ 字符的路径以确保超过 truncate_path(60) 阈值
+        let long = "/very/very/very/very/very/very/very/very/very/very/very/very/very/long/path/file.txt";
+        let line = build_header_line("Read", long, "");
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.starts_with("Read "), "expected Read prefix: {text}");
+        assert!(text.contains("..."), "expected ellipsis in long path: {text}");
+        assert!(text.len() < long.len() + 10, "long path should be truncated: {text}");
+    }
+}
