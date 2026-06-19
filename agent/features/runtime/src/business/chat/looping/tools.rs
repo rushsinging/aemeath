@@ -1,5 +1,5 @@
 // summary 已由 TUI 层从 input 参数组装，runtime 不再生成
-use crate::business::agent::{Agent, ToolCall};
+use crate::business::agent::{Agent, ToolCall, ToolExecution};
 use crate::business::chat::looping::agent_calls::execute_agent_calls;
 use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
@@ -14,19 +14,10 @@ use crate::business::chat::looping::engine::{DeniedCall, PolicyEngine};
 use crate::LOG_TARGET;
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
-use share::tool::ImageData;
+use share::tool::ToolOutcome;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
-
-pub(crate) type UiToolResult = (
-    ToolCallId,
-    String,
-    String,
-    serde_json::Value,
-    bool,
-    Vec<ImageData>,
-);
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -41,7 +32,7 @@ pub(crate) async fn execute_tool_round<S>(
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
     language: &str,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -113,7 +104,7 @@ async fn deny_tool_calls<S>(
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -145,18 +136,22 @@ where
                 status: RuntimeToolCallStatus::Ready,
             })
             .await;
-        let result = (
-            call_id,
-            call.id.clone(),
-            call.reason.clone(),
-            serde_json::json!({
+        // 保持原 wire 形态 {"status":"error","message":...}（与 deny 路径历史一致）。
+        let outcome = ToolOutcome {
+            text: call.reason.clone(),
+            data: serde_json::json!({
                 "status": "error",
                 "message": call.reason,
             }),
-            true,
-            Vec::new(),
-        );
-        denied_results.push(result);
+            is_error: true,
+            images: Vec::new(),
+        };
+        denied_results.push(ToolExecution::from_parts(
+            call_id,
+            call.id.clone(),
+            call.name.clone(),
+            outcome,
+        ));
     }
     denied_results
 }
@@ -238,36 +233,46 @@ pub(crate) async fn emit_json_hook_context<S>(
 pub(crate) async fn send_tool_result<S>(
     sink: &S,
     context: &RuntimeTurnContext,
-    call: &ToolCall,
-    result: &UiToolResult,
+    execution: &ToolExecution,
 ) where
     S: ChatEventSink,
 {
     let _ = sink
         .send_event(RuntimeStreamEvent::ToolResult {
             context: context.clone(),
-            id: result.0.clone(),
-            provider_id: result.1.clone(),
-            tool_name: call.name.clone(),
-            output: result.2.clone(),
-            content: result.3.clone(),
-            is_error: result.4,
-            images: result.5.clone(),
+            id: execution.call_id.clone(),
+            provider_id: execution.provider_id.clone(),
+            tool_name: execution.tool_name.clone(),
+            output: execution.outcome.text.clone(),
+            content: execution.outcome.data.clone(),
+            is_error: execution.outcome.is_error,
+            images: execution.outcome.images.clone(),
         })
         .await;
 }
 
 pub(crate) fn tool_results_for_api(
-    mut results: Vec<UiToolResult>,
+    results: Vec<ToolExecution>,
     session_id: &str,
 ) -> share::message::Message {
+    let error_count = results.iter().filter(|ex| ex.outcome.is_error).count();
+    log::debug!(
+        target: LOG_TARGET,
+        "tool_results_for_api: {} typed ToolExecution(s) → wire ({} error)",
+        results.len(),
+        error_count
+    );
     let mut provider_results: Vec<_> = results
-        .drain(..)
-        .map(
-            |(_runtime_id, provider_id, output, content, is_error, images)| {
-                (provider_id, output, content, is_error, images)
-            },
-        )
+        .into_iter()
+        .map(|ex| {
+            (
+                ex.provider_id,
+                ex.outcome.text,
+                ex.outcome.data,
+                ex.outcome.is_error,
+                ex.outcome.images,
+            )
+        })
         .collect();
     storage::api::persist_oversized_results(session_id, &mut provider_results);
     share::message::Message::tool_results_rich(provider_results)
@@ -290,19 +295,19 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 #[cfg(test)]
 mod tests {
     use super::tool_results_for_api;
+    use crate::business::agent::ToolExecution;
     use crate::business::compact::MAX_TOOL_RESULT_CHARS;
     use sdk::ids::ToolCallId;
     use share::message::ContentBlock;
+    use share::tool::ToolOutcome;
 
     #[test]
     fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
-        let results = vec![(
+        let results = vec![ToolExecution::from_parts(
             ToolCallId::new_v7(),
             "provider-id".to_string(),
-            "ok".to_string(),
-            serde_json::json!({ "text": "ok" }),
-            false,
-            Vec::new(),
+            "Bash".to_string(),
+            ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
         )];
         let message = tool_results_for_api(results, "test-provider-id");
 
@@ -316,13 +321,15 @@ mod tests {
     fn test_tool_results_for_api_persists_oversized_tui_result() {
         let session_id = format!("test-tui-{}", std::process::id());
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
-        let results = vec![(
+        let results = vec![ToolExecution::from_parts(
             ToolCallId::new_v7(),
             "provider-oversized".to_string(),
-            oversized,
-            serde_json::json!({ "text": "oversized" }),
-            false,
-            Vec::new(),
+            "Bash".to_string(),
+            ToolOutcome::new(
+                oversized,
+                serde_json::json!({ "text": "oversized" }),
+                Vec::new(),
+            ),
         )];
         let message = tool_results_for_api(results, &session_id);
 

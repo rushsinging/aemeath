@@ -21,11 +21,13 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_result_summaries(
         &self,
         turn_number: usize,
-        results: &[crate::business::agent::ToolResultTuple],
+        results: &[crate::business::agent::ToolExecution],
         call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
-        for (id, _provider_id, output, _content, is_error, _) in results.iter() {
-            let label = if *is_error { "ERR" } else { "OK" };
+        for ex in results.iter() {
+            let id = &ex.call_id;
+            let output = &ex.outcome.text;
+            let label = if ex.outcome.is_error { "ERR" } else { "OK" };
             if let Some((name, input_short)) = call_info.get(id) {
                 (self.progress)(Some(turn_number), &format!("  → {}({})", name, input_short));
             }
@@ -48,11 +50,16 @@ impl<'a> SubAgentRun<'a> {
     pub(super) fn log_tool_results(
         &self,
         turn_number: usize,
-        results: &[crate::business::agent::ToolResultTuple],
+        results: &[crate::business::agent::ToolExecution],
         call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
-        for (id, _provider_id, output, _content, is_error, _) in results.iter() {
-            let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
+        for ex in results.iter() {
+            let data = build_json_logger_tool_result_data(
+                &ex.call_id,
+                &ex.outcome.text,
+                ex.outcome.is_error,
+                call_info,
+            );
             log::debug!(
                 target: LOG_TARGET,
                 "tool_result: {}",
@@ -114,16 +121,20 @@ impl<'a> SubAgentRun<'a> {
 
 pub(super) fn append_tool_results(
     messages: &mut Vec<Message>,
-    mut results: Vec<crate::business::agent::ToolResultTuple>,
+    results: Vec<crate::business::agent::ToolExecution>,
     session_id: &str,
 ) {
     let mut provider_results: Vec<_> = results
-        .drain(..)
-        .map(
-            |(_runtime_id, provider_id, output, content, is_error, images)| {
-                (provider_id, output, content, is_error, images)
-            },
-        )
+        .into_iter()
+        .map(|ex| {
+            (
+                ex.provider_id,
+                ex.outcome.text,
+                ex.outcome.data,
+                ex.outcome.is_error,
+                ex.outcome.images,
+            )
+        })
         .collect();
     storage::api::persist_oversized_results(session_id, &mut provider_results);
     messages.push(Message::tool_results_rich(provider_results));
@@ -138,13 +149,11 @@ mod tests {
     #[test]
     fn test_append_tool_results_uses_provider_id_not_runtime_id() {
         let mut messages = Vec::new();
-        let results = vec![(
+        let results = vec![crate::business::agent::ToolExecution::from_parts(
             sdk::ids::ToolCallId::from_legacy_or_new("runtime-id"),
             "provider-id".to_string(),
-            "ok".to_string(),
-            serde_json::json!({ "text": "ok" }),
-            false,
-            Vec::new(),
+            "Bash".to_string(),
+            share::tool::ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
         )];
 
         append_tool_results(&mut messages, results, "test-sub-agent-provider-id");
@@ -160,13 +169,15 @@ mod tests {
         let session_id = format!("test-sub-agent-{}", std::process::id());
         let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
         let mut messages = Vec::new();
-        let results = vec![(
+        let results = vec![crate::business::agent::ToolExecution::from_parts(
             sdk::ids::ToolCallId::from_legacy_or_new("tool-oversized"),
             "provider-oversized".to_string(),
-            oversized,
-            serde_json::json!({ "text": "oversized" }),
-            false,
-            Vec::new(),
+            "Bash".to_string(),
+            share::tool::ToolOutcome::new(
+                oversized,
+                serde_json::json!({ "text": "oversized" }),
+                Vec::new(),
+            ),
         )];
 
         append_tool_results(&mut messages, results, &session_id);

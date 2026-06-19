@@ -1,12 +1,13 @@
-use crate::business::agent::{Agent, ToolCall};
+use crate::business::agent::{Agent, ToolCall, ToolExecution};
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
+use share::tool::ToolOutcome;
 use std::sync::Arc;
 
 use super::tools::{
-    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_result, UiToolResult,
+    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_result,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -18,7 +19,7 @@ pub(super) async fn execute_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
     language: &str,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -68,12 +69,12 @@ async fn execute_multiple_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     other_calls: &[&ToolCall],
     language: &str,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
     let total_len = other_calls.len();
-    let mut results: Vec<Option<UiToolResult>> = vec![None; total_len];
+    let mut results: Vec<Option<ToolExecution>> = vec![None; total_len];
     let (concurrent_positions, sequential_positions) = partition_calls(agent, other_calls);
 
     if !concurrent_positions.is_empty() {
@@ -158,19 +159,12 @@ fn partition_calls(agent: &Agent<'_>, calls: &[&ToolCall]) -> (Vec<usize>, Vec<u
     (concurrent_positions, sequential_positions)
 }
 
-fn cancelled_result(call: &ToolCall, language: &str) -> UiToolResult {
+fn cancelled_result(call: &ToolCall, language: &str) -> ToolExecution {
     let msg = match language {
         "zh" => "用户已取消",
         _ => "Cancelled by user",
     };
-    (
-        call.id.clone(),
-        call.provider_id.clone(),
-        msg.to_string(),
-        serde_json::json!({ "text": msg }),
-        true,
-        Vec::new(),
-    )
+    ToolExecution::new(call, ToolOutcome::error(msg))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -182,7 +176,7 @@ async fn execute_one_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
     language: &str,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -223,15 +217,8 @@ where
             _ => "Blocked by PreToolUse hook",
         };
         let error_detail = blocked_result.error.as_deref().unwrap_or(default_blocked);
-        let result = (
-            owned_call.id.clone(),
-            owned_call.provider_id.clone(),
-            error_detail.to_string(),
-            serde_json::json!({ "text": error_detail }),
-            true,
-            Vec::new(),
-        );
-        send_tool_result(sink, context, &owned_call, &result).await;
+        let result = ToolExecution::new(&owned_call, ToolOutcome::error(error_detail));
+        send_tool_result(sink, context, &result).await;
         return vec![result];
     }
     // Only Bash supports stdout streaming via progress_tx. For other tools,
@@ -298,16 +285,32 @@ where
         })
         .await;
     let mut out = Vec::new();
-    for (id, provider_id, output, content, is_error, images) in exec_results {
-        log_tool_result(&id, &owned_call.name, is_error, &output);
-        run_post_tool_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        run_task_hooks(sink, hook_ui, hook_runner, &owned_call, &output, is_error).await;
-        let result = (id, provider_id, output, content, is_error, images);
-        if task_store_mutation_succeeded(&owned_call.name, result.4) {
+    for ex in exec_results {
+        let is_error = ex.outcome.is_error;
+        log_tool_result(&ex.call_id, &owned_call.name, is_error, &ex.outcome.text);
+        run_post_tool_hooks(
+            sink,
+            hook_ui,
+            hook_runner,
+            &owned_call,
+            &ex.outcome.text,
+            is_error,
+        )
+        .await;
+        run_task_hooks(
+            sink,
+            hook_ui,
+            hook_runner,
+            &owned_call,
+            &ex.outcome.text,
+            is_error,
+        )
+        .await;
+        if task_store_mutation_succeeded(&owned_call.name, is_error) {
             let _ = sink.send_event(RuntimeStreamEvent::TasksChanged).await;
         }
-        send_tool_result(sink, context, &owned_call, &result).await;
-        out.push(result);
+        send_tool_result(sink, context, &ex).await;
+        out.push(ex);
     }
     out
 }

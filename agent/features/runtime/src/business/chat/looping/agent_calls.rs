@@ -1,9 +1,10 @@
-use crate::business::agent::ToolCall;
+use crate::business::agent::{ToolCall, ToolExecution};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_result, UiToolResult};
+use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_result};
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
+use share::tool::ToolOutcome;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::{ToolExecutionContext, ToolRegistry};
@@ -19,7 +20,7 @@ pub(crate) async fn execute_agent_calls<S>(
     hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -59,7 +60,7 @@ where
                 }
             })
             .collect();
-        let batch_results: Vec<Vec<UiToolResult>> = futures::future::join_all(agent_futures).await;
+        let batch_results: Vec<Vec<ToolExecution>> = futures::future::join_all(agent_futures).await;
         agent_results.extend(batch_results.into_iter().flatten());
     }
     agent_results
@@ -73,7 +74,7 @@ async fn execute_one_agent<S>(
     hook_runner: hook::api::HookRunner,
     registry: Arc<ToolRegistry>,
     ag_ctx: &mut ToolExecutionContext,
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -95,15 +96,8 @@ where
             .error
             .as_deref()
             .unwrap_or("Blocked by PreToolUse hook");
-        let result = (
-            call.id.clone(),
-            call.provider_id.clone(),
-            error_detail.to_string(),
-            serde_json::json!({ "text": error_detail }),
-            true,
-            Vec::new(),
-        );
-        send_tool_result(&sink, context, &call, &result).await;
+        let result = ToolExecution::new(&call, ToolOutcome::error(error_detail));
+        send_tool_result(&sink, context, &result).await;
         return vec![result];
     }
 
@@ -139,33 +133,19 @@ where
             workspace,
         })
         .await;
-    let results = vec![(
-        call.id.clone(),
-        call.provider_id.clone(),
-        result.output,
-        result.content,
-        result.is_error,
-        result.images,
-    )];
+    let execution = ToolExecution::new(&call, ToolOutcome::from_tool_result(result));
     ag_ctx.progress_tx = None;
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
-    for (id, provider_id, output, content, is_error, images) in &results {
-        run_post_tool_hooks(&sink, &hook_ui, &hook_runner, &call, output, *is_error).await;
-        send_tool_result(
-            &sink,
-            context,
-            &call,
-            &(
-                id.clone(),
-                provider_id.clone(),
-                output.clone(),
-                content.clone(),
-                *is_error,
-                images.clone(),
-            ),
-        )
-        .await;
-    }
-    results
+    run_post_tool_hooks(
+        &sink,
+        &hook_ui,
+        &hook_runner,
+        &call,
+        &execution.outcome.text,
+        execution.outcome.is_error,
+    )
+    .await;
+    send_tool_result(&sink, context, &execution).await;
+    vec![execution]
 }
