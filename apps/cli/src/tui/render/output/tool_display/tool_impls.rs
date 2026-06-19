@@ -9,40 +9,15 @@ use super::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use serde::de::DeserializeOwned;
 
-/// 从 `payload.content` (typed JSON Value) 中按 dotted path 提取 u64 字段。
+/// 从 `payload.content.data` 反序列化到 typed struct。
 ///
-/// path 形如 `"data.line_count"`，先走 `content` 的子对象查找再逐层下钻；
-/// 任一节点缺失或类型不匹配返回 `None`。TUI 渲染层 inline helper，避免引入
-/// 对 share/sdk 类型的硬依赖（typed 字段在 share::tool::types::read 中定义，
-/// 但本模块不 import share，确保渲染层可独立编译与测试）。
-fn data_field_u64(payload: Option<&ToolResultPayload>, path: &str) -> Option<u64> {
+/// 返回 `None` 当 payload 缺失、data 字段缺失、或反序列化失败。
+fn typed_data<T: DeserializeOwned>(payload: Option<&ToolResultPayload>) -> Option<T> {
     let payload = payload?;
-    let mut current: &serde_json::Value = &payload.content;
-    for segment in path.split('.') {
-        current = current.get(segment)?;
-    }
-    current.as_u64()
-}
-
-/// 同 `data_field_u64`，但提取 i64 字段（Bash exit_code 等可为负值，标识 signal）。
-fn data_field_i64(payload: Option<&ToolResultPayload>, path: &str) -> Option<i64> {
-    let payload = payload?;
-    let mut current: &serde_json::Value = &payload.content;
-    for segment in path.split('.') {
-        current = current.get(segment)?;
-    }
-    current.as_i64()
-}
-
-/// 同 `data_field_u64`，但提取 String 字段（branch / agent_id / working_root 等）。
-fn data_field_string(payload: Option<&ToolResultPayload>, path: &str) -> Option<String> {
-    let payload = payload?;
-    let mut current: &serde_json::Value = &payload.content;
-    for segment in path.split('.') {
-        current = current.get(segment)?;
-    }
-    current.as_str().map(|s| s.to_string())
+    let data = payload.content.get("data")?;
+    serde_json::from_value(data.clone()).ok()
 }
 
 // ── Bash ─────────────────────────────────────────────────────────
@@ -83,19 +58,24 @@ impl ToolDisplay for BashDisplay {
             },
         }
     }
-    /// 当 result 到达后，从 `payload.content.data.exit_code` (i64) 读取
-    /// exit code 显示后缀：0/None 空；< 0 `(signal N)`；> 0 `(exit N)`。
+    /// 当 result 到达后，从 `BashResult.exit_code` / `signal` 读取
+    /// exit code 显示后缀：0/None 空；signal 有值 `(signal N)`；> 0 `(exit N)`。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-        let exit = data_field_i64(result_payload, "data.exit_code");
-        let suffix = match exit {
-            Some(0) | None => String::new(),
-            Some(code) if code < 0 => format!(" (signal {})", -code),
-            Some(code) => format!(" (exit {code})"),
+        let result: Option<sdk::tool_result::BashResult> = typed_data(result_payload);
+        let suffix = match result {
+            Some(r) if r.exit_code != 0 => {
+                if let Some(sig) = r.signal {
+                    format!(" (signal {sig})")
+                } else {
+                    format!(" (exit {})", r.exit_code)
+                }
+            }
+            _ => String::new(),
         };
         if cmd.is_empty() && suffix.is_empty() {
             Line::from(Span::styled(
@@ -200,8 +180,7 @@ impl ToolDisplay for ReadDisplay {
         ])
     }
     /// 当 result 到达后，使用实际读取的行数更新 header。
-    /// typed 路径优先：直接从 `payload.content.data.line_count` 读取；
-    /// typed 字段缺失时回退到原 regex 解析 `output` 文本（兼容旧 ToolResult）。
+    /// 从 `ReadResult.line_count` 反序列化读取；缺失时回退到 regex 解析。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
@@ -213,9 +192,9 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
 
-        // typed 优先：data.line_count (issue #273 引入的 typed R 字段)
-        let actual_lines = data_field_u64(result_payload, "data.line_count")
-            .map(|n| n as usize)
+        // typed 优先：ReadResult.line_count
+        let actual_lines = typed_data::<sdk::tool_result::ReadResult>(result_payload)
+            .map(|r| r.line_count as usize)
             // regex 回退：旧 ToolResult 仅 message 含 "Read N lines from ..."
             .or_else(|| result_payload.and_then(|p| parse_line_count_from_message(&p.output)));
 
@@ -284,8 +263,7 @@ impl ToolDisplay for WriteDisplay {
         format!("{} {display_path} {bytes} bytes", self.display_name())
     }
     /// 当 result 到达后，使用实际写入的字节数更新 header。
-    /// typed 路径优先：直接从 `payload.content.data.bytes_written` 读取；
-    /// typed 字段缺失时回退到原 regex 解析 `output` 文本（兼容旧 ToolResult）。
+    /// 从 `WriteResult.bytes_written` 反序列化读取；缺失时回退到 regex 解析。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
@@ -294,9 +272,9 @@ impl ToolDisplay for WriteDisplay {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
 
-        // typed 优先：data.bytes_written (issue #273 引入的 typed R 字段)
-        let actual_bytes = data_field_u64(result_payload, "data.bytes_written")
-            .map(|n| n as usize)
+        // typed 优先：WriteResult.bytes_written
+        let actual_bytes = typed_data::<sdk::tool_result::WriteResult>(result_payload)
+            .map(|r| r.bytes_written as usize)
             // regex 回退：旧 ToolResult 仅 message 含 "Wrote N bytes to ..."
             .or_else(|| result_payload.and_then(|p| parse_bytes_from_message(&p.output)));
 
@@ -376,8 +354,8 @@ impl ToolDisplay for EditDisplay {
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let path = file_path(input);
-        let suffix = data_field_u64(result_payload, "data.occurrences")
-            .map(|n| format!(" (Replaced {n})"))
+        let suffix = typed_data::<sdk::tool_result::EditResult>(result_payload)
+            .map(|r| format!(" (Replaced {})", r.replacements_made))
             .unwrap_or_default();
         build_header_line(self.display_name(), path, &suffix)
     }
@@ -417,17 +395,14 @@ impl ToolDisplay for GlobDisplay {
             format!("{} {pattern}", self.display_name())
         }
     }
-    /// result 到达后，使用结构化 payload 中的匹配文件数更新 header。
-    /// typed 路径优先：`data.match_count`（issue #273 引入），fallback 到
-    /// `data.count`（旧字段，1 release 兼容期）。
+    /// result 到达后，从 `GlobResult.count` 反序列化读取匹配文件数。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let pattern = str_arg(input, "pattern", "");
-        let n = data_field_u64(result_payload, "data.match_count")
-            .or_else(|| data_field_u64(result_payload, "data.count"));
+        let n = typed_data::<sdk::tool_result::GlobResult>(result_payload).map(|r| r.count);
         let suffix = n.map(|c| format!(" ({c} files)")).unwrap_or_default();
         if pattern.is_empty() && suffix.is_empty() {
             Line::from(Span::styled(
@@ -487,7 +462,7 @@ impl ToolDisplay for GrepDisplay {
         } else {
             format!("/{pattern}/, path={path}")
         };
-        let n = data_field_u64(result_payload, "data.match_count");
+        let n = typed_data::<sdk::tool_result::GrepResult>(result_payload).map(|r| r.total_matches);
         let suffix = n.map(|c| format!(" ({c} matches)")).unwrap_or_default();
         build_header_line(self.display_name(), &arg, &suffix)
     }
@@ -561,8 +536,9 @@ impl ToolDisplay for AgentDisplay {
             .get("description")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let target =
-            data_field_string(result_payload, "data.agent_id").unwrap_or_else(|| "?".to_string());
+        let target = typed_data::<sdk::tool_result::AgentResult>(result_payload)
+            .map(|r| r.agent_id)
+            .unwrap_or_else(|| "?".to_string());
         let arg = format!("{description} -> [{target}]");
         build_header_line(self.display_name(), &arg, "")
     }
@@ -595,11 +571,14 @@ impl ToolDisplay for EnterWorktreeDisplay {
         _input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
-        let branch = data_field_string(result_payload, "data.branch")
+        let result: Option<sdk::tool_result::EnterWorktreeResult> = typed_data(result_payload);
+        let branch = result
+            .as_ref()
+            .map(|r| r.branch.clone())
             .unwrap_or_else(|| "(default)".to_string());
         let arg = format!("branch={branch}");
-        let path_suffix = data_field_string(result_payload, "data.working_root")
-            .map(|p| format!(" ({p})"))
+        let path_suffix = result
+            .map(|r| format!(" ({})", r.working_root.display()))
             .unwrap_or_default();
         build_header_line(self.display_name(), &arg, &path_suffix)
     }
@@ -635,8 +614,8 @@ impl ToolDisplay for ExitWorktreeDisplay {
         _input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
-        let path_suffix = data_field_string(result_payload, "data.working_root")
-            .map(|p| format!(" (back to {p})"))
+        let path_suffix = typed_data::<sdk::tool_result::ExitWorktreeResult>(result_payload)
+            .map(|r| format!(" (back to {})", r.working_root.display()))
             .unwrap_or_default();
         build_header_line(self.display_name(), "", &path_suffix)
     }
@@ -682,8 +661,11 @@ impl ToolDisplay for WebFetchDisplay {
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        let bytes = data_field_u64(result_payload, "data.byte_count");
-        let suffix = bytes.map(|b| format!(" ({b} bytes)")).unwrap_or_default();
+        let result: Option<sdk::tool_result::WebFetchResult> = typed_data(result_payload);
+        let suffix = result
+            .filter(|r| r.truncated)
+            .map(|_| " (truncated)".to_string())
+            .unwrap_or_default();
         if url.is_empty() && suffix.is_empty() {
             Line::from(Span::styled(
                 self.display_name().to_string(),
@@ -739,7 +721,7 @@ impl ToolDisplay for AskUserQuestionDisplay {
             result: ResultPolicy::Hidden, // answer is already echoed via App::append_user_echo
         }
     }
-    /// result 到达后，从 `payload.content.data.option_count` (u64) 读取选项数，
+    /// result 到达后，从 `AskUserQuestionResult.options` 读取选项数，
     /// suffix 形如 ` (N options)`。
     fn format_header_line_with_result(
         &self,
@@ -747,7 +729,8 @@ impl ToolDisplay for AskUserQuestionDisplay {
         result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
-        let n = data_field_u64(result_payload, "data.option_count");
+        let n = typed_data::<sdk::tool_result::AskUserQuestionResult>(result_payload)
+            .map(|r| r.options.len() as u64);
         let suffix = n.map(|c| format!(" ({c} options)")).unwrap_or_default();
         build_header_line(self.display_name(), question, &suffix)
     }

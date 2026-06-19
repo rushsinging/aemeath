@@ -11,6 +11,7 @@ path = "src/main.rs"
 composition = { path = "../../agent/composition" }
 sdk = { path = "../../packages/sdk" }
 tokio = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = { version = "0.28", features = ["events", "event-stream"] }
