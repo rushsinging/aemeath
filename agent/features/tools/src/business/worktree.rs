@@ -105,11 +105,7 @@ impl TypedTool for EnterWorktreeTool {
     ) -> TypedToolResult<EnterWorktreeResult> {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => {
-                return TypedToolResult::error_value(
-                    serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e)}),
-                )
-            }
+            Err(e) => return TypedToolResult::error(format!("Invalid input: {}", e)),
         };
 
         let display_target = args.path.clone().unwrap_or_else(|| {
@@ -135,9 +131,7 @@ impl TypedTool for EnterWorktreeTool {
                     &working_root,
                 ))
             }
-            Err(e) => TypedToolResult::error_value(
-                serde_json::json!({"status": "error", "message": format!("进入 worktree 失败：{}", e)}),
-            ),
+            Err(e) => TypedToolResult::error(format!("进入 worktree 失败：{}", e)),
         }
     }
 
@@ -188,11 +182,7 @@ impl TypedTool for ExitWorktreeTool {
     ) -> TypedToolResult<ExitWorktreeResult> {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => {
-                return TypedToolResult::error_value(
-                    serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e)}),
-                )
-            }
+            Err(e) => return TypedToolResult::error(format!("Invalid input: {}", e)),
         };
 
         if let Some(path) = args.path {
