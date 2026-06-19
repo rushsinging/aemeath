@@ -219,11 +219,10 @@ impl TypedTool for FileEditTool {
                     replacements_made: occurrences as u64,
                     dry_run: false,
                 };
-                TypedToolResult::success_value(serde_json::json!({
-                    "status": "success",
-                    "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
-                    "data": serde_json::to_value(&data).unwrap()
-                }))
+                TypedToolResult::success(
+                    format!("Replaced {occurrences} occurrence(s) in {file_path}"),
+                    data,
+                )
             }
             Err(e) => TypedToolResult::error(
                 serde_json::json!({

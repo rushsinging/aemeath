@@ -54,34 +54,20 @@ impl TypedTool for TaskListCreateTool {
     ) -> TypedToolResult<TaskListCreateResult> {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": "missing required parameter: subject",
-                    "data": {}
-                }))
-            }
+            None => return TypedToolResult::error("missing required parameter: subject"),
         };
         let summary = match input.get("summary").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": "missing required parameter: summary",
-                    "data": {}
-                }))
-            }
+            None => return TypedToolResult::error("missing required parameter: summary"),
         };
 
         let batch = self.store.create_list(subject.clone(), summary).await;
-        TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": format!(
-                "Task list #{} created. Subject: {}",
-                batch.id, subject
-            ),
-            "data": serde_json::to_value(TaskListCreateResult { batch_id: batch.id.to_string() }).unwrap()
-        }))
+        TypedToolResult::success(
+            format!("Task list #{} created. Subject: {}", batch.id, subject),
+            TaskListCreateResult {
+                batch_id: batch.id.to_string(),
+            },
+        )
     }
 }
 

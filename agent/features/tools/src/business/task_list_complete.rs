@@ -42,16 +42,13 @@ impl TypedTool for TaskListCompleteTool {
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskListCompleteResult> {
         match self.store.complete_list().await {
-            Some(batch) => TypedToolResult::success_value(serde_json::json!({
-                "status": "success",
-                "message": format!("Task list #{} completed", batch.id),
-                "data": serde_json::to_value(TaskListCompleteResult { batch_id: batch.id.to_string() }).unwrap()
-            })),
-            None => TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": "no active task list",
-                "data": {}
-            })),
+            Some(batch) => TypedToolResult::success(
+                format!("Task list #{} completed", batch.id),
+                TaskListCompleteResult {
+                    batch_id: batch.id.to_string(),
+                },
+            ),
+            None => TypedToolResult::error("no active task list"),
         }
     }
 }

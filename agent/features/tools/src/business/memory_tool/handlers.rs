@@ -71,7 +71,7 @@ pub(super) fn add_memory(
                 action: "merged".to_string(),
             },
         ),
-        Ok(AddResult::NeedsEviction { candidates }) => {
+        Ok(AddResult::NeedsEviction { candidates: _ }) => {
             TypedToolResult::error("记忆数量已达上限，请先归档候选记忆")
         }
         Err(error) => TypedToolResult::error(error.to_string()),

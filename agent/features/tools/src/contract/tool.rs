@@ -88,36 +88,6 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
         }
     }
 
-    /// 从 JSON Value 构造成功结果（兼容旧代码）。
-    pub fn success_value(json: Value) -> Self {
-        let output = json
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        Self {
-            output,
-            data: None,
-            is_error: false,
-            images: vec![],
-        }
-    }
-
-    /// 从 JSON Value 构造错误结果（兼容旧代码）。
-    pub fn error_value(json: Value) -> Self {
-        let output = json
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("error")
-            .to_string();
-        Self {
-            output,
-            data: None,
-            is_error: true,
-            images: vec![],
-        }
-    }
-
     /// 添加图片。
     pub fn with_image(mut self, base64: String, media_type: String) -> Self {
         self.images.push(ImageData { base64, media_type });

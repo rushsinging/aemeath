@@ -92,11 +92,7 @@ impl TypedTool for TaskListTool {
         }
 
         if tasks.is_empty() {
-            return TypedToolResult::success_value(serde_json::json!({
-                "status": "success",
-                "message": "No tasks found",
-                "data": { "tasks": [] }
-            }));
+            return TypedToolResult::success("No tasks found", TaskListResult { tasks: vec![] });
         }
 
         let stats = self.store.stats().await;
@@ -182,13 +178,6 @@ impl TypedTool for TaskListTool {
             stats.completed
         );
 
-        TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": msg,
-            "data": {
-                "batches": batches_json,
-                "tasks": tasks_json
-            }
-        }))
+        TypedToolResult::success(msg, TaskListResult { tasks })
     }
 }

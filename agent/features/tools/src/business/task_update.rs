@@ -71,25 +71,13 @@ impl TypedTool for TaskUpdateTool {
         let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": "missing required parameter: taskId",
-                    "data": {}
-                }))
-            }
+            None => return TypedToolResult::error("missing required parameter: taskId"),
         };
 
         // Resolve display number (batch-local id) to global task id
         let task_id = match self.store.resolve_display_id(&input_id).await {
             Some(global_id) => global_id,
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": format!("task not found: {input_id}"),
-                    "data": { "task_id": input_id }
-                }))
-            }
+            None => return TypedToolResult::error(format!("task not found: {input_id}")),
         };
 
         // Pre-resolve dependency display numbers to global ids (must be async)
@@ -192,17 +180,15 @@ impl TypedTool for TaskUpdateTool {
                 let status = format!("{:?}", task.status);
 
                 let message = format!("Task #{} updated", display_id);
-                TypedToolResult::success_value(serde_json::json!({
-                    "status": "success",
-                    "message": message,
-                    "data": serde_json::to_value(TaskUpdateResult { task_id: display_id, status }).unwrap()
-                }))
+                TypedToolResult::success(
+                    message,
+                    TaskUpdateResult {
+                        task_id: display_id,
+                        status,
+                    },
+                )
             }
-            None => TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": format!("task not found: {input_id}"),
-                "data": { "task_id": input_id }
-            })),
+            None => TypedToolResult::error(format!("task not found: {input_id}")),
         }
     }
 }

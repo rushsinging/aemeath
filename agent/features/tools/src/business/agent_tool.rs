@@ -75,24 +75,12 @@ impl TypedTool for AgentTool {
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<AgentResult> {
         let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": "missing required parameter: prompt",
-                    "data": {}
-                }))
-            }
+            None => return TypedToolResult::error("missing required parameter: prompt"),
         };
 
         let _description = match input.get("description").and_then(|v| v.as_str()) {
             Some(d) => d,
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": "missing required parameter: description",
-                    "data": {}
-                }))
-            }
+            None => return TypedToolResult::error("missing required parameter: description"),
         };
 
         // --- Task scope analysis ---
@@ -120,13 +108,7 @@ impl TypedTool for AgentTool {
             .map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
         let runner = match &ctx.agent_runner {
             Some(r) => r.clone(),
-            None => {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": "agent runner not available",
-                    "data": {}
-                }))
-            }
+            None => return TypedToolResult::error("agent runner not available"),
         };
 
         let cwd_str = cwd.to_string_lossy();
@@ -151,11 +133,7 @@ impl TypedTool for AgentTool {
 
         if let Some(ref tid) = task_id {
             if self.store.get(tid).await.is_none() {
-                return TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": format!("task not found: {tid}"),
-                    "data": { "task_id": tid }
-                }));
+                return TypedToolResult::error(format!("task not found: {tid}"));
             }
             self.store
                 .update(tid, |t| {
@@ -233,14 +211,13 @@ Instructions:- Complete the task described in the user message
                 .await;
         }
 
-        TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": "子代理执行完成",
-            "data": {
-                "agent_id": task_id,
-                "output": final_output
-            }
-        }))
+        TypedToolResult::success(
+            "子代理执行完成",
+            AgentResult {
+                agent_id: task_id.unwrap_or_default(),
+                output: final_output,
+            },
+        )
     }
 }
 
