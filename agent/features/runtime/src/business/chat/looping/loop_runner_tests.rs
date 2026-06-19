@@ -152,6 +152,8 @@ impl LlmProvider for TwoTurnProvider {
             usage: Usage {
                 input_tokens: 1,
                 output_tokens: 1,
+                cached_tokens: None,
+                reasoning_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -212,6 +214,8 @@ impl LlmProvider for SequenceProvider {
             usage: Usage {
                 input_tokens: 1,
                 output_tokens: 1,
+                cached_tokens: None,
+                reasoning_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })

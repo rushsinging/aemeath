@@ -258,6 +258,8 @@ mod tests {
                 usage: Usage {
                     input_tokens: 11,
                     output_tokens: 22,
+                    cached_tokens: None,
+                    reasoning_tokens: None,
                 },
                 calls,
             },

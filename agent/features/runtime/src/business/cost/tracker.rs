@@ -26,6 +26,8 @@ pub struct UsageRecord {
     pub cache_write_tokens: Option<u32>,
     /// 缓存读取 token 数
     pub cache_read_tokens: Option<u32>,
+    /// 推理/thinking 消耗的 token 数
+    pub reasoning_tokens: Option<u32>,
     /// 计算的费用（USD）
     pub cost: f64,
 }
@@ -82,6 +84,7 @@ impl CostTracker {
         output_tokens: u32,
         cache_write_tokens: Option<u32>,
         cache_read_tokens: Option<u32>,
+        reasoning_tokens: Option<u32>,
     ) -> f64 {
         let pricing = get_pricing(model);
         let cost = if let (Some(cw), Some(cr)) = (cache_write_tokens, cache_read_tokens) {
@@ -103,6 +106,7 @@ impl CostTracker {
             output_tokens,
             cache_write_tokens,
             cache_read_tokens,
+            reasoning_tokens,
             cost,
         });
 
