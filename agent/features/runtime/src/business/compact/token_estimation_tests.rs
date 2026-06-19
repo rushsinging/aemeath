@@ -47,8 +47,8 @@ fn test_needs_compaction_actual_no_cache_no_reasoning() {
 
 #[test]
 fn test_needs_compaction_actual_with_cached_tokens() {
-    // 有 cached_tokens，应该扣除
-    // input=100000, cached=80000, actual_input=20000
+    // 有 cached_tokens，但不扣除（cached tokens 仍占用 context window）
+    // input=100000, cached=80000, total=110000 (100000 + 10000)
     assert!(!needs_compaction_actual(
         100000,
         10000,
@@ -57,7 +57,7 @@ fn test_needs_compaction_actual_with_cached_tokens() {
         1_048_576
     ));
 
-    // input=100000, cached=0, actual_input=100000
+    // input=100000, cached=0, total=110000 (100000 + 10000)
     assert!(!needs_compaction_actual(
         100000,
         10000,
@@ -103,8 +103,8 @@ fn test_needs_compaction_actual_with_reasoning_tokens() {
 #[test]
 fn test_needs_compaction_actual_with_both() {
     // 同时有 cached_tokens 和 reasoning_tokens
-    // input=200000, cached=150000, actual_input=50000
-    // output=10000, reasoning=100000, total=160000
+    // input=200000, cached=150000 (不扣除), output=10000, reasoning=100000
+    // total = 200000 + 10000 + 100000 = 310000
     assert!(!needs_compaction_actual(
         200000,
         10000,
@@ -113,23 +113,23 @@ fn test_needs_compaction_actual_with_both() {
         1_048_576
     ));
 
-    // input=200000, cached=150000, actual_input=50000
-    // output=10000, reasoning=970000, total=1030000
-    // threshold = 1,027,384, 1030000 > threshold -> true
+    // input=200000, cached=150000 (不扣除), output=10000, reasoning=830000
+    // total = 200000 + 10000 + 830000 = 1040000
+    // threshold = 1,027,384, 1040000 > threshold -> true
     assert!(needs_compaction_actual(
         200000,
         10000,
         Some(150000),
-        Some(970000),
+        Some(830000),
         1_048_576
     ));
 }
 
 #[test]
 fn test_needs_compaction_actual_cached_greater_than_input() {
-    // cached_tokens 大于 input_tokens，应该返回 0（不会 underflow）
-    // input=10000, cached=50000, actual_input=0
-    // output=10000, total=10000
+    // cached_tokens 大于 input_tokens（不扣除）
+    // input=10000, cached=50000 (不扣除), output=10000
+    // total = 10000 + 10000 = 20000
     assert!(!needs_compaction_actual(
         10000,
         10000,
@@ -159,15 +159,15 @@ fn test_compaction_urgency_no_cache_no_reasoning() {
 
 #[test]
 fn test_compaction_urgency_with_cached_tokens() {
-    // 有 cached_tokens，应该扣除
-    // input=100000, cached=80000, actual_input=20000, 20000/1,040,384 = 1.9% -> level 0
+    // 有 cached_tokens，但不扣除（cached tokens 仍占用 context window）
+    // input=100000, cached=80000 (不扣除), 100000/1,040,384 = 9.6% -> level 0
     assert_eq!(compaction_urgency(100000, Some(80000), None, 1_048_576), 0);
 
-    // input=900000, cached=200000, actual_input=700000, 700000/1,040,384 = 67.3% -> level 0
-    assert_eq!(compaction_urgency(900000, Some(200000), None, 1_048_576), 0);
+    // input=900000, cached=200000 (不扣除), 900000/1,040,384 = 86.5% -> level 2
+    assert_eq!(compaction_urgency(900000, Some(200000), None, 1_048_576), 2);
 
-    // input=900000, cached=100000, actual_input=800000, 800000/1,040,384 = 76.9% -> level 1
-    assert_eq!(compaction_urgency(900000, Some(100000), None, 1_048_576), 1);
+    // input=900000, cached=100000 (不扣除), 900000/1,040,384 = 86.5% -> level 2
+    assert_eq!(compaction_urgency(900000, Some(100000), None, 1_048_576), 2);
 }
 
 #[test]
@@ -186,33 +186,33 @@ fn test_compaction_urgency_with_reasoning_tokens() {
 #[test]
 fn test_compaction_urgency_with_both() {
     // 同时有 cached_tokens 和 reasoning_tokens
-    // input=200000, cached=100000, actual_input=100000
-    // reasoning=50000, total=150000, 150000/1,040,384 = 14.4% -> level 0
+    // input=200000, cached=100000 (不扣除), reasoning=50000
+    // total = 200000 + 50000 = 250000, 250000/1,040,384 = 24.0% -> level 0
     assert_eq!(
         compaction_urgency(200000, Some(100000), Some(50000), 1_048_576),
         0
     );
 
-    // input=900000, cached=200000, actual_input=700000
-    // reasoning=140000, total=840000, 840000/1,040,384 = 80.7% -> level 2
+    // input=900000, cached=200000 (不扣除), reasoning=140000
+    // total = 900000 + 140000 = 1040000, 1040000/1,040,384 = 99.9% -> level 3
     assert_eq!(
         compaction_urgency(900000, Some(200000), Some(140000), 1_048_576),
-        2
+        3
     );
 
-    // input=900000, cached=200000, actual_input=700000
-    // reasoning=40000, total=740000, 740000/1,040,384 = 71.1% -> level 1
+    // input=900000, cached=200000 (不扣除), reasoning=40000
+    // total = 900000 + 40000 = 940000, 940000/1,040,384 = 90.4% -> level 3
     assert_eq!(
         compaction_urgency(900000, Some(200000), Some(40000), 1_048_576),
-        1
+        3
     );
 }
 
 #[test]
 fn test_compaction_urgency_cached_greater_than_input() {
-    // cached_tokens 大于 input_tokens，actual_input=0
-    // input=10000, cached=50000, actual_input=0
-    // reasoning=100000, total=100000, 10% -> level 0
+    // cached_tokens 大于 input_tokens（不扣除）
+    // input=10000, cached=50000 (不扣除), reasoning=100000
+    // total = 10000 + 100000 = 110000, 110000/1,040,384 = 10.6% -> level 0
     assert_eq!(
         compaction_urgency(10000, Some(50000), Some(100000), 1_048_576),
         0
