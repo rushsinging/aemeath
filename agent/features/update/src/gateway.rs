@@ -138,13 +138,15 @@ impl UpdateService for UpdateGateway {
 
         log::info!(
             target: LOG_TARGET,
-            "更新完成: {} → {version}",
-            check.current_version
+            "更新完成: {} → {version}（安装路径: {}）",
+            check.current_version,
+            current_exe.display()
         );
 
         Ok(UpdateResult::Updated {
             from: check.current_version,
             to: check.latest_version,
+            installed_path: current_exe.to_string_lossy().into_owned(),
         })
     }
 }
