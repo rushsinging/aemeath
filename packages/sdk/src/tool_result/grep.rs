@@ -1,11 +1,9 @@
-use serde::{Deserialize, Serialize};
-
-/// Typed result struct for `grep` tool.
-///
-/// 字段由 Phase 0 任务 0.3/0.4 填充。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct GrepResult {
-    // Placeholder; will be filled in by Phase 0 任务 0.3 (core tools)
-    // or 任务 0.4 (non-core tools).
-    pub _placeholder: (),
-}
+//! Thin re-export of the canonical typed result struct.
+//!
+//! The authoritative definition lives in `share::tool::types::grep`
+//! so that runtime, tools and TUI can all share the same shape
+//! without inverting the DDD layering.
+//!
+//! See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
+//! Phase 0a (方案 D) for the rationale.
+pub use share::tool::types::grep::GrepResult;

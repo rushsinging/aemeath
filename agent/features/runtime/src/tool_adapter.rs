@@ -15,11 +15,11 @@ use sdk::tool_result::{
     BashResult,
     SleepResult,
     AgentResult,
-    AskUserResult,
+    AskUserQuestionResult,
     EnterWorktreeResult,
     ExitWorktreeResult,
     BriefResult,
-    ConfigToolResult,
+    ConfigResult,
     LspResult,
     PlanModeResult,
     MemoryResult,
@@ -39,9 +39,15 @@ use sdk::tool_result::{
 };
 
 /// Tool result adapter: convert `serde_json::Value` back to the typed R struct.
-pub trait ToolResultAdapter: DeserializeOwned + Default + Sized {
-    fn from_raw(data: &serde_json::Value) -> Self {
-        serde_json::from_value(data.clone()).unwrap_or_default()
+///
+/// The trait deliberately does **not** require `Default` so that R structs
+/// with non-`Default` inner types (e.g. `TaskListResult` whose element type
+/// is `Task`, and `TaskGetResult` whose element is `Task`) can still
+/// participate. Callers that want a "best-effort" decode should `.unwrap_or`
+/// the error or fall back to a typed empty value themselves.
+pub trait ToolResultAdapter: DeserializeOwned + Sized {
+    fn from_raw(data: &serde_json::Value) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(data.clone())
     }
 }
 
@@ -55,11 +61,11 @@ impl ToolResultAdapter for WebSearchResult {}
 impl ToolResultAdapter for BashResult {}
 impl ToolResultAdapter for SleepResult {}
 impl ToolResultAdapter for AgentResult {}
-impl ToolResultAdapter for AskUserResult {}
+impl ToolResultAdapter for AskUserQuestionResult {}
 impl ToolResultAdapter for EnterWorktreeResult {}
 impl ToolResultAdapter for ExitWorktreeResult {}
 impl ToolResultAdapter for BriefResult {}
-impl ToolResultAdapter for ConfigToolResult {}
+impl ToolResultAdapter for ConfigResult {}
 impl ToolResultAdapter for LspResult {}
 impl ToolResultAdapter for PlanModeResult {}
 impl ToolResultAdapter for MemoryResult {}

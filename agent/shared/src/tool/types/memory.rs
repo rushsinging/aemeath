@@ -8,7 +8,7 @@ use crate::memory::MemoryEntry;
 /// `entries` re-uses the canonical `share::memory::MemoryEntry` type so the
 /// memory tool's typed result is interoperable with the rest of the memory
 /// subsystem without crossing DDD boundaries.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryResult {
     pub entries: Vec<MemoryEntry>,
 }
