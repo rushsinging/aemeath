@@ -42,10 +42,7 @@ impl std::fmt::Display for HistoryDisplayParseError {
 
 impl HistoryDisplayMessage {
     pub(super) fn parse(msg: &sdk::ChatMessage) -> Result<Self, HistoryDisplayParseError> {
-        let blocks = msg
-            .content
-            .as_array()
-            .ok_or(HistoryDisplayParseError::ContentNotArray)?;
+        let blocks = msg.content.as_slice();
         match msg.role.as_str() {
             "user" => parse_history_user(blocks),
             "assistant" => parse_history_assistant(blocks),
@@ -55,7 +52,7 @@ impl HistoryDisplayMessage {
 }
 
 fn parse_history_user(
-    blocks: &[serde_json::Value],
+    blocks: &[sdk::ContentBlock],
 ) -> Result<HistoryDisplayMessage, HistoryDisplayParseError> {
     let parsed_blocks = parse_history_user_blocks(blocks)?;
     let mut text = String::new();
@@ -77,55 +74,32 @@ fn parse_history_user(
 }
 
 fn parse_history_assistant(
-    blocks: &[serde_json::Value],
+    blocks: &[sdk::ContentBlock],
 ) -> Result<HistoryDisplayMessage, HistoryDisplayParseError> {
     let mut parsed = Vec::new();
     for block in blocks {
-        let object = block
-            .as_object()
-            .ok_or(HistoryDisplayParseError::BlockNotObject)?;
-        let kind = object
-            .get("type")
-            .and_then(|value| value.as_str())
-            .ok_or(HistoryDisplayParseError::MissingBlockType)?;
-        match kind {
-            "text" => {
-                let text = object
-                    .get("text")
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingText)?;
-                parsed.push(HistoryAssistantBlock::Text(text.to_string()));
+        match block {
+            sdk::ContentBlock::Text { text } => {
+                parsed.push(HistoryAssistantBlock::Text(text.clone()));
             }
-            "thinking" => {
-                let text = object
-                    .get("thinking")
-                    .or_else(|| object.get("text"))
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingText)?;
-                parsed.push(HistoryAssistantBlock::Thinking(text.to_string()));
+            sdk::ContentBlock::Thinking { thinking } => {
+                parsed.push(HistoryAssistantBlock::Thinking(thinking.clone()));
             }
-            "tool_use" => {
-                let id = object
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingToolUseId)?;
-                let name = object
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingToolUseName)?;
-                let input = object
-                    .get("input")
-                    .cloned()
-                    .ok_or(HistoryDisplayParseError::MissingToolUseInput)?;
+            sdk::ContentBlock::ToolUse { id, name, input } => {
                 parsed.push(HistoryAssistantBlock::ToolUse {
-                    id: id.to_string(),
-                    name: name.to_string(),
-                    input,
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
                 });
             }
-            other => {
+            sdk::ContentBlock::ToolResult { .. } => {
                 return Err(HistoryDisplayParseError::UnsupportedAssistantBlock(
-                    other.to_string(),
+                    "tool_result".to_string(),
+                ))
+            }
+            sdk::ContentBlock::Image { .. } => {
+                return Err(HistoryDisplayParseError::UnsupportedAssistantBlock(
+                    "image".to_string(),
                 ))
             }
         }
@@ -153,48 +127,31 @@ enum HistoryUserBlock<'a> {
 }
 
 fn parse_history_user_blocks(
-    blocks: &[serde_json::Value],
+    blocks: &[sdk::ContentBlock],
 ) -> Result<Vec<HistoryUserBlock<'_>>, HistoryDisplayParseError> {
     blocks
         .iter()
-        .map(|block| {
-            let object = block
-                .as_object()
-                .ok_or(HistoryDisplayParseError::BlockNotObject)?;
-            let kind = object
-                .get("type")
-                .and_then(|value| value.as_str())
-                .ok_or(HistoryDisplayParseError::MissingBlockType)?;
-            match kind {
-                "text" => {
-                    let text = object
-                        .get("text")
-                        .and_then(|value| value.as_str())
-                        .ok_or(HistoryDisplayParseError::MissingText)?;
-                    Ok(HistoryUserBlock::Text(text))
-                }
-                "tool_result" => {
-                    let tool_use_id = object
-                        .get("tool_use_id")
-                        .and_then(|value| value.as_str())
-                        .ok_or(HistoryDisplayParseError::MissingToolResultId)?;
-                    let content = object
-                        .get("content")
-                        .ok_or(HistoryDisplayParseError::MissingToolResultContent)?;
-                    let is_error = object
-                        .get("is_error")
-                        .and_then(|value| value.as_bool())
-                        .unwrap_or(false);
-                    Ok(HistoryUserBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        is_error,
-                    })
-                }
-                other => Err(HistoryDisplayParseError::UnsupportedUserBlock(
-                    other.to_string(),
-                )),
-            }
+        .map(|block| match block {
+            sdk::ContentBlock::Text { text } => Ok(HistoryUserBlock::Text(text.as_str())),
+            sdk::ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+                ..
+            } => Ok(HistoryUserBlock::ToolResult {
+                tool_use_id: tool_use_id.as_str(),
+                content,
+                is_error: *is_error,
+            }),
+            sdk::ContentBlock::Thinking { .. } => Err(
+                HistoryDisplayParseError::UnsupportedUserBlock("thinking".to_string()),
+            ),
+            sdk::ContentBlock::ToolUse { .. } => Err(
+                HistoryDisplayParseError::UnsupportedUserBlock("tool_use".to_string()),
+            ),
+            sdk::ContentBlock::Image { .. } => Err(
+                HistoryDisplayParseError::UnsupportedUserBlock("image".to_string()),
+            ),
         })
         .collect()
 }
@@ -205,10 +162,7 @@ pub(super) fn collect_following_tool_results(
     let Some(user_msg) = subsequent_msg else {
         return std::collections::HashMap::new();
     };
-    let Some(blocks) = user_msg.content.as_array() else {
-        return std::collections::HashMap::new();
-    };
-    let Ok(parsed_blocks) = parse_history_user_blocks(blocks) else {
+    let Ok(parsed_blocks) = parse_history_user_blocks(user_msg.content.as_slice()) else {
         return std::collections::HashMap::new();
     };
     parsed_blocks

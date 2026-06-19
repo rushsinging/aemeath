@@ -1,12 +1,13 @@
 //! Session 快照与摘要。
 
+use crate::content::ContentBlock;
 use serde::{Deserialize, Serialize};
 
-/// SDK 级 message 投影。
+/// SDK 级 message 投影。`content` 为 typed 块列表（serde 成与历史完全相同的 JSON）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: serde_json::Value,
+    pub content: Vec<ContentBlock>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ChatMessageMetadata>,
 }
@@ -29,7 +30,7 @@ impl ChatMessage {
     pub fn user_text(text: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
-            content: serde_json::json!([{ "type": "text", "text": text.into() }]),
+            content: vec![ContentBlock::text(text)],
             metadata: None,
         }
     }
@@ -37,7 +38,7 @@ impl ChatMessage {
     pub fn system_generated_user_text(text: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
-            content: serde_json::json!([{ "type": "text", "text": text.into() }]),
+            content: vec![ContentBlock::text(text)],
             metadata: Some(ChatMessageMetadata {
                 source: ChatMessageSource::SystemGenerated,
             }),
@@ -47,41 +48,46 @@ impl ChatMessage {
     pub fn assistant_text(text: impl Into<String>) -> Self {
         Self {
             role: "assistant".to_string(),
-            content: serde_json::json!([{ "type": "text", "text": text.into() }]),
+            content: vec![ContentBlock::text(text)],
             metadata: None,
         }
     }
 
     pub fn user_with_images(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
-        let mut blocks = vec![serde_json::json!({ "type": "text", "text": text.into() })];
-        blocks.extend(images.into_iter().map(|image| {
-            serde_json::json!({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": image.media_type,
-                    "data": image.base64,
-                }
-            })
+        let mut blocks = vec![ContentBlock::text(text)];
+        blocks.extend(images.into_iter().map(|image| ContentBlock::Image {
+            source: crate::content::ImageSource::Base64 {
+                media_type: image.media_type,
+                data: image.base64,
+            },
         }));
         Self {
             role: "user".to_string(),
-            content: serde_json::Value::Array(blocks),
+            content: blocks,
             metadata: None,
         }
     }
 
+    /// 是否为**用户输入**消息：role=user + source=User + 含 Text 块。
+    /// 显式分类，取代历史 `text_content().is_empty()` 启发式（修 #386 那类）。
+    pub fn is_user_input(&self) -> bool {
+        self.role == "user"
+            && self.source() == ChatMessageSource::User
+            && self.content.iter().any(|b| b.is_text())
+    }
+
+    /// 是否含工具结果块。
+    pub fn has_tool_result(&self) -> bool {
+        self.content.iter().any(|b| b.is_tool_result())
+    }
+
+    /// 消息文本：只取 Text 块（typed），**不**误抓 tool_result 等块的 text 字段。
     pub fn text_content(&self) -> String {
         self.content
-            .as_array()
-            .map(|blocks| {
-                blocks
-                    .iter()
-                    .filter_map(|block| block.get("text").and_then(|text| text.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("")
-            })
-            .unwrap_or_default()
+            .iter()
+            .filter_map(|block| block.as_text())
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     pub fn source(&self) -> ChatMessageSource {

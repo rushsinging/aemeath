@@ -11,6 +11,7 @@ mod chat_result;
 mod chat_view;
 pub mod client;
 pub mod commands;
+pub mod content;
 pub mod error;
 pub mod models;
 pub mod project;
@@ -36,6 +37,7 @@ pub use commands::{
     CommandAction, CommandContext, CommandResult, ConfirmAction, ContextEstimate,
     ModelSwitchParams, ModelSwitchResult,
 };
+pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
 pub use ids::{ChatId, ChatTurnId, IdParseError, ToolCallId};
 pub use models::ModelSummary;

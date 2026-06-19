@@ -81,16 +81,8 @@ mod tests {
     fn test_chat_request_keeps_message_order() {
         let request = ChatRequest {
             messages: vec![
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: serde_json::json!([{"type":"text","text":"one"}]),
-                    metadata: None,
-                },
-                ChatMessage {
-                    role: "assistant".to_string(),
-                    content: serde_json::json!([{"type":"text","text":"two"}]),
-                    metadata: None,
-                },
+                ChatMessage::user_text("one"),
+                ChatMessage::assistant_text("two"),
             ],
             queue_drain: None,
             input_events: None,
