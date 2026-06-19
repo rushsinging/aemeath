@@ -86,7 +86,7 @@ pub fn persist_tool_result(
     // Write-once semantics: skip if already persisted (idempotent on resume)
     if !filepath.exists() {
         if let Err(e) = std::fs::write(&filepath, output) {
-            log::warn!(target: LOG_TARGET, "failed to persist tool result: {e}");
+            log::error!(target: LOG_TARGET, "failed to persist tool result: {e}");
             return None;
         }
     }

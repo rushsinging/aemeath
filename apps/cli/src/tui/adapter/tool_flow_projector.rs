@@ -78,7 +78,7 @@ impl ToolFlowProjector {
                 arguments,
                 status,
             } => {
-                crate::tui::log_debug!(
+                crate::tui::log_trace!(
                     "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} status={:?} args_delta_len={} ",
                     context.chat_id,
                     context.turn_id,

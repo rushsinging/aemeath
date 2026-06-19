@@ -114,7 +114,7 @@ impl AgentRunner for CliAgentRunner {
             let turn_str = turn
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "-".to_string());
-            log::info!(
+            log::debug!(
                 target: LOG_TARGET,
                 "[role:{} model:{} turn:{}] {}",
                 role_name,

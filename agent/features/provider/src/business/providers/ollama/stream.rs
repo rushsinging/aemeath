@@ -91,7 +91,7 @@ pub(crate) async fn parse_ollama_stream(
                     if !result.delta.is_empty() {
                         handler.on_thinking(result.delta);
                     }
-                    log::debug!(target: LOG_TARGET,
+                    log::trace!(target: LOG_TARGET,
                         "[ollama stream] reasoning dedup_action={:?} \
                          raw_chars={} emitted_chars={} acc_chars={}",
                         result.action,
