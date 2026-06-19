@@ -67,7 +67,7 @@ mod tests {
     use crate::tui::view_model::style::SemanticStyle;
 
     fn ctx() -> RenderCtx {
-        RenderCtx { width: 80 }
+        RenderCtx { text_width: 80 }
     }
 
     #[test]

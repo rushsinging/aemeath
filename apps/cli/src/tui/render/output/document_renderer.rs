@@ -1,6 +1,7 @@
 //! 输出文档渲染器：遍历 ViewModel.blocks，经 block 级缓存产出 RenderedDocument。
 
 use crate::tui::render::output::block_cache::{BlockCache, CacheKey};
+use crate::tui::render::output::gutter;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
 use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::render::theme;
@@ -18,12 +19,12 @@ impl OutputDocumentRenderer {
     pub fn render_model_document(
         &mut self,
         view_model: &OutputViewModel,
-        width: u16,
+        outer_width: u16,
         fallback_width: usize,
         animation_frame: u64,
     ) -> RenderedDocument {
-        let render_width = if width > 1 {
-            width
+        let render_width = if outer_width > 1 {
+            outer_width
         } else {
             u16::try_from(fallback_width.max(1)).unwrap_or(u16::MAX)
         };
@@ -32,15 +33,23 @@ impl OutputDocumentRenderer {
 
     /// 递归走 `view_model.roots`（DFS：父块先于子块），经 block 级缓存展平为线性文档。
     /// gutter（depth 缩进 + marker）在组合期注入。
-    pub fn render_tree(&mut self, view_model: &OutputViewModel, width: u16) -> RenderedDocument {
-        self.render_tree_with_animation_frame(view_model, width, 0)
+    ///
+    /// **`outer_width` 语义**：output_document_width = content_area.width（不含 gutter），
+    /// 由调用方（`App::output_document_width()`）传入。block 内部 wrap 用的 `text_width`
+    /// 由 `render_node` 按 depth 扣除 gutter 派生。
+    pub fn render_tree(
+        &mut self,
+        view_model: &OutputViewModel,
+        outer_width: u16,
+    ) -> RenderedDocument {
+        self.render_tree_with_animation_frame(view_model, outer_width, 0)
     }
 
     /// 带动画帧的 render_tree；动画只进入缓存外 gutter，不参与 block 内容缓存。
     pub fn render_tree_with_animation_frame(
         &mut self,
         view_model: &OutputViewModel,
-        width: u16,
+        outer_width: u16,
         animation_frame: u64,
     ) -> RenderedDocument {
         // 按 root 分组渲染：每个 root 子树（父块 + 全部后代）落入独立 group，
@@ -48,7 +57,7 @@ impl OutputDocumentRenderer {
         let mut groups: Vec<Vec<RenderedBlock>> = Vec::new();
         for root in &view_model.roots {
             let mut group = Vec::new();
-            self.render_node(root, width, 0, animation_frame, &mut group);
+            self.render_node(root, outer_width, 0, animation_frame, &mut group);
             groups.push(group);
         }
         let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
@@ -60,14 +69,17 @@ impl OutputDocumentRenderer {
     fn render_node(
         &mut self,
         node: &BlockNode,
-        width: u16,
+        outer_width: u16,
         depth: usize,
         animation_frame: u64,
         out: &mut Vec<RenderedBlock>,
     ) {
+        // #329 契约：block 内部 wrap 宽度 = outer_width - gutter_width(depth)，
+        // 保证 wrap 后 line 加回 gutter 总可见宽 ≤ outer_width（content_area.width）。
+        let text_width = gutter::effective_block_width(outer_width, depth);
         let key = CacheKey {
             version: node.block_version,
-            width,
+            text_width,
         };
         let mut rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
             #[cfg(test)]
@@ -80,7 +92,8 @@ impl OutputDocumentRenderer {
         ) {
             rendered = rendered.with_line_fill_style(Style::default().bg(theme::USER_BG));
         }
-        // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，        // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
+        // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
+        // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
         let mut gutted = crate::tui::render::output::gutter::apply_gutter_with_frame(
             &node.kind,
             depth,
@@ -103,7 +116,7 @@ impl OutputDocumentRenderer {
             lines: gutted,
         });
         for child in &node.children {
-            self.render_node(child, width, depth + 1, animation_frame, out);
+            self.render_node(child, outer_width, depth + 1, animation_frame, out);
         }
     }
 

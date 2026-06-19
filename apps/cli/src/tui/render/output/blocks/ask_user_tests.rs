@@ -24,7 +24,7 @@ fn test_render_ask_user_highlights_cursor_option() {
     let block = render_ask_user(
         "ask",
         &view(&["A", "B"], 1, false),
-        &RenderCtx { width: 80 },
+        &RenderCtx { text_width: 80 },
     );
     // 找到选项 B 行（含 ❯ 标记表示高亮）
     let highlighted = block
@@ -48,7 +48,7 @@ fn test_render_ask_user_empty_options_shows_confirm_hint() {
     let mut v = view(&[], 0, false);
     v.options.clear();
     v.llm_option_count = 0;
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 80 });
     assert!(block
         .lines
         .iter()
@@ -64,7 +64,7 @@ fn test_render_ask_user_empty_options_shows_default_line() {
     v.options.clear();
     v.llm_option_count = 0;
     v.default = Some("main".into());
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 80 });
     assert!(
         block
             .lines
@@ -80,7 +80,7 @@ fn test_render_ask_user_empty_options_no_default_omits_line() {
     let mut v = view(&[], 0, false);
     v.options.clear();
     v.llm_option_count = 0;
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 80 });
     assert!(!block
         .lines
         .iter()
@@ -89,7 +89,7 @@ fn test_render_ask_user_empty_options_no_default_omits_line() {
 
 #[test]
 fn test_render_ask_user_single_option_renders_marker() {
-    let block = render_ask_user("ask", &view(&["Only"], 0, false), &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &view(&["Only"], 0, false), &RenderCtx { text_width: 80 });
     let line = block
         .lines
         .iter()
@@ -102,7 +102,7 @@ fn test_render_ask_user_single_option_renders_marker() {
 fn test_render_ask_user_multi_select_shows_checkbox() {
     let mut v = view(&["A", "B"], 0, true);
     v.selected = vec![false, true];
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 80 });
     let checked = block
         .lines
         .iter()
@@ -115,7 +115,7 @@ fn test_render_ask_user_multi_select_shows_checkbox() {
 fn test_render_ask_user_chat_input_active_suppresses_option_highlight() {
     let mut v = view(&["A", "B"], 0, false);
     v.chat_input_active = true;
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 80 });
     // chat 子态下选项列表中无 ❯ 高亮
     let option_lines: Vec<_> = block
         .lines
@@ -202,7 +202,7 @@ fn test_wrap_text_chinese_wraps_by_char() {
 fn test_render_ask_user_answered_shows_answer_text() {
     let mut v = view(&["A", "B"], 0, false);
     v.answer = Some("都不喜欢".to_string());
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 80 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 80 });
     // 应包含回答文本
     assert!(
         block.lines.iter().any(|l| l.plain.contains("❯ 都不喜欢")),
@@ -230,7 +230,7 @@ fn test_wrap_text_mixed_cjk_and_ascii() {
 fn test_render_ask_user_wraps_long_question() {
     let mut v = view(&[], 0, false);
     v.question = "这是一段很长的提问内容用于测试自动换行功能是否正常工作".to_string();
-    let block = render_ask_user("ask", &v, &RenderCtx { width: 60 });
+    let block = render_ask_user("ask", &v, &RenderCtx { text_width: 60 });
     // 60 * 0.6 = 36，中文每字约 2 列宽，36 列放约 18 个字，所以应拆为多行
     let question_lines: Vec<_> = block
         .lines

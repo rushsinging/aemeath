@@ -12,7 +12,7 @@ pub fn render_thinking(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) ->
         .text
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .flat_map(|line| render_wrapped_thinking_line(line, style, ctx.width))
+        .flat_map(|line| render_wrapped_thinking_line(line, style, ctx.text_width))
         .collect();
     if lines.is_empty() {
         lines.push(RenderedLine::default());
@@ -67,7 +67,7 @@ mod tests {
             text: "ponder".into(),
             style: SemanticStyle::Muted,
         };
-        let block = render_thinking("t", &view, &RenderCtx { width: 80 });
+        let block = render_thinking("t", &view, &RenderCtx { text_width: 80 });
 
         assert_eq!(block.lines[0].plain, "ponder");
         assert!(
@@ -84,7 +84,7 @@ mod tests {
             text: "a\n\n\nb".into(),
             style: SemanticStyle::Muted,
         };
-        let block = render_thinking("t", &view, &RenderCtx { width: 80 });
+        let block = render_thinking("t", &view, &RenderCtx { text_width: 80 });
 
         assert!(block.lines.iter().all(|line| !line.plain.trim().is_empty()));
     }
@@ -97,7 +97,7 @@ mod tests {
             text: text.into(),
             style: SemanticStyle::Muted,
         };
-        let block = render_thinking("t", &view, &RenderCtx { width: 16 });
+        let block = render_thinking("t", &view, &RenderCtx { text_width: 16 });
 
         assert!(block.lines.len() > 1, "长 reasoning 行应按渲染宽度拆成多行");
         assert!(block
@@ -125,7 +125,7 @@ mod tests {
             text: text.into(),
             style: SemanticStyle::Muted,
         };
-        let block = render_thinking("t", &view, &RenderCtx { width: 120 });
+        let block = render_thinking("t", &view, &RenderCtx { text_width: 120 });
 
         assert_eq!(block.lines.len(), 1);
         assert_eq!(block.lines[0].plain, text);

@@ -1,6 +1,29 @@
 use super::*;
+use crate::tui::render::display::safe_text::str_display_width;
+use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::view_model::output::{BlockNode, OutputBlockKind, OutputViewModel, TextBlockView};
 use crate::tui::view_model::style::SemanticStyle;
+
+fn visible_line_width(line: &RenderedLine) -> usize {
+    line.spans
+        .iter()
+        .map(|span| str_display_width(span.content.as_ref()))
+        .sum()
+}
+
+fn assistant_node(id: &str, text: &str) -> BlockNode {
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: id.into(),
+        text: text.into(),
+        style: SemanticStyle::Normal,
+    });
+    BlockNode {
+        block_id: id.into(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    }
+}
 
 fn node(id: &str, text: &str, children: Vec<BlockNode>) -> BlockNode {
     let kind = OutputBlockKind::SystemNotice(TextBlockView {
@@ -327,4 +350,118 @@ fn test_retain_keeps_all_tree_block_ids() {
         !renderer.cache.contains("c"),
         "子块已从树中移除 → retain 清除缓存防泄漏"
     );
+}
+
+// ─── #329 回归测试：行尾字符碰到右边界时被 LineTruncator 截断丢失 ───
+//
+// 根因：document 预 wrap 宽度（=`App::output_document_width()` = content_area.width）
+// 未扣除组合期注入的 gutter 宽度（`gutter::gutter_width(depth)`）。
+// 真实渲染 `Paragraph::new(display_lines)` 未调用 `.wrap()`，默认走 LineTruncator，
+// 超宽 line 的尾部字符会被吞掉。
+//
+// 修复后契约：`effective_block_width(outer_width, depth) = outer_width - gutter_width(depth)`，
+// block 内部 wrap 宽度即 `RenderCtx.text_width`，因此 gutter + content 可见总宽 ≤ outer_width。
+
+#[test]
+fn test_render_tree_depth_zero_full_width_assistant_does_not_exceed_outer_width() {
+    // 复现 #329：outer_width=77 (= content_area.width 80 - 3 scrollbar reserve)，
+    // assistant block 文本刚好填满 outer_width。修复前 line 总宽 = 77 (wrap) + 2 (gutter) = 79 > 77。
+    let outer_width: u16 = 77;
+    let text = "x".repeat(outer_width as usize);
+    let mut renderer = OutputDocumentRenderer::default();
+    let vm = vm_with_roots(vec![assistant_node("a", &text)]);
+    let doc = renderer.render_tree(&vm, outer_width);
+
+    // render_node 在 depth=0 时前置 root 分隔空行（index 0），index 1 是 content line。
+    let content_line = &doc.blocks[0].lines[1];
+    let visible = visible_line_width(content_line);
+
+    assert!(
+        visible <= outer_width as usize,
+        "depth=0：gutter + content 可见总宽 {} 应 ≤ outer_width {}（#329）",
+        visible,
+        outer_width
+    );
+}
+
+#[test]
+fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width() {
+    // depth=1（如 ToolResult 子块）gutter=4 列：未修复时 line 总宽 = 77 + 4 = 81 > 77。
+    // 用 AssistantMessage 作为 ToolCall 子节点（OutputBlockKind 任意 enum 都能挂为子节点）。
+    let outer_width: u16 = 77;
+    let text = "x".repeat(outer_width as usize);
+    use crate::tui::view_model::output::{ToolCallBlockView, ToolSemanticStatus};
+    let tool_kind = OutputBlockKind::ToolCall(ToolCallBlockView {
+        key: "tool".into(),
+        chat_id: None,
+        turn_id: None,
+        tool_call_id: Some("tool".into()),
+        title: "Bash".into(),
+        icon: "✓".into(),
+        semantic_status: ToolSemanticStatus::Success,
+        style: SemanticStyle::Normal,
+        args_preview: None,
+        activity_summary: None,
+        result_summary: None,
+        collapsible: false,
+        collapsed: false,
+    });
+    let tool_node = BlockNode {
+        block_id: "tool".into(),
+        block_version: tool_kind.cache_version(),
+        kind: tool_kind,
+        children: vec![assistant_node("child", &text)],
+    };
+    let mut renderer = OutputDocumentRenderer::default();
+    let vm = vm_with_roots(vec![tool_node]);
+    let doc = renderer.render_tree(&vm, outer_width);
+
+    // tool_node 是 root（depth=0，block index 0），其子 child 是 depth=1（block index 1）。
+    let child_block = doc
+        .blocks
+        .iter()
+        .find(|b| b.block_id == "child")
+        .expect("child block 存在");
+    // depth=1 块没有 root 分隔空行（render_node 只在 depth==0 时插入）；
+    // 跳过 tool 自身产生的任何空行，取第一个非空 content line。
+    let content_line = child_block
+        .lines
+        .iter()
+        .find(|line| !line.plain.is_empty())
+        .expect("child block 至少有一行 content");
+    let visible = visible_line_width(content_line);
+
+    assert!(
+        visible <= outer_width as usize,
+        "depth=1：gutter(4) + content 可见总宽 {} 应 ≤ outer_width {}（#329）",
+        visible,
+        outer_width
+    );
+}
+
+#[test]
+fn test_render_tree_various_widths_keep_every_line_within_outer_width() {
+    // 横扫多种 outer_width / text 长度组合，确保 wrap 边界 + gutter 后不超。
+    // 修复前：text 长度 = outer_width 时必失败；修复后全过。
+    for outer_width in [10u16, 20, 40, 77, 120] {
+        for text_len in [outer_width, outer_width + 5, outer_width * 2] {
+            let text = "x".repeat(text_len as usize);
+            let mut renderer = OutputDocumentRenderer::default();
+            let vm = vm_with_roots(vec![assistant_node("a", &text)]);
+            let doc = renderer.render_tree(&vm, outer_width);
+
+            for (idx, line) in doc.blocks[0].lines.iter().enumerate() {
+                let visible = visible_line_width(line);
+                assert!(
+                    visible <= outer_width as usize,
+                    "outer_width={} text_len={} line[{}] 可见宽 {} > {}（#329）",
+                    outer_width,
+                    text_len,
+                    idx,
+                    visible,
+                    outer_width
+                );
+            }
+        }
+    }
 }

@@ -10,9 +10,19 @@ use ratatui::text::Span;
 ///
 /// 当前主题是编译期 `render::theme` 常量，无运行时 Theme，故只持宽度。
 /// TODO(theme): 引入运行时主题后加 `theme` 字段并把 theme_version 纳入 CacheKey。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// 渲染上下文（按 block 传递）。
+///
+/// **#329 语义约定**：`text_width` 是 **block 文本可用宽度**（已扣除组合期注入的 gutter），
+/// 不是输出文档外层宽度。`document_renderer::render_node` 必须用
+/// `gutter::effective_block_width(outer_width, depth)` 转换后再塞进 ctx。
+/// block 内部用 `ctx.text_width` 做 wrap，wrap 后 line 加回 gutter 总可见宽 ≤ outer。
+///
+/// `gutter_cols` 仅做尾部空白填充，已在 `apply_gutter_with_frame` 阶段处理，
+/// 不影响 wrap 宽度。
+#[derive(Clone, Copy, Debug)]
 pub struct RenderCtx {
-    pub width: u16,
+    pub text_width: u16,
 }
 
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），
