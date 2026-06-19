@@ -12,7 +12,7 @@ impl TypedTool for AskUserQuestionTool {
         "AskUserQuestion"
     }
     fn description(&self) -> &str {
-        "Ask the user a question and wait for their response. Use this when you need clarification, confirmation, or user input to proceed with a task. When offering predefined choices, MUST put each choice in the options array as a separate item and keep question to the prompt text only. NEVER embed choices such as A/B/C, 1/2/3, or multiple selectable alternatives directly in question."
+        "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({
@@ -168,9 +168,8 @@ mod tests {
         let tool = AskUserQuestionTool;
         let description = tool.description();
 
-        assert!(description.contains("MUST put each choice in the options array"));
-        assert!(description.contains("keep question to the prompt text only"));
-        assert!(description.contains("NEVER embed choices"));
+        assert!(description.contains("options")); // 精简后只检查关键词
+        assert!(description.contains("never embed choices"));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
-use crate::business::compact::truncate_tool_result;
+use crate::business::compact::offload_tool_result;
 use crate::LOG_TARGET;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
@@ -128,11 +128,16 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
+                    // 合并 #380：offload 大结果到磁盘；改用 ToolExecution 字段访问。
                     for ex in &mut results {
-                        if ex.outcome.text.len() > crate::business::compact::MAX_TOOL_RESULT_CHARS {
-                            let truncated = truncate_tool_result(&ex.outcome.text);
-                            ex.outcome.data = serde_json::json!({ "text": truncated.clone() });
-                            ex.outcome.text = truncated;
+                        let offloaded = offload_tool_result(
+                            &ex.outcome.text,
+                            ex.call_id.as_str(),
+                            &self.session_id,
+                        );
+                        if offloaded.len() != ex.outcome.text.len() {
+                            ex.outcome.text = offloaded;
+                            ex.outcome.data = serde_json::json!({ "text": &ex.outcome.text });
                         }
                     }
                     append_tool_results(&mut self.messages, results, &self.session_id);

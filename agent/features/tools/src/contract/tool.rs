@@ -4,6 +4,17 @@ use serde::Serialize;
 use serde_json::Value;
 use share::tool::{ImageData, PathAccess, ToolResult};
 
+/// 工具列表查询能力（contract 层定义，由 `ToolRegistry` 实现）。
+///
+/// 用于 `ToolSearch` 从注册表动态获取已注册工具的 name + description，
+/// 避免 contract 层依赖 core 层的 `ToolRegistry` 具体类型。
+pub trait ToolListProvider: Send + Sync {
+    /// 所有已注册工具的 name 列表。
+    fn tool_names(&self) -> Vec<String>;
+    /// 按 name 获取工具 description。
+    fn tool_description(&self, name: &str) -> Option<String>;
+}
+
 /// Type-erased tool trait（registry 存储这个）。
 ///
 /// 工具源应实现 [`TypedTool`]，用 [`TypedToolAdapter`] 包装后注册。

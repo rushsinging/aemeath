@@ -36,6 +36,9 @@ pub struct ToolExecutionContext {
     /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
     /// back to the user-visible session.
     pub parent_session_id: Option<String>,
+    /// Tool list provider (for ToolSearch dynamic queries).
+    /// Only set in the main chat loop; sub-agent contexts use `None`.
+    pub registry: Option<Arc<dyn super::ToolListProvider>>,
 }
 
 impl ToolExecutionContext {

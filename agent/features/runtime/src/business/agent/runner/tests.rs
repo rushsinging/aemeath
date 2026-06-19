@@ -265,6 +265,7 @@ fn test_ctx() -> ToolExecutionContext {
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
+        registry: None,
     }
 }
 

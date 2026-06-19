@@ -43,6 +43,7 @@ fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
         agent_semaphore: Arc::new(Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
+        registry: None,
     }
 }
 
@@ -113,7 +114,7 @@ fn test_agent_tool_schema_describes_200_turn_limit() {
     let description = tool.description();
 
     assert!(schema.contains("default 200, max 200"));
-    assert!(description.contains("default 200 tool-call rounds"));
+    assert!(description.contains("default 200 rounds"));
 }
 
 #[tokio::test]

@@ -76,6 +76,7 @@ mod tests {
             agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
+            registry: None,
         }
     }
 

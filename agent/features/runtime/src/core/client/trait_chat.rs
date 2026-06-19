@@ -86,6 +86,8 @@ pub(super) async fn chat_impl(
             hook_runner: inner.context.hook_runner.clone(),
             memory_config: inner.context.memory_config.clone(),
             language: inner.context.language.clone(),
+            frozen_chats: inner.frozen_chats.clone(),
+            active_summary: inner.active_summary.clone(),
         })
         .await;
         if let Ok(mut guard) = inner.current_cancel.lock() {

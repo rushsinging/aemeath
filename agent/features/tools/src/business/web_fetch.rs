@@ -103,7 +103,7 @@ impl TypedTool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetches content from a specified URL via HTTP GET.\n\nUsage:\n- The URL must be a fully-formed valid URL\n- HTTP URLs will be automatically upgraded to HTTPS\n- This tool is read-only and does not modify any files\n- Results may be truncated if the content is very large\n- For GitHub URLs, prefer using the gh CLI via Bash instead (e.g. gh pr view, gh issue view)"
+        "Fetches content from a URL via HTTP GET. Read-only. Results may be truncated for large content. For GitHub URLs, prefer `gh` CLI."
     }
 
     fn input_schema(&self) -> Value {

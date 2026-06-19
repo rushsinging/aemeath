@@ -3,9 +3,11 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::tool_search::ToolSearchResult;
 
-/// ToolSearch tool - searches for available tools.
-/// Note: This tool provides a static list of known tools since the registry
-/// cannot be cloned. The actual availability depends on what's registered.
+/// ToolSearch tool - dynamically searches available tools from the registry.
+///
+/// Replaces the previous hardcoded tool list. Queries the live `ToolRegistry`
+/// via `ToolExecutionContext.registry`, ensuring newly registered tools (e.g.
+/// MCP tools) are discoverable.
 pub struct ToolSearchTool;
 
 #[async_trait]
@@ -43,48 +45,37 @@ impl TypedTool for ToolSearchTool {
     async fn call(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> TypedToolResult<ToolSearchResult> {
         let query = input["query"].as_str().unwrap_or("").to_lowercase();
 
-        // 预定义的工具列表及其描述
-        let all_tools = [
-            ("Bash", "Execute bash commands with timeout support"),
-            ("Read", "Read file contents (alias: FileRead)"),
-            ("Write", "Write file contents (alias: FileWrite)"),
-            (
-                "Edit",
-                "Edit file with exact string replacement (alias: FileEdit)",
-            ),
-            ("Glob", "Fast file pattern matching tool"),
-            ("Grep", "Search file contents with regex support"),
-            (
-                "LSP",
-                "Language server protocol operations (diagnostics, definitions, references)",
-            ),
-            ("WebFetch", "Fetch content from URLs"),
-            ("WebSearch", "Search the web for information"),
-            ("Agent", "Launch a sub-agent for complex multi-step tasks"),
-            ("TaskCreate", "Create a task to track multi-step work"),
-            ("TaskUpdate", "Update task status, subject, or dependencies"),
-            ("TaskList", "List all tasks and their status"),
-            ("TaskGet", "Retrieve a specific task by ID"),
-            ("TaskStop", "Stop a running or pending task"),
-            ("MCP", "Call MCP server tools"),
-            ("Skill", "Execute a skill template"),
-            ("Config", "View or modify configuration settings"),
-            ("Sleep", "Pause execution for a specified duration"),
-            ("AskUserQuestion", "Ask user for input or confirmation"),
-            ("ToolSearch", "Search for available tools"),
-        ];
+        // 从注册表动态获取工具列表
+        let tools: Vec<(String, String)> = match &ctx.registry {
+            Some(reg) => reg
+                .tool_names()
+                .into_iter()
+                .map(|name| {
+                    let desc = reg.tool_description(&name).unwrap_or_default();
+                    (name, desc)
+                })
+                .collect(),
+            None => Vec::new(),
+        };
 
         if query.is_empty() {
-            // Return all available tools
-            return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": format!("Available tools ({})", all_tools.len()), "data": {"tools": all_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string());
+            let tool_names: Vec<&str> = tools.iter().map(|(n, _)| n.as_str()).collect();
+            return TypedToolResult::success_msg(
+                serde_json::json!({
+                    "status": "success",
+                    "message": format!("Available tools ({})", tools.len()),
+                    "data": {"tools": tool_names}
+                })
+                .to_string(),
+            );
         }
 
-        // Search for matching tools
-        let matching_tools: Vec<(&str, &str)> = all_tools
+        // 搜索匹配的工具
+        let matching: Vec<&(String, String)> = tools
             .iter()
             .filter(|(name, desc)| {
                 let name_lower = name.to_lowercase();
@@ -93,14 +84,28 @@ impl TypedTool for ToolSearchTool {
                     || desc_lower.contains(&query)
                     || match_keywords(&query, name)
             })
-            .copied()
             .collect();
 
-        if matching_tools.is_empty() {
-            return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": format!("No tools found matching '{}'", query), "data": {"tools": []}}).to_string());
+        if matching.is_empty() {
+            return TypedToolResult::success_msg(
+                serde_json::json!({
+                    "status": "success",
+                    "message": format!("No tools found matching '{}'", query),
+                    "data": {"tools": []}
+                })
+                .to_string(),
+            );
         }
 
-        TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": format!("Found {} tool(s) matching '{}'", matching_tools.len(), query), "data": {"tools": matching_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string())
+        let tool_names: Vec<&str> = matching.iter().map(|(n, _)| n.as_str()).collect();
+        TypedToolResult::success_msg(
+            serde_json::json!({
+                "status": "success",
+                "message": format!("Found {} tool(s) matching '{}'", matching.len(), query),
+                "data": {"tools": tool_names}
+            })
+            .to_string(),
+        )
     }
 }
 
