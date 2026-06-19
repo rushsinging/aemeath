@@ -22,6 +22,19 @@ pub const COST_HISTORY_FILE: &str = "cost_history.json";
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const UPDATE_CHECK_FILE: &str = "update_check.json";
 
+/// 解析 home 目录（读取 `$HOME`）。
+///
+/// 不依赖 `dirs` crate，以满足 shared kernel 零外部行为依赖约束
+///（见 `check-share-minimal-kernel.sh` 依赖白名单）。Unix 下 `$HOME`
+/// 始终设置；项目仅发布 macOS/Linux 二进制。
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn home_dir_or_dot() -> PathBuf {
+    home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
 pub fn global_agents_dir() -> PathBuf {
     if let Ok(value) = std::env::var(AGENTS_DIR_ENV) {
         let trimmed = value.trim();
@@ -30,9 +43,7 @@ pub fn global_agents_dir() -> PathBuf {
         }
     }
 
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(AGENTS_DIR_NAME)
+    home_dir_or_dot().join(AGENTS_DIR_NAME)
 }
 
 /// 展开 `~` / `~/` 前缀为 home 目录。
@@ -43,10 +54,10 @@ pub fn global_agents_dir() -> PathBuf {
 pub fn expand_home(path: &Path) -> PathBuf {
     let text = path.to_string_lossy();
     if text == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        return home_dir_or_dot();
     }
     if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = home_dir() {
             return home.join(rest);
         }
     }
@@ -177,6 +188,9 @@ mod tests {
     /// 避免全局 env 污染其它测试。
     static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// 测试用唯一序号（避免读时钟——shared kernel 禁用 SystemTime::now）。
+    static UNIQUE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     struct TestEnvGuard {
         key: &'static str,
         old: Option<std::ffi::OsString>,
@@ -257,10 +271,7 @@ mod tests {
         // 用 env 隔离，避免污染真实 home/.agents
         let temp_agents_dir = std::env::temp_dir().join(format!(
             "aemeath_shared_paths_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            UNIQUE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, &temp_agents_dir);
 
@@ -292,15 +303,13 @@ mod tests {
     fn test_global_agents_dir_falls_back_to_home() {
         // 无 env 时必须落到 home/.agents（而非相对路径 .agents）
         let _guard = TestEnvGuard::unset(AGENTS_DIR_ENV);
-        let expected = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(AGENTS_DIR_NAME);
+        let expected = home_dir_or_dot().join(AGENTS_DIR_NAME);
         assert_eq!(global_agents_dir(), expected);
     }
 
     #[test]
     fn test_expand_home() {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home = home_dir_or_dot();
         assert_eq!(expand_home(Path::new("~")), home);
         assert_eq!(expand_home(Path::new("~/foo/bar")), home.join("foo/bar"));
         // 非 ~ 前缀原样返回
@@ -318,9 +327,7 @@ mod tests {
     fn test_global_agents_dir_env_empty_string_falls_back_to_home() {
         // env 设了但为空，应回退到 home/.agents（而非空路径）
         let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, "   ");
-        let expected = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(AGENTS_DIR_NAME);
+        let expected = home_dir_or_dot().join(AGENTS_DIR_NAME);
         assert_eq!(global_agents_dir(), expected);
     }
 
