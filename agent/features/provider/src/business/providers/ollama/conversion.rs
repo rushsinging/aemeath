@@ -107,6 +107,7 @@ impl OllamaProviderConversion for OllamaProvider {
                         tool_use_id: _,
                         content,
                         is_error: _,
+                        ..
                     } => {
                         let text = match content {
                             serde_json::Value::String(s) => s.clone(),
