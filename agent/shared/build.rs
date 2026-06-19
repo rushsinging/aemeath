@@ -2,8 +2,9 @@
 //!
 //! 用 `git describe --tags --abbrev=0` 取最近 tag，strip `v` 前缀后通过
 //! `cargo:rustc-env=AEMEATH_VERSION=<x.y.z>` 注入。
-//! 运行时通过 `share::VERSION`（= `option_env!("AEMEATH_VERSION").unwrap_or(CARGO_PKG_VERSION)`）
-//! 访问，取不到时 fallback 到 `Cargo.toml` 的 `version`（占位符 `0.0.0`）。
+//! 运行时通过 `share::version()` 访问：优先读 `AEMEATH_VERSION` 环境变量
+//! （方便本地测试覆盖），fallback 到编译期注入的 `option_env!("AEMEATH_VERSION")`，
+//! 再 fallback 到 `Cargo.toml` 的 `version`（占位符 `0.0.0`）。
 
 use std::process::Command;
 

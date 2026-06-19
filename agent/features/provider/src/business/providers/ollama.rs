@@ -58,7 +58,7 @@ impl OllamaProvider {
             api_key,
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
-            user_agent: format!("aemeath/{}", share::VERSION),
+            user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
                 .build()
