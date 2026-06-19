@@ -17,22 +17,14 @@
 
 use crate::LOG_TARGET;
 
+use share::config::paths;
 use std::path::PathBuf;
 
 pub mod constants;
 pub mod resolver;
 
-const AGENTS_DIR_ENV: &str = "AEMEATH_AGENTS_DIR";
-
-fn global_agents_dir() -> PathBuf {
-    std::env::var_os(AGENTS_DIR_ENV)
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".agents")))
-        .unwrap_or_else(|| PathBuf::from(".agents"))
-}
-
 fn global_guidance_dir() -> PathBuf {
-    global_agents_dir().join("guidance")
+    paths::global_guidance_dir()
 }
 
 // Re-export public API so external code can use `share::guidance::...` unchanged.
@@ -125,7 +117,7 @@ mod tests {
     fn test_guidance_dir_uses_agents_directory() {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_agents_dir = unique_temp_dir("guidance_dir");
-        let _guard = EnvVarGuard::set_path(AGENTS_DIR_ENV, &temp_agents_dir);
+        let _guard = EnvVarGuard::set_path(paths::AGENTS_DIR_ENV, &temp_agents_dir);
 
         assert_eq!(guidance_dir(), Some(temp_agents_dir.join("guidance")));
     }
@@ -135,7 +127,7 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_agents_dir = unique_temp_dir("guidance_init");
         let guidance = temp_agents_dir.join("guidance");
-        let _guard = EnvVarGuard::set_path(AGENTS_DIR_ENV, &temp_agents_dir);
+        let _guard = EnvVarGuard::set_path(paths::AGENTS_DIR_ENV, &temp_agents_dir);
         let _ = std::fs::remove_dir_all(&temp_agents_dir);
 
         init_guidance_dir();
@@ -162,7 +154,7 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp_agents_dir = unique_temp_dir("guidance_lang");
         let guidance = temp_agents_dir.join("guidance");
-        let _guard = EnvVarGuard::set_path(AGENTS_DIR_ENV, &temp_agents_dir);
+        let _guard = EnvVarGuard::set_path(paths::AGENTS_DIR_ENV, &temp_agents_dir);
         let _ = std::fs::remove_dir_all(&temp_agents_dir);
 
         // Create root file only (no language subdirectory)
