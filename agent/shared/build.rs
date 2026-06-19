@@ -7,13 +7,17 @@
 //! `CARGO_PKG_VERSION`（即 `Cargo.toml` 的 `workspace.version` 占位符 `0.0.0`）。
 //! 本地 dev build 永远显示 `0.0.0`，发布版本由 release workflow 注入。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::Path;
 
 /// 将 Rust 类型映射到 JSON Schema 片段。
-fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> String {
+fn rust_type_to_json_schema(
+    ty: &syn::Type,
+    known_structs: &HashSet<String>,
+    known_enums: &HashMap<String, Vec<String>>,
+) -> String {
     match ty {
         syn::Type::Path(type_path) => {
             let segments: Vec<String> = type_path
@@ -36,7 +40,8 @@ fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> St
                         &type_path.path.segments.last().unwrap().arguments
                     {
                         if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                            let inner = rust_type_to_json_schema(inner_ty, known_types);
+                            let inner =
+                                rust_type_to_json_schema(inner_ty, known_structs, known_enums);
                             return inner.replacen('}', r#","nullable": true}"#, 1);
                         }
                     }
@@ -47,7 +52,8 @@ fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> St
                         &type_path.path.segments.last().unwrap().arguments
                     {
                         if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                            let items = rust_type_to_json_schema(inner_ty, known_types);
+                            let items =
+                                rust_type_to_json_schema(inner_ty, known_structs, known_enums);
                             return format!(r#"{{"type": "array", "items": {items}}}"#);
                         }
                     }
@@ -59,12 +65,21 @@ fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> St
                         &type_path.path.segments.last().unwrap().arguments
                     {
                         if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                            return rust_type_to_json_schema(inner_ty, known_types);
+                            return rust_type_to_json_schema(inner_ty, known_structs, known_enums);
                         }
                     }
                     r#"{"type": "object"}"#.to_string()
                 }
-                other if known_types.contains(other) => r#"{"type": "object"}"#.to_string(),
+                other if known_enums.contains_key(other) => {
+                    let variants = known_enums.get(other).unwrap();
+                    let enum_values: Vec<String> =
+                        variants.iter().map(|v| format!(r#""{v}""#)).collect();
+                    format!(
+                        r#"{{"type": "string", "enum": [{}]}}"#,
+                        enum_values.join(", ")
+                    )
+                }
+                other if known_structs.contains(other) => r#"{"type": "object"}"#.to_string(),
                 other => {
                     println!(
                         "cargo:warning=build.rs: 类型 `{other}` 未在 tool types 模块中定义，\
@@ -74,7 +89,9 @@ fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> St
                 }
             }
         }
-        syn::Type::Reference(type_ref) => rust_type_to_json_schema(&type_ref.elem, known_types),
+        syn::Type::Reference(type_ref) => {
+            rust_type_to_json_schema(&type_ref.elem, known_structs, known_enums)
+        }
         _ => {
             panic!("build.rs: 无法解析的类型 {:?} in tool type struct.", ty);
         }
@@ -84,7 +101,8 @@ fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> St
 /// 从 struct 定义提取字段，生成 ToolSchema impl。
 fn generate_tool_schema_impl(
     item: &syn::ItemStruct,
-    known_types: &HashSet<String>,
+    known_structs: &HashSet<String>,
+    known_enums: &HashMap<String, Vec<String>>,
 ) -> Option<String> {
     let struct_name = item.ident.to_string();
     let mut properties = Vec::new();
@@ -97,7 +115,7 @@ fn generate_tool_schema_impl(
         };
 
         let is_option = is_option_type(&field.ty);
-        let schema = rust_type_to_json_schema(&field.ty, known_types);
+        let schema = rust_type_to_json_schema(&field.ty, known_structs, known_enums);
 
         properties.push(format!("            \"{field_name}\": {schema}"));
         if !is_option {
@@ -168,8 +186,9 @@ fn main() {
     let mut impls = Vec::new();
     let skip_files = ["mod.rs"];
 
-    // 第一遍：收集所有 struct 名
-    let mut known_types = HashSet::new();
+    // 第一遍：收集所有 struct 和 enum 定义
+    let mut known_structs = HashSet::new();
+    let mut known_enums: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_files = Vec::new();
 
     for entry in fs::read_dir(types_dir).unwrap() {
@@ -189,10 +208,39 @@ fn main() {
         });
 
         for item in &syn_file.items {
-            if let syn::Item::Struct(item_struct) = item {
-                if matches!(item_struct.vis, syn::Visibility::Public(_)) {
-                    known_types.insert(item_struct.ident.to_string());
+            match item {
+                syn::Item::Struct(item_struct) => {
+                    if matches!(item_struct.vis, syn::Visibility::Public(_)) {
+                        known_structs.insert(item_struct.ident.to_string());
+                    }
                 }
+                syn::Item::Enum(item_enum) => {
+                    if matches!(item_enum.vis, syn::Visibility::Public(_)) {
+                        let enum_name = item_enum.ident.to_string();
+                        let variants: Vec<String> = item_enum
+                            .variants
+                            .iter()
+                            .map(|v| {
+                                // 将 PascalCase 变体名转换为 snake_case
+                                let name = v.ident.to_string();
+                                let mut snake_case = String::new();
+                                for (i, c) in name.chars().enumerate() {
+                                    if c.is_uppercase() {
+                                        if i > 0 {
+                                            snake_case.push('_');
+                                        }
+                                        snake_case.extend(c.to_lowercase());
+                                    } else {
+                                        snake_case.push(c);
+                                    }
+                                }
+                                snake_case
+                            })
+                            .collect();
+                        known_enums.insert(enum_name, variants);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -211,7 +259,9 @@ fn main() {
                 if !matches!(item_struct.vis, syn::Visibility::Public(_)) {
                     continue;
                 }
-                if let Some(impl_code) = generate_tool_schema_impl(item_struct, &known_types) {
+                if let Some(impl_code) =
+                    generate_tool_schema_impl(item_struct, &known_structs, &known_enums)
+                {
                     impls.push(impl_code);
                 }
             }
