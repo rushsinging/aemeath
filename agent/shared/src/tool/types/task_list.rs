@@ -1,6 +1,6 @@
 //! Typed result for the `task_list` tool (non-core tool).
 
-use crate::task::types::Task;
+use super::task::Task;
 use serde::{Deserialize, Serialize};
 
 /// Typed result returned by the `task_list` tool.
