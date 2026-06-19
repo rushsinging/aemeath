@@ -332,6 +332,17 @@ impl ToolDisplay for EditDisplay {
             self.display_name()
         )
     }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let path = file_path(input);
+        let suffix = data_field_u64(result_payload, "data.occurrences")
+            .map(|n| format!(" (Replaced {n})"))
+            .unwrap_or_default();
+        build_header_line(self.display_name(), path, &suffix)
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // old/new 内容由 result 子块的 diff 渲染展示
         vec![]
