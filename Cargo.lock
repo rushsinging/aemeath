@@ -265,6 +265,7 @@ dependencies = [
  "ratatui",
  "regex",
  "sdk",
+ "serde",
  "serde_json",
  "similar",
  "syntect",

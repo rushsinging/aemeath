@@ -593,7 +593,7 @@ mod tests {
         // typed 路径：payload.content.data.line_count=340 应直接驱动 header 后缀
         let payload = ToolResultPayload::new(
             String::new(), // output 不参与 typed 解析
-            serde_json::json!({ "data": { "line_count": 340u64 } }),
+            serde_json::json!({ "data": { "content": "", "file_path": "/src/lib.rs", "line_count": 340u64, "start_line": 1u64, "total_lines": 500u64 } }),
             false,
             0,
         );
@@ -620,7 +620,7 @@ mod tests {
         // typed 路径：payload.content.data.bytes_written=1234 应直接驱动 header 字节数
         let payload = ToolResultPayload::new(
             String::new(),
-            serde_json::json!({ "data": { "bytes_written": 1234u64 } }),
+            serde_json::json!({ "data": { "file_path": "/tmp/x.rs", "bytes_written": 1234u64 } }),
             false,
             0,
         );
