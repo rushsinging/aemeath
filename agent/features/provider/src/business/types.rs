@@ -98,13 +98,20 @@ impl CreateMessageRequest {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
+    #[serde(alias = "input_tokens")]
     pub input_tokens: u32,
+    #[serde(alias = "output_tokens")]
     pub output_tokens: u32,
     /// Tokens served from prompt cache (cost-free or reduced cost).
     /// Parsed from `prompt_tokens_details.cached_tokens` (OpenAI-compatible)
     /// or `usage.cache_read_input_tokens` (Anthropic).
-    #[serde(default)]
+    #[serde(default, alias = "cache_read_input_tokens")]
     pub cached_tokens: Option<u32>,
+    /// Tokens written to prompt cache this turn (Anthropic
+    /// `cache_creation_input_tokens`). Charged at a premium rate; subsequent
+    /// turns read from cache at a steep discount.
+    #[serde(default, alias = "cache_creation_input_tokens")]
+    pub cache_creation_tokens: Option<u32>,
     /// Tokens consumed by reasoning/thinking.
     /// Parsed from `completion_tokens_details.reasoning_tokens` (OpenAI-compatible)
     /// or `usage.reasoning_tokens` (if provider supports it).

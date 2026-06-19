@@ -116,13 +116,25 @@ impl LlmProvider for AnthropicProvider {
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
 
+        // 为 tools 数组最后一个元素添加 cache_control 断点，让 Anthropic
+        // 缓存整个 tools schema（≈6K tokens）。后续 turn 命中 cache 后
+        // 固定开销成本降至约 1/10。Anthropic 原生支持 tools 数组缓存。
+        let mut cached_tools = tool_schemas.to_vec();
+        if let Some(last_tool) = cached_tools.last_mut() {
+            if let Some(obj) = last_tool.as_object_mut() {
+                obj.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+            }
+        }
         let request = CreateMessageRequest::new(
             self.model.clone(),
             self.current_max_tokens(),
             self.thinking_max_tokens,
             system.to_vec(),
             api_messages,
-            tool_schemas.to_vec(),
+            cached_tools,
             true,
         );
 

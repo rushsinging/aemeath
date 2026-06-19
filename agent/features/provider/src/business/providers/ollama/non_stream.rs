@@ -163,6 +163,7 @@ impl OllamaProviderNonStream for OllamaProvider {
                 input_tokens,
                 output_tokens,
                 cached_tokens: None,
+                cache_creation_tokens: None,
                 reasoning_tokens: None,
             },
             stop_reason,

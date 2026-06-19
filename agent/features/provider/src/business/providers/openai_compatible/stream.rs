@@ -120,6 +120,7 @@ pub(crate) async fn parse_openai_stream(
         input_tokens: 0,
         output_tokens: 0,
         cached_tokens: None,
+        cache_creation_tokens: None,
         reasoning_tokens: None,
     };
     let mut stop_reason = crate::business::types::StopReason::EndTurn;
