@@ -2249,7 +2249,6 @@ dependencies = [
 name = "share"
 version = "0.0.0"
 dependencies = [
- "dirs",
  "log",
  "logging",
  "serde",
