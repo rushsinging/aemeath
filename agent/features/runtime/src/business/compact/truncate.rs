@@ -168,6 +168,7 @@ mod tests {
                 tool_use_id: "t1".to_string(),
                 content: serde_json::Value::String("short".to_string()),
                 is_error: false,
+                text: None,
             }],
             metadata: None,
         };
@@ -189,6 +190,7 @@ mod tests {
                 tool_use_id: "t1".to_string(),
                 content: serde_json::Value::String(large_content.clone()),
                 is_error: false,
+                text: None,
             }],
             metadata: None,
         };

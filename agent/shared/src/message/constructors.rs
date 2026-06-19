@@ -60,6 +60,8 @@ impl Message {
                         tool_use_id,
                         content: serde_json::Value::String(content),
                         is_error,
+                        // content 已是纯文本，本身即 text-first；无需单独 text。
+                        text: None,
                     },
                 )
                 .collect(),
@@ -101,7 +103,7 @@ impl Message {
                             .collect();
                         blocks.push(serde_json::json!({
                             "type": "text",
-                            "text": text,
+                            "text": text.clone(),
                         }));
                         blocks.push(serde_json::json!({
                             "type": "json",
@@ -109,10 +111,12 @@ impl Message {
                         }));
                         serde_json::Value::Array(blocks)
                     };
+                    // 持久化忠实保留结构化 content；text 供 LLM 出站时降为 text-first。
                     ContentBlock::ToolResult {
                         tool_use_id,
                         content,
                         is_error,
+                        text: Some(text),
                     }
                 })
                 .collect(),

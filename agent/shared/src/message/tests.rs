@@ -82,6 +82,7 @@ fn test_tool_results_constructor() {
             tool_use_id,
             content,
             is_error,
+            ..
         } => {
             assert_eq!(tool_use_id, "tool_1");
             assert_eq!(content, &serde_json::Value::String("result1".to_string()));
@@ -95,6 +96,7 @@ fn test_tool_results_constructor() {
             tool_use_id,
             content,
             is_error,
+            ..
         } => {
             assert_eq!(tool_use_id, "tool_2");
             assert!(content.as_str().unwrap_or_default().contains("error"));

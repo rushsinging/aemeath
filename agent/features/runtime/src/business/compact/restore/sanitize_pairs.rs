@@ -86,6 +86,8 @@ pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {
                     tool_use_id: id,
                     content: serde_json::json!("[result removed during compaction]"),
                     is_error: false,
+                    // 占位符 content 已是纯文本，无需单独 text。
+                    text: None,
                 })
                 .collect();
 

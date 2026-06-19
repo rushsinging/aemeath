@@ -92,6 +92,7 @@ fn sanitize_tool_pairs_complete_pair_untouched() {
                 tool_use_id: "tool_1".to_string(),
                 content: serde_json::Value::String("ok".to_string()),
                 is_error: false,
+                text: None,
             }],
             metadata: None,
         },
@@ -108,6 +109,7 @@ fn sanitize_tool_pairs_orphan_tool_result_removed() {
             tool_use_id: "nonexistent".to_string(),
             content: serde_json::Value::String("orphan".to_string()),
             is_error: false,
+            text: None,
         }],
         metadata: None,
     }];
@@ -166,6 +168,7 @@ fn sanitize_tool_pairs_mixed_partial_results() {
                 tool_use_id: "t1".to_string(),
                 content: serde_json::Value::String("result1".to_string()),
                 is_error: false,
+                text: None,
             }],
             metadata: None,
         },

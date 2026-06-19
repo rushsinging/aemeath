@@ -76,6 +76,7 @@ impl OpenAICompatibleProvider {
                         tool_use_id,
                         content,
                         is_error,
+                        ..
                     } => {
                         // Tool result 在 OpenAI 格式中是独立的消息
                         openai_messages.push(serde_json::json!({
