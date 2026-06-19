@@ -1,9 +1,9 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{PathAccess, PathKind};
 use share::tool::types::grep::GrepResult;
 use share::tool::types::support::Match;
+use share::tool::{PathAccess, PathKind};
 use std::path::PathBuf;
 use tokio::process::Command;
 
@@ -101,17 +101,20 @@ impl Tool for GrepTool {
                     )
                 } else {
                     let lines: Vec<&str> = stdout.lines().take(250).collect();
-                    let parsed_matches: Vec<Match> = lines.iter().filter_map(|line| {
-                        let mut parts = line.splitn(3, ':');
-                        let file = parts.next()?;
-                        let line_num = parts.next()?.parse::<u64>().ok()?;
-                        let text = parts.next().unwrap_or("").to_string();
-                        Some(Match {
-                            file_path: PathBuf::from(file),
-                            line_number: line_num,
-                            line: text,
+                    let parsed_matches: Vec<Match> = lines
+                        .iter()
+                        .filter_map(|line| {
+                            let mut parts = line.splitn(3, ':');
+                            let file = parts.next()?;
+                            let line_num = parts.next()?.parse::<u64>().ok()?;
+                            let text = parts.next().unwrap_or("").to_string();
+                            Some(Match {
+                                file_path: PathBuf::from(file),
+                                line_number: line_num,
+                                line: text,
+                            })
                         })
-                    }).collect();
+                        .collect();
                     let total_matches = parsed_matches.len() as u64;
                     ToolResult::success(
                         serde_json::json!({

@@ -217,9 +217,7 @@ impl ToolDisplay for ReadDisplay {
         let actual_lines = data_field_u64(result_payload, "data.line_count")
             .map(|n| n as usize)
             // regex 回退：旧 ToolResult 仅 message 含 "Read N lines from ..."
-            .or_else(|| {
-                result_payload.and_then(|p| parse_line_count_from_message(&p.output))
-            });
+            .or_else(|| result_payload.and_then(|p| parse_line_count_from_message(&p.output)));
 
         let range_info = match actual_lines {
             Some(actual) => {
@@ -300,9 +298,7 @@ impl ToolDisplay for WriteDisplay {
         let actual_bytes = data_field_u64(result_payload, "data.bytes_written")
             .map(|n| n as usize)
             // regex 回退：旧 ToolResult 仅 message 含 "Wrote N bytes to ..."
-            .or_else(|| {
-                result_payload.and_then(|p| parse_bytes_from_message(&p.output))
-            });
+            .or_else(|| result_payload.and_then(|p| parse_bytes_from_message(&p.output)));
 
         // 计算入参中的字节数（回退值）
         let input_bytes = input
@@ -565,8 +561,8 @@ impl ToolDisplay for AgentDisplay {
             .get("description")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let target = data_field_string(result_payload, "data.agent_id")
-            .unwrap_or_else(|| "?".to_string());
+        let target =
+            data_field_string(result_payload, "data.agent_id").unwrap_or_else(|| "?".to_string());
         let arg = format!("{description} -> [{target}]");
         build_header_line(self.display_name(), &arg, "")
     }
@@ -785,11 +781,18 @@ mod tests {
     #[test]
     fn build_header_line_truncates_long_path() {
         // 90+ 字符的路径以确保超过 truncate_path(60) 阈值
-        let long = "/very/very/very/very/very/very/very/very/very/very/very/very/very/long/path/file.txt";
+        let long =
+            "/very/very/very/very/very/very/very/very/very/very/very/very/very/long/path/file.txt";
         let line = build_header_line("Read", long, "");
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.starts_with("Read "), "expected Read prefix: {text}");
-        assert!(text.contains("..."), "expected ellipsis in long path: {text}");
-        assert!(text.len() < long.len() + 10, "long path should be truncated: {text}");
+        assert!(
+            text.contains("..."),
+            "expected ellipsis in long path: {text}"
+        );
+        assert!(
+            text.len() < long.len() + 10,
+            "long path should be truncated: {text}"
+        );
     }
 }

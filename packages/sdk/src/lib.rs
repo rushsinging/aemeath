@@ -15,9 +15,9 @@ pub mod error;
 pub mod models;
 pub mod project;
 pub mod session;
+pub mod tool_result;
 pub mod tui;
 pub mod types;
-pub mod tool_result;
 pub mod update;
 
 pub mod ids;

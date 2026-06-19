@@ -57,7 +57,7 @@ pub fn apply_tool_result_budget(message: &mut Message) {
     }
 
     // 按大小降序排列 — 优先截断最大的
-    result_sizes.sort_by(|a, b| b.1.cmp(&a.1));
+    result_sizes.sort_by_key(|item| std::cmp::Reverse(item.1));
 
     for (idx, _size) in result_sizes {
         if total_chars <= MAX_TOOL_RESULTS_PER_MESSAGE_CHARS {

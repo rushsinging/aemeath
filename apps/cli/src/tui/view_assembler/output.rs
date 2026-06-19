@@ -356,8 +356,7 @@ fn find_tool_view(
                         is_error,
                         image_count,
                     );
-                    let text =
-                        display_text_for_tool_result(Some(&call.name), result, content);
+                    let text = display_text_for_tool_result(Some(&call.name), result, content);
                     (Some(text), Some(owned))
                 }
                 None => (Some(result.to_string()), None),

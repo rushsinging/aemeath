@@ -52,7 +52,7 @@ impl OpenAICompatibleProvider {
             config,
             api_key,
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
-            user_agent: format!("aemeath/{}", share::VERSION),
+            user_agent: format!("aemeath/{}", share::version()),
             http: build_streaming_http_client_builder()
                 .build()
                 .expect("failed to create HTTP client"),

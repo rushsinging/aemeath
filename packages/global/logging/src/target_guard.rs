@@ -205,6 +205,11 @@ mod tests {
     }
 
     #[test]
+    fn chat_layer_must_not_use_bare_log_macros() {
+        check_layer("apps/cli/src/chat", "cli::");
+    }
+
+    #[test]
     fn hook_layer_must_not_use_bare_log_macros() {
         check_layer("agent/features/hook/src", "hook::");
     }

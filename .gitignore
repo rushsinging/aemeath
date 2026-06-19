@@ -29,6 +29,13 @@ Thumbs.db
 .serena/
 .worktrees/
 
+# Runtime data accidentally written into project-local .agents/
+# (root cause fixed → global runtime dir is ~/.agents; kept as defense for
+#  AEMEATH_AGENTS_DIR overrides or historical artifacts like update_check.json)
+.agents/*
+!.agents/aemeath.json
+!.agents/hooks/
+
 # Build artifacts
 *.exe
 *.dll

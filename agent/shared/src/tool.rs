@@ -192,12 +192,9 @@ mod tests {
 
     #[test]
     fn test_tool_result_json_falls_back_to_message_text_or_serialized_json() {
-        let message: ToolResult =
-            ToolResult::success_json(serde_json::json!({ "message": "msg" }));
-        let text: ToolResult =
-            ToolResult::success_json(serde_json::json!({ "text": "txt" }));
-        let other: ToolResult =
-            ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
+        let message: ToolResult = ToolResult::success_json(serde_json::json!({ "message": "msg" }));
+        let text: ToolResult = ToolResult::success_json(serde_json::json!({ "text": "txt" }));
+        let other: ToolResult = ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
 
         assert_eq!(message.output, "msg");
         assert_eq!(text.output, "txt");

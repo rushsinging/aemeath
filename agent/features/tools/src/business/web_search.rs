@@ -1,8 +1,8 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
-use share::tool::types::web_search::WebSearchResult;
 use async_trait::async_trait;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::Value;
+use share::tool::types::web_search::WebSearchResult;
 
 pub struct WebSearchTool;
 
@@ -164,10 +164,7 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
 
 fn format_search_results(query: &str, results: Vec<SearchResult>) -> ToolResult {
     if results.is_empty() {
-        let data = serde_json::to_value(WebSearchResult {
-            results: vec![],
-        })
-        .unwrap_or_default();
+        let data = serde_json::to_value(WebSearchResult { results: vec![] }).unwrap_or_default();
         return ToolResult::success(
             serde_json::json!({
                 "status": "success",

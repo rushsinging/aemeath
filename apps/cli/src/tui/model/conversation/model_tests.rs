@@ -287,7 +287,7 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         .tool_calls
         .iter()
         .filter(|call| call.name == "Skill")
-        .filter_map(|call| Some(call.args_preview.as_str()))
+        .map(|call| call.args_preview.as_str())
         .collect();
 
     assert_eq!(summaries.len(), 2);
@@ -504,7 +504,7 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         .map(|call| {
             (
                 call.id.as_ref().unwrap().as_ref(),
-                Some(call.args_preview.as_str()).unwrap_or(""),
+                call.args_preview.as_str(),
             )
         })
         .collect();

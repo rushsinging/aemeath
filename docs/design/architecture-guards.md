@@ -17,7 +17,6 @@
 │ Stop（任务结束）                                              │
 │   └─ check-architecture-guards.sh    串行执行 18 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
-│   └─ build_cli.sh                   cargo build release      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -442,11 +441,6 @@
   2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
   3. 对 11 个 crate 顺序跑 `cargo test --lib`（`cli` 用 `cargo test -p cli --bin aemeath`）。
 - **被测 crates**：`share, runtime, project, policy, prompt, provider, tools, storage, hook, audit, cli`。
-
-### build_cli.sh（Stop）
-
-- **触发**：`Stop` 钩子（无 matcher）。
-- **行为**：执行 `cargo build --release` 构建 CLI 二进制；用于在 Stop 时验证 release 编译通过。
 
 ## 维护说明
 

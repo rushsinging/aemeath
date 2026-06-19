@@ -101,9 +101,9 @@ where
 
     ask_user_results
         .into_iter()
-        .chain(non_agent_results.into_iter())
-        .chain(agent_results.into_iter())
-        .chain(denied_results.into_iter())
+        .chain(non_agent_results)
+        .chain(agent_results)
+        .chain(denied_results)
         .collect()
 }
 
@@ -280,7 +280,7 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
         "is_error": is_error,
         "output": output,
     });
-    log::info!(
+    log::debug!(
         target: LOG_TARGET,
         "tool_result: {}",
         serde_json::to_string(&tr_data).unwrap_or_default()

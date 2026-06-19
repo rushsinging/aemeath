@@ -19,6 +19,9 @@ pub(crate) async fn auto_compact<S>(
     context_size: usize,
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
+    last_api_output_tokens: u64,
+    cached_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
@@ -69,7 +72,13 @@ where
     }
 
     let should_compact = if last_api_input_tokens > 0 {
-        compact::needs_compaction_actual(last_api_input_tokens, 0, context_size)
+        compact::needs_compaction_actual(
+            last_api_input_tokens,
+            last_api_output_tokens,
+            cached_tokens,
+            reasoning_tokens,
+            context_size,
+        )
     } else {
         compact::needs_compaction_full(
             messages,
@@ -91,7 +100,13 @@ where
         context_size,
         tool_schema_tokens,
     ) || (last_api_input_tokens > 0
-        && compact::needs_compaction_actual(last_api_input_tokens, 0, context_size))
+        && compact::needs_compaction_actual(
+            last_api_input_tokens,
+            last_api_output_tokens,
+            cached_tokens,
+            reasoning_tokens,
+            context_size,
+        ))
     {
         if let Some(text) = crate::business::chat::looping::reflection::run_precompact_reflection(
             memory_config,

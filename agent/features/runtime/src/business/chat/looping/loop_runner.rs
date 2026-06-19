@@ -132,6 +132,9 @@ where
 
     let messages_at_start = messages.len();
     let mut last_api_input_tokens: u64 = 0;
+    let mut last_api_output_tokens: u64 = 0;
+    let mut cached_tokens: Option<u64> = None;
+    let mut reasoning_tokens: Option<u64> = None;
     let turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
@@ -224,6 +227,9 @@ where
             context_size,
             tool_schema_tokens,
             last_api_input_tokens,
+            last_api_output_tokens,
+            cached_tokens,
+            reasoning_tokens,
             &memory_config,
             &cwd,
             &ctx.client,
@@ -307,6 +313,35 @@ where
         match response {
             Ok(resp) => {
                 last_api_input_tokens = resp.usage.input_tokens as u64;
+                last_api_output_tokens = resp.usage.output_tokens as u64;
+                cached_tokens = resp.usage.cached_tokens.map(|v| v as u64);
+                reasoning_tokens = resp.usage.reasoning_tokens.map(|v| v as u64);
+
+                // 计算 context window 使用情况
+                let cached = cached_tokens.unwrap_or(0);
+                let reasoning = reasoning_tokens.unwrap_or(0);
+                let total_tokens = last_api_input_tokens + last_api_output_tokens + reasoning;
+                let effective_window =
+                    crate::business::compact::effective_context_window(context_size, 8192) as u64;
+                let threshold =
+                    crate::business::compact::autocompact_threshold(context_size, 8192) as u64;
+                let pct = total_tokens * 100 / effective_window.max(1);
+
+                log::info!(target: LOG_TARGET,
+                    "turn usage: session={}, turn={}, input={}, output={}, cached={}, reasoning={}, total={}, context_size={}, effective_window={}, threshold={}, usage_pct={}%",
+                    session_id,
+                    turn_count,
+                    last_api_input_tokens,
+                    last_api_output_tokens,
+                    cached,
+                    reasoning,
+                    total_tokens,
+                    context_size,
+                    effective_window,
+                    threshold,
+                    pct
+                );
+
                 sink.send_event(RuntimeStreamEvent::Usage {
                     input: resp.usage.input_tokens,
                     output: resp.usage.output_tokens,

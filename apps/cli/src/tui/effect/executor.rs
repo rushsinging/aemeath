@@ -255,10 +255,14 @@ impl App {
         let ui_tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("self_update", async move {
             match service.perform_update().await {
-                Ok(sdk::UpdateResult::Updated { from, to }) => {
+                Ok(sdk::UpdateResult::Updated {
+                    from,
+                    to,
+                    installed_path,
+                }) => {
                     let _ = ui_tx
                         .send(UiEvent::SystemMessage(format!(
-                            "✓ Updated aemeath {from} → {to}\nPlease restart aemeath to use the new version."
+                            "✓ Updated aemeath {from} → {to}\nInstalled to: {installed_path}\nPlease restart aemeath to use the new version."
                         )))
                         .await;
                 }

@@ -33,3 +33,188 @@ fn test_format_tokens() {
     assert_eq!(format_tokens(15000), "15k");
     assert_eq!(format_tokens(1500000), "1.5m");
 }
+
+#[test]
+fn test_needs_compaction_actual_no_cache_no_reasoning() {
+    // 没有 cached_tokens 和 reasoning_tokens
+    assert!(!needs_compaction_actual(
+        50000, 10000, None, None, 1_048_576
+    ));
+    assert!(needs_compaction_actual(
+        900000, 200000, None, None, 1_048_576
+    ));
+}
+
+#[test]
+fn test_needs_compaction_actual_with_cached_tokens() {
+    // 有 cached_tokens，但不扣除（cached tokens 仍占用 context window）
+    // input=100000, cached=80000, total=110000 (100000 + 10000)
+    assert!(!needs_compaction_actual(
+        100000,
+        10000,
+        Some(80000),
+        None,
+        1_048_576
+    ));
+
+    // input=100000, cached=0, total=110000 (100000 + 10000)
+    assert!(!needs_compaction_actual(
+        100000,
+        10000,
+        Some(0),
+        None,
+        1_048_576
+    ));
+}
+
+#[test]
+fn test_needs_compaction_actual_with_reasoning_tokens() {
+    // 有 reasoning_tokens，应该加上
+    // input=50000, output=10000, reasoning=100000, total=160000
+    assert!(!needs_compaction_actual(
+        50000,
+        10000,
+        None,
+        Some(100000),
+        1_048_576
+    ));
+
+    // input=50000, output=10000, reasoning=950000, total=1010000
+    // threshold = 1,027,384, 1010000 < threshold -> false
+    assert!(!needs_compaction_actual(
+        50000,
+        10000,
+        None,
+        Some(950000),
+        1_048_576
+    ));
+
+    // input=50000, output=10000, reasoning=970000, total=1030000
+    // threshold = 1,027,384, 1030000 > threshold -> true
+    assert!(needs_compaction_actual(
+        50000,
+        10000,
+        None,
+        Some(970000),
+        1_048_576
+    ));
+}
+
+#[test]
+fn test_needs_compaction_actual_with_both() {
+    // 同时有 cached_tokens 和 reasoning_tokens
+    // input=200000, cached=150000 (不扣除), output=10000, reasoning=100000
+    // total = 200000 + 10000 + 100000 = 310000
+    assert!(!needs_compaction_actual(
+        200000,
+        10000,
+        Some(150000),
+        Some(100000),
+        1_048_576
+    ));
+
+    // input=200000, cached=150000 (不扣除), output=10000, reasoning=830000
+    // total = 200000 + 10000 + 830000 = 1040000
+    // threshold = 1,027,384, 1040000 > threshold -> true
+    assert!(needs_compaction_actual(
+        200000,
+        10000,
+        Some(150000),
+        Some(830000),
+        1_048_576
+    ));
+}
+
+#[test]
+fn test_needs_compaction_actual_cached_greater_than_input() {
+    // cached_tokens 大于 input_tokens（不扣除）
+    // input=10000, cached=50000 (不扣除), output=10000
+    // total = 10000 + 10000 = 20000
+    assert!(!needs_compaction_actual(
+        10000,
+        10000,
+        Some(50000),
+        None,
+        1_048_576
+    ));
+}
+
+#[test]
+fn test_compaction_urgency_no_cache_no_reasoning() {
+    // 没有 cached_tokens 和 reasoning_tokens
+    // effective_context_window(1,048,576, 8192) = 1,040,384
+    // 100000 / 1,040,384 = 9.6% -> level 0
+    assert_eq!(compaction_urgency(100000, None, None, 1_048_576), 0);
+    // 700000 / 1,040,384 = 67.3% -> level 0
+    assert_eq!(compaction_urgency(700000, None, None, 1_048_576), 0);
+    // 730000 / 1,040,384 = 70.2% -> level 1
+    assert_eq!(compaction_urgency(730000, None, None, 1_048_576), 1);
+    // 800000 / 1,040,384 = 76.9% -> level 1
+    assert_eq!(compaction_urgency(800000, None, None, 1_048_576), 1);
+    // 840000 / 1,040,384 = 80.7% -> level 2
+    assert_eq!(compaction_urgency(840000, None, None, 1_048_576), 2);
+    // 940000 / 1,040,384 = 90.4% -> level 3
+    assert_eq!(compaction_urgency(940000, None, None, 1_048_576), 3);
+}
+
+#[test]
+fn test_compaction_urgency_with_cached_tokens() {
+    // 有 cached_tokens，但不扣除（cached tokens 仍占用 context window）
+    // input=100000, cached=80000 (不扣除), 100000/1,040,384 = 9.6% -> level 0
+    assert_eq!(compaction_urgency(100000, Some(80000), None, 1_048_576), 0);
+
+    // input=900000, cached=200000 (不扣除), 900000/1,040,384 = 86.5% -> level 2
+    assert_eq!(compaction_urgency(900000, Some(200000), None, 1_048_576), 2);
+
+    // input=900000, cached=100000 (不扣除), 900000/1,040,384 = 86.5% -> level 2
+    assert_eq!(compaction_urgency(900000, Some(100000), None, 1_048_576), 2);
+}
+
+#[test]
+fn test_compaction_urgency_with_reasoning_tokens() {
+    // 有 reasoning_tokens，应该加上
+    // input=100000, reasoning=50000, total=150000, 150000/1,040,384 = 14.4% -> level 0
+    assert_eq!(compaction_urgency(100000, None, Some(50000), 1_048_576), 0);
+
+    // input=100000, reasoning=630000, total=730000, 730000/1,040,384 = 70.2% -> level 1
+    assert_eq!(compaction_urgency(100000, None, Some(630000), 1_048_576), 1);
+
+    // input=100000, reasoning=740000, total=840000, 840000/1,040,384 = 80.7% -> level 2
+    assert_eq!(compaction_urgency(100000, None, Some(740000), 1_048_576), 2);
+}
+
+#[test]
+fn test_compaction_urgency_with_both() {
+    // 同时有 cached_tokens 和 reasoning_tokens
+    // input=200000, cached=100000 (不扣除), reasoning=50000
+    // total = 200000 + 50000 = 250000, 250000/1,040,384 = 24.0% -> level 0
+    assert_eq!(
+        compaction_urgency(200000, Some(100000), Some(50000), 1_048_576),
+        0
+    );
+
+    // input=900000, cached=200000 (不扣除), reasoning=140000
+    // total = 900000 + 140000 = 1040000, 1040000/1,040,384 = 99.9% -> level 3
+    assert_eq!(
+        compaction_urgency(900000, Some(200000), Some(140000), 1_048_576),
+        3
+    );
+
+    // input=900000, cached=200000 (不扣除), reasoning=40000
+    // total = 900000 + 40000 = 940000, 940000/1,040,384 = 90.4% -> level 3
+    assert_eq!(
+        compaction_urgency(900000, Some(200000), Some(40000), 1_048_576),
+        3
+    );
+}
+
+#[test]
+fn test_compaction_urgency_cached_greater_than_input() {
+    // cached_tokens 大于 input_tokens（不扣除）
+    // input=10000, cached=50000 (不扣除), reasoning=100000
+    // total = 10000 + 100000 = 110000, 110000/1,040,384 = 10.6% -> level 0
+    assert_eq!(
+        compaction_urgency(10000, Some(50000), Some(100000), 1_048_576),
+        0
+    );
+}

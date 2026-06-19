@@ -2,9 +2,9 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
 use crate::business::mcp_manager::McpConnectionManager;
 use crate::LOG_TARGET;
-use share::tool::types::mcp_manager::McpManagerResult;
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::mcp_manager::McpManagerResult;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

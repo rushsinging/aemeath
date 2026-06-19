@@ -100,7 +100,7 @@ pub fn check_config_changes(registry: &mut SourceSnapshotRegistry) -> ConfigDiff
         };
     }
 
-    log::info!(target: LOG_TARGET,
+    log::debug!(target: LOG_TARGET,
         "[config_reload] detected {} file change(s)",
         changes.len()
     );
@@ -190,9 +190,19 @@ mod tests {
     use std::fs;
     use std::io::Write;
 
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// 测试唯一序号——每次调用自增，避免同进程内多个测试共享同一临时目录
+    /// 导致并行删除竞争（`File::create` 收到 EINVAL）。见 flaky 测试根因。
+    static TEMP_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
     fn temp_dir() -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("aemeath_config_reload_test_{}", std::process::id()));
+        let seq = TEMP_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "aemeath_config_reload_test_{}_{}",
+            std::process::id(),
+            seq
+        ));
         let _ = fs::create_dir_all(&dir);
         dir
     }

@@ -25,17 +25,17 @@ pub trait ToolSchema {
     fn data_schema() -> serde_json::Value;
 }
 
-pub mod read;
-pub mod write;
-pub mod edit;
-pub mod glob;
-pub mod grep;
-pub mod web_fetch;
-pub mod bash;
 pub mod agent;
+pub mod ask_user;
+pub mod bash;
+pub mod edit;
 pub mod enter_worktree;
 pub mod exit_worktree;
-pub mod ask_user;
+pub mod glob;
+pub mod grep;
+pub mod read;
+pub mod web_fetch;
+pub mod write;
 
 // Re-exports for ergonomic `use share::tool::types::XxxResult;`.
 pub use agent::AgentResult;

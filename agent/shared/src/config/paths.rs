@@ -22,8 +22,46 @@ pub const COST_HISTORY_FILE: &str = "cost_history.json";
 pub const SETTINGS_FILE: &str = "settings.json";
 pub const UPDATE_CHECK_FILE: &str = "update_check.json";
 
+/// 解析 home 目录（读取 `$HOME`）。
+///
+/// 不依赖 `dirs` crate，以满足 shared kernel 零外部行为依赖约束
+///（见 `check-share-minimal-kernel.sh` 依赖白名单）。Unix 下 `$HOME`
+/// 始终设置；项目仅发布 macOS/Linux 二进制。
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn home_dir_or_dot() -> PathBuf {
+    home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
 pub fn global_agents_dir() -> PathBuf {
-    PathBuf::from(AGENTS_DIR_NAME)
+    if let Ok(value) = std::env::var(AGENTS_DIR_ENV) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return expand_home(Path::new(trimmed));
+        }
+    }
+
+    home_dir_or_dot().join(AGENTS_DIR_NAME)
+}
+
+/// 展开 `~` / `~/` 前缀为 home 目录。
+///
+/// - `~` → home
+/// - `~/foo` → home/foo
+/// - 其它原样返回
+pub fn expand_home(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if text == "~" {
+        return home_dir_or_dot();
+    }
+    if let Some(rest) = text.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    path.to_path_buf()
 }
 
 pub fn global_config_path() -> PathBuf {
@@ -146,6 +184,59 @@ pub fn old_project_skills_dir(cwd: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
+    /// 测试用环境变量守护：构造时设值，析构时还原。
+    /// 避免全局 env 污染其它测试。
+    static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 测试用唯一序号（避免读时钟——shared kernel 禁用 SystemTime::now）。
+    static UNIQUE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    struct TestEnvGuard {
+        key: &'static str,
+        old: Option<std::ffi::OsString>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TestEnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let guard = TEST_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self {
+                key,
+                old,
+                _guard: guard,
+            }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let guard = TEST_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self {
+                key,
+                old,
+                _guard: guard,
+            }
+        }
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(old) = &self.old {
+                    std::env::set_var(self.key, old);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_project_paths_use_agents_directory() {
         let cwd = PathBuf::from("/tmp/demo");
@@ -177,24 +268,67 @@ mod tests {
 
     #[test]
     fn test_global_data_paths_use_agents_directory() {
-        assert_eq!(global_config_path(), PathBuf::from(".agents/aemeath.json"));
-        assert_eq!(global_agents_md_path(), PathBuf::from(".agents/AGENTS.md"));
-        assert_eq!(global_skills_dir(), PathBuf::from(".agents/skills"));
-        assert_eq!(global_logs_dir(), PathBuf::from(".agents/logs"));
-        assert_eq!(global_guidance_dir(), PathBuf::from(".agents/guidance"));
-        assert_eq!(global_memory_dir(), PathBuf::from(".agents/memory"));
-        assert_eq!(global_sessions_dir(), PathBuf::from(".agents/sessions"));
-        assert_eq!(global_hooks_dir(), PathBuf::from(".agents/hooks"));
-        assert_eq!(global_mcp_config_path(), PathBuf::from(".agents/mcp.json"));
-        assert_eq!(global_history_path(), PathBuf::from(".agents/history.json"));
+        // 用 env 隔离，避免污染真实 home/.agents
+        let temp_agents_dir = std::env::temp_dir().join(format!(
+            "aemeath_shared_paths_{}",
+            UNIQUE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, &temp_agents_dir);
+
+        assert_eq!(global_config_path(), temp_agents_dir.join("aemeath.json"));
+        assert_eq!(global_agents_md_path(), temp_agents_dir.join("AGENTS.md"));
+        assert_eq!(global_skills_dir(), temp_agents_dir.join("skills"));
+        assert_eq!(global_logs_dir(), temp_agents_dir.join("logs"));
+        assert_eq!(global_guidance_dir(), temp_agents_dir.join("guidance"));
+        assert_eq!(global_memory_dir(), temp_agents_dir.join("memory"));
+        assert_eq!(global_sessions_dir(), temp_agents_dir.join("sessions"));
+        assert_eq!(global_hooks_dir(), temp_agents_dir.join("hooks"));
+        assert_eq!(global_mcp_config_path(), temp_agents_dir.join("mcp.json"));
+        assert_eq!(global_history_path(), temp_agents_dir.join("history.json"));
         assert_eq!(
             global_cost_history_path(),
-            PathBuf::from(".agents/cost_history.json")
+            temp_agents_dir.join("cost_history.json")
         );
         assert_eq!(
             global_settings_path(),
-            PathBuf::from(".agents/settings.json")
+            temp_agents_dir.join("settings.json")
         );
+        assert_eq!(
+            global_update_check_path(),
+            temp_agents_dir.join("update_check.json")
+        );
+    }
+
+    #[test]
+    fn test_global_agents_dir_falls_back_to_home() {
+        // 无 env 时必须落到 home/.agents（而非相对路径 .agents）
+        let _guard = TestEnvGuard::unset(AGENTS_DIR_ENV);
+        let expected = home_dir_or_dot().join(AGENTS_DIR_NAME);
+        assert_eq!(global_agents_dir(), expected);
+    }
+
+    #[test]
+    fn test_expand_home() {
+        let home = home_dir_or_dot();
+        assert_eq!(expand_home(Path::new("~")), home);
+        assert_eq!(expand_home(Path::new("~/foo/bar")), home.join("foo/bar"));
+        // 非 ~ 前缀原样返回
+        assert_eq!(
+            expand_home(Path::new("/abs/path")),
+            PathBuf::from("/abs/path")
+        );
+        assert_eq!(
+            expand_home(Path::new("relative")),
+            PathBuf::from("relative")
+        );
+    }
+
+    #[test]
+    fn test_global_agents_dir_env_empty_string_falls_back_to_home() {
+        // env 设了但为空，应回退到 home/.agents（而非空路径）
+        let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, "   ");
+        let expected = home_dir_or_dot().join(AGENTS_DIR_NAME);
+        assert_eq!(global_agents_dir(), expected);
     }
 
     #[test]

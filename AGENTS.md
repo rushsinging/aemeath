@@ -100,7 +100,7 @@ aemeath/                    # workspace root
 │   └── agent-audit.log      #   aemeath:agent:audit — 审计事件
 > **废弃文件**：`input.log` / `output.log` / `tool.log` / `audit.log` / `agent.log` 已废弃，NEVER 再使用。详见 `specs/logging.md`。
 >
-> **终端测试**：`echo "{prompt}" | cargo run -- -qv`（`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试）。
+> **终端测试**：`echo '{prompt}' | AEMEATH_VERSION= RUST_LOG= cargo run -- -qv`（`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试；`AEMEATH_VERSION=` 覆盖版本号、`RUST_LOG=` 覆盖日志级别，方便测试）。
 ├── memory/                  # 持久化记忆存储
 ├── sessions/                # 会话持久化
 ├── skills/                  # 全局 Skills
@@ -134,6 +134,18 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 - **MUST** worktree 分支完成验证并提交后，通过 **Pull Request** 提交回 `main`；**NEVER** 直接 push 到 `main`（`main` 已受保护，不允许直接推送）。
 - **MUST NEVER** 由 agent 自动合并 PR。PR 创建后由用户 review，用户确认后手动合并；agent 只能在用户明确授权后执行合并动作。
 - **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin main` 拉取最新 main；若存在冲突，解决后重新通过验证门禁，才能推送分支并创建 PR。
+
+### 发版
+
+发版通过 push `v*` tag 触发 `.github/workflows/release.yml` 自动完成（校验 → macOS 双架构构建 → 创建 GitHub Release + checksums）。**MUST** 遵守：
+
+- **MUST** 由用户明确指定版本号（如"发 0.0.2"），agent **NEVER** 自行决定发版或推演版本号。
+- **MUST** tag 打在 `origin/main` 最新 commit 上（已 review、已同步到远端），**NEVER** 打在本地未 push 的 HEAD 上。本地若有未 push 的 commit，**MUST** 先判断其是否为已通过 PR 合入内容的噪音（如 merge commit、仅含 `.agents/*` 等运行时副产物的提交）；若是则 tag 仍打在 `origin/main`，发版后 reset 清理。
+- **MUST** 使用轻量 tag（沿用 v0.0.1 风格），格式 `vX.Y.Z`。**NEVER** 改 `Cargo.toml` 的 `workspace.version`（占位符 `0.0.0`，实际版本从 tag 提取）。
+- **MUST** push tag 前先向用户输出方案（tag 指向哪个 commit、版本号、自上一 tag 以来的变更摘要）并等待确认；**NEVER** 未经确认直接 push tag。
+- **MUST** push 后用 `gh run list --workflow=release.yml` 监控三个阶段（Validate & Gate / Build ×2 / Create Release）全部通过；任一失败 **MUST** 排查并报告。
+- release notes 由 `generate_release_notes: true` 自动从 PR 生成，agent **NEVER** 手写发版说明。
+- **MUST** 用 `gh release view vX.Y.Z` 确认 Release 已发布且包含 aarch64 / x86_64 tar.gz + checksums.txt 三个 asset。
 
 ### Hook 阻断处理
 

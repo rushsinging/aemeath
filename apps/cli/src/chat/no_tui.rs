@@ -95,7 +95,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::TasksChanged
         | sdk::ChatEvent::ConfigReloaded { .. } => {}
         sdk::ChatEvent::ToolCallUpdate { name, .. } => {
-            log::debug!("[tool:update] {name}");
+            log::trace!(target: "aemeath:tui", "[tool:update] {name}");
         }
         sdk::ChatEvent::ToolResult {
             tool_name,

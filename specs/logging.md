@@ -80,40 +80,167 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 10 | `role` | string \| null | 消息角色 | `context::current_role()` | `"default"` / `"sub-agent-1"` |
 | 11 | `level` | string | 日志级别 | `record.level()` | `"INFO"` |
 | 12 | `target` | string | 日志 target（`aemeath:` 前缀） | `record.target()` | `"aemeath:agent:runtime"` |
-| 13 | `msg` | string \| null | 日志消息（诊断行为自由文本，审计行为 JSON 字符串） | `record.args()` | `"compact triggered"` |
+| 13 | `msg` | string \| null | 日志消息（诊断行为自由文本，或结构化 JSON payload） | `record.args()` | `"compact triggered"` |
 
-> 审计日志的 `msg` 字段包含序列化后的 JSON payload（如 `{"event_type":"llm_input","messages":[...]}`），
+> 部分日志的 `msg` 字段包含序列化后的 JSON payload（诊断行为自由文本，或 LLM I/O 等结构化内容）。
 > 消费者可用 `jq 'select(.msg | startswith("{")) | .msg | fromjson' *.log` 解析。
 
-## event_type 字段
+## 日志级别策略（Issue #338）
 
-`event_type` 作为审计日志 JSON payload 内的字段（嵌套在 `msg` 中），由调用方在序列化 payload 时自行设置。诊断日志的 `msg` 为自由文本，不含 `event_type`。
+### 总则
 
-| event_type | 语义 | 写入方式 |
-|-----------|------|---------|
-| `llm_input` | 发送给 LLM 的完整 prompt | `log::info!(target, "{}", json!({"event_type":"llm_input", ...}))` |
-| `llm_output` | LLM 完整响应 | `log::info!(target, "{}", json!({"event_type":"llm_output", ...}))` |
-| `user_input` | 用户输入 | `log::info!(target, "{}", json!({"event_type":"user_input", ...}))` |
-| `llm_request_start` | LLM 请求发起 | `log::debug!` |
-| `llm_chunk` | LLM stream 每个 chunk | `log::trace!` |
-| `llm_error` | LLM 请求错误 | `log::error!` |
-| `tool_call` | tool 调用发起 | `log::info!` |
-| `tool_result` | tool 执行结果 | `log::info!` |
-| `turn_start` | 一轮对话开始 | `log::info!` |
-| `turn_end` | 一轮对话结束 | `log::info!` |
-| `compact` | 上下文压缩触发 | `log::info!` |
+| Level | 语义 | 频率约束 |
+|---|---|---|
+| `error` | 已发生且需要用户/开发者关注的**不可恢复**失败 | 正常控制流 **NEVER** 出现 |
+| `warn`  | 可恢复但值得关注的异常或降级 | 每次失败 **MAY** 出现，但不应爆炸式重复 |
+| `info`  | 用户/运维关心的**关键生命周期事件** | 低频，**NEVER** 含完整 JSON payload 或 per-chunk/per-turn 高频日志 |
+| `debug` | 开发调试需要的**中等粒度**细节 | 中频，可含安全截断后的 preview |
+| `trace` | 高频、细粒度、默认关闭的诊断 | 无频率上限，但 **NEVER** 泄露未截断的敏感完整内容 |
 
-## 日志级别策略
+### `error`
 
-| 级别 | 定位 | 记录什么 | 示例 |
-|------|------|---------|------|
-| **ERROR** | 致命错误 | 不可恢复的异常、panic 级别故障 | LLM 连接失败、文件写入失败、数据损坏 |
-| **WARN** | 可恢复异常 | 降级处理、重试、fallback | API 超时后重试、配置缺失用默认值、权限不足 |
-| **INFO** | 用户排障关键事件 | 影响用户可见行为的状态变迁 | 会话开始/结束、tool 执行、compact 触发、provider 切换 |
-| **DEBUG** | 开发调试 | 内部状态、决策路径、**带 preview** 的内容摘要 | LLM 请求摘要（messages 数量 + preview）、token 统计、路由决策 |
-| **TRACE** | chunk / token 级 | **完整原始内容**，仅在深度调试时开启 | LLM stream 每个 chunk、完整 messages JSON、raw HTTP response |
+**NEVER** 在正常控制流中频繁出现。用于：
 
-> **MUST NOT** 在 INFO 级记录大文本内容。DEBUG 级用 preview，TRACE 级可记录完整内容。
+- 操作最终失败且无法自动恢复；
+- 数据持久化失败（如 tool_result 写盘失败）；
+- provider 请求失败且已返回给用户（最终失败，非中间重试）；
+- hook / tool / runtime 关键流程失败（如 task panic）。
+
+### `warn`
+
+可恢复但值得关注的异常或降级。用于：
+
+- 配置项无效并回退默认值；
+- 网络失败但不影响主流程继续（如 MCP 重连失败、hook spawn 失败）；
+- 兼容旧格式或迁移降级；
+- tool/provider 返回异常结构但已容错（如孤儿 tool message 丢弃、流解析容错）；
+- 潜在数据不一致风险。
+
+**重试场景降噪**：重试循环中的中间失败 **SHOULD** 用 `debug`，仅末次汇总用 `warn`。
+
+### `info`
+
+用户或运维可能关心的关键生命周期事件。用于：
+
+- session 启动/结束；
+- provider/model 选择（一次性）；
+- MCP 服务器连接初始化结果；
+- tool 调用**摘要**（不含完整 I/O）；
+- compact / cost / worktree 等关键状态变化；
+- guidance 重新加载策略决策。
+
+**NEVER** 包含：
+- 完整 LLM 请求/响应 JSON payload（应为 `debug`）；
+- per-chunk / per-turn / per-hook 事件级日志（应为 `debug` 或 `trace`）。
+
+### `debug`
+
+开发调试需要的中等粒度细节。用于：
+
+- 请求参数/响应摘要；
+- tool input/output 摘要；
+- runtime 状态机转换；
+- 配置解析细节；
+- 完整 JSON payload（当确实需要落盘时，如 LLM I/O）；
+- 重试循环中的中间失败；
+- 可包含安全截断后的 preview（**SHOULD** 用 `truncate_preview` 或等价机制截断 body）。
+
+### `trace`
+
+高频、细粒度、默认关闭的诊断。用于：
+
+- SSE chunk 级事件（raw 行、delta 长度）；
+- reasoning / content delta 长度统计；
+- UI 布局细节、帧级绘制；
+- token / stream 累计状态；
+- per-chunk 的状态机推进（如 `ToolCallUpdate` 的 `arguments_delta`）。
+
+**NEVER** 泄露未截断的敏感完整内容（如完整用户输入、完整 API key、完整 LLM body）。
+
+### Per-Layer 细则
+
+#### provider 层（`agent/features/provider/**`）
+
+| 场景 | Level | 说明 |
+|---|---|---|
+| provider client 创建、model 选定 | `info` | 一次性生命周期 |
+| `send_message` / `stream_message` 入口 | `debug` 或不加 | 非 lifecycle，是 per-turn |
+| SSE chunk raw 行 | `trace` | 高频 |
+| reasoning / content delta 长度统计（per-chunk） | `trace` | 高频累计 |
+| `tool_use_start` / first delta（一次性） | `debug` | 每 turn 一次 |
+| 请求/响应摘要（已截断） | `debug` | 中等粒度 |
+| 5xx / 非 2xx body | `debug`（**SHOULD** 截断） | 排障用 |
+| 重试中间失败 | `debug` | 仅末次失败用 `warn` |
+| 流截断（`StreamTruncated`）返回 | `warn`（已容错）或 `error`（最终失败） | 视是否终止主流程 |
+| 孤儿 tool message 丢弃 | `warn` | 数据一致性 |
+
+#### runtime 层（`agent/features/runtime/**`）
+
+| 场景 | Level | 说明 |
+|---|---|---|
+| session 启动/结束、turn 起止摘要 | `info` | 低频生命周期 |
+| provider/model 选择、skills 加载、MCP 连接结果 | `info` | 一次性 |
+| compact 触发、cost 清零、worktree 状态变化 | `info` | 状态变化 |
+| **完整 LLM I/O JSON（messages / content_blocks / tool_schemas）** | `debug` | **NEVER info**，payload 过大 |
+| 每 turn 的 tool_call 独立日志 | `debug` | per-turn 中频 |
+| sub-agent 每 turn 进度回调 | `debug` | per-turn |
+| 每 turn 边界的 config_reload 检测 | `debug` | per-turn |
+| 每个 hook 事件分发 | `debug` | per-event |
+| tool 执行取消（正常控制流） | `debug` | 非异常 |
+| tool 执行完成摘要 | `debug` | 中等粒度 |
+| 状态机非法转换、持久化失败、PreCompact 阻止 | `warn` | 可恢复降级 |
+| 数据持久化失败且影响后续正确性 | `warn` 或 `error` | 视是否终止 |
+| runtime→sdk 事件转换（per-stream-event） | `trace` | 高频 |
+
+#### tui 层（`apps/cli/src/tui/**` + `apps/cli/src/chat/**`）
+
+| 场景 | Level | 说明 |
+|---|---|---|
+| chat frontend 启动、session 启动/结束 | `info` | 生命周期 |
+| 更新检测完成、guidance 初始化完成 | `info` | 生命周期 |
+| streaming delta（`ToolCallUpdate.arguments_delta`） | `trace` | per-chunk 高频 |
+| `tool_call_start` / `tool_result`（一次性） | `debug` | 每 turn 有限次 |
+| tool I/O 摘要、状态机转换 | `debug` | 中等粒度 |
+| TUI 主循环帧级、事件级 | `trace` | 高频 |
+| panic 兜底（task panic、事件循环 panic） | `error` | 关键失败 |
+| auto-save 失败（可能丢失用户会话） | `warn` 或 `error` | 视严重性 |
+| 排队消息丢弃图片（设计预期） | `debug` | 非异常 |
+
+#### hook / tools / storage / prompt / update 层
+
+| 场景 | Level |
+|---|---|
+| hook spawn/write/exit/wait/timeout 失败（返回 HookResult error） | `warn` |
+| hook match/start/end/env/result 细节 | `debug` |
+| bash 命令执行/完成摘要、被信号终止 | `debug` / `warn` |
+| MCP 重连失败、tools/list 重试失败 | `warn` |
+| MCP SSE 协议级细节、stderr 转发 | `debug` |
+| tool_result **写盘失败**（数据持久化失败） | `error` |
+| tool_result 路径遍历拒绝、目录创建失败 | `warn` |
+| guidance 目录/文件创建失败、skill 解析失败 | `warn` |
+| 更新检测命中、下载完成、校验通过 | `info` |
+| 更新缓存写入/序列化失败（次要持久化） | `warn` |
+
+### 强制约束（MUST / NEVER / SHOULD）
+
+- **MUST** 选择 level 时对照本节 Per-Layer 细则表。
+- **NEVER** 在 `info!` 中输出完整 LLM I/O JSON payload——用 `debug!`。
+- **NEVER** 在 `info!` / `debug!` 中输出 per-chunk 高频事件——用 `trace!`。
+- **NEVER** 在 `debug!` 中输出未截断的完整敏感 body——**SHOULD** 用 `truncate_preview` 截断。
+- **SHOULD** 重试循环中的中间失败用 `debug!`，末次汇总用 `warn!`。
+- **SHOULD** 数据持久化失败视影响升 `error!`。
+- **MUST** 新增日志调用时在 PR 描述中标注所遵循的 level 规则条目。
+
+### 待设计点决策（#338 遗留）
+
+| 待设计点 | 决策 | 理由 |
+|---|---|---|
+| 按模块定义 target 命名规范 | **沿用现状**——`aemeath:<domain>` | 现有规范已满足，见上方 target 命名章节 |
+| 统一要求生产代码日志带 `target:` | **MUST**（已落地，守卫强制） | `rust-coding.md` + `target_guard.rs` 已实现 |
+| 从 `log` 迁移到结构化 `tracing` | **推迟**，单开 issue 追踪（#346） | 当前无 trace 可视化后端消费 span 因果链，迁移成本高且与 level 规范正交 |
+| 统一 logging helper / macro | **沿用现状**——`LOG_TARGET` 常量 + TUI `log_xxx!` 宏 | 已满足，无需新增 |
+| 建立 lint/test 防止错误 level 扩散 | **文档 + code review 为主**；`target_guard.rs` 仅强制 target 合规 | level 选择存在语义判断，机器化检测收益有限；新增日志的 level 由 PR review 把关 |
+| provider/tool/runtime/TUI 补充细则 | **已在本节 Per-Layer 细则落地** | 见上 |
 
 ## preview / 脱敏策略
 
@@ -128,7 +255,7 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 ### preview 函数
 
 - `preview_messages(messages)` — 遍历 messages 列表，每条只记 `role` + content 前 100 字符 + 总长度
-- 审计日志（`llm_input`/`llm_output`/`user_input`）中的 `msg` 字段包含完整 JSON payload，由调用方通过 `log::info!` 传入
+- LLM I/O 日志的 `msg` 字段包含完整 JSON payload，由调用方通过 `log::debug!` 传入（见下方级别策略）
 
 ### request_id 生命周期
 

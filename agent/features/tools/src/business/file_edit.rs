@@ -1,8 +1,8 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::{PathAccess, PathKind};
 use share::tool::types::edit::EditResult;
+use share::tool::{PathAccess, PathKind};
 
 pub struct FileEditTool;
 
@@ -210,13 +210,11 @@ impl Tool for FileEditTool {
                     replacements_made: occurrences as u64,
                     dry_run: false,
                 };
-                ToolResult::success_json(
-                    serde_json::json!({
-                        "status": "success",
-                        "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
-                        "data": serde_json::to_value(&data).unwrap()
-                    })
-                )
+                ToolResult::success_json(serde_json::json!({
+                    "status": "success",
+                    "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
+                    "data": serde_json::to_value(&data).unwrap()
+                }))
             }
             Err(e) => ToolResult::error(
                 serde_json::json!({

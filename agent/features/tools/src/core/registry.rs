@@ -1,8 +1,8 @@
 //! Tool 注册编排：将各 business 层 Tool 实现注册到 `ToolRegistry`。
 
 use crate::business::{
-    agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool,
-    grep, lsp, memory_tool, plan_mode, skill_tool, sleep, task_create, task_get, task_list,
+    agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep, lsp,
+    memory_tool, plan_mode, skill_tool, sleep, task_create, task_get, task_list,
     task_list_complete, task_list_create, task_stop, task_update, tool_search, web_fetch,
     web_search, worktree,
 };

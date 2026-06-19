@@ -5,7 +5,6 @@ use share::tool::{PathAccess, ToolResult};
 
 #[async_trait]
 pub trait Tool: Send + Sync {
-
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;

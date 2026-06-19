@@ -103,7 +103,7 @@ fn add_task_tool(
     conversation: &mut ConversationModel,
     id: &str,
     name: &str,
-    summary: &str,
+    _summary: &str,
     output: &str,
 ) {
     conversation.apply(ConversationIntent::ObserveToolCallStart {

@@ -347,58 +347,55 @@ impl LlmClient {
         if !log::log_enabled!(log::Level::Debug) {
             return;
         }
-        match result {
-            Ok(resp) => {
-                let text = resp.assistant_message.text_content();
-                let text_preview = truncate_preview(&text, 500);
-                let tool_uses = resp.assistant_message.extract_tool_uses();
-                let tools_summary: Vec<serde_json::Value> = tool_uses.iter().map(|(id, name, input)| {
-                    let input_str = input.to_string();
-                    serde_json::json!({"id":id,"name":name,"input_preview":truncate_preview(&input_str,300)})
-                }).collect();
+        if let Ok(resp) = result {
+            let text = resp.assistant_message.text_content();
+            let text_preview = truncate_preview(&text, 500);
+            let tool_uses = resp.assistant_message.extract_tool_uses();
+            let tools_summary: Vec<serde_json::Value> = tool_uses.iter().map(|(id, name, input)| {
+                let input_str = input.to_string();
+                serde_json::json!({"id":id,"name":name,"input_preview":truncate_preview(&input_str,300)})
+            }).collect();
 
-                // 提取 thinking 块诊断信息
-                let thinking_info: Vec<serde_json::Value> = resp
-                    .assistant_message
-                    .content
-                    .iter()
-                    .filter_map(|block| {
-                        if let share::message::ContentBlock::Thinking { thinking } = block {
-                            let lines: Vec<&str> = thinking.lines().collect();
-                            let mut dup_lines = 0;
-                            for i in 1..lines.len() {
-                                if lines[i] == lines[i - 1] && !lines[i].trim().is_empty() {
-                                    dup_lines += 1;
-                                }
+            // 提取 thinking 块诊断信息
+            let thinking_info: Vec<serde_json::Value> = resp
+                .assistant_message
+                .content
+                .iter()
+                .filter_map(|block| {
+                    if let share::message::ContentBlock::Thinking { thinking } = block {
+                        let lines: Vec<&str> = thinking.lines().collect();
+                        let mut dup_lines = 0;
+                        for i in 1..lines.len() {
+                            if lines[i] == lines[i - 1] && !lines[i].trim().is_empty() {
+                                dup_lines += 1;
                             }
-                            Some(serde_json::json!({
-                                "thinking_len": thinking.len(),
-                                "thinking_chars": thinking.chars().count(),
-                                "dup_lines": dup_lines,
-                                "preview": truncate_preview(thinking, 200),
-                            }))
-                        } else {
-                            None
                         }
-                    })
-                    .collect();
+                        Some(serde_json::json!({
+                            "thinking_len": thinking.len(),
+                            "thinking_chars": thinking.chars().count(),
+                            "dup_lines": dup_lines,
+                            "preview": truncate_preview(thinking, 200),
+                        }))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-                log::debug!(target: LOG_TARGET,
-                    "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}",
-                    resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
-                    tool_uses.len(), thinking_info.len(),
-                );
-                log::trace!(target: LOG_TARGET,
-                    "[LLM RESPONSE] text: {}\n  thinking: {}\n  tools: {}",
-                    text_preview,
-                    serde_json::to_string_pretty(&thinking_info).unwrap_or_default(),
-                    serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
-                );
-            }
-            Err(e) => {
-                log::warn!(target: LOG_TARGET, "[LLM RESPONSE ERROR] {}{}", e, llm_error_chain(e));
-            }
+            log::debug!(target: LOG_TARGET,
+                "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}",
+                resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
+                tool_uses.len(), thinking_info.len(),
+            );
+            log::trace!(target: LOG_TARGET,
+                "[LLM RESPONSE] text: {}\n  thinking: {}\n  tools: {}",
+                text_preview,
+                serde_json::to_string_pretty(&thinking_info).unwrap_or_default(),
+                serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
+            );
         }
+        // Error path already handled by log_stream_error() with comprehensive context;
+        // no need to log a redundant warn here.
     }
 
     fn log_stream_error(

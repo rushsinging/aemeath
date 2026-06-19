@@ -95,10 +95,21 @@ impl CreateMessageRequest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Usage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Tokens served from prompt cache (cost-free or reduced cost).
+    /// Parsed from `prompt_tokens_details.cached_tokens` (OpenAI-compatible)
+    /// or `usage.cache_read_input_tokens` (Anthropic).
+    #[serde(default)]
+    pub cached_tokens: Option<u32>,
+    /// Tokens consumed by reasoning/thinking.
+    /// Parsed from `completion_tokens_details.reasoning_tokens` (OpenAI-compatible)
+    /// or `usage.reasoning_tokens` (if provider supports it).
+    #[serde(default)]
+    pub reasoning_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

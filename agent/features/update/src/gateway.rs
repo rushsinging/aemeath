@@ -19,26 +19,44 @@ const GITHUB_API_URL: &str = "https://api.github.com/repos/rushsinging/aemeath/r
 /// 缓存最大有效期（小时）。
 const CACHE_MAX_AGE_HOURS: i64 = 24;
 
-/// HTTP 请求超时（秒）。
+/// HTTP 请求超时（秒）—— 用于元数据请求（GitHub API JSON / checksums.txt）。
 const REQUEST_TIMEOUT_SECS: u64 = 5;
+
+/// 二进制下载超时（秒）—— 用于 tar.gz artifact（可达数 MB）。
+/// 5s 对 6.5MB tar.gz 经常不够（含 TLS 握手 + GitHub 302 跳转），
+/// 过短会中断 body 流导致 `error decoding response body`。见 issue #350。
+const DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 
 // ── public API ───────────────────────────────────────────────────
 
 /// 版本检查与自动更新 Gateway。
 pub struct UpdateGateway {
+    /// 元数据请求 client（短超时）。
     http: reqwest::Client,
+    /// 二进制下载 client（长超时）。
+    download: reqwest::Client,
     cache_path: PathBuf,
 }
 
 impl UpdateGateway {
     /// 创建 Gateway。`cache_path` 通常为 `~/.agents/update_check.json`。
     pub fn new(cache_path: PathBuf) -> Self {
+        let ua = format!("aemeath/{}", share::version());
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .user_agent(format!("aemeath/{}", share::VERSION))
+            .user_agent(&ua)
             .build()
             .unwrap_or_default();
-        Self { http, cache_path }
+        let download = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
+            .user_agent(ua)
+            .build()
+            .unwrap_or_default();
+        Self {
+            http,
+            download,
+            cache_path,
+        }
     }
 }
 
@@ -138,13 +156,15 @@ impl UpdateService for UpdateGateway {
 
         log::info!(
             target: LOG_TARGET,
-            "更新完成: {} → {version}",
-            check.current_version
+            "更新完成: {} → {version}（安装路径: {}）",
+            check.current_version,
+            current_exe.display()
         );
 
         Ok(UpdateResult::Updated {
             from: check.current_version,
             to: check.latest_version,
+            installed_path: current_exe.to_string_lossy().into_owned(),
         })
     }
 }
@@ -226,10 +246,10 @@ impl UpdateGateway {
             .await
     }
 
-    /// 下载二进制内容（如 tar.gz）。
+    /// 下载二进制内容（如 tar.gz）。使用长超时 client（见 issue #350）。
     async fn download_bytes(&self, url: &str) -> Result<Vec<u8>, reqwest::Error> {
         log::debug!(target: LOG_TARGET, "下载: {url}");
-        self.http
+        self.download
             .get(url)
             .send()
             .await?
@@ -249,7 +269,7 @@ fn strip_v_prefix(tag: &str) -> &str {
 
 /// 解析当前版本号。
 fn current_version() -> Version {
-    Version::parse(share::VERSION).expect("AEMEATH_VERSION / CARGO_PKG_VERSION 必须是合法 semver")
+    Version::parse(share::version()).expect("AEMEATH_VERSION / CARGO_PKG_VERSION 必须是合法 semver")
 }
 
 /// 判断缓存是否在有效期内。

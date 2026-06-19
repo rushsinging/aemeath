@@ -1,5 +1,5 @@
 //! build.rs: 两个职责
-//! 1. 从 git tag 注入版本号
+//! 1. 从 git tag 注入版本号到编译期常量（`cargo:rustc-env=AEMEATH_VERSION`）
 //! 2. 从 `// tool_schema: {...}` 注释生成 ToolSchema impl
 
 use std::env;

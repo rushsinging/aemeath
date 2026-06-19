@@ -5,36 +5,12 @@
 //! Phase 0a for the full design.
 use serde::de::DeserializeOwned;
 use share::tool::types::{
-    ReadResult,
-    WriteResult,
-    EditResult,
-    GlobResult,
-    GrepResult,
-    WebFetchResult,
-    WebSearchResult,
-    BashResult,
-    SleepResult,
-    AgentResult,
-    AskUserQuestionResult,
-    EnterWorktreeResult,
-    ExitWorktreeResult,
-    BriefResult,
-    LspResult,
-    PlanModeResult,
-    MemoryResult,
-    SkillResult,
-    TaskCreateResult,
-    TaskGetResult,
-    TaskListResult,
-    TaskStopResult,
-    TaskUpdateResult,
-    TaskListCreateResult,
-    TaskListCompleteResult,
-    ToolSearchResult,
-    McpToolResult,
-    McpManagerResult,
-    ListMcpResourcesResult,
-    ReadMcpResourceResult,
+    AgentResult, AskUserQuestionResult, BashResult, BriefResult, EditResult, EnterWorktreeResult,
+    ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult, LspResult,
+    McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult,
+    ReadResult, SkillResult, SleepResult, TaskCreateResult, TaskGetResult, TaskListCompleteResult,
+    TaskListCreateResult, TaskListResult, TaskStopResult, TaskUpdateResult, ToolSearchResult,
+    WebFetchResult, WebSearchResult, WriteResult,
 };
 
 /// Tool result adapter: convert `serde_json::Value` back to the typed R struct.
@@ -80,4 +56,3 @@ impl ToolResultAdapter for McpToolResult {}
 impl ToolResultAdapter for McpManagerResult {}
 impl ToolResultAdapter for ListMcpResourcesResult {}
 impl ToolResultAdapter for ReadMcpResourceResult {}
-

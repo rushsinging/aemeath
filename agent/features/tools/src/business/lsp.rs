@@ -2,8 +2,8 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::string_idx::slice_head;
-use share::tool::{PathAccess, PathKind};
 use share::tool::types::lsp::LspResult;
+use share::tool::{PathAccess, PathKind};
 use tokio::process::Command;
 
 pub struct LspTool;

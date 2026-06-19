@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// A Rust-based AI coding agent
 #[derive(Parser)]
-#[command(name = "aemeath")]
+#[command(name = "aemeath", version = composition::COMPILED_VERSION)]
 pub struct Cli {
     #[command(flatten)]
     pub run_args: RunArgs,
@@ -113,6 +113,9 @@ pub enum Commands {
         #[arg(long)]
         check: bool,
     },
+
+    /// Print version information
+    Version,
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.

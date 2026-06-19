@@ -6,38 +6,7 @@
 use serde::{Deserialize, Serialize};
 use share::config::paths;
 use std::fs;
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn global_agents_dir() -> PathBuf {
-    if let Ok(value) = std::env::var(paths::AGENTS_DIR_ENV) {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return expand_home(std::path::Path::new(trimmed));
-        }
-    }
-
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(paths::AGENTS_DIR_NAME)
-}
-
-fn global_history_path() -> PathBuf {
-    global_agents_dir().join(paths::HISTORY_FILE)
-}
-
-fn expand_home(path: &std::path::Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    if text == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    path.to_path_buf()
-}
 
 /// A single history entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,7 +35,7 @@ impl HistoryManager {
         Self {
             entries: Vec::new(),
             max_entries,
-            path: global_history_path(),
+            path: paths::global_history_path(),
         }
     }
 

@@ -35,7 +35,7 @@ pub(super) fn log_llm_input(
         "tool_schemas_count": tool_schemas.len(),
         "tool_schemas_names": schema_names,
     });
-    log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+    log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
 }
 
 /// 记录 LLM 完整输出 + tool_call 到 `output.log` / `tool.log`。
@@ -60,7 +60,7 @@ pub(super) fn log_llm_output_and_tool_calls(
         "provider": provider_name,
         "content_blocks": blocks,
     });
-    log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+    log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
 
     for tc in tool_calls {
         let tc_data = serde_json::json!({
@@ -68,7 +68,7 @@ pub(super) fn log_llm_output_and_tool_calls(
             "tool_name": tc.name,
             "input": tc.input,
         });
-        log::info!(
+        log::debug!(
             target: LOG_TARGET,
             "tool_call: {}",
             serde_json::to_string(&tc_data).unwrap_or_default()

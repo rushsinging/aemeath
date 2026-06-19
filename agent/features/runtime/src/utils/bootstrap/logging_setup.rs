@@ -47,7 +47,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
 
     // 注入 boot_ts 和 app_version 到全局上下文
     logging::set_boot_ts(logging::timestamp_local_rfc3339());
-    logging::set_app_version(share::VERSION.to_string());
+    logging::set_app_version(share::version().to_string());
 }
 
 fn use_stderr_log_target() -> bool {

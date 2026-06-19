@@ -197,7 +197,12 @@ impl Tool for WebFetchTool {
                     let max_chars = 50_000;
                     if body.len() > max_chars {
                         let truncated = share::string_idx::slice_head(&body, max_chars);
-                        let truncated_content = format!("{}...\n\n[truncated, showing first {} chars of {} total]", truncated, truncated.chars().count(), body.chars().count());
+                        let truncated_content = format!(
+                            "{}...\n\n[truncated, showing first {} chars of {} total]",
+                            truncated,
+                            truncated.chars().count(),
+                            body.chars().count()
+                        );
                         ToolResult::success(serde_json::json!({
                             "status": "success",
                             "message": format!("Fetched {} (truncated, showing first {} chars of {} total)", url, truncated.chars().count(), body.chars().count()),

@@ -204,7 +204,7 @@ inventory::submit! {
             |_args, _ctx| {
                 CommandResult::Success(format!(
                     "aemeath v{}\n\nBuild info:\n  Rust version: stable\n  Target: {}",
-                    share::VERSION, std::env::consts::ARCH
+                    share::version(), std::env::consts::ARCH
                 ))
             },
         )
