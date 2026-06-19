@@ -6,7 +6,7 @@ use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
-use crate::business::compact::truncate_tool_result;
+use crate::business::compact::offload_tool_result;
 use crate::LOG_TARGET;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
@@ -128,10 +128,12 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
-                    for (_, _, output, content, _, _) in &mut results {
-                        if output.len() > crate::business::compact::MAX_TOOL_RESULT_CHARS {
-                            *output = truncate_tool_result(output);
-                            *content = serde_json::json!({ "text": output });
+                    for (tool_call_id, _, output, content, _, _) in &mut results {
+                        let offloaded =
+                            offload_tool_result(output, tool_call_id.as_str(), &self.session_id);
+                        if offloaded.len() != output.len() {
+                            *output = offloaded;
+                            *content = serde_json::json!({ "text": &*output });
                         }
                     }
                     append_tool_results(&mut self.messages, results, &self.session_id);

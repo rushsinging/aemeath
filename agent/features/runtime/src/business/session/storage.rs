@@ -172,7 +172,15 @@ pub async fn delete_session(id: &str) -> Result<(), String> {
     }
     tokio::fs::remove_file(&path)
         .await
-        .map_err(|e| format!("failed to delete session: {e}"))
+        .map_err(|e| format!("failed to delete session: {e}"))?;
+
+    // 清理该 session 的 tool_outputs 子目录（生命周期与 session 绑定）
+    let tool_outputs_dir = share::config::paths::session_tool_outputs_dir(id);
+    if tool_outputs_dir.exists() {
+        let _ = tokio::fs::remove_dir_all(&tool_outputs_dir).await;
+    }
+
+    Ok(())
 }
 
 /// Update session metadata

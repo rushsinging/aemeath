@@ -54,6 +54,10 @@ Rules:
 Here is the conversation to summarize:
 "#;
 
+/// 单个 compact chunk 的目标 token 数。
+/// 超过此值的 early_messages 会触发 map-reduce（分块独立摘要 → 合并）。
+const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
+
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
 ///
 /// 返回 `Some(CompactResult)` 表示发生了压缩（summary + recent tail）；
@@ -238,11 +242,21 @@ pub async fn compact_messages_with_llm(
     let early_messages = &messages[window.head_protect..window.split_point];
 
     // 尝试 LLM 摘要，失败则回退到本地
+    let early_tokens = super::token_estimation::estimate_messages_tokens(early_messages);
     let summary = match client {
-        Some(client) => match llm_compact(client, early_messages).await {
-            Ok(text) => text,
-            Err(_) => build_summary_text(early_messages),
-        },
+        Some(client) => {
+            if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
+                match compact_messages_map_reduce(client, early_messages).await {
+                    Ok(text) => text,
+                    Err(_) => build_summary_text(early_messages),
+                }
+            } else {
+                match llm_compact(client, early_messages).await {
+                    Ok(text) => text,
+                    Err(_) => build_summary_text(early_messages),
+                }
+            }
+        }
         None => build_summary_text(early_messages),
     };
 
@@ -256,18 +270,11 @@ pub async fn compact_messages_with_llm(
     })
 }
 
-/// 调用 LLM 生成语义化压缩摘要
-async fn llm_compact(
+/// 底层 LLM 调用：发送 request 消息列表，流式收集文本并解析 `<summary>` 标签。
+async fn llm_generate(
     client: &provider::api::LlmClient,
-    early_messages: &[Message],
+    request: Vec<Message>,
 ) -> Result<String, String> {
-    let mut request = build_compact_request(early_messages);
-    // 将 COMPACT_PROMPT 作为最后一条 user 消息
-    request.push(Message::user(format!(
-        "{}\n\n这里是要总结的对话：",
-        COMPACT_PROMPT
-    )));
-
     let cancel = CancellationToken::new();
     let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let collected_clone = collected.clone();
@@ -281,7 +288,7 @@ async fn llm_compact(
         client
             .stream_message(&[], &request, &[], &mut handler, &cancel)
             .await
-            .map_err(|e| format!("LLM compact call failed: {e}"))?;
+            .map_err(|e| format!("LLM call failed: {e}"))?;
     }
 
     let full_text = collected.lock().map_err(|e| format!("Lock error: {e}"))?;
@@ -290,6 +297,96 @@ async fn llm_compact(
         return Err("LLM returned empty summary".into());
     }
     Ok(summary)
+}
+
+/// 调用 LLM 对 early_messages 生成单次压缩摘要。
+async fn llm_compact(
+    client: &provider::api::LlmClient,
+    early_messages: &[Message],
+) -> Result<String, String> {
+    let mut request = build_compact_request(early_messages);
+    request.push(Message::user(format!(
+        "{}\n\n这里是要总结的对话：",
+        COMPACT_PROMPT
+    )));
+    llm_generate(client, request).await
+}
+
+/// 将消息列表按 token 预算分块（不拆分单条消息）。
+fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec<Vec<Message>> {
+    use super::token_estimation::estimate_message_tokens;
+
+    let mut chunks = Vec::new();
+    let mut current = Vec::new();
+    let mut current_tokens = 0usize;
+
+    for msg in messages {
+        let msg_tokens = estimate_message_tokens(msg);
+        if current_tokens + msg_tokens > target_tokens && !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+            current_tokens = 0;
+        }
+        current.push(msg.clone());
+        current_tokens += msg_tokens;
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+/// map-reduce 式压缩：分块独立摘要 → 合并为最终摘要。
+///
+/// 当 early_messages 很大时，单次 LLM compact 会因输入过长而摘要质量下降。
+/// 改为分块（map）再合并（reduce）：
+/// 1. map: 按 token 预算分 N 块，每块独立调用 `llm_compact`。
+/// 2. reduce: 把 N 个子摘要合并，再次调用 LLM 生成连贯的最终摘要。
+async fn compact_messages_map_reduce(
+    client: &provider::api::LlmClient,
+    early_messages: &[Message],
+) -> Result<String, String> {
+    use super::token_estimation::estimate_messages_tokens;
+
+    let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
+    log::info!(
+        target: crate::LOG_TARGET,
+        "map-reduce compact: {} chunks from {} messages ({} tokens)",
+        chunks.len(),
+        early_messages.len(),
+        estimate_messages_tokens(early_messages),
+    );
+
+    // map: 每个 chunk 独立摘要
+    let mut sub_summaries = Vec::with_capacity(chunks.len());
+    for (i, chunk) in chunks.iter().enumerate() {
+        let summary = llm_compact(client, chunk).await?;
+        sub_summaries.push(summary);
+        log::info!(
+            target: crate::LOG_TARGET,
+            "map-reduce compact: chunk {}/{} done",
+            i + 1,
+            chunks.len(),
+        );
+    }
+
+    // 只有 1 块时无需 reduce
+    if sub_summaries.len() <= 1 {
+        return Ok(sub_summaries.into_iter().next().unwrap_or_default());
+    }
+
+    // reduce: 合并子摘要
+    let combined = sub_summaries
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!("## Part {} summary\n\n{s}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n");
+
+    let prompt = format!(
+        "{COMPACT_PROMPT}\n\n以下是对话的多个分段摘要，请合并为一份连贯的最终摘要：\n\n<sub-summaries>\n{combined}\n</sub-summaries>\n\nWrite your summary inside <summary> tags."
+    );
+
+    llm_generate(client, vec![Message::user(prompt)]).await
 }
 
 #[cfg(test)]

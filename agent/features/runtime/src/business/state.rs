@@ -313,6 +313,11 @@ impl AppState {
                 .await
                 .map_err(|e| format!("Failed to delete session: {e}"))?;
         }
+        // 清理该 session 的 tool_outputs 子目录
+        let tool_outputs_dir = share::config::paths::session_tool_outputs_dir(session_id);
+        if tool_outputs_dir.exists() {
+            let _ = tokio::fs::remove_dir_all(&tool_outputs_dir).await;
+        }
         Ok(())
     }
 }
