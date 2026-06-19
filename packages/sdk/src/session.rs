@@ -77,7 +77,16 @@ impl ChatMessage {
             .map(|blocks| {
                 blocks
                     .iter()
-                    .filter_map(|block| block.get("text").and_then(|text| text.as_str()))
+                    .filter_map(|block| {
+                        // 只取真正的 `text` 块；**不能**对所有块裸抓 `text` 字段——
+                        // 否则 tool_result 块（text-first 后带 `text` 字段）会被误当成消息
+                        // 文本，导致工具结果被 MessagesSync 回显成蓝色 user 消息。
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            block.get("text").and_then(|text| text.as_str())
+                        } else {
+                            None
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join("")
             })
@@ -138,4 +147,59 @@ pub struct SessionSummary {
     pub preview: Option<String>,
     /// 展示摘要。
     pub summary: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChatMessage;
+
+    fn msg(content: serde_json::Value) -> ChatMessage {
+        ChatMessage {
+            role: "user".to_string(),
+            content,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn test_text_content_extracts_text_blocks() {
+        // 正常路径：text 块的文本被提取。
+        let m = msg(serde_json::json!([{ "type": "text", "text": "hello" }]));
+        assert_eq!(m.text_content(), "hello");
+    }
+
+    #[test]
+    fn test_text_content_ignores_tool_result_text_field() {
+        // 回归：tool_result 块（text-first 后带 `text` 字段）不应被当成消息文本，
+        // 否则工具结果会被 MessagesSync 回显成 user 消息。
+        let m = msg(serde_json::json!([{
+            "type": "tool_result",
+            "tool_use_id": "t1",
+            "content": { "stdout": "lots of output" },
+            "is_error": false,
+            "text": "lots of output"
+        }]));
+        assert_eq!(
+            m.text_content(),
+            "",
+            "tool_result 的 text 字段不应进入 text_content"
+        );
+    }
+
+    #[test]
+    fn test_text_content_mixed_only_text_blocks() {
+        // 边界：text + tool_result 混合 → 只取 text 块。
+        let m = msg(serde_json::json!([
+            { "type": "text", "text": "answer" },
+            { "type": "tool_result", "tool_use_id": "t1", "content": {}, "is_error": false, "text": "tool out" }
+        ]));
+        assert_eq!(m.text_content(), "answer");
+    }
+
+    #[test]
+    fn test_text_content_non_array_content() {
+        // 错误/边界路径：content 非数组 → 空串。
+        let m = msg(serde_json::json!("not an array"));
+        assert_eq!(m.text_content(), "");
+    }
 }
