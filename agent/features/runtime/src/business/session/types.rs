@@ -8,6 +8,8 @@ use share::message::{Message, Role};
 use std::path::PathBuf;
 use storage::api::TaskSnapshot;
 
+use super::chat_chain::ChatSegment;
+
 /// Validate a session ID — delegates to state::validate_session_id
 pub fn validate_session_id(id: &str) -> Result<(), String> {
     state::validate_session_id(id)
@@ -36,7 +38,15 @@ pub use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFram
 pub struct Session {
     pub id: String,
     pub cwd: String,
+    /// 旧格式兼容字段（加载后迁移到 `chats`）。新 session 写入空数组。
+    #[serde(default)]
     pub messages: Vec<Message>,
+    /// Chat 链：按 user 消息分段的对话历史（新格式）。
+    ///
+    /// compact 产生新链时，旧链保留在此数组（冻结），新 `Compact` 段（`parent_id=None`）
+    /// 作为新链起点。resume 只加载活跃链（最后一个 Compact 段到末端）。
+    #[serde(default)]
+    pub chats: Vec<ChatSegment>,
     pub created_at: String,
     pub updated_at: String,
     /// Session metadata for organization
@@ -57,6 +67,7 @@ impl Session {
             id,
             cwd,
             messages: Vec::new(),
+            chats: Vec::new(),
             created_at: now_iso(),
             updated_at: now_iso(),
             metadata: SessionMetadata {
@@ -127,7 +138,13 @@ impl Session {
         if let Some(title) = &self.metadata.title {
             return title.chars().take(40).collect();
         }
-        let first_user = self.messages.iter().find(|m| m.role == Role::User);
+        // 优先从 chats 链查找，回退到旧 messages（未迁移的旧 session）
+        let first_user = self
+            .chats
+            .iter()
+            .flat_map(|s| s.messages.iter())
+            .chain(self.messages.iter())
+            .find(|m| m.role == Role::User);
         if let Some(msg) = first_user {
             let text = msg.text_content();
             let first_line = text.lines().next().unwrap_or("").trim();

@@ -302,6 +302,8 @@ mod tests {
             current_client: std::sync::RwLock::new(client),
             current_cancel: Arc::new(std::sync::Mutex::new(None)),
             current_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
+            frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
+            active_summary: Arc::new(std::sync::Mutex::new(None)),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),
             change_tx,
             change_rx,

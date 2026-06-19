@@ -330,7 +330,7 @@ pub fn needs_compaction_actual(
 /// Uses effective_context_window for percentage calculation.
 /// Returns a level from 0-3:
 /// - 0: No compaction needed (< 70% of effective window)
-/// - 1: Approaching limit, microcompact recommended (70-80%)
+/// - 1: Approaching limit, monitoring (70-80%)
 /// - 2: At limit, full compaction needed (80-90%)
 /// - 3: Critical, blocking — must compact before next query (> 90%)
 ///
