@@ -151,14 +151,14 @@ fn truncate_path(path: &str, max_width: usize) -> String {
 /// Span::styled(suffix, MUTED)])` 模板，DRY 化后由 helper 统一处理。
 fn build_header_line(name: &str, path: &str, suffix: &str) -> Line<'static> {
     let display_path = truncate_path(path, 60);
-    let mut spans = vec![
-        Span::styled(
-            name.to_string(),
-            Style::default().fg(theme::ACCENT_BRIGHT),
-        ),
-        Span::raw(" "),
-        Span::styled(display_path, Style::default().fg(theme::TEXT)),
-    ];
+    let mut spans = vec![Span::styled(
+        name.to_string(),
+        Style::default().fg(theme::ACCENT_BRIGHT),
+    )];
+    if !display_path.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(display_path, Style::default().fg(theme::TEXT)));
+    }
     if !suffix.is_empty() {
         spans.push(Span::styled(
             suffix.to_string(),
@@ -421,6 +421,27 @@ impl ToolDisplay for GlobDisplay {
             format!("{} {pattern}", self.display_name())
         }
     }
+    /// result 到达后，使用结构化 payload 中的匹配文件数更新 header。
+    /// typed 路径优先：`data.match_count`（issue #273 引入），fallback 到
+    /// `data.count`（旧字段，1 release 兼容期）。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let pattern = str_arg(input, "pattern", "");
+        let n = data_field_u64(result_payload, "data.match_count")
+            .or_else(|| data_field_u64(result_payload, "data.count"));
+        let suffix = n.map(|c| format!(" ({c} files)")).unwrap_or_default();
+        if pattern.is_empty() && suffix.is_empty() {
+            Line::from(Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
+        } else {
+            build_header_line(self.display_name(), pattern, &suffix)
+        }
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
@@ -457,6 +478,22 @@ impl ToolDisplay for GrepDisplay {
         } else {
             format!("{} /{pattern}/ in {display_path}", self.display_name())
         }
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let arg = if pattern.is_empty() {
+            format!("in {path}")
+        } else {
+            format!("/{pattern}/, path={path}")
+        };
+        let n = data_field_u64(result_payload, "data.match_count");
+        let suffix = n.map(|c| format!(" ({c} matches)")).unwrap_or_default();
+        build_header_line(self.display_name(), &arg, &suffix)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -518,6 +555,20 @@ impl ToolDisplay for AgentDisplay {
                 tail_mode: false,
             },
         }
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let description = input
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let target = data_field_string(result_payload, "data.agent_id")
+            .unwrap_or_else(|| "?".to_string());
+        let arg = format!("{description} -> [{target}]");
+        build_header_line(self.display_name(), &arg, "")
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -583,6 +634,16 @@ impl ToolDisplay for ExitWorktreeDisplay {
     fn format_header(&self, _input: &serde_json::Value) -> String {
         self.display_name().to_string()
     }
+    fn format_header_line_with_result(
+        &self,
+        _input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let path_suffix = data_field_string(result_payload, "data.working_root")
+            .map(|p| format!(" (back to {p})"))
+            .unwrap_or_default();
+        build_header_line(self.display_name(), "", &path_suffix)
+    }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
@@ -617,6 +678,23 @@ impl ToolDisplay for WebFetchDisplay {
         } else {
             let display_url = truncate_ellipsis(url, 60);
             format!("{} {display_url}", self.display_name())
+        }
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        let bytes = data_field_u64(result_payload, "data.byte_count");
+        let suffix = bytes.map(|b| format!(" ({b} bytes)")).unwrap_or_default();
+        if url.is_empty() && suffix.is_empty() {
+            Line::from(Span::styled(
+                self.display_name().to_string(),
+                Style::default().fg(theme::ACCENT_BRIGHT),
+            ))
+        } else {
+            build_header_line(self.display_name(), url, &suffix)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -664,6 +742,18 @@ impl ToolDisplay for AskUserQuestionDisplay {
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Hidden, // answer is already echoed via App::append_user_echo
         }
+    }
+    /// result 到达后，从 `payload.content.data.option_count` (u64) 读取选项数，
+    /// suffix 形如 ` (N options)`。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> Line<'static> {
+        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+        let n = data_field_u64(result_payload, "data.option_count");
+        let suffix = n.map(|c| format!(" ({c} options)")).unwrap_or_default();
+        build_header_line(self.display_name(), question, &suffix)
     }
 }
 inventory::submit!(ToolDisplayEntry {
