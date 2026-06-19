@@ -25,6 +25,26 @@ fn data_field_u64(payload: Option<&ToolResultPayload>, path: &str) -> Option<u64
     current.as_u64()
 }
 
+/// 同 `data_field_u64`，但提取 i64 字段（Bash exit_code 等可为负值，标识 signal）。
+fn data_field_i64(payload: Option<&ToolResultPayload>, path: &str) -> Option<i64> {
+    let payload = payload?;
+    let mut current: &serde_json::Value = &payload.content;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_i64()
+}
+
+/// 同 `data_field_u64`，但提取 String 字段（branch / agent_id / working_root 等）。
+fn data_field_string(payload: Option<&ToolResultPayload>, path: &str) -> Option<String> {
+    let payload = payload?;
+    let mut current: &serde_json::Value = &payload.content;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_str().map(|s| s.to_string())
+}
+
 // ── Bash ─────────────────────────────────────────────────────────
 
 struct BashDisplay;
