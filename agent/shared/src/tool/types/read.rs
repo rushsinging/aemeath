@@ -14,3 +14,16 @@ pub struct ReadResult {
     pub start_line: u64,
     pub total_lines: u64,
 }
+
+/// Typed input for the `read` tool.
+///
+/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ReadInput {
+    /// Absolute path to the file to read
+    pub file_path: String,
+    /// Line number to start reading from (0-based)
+    pub offset: Option<u64>,
+    /// Maximum number of lines to read (default 2000)
+    pub limit: Option<u64>,
+}

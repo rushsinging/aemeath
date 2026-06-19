@@ -1,6 +1,5 @@
 mod handlers;
 mod helpers;
-mod schema;
 
 #[cfg(test)]
 mod tests;
@@ -8,7 +7,7 @@ mod tests;
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::memory::MemoryResult;
+use share::tool::types::memory::{MemoryInput, MemoryResult};
 
 pub struct MemoryTool;
 
@@ -24,7 +23,8 @@ impl TypedTool for MemoryTool {
     }
 
     fn input_schema(&self) -> Value {
-        schema::input_schema()
+        use share::tool::types::ToolSchema;
+        MemoryInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -44,10 +44,11 @@ impl TypedTool for MemoryTool {
         input: Value,
         ctx: &ToolExecutionContext,
     ) -> TypedToolResult<MemoryResult> {
-        let action = input
-            .get("action")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
+        let args: MemoryInput = match serde_json::from_value(input.clone()) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+        let action = args.action.as_str();
 
         match action {
             "add" => handlers::add_memory(input, ctx),

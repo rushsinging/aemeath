@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::agent::AgentResult;
+use share::tool::types::agent::{AgentInput, AgentResult};
 use std::path::Path;
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
@@ -25,35 +25,8 @@ impl TypedTool for AgentTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "The task for the agent to perform"
-                },
-                "description": {
-                    "type": "string",
-                    "description": "A short (3-5 word) description of the task"
-                },
-                "role": {
-                    "type": "string",
-                    "description": "Agent role name defined in config (e.g. 'coder', 'reviewer'). Resolves to the model and settings configured for that role."
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Direct model override in 'provider/model_id' format (e.g. 'deepseek/deepseek-chat', 'ollama/llama3.2'). Takes precedence over 'role' if both are specified."
-                },
-                "max_turns": {
-                    "type": "integer",
-                    "description": "Maximum number of tool-call rounds (default 200, max 200)"
-                },
-                "taskId": {
-                    "type": "string",
-                    "description": "Task ID from TaskCreate. OPTIONAL — only pass when you want the dispatcher to auto-manage task status (InProgress on start, Completed on success, Pending on failure). Free-form exploration or ad-hoc agent calls do NOT need a taskId."
-                }            },
-            "required": ["prompt", "description"]
-        })
+        use share::tool::types::ToolSchema;
+        AgentInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -73,15 +46,18 @@ impl TypedTool for AgentTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<AgentResult> {
-        let prompt = match input.get("prompt").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => return TypedToolResult::error("missing required parameter: prompt"),
+        let args: AgentInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
 
-        let _description = match input.get("description").and_then(|v| v.as_str()) {
-            Some(d) => d,
-            None => return TypedToolResult::error("missing required parameter: description"),
-        };
+        if args.prompt.is_empty() {
+            return TypedToolResult::error("missing required parameter: prompt");
+        }
+        if args.description.is_empty() {
+            return TypedToolResult::error("missing required parameter: description");
+        }
+        let prompt = args.prompt.as_str();
 
         // --- Task scope analysis ---
         // Warnings flow through two paths:
@@ -100,12 +76,7 @@ impl TypedTool for AgentTool {
         // (Previously, ScopeLevel::Block returned an error here, which was too
         // aggressive for expert users who know what they're doing.)
 
-        let _model = input.get("model").and_then(|v| v.as_str()).unwrap_or("");
-
-        let max_turns = input
-            .get("max_turns")
-            .and_then(|v| v.as_u64())
-            .map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
+        let max_turns = args.max_turns.map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
         let runner = match &ctx.agent_runner {
             Some(r) => r.clone(),
             None => return TypedToolResult::error("agent runner not available"),
@@ -118,18 +89,15 @@ impl TypedTool for AgentTool {
         //   - `model` takes precedence: a direct "provider/model_id" spec
         //   - `role` is resolved by CliAgentRunner via AgentsConfig::roles
         //   - If neither is set, the runner uses the default model
-        let role = input.get("role").and_then(|v| v.as_str());
-        let model = input.get("model").and_then(|v| v.as_str());
+        let role = args.role.as_deref();
+        let model = args.model.as_deref();
         let model_spec = if model.is_some() { model } else { role };
 
         // --- Task status management ---
         // If `taskId` is provided, automatically manage its lifecycle:
         //   Pending → InProgress (before run_agent)
         //   InProgress → Completed (on success) or Pending (on failure)
-        let task_id = input
-            .get("taskId")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let task_id = args.taskId.clone();
 
         if let Some(ref tid) = task_id {
             if self.store.get(tid).await.is_none() {

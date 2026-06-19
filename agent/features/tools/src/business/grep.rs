@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::grep::GrepResult;
+use share::tool::types::grep::{GrepInput, GrepResult};
 use share::tool::types::support::Match;
 use share::tool::{PathAccess, PathKind};
 use std::path::PathBuf;
@@ -24,15 +24,8 @@ impl TypedTool for GrepTool {
         "Search file contents using ripgrep regex syntax. Supports glob file filters."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": { "type": "string", "description": "Regex pattern to search for" },
-                "path": { "type": "string", "description": "File or directory to search in (defaults to cwd)" },
-                "glob": { "type": "string", "description": "File glob filter (e.g. \"*.rs\")" }
-            },
-            "required": ["pattern"]
-        })
+        use share::tool::types::ToolSchema;
+        GrepInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -49,13 +42,13 @@ impl TypedTool for GrepTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<GrepResult> {
-        let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => {
+        let args: GrepInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
                 return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
-                        "message": "Missing required parameter: pattern",
+                        "message": format!("invalid input: {e}"),
                         "data": {
                             "matches": [],
                             "match_count": 0
@@ -65,13 +58,14 @@ impl TypedTool for GrepTool {
                 )
             }
         };
+        let pattern = args.pattern.as_str();
         // Path has already been validated and normalised by PolicyEngine
         let working_root = ctx.workspace_read().current_root();
-        let search_path = match input.get("path").and_then(|v| v.as_str()) {
+        let search_path = match args.path.as_deref() {
             Some(p) => std::path::PathBuf::from(p),
             None => working_root.clone(),
         };
-        let glob_filter = input.get("glob").and_then(|v| v.as_str());
+        let glob_filter = args.glob.as_deref();
 
         let output = if is_rg_available().await {
             let mut cmd = Command::new("rg");

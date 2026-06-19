@@ -4,7 +4,7 @@ use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
-use share::tool::types::bash::BashResult;
+use share::tool::types::bash::{BashInput, BashResult};
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 
 pub use safety::is_readonly_command;
@@ -34,14 +34,8 @@ impl TypedTool for BashTool {
         "Executes a bash command and returns its output. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s)."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "command": { "type": "string", "description": "The bash command to execute" },
-                "timeout": { "type": "integer", "description": "Timeout in milliseconds (default 120000)" }
-            },
-            "required": ["command"]
-        })
+        use share::tool::types::ToolSchema;
+        BashInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -70,10 +64,11 @@ impl TypedTool for BashTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<BashResult> {
-        let command = match input.get("command").and_then(|v| v.as_str()) {
-            Some(c) => c,
-            None => return TypedToolResult::error("missing required parameter: command"),
+        let args: BashInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
+        let command = args.command.as_str();
         if let Some(reason) = check_command_safety(command) {
             if !ctx.allow_all {
                 return TypedToolResult::error(format!("Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."));
@@ -85,10 +80,7 @@ impl TypedTool for BashTool {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
-        let timeout_ms = input
-            .get("timeout")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(120_000);
+        let timeout_ms = args.timeout.unwrap_or(120_000);
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(

@@ -42,7 +42,18 @@ fn rust_type_to_json_schema(
                         if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
                             let inner =
                                 rust_type_to_json_schema(inner_ty, known_structs, known_enums);
-                            return inner.replacen('}', r#","nullable": true}"#, 1);
+                            // 在**最外层** `}` 前插入 nullable：嵌套对象（如 Vec<Value> 的
+                            // `{"type":"array","items":{}}`）的第一个 `}` 是内层的，不能用
+                            // replacen 第一个；空对象 `{}` 特判避免产生首逗号。
+                            if inner.trim() == "{}" {
+                                return r#"{ "nullable": true }"#.to_string();
+                            }
+                            if let Some(pos) = inner.rfind('}') {
+                                let mut s = inner.clone();
+                                s.insert_str(pos, r#","nullable": true"#);
+                                return s;
+                            }
+                            return inner;
                         }
                     }
                     r#"{"type": "object"}"#.to_string()
@@ -98,6 +109,38 @@ fn rust_type_to_json_schema(
     }
 }
 
+/// 提取字段/struct 的 `///` 文档注释（syn 解析为 `#[doc = "..."]`），多行拼成一句。
+fn extract_doc(attrs: &[syn::Attribute]) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for attr in attrs {
+        if !attr.path().is_ident("doc") {
+            continue;
+        }
+        if let syn::Meta::NameValue(nv) = &attr.meta {
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            {
+                lines.push(s.value().trim().to_string());
+            }
+        }
+    }
+    let joined = lines.join(" ").trim().to_string();
+    if joined.is_empty() {
+        None
+    } else {
+        Some(joined)
+    }
+}
+
+/// 将字符串转义为可安全嵌入 JSON 字面量的形式（描述文本用）。
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(['\n', '\r'], " ")
+}
+
 /// 从 struct 定义提取字段，生成 ToolSchema impl。
 fn generate_tool_schema_impl(
     item: &syn::ItemStruct,
@@ -115,7 +158,15 @@ fn generate_tool_schema_impl(
         };
 
         let is_option = is_option_type(&field.ty);
-        let schema = rust_type_to_json_schema(&field.ty, known_structs, known_enums);
+        let mut schema = rust_type_to_json_schema(&field.ty, known_structs, known_enums);
+        // 注入字段级 /// 文档注释为 description（供 LLM 理解参数；input schema 关键）。
+        if let Some(desc) = extract_doc(&field.attrs) {
+            schema = schema.replacen(
+                '{',
+                &format!("{{ \"description\": \"{}\",", json_escape(&desc)),
+                1,
+            );
+        }
 
         properties.push(format!("            \"{field_name}\": {schema}"));
         if !is_option {

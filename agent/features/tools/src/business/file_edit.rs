@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::edit::EditResult;
+use share::tool::types::edit::{EditInput, EditResult};
 use share::tool::{PathAccess, PathKind};
 
 pub struct FileEditTool;
@@ -21,16 +21,8 @@ impl TypedTool for FileEditTool {
         "Performs exact string replacements in files. Read must be called first. Fails if `old_string` is not unique — use `replace_all` for multiple occurrences."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file" },
-                "old_string": { "type": "string", "description": "The exact text to replace" },
-                "new_string": { "type": "string", "description": "The replacement text" },
-                "replace_all": { "type": "boolean", "description": "Replace all occurrences (default false)" }
-            },
-            "required": ["file_path", "old_string", "new_string"]
-        })
+        use share::tool::types::ToolSchema;
+        EditInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -51,52 +43,26 @@ impl TypedTool for FileEditTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<EditResult> {
-        let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => {
+        let args: EditInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
                 return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
-                        "message": "missing required parameter: file_path",
+                        "message": format!("invalid input: {e}"),
                         "data": null
                     })
                     .to_string(),
                 )
             }
         };
+        let file_path = args.file_path.as_str();
 
         // Path has already been validated and normalised by PolicyEngine
         let path = std::path::PathBuf::from(file_path);
-        let old_string = match input.get("old_string").and_then(|v| v.as_str()) {
-            Some(s) => s,
-            None => {
-                return TypedToolResult::error(
-                    serde_json::json!({
-                        "status": "error",
-                        "message": "missing required parameter: old_string",
-                        "data": null
-                    })
-                    .to_string(),
-                )
-            }
-        };
-        let new_string = match input.get("new_string").and_then(|v| v.as_str()) {
-            Some(s) => s,
-            None => {
-                return TypedToolResult::error(
-                    serde_json::json!({
-                        "status": "error",
-                        "message": "missing required parameter: new_string",
-                        "data": null
-                    })
-                    .to_string(),
-                )
-            }
-        };
-        let replace_all = input
-            .get("replace_all")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let old_string = args.old_string.as_str();
+        let new_string = args.new_string.as_str();
+        let replace_all = args.replace_all.unwrap_or(false);
         if !path.exists() {
             return TypedToolResult::error(
                 serde_json::json!({

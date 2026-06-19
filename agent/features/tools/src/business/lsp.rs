@@ -2,7 +2,7 @@ use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::string_idx::slice_head;
-use share::tool::types::lsp::LspResult;
+use share::tool::types::lsp::{LspInput, LspResult};
 use share::tool::{PathAccess, PathKind};
 use tokio::process::Command;
 
@@ -25,25 +25,8 @@ impl TypedTool for LspTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "enum": ["diagnostics", "symbols"],
-                    "description": "The LSP operation to perform"
-                },
-                "filePath": {
-                    "type": "string",
-                    "description": "Absolute path to the file"
-                },
-                "language": {
-                    "type": "string",
-                    "description": "Language hint (rust, typescript, python, go). Auto-detected from file extension if omitted."
-                }
-            },
-            "required": ["operation", "filePath"]
-        })
+        use share::tool::types::ToolSchema;
+        LspInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -62,20 +45,16 @@ impl TypedTool for LspTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<LspResult> {
-        let operation = match input.get("operation").and_then(|v| v.as_str()) {
-            Some(op) => op,
-            None => return TypedToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: operation", "data": null}).to_string()),
+        let args: LspInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("invalid input: {e}"), "data": null}).to_string()),
         };
+        let operation = args.operation.as_str();
+        let file_path = args.filePath.as_str();
 
-        let file_path = match input.get("filePath").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => return TypedToolResult::error(serde_json::json!({"status": "error", "message": "missing required parameter: filePath", "data": null}).to_string()),
-        };
-
-        let language = input
-            .get("language")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+        let language = args
+            .language
+            .clone()
             .unwrap_or_else(|| detect_language(file_path));
 
         // Path has already been validated and normalised by PolicyEngine

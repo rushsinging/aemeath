@@ -10,3 +10,14 @@ pub struct WebFetchResult {
     pub content: String,
     pub truncated: bool,
 }
+
+/// Typed input for the `web_fetch` tool.
+///
+/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WebFetchInput {
+    /// The URL to fetch
+    pub url: String,
+    /// Timeout in milliseconds (default 30000)
+    pub timeout: Option<u64>,
+}

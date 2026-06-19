@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::read::ReadResult;
+use share::tool::types::read::{ReadInput, ReadResult};
 use share::tool::{PathAccess, PathKind};
 use std::path::Path;
 
@@ -22,15 +22,8 @@ impl TypedTool for FileReadTool {
         "Reads a file from the local filesystem. Supports text files (with line numbers) and images (PNG, JPG, GIF, WebP). Cannot read directories."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file to read" },
-                "offset": { "type": "integer", "description": "Line number to start reading from (0-based)" },
-                "limit": { "type": "integer", "description": "Maximum number of lines to read (default 2000)" }
-            },
-            "required": ["file_path"]
-        })
+        use share::tool::types::ToolSchema;
+        ReadInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -47,10 +40,11 @@ impl TypedTool for FileReadTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<ReadResult> {
-        let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => return TypedToolResult::error("missing required parameter: file_path"),
+        let args: ReadInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
+        let file_path = args.file_path.as_str();
 
         // Path has already been validated and normalised by PolicyEngine
         let path = std::path::PathBuf::from(file_path);
@@ -63,8 +57,8 @@ impl TypedTool for FileReadTool {
             return read_image_file(file_path, &path).await;
         }
 
-        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+        let offset = args.offset.unwrap_or(0) as usize;
+        let limit = args.limit.unwrap_or(2000) as usize;
         match tokio::fs::read_to_string(&path).await {
             Ok(content) => {
                 let lines: Vec<&str> = content.lines().collect();

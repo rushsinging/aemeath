@@ -5,10 +5,9 @@
 
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
-use serde::Deserialize;
 use serde_json::Value;
-use share::tool::types::enter_worktree::EnterWorktreeResult;
-use share::tool::types::exit_worktree::ExitWorktreeResult;
+use share::tool::types::enter_worktree::{EnterWorktreeInput, EnterWorktreeResult};
+use share::tool::types::exit_worktree::{ExitWorktreeInput, ExitWorktreeResult};
 use std::path::{Path, PathBuf};
 
 /// Tool to enter a git worktree directory
@@ -16,23 +15,6 @@ pub struct EnterWorktreeTool;
 
 /// Tool to exit the current worktree and restore the previous context
 pub struct ExitWorktreeTool;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct EnterWorktreeInput {
-    /// worktree 根目录路径（绝对或相对路径）；省略时从 branch 推导
-    #[serde(default)]
-    pub path: Option<String>,
-    /// 目标路径不存在时创建的新分支名；path 省略时必填
-    #[serde(default)]
-    pub branch: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExitWorktreeInput {
-    /// 可选：直接切回指定路径，忽略上下文栈
-    #[serde(default)]
-    pub path: Option<String>,
-}
 
 /// 获取当前分支名；detached HEAD / 无法获取时返回 "(unknown)"。
 /// git 调用收敛在 project 的 `GitCli`（GitWorktreeOps port）。
@@ -76,20 +58,8 @@ impl TypedTool for EnterWorktreeTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "可选：worktree 根目录路径（绝对或相对路径）。省略时从 branch 推导为 .worktrees/<安全分支名>"
-                },
-                "branch": {
-                    "type": "string",
-                    "description": "可选：目标路径不存在时创建的新分支名；path 省略时必须提供。创建时固定基于 main"
-                }
-            },
-            "required": []
-        })
+        use share::tool::types::ToolSchema;
+        EnterWorktreeInput::data_schema()
     }
 
     async fn call(
@@ -151,16 +121,8 @@ impl TypedTool for ExitWorktreeTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "可选：直接切回指定路径，忽略上下文栈"
-                }
-            },
-            "required": []
-        })
+        use share::tool::types::ToolSchema;
+        ExitWorktreeInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -239,7 +201,11 @@ mod tests {
         assert_eq!(schema["properties"]["path"]["type"], "string");
         assert_eq!(schema["properties"]["branch"]["type"], "string");
         assert!(schema["properties"].get("base").is_none());
-        assert!(schema["required"].as_array().unwrap().is_empty());
+        // 全 Option 字段：生成的 schema 不含 required 键（或为空数组）。
+        assert!(schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .is_none_or(|arr| arr.is_empty()));
     }
 
     #[test]
@@ -249,7 +215,11 @@ mod tests {
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["path"]["type"], "string");
-        assert!(schema["required"].as_array().unwrap().is_empty());
+        // 全 Option 字段：生成的 schema 不含 required 键（或为空数组）。
+        assert!(schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .is_none_or(|arr| arr.is_empty()));
     }
 
     #[test]

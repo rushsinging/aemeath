@@ -38,17 +38,17 @@ pub mod web_fetch;
 pub mod write;
 
 // Re-exports for ergonomic `use share::tool::types::XxxResult;`.
-pub use agent::AgentResult;
-pub use ask_user::AskUserQuestionResult;
-pub use bash::BashResult;
-pub use edit::EditResult;
-pub use enter_worktree::EnterWorktreeResult;
-pub use exit_worktree::ExitWorktreeResult;
-pub use glob::GlobResult;
-pub use grep::GrepResult;
-pub use read::ReadResult;
-pub use web_fetch::WebFetchResult;
-pub use write::WriteResult;
+pub use agent::{AgentInput, AgentResult};
+pub use ask_user::{AskUserQuestionInput, AskUserQuestionResult};
+pub use bash::{BashInput, BashResult};
+pub use edit::{EditInput, EditResult};
+pub use enter_worktree::{EnterWorktreeInput, EnterWorktreeResult};
+pub use exit_worktree::{ExitWorktreeInput, ExitWorktreeResult};
+pub use glob::{GlobInput, GlobResult};
+pub use grep::{GrepInput, GrepResult};
+pub use read::{ReadInput, ReadResult};
+pub use web_fetch::{WebFetchInput, WebFetchResult};
+pub use write::{WriteInput, WriteResult};
 // Non-core tool result structs (Phase 0a 任务 0.4).
 pub mod brief;
 pub mod list_mcp_resources;
@@ -72,26 +72,26 @@ pub mod tool_search;
 pub mod web_search;
 
 // Re-exports for non-core tool result structs.
-pub use brief::BriefResult;
+pub use brief::{BriefInput, BriefResult};
 pub use list_mcp_resources::ListMcpResourcesResult;
-pub use lsp::LspResult;
+pub use lsp::{LspInput, LspResult};
 pub use mcp_manager::McpManagerResult;
 pub use mcp_tool::McpToolResult;
-pub use memory::MemoryResult;
-pub use plan_mode::PlanModeResult;
+pub use memory::{MemoryInput, MemoryResult};
+pub use plan_mode::{EnterPlanModeInput, ExitPlanModeInput, PlanModeResult};
 pub use read_mcp_resource::ReadMcpResourceResult;
-pub use skill::SkillResult;
-pub use sleep::SleepResult;
+pub use skill::{SkillInput, SkillResult};
+pub use sleep::{SleepInput, SleepResult};
 pub use task::{Batch, BatchStatus, Task, TaskPriority, TaskSnapshot, TaskStatus, TaskTimestamps};
-pub use task_create::TaskCreateResult;
-pub use task_get::TaskGetResult;
-pub use task_list::TaskListResult;
+pub use task_create::{TaskCreateInput, TaskCreateResult};
+pub use task_get::{TaskGetInput, TaskGetResult};
+pub use task_list::{TaskListInput, TaskListResult};
 pub use task_list_complete::TaskListCompleteResult;
-pub use task_list_create::TaskListCreateResult;
-pub use task_stop::TaskStopResult;
-pub use task_update::TaskUpdateResult;
-pub use tool_search::ToolSearchResult;
-pub use web_search::WebSearchResult;
+pub use task_list_create::{TaskListCreateInput, TaskListCreateResult};
+pub use task_stop::{TaskStopInput, TaskStopResult};
+pub use task_update::{TaskUpdateInput, TaskUpdateResult};
+pub use tool_search::{ToolSearchInput, ToolSearchResult};
+pub use web_search::{WebSearchInput, WebSearchResult};
 
 // Generated ToolSchema impls (by build.rs).
 include!(concat!(env!("OUT_DIR"), "/generated_impls.rs"));

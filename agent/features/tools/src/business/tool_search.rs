@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::tool_search::ToolSearchResult;
+use share::tool::types::tool_search::{ToolSearchInput, ToolSearchResult};
 
 /// ToolSearch tool - dynamically searches available tools from the registry.
 ///
@@ -20,16 +20,8 @@ impl TypedTool for ToolSearchTool {
         "Search for available tools by name or functionality. Use this to discover tools that can help with specific tasks."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query - tool name or functionality keyword"
-                }
-            },
-            "required": ["query"]
-        })
+        use share::tool::types::ToolSchema;
+        ToolSearchInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -47,7 +39,11 @@ impl TypedTool for ToolSearchTool {
         input: serde_json::Value,
         ctx: &ToolExecutionContext,
     ) -> TypedToolResult<ToolSearchResult> {
-        let query = input["query"].as_str().unwrap_or("").to_lowercase();
+        let args: ToolSearchInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+        let query = args.query.to_lowercase();
 
         // 从注册表动态获取工具列表
         let tools: Vec<(String, String)> = match &ctx.registry {

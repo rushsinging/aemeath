@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::task_list_create::TaskListCreateResult;
+use share::tool::types::task_list_create::{TaskListCreateInput, TaskListCreateResult};
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -21,14 +21,8 @@ impl TypedTool for TaskListCreateTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "subject": { "type": "string", "description": "Short title for this task list" },
-                "summary": { "type": "string", "description": "One-sentence summary of the user request this task list belongs to" }
-            },
-            "required": ["subject", "summary"]
-        })
+        use share::tool::types::ToolSchema;
+        TaskListCreateInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -52,14 +46,12 @@ impl TypedTool for TaskListCreateTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskListCreateResult> {
-        let subject = match input.get("subject").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return TypedToolResult::error("missing required parameter: subject"),
+        let args: TaskListCreateInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
-        let summary = match input.get("summary").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => return TypedToolResult::error("missing required parameter: summary"),
-        };
+        let subject = args.subject;
+        let summary = args.summary;
 
         let batch = self.store.create_list(subject.clone(), summary).await;
         TypedToolResult::success(
