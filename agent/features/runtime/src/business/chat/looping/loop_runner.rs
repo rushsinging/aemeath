@@ -316,6 +316,37 @@ where
                 last_api_output_tokens = resp.usage.output_tokens as u64;
                 cached_tokens = resp.usage.cached_tokens.map(|v| v as u64);
                 reasoning_tokens = resp.usage.reasoning_tokens.map(|v| v as u64);
+
+                // 计算 context window 使用情况
+                let cached = cached_tokens.unwrap_or(0);
+                let reasoning = reasoning_tokens.unwrap_or(0);
+                let total_tokens = last_api_input_tokens + last_api_output_tokens + reasoning;
+                let effective_window =
+                    crate::business::compact::token_estimation::effective_context_window(
+                        context_size,
+                        8192,
+                    ) as u64;
+                let threshold = crate::business::compact::token_estimation::autocompact_threshold(
+                    context_size,
+                    8192,
+                ) as u64;
+                let pct = total_tokens * 100 / effective_window.max(1);
+
+                log::info!(target: LOG_TARGET,
+                    "turn usage: session={}, turn={}, input={}, output={}, cached={}, reasoning={}, total={}, context_size={}, effective_window={}, threshold={}, usage_pct={}%",
+                    session_id,
+                    turn_count,
+                    last_api_input_tokens,
+                    last_api_output_tokens,
+                    cached,
+                    reasoning,
+                    total_tokens,
+                    context_size,
+                    effective_window,
+                    threshold,
+                    pct
+                );
+
                 sink.send_event(RuntimeStreamEvent::Usage {
                     input: resp.usage.input_tokens,
                     output: resp.usage.output_tokens,
