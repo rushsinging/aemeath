@@ -14,51 +14,23 @@ pub(super) fn add_memory(
 ) -> TypedToolResult<MemoryResult> {
     let content = match input.get("content").and_then(|value| value.as_str()) {
         Some(content) => content.trim(),
-        None => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": "缺少必需参数: content",
-                "data": {}
-            }))
-        }
+        None => return TypedToolResult::error("缺少必需参数: content"),
     };
     if let Err(error) = validate_content(content) {
-        return TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error,
-            "data": {}
-        }));
+        return TypedToolResult::error(error);
     }
 
     let layer = match optional_layer(&input) {
         Ok(layer) => layer.unwrap_or(MemoryLayer::Project),
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let category = match optional_category(&input) {
         Ok(category) => category.unwrap_or(MemoryCategory::Fact),
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let tags = match parse_tags(&input) {
         Ok(tags) => tags,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
 
     let now = current_timestamp_secs();
@@ -81,39 +53,28 @@ pub(super) fn add_memory(
 
     let mut store = match open_store(ctx) {
         Ok(store) => store,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     match store.add(entry) {
-        Ok(AddResult::Added { id }) => TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": format!("记忆已添加。ID: {}", &id[..8.min(id.len())]),
-            "data": serde_json::to_value(MemoryResult { action: "added".to_string() }).unwrap()
-        })),
-        Ok(AddResult::Merged { existing_id }) => {
-            TypedToolResult::success_value(serde_json::json!({
-                "status": "success",
-                "message": format!("已与相似记忆合并: {}", &existing_id[..8.min(existing_id.len())]),
-                "data": serde_json::to_value(MemoryResult { action: "merged".to_string() }).unwrap()
-            }))
-        }
+        Ok(AddResult::Added { id }) => TypedToolResult::success(
+            format!("记忆已添加。ID: {}", &id[..8.min(id.len())]),
+            MemoryResult {
+                action: "added".to_string(),
+            },
+        ),
+        Ok(AddResult::Merged { existing_id }) => TypedToolResult::success(
+            format!(
+                "已与相似记忆合并: {}",
+                &existing_id[..8.min(existing_id.len())]
+            ),
+            MemoryResult {
+                action: "merged".to_string(),
+            },
+        ),
         Ok(AddResult::NeedsEviction { candidates }) => {
-            TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": "记忆数量已达上限，请先归档候选记忆",
-                "data": { "candidates": candidates }
-            }))
+            TypedToolResult::error("记忆数量已达上限，请先归档候选记忆")
         }
-        Err(error) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error.to_string(),
-            "data": {}
-        })),
+        Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
@@ -123,36 +84,21 @@ pub(super) fn delete_memory(
 ) -> TypedToolResult<MemoryResult> {
     let id = match required_string(&input, "id") {
         Ok(id) => id,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let mut store = match open_store(ctx) {
         Ok(store) => store,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
 
     match store.delete(id) {
-        Ok(()) => TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": "记忆已删除。",
-            "data": serde_json::to_value(MemoryResult { action: "delete".to_string() }).unwrap()
-        })),
-        Err(error) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error.to_string(),
-            "data": { "id": id }
-        })),
+        Ok(()) => TypedToolResult::success(
+            "记忆已删除。",
+            MemoryResult {
+                action: "delete".to_string(),
+            },
+        ),
+        Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
@@ -162,13 +108,7 @@ pub(super) fn search_memory(
 ) -> TypedToolResult<MemoryResult> {
     let query = match required_string(&input, "query") {
         Ok(query) => query,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let limit = input
         .get("limit")
@@ -176,13 +116,7 @@ pub(super) fn search_memory(
         .unwrap_or(10) as usize;
     let store = match open_store(ctx) {
         Ok(store) => store,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
 
     match store.search(query, limit.min(50)) {
@@ -192,17 +126,14 @@ pub(super) fn search_memory(
             } else {
                 format!("找到 {} 条记忆。", entries.len())
             };
-            TypedToolResult::success_value(serde_json::json!({
-                "status": "success",
-                "message": message,
-                "data": serde_json::to_value(MemoryResult { action: "search".to_string() }).unwrap()
-            }))
+            TypedToolResult::success(
+                message,
+                MemoryResult {
+                    action: "search".to_string(),
+                },
+            )
         }
-        Err(error) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error.to_string(),
-            "data": {}
-        })),
+        Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
@@ -212,13 +143,7 @@ pub(super) fn pin_memory(
 ) -> TypedToolResult<MemoryResult> {
     let id = match required_string(&input, "id") {
         Ok(id) => id,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let pinned = input
         .get("pinned")
@@ -226,26 +151,21 @@ pub(super) fn pin_memory(
         .unwrap_or(true);
     let mut store = match open_store(ctx) {
         Ok(store) => store,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
 
     match store.pin(id, pinned) {
-        Ok(()) => TypedToolResult::success_value(serde_json::json!({
-            "status": "success",
-            "message": if pinned { "记忆已固定。" } else { "记忆已取消固定。" },
-            "data": serde_json::to_value(MemoryResult { action: "pin".to_string() }).unwrap()
-        })),
-        Err(error) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error.to_string(),
-            "data": { "id": id }
-        })),
+        Ok(()) => TypedToolResult::success(
+            if pinned {
+                "记忆已固定。"
+            } else {
+                "记忆已取消固定。"
+            },
+            MemoryResult {
+                action: "pin".to_string(),
+            },
+        ),
+        Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
@@ -255,23 +175,11 @@ pub(super) fn list_memory(
 ) -> TypedToolResult<MemoryResult> {
     let layer = match optional_layer(&input) {
         Ok(layer) => layer,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let store = match open_store(ctx) {
         Ok(store) => store,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
 
     match store.list(layer) {
@@ -281,17 +189,14 @@ pub(super) fn list_memory(
             } else {
                 format!("共 {} 条记忆。", entries.len())
             };
-            TypedToolResult::success_value(serde_json::json!({
-                "status": "success",
-                "message": message,
-                "data": serde_json::to_value(MemoryResult { action: "list".to_string() }).unwrap()
-            }))
+            TypedToolResult::success(
+                message,
+                MemoryResult {
+                    action: "list".to_string(),
+                },
+            )
         }
-        Err(error) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error.to_string(),
-            "data": {}
-        })),
+        Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
@@ -308,61 +213,36 @@ pub(super) fn add_reminder(
 ) -> TypedToolResult<MemoryResult> {
     let content = match required_string(&input, "content") {
         Ok(content) => content,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     if let Err(error) = validate_content(content) {
-        return TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": error,
-            "data": {}
-        }));
+        return TypedToolResult::error(error);
     }
     let priority = input
         .get("priority")
         .and_then(|value| value.as_str())
         .unwrap_or("normal");
     if !matches!(priority, "low" | "normal" | "high") {
-        return TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": format!("无效 reminder priority: {priority}"),
-            "data": { "priority": priority }
-        }));
+        return TypedToolResult::error(format!("无效 reminder priority: {priority}"));
     }
 
     let Some(reminders) = &ctx.session_reminders else {
-        return TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": "当前运行环境不支持 session reminder。",
-            "data": {}
-        }));
+        return TypedToolResult::error("当前运行环境不支持 session reminder。");
     };
     match reminders.lock() {
         Ok(mut reminders) => {
             let id = uuid::Uuid::now_v7().to_string();
             match reminders.add(id.clone(), content.to_string(), current_timestamp_secs()) {
-                Ok(id) => TypedToolResult::success_value(serde_json::json!({
-                    "status": "success",
-                    "message": format!("已添加会话提醒: {id}"),
-                    "data": serde_json::to_value(MemoryResult { action: "add_reminder".to_string() }).unwrap()
-                })),
-                Err(error) => TypedToolResult::error_value(serde_json::json!({
-                    "status": "error",
-                    "message": error.to_string(),
-                    "data": {}
-                })),
+                Ok(id) => TypedToolResult::success(
+                    format!("已添加会话提醒: {id}"),
+                    MemoryResult {
+                        action: "add_reminder".to_string(),
+                    },
+                ),
+                Err(error) => TypedToolResult::error(error.to_string()),
             }
         }
-        Err(_) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": "session reminder 状态锁已损坏",
-            "data": {}
-        })),
+        Err(_) => TypedToolResult::error("session reminder 状态锁已损坏"),
     }
 }
 
@@ -372,38 +252,21 @@ pub(super) fn complete_reminder(
 ) -> TypedToolResult<MemoryResult> {
     let id = match required_string(&input, "id") {
         Ok(id) => id,
-        Err(error) => {
-            return TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error,
-                "data": {}
-            }))
-        }
+        Err(error) => return TypedToolResult::error(error),
     };
     let Some(reminders) = &ctx.session_reminders else {
-        return TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": "当前运行环境不支持 session reminder。",
-            "data": {}
-        }));
+        return TypedToolResult::error("当前运行环境不支持 session reminder。");
     };
     match reminders.lock() {
         Ok(mut reminders) => match reminders.complete(id) {
-            Ok(()) => TypedToolResult::success_value(serde_json::json!({
-                "status": "success",
-                "message": "会话提醒已完成。",
-                "data": serde_json::to_value(MemoryResult { action: "complete_reminder".to_string() }).unwrap()
-            })),
-            Err(error) => TypedToolResult::error_value(serde_json::json!({
-                "status": "error",
-                "message": error.to_string(),
-                "data": { "id": id }
-            })),
+            Ok(()) => TypedToolResult::success(
+                "会话提醒已完成。",
+                MemoryResult {
+                    action: "complete_reminder".to_string(),
+                },
+            ),
+            Err(error) => TypedToolResult::error(error.to_string()),
         },
-        Err(_) => TypedToolResult::error_value(serde_json::json!({
-            "status": "error",
-            "message": "session reminder 状态锁已损坏",
-            "data": {}
-        })),
+        Err(_) => TypedToolResult::error("session reminder 状态锁已损坏"),
     }
 }

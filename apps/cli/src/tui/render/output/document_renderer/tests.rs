@@ -404,6 +404,7 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
         args_preview: None,
         activity_summary: None,
         result_summary: None,
+        result_payload: None,
         collapsible: false,
         collapsed: false,
     });
