@@ -34,7 +34,7 @@ impl Tool for ToolSearchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("").to_lowercase();
 
         // 预定义的工具列表及其描述
@@ -70,7 +70,7 @@ impl Tool for ToolSearchTool {
 
         if query.is_empty() {
             // Return all available tools
-            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("Available tools ({})", all_tools.len()), "data": {"tools": all_tools.iter().map(|(name, desc)| serde_json::json!({"name": name, "description": desc})).collect::<Vec<_>>()}}).to_string());
+            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("Available tools ({})", all_tools.len()), "data": {"tools": all_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string());
         }
 
         // Search for matching tools
@@ -87,10 +87,10 @@ impl Tool for ToolSearchTool {
             .collect();
 
         if matching_tools.is_empty() {
-            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("No tools found matching '{}'", query), "data": {"query": query, "tools": [], "hint": "Use ToolSearch with empty query to see all available tools."}}).to_string());
+            return ToolResult::success(serde_json::json!({"status": "success", "message": format!("No tools found matching '{}'", query), "data": {"tools": []}}).to_string());
         }
 
-        ToolResult::success(serde_json::json!({"status": "success", "message": format!("Found {} tool(s) matching '{}'", matching_tools.len(), query), "data": {"query": query, "tools": matching_tools.iter().map(|(name, desc)| serde_json::json!({"name": name, "description": desc})).collect::<Vec<_>>()}}).to_string())
+        ToolResult::success(serde_json::json!({"status": "success", "message": format!("Found {} tool(s) matching '{}'", matching_tools.len(), query), "data": {"tools": matching_tools.iter().map(|(name, _)| serde_json::json!(name)).collect::<Vec<_>>()}}).to_string())
     }
 }
 

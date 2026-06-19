@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_create::TaskCreateResult;
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStore};
 
@@ -66,7 +67,7 @@ impl Tool for TaskCreateTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
@@ -153,12 +154,7 @@ impl Tool for TaskCreateTool {
             serde_json::json!({
                 "status": "success",
                 "message": format!("Task #{} created: {}", display_id, task.subject),
-                "data": {
-                    "task_id": task.id,
-                    "subject": task.subject,
-                    "description": task.description,
-                    "priority": priority_str
-                }
+                "data": serde_json::to_value(TaskCreateResult { task_id: task.id }).unwrap()
             })
             .to_string(),
         )

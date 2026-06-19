@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_list_create::TaskListCreateResult;
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -41,7 +42,7 @@ impl Tool for TaskListCreateTool {
         5
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
@@ -71,15 +72,7 @@ impl Tool for TaskListCreateTool {
                 "Task list #{} created. Subject: {}",
                 batch.id, subject
             ),
-            "data": {
-                "batch_id": batch.id,
-                "subject": subject,
-                "summary": summary_text,
-                "next_steps": format!(
-                    "You can now create tasks with TaskCreate — they will automatically attach to task list #{}.",
-                    batch.id
-                )
-            }
+            "data": serde_json::to_value(TaskListCreateResult { batch_id: batch.id.to_string() }).unwrap()
         }))
     }
 }
@@ -125,7 +118,11 @@ mod tests {
 
         assert!(!result.is_error);
         assert!(result.output.contains("Task list #0 created"));
-        assert!(result.content["data"]["subject"].as_str() == Some("修复 bug"));
+        assert!(
+            result.content["data"]["batch_id"].as_str().is_some(),
+            "data should contain batch_id, got: {}",
+            result.content["data"]
+        );
         assert_eq!(
             store.active_list().await.unwrap().summary.as_deref(),
             Some("修复 task 状态")

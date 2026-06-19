@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_stop::TaskStopResult;
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
 
@@ -35,7 +36,7 @@ impl Tool for TaskStopTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {
@@ -99,7 +100,7 @@ impl Tool for TaskStopTool {
         ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": format!("Task #{} stopped and marked as deleted", display_id),
-            "data": { "task_id": display_id, "new_status": "deleted" }
+            "data": serde_json::to_value(TaskStopResult { task_id: display_id }).unwrap()
         }))
     }
 }

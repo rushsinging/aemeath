@@ -68,7 +68,7 @@ impl Tool for ReadMcpResourceTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let server_name = input
             .get("server")
             .and_then(|s| s.as_str())

@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::skill_ops::Skill;
+use share::tool::types::skill::SkillResult;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -45,7 +46,7 @@ impl Tool for SkillTool {
         false
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let skill_name = match input.get("skill").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
@@ -91,10 +92,10 @@ impl Tool for SkillTool {
             serde_json::json!({
                 "status": "success",
                 "message": format!("Skill '{}' loaded", skill.name),
-                "data": {
-                    "skill": skill.name,
-                    "content": content
-                }
+                "data": serde_json::to_value(SkillResult {
+                    name: skill.name,
+                    path: skill.source_path.to_string_lossy().to_string()
+                }).unwrap()
             })
             .to_string(),
         )

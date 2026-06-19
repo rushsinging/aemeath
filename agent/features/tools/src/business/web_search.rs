@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::Value;
+use share::tool::types::web_search::WebSearchResult;
 
 pub struct WebSearchTool;
 
@@ -38,7 +39,7 @@ impl Tool for WebSearchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let query = input["query"].as_str().unwrap_or("");
         let limit = input["limit"].as_u64().unwrap_or(5).min(10) as usize;
 
@@ -163,14 +164,12 @@ async fn search_bing(client: &reqwest::Client, query: &str, limit: usize) -> Too
 
 fn format_search_results(query: &str, results: Vec<SearchResult>) -> ToolResult {
     if results.is_empty() {
+        let data = serde_json::to_value(WebSearchResult { results: vec![] }).unwrap_or_default();
         return ToolResult::success(
             serde_json::json!({
                 "status": "success",
                 "message": "No search results found",
-                "data": {
-                    "query": query,
-                    "results": []
-                }
+                "data": data
             })
             .to_string(),
         );
@@ -187,14 +186,16 @@ fn format_search_results(query: &str, results: Vec<SearchResult>) -> ToolResult 
         })
         .collect();
 
+    let data = serde_json::to_value(WebSearchResult {
+        results: results_json,
+    })
+    .unwrap_or_default();
+
     ToolResult::success(
         serde_json::json!({
             "status": "success",
-            "message": format!("Found {} search results", results_json.len()),
-            "data": {
-                "query": query,
-                "results": results_json
-            }
+            "message": format!("Found {} search results", results.len()),
+            "data": data
         })
         .to_string(),
     )

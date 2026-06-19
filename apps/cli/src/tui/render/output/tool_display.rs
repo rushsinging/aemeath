@@ -3,6 +3,7 @@ mod task_impls;
 mod tool_impls;
 
 use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 use crate::tui::view_model::tool_name::tool_display_name;
 use common::truncate_json;
 use ratatui::style::Style;
@@ -106,13 +107,14 @@ pub trait ToolDisplay: Send + Sync {
         }
     }
 
-    /// Format the header line with optional result summary。
-    /// 默认实现忽略 result_summary，直接调用 `format_header_line`。
-    /// 需要根据 result 更新 header 的工具（如 Read）可覆写此方法。
+    /// Format the header line with optional structured result payload。
+    /// 默认实现忽略 payload，直接调用 `format_header_line`。
+    /// 需要根据 result 更新 header 的工具（如 Read）可覆写此方法，typed 字段
+    /// 优先从 `payload.content` 提取，回退到 `payload.output` 文本扫描。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
-        _result_summary: Option<&str>,
+        _result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         self.format_header_line(input)
     }
@@ -168,17 +170,20 @@ pub fn result_render_kind(name: &str) -> ResultRender {
 /// Format a tool call for human-friendly display.
 /// 返回 `(Line, details)`：Line 已含样式，details 为纯文本行。
 ///
-/// `result_summary`：可选的结果摘要，用于在 result 到达后更新 header（如 Read 实际行数）。
+/// `result_payload`：可选的结构化 result 载荷（来自 view_assembler 注入到
+/// `ToolCallBlockView.result_payload` 的 owned 副本）；用于在 result 到达后
+/// 更新 header（如 Read 实际行数、Write 实际写入字节数）。Display 实现可选择
+/// 覆写 `format_header_line_with_result` 消费 typed 字段。
 pub fn format_tool_call(
     name: &str,
     raw_json: &str,
-    result_summary: Option<&str>,
+    result_payload: Option<&ToolResultPayload>,
 ) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header_line_with_result(&parsed, result_summary);
+        let header = display.format_header_line_with_result(&parsed, result_payload);
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -573,5 +578,85 @@ mod tests {
             "空 question 时应只显示 display name 'Ask': {text}"
         );
         assert!(!text.contains('?'));
+    }
+
+    // ── 回归 #273 typed payload 路径 ──────────────────────────────────
+    // Read/Write header 在 result 到达后应优先使用 typed data 字段（issue #273
+    // 引入的 typed R 路径），不再依赖 regex 解析 message 文本。覆盖：
+    // - payload.content.data.line_count (Read)
+    // - payload.content.data.bytes_written (Write)
+    // 旧 regex 路径通过 fallback 行为继续兼容（payload.output 含 "Read N lines from"）。
+
+    #[test]
+    fn test_format_tool_call_read_uses_typed_line_count_from_payload() {
+        use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+        // typed 路径：payload.content.data.line_count=340 应直接驱动 header 后缀
+        let payload = ToolResultPayload::new(
+            String::new(), // output 不参与 typed 解析
+            serde_json::json!({ "data": { "line_count": 340u64 } }),
+            false,
+            0,
+        );
+        let (header, _details) = format_tool_call(
+            "Read",
+            r#"{"file_path":"/src/lib.rs","offset":0,"limit":2000}"#,
+            Some(&payload),
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("Read "), "header: {text}");
+        assert!(
+            text.contains("1:340"),
+            "header 应使用 typed line_count=340 覆盖默认 limit: {text}"
+        );
+        assert!(
+            text.contains("(340 lines)"),
+            "header 应包含 typed 行数后缀: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_write_uses_typed_bytes_written_from_payload() {
+        use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+        // typed 路径：payload.content.data.bytes_written=1234 应直接驱动 header 字节数
+        let payload = ToolResultPayload::new(
+            String::new(),
+            serde_json::json!({ "data": { "bytes_written": 1234u64 } }),
+            false,
+            0,
+        );
+        let (header, _details) = format_tool_call(
+            "Write",
+            r#"{"file_path":"/tmp/x.rs","content":"abc"}"#,
+            Some(&payload),
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("Write "), "header: {text}");
+        assert!(
+            text.contains("1234 bytes"),
+            "header 应使用 typed bytes_written=1234: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_read_falls_back_to_regex_when_typed_missing() {
+        // 旧 ToolResult data 无 typed 字段（仅 output 文本 "Read N lines from ..."），
+        // regex 路径应继续生效。
+        use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+        let payload = ToolResultPayload::new(
+            "Read 200 lines from /src/legacy.rs".to_string(),
+            serde_json::Value::Null, // 模拟旧格式，无 data.typed 字段
+            false,
+            0,
+        );
+        let (header, _details) = format_tool_call(
+            "Read",
+            r#"{"file_path":"/src/legacy.rs","offset":0,"limit":2000}"#,
+            Some(&payload),
+        );
+        let text = line_to_string(&header);
+        assert!(
+            text.contains("(200 lines)"),
+            "typed 缺失时 regex fallback 应生效: {text}"
+        );
     }
 }

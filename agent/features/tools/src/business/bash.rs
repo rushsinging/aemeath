@@ -4,6 +4,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
 use safety::{check_command_safety, check_shell_injection};
+use share::tool::types::bash::BashResult;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 
 pub use safety::is_readonly_command;
@@ -330,13 +331,20 @@ impl Tool for BashTool {
                     );
                 }
 
-                let mut data = serde_json::json!({
-                    "stdout": stdout.to_string(),
-                    "exit_code": exit_code
-                });
-                if !stderr.is_empty() {
-                    data["stderr"] = serde_json::Value::String(stderr.to_string());
-                }
+                let data = serde_json::to_value(BashResult {
+                    stdout: stdout.to_string(),
+                    stderr: if stderr.is_empty() {
+                        String::new()
+                    } else {
+                        stderr.to_string()
+                    },
+                    exit_code,
+                    #[cfg(unix)]
+                    signal: status.signal(),
+                    #[cfg(not(unix))]
+                    signal: None,
+                })
+                .unwrap_or_default();
                 // 构造 TUI 显示文本：stdout + stderr（如有），让 TUI 显示实际命令输出
                 // 而非 "Command executed successfully" 这类元信息（display > message 优先级）
                 let display = {

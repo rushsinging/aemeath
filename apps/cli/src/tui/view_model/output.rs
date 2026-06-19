@@ -1,3 +1,4 @@
+use super::conversation::tool_result_payload::ToolResultPayload;
 use super::style::SemanticStyle;
 use std::hash::Hash;
 
@@ -110,6 +111,10 @@ pub struct ToolCallBlockView {
     pub args_preview: Option<String>,
     pub activity_summary: Option<String>,
     pub result_summary: Option<String>,
+    /// Owned structured payload of the tool result (output/content/is_error/image_count).
+    /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），
+    /// 不依赖手工解析 message 字符串。
+    pub result_payload: Option<ToolResultPayload>,
     pub collapsible: bool,
     pub collapsed: bool,
 }

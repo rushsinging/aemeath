@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::read::ReadResult;
 use share::tool::{PathAccess, PathKind};
 use std::path::Path;
 
@@ -91,17 +92,31 @@ impl Tool for FileReadTool {
                     read_files.insert(path.to_string_lossy().to_string());
                 }
                 if numbered.is_empty() {
+                    let data = ReadResult {
+                        content: String::new(),
+                        file_path: file_path.to_string(),
+                        line_count: 0,
+                        start_line: 0,
+                        total_lines: 0,
+                    };
                     ToolResult::success_json(serde_json::json!({
                         "status": "success",
                         "message": "(empty file)",
-                        "data": { "content": "", "file_path": file_path }
+                        "data": serde_json::to_value(&data).unwrap()
                     }))
                 } else {
                     let line_count = end - start;
+                    let data = ReadResult {
+                        content: numbered,
+                        file_path: file_path.to_string(),
+                        line_count: line_count as u64,
+                        start_line: start as u64,
+                        total_lines: total as u64,
+                    };
                     ToolResult::success_json(serde_json::json!({
                         "status": "success",
                         "message": format!("Read {} lines from {}", line_count, file_path),
-                        "data": { "content": numbered, "file_path": file_path }
+                        "data": serde_json::to_value(&data).unwrap()
                     }))
                 }
             }

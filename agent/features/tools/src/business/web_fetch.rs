@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::web_fetch::WebFetchResult;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 use tokio::process::Command;
@@ -129,7 +130,7 @@ impl Tool for WebFetchTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let raw_url = match input.get("url").and_then(|v| v.as_str()) {
             Some(u) => u,
             None => {
@@ -196,23 +197,33 @@ impl Tool for WebFetchTool {
                     let max_chars = 50_000;
                     if body.len() > max_chars {
                         let truncated = share::string_idx::slice_head(&body, max_chars);
+                        let truncated_content = format!(
+                            "{}...\n\n[truncated, showing first {} chars of {} total]",
+                            truncated,
+                            truncated.chars().count(),
+                            body.chars().count()
+                        );
                         ToolResult::success(serde_json::json!({
                             "status": "success",
                             "message": format!("Fetched {} (truncated, showing first {} chars of {} total)", url, truncated.chars().count(), body.chars().count()),
-                            "data": {
-                                "url": url.as_str(),
-                                "content": format!("{}...\n\n[truncated, showing first {} chars of {} total]", truncated, truncated.chars().count(), body.chars().count())
-                            }
+                            "data": serde_json::to_value(WebFetchResult {
+                                url: url.to_string(),
+                                title: String::new(),
+                                content: truncated_content,
+                                truncated: true,
+                            }).unwrap()
                         }).to_string())
                     } else {
                         ToolResult::success(
                             serde_json::json!({
                                 "status": "success",
                                 "message": format!("Fetched {}", url),
-                                "data": {
-                                    "url": url.as_str(),
-                                    "content": body.to_string()
-                                }
+                                "data": serde_json::to_value(WebFetchResult {
+                                    url: url.to_string(),
+                                    title: String::new(),
+                                    content: body.to_string(),
+                                    truncated: false,
+                                }).unwrap()
                             })
                             .to_string(),
                         )

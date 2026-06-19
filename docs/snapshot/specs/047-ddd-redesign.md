@@ -545,6 +545,13 @@ provider / project / storage / policy / hook / audit
 
 > **横向 feature 依赖的批准标准**：supporting feature 默认只依赖 `shared`；横向依赖另一 feature 必须满足——(1) 方向无环；(2) 经对方 `api`；(3) 在本 spec 登记原因与替代方案。已批准：`tools → project`（worktree 上下文，git+fs 行为不宜进 shared）、`tools → storage`（memory 持久化复用同一 store，避免 DRY 违规与 13 方法透传 trait 的无收益抽象）。
 
+**`packages/sdk` 与 `agent/shared` 的关系（2026-06 工具 Display 重构方案 D 补充）**：
+
+- `sdk` 是 CLI ↔ Runtime 通信契约（`AgentClient` trait、wire event 类型），同时也是**thin re-export / protocol facade**——它可引 `share` 以 re-export 业务 typed result structs（`share::tool::types::*`）给 cli 与未来 server consumer。
+- `share::tool::types` 是 horizontal shared types in `agent/shared`（minimal kernel 子模块），所有 feature（tools/runtime/...）均可直接 `use share::tool::types::XxxResult;` 而无 DDD 违规——`share` 是横切内核而非 vertical contract。
+- 业务模块（`tools`）**不直接引 sdk**——避免业务依赖通信端点；TUI 渲染层（`apps/cli`）走 sdk 拿 typed 类型，工具实现走 share 拿 typed 类型，runtime/compact 走 share 拿 typed 类型。
+- 未来 server 落地时，sdk 端可加 `WireSchema` trait（`json_schema()` / `protobuf_descriptor()`），由 `share::tool::types::XxxResult` 派生以生成协议 schema；server 引 sdk 拿 schema 生成 OpenAPI/Protobuf——同样不破 DDD 边界。
+
 `apps/cli` 只能直接依赖 `packages/sdk`、`agent/composition`（composition root 装配）和纯技术库，**不得**直接依赖 supporting feature、`agent/shared` 或其他业务 crate。
 
 #### 6.4.8 架构守卫

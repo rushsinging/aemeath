@@ -12,6 +12,8 @@ pub mod connection;
 pub mod diff;
 pub mod wrapper;
 
+pub use share::tool::types::mcp_manager::McpManagerResult;
+
 pub use config::{ConnectionState, McpManagerConfig, McpServerConnection};
 pub use connection::McpConnectionManager;
 pub use diff::{diff_tools, qualified_tool_name, removed_qualified_tool_names, ToolListDiff};

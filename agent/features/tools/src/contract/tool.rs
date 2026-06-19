@@ -48,5 +48,11 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Execute the tool.
+    ///
+    /// The return type is `Self::Result`, which defaults to
+    /// `ToolResult<serde_json::Value>` for backward compatibility. Tools
+    /// that opt into a typed payload override the `Result` associated
+    /// type and return `ToolResult<MyResult>` directly.
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult;
 }

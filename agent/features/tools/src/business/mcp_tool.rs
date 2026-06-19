@@ -2,6 +2,8 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde_json::Value;
+#[allow(unused_imports)]
+use share::tool::types::mcp_tool::McpToolResult;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -36,7 +38,7 @@ impl Tool for McpTool {
         true
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
             Ok(output) => {

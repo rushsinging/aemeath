@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_list_complete::TaskListCompleteResult;
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -30,12 +31,12 @@ impl Tool for TaskListCompleteTool {
         true
     }
 
-    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, _input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
         match self.store.complete_list().await {
             Some(batch) => ToolResult::success_json(serde_json::json!({
                 "status": "success",
                 "message": format!("Task list #{} completed", batch.id),
-                "data": { "batch_id": batch.id }
+                "data": serde_json::to_value(TaskListCompleteResult { batch_id: batch.id.to_string() }).unwrap()
             })),
             None => ToolResult::error_json(serde_json::json!({
                 "status": "error",

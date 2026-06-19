@@ -19,3 +19,6 @@ unicode-width = "0.2"
 logging = { path = "../../packages/global/logging" }
 utils = { path = "../../packages/global/utils" }
 
+[build-dependencies]
+regex = "1"
+

@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::sleep::SleepResult;
 
 pub struct SleepTool;
 
@@ -69,9 +70,7 @@ impl Tool for SleepTool {
             serde_json::json!({
                 "status": "success",
                 "message": format!("Slept for {}ms", duration_ms),
-                "data": {
-                    "duration_ms": duration_ms
-                }
+                "data": serde_json::to_value(SleepResult { duration_ms }).unwrap()
             })
             .to_string(),
         )
