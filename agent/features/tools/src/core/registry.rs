@@ -16,182 +16,184 @@ use super::tool_registry::ToolRegistry;
 
 use crate::contract::tool::TypedToolAdapter;
 
+/// 工具集 profile：决定哪些工具被注册。取代历史的 3 个近重复 `register_*` 函数，
+/// 工具清单只定义一次（见 [`register_tools`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolProfile {
+    /// 主 agent：全部工具。
+    Full,
+    /// 子 agent：排除协调类工具（Agent / AskUserQuestion / Task* / Worktree / PlanMode）——
+    /// 子 agent 不与用户交互、不操作父任务列表。
+    SubAgent,
+    /// 排除 Agent 自身（避免子 agent 递归派发），同时不含 ToolSearch / PlanMode。
+    NoAgent,
+}
+
+impl ToolProfile {
+    /// 该 profile 是否排除指定 registry 工具名。
+    fn excludes(self, name: &str) -> bool {
+        match self {
+            ToolProfile::Full => false,
+            ToolProfile::SubAgent => matches!(
+                name,
+                "Agent"
+                    | "AskUserQuestion"
+                    | "TaskCreate"
+                    | "TaskUpdate"
+                    | "TaskList"
+                    | "TaskListCreate"
+                    | "TaskListComplete"
+                    | "TaskGet"
+                    | "TaskStop"
+                    | "EnterWorktree"
+                    | "ExitWorktree"
+                    | "EnterPlanMode"
+                    | "ExitPlanMode"
+            ),
+            ToolProfile::NoAgent => {
+                matches!(
+                    name,
+                    "Agent" | "ToolSearch" | "EnterPlanMode" | "ExitPlanMode"
+                )
+            }
+        }
+    }
+}
+
+/// 单一注册入口：按 `profile` 把内置工具注册到 `registry`。
+///
+/// 工具清单在此**定义一次**（DRY）；各 profile 通过 [`ToolProfile::excludes`] 过滤。
+/// MCP 工具由 connector 动态注册，不在此列。
+pub fn register_tools(
+    registry: &ToolRegistry,
+    task_store: Arc<TaskStore>,
+    skills: Arc<Mutex<HashMap<String, Skill>>>,
+    profile: ToolProfile,
+) {
+    macro_rules! reg {
+        ($name:literal, $tool:expr) => {
+            if !profile.excludes($name) {
+                registry.register(Box::new(TypedToolAdapter::new($tool)));
+            }
+        };
+    }
+
+    // Core tools
+    reg!("Bash", bash::BashTool);
+    reg!("Read", file_read::FileReadTool);
+    reg!("Write", file_write::FileWriteTool);
+    reg!("Edit", file_edit::FileEditTool);
+    reg!("Glob", glob_tool::GlobTool);
+    reg!("Grep", grep::GrepTool);
+    reg!("LSP", lsp::LspTool);
+
+    // Web tools
+    reg!("WebFetch", web_fetch::WebFetchTool);
+    reg!("WebSearch", web_search::WebSearchTool);
+
+    // Agent dispatch
+    reg!(
+        "Agent",
+        agent_tool::AgentTool {
+            store: task_store.clone(),
+        }
+    );
+
+    // Task management tools
+    reg!(
+        "TaskCreate",
+        task_create::TaskCreateTool {
+            store: task_store.clone(),
+        }
+    );
+    reg!(
+        "TaskUpdate",
+        task_update::TaskUpdateTool {
+            store: task_store.clone(),
+        }
+    );
+    reg!(
+        "TaskList",
+        task_list::TaskListTool {
+            store: task_store.clone(),
+        }
+    );
+    reg!(
+        "TaskListCreate",
+        task_list_create::TaskListCreateTool {
+            store: task_store.clone(),
+        }
+    );
+    reg!(
+        "TaskListComplete",
+        task_list_complete::TaskListCompleteTool {
+            store: task_store.clone(),
+        }
+    );
+    reg!(
+        "TaskGet",
+        task_get::TaskGetTool {
+            store: task_store.clone(),
+        }
+    );
+    reg!(
+        "TaskStop",
+        task_stop::TaskStopTool {
+            store: task_store.clone(),
+        }
+    );
+
+    // Skill and memory tools (MCP tools are dynamically registered)
+    reg!(
+        "Skill",
+        skill_tool::SkillTool {
+            skills: skills.clone(),
+        }
+    );
+    reg!("Memory", memory_tool::MemoryTool);
+
+    // Utility tools
+    reg!("Sleep", sleep::SleepTool);
+    reg!("AskUserQuestion", ask_user::AskUserQuestionTool);
+    reg!("Brief", brief::BriefTool);
+
+    // Tool discovery
+    reg!("ToolSearch", tool_search::ToolSearchTool);
+
+    // Plan mode tools
+    reg!("EnterPlanMode", plan_mode::EnterPlanModeTool);
+    reg!("ExitPlanMode", plan_mode::ExitPlanModeTool);
+
+    // Worktree tools
+    reg!("EnterWorktree", worktree::EnterWorktreeTool);
+    reg!("ExitWorktree", worktree::ExitWorktreeTool);
+}
+
+/// 主 agent 全量工具（[`register_tools`] 的 `Full` profile 便捷封装）。
 pub fn register_all_tools(
     registry: &ToolRegistry,
     task_store: Arc<TaskStore>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    // Core tools
-    registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_read::FileReadTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_write::FileWriteTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_edit::FileEditTool)));
-    registry.register(Box::new(TypedToolAdapter::new(glob_tool::GlobTool)));
-    registry.register(Box::new(TypedToolAdapter::new(grep::GrepTool)));
-    registry.register(Box::new(TypedToolAdapter::new(lsp::LspTool)));
-
-    // Web tools
-    registry.register(Box::new(TypedToolAdapter::new(web_fetch::WebFetchTool)));
-    registry.register(Box::new(TypedToolAdapter::new(web_search::WebSearchTool)));
-
-    // Agent tools
-    registry.register(Box::new(TypedToolAdapter::new(agent_tool::AgentTool {
-        store: task_store.clone(),
-    })));
-
-    // Task management tools
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_create::TaskCreateTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_update::TaskUpdateTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(task_list::TaskListTool {
-        store: task_store.clone(),
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_list_create::TaskListCreateTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_list_complete::TaskListCompleteTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(task_get::TaskGetTool {
-        store: task_store.clone(),
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(task_stop::TaskStopTool {
-        store: task_store.clone(),
-    })));
-
-    // Skill and memory tools (MCP tools are dynamically registered)
-    registry.register(Box::new(TypedToolAdapter::new(skill_tool::SkillTool {
-        skills,
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(memory_tool::MemoryTool)));
-
-    // Utility tools
-    registry.register(Box::new(TypedToolAdapter::new(sleep::SleepTool)));
-    registry.register(Box::new(TypedToolAdapter::new(
-        ask_user::AskUserQuestionTool,
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(brief::BriefTool)));
-
-    // Tool discovery
-    registry.register(Box::new(TypedToolAdapter::new(tool_search::ToolSearchTool)));
-
-    // Plan mode tools
-    registry.register(Box::new(TypedToolAdapter::new(
-        plan_mode::EnterPlanModeTool,
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(plan_mode::ExitPlanModeTool)));
-
-    // Worktree tools
-    registry.register(Box::new(TypedToolAdapter::new(worktree::EnterWorktreeTool)));
-    registry.register(Box::new(TypedToolAdapter::new(worktree::ExitWorktreeTool)));
+    register_tools(registry, task_store, skills, ToolProfile::Full);
 }
 
+/// 子 agent 工具集（排除协调类工具；[`ToolProfile::SubAgent`] 封装）。
 pub fn register_subagent_tools(
     registry: &mut ToolRegistry,
-    _task_store: Arc<TaskStore>,
+    task_store: Arc<TaskStore>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    // Core tools
-    registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_read::FileReadTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_write::FileWriteTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_edit::FileEditTool)));
-    registry.register(Box::new(TypedToolAdapter::new(glob_tool::GlobTool)));
-    registry.register(Box::new(TypedToolAdapter::new(grep::GrepTool)));
-    registry.register(Box::new(TypedToolAdapter::new(lsp::LspTool)));
-
-    // Web tools
-    registry.register(Box::new(TypedToolAdapter::new(web_fetch::WebFetchTool)));
-    registry.register(Box::new(TypedToolAdapter::new(web_search::WebSearchTool)));
-
-    // Skill and memory tools (MCP tools are dynamically registered)
-    registry.register(Box::new(TypedToolAdapter::new(skill_tool::SkillTool {
-        skills,
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(memory_tool::MemoryTool)));
-
-    // Utility tools that do not coordinate with the user or parent task list
-    registry.register(Box::new(TypedToolAdapter::new(sleep::SleepTool)));
-    registry.register(Box::new(TypedToolAdapter::new(brief::BriefTool)));
-    registry.register(Box::new(TypedToolAdapter::new(tool_search::ToolSearchTool)));
+    register_tools(registry, task_store, skills, ToolProfile::SubAgent);
 }
 
+/// 排除 Agent 的工具集（[`ToolProfile::NoAgent`] 封装）。
 pub fn register_all_tools_except_agent(
     registry: &ToolRegistry,
     task_store: Arc<TaskStore>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    // Core tools
-    registry.register(Box::new(TypedToolAdapter::new(bash::BashTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_read::FileReadTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_write::FileWriteTool)));
-    registry.register(Box::new(TypedToolAdapter::new(file_edit::FileEditTool)));
-    registry.register(Box::new(TypedToolAdapter::new(glob_tool::GlobTool)));
-    registry.register(Box::new(TypedToolAdapter::new(grep::GrepTool)));
-    registry.register(Box::new(TypedToolAdapter::new(lsp::LspTool)));
-
-    // Web tools
-    registry.register(Box::new(TypedToolAdapter::new(web_fetch::WebFetchTool)));
-    registry.register(Box::new(TypedToolAdapter::new(web_search::WebSearchTool)));
-
-    // Task management tools
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_create::TaskCreateTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_update::TaskUpdateTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(task_list::TaskListTool {
-        store: task_store.clone(),
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_list_create::TaskListCreateTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(
-        task_list_complete::TaskListCompleteTool {
-            store: task_store.clone(),
-        },
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(task_get::TaskGetTool {
-        store: task_store.clone(),
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(task_stop::TaskStopTool {
-        store: task_store,
-    })));
-
-    // Skill and memory tools (MCP tools are dynamically registered)
-    registry.register(Box::new(TypedToolAdapter::new(skill_tool::SkillTool {
-        skills,
-    })));
-    registry.register(Box::new(TypedToolAdapter::new(memory_tool::MemoryTool)));
-
-    // Utility tools
-    registry.register(Box::new(TypedToolAdapter::new(sleep::SleepTool)));
-    registry.register(Box::new(TypedToolAdapter::new(
-        ask_user::AskUserQuestionTool,
-    )));
-    registry.register(Box::new(TypedToolAdapter::new(brief::BriefTool)));
-
-    // Worktree tools
-    registry.register(Box::new(TypedToolAdapter::new(worktree::EnterWorktreeTool)));
-    registry.register(Box::new(TypedToolAdapter::new(worktree::ExitWorktreeTool)));
+    register_tools(registry, task_store, skills, ToolProfile::NoAgent);
 }
 
 #[cfg(test)]
@@ -228,5 +230,55 @@ mod tests {
         assert!(registry.contains("Grep"));
         assert!(registry.contains("Bash"));
         assert!(registry.contains("Skill"));
+    }
+
+    #[test]
+    fn test_full_profile_registers_all_27_tools() {
+        let registry = ToolRegistry::new();
+        register_tools(
+            &registry,
+            Arc::new(TaskStore::new()),
+            Arc::new(Mutex::new(HashMap::new())),
+            ToolProfile::Full,
+        );
+        for name in [
+            "Bash",
+            "Read",
+            "Agent",
+            "TaskCreate",
+            "AskUserQuestion",
+            "ToolSearch",
+            "EnterPlanMode",
+            "ExitPlanMode",
+            "EnterWorktree",
+            "ExitWorktree",
+        ] {
+            assert!(registry.contains(name), "Full 应包含 {name}");
+        }
+    }
+
+    #[test]
+    fn test_no_agent_profile_excludes_agent_toolsearch_planmode_only() {
+        // NoAgent 的 quirk：排除 Agent / ToolSearch / PlanMode，但保留 Task / AskUser / Worktree。
+        let registry = ToolRegistry::new();
+        register_tools(
+            &registry,
+            Arc::new(TaskStore::new()),
+            Arc::new(Mutex::new(HashMap::new())),
+            ToolProfile::NoAgent,
+        );
+        for excluded in ["Agent", "ToolSearch", "EnterPlanMode", "ExitPlanMode"] {
+            assert!(!registry.contains(excluded), "NoAgent 应排除 {excluded}");
+        }
+        for included in [
+            "Bash",
+            "TaskCreate",
+            "TaskStop",
+            "AskUserQuestion",
+            "EnterWorktree",
+            "ExitWorktree",
+        ] {
+            assert!(registry.contains(included), "NoAgent 应保留 {included}");
+        }
     }
 }
