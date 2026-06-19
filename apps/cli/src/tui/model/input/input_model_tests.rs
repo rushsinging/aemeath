@@ -106,14 +106,14 @@ fn test_input_model_does_not_collapse_two_line_paste() {
     model.apply(InputIntent::InsertPastedText("a\nb".to_string()));
 
     assert_eq!(model.document.buffer, "a\nb");
+}
 
-    #[test]
-    fn test_input_model_does_not_collapse_three_line_paste() {
-        let mut model = InputModel::default();
-        model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
+#[test]
+fn test_input_model_does_not_collapse_three_line_paste() {
+    let mut model = InputModel::default();
+    model.apply(InputIntent::InsertPastedText("a\nb\nc".to_string()));
 
-        assert_eq!(model.document.buffer, "a\nb\nc");
-    }
+    assert_eq!(model.document.buffer, "a\nb\nc");
 }
 
 #[test]

@@ -88,7 +88,7 @@ fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_le
     let event = build_tool_calls_progress_event(1, &calls);
 
     match event.kind {
-        AgentProgressKind::ToolCalls { calls } => {
+        AgentProgressKind::ToolCalls { calls: _ } => {
             // 所有 tool 的 summary 为空
         }
         AgentProgressKind::Message { .. } => panic!("expected ToolCalls event"),
