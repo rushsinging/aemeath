@@ -81,6 +81,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         args_preview: None,
         activity_summary: None,
         result_summary: Some("```\ncode\n```".into()),
+            result_payload: None,
         collapsible: false,
         collapsed: false,
     });

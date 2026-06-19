@@ -2,6 +2,7 @@ use crate::tui::model::conversation::block::HookNoticeKind;
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
+use crate::tui::model::conversation::tool_result_payload::ToolResultPayload;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::{
@@ -96,26 +97,28 @@ impl OutputViewAssembler {
                         &reference.context.turn_id,
                         &reference.tool_call_id,
                     );
-                    let Some(result) = find_tool_result_payload(
-                        conversation,
-                        &reference.context.chat_id,
-                        &reference.context.turn_id,
-                        &reference.tool_call_id,
-                    ) else {
+                    let Some((result_output, result_content, result_is_error, result_image_count)) =
+                        find_tool_result_block(
+                            conversation,
+                            &reference.context.chat_id,
+                            &reference.context.turn_id,
+                            &reference.tool_call_id,
+                        )
+                    else {
                         continue;
                     };
                     let display_output = display_text_for_tool_result(
                         tool_name.as_deref(),
-                        result.output,
-                        result.content,
+                        result_output,
+                        result_content,
                     );
                     let text = summarize_non_embedded_result(
                         tool_name.as_deref(),
                         &display_output,
-                        result.is_error,
+                        result_is_error,
                     );
-                    let text = if result.image_count > 0 {
-                        format!("{text}\n[图片: {}]", result.image_count)
+                    let text = if result_image_count > 0 {
+                        format!("{text}\n[图片: {}]", result_image_count)
                     } else {
                         text
                     };
@@ -124,7 +127,7 @@ impl OutputViewAssembler {
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: format!("{}-result", reference.tool_call_id.as_ref()),
                             text,
-                            style: if result.is_error {
+                            style: if result_is_error {
                                 SemanticStyle::Error
                             } else {
                                 SemanticStyle::Success
@@ -341,17 +344,26 @@ fn find_tool_view(
 ) -> Option<ToolCallBlockView> {
     let call = find_tool_call(conversation, chat_id, turn_id, tool_id)?;
     let (icon, semantic_status, style) = map_tool_status(call.status);
-    let result_summary = call
-        .result
-        .as_deref()
-        .filter(|result| !result.is_empty())
-        .map(|result| {
-            find_tool_result_payload(conversation, chat_id, turn_id, tool_id)
-                .map(|payload| {
-                    display_text_for_tool_result(Some(&call.name), result, payload.content)
-                })
-                .unwrap_or_else(|| result.to_string())
-        });
+    // 同时计算 result_summary（展示文本）与 result_payload（结构化 payload，
+    // 供 TUI Display 走 typed 字段渲染 header），避免两遍扫描 tool result block。
+    let (result_summary, result_payload) =
+        match call.result.as_deref().filter(|result| !result.is_empty()) {
+            Some(result) => match find_tool_result_block(conversation, chat_id, turn_id, tool_id) {
+                Some((output, content, is_error, image_count)) => {
+                    let owned = ToolResultPayload::new(
+                        output.to_string(),
+                        content.clone(),
+                        is_error,
+                        image_count,
+                    );
+                    let text =
+                        display_text_for_tool_result(Some(&call.name), result, content);
+                    (Some(text), Some(owned))
+                }
+                None => (Some(result.to_string()), None),
+            },
+            None => (None, None),
+        };
     crate::tui::log_debug!(
         "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
         chat_id.as_ref(),
@@ -392,16 +404,36 @@ fn find_tool_view(
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
         // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
         result_summary,
+        result_payload,
         collapsible: true,
         collapsed: false,
     })
 }
 
-struct ToolResultPayload<'a> {
-    output: &'a str,
-    content: &'a serde_json::Value,
-    is_error: bool,
-    image_count: usize,
+/// 在 `conversation.blocks` 中查找匹配 `(chat_id, turn_id, tool_id)` 的 ToolResult block，
+/// 返回 `(output, content, is_error, image_count)` 元组。
+/// 替代原先构造借用 struct `ToolResultPayload<'a>` 的版本——assembler 端已转成 owned
+/// payload 写入 `ToolCallBlockView.result_payload`，无需保留借用。
+fn find_tool_result_block<'a>(
+    conversation: &'a ConversationModel,
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<(&'a str, &'a serde_json::Value, bool, usize)> {
+    conversation.blocks.iter().find_map(|block| match block {
+        crate::tui::model::conversation::block::ConversationBlock::ToolResult {
+            id,
+            chat_id: result_chat_id,
+            turn_id: result_turn_id,
+            output,
+            content,
+            is_error,
+            image_count,
+        } if id == tool_id && result_chat_id == chat_id && result_turn_id == turn_id => {
+            Some((output.as_str(), content, *is_error, *image_count))
+        }
+        _ => None,
+    })
 }
 
 fn find_tool_call<'a>(
@@ -420,33 +452,6 @@ fn find_tool_call<'a>(
                 .iter()
                 .find(|call| call.id.as_ref() == Some(tool_id))
         })
-}
-
-fn find_tool_result_payload<'a>(
-    conversation: &'a ConversationModel,
-    chat_id: &ChatId,
-    turn_id: &ChatTurnId,
-    tool_id: &ToolCallId,
-) -> Option<ToolResultPayload<'a>> {
-    conversation.blocks.iter().find_map(|block| match block {
-        crate::tui::model::conversation::block::ConversationBlock::ToolResult {
-            id,
-            chat_id: result_chat_id,
-            turn_id: result_turn_id,
-            output,
-            content,
-            is_error,
-            image_count,
-        } if id == tool_id && result_chat_id == chat_id && result_turn_id == turn_id => {
-            Some(ToolResultPayload {
-                output,
-                content,
-                is_error: *is_error,
-                image_count: *image_count,
-            })
-        }
-        _ => None,
-    })
 }
 
 fn assemble_legacy_conversation_blocks(

@@ -100,6 +100,7 @@ mod tests {
             args_preview: Some("/foo/".into()),
             activity_summary: None,
             result_summary: None,
+            result_payload: None,
             collapsible: false,
             collapsed: false,
         }
