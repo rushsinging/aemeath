@@ -3,6 +3,7 @@ use crate::business::agent::Agent;
 use crate::business::chat::looping::compact::auto_compact;
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
+    stop_hook_block_limit_reached,
 };
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
@@ -139,6 +140,7 @@ where
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
     let mut stall_detector = StallDetector::new();
+    let mut stop_hook_block_count: usize = 0;
     let mut pending_input = PendingInputBuffer::default();
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
@@ -380,6 +382,44 @@ where
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
+                    // #372: stall 终止前也须经 Stop hook 门禁；阻断则注入反馈并重试
+                    let stall_outcome = AgentRunOutcome {
+                        status: AgentRunStatus::Completed,
+                        turns: turn_count,
+                        duration: turn_start.elapsed(),
+                        role: None,
+                        model: client.model_name().to_string(),
+                    };
+                    if let Some(feedback) = run_stop_hook_before_finish(
+                        &stall_outcome,
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        &session_id,
+                        &language,
+                    )
+                    .await
+                    {
+                        stop_hook_block_count += 1;
+                        if stop_hook_block_limit_reached(
+                            stop_hook_block_count,
+                            &sink,
+                            &mut loop_fsm,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                        loop_fsm.transition(ChatLoopTransition::StopBlocked);
+                        messages.push(Message::system_generated_user(format!(
+                            "<system-reminder>\n{feedback}\n</system-reminder>"
+                        )));
+                        sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+                            .await;
+                        stall_detector = StallDetector::new();
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        continue;
+                    }
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     loop_fsm.assert_state(ChatLoopState::Done, "stall stop finalizes loop");
                     break;
@@ -451,6 +491,16 @@ where
                     )
                     .await
                     {
+                        stop_hook_block_count += 1;
+                        if stop_hook_block_limit_reached(
+                            stop_hook_block_count,
+                            &sink,
+                            &mut loop_fsm,
+                        )
+                        .await
+                        {
+                            break;
+                        }
                         loop_fsm.transition(ChatLoopTransition::StopBlocked);
                         messages.push(Message::system_generated_user(format!(
                             "<system-reminder>\n{outcome}\n</system-reminder>"
@@ -604,6 +654,12 @@ where
                 )
                 .await
                 {
+                    stop_hook_block_count += 1;
+                    if stop_hook_block_limit_reached(stop_hook_block_count, &sink, &mut loop_fsm)
+                        .await
+                    {
+                        break;
+                    }
                     messages.push(Message::system_generated_user(format!(
                         "<system-reminder>\n{outcome}\n</system-reminder>"
                     )));
