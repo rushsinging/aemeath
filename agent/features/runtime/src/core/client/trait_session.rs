@@ -37,11 +37,36 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
     let workspace = Some(project::api::WorkspacePersist::snapshot(
         me.inner.workspace.as_ref(),
     ));
+    let summary = me
+        .inner
+        .active_summary
+        .lock()
+        .map_err(|_| SdkError::Internal("active_summary 锁已损坏".to_string()))?
+        .clone();
+    let frozen_chats = me
+        .inner
+        .frozen_chats
+        .lock()
+        .map_err(|_| SdkError::Internal("frozen_chats 锁已损坏".to_string()))?
+        .clone();
+
+    // 构造 chats = 旧链（冻结）+ 活跃段
+    let mut chats = frozen_chats;
+    if let Some(s) = summary {
+        chats.push(crate::business::session::ChatSegment::compact(s, messages));
+    } else {
+        let mut seg = crate::business::session::ChatSegment::normal(None);
+        seg.messages = messages;
+        chats.push(seg);
+    }
+
     let mut session = crate::business::session::Session::new(
         me.inner.session_id.clone(),
         me.inner.cwd.to_string_lossy().to_string(),
     );
-    session.messages = messages;
+    session.chats = chats;
+    // 旧 messages 字段置空（已迁移到 chats）
+    session.messages = Vec::new();
     session.updated_at = crate::business::session::now_iso();
     session.metadata.model = Some(mapping::model_display(
         &me.inner.resolved_model.source_key,
@@ -61,7 +86,29 @@ pub(super) async fn load_session_impl(
 ) -> Result<SessionSnapshot, SdkError> {
     match crate::business::session::load_session(id).await {
         Ok(session) => {
-            let mut messages = session.messages;
+            // 从 chat 链提取活跃链（最后一个 Compact 段到末端）
+            let chain = crate::business::session::ChatChain::from_chats(&session.chats);
+            let summary = chain.active_summary().map(|s| s.to_string());
+
+            // 活跃链起点（旧链在此索引之前，冻结保留）
+            let active_start = session
+                .chats
+                .iter()
+                .rposition(|s| s.kind == crate::business::session::SegmentKind::Compact)
+                .or_else(|| session.chats.iter().position(|s| s.parent_id.is_none()))
+                .unwrap_or(0);
+            let frozen: Vec<crate::business::session::ChatSegment> =
+                session.chats[..active_start].to_vec();
+
+            // 写回 RuntimeHandle 状态
+            if let Ok(mut guard) = me.inner.active_summary.lock() {
+                *guard = summary;
+            }
+            if let Ok(mut guard) = me.inner.frozen_chats.lock() {
+                *guard = frozen;
+            }
+
+            let mut messages = chain.messages();
             let trimmed = {
                 let before = messages.len();
                 crate::business::chat::message_integrity::sanitize_messages(&mut messages);

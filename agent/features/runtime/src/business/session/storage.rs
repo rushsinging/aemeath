@@ -13,6 +13,24 @@ use crate::business::session::types::*;
 use crate::LOG_TARGET;
 use tokio::io::AsyncWriteExt;
 
+/// 旧格式迁移：若 `chats` 为空且 `messages` 非空，把扁平 messages 包装为
+/// 单个 `ChatSegment::normal(None)`，存入 `chats`，清空 `messages`。
+fn migrate_legacy_messages(session: &mut Session) {
+    if session.chats.is_empty() && !session.messages.is_empty() {
+        log::info!(
+            target: LOG_TARGET,
+            "session {} migrating legacy flat messages ({}) to chat chain",
+            session.id,
+            session.messages.len()
+        );
+        let messages = std::mem::take(&mut session.messages);
+        let mut seg = super::chat_chain::ChatSegment::normal(None);
+        seg.messages = messages;
+        session.chats.push(seg);
+        session.messages = Vec::new();
+    }
+}
+
 /// Save a session to disk (atomic: tmp → fsync → rename).
 ///
 /// Before replacing `{id}.json`, the previous version is preserved as
@@ -80,7 +98,10 @@ pub async fn load_session(id: &str) -> Result<Session, String> {
         .map_err(|e| format!("failed to read session: {e}"))?;
 
     match serde_json::from_str::<Session>(&json) {
-        Ok(session) => Ok(session),
+        Ok(mut session) => {
+            migrate_legacy_messages(&mut session);
+            Ok(session)
+        }
         Err(parse_err) => {
             log::warn!(
                 target: LOG_TARGET,
@@ -91,12 +112,13 @@ pub async fn load_session(id: &str) -> Result<Session, String> {
             // 尝试 .bak 回退
             if bak_path.exists() {
                 if let Ok(bak_json) = tokio::fs::read_to_string(&bak_path).await {
-                    if let Ok(session) = serde_json::from_str::<Session>(&bak_json) {
+                    if let Ok(mut session) = serde_json::from_str::<Session>(&bak_json) {
                         log::info!(
                             target: LOG_TARGET,
                             "session {} recovered from .bak backup",
                             id
                         );
+                        migrate_legacy_messages(&mut session);
                         return Ok(session);
                     }
                 }

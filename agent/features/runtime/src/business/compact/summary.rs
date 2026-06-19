@@ -3,14 +3,22 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use crate::business::compact::micro::microcompact;
-use crate::business::compact::restore::{fix_role_alternation, sanitize_tool_pairs};
+use crate::business::compact::restore::sanitize_tool_pairs;
 use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
 // 向后兼容的 re-export
 pub use crate::business::compact::needs_compaction;
+
+/// compact 结果：summary 走 system 通道，recent_messages 作为新链的消息。
+#[derive(Debug, Clone)]
+pub struct CompactResult {
+    /// 早期对话的结构化摘要（拼入 system_blocks）
+    pub summary: String,
+    /// recent tail（从 split_point 到末尾的原始消息）
+    pub recent_messages: Vec<Message>,
+}
 
 /// 发送给 LLM 的压缩提示模板。
 pub const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Create a structured summary of the conversation.
@@ -47,59 +55,35 @@ Here is the conversation to summarize:
 "#;
 
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
-/// 返回 (压缩后的消息, 是否进行了压缩)
+///
+/// 返回 `Some(CompactResult)` 表示发生了压缩（summary + recent tail）；
+/// `None` 表示无需压缩。summary 不再注入 messages，走 system 通道。
 pub fn compact_messages(
     messages: &[Message],
     system_prompt: &str,
     context_size: usize,
-) -> (Vec<Message>, bool) {
+) -> Option<CompactResult> {
     if !needs_compaction(messages, system_prompt, context_size) {
-        return (messages.to_vec(), false);
+        return None;
     }
 
     let total = messages.len();
+    let window = compact_window(total)?;
     if total <= 4 {
-        return (messages.to_vec(), false);
+        return None;
     }
 
-    // 第一步：先尝试微压缩（保留最近 10 条消息的工具结果）
-    let result = microcompact(messages, 10);
-
-    if !needs_compaction(&result, system_prompt, context_size) {
-        return (result, true);
-    }
-
-    // 第二步：完整压缩 — 头部/尾部保护
-    let Some(window) = compact_window(total) else {
-        return (result, false);
-    };
-
-    let early_messages = &result[window.head_protect..window.split_point];
+    let early_messages = &messages[window.head_protect..window.split_point];
     let summary = build_summary_text(early_messages);
 
-    // 重组：头部 + 摘要 + 近期消息
-    let mut compacted = Vec::with_capacity(window.head_protect + window.keep_recent + 3);
-    compacted.extend_from_slice(&result[..window.head_protect]);
+    // recent tail：split_point 到末尾的原始消息
+    let mut recent = messages[window.split_point..].to_vec();
+    sanitize_tool_pairs(&mut recent);
 
-    let summary_text = format!(
-        "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
-        early_messages.len(),
-        summary
-    );
-    compacted.push(Message::system_generated_user(summary_text));
-    compacted.push(Message {
-        role: Role::Assistant,
-        content: vec![ContentBlock::Text {
-            text: "I understand. I'll continue from where we left off.".to_string(),
-        }],
-        metadata: None,
-    });
-    compacted.extend_from_slice(&result[window.split_point..]);
-
-    fix_role_alternation(&mut compacted);
-    sanitize_tool_pairs(&mut compacted);
-
-    (compacted, true)
+    Some(CompactResult {
+        summary,
+        recent_messages: recent,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,35 +216,26 @@ pub fn build_summary_text(messages: &[Message]) -> String {
 /// 使用 LLM 进行语义化压缩（对早期消息生成结构化摘要）。
 ///
 /// 如果 LLM 调用失败，回退到本地 `build_summary_text`。
-/// 返回 (压缩后的消息, 是否进行了压缩)
+/// 返回 `Some(CompactResult)` 表示发生了压缩；`None` 表示无需压缩。
+/// summary 走 system 通道，不注入 messages。
 pub async fn compact_messages_with_llm(
     messages: &[Message],
     system_prompt: &str,
     context_size: usize,
     client: Option<&provider::api::LlmClient>,
-) -> (Vec<Message>, bool) {
+) -> Option<CompactResult> {
     if !needs_compaction(messages, system_prompt, context_size) {
-        return (messages.to_vec(), false);
+        return None;
     }
 
     let total = messages.len();
     if total <= 4 {
-        return (messages.to_vec(), false);
+        return None;
     }
 
-    // 第一步：微压缩（返回克隆视图，不修改原始 messages）
-    let result = microcompact(messages, 10);
+    let window = compact_window(total)?;
 
-    if !needs_compaction(&result, system_prompt, context_size) {
-        return (result, true);
-    }
-
-    // 第二步：完整压缩 — 头部/尾部保护
-    let Some(window) = compact_window(total) else {
-        return (result, false);
-    };
-
-    let early_messages = &result[window.head_protect..window.split_point];
+    let early_messages = &messages[window.head_protect..window.split_point];
 
     // 尝试 LLM 摘要，失败则回退到本地
     let summary = match client {
@@ -271,29 +246,14 @@ pub async fn compact_messages_with_llm(
         None => build_summary_text(early_messages),
     };
 
-    // 重组：头部 + 摘要 + 近期消息
-    let mut compacted = Vec::with_capacity(window.head_protect + window.keep_recent + 3);
-    compacted.extend_from_slice(&result[..window.head_protect]);
+    // recent tail：split_point 到末尾的原始消息
+    let mut recent = messages[window.split_point..].to_vec();
+    sanitize_tool_pairs(&mut recent);
 
-    let summary_text = format!(
-        "<system-reminder>\n[Conversation summary of {} earlier messages]\n{}\n</system-reminder>",
-        early_messages.len(),
-        summary
-    );
-    compacted.push(Message::system_generated_user(summary_text));
-    compacted.push(Message {
-        role: Role::Assistant,
-        content: vec![ContentBlock::Text {
-            text: "I understand. I'll continue from where we left off.".to_string(),
-        }],
-        metadata: None,
-    });
-    compacted.extend_from_slice(&result[window.split_point..]);
-
-    fix_role_alternation(&mut compacted);
-    sanitize_tool_pairs(&mut compacted);
-
-    (compacted, true)
+    Some(CompactResult {
+        summary,
+        recent_messages: recent,
+    })
 }
 
 /// 调用 LLM 生成语义化压缩摘要

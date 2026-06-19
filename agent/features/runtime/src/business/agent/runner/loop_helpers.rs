@@ -81,13 +81,12 @@ impl<'a> SubAgentRun<'a> {
 
         if urgency >= 2 {
             let old_len = self.messages.len();
-            let (compacted, was_compacted) = crate::business::compact::compact_messages(
+            if let Some(result) = crate::business::compact::compact_messages(
                 &self.messages,
                 &self.system,
                 self.ctx_context_size,
-            );
-            if was_compacted {
-                self.messages = compacted;
+            ) {
+                self.messages = result.recent_messages;
                 (self.progress)(
                     Some(turn_number),
                     &format!(
@@ -97,9 +96,6 @@ impl<'a> SubAgentRun<'a> {
                     ),
                 );
             }
-        } else if urgency >= 1 {
-            self.messages = crate::business::compact::microcompact(&self.messages, 4);
-            (self.progress)(Some(turn_number), "Agent microcompacted");
         }
     }
 
