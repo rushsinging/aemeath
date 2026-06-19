@@ -111,6 +111,7 @@ mod tests {
                     input_tokens: 0,
                     output_tokens: 0,
                     cached_tokens: None,
+                    cache_creation_tokens: None,
                     reasoning_tokens: None,
                 },
                 stop_reason: crate::business::types::StopReason::EndTurn,

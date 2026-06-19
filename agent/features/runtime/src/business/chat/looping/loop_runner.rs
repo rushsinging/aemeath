@@ -315,10 +315,12 @@ where
                 last_api_input_tokens = resp.usage.input_tokens as u64;
                 last_api_output_tokens = resp.usage.output_tokens as u64;
                 cached_tokens = resp.usage.cached_tokens.map(|v| v as u64);
+                let cache_creation = resp.usage.cache_creation_tokens.map(|v| v as u64);
                 reasoning_tokens = resp.usage.reasoning_tokens.map(|v| v as u64);
 
                 // 计算 context window 使用情况
                 let cached = cached_tokens.unwrap_or(0);
+                let cache_write = cache_creation.unwrap_or(0);
                 let reasoning = reasoning_tokens.unwrap_or(0);
                 let total_tokens = last_api_input_tokens + last_api_output_tokens + reasoning;
                 let effective_window =
@@ -328,11 +330,12 @@ where
                 let pct = total_tokens * 100 / effective_window.max(1);
 
                 log::info!(target: LOG_TARGET,
-                    "turn usage: session={}, turn={}, input={}, output={}, cached={}, reasoning={}, total={}, context_size={}, effective_window={}, threshold={}, usage_pct={}%",
+                    "turn usage: session={}, turn={}, input={}, output={}, cache_write={}, cached={}, reasoning={}, total={}, context_size={}, effective_window={}, threshold={}, usage_pct={}%",
                     session_id,
                     turn_count,
                     last_api_input_tokens,
                     last_api_output_tokens,
+                    cache_write,
                     cached,
                     reasoning,
                     total_tokens,
