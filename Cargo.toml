@@ -17,7 +17,6 @@ members = [
     "packages/sdk",
     "packages/global/logging",
     "packages/global/utils",
-    "packages/tool-schema-macros",
 ]
 
 [workspace.dependencies]

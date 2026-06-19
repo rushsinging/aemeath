@@ -79,7 +79,7 @@ impl Tool for TaskGetTool {
 
         let priority = task.priority.as_str();
 
-        let mut data = serde_json::json!({
+        let mut task_data = serde_json::json!({
             "id": display_id,
             "subject": task.subject.clone(),
             "status": status,
@@ -91,19 +91,19 @@ impl Tool for TaskGetTool {
         });
 
         if let Some(ref progress_message) = task.progress_message {
-            data["progress_message"] = serde_json::Value::String(progress_message.clone());
+            task_data["progress_message"] = serde_json::Value::String(progress_message.clone());
         }
         if let Some(ref owner) = task.owner {
-            data["owner"] = serde_json::Value::String(owner.clone());
+            task_data["owner"] = serde_json::Value::String(owner.clone());
         }
         if let Some(ref active_form) = task.active_form {
-            data["active_form"] = serde_json::Value::String(active_form.clone());
+            task_data["active_form"] = serde_json::Value::String(active_form.clone());
         }
         if let Some(ref session_id) = task.session_id {
-            data["session_id"] = serde_json::Value::String(session_id.clone());
+            task_data["session_id"] = serde_json::Value::String(session_id.clone());
         }
         if !task.tags.is_empty() {
-            data["tags"] = serde_json::json!(task.tags);
+            task_data["tags"] = serde_json::json!(task.tags);
         }
 
         // Dependencies
@@ -112,20 +112,22 @@ impl Tool for TaskGetTool {
             let blocked_by: Vec<String> =
                 dep_displays.iter().map(|id| format!("#{}", id)).collect();
             let is_blocked = self.store.is_blocked(&task).await;
-            data["blocked_by"] = serde_json::json!(blocked_by);
-            data["is_blocked"] = serde_json::json!(is_blocked);
+            task_data["blocked_by"] = serde_json::json!(blocked_by);
+            task_data["is_blocked"] = serde_json::json!(is_blocked);
         }
 
         if !task.blocks.is_empty() {
             let dep_displays = self.store.to_display_ids(&task.blocks).await;
             let blocks: Vec<String> = dep_displays.iter().map(|id| format!("#{}", id)).collect();
-            data["blocks"] = serde_json::json!(blocks);
+            task_data["blocks"] = serde_json::json!(blocks);
         }
 
         ToolResult::success_json(serde_json::json!({
             "status": "success",
             "message": format!("Task #{}: {}", display_id, task.subject),
-            "data": data
+            "data": {
+                "task": task_data
+            }
         }))
     }
 }

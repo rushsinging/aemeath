@@ -1,10 +1,10 @@
 //! Typed result for the `bash` tool (issue #273 core tool).
 
 use serde::{Deserialize, Serialize};
-use tool_schema_macros::ToolSchema;
 
 /// Typed result returned by the `bash` tool.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ToolSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+// tool_schema: {stdout: string, stderr: string, exit_code: integer, signal: integer?}
 pub struct BashResult {
     pub stdout: String,
     pub stderr: String,

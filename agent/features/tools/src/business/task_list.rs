@@ -85,7 +85,7 @@ impl Tool for TaskListTool {
             return ToolResult::success_json(serde_json::json!({
                 "status": "success",
                 "message": "No tasks found",
-                "data": { "tasks": [], "stats": {} }
+                "data": { "tasks": [] }
             }));
         }
 
@@ -176,12 +176,6 @@ impl Tool for TaskListTool {
             "status": "success",
             "message": msg,
             "data": {
-                "stats": {
-                    "total": stats.total - stats.deleted,
-                    "pending": stats.pending,
-                    "in_progress": stats.in_progress,
-                    "completed": stats.completed
-                },
                 "batches": batches_json,
                 "tasks": tasks_json
             }

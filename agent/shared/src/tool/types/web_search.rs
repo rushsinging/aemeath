@@ -2,10 +2,10 @@
 
 use super::support::SearchResult;
 use serde::{Deserialize, Serialize};
-use tool_schema_macros::ToolSchema;
 
 /// Typed result returned by the `web_search` tool.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ToolSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+// tool_schema: {results: array}
 pub struct WebSearchResult {
     pub results: Vec<SearchResult>,
 }

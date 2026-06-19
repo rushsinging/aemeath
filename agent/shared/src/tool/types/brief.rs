@@ -1,10 +1,10 @@
 //! Typed result for the `brief` tool (non-core tool).
 
 use serde::{Deserialize, Serialize};
-use tool_schema_macros::ToolSchema;
 
 /// Typed result returned by the `brief` tool.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ToolSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+// tool_schema: {summary: string}
 pub struct BriefResult {
     pub summary: String,
 }

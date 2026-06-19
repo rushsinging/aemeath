@@ -92,3 +92,6 @@ pub use task_stop::TaskStopResult;
 pub use task_update::TaskUpdateResult;
 pub use tool_search::ToolSearchResult;
 pub use web_search::WebSearchResult;
+
+// Generated ToolSchema impls (by build.rs).
+include!(concat!(env!("OUT_DIR"), "/generated_impls.rs"));

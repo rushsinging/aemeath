@@ -2,10 +2,10 @@
 
 use super::support::ResourceContent;
 use serde::{Deserialize, Serialize};
-use tool_schema_macros::ToolSchema;
 
 /// Typed result returned by the `read_mcp_resource` tool.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ToolSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+// tool_schema: {uri: string}
 pub struct ReadMcpResourceResult {
     pub contents: ResourceContent,
 }

@@ -2,14 +2,14 @@
 
 use super::support::AskOption;
 use serde::{Deserialize, Serialize};
-use tool_schema_macros::ToolSchema;
 
 /// Typed result returned by the `ask_user` tool.
 ///
 /// `options` is the list of answer choices presented to the user; each
 /// option uses `AskOption` (renamed from the bare `Option` to avoid shadowing
 /// `std::option::Option`).
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ToolSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+// tool_schema: {question_type: string, options: array, allow_free_input: boolean}
 pub struct AskUserQuestionResult {
     pub question_type: String,
     pub question: String,
