@@ -141,7 +141,7 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 
 - **MUST** 由用户明确指定版本号（如"发 0.0.2"），agent **NEVER** 自行决定发版或推演版本号。
 - **MUST** tag 打在 `origin/main` 最新 commit 上（已 review、已同步到远端），**NEVER** 打在本地未 push 的 HEAD 上。本地若有未 push 的 commit，**MUST** 先判断其是否为已通过 PR 合入内容的噪音（如 merge commit、仅含 `.agents/*` 等运行时副产物的提交）；若是则 tag 仍打在 `origin/main`，发版后 reset 清理。
-- **MUST** 使用轻量 tag（沿用 v0.0.1 风格），格式 `vX.Y.Z`。**NEVER** 改 `Cargo.toml` 的 `workspace.version`（占位符 `0.0.0`，实际版本从 tag 提取）。
+- **MUST** 使用轻量 tag（沿用 v0.0.1 风格），格式 `vX.Y.Z`。**NEVER** 改 `Cargo.toml` 的 `workspace.version`（占位符 `0.0.0`）；实际版本由 `release.yml` 的 `build` job 显式注入 `AEMEATH_VERSION` env（取自 `validate.outputs.version`），`build.rs` 不再从 git 历史读 tag。
 - **MUST** push tag 前先向用户输出方案（tag 指向哪个 commit、版本号、自上一 tag 以来的变更摘要）并等待确认；**NEVER** 未经确认直接 push tag。
 - **MUST** push 后用 `gh run list --workflow=release.yml` 监控三个阶段（Validate & Gate / Build ×2 / Create Release）全部通过；任一失败 **MUST** 排查并报告。
 - release notes 由 `generate_release_notes: true` 自动从 PR 生成，agent **NEVER** 手写发版说明。

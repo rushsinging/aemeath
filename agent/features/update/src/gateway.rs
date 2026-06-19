@@ -3,21 +3,15 @@
 //! 对应设计文档：`docs/snapshot/release-update-design.md` 子系统 2（版本检查）。
 //! 子系统 3（自动更新）见本文件 `perform_update`。
 
-use std::path::PathBuf;
-
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use sdk::{SdkError, UpdateResult, UpdateService, VersionCheck};
 use semver::Version;
 
-use crate::contract::{CacheEntry, GitHubRelease};
+use crate::contract::GitHubRelease;
 use crate::LOG_TARGET;
 
 /// GitHub Releases API endpoint（匿名访问，限速 60 次/小时）。
 const GITHUB_API_URL: &str = "https://api.github.com/repos/rushsinging/aemeath/releases/latest";
-
-/// 缓存最大有效期（小时）。
-const CACHE_MAX_AGE_HOURS: i64 = 24;
 
 /// HTTP 请求超时（秒）—— 用于元数据请求（GitHub API JSON / checksums.txt）。
 const REQUEST_TIMEOUT_SECS: u64 = 5;
@@ -30,17 +24,20 @@ const DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 // ── public API ───────────────────────────────────────────────────
 
 /// 版本检查与自动更新 Gateway。
+///
+/// 每次 `check_latest()` 都会直接调 GitHub Releases API，不做本地缓存：
+/// GitHub 匿名 API 限速 60 次/小时，普通 dev tool 不会打满；
+/// 每次检查都拿到最新数据，避免缓存过期漏报新版本。
 pub struct UpdateGateway {
     /// 元数据请求 client（短超时）。
     http: reqwest::Client,
     /// 二进制下载 client（长超时）。
     download: reqwest::Client,
-    cache_path: PathBuf,
 }
 
 impl UpdateGateway {
-    /// 创建 Gateway。`cache_path` 通常为 `~/.agents/update_check.json`。
-    pub fn new(cache_path: PathBuf) -> Self {
+    /// 创建 Gateway。
+    pub fn new() -> Self {
         let ua = format!("aemeath/{}", share::version());
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -52,11 +49,13 @@ impl UpdateGateway {
             .user_agent(ua)
             .build()
             .unwrap_or_default();
-        Self {
-            http,
-            download,
-            cache_path,
-        }
+        Self { http, download }
+    }
+}
+
+impl Default for UpdateGateway {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -65,25 +64,12 @@ impl UpdateGateway {
 #[async_trait]
 impl UpdateService for UpdateGateway {
     async fn check_latest(&self) -> Result<VersionCheck, SdkError> {
-        // 先检查缓存是否新鲜
-        if let Some(cache) = self.load_cache() {
-            if is_cache_fresh(&cache) {
-                log::debug!(
-                    target: LOG_TARGET,
-                    "使用缓存（last_check={}）",
-                    cache.last_check
-                );
-                return build_check_from_cache(&cache);
-            }
-        }
-
-        // 缓存过期或不存在 → 调 API
+        // 无缓存策略：每次都直接查 GitHub API。
         self.force_check().await
     }
 
     async fn force_check(&self) -> Result<VersionCheck, SdkError> {
         let release = self.fetch_latest_release().await?;
-        self.save_cache(&release);
         build_version_check(&release)
     }
 
@@ -206,34 +192,6 @@ impl UpdateGateway {
         Ok(release)
     }
 
-    /// 写入缓存文件（失败时静默降级，不影响主流程）。
-    fn save_cache(&self, release: &GitHubRelease) {
-        let entry = CacheEntry {
-            last_check: Utc::now().to_rfc3339(),
-            latest_version: strip_v_prefix(&release.tag_name).to_string(),
-            latest_url: release.html_url.clone(),
-        };
-
-        if let Some(parent) = self.cache_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-
-        match serde_json::to_string(&entry) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(&self.cache_path, json) {
-                    log::warn!(target: LOG_TARGET, "写入更新缓存失败 {}: {e}", self.cache_path.display());
-                }
-            }
-            Err(e) => log::warn!(target: LOG_TARGET, "序列化更新缓存失败: {e}"),
-        }
-    }
-
-    /// 读取缓存文件（不存在或解析失败时返回 None）。
-    fn load_cache(&self) -> Option<CacheEntry> {
-        let content = std::fs::read_to_string(&self.cache_path).ok()?;
-        serde_json::from_str(&content).ok()
-    }
-
     /// 下载文本内容（如 checksums.txt）。
     async fn download_text(&self, url: &str) -> Result<String, reqwest::Error> {
         log::debug!(target: LOG_TARGET, "下载: {url}");
@@ -272,17 +230,6 @@ fn current_version() -> Version {
     Version::parse(share::version()).expect("AEMEATH_VERSION / CARGO_PKG_VERSION 必须是合法 semver")
 }
 
-/// 判断缓存是否在有效期内。
-fn is_cache_fresh(entry: &CacheEntry) -> bool {
-    match DateTime::parse_from_rfc3339(&entry.last_check) {
-        Ok(last_check) => {
-            let elapsed = Utc::now().signed_duration_since(last_check.with_timezone(&Utc));
-            elapsed.num_hours() < CACHE_MAX_AGE_HOURS
-        }
-        Err(_) => false,
-    }
-}
-
 /// 从 GitHubRelease 构造 VersionCheck。
 fn build_version_check(release: &GitHubRelease) -> Result<VersionCheck, SdkError> {
     let current = current_version();
@@ -296,21 +243,6 @@ fn build_version_check(release: &GitHubRelease) -> Result<VersionCheck, SdkError
         is_update_available: latest > current,
         release_url: release.html_url.clone(),
         release_notes: release.body.clone(),
-    })
-}
-
-/// 从缓存构造 VersionCheck。
-fn build_check_from_cache(cache: &CacheEntry) -> Result<VersionCheck, SdkError> {
-    let current = current_version();
-    let latest = Version::parse(&cache.latest_version)
-        .map_err(|e| SdkError::Internal(format!("解析缓存版本号失败: {e}")))?;
-
-    Ok(VersionCheck {
-        current_version: current.to_string(),
-        latest_version: latest.to_string(),
-        is_update_available: latest > current,
-        release_url: cache.latest_url.clone(),
-        release_notes: None,
     })
 }
 
@@ -466,49 +398,6 @@ mod tests {
         };
         let check = build_version_check(&release).unwrap();
         assert!(!check.is_update_available);
-    }
-
-    #[test]
-    fn test_is_cache_fresh_recent() {
-        let entry = CacheEntry {
-            last_check: Utc::now().to_rfc3339(),
-            latest_version: "0.9.0".into(),
-            latest_url: "https://example.com".into(),
-        };
-        assert!(is_cache_fresh(&entry));
-    }
-
-    #[test]
-    fn test_is_cache_fresh_expired() {
-        let old = Utc::now() - chrono::Duration::hours(CACHE_MAX_AGE_HOURS + 1);
-        let entry = CacheEntry {
-            last_check: old.to_rfc3339(),
-            latest_version: "0.9.0".into(),
-            latest_url: "https://example.com".into(),
-        };
-        assert!(!is_cache_fresh(&entry));
-    }
-
-    #[test]
-    fn test_is_cache_fresh_invalid_date() {
-        let entry = CacheEntry {
-            last_check: "not-a-date".into(),
-            latest_version: "0.9.0".into(),
-            latest_url: "https://example.com".into(),
-        };
-        assert!(!is_cache_fresh(&entry));
-    }
-
-    #[test]
-    fn test_build_check_from_cache() {
-        let cache = CacheEntry {
-            last_check: Utc::now().to_rfc3339(),
-            latest_version: format!("{}.{}.{}", current_version().major + 1, 0, 0),
-            latest_url: "https://example.com".into(),
-        };
-        let check = build_check_from_cache(&cache).unwrap();
-        assert!(check.is_update_available);
-        assert!(check.release_notes.is_none());
     }
 
     // ── perform_update 辅助函数测试 ──────────────────────────────────

@@ -79,6 +79,12 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: Build release binary
+        # 显式注入 AEMEATH_VERSION，使二进制内嵌正确的版本号。
+        # 版本号由 validate job 从 git tag / workflow_dispatch 输入解析（见
+        # outputs.version）。build.rs 不再从 git 历史读取版本号，本地 dev build
+        # 默认 0.0.0；发布版本必须在此显式注入。
+        env:
+          AEMEATH_VERSION: ${{ needs.validate.outputs.version }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package tarball

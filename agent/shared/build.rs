@@ -1,6 +1,11 @@
-//! build.rs: 两个职责
-//! 1. 从 git tag 注入版本号到编译期常量（`cargo:rustc-env=AEMEATH_VERSION`）
-//! 2. 用 syn 解析 `src/tool/types/*.rs` 中的 struct 定义，生成 ToolSchema impl
+//! build.rs: 一个职责
+//!
+//! 用 syn 解析 `src/tool/types/*.rs` 中的 struct 定义，生成 ToolSchema impl。
+//!
+//! 版本号注入说明：build.rs 不再从 git tag 读取版本号，而是尊重外部传入的
+//! `AEMEATH_VERSION` 环境变量（由打包/CI 显式注入），无外部注入时 fallback 到
+//! `CARGO_PKG_VERSION`（即 `Cargo.toml` 的 `workspace.version` 占位符 `0.0.0`）。
+//! 本地 dev build 永远显示 `0.0.0`，发布版本由 release workflow 注入。
 
 use std::collections::HashSet;
 use std::env;
@@ -146,24 +151,11 @@ fn is_option_type(ty: &syn::Type) -> bool {
 }
 
 fn main() {
-    // --- 1. 版本注入 ---
-    println!("cargo:rerun-if-changed=.git/refs/tags");
-    println!("cargo:rerun-if-changed=.git/HEAD");
+    // --- 1. ToolSchema 代码生成（syn 解析） ---
+    // 当 AEMEATH_VERSION 环境变量变化时重新运行 build.rs
+    // （AEMEATH_VERSION 由 release workflow 显式注入，本地 dev build 通常未设置）
+    println!("cargo:rerun-if-env-changed=AEMEATH_VERSION");
 
-    let output = std::process::Command::new("git")
-        .args(["describe", "--tags", "--abbrev=0"])
-        .output();
-
-    let tag = match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => String::new(),
-    };
-    if !tag.is_empty() {
-        let version = tag.strip_prefix(['v', 'V']).unwrap_or(&tag);
-        println!("cargo:rustc-env=AEMEATH_VERSION={version}");
-    }
-
-    // --- 2. ToolSchema 代码生成（syn 解析） ---
     let out_dir = env::var("OUT_DIR").unwrap();
     let types_dir = Path::new("src/tool/types");
 

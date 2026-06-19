@@ -7,8 +7,8 @@ pub use paths::{
     expand_home, global_agents_dir, global_agents_md_path, global_config_path,
     global_cost_history_path, global_guidance_dir, global_history_path, global_hooks_dir,
     global_logs_dir, global_mcp_config_path, global_memory_dir, global_sessions_dir,
-    global_settings_path, global_skills_dir, global_update_check_path, old_global_claude_md_path,
-    old_global_config_path, old_global_skills_dir,
+    global_settings_path, global_skills_dir, old_global_claude_md_path, old_global_config_path,
+    old_global_skills_dir,
 };
 
 pub async fn migrate_file_once(old_path: &Path, new_path: &Path) -> Result<bool, String> {
