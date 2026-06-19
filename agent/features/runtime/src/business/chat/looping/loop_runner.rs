@@ -322,14 +322,9 @@ where
                 let reasoning = reasoning_tokens.unwrap_or(0);
                 let total_tokens = last_api_input_tokens + last_api_output_tokens + reasoning;
                 let effective_window =
-                    crate::business::compact::token_estimation::effective_context_window(
-                        context_size,
-                        8192,
-                    ) as u64;
-                let threshold = crate::business::compact::token_estimation::autocompact_threshold(
-                    context_size,
-                    8192,
-                ) as u64;
+                    crate::business::compact::effective_context_window(context_size, 8192) as u64;
+                let threshold =
+                    crate::business::compact::autocompact_threshold(context_size, 8192) as u64;
                 let pct = total_tokens * 100 / effective_window.max(1);
 
                 log::info!(target: LOG_TARGET,
