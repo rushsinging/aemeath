@@ -18,7 +18,7 @@ impl TypedTool for FileWriteTool {
         "Write"
     }
     fn description(&self) -> &str {
-        "Writes a file to the local filesystem.\n\nRequired arguments (BOTH must be present):\n- `file_path`: absolute or workspace-relative path of the file to create or overwrite\n- `content`: the full text to write into that file\n\nExample call:\n  Write({\"file_path\": \"src/foo.rs\", \"content\": \"fn main() {}\\n\"})\n\nRules:\n- Overwrites the existing file at `file_path` if it exists.\n- For existing files you MUST call Read first; this tool fails otherwise.\n- Prefer the Edit tool for modifying existing files — it only sends the diff. Use Write only for new files or complete rewrites.\n- NEVER create documentation files (*.md) or README files unless explicitly requested by the user.\n- DO NOT call Write with empty arguments — both `file_path` and `content` are required strings."
+        "Writes a file to the local filesystem. Requires `file_path` and `content`. For existing files, Read must be called first. Prefer Edit for modifications; use Write for new files or complete rewrites."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({

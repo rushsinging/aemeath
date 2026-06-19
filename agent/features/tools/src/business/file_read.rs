@@ -19,7 +19,7 @@ impl TypedTool for FileReadTool {
         "Read"
     }
     fn description(&self) -> &str {
-        "Reads a file from the local filesystem.\n\nUsage:\n- The file_path parameter must be an absolute path, not a relative path\n- By default, it reads up to 2000 lines starting from the beginning of the file\n- When you already know which part of the file you need, only read that part. This can be important for larger files.\n- Results are returned using cat -n format, with line numbers starting at 1\n- This tool allows reading images (PNG, JPG, GIF, WebP). When reading an image file the contents are presented visually.\n- This tool can only read files, not directories. To read a directory, use an ls command via the Bash tool.\n- If you read a file that exists but has empty contents you will receive a warning."
+        "Reads a file from the local filesystem. Supports text files (with line numbers) and images (PNG, JPG, GIF, WebP). Cannot read directories."
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({

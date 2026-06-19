@@ -63,6 +63,10 @@ where
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
     pub language: String,
+    /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
+    pub frozen_chats: Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
+    /// 活跃链的 compact summary（走 system 通道注入）。
+    pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -98,6 +102,8 @@ where
         hook_runner,
         memory_config,
         language,
+        frozen_chats,
+        active_summary: active_summary_arc,
     } = ctx;
     let hook_ui = HookUi::new(sink.clone());
 
@@ -128,6 +134,7 @@ where
             agent_semaphore,
             progress_tx: None,
             parent_session_id: Some(session_id.clone()),
+            registry: Some(registry.clone() as std::sync::Arc<dyn tools::api::ToolListProvider>),
         },
     };
 
@@ -241,8 +248,26 @@ where
         )
         .await
         {
+            // 1. 冻结旧链（compact 前的完整 messages）到 frozen_chats，
+            //    保证 session 真相源完整（resume 不加载，但落盘保留）。
+            let old_segment = {
+                use crate::business::session::ChatSegment;
+                let mut seg = ChatSegment::normal(None);
+                seg.messages = std::mem::take(&mut messages);
+                seg
+            };
+            if let Ok(mut guard) = frozen_chats.lock() {
+                guard.push(old_segment);
+            }
+
+            // 2. 替换为 recent tail
             messages = outcome.messages;
+
+            // 3. 设 summary（走 system 通道）
             active_summary = Some(outcome.summary);
+            if let Ok(mut guard) = active_summary_arc.lock() {
+                *guard = active_summary.clone();
+            }
             sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
                 .await;
         }
@@ -299,7 +324,7 @@ where
 
         // summary 注入 system_blocks（compact 后的摘要走 system 通道）
         let mut effective_system_blocks = system_blocks.clone();
-        if let Some(ref summary) = active_summary {
+        if let Some(ref summary) = active_summary.clone() {
             effective_system_blocks.push(provider::api::SystemBlock {
                 block_type: "text".to_string(),
                 text: format!("<compact-summary>\n{summary}\n</compact-summary>"),
