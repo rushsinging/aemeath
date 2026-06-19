@@ -3,4 +3,4 @@
 pub mod agent;
 pub mod runner;
 
-pub use agent::{Agent, ToolCall, ToolResultTuple};
+pub use agent::{Agent, ToolCall, ToolExecution};

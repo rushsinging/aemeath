@@ -128,12 +128,16 @@ impl<'a> SubAgentRun<'a> {
                     self.log_result_summaries(turn_number, &results, &call_info);
                     self.log_tool_results(turn_number, &results, &call_info);
 
-                    for (tool_call_id, _, output, content, _, _) in &mut results {
-                        let offloaded =
-                            offload_tool_result(output, tool_call_id.as_str(), &self.session_id);
-                        if offloaded.len() != output.len() {
-                            *output = offloaded;
-                            *content = serde_json::json!({ "text": &*output });
+                    // 合并 #380：offload 大结果到磁盘；改用 ToolExecution 字段访问。
+                    for ex in &mut results {
+                        let offloaded = offload_tool_result(
+                            &ex.outcome.text,
+                            ex.call_id.as_str(),
+                            &self.session_id,
+                        );
+                        if offloaded.len() != ex.outcome.text.len() {
+                            ex.outcome.text = offloaded;
+                            ex.outcome.data = serde_json::json!({ "text": &ex.outcome.text });
                         }
                     }
                     append_tool_results(&mut self.messages, results, &self.session_id);

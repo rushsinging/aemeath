@@ -1,10 +1,11 @@
-use crate::business::agent::ToolCall;
+use crate::business::agent::{ToolCall, ToolExecution};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::tools::{send_tool_result, UiToolResult};
+use crate::business::chat::looping::tools::send_tool_result;
 use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use hook::api::HookData;
 use sdk::{AskUserQuestionItem, OptionItem};
 use share::config::hooks::HookEvent;
+use share::tool::ToolOutcome;
 
 pub(crate) async fn ask_user<S>(
     context: &RuntimeTurnContext,
@@ -12,7 +13,7 @@ pub(crate) async fn ask_user<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
-) -> Vec<UiToolResult>
+) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
@@ -117,15 +118,15 @@ where
             .cloned()
             .filter(|a| !a.is_empty())
             .unwrap_or(default);
-        let result = (
-            call.id.clone(),
-            call.provider_id.clone(),
-            answer.clone(),
-            serde_json::json!({ "text": answer }),
-            false,
-            Vec::new(),
+        let result = ToolExecution::new(
+            call,
+            ToolOutcome::new(
+                answer.clone(),
+                serde_json::json!({ "text": answer }),
+                Vec::new(),
+            ),
         );
-        send_tool_result(sink, context, call, &result).await;
+        send_tool_result(sink, context, &result).await;
         ask_user_results.push(result);
     }
     ask_user_results
