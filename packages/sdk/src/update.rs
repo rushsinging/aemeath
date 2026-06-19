@@ -27,7 +27,15 @@ pub enum UpdateResult {
     /// 已是最新版本。
     UpToDate { version: String },
     /// 更新成功。
-    Updated { from: String, to: String },
+    ///
+    /// `installed_path` 为被替换的可执行文件绝对路径，用于向用户展示
+    /// 「更新到何处」。值来自 `perform_update` 内 `std::env::current_exe()`，
+    /// 单一数据源，CLI / TUI 共用。
+    Updated {
+        from: String,
+        to: String,
+        installed_path: String,
+    },
     /// 仅检查未更新（`--check` 模式）。
     CheckOnly(VersionCheck),
 }

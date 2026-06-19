@@ -349,7 +349,7 @@ mod tests {
     fn test_render_tool_result_edit_diff_renders_with_numbers_signs_indent_color() {
         // #61 端到端：Edit 结果含 ---DIFF--- 标记，应渲染为带行号 + 加减语义色 +
         // 缩进 + 语法高亮的 diff 行，而非原始标记纯文本；ext 从 summary 推断。
-        let mut view = result(
+        let view = result(
             "Edit",
             "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
         );
