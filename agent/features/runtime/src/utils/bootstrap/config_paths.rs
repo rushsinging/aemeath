@@ -1,87 +1,15 @@
 use share::config::paths;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub fn global_agents_dir() -> PathBuf {
-    if let Ok(value) = std::env::var(paths::AGENTS_DIR_ENV) {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return expand_home(Path::new(trimmed));
-        }
-    }
-
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(paths::AGENTS_DIR_NAME)
-}
-
-pub fn global_config_path() -> PathBuf {
-    global_agents_dir().join(paths::NEW_CONFIG_FILE)
-}
-
-pub fn old_global_config_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(paths::OLD_AEMEATH_DIR_NAME)
-        .join(paths::OLD_CONFIG_FILE)
-}
-
-pub fn global_agents_md_path() -> PathBuf {
-    global_agents_dir().join(paths::AGENTS_MD)
-}
-
-pub fn old_global_claude_md_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(paths::CLAUDE_DIR_NAME)
-        .join(paths::CLAUDE_MD)
-}
-
-pub fn global_skills_dir() -> PathBuf {
-    global_agents_dir().join(paths::SKILLS_DIR_NAME)
-}
-
-pub fn global_logs_dir() -> PathBuf {
-    global_agents_dir().join(paths::LOGS_DIR_NAME)
-}
-
-pub fn global_guidance_dir() -> PathBuf {
-    global_agents_dir().join(paths::GUIDANCE_DIR_NAME)
-}
-
-pub fn global_memory_dir() -> PathBuf {
-    global_agents_dir().join(paths::MEMORY_DIR_NAME)
-}
-
-pub fn global_sessions_dir() -> PathBuf {
-    global_agents_dir().join(paths::SESSIONS_DIR_NAME)
-}
-
-pub fn global_hooks_dir() -> PathBuf {
-    global_agents_dir().join(paths::HOOKS_DIR_NAME)
-}
-
-pub fn global_mcp_config_path() -> PathBuf {
-    global_agents_dir().join(paths::MCP_CONFIG_FILE)
-}
-
-pub fn global_history_path() -> PathBuf {
-    global_agents_dir().join(paths::HISTORY_FILE)
-}
-
-pub fn global_cost_history_path() -> PathBuf {
-    global_agents_dir().join(paths::COST_HISTORY_FILE)
-}
-
-pub fn global_settings_path() -> PathBuf {
-    global_agents_dir().join(paths::SETTINGS_FILE)
-}
-
-pub fn old_global_skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(paths::OLD_AEMEATH_DIR_NAME)
-        .join(paths::SKILLS_DIR_NAME)
-}
+// 全局路径函数统一转发到 `share::config::paths`（单一可变状态源），
+// 本文件仅保留 runtime 特有的迁移 / 目录初始化逻辑与测试工具。
+pub use paths::{
+    expand_home, global_agents_dir, global_agents_md_path, global_config_path,
+    global_cost_history_path, global_guidance_dir, global_history_path, global_hooks_dir,
+    global_logs_dir, global_mcp_config_path, global_memory_dir, global_sessions_dir,
+    global_settings_path, global_skills_dir, global_update_check_path, old_global_claude_md_path,
+    old_global_config_path, old_global_skills_dir,
+};
 
 pub async fn migrate_file_once(old_path: &Path, new_path: &Path) -> Result<bool, String> {
     if new_path.exists() || !old_path.exists() {
@@ -137,19 +65,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-pub fn expand_home(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    if text == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    path.to_path_buf()
 }
 
 pub async fn ensure_agents_dirs() -> Result<(), String> {
@@ -212,47 +127,6 @@ impl Drop for TestEnvGuard {
 mod tests {
     use super::*;
     use std::io::Write;
-
-    #[test]
-    fn test_global_logs_dir_uses_agents_logs_directory() {
-        let temp_agents_dir = std::env::temp_dir().join(format!(
-            "aemeath_agents_logs_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _guard = TestEnvGuard::set(paths::AGENTS_DIR_ENV, &temp_agents_dir);
-
-        assert_eq!(global_logs_dir(), temp_agents_dir.join("logs"));
-    }
-
-    #[test]
-    fn test_global_data_paths_use_agents_directory() {
-        let temp_agents_dir = std::env::temp_dir().join(format!(
-            "aemeath_agents_data_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _guard = TestEnvGuard::set(paths::AGENTS_DIR_ENV, &temp_agents_dir);
-
-        assert_eq!(global_guidance_dir(), temp_agents_dir.join("guidance"));
-        assert_eq!(global_memory_dir(), temp_agents_dir.join("memory"));
-        assert_eq!(global_sessions_dir(), temp_agents_dir.join("sessions"));
-        assert_eq!(global_hooks_dir(), temp_agents_dir.join("hooks"));
-        assert_eq!(global_mcp_config_path(), temp_agents_dir.join("mcp.json"));
-        assert_eq!(global_history_path(), temp_agents_dir.join("history.json"));
-        assert_eq!(
-            global_cost_history_path(),
-            temp_agents_dir.join("cost_history.json")
-        );
-        assert_eq!(
-            global_settings_path(),
-            temp_agents_dir.join("settings.json")
-        );
-    }
 
     #[test]
     fn test_migrate_dir_once_copies_nested_files_without_overwrite() {
