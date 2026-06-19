@@ -46,6 +46,9 @@ async fn main() {
         Some(Commands::Update { check }) => {
             subcommand::update_command::run_update_command(check).await;
         }
+        Some(Commands::Version) => {
+            println!("aemeath {}", composition::version());
+        }
         None => {
             // 无子命令 — 默认调用 run，使用顶层参数
             chat::run_chat(cli.run_args.into()).await;
