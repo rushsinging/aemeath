@@ -134,7 +134,7 @@ where
             agent_semaphore,
             progress_tx: None,
             parent_session_id: Some(session_id.clone()),
-            registry: Some(registry.clone()),
+            registry: Some(registry.clone() as std::sync::Arc<dyn tools::api::ToolListProvider>),
         },
     };
 

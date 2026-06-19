@@ -52,13 +52,10 @@ impl TypedTool for ToolSearchTool {
         // 从注册表动态获取工具列表
         let tools: Vec<(String, String)> = match &ctx.registry {
             Some(reg) => reg
-                .names()
+                .tool_names()
                 .into_iter()
                 .map(|name| {
-                    let desc = reg
-                        .get(&name)
-                        .map(|t| t.description().to_string())
-                        .unwrap_or_default();
+                    let desc = reg.tool_description(&name).unwrap_or_default();
                     (name, desc)
                 })
                 .collect(),

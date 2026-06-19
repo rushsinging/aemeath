@@ -67,6 +67,15 @@ impl ToolRegistry {
     }
 }
 
+impl crate::contract::ToolListProvider for ToolRegistry {
+    fn tool_names(&self) -> Vec<String> {
+        self.names()
+    }
+    fn tool_description(&self, name: &str) -> Option<String> {
+        self.get(name).map(|t| t.description().to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
