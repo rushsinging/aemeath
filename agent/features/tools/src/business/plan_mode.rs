@@ -3,9 +3,10 @@
 //! Plan mode allows the agent to create a detailed plan before executing actions.
 //! In plan mode, tool calls are only simulated and not actually executed.
 
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use share::tool::types::plan_mode::PlanModeResult;
 
 /// Tool to enter plan mode
 pub struct EnterPlanModeTool;
@@ -28,7 +29,8 @@ pub struct ExitPlanModeInput {
 }
 
 #[async_trait]
-impl Tool for EnterPlanModeTool {
+impl TypedTool for EnterPlanModeTool {
+    type Output = PlanModeResult;
     fn name(&self) -> &'static str {
         "EnterPlanMode"
     }
@@ -51,21 +53,25 @@ impl Tool for EnterPlanModeTool {
         })
     }
 
-    async fn call(&self, input: serde_json::Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<PlanModeResult> {
         let _args: PlanModeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return ToolResult::error(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e), "data": null}).to_string()),
+            Err(e) => return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e), "data": null}).to_string()),
         };
 
         // Set plan mode in context
         if let Some(mode) = ctx.plan_mode.as_ref() {
             if *mode {
-                return ToolResult::success(serde_json::json!({"status": "success", "message": "Already in plan mode", "data": null}).to_string());
+                return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Already in plan mode", "data": null}).to_string());
             }
         }
 
         // Note: The actual mode change happens in the agent runner
-        ToolResult::success(
+        TypedToolResult::success_msg(
             serde_json::json!({"status": "success", "message": "Entered plan mode. Tool calls will be simulated and not executed. Use ExitPlanMode to return to normal execution mode.", "data": null}).to_string(),
         )
     }
@@ -76,7 +82,8 @@ impl Tool for EnterPlanModeTool {
 }
 
 #[async_trait]
-impl Tool for ExitPlanModeTool {
+impl TypedTool for ExitPlanModeTool {
+    type Output = PlanModeResult;
     fn name(&self) -> &'static str {
         "ExitPlanMode"
     }
@@ -100,25 +107,29 @@ impl Tool for ExitPlanModeTool {
         })
     }
 
-    async fn call(&self, input: serde_json::Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<PlanModeResult> {
         let args: ExitPlanModeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return ToolResult::error(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e), "data": null}).to_string()),
+            Err(e) => return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e), "data": null}).to_string()),
         };
 
         // Check if we're in plan mode
         if let Some(mode) = ctx.plan_mode.as_ref() {
             if !*mode {
-                return ToolResult::success(serde_json::json!({"status": "success", "message": "Not in plan mode", "data": null}).to_string());
+                return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Not in plan mode", "data": null}).to_string());
             }
         }
 
         if args.execute {
-            ToolResult::success(
+            TypedToolResult::success_msg(
                 serde_json::json!({"status": "success", "message": "Exited plan mode. The planned actions will now be executed. Note: Simulated tool calls need to be re-invoked.", "data": {"execute": true}}).to_string(),
             )
         } else {
-            ToolResult::success(
+            TypedToolResult::success_msg(
                 serde_json::json!({"status": "success", "message": "Exited plan mode. Returning to normal execution without running planned actions.", "data": {"execute": false}}).to_string(),
             )
         }

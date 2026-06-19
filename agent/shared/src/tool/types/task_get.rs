@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 /// Re-uses the canonical `share::task::Task` type so task results stay
 /// interoperable with the rest of the task subsystem.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-// tool_schema: {task: object}
 pub struct TaskGetResult {
     pub task: Task,
 }

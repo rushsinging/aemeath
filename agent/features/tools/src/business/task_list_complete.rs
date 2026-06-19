@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_list_complete::TaskListCompleteResult;
@@ -10,7 +10,8 @@ pub struct TaskListCompleteTool {
 }
 
 #[async_trait]
-impl Tool for TaskListCompleteTool {
+impl TypedTool for TaskListCompleteTool {
+    type Output = TaskListCompleteResult;
     fn name(&self) -> &str {
         "TaskListComplete"
     }
@@ -31,14 +32,18 @@ impl Tool for TaskListCompleteTool {
         true
     }
 
-    async fn call(&self, _input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        _input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskListCompleteResult> {
         match self.store.complete_list().await {
-            Some(batch) => ToolResult::success_json(serde_json::json!({
+            Some(batch) => TypedToolResult::success_value(serde_json::json!({
                 "status": "success",
                 "message": format!("Task list #{} completed", batch.id),
                 "data": serde_json::to_value(TaskListCompleteResult { batch_id: batch.id.to_string() }).unwrap()
             })),
-            None => ToolResult::error_json(serde_json::json!({
+            None => TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": "no active task list",
                 "data": {}

@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::write::WriteResult;
@@ -12,7 +12,8 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 }];
 
 #[async_trait]
-impl Tool for FileWriteTool {
+impl TypedTool for FileWriteTool {
+    type Output = WriteResult;
     fn name(&self) -> &str {
         "Write"
     }
@@ -47,10 +48,14 @@ impl Tool for FileWriteTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<WriteResult> {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
-            None => return ToolResult::error(serde_json::json!({
+            None => return TypedToolResult::error(serde_json::json!({
                 "status": "error",
                 "message": format!(
                     "missing required parameter: file_path. Write takes both `file_path` (absolute or workspace-relative path) and `content` (string). Received keys: [{}]",
@@ -61,7 +66,7 @@ impl Tool for FileWriteTool {
         };
         let content = match input.get("content").and_then(|v| v.as_str()) {
             Some(c) => c,
-            None => return ToolResult::error(serde_json::json!({
+            None => return TypedToolResult::error(serde_json::json!({
                 "status": "error",
                 "message": format!(
                     "missing required parameter: content. Write takes both `file_path` and `content` (string). Received keys: [{}]",
@@ -76,7 +81,7 @@ impl Tool for FileWriteTool {
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                    return ToolResult::error(
+                    return TypedToolResult::error(
                         serde_json::json!({
                             "status": "error",
                             "message": format!("failed to create directory: {e}"),
@@ -95,7 +100,7 @@ impl Tool for FileWriteTool {
                     file_path: file_path.to_string(),
                     bytes_written: content.len() as u64,
                 };
-                ToolResult::success(
+                TypedToolResult::success_msg(
                     serde_json::json!({
                         "status": "success",
                         "message": format!("Wrote {} bytes to {file_path}", content.len()),
@@ -104,7 +109,7 @@ impl Tool for FileWriteTool {
                     .to_string(),
                 )
             }
-            Err(e) => ToolResult::error(
+            Err(e) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("failed to write file: {e}"),

@@ -5,7 +5,6 @@ use serde_json::Value;
 
 /// Typed result returned by the `web_search` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-// tool_schema: {results: array}
 pub struct WebSearchResult {
     pub results: Vec<Value>,
 }

@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::ask_user::AskUserQuestionResult;
@@ -6,7 +6,8 @@ use share::tool::types::ask_user::AskUserQuestionResult;
 pub struct AskUserQuestionTool;
 
 #[async_trait]
-impl Tool for AskUserQuestionTool {
+impl TypedTool for AskUserQuestionTool {
+    type Output = AskUserQuestionResult;
     fn name(&self) -> &str {
         "AskUserQuestion"
     }
@@ -57,11 +58,15 @@ impl Tool for AskUserQuestionTool {
         true
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<AskUserQuestionResult> {
         let question = input["question"].as_str().unwrap_or("");
 
         if question.is_empty() {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": "Question is required",
@@ -106,7 +111,7 @@ impl Tool for AskUserQuestionTool {
 
         // 使用取消令牌来检测是否被中断
         if ctx.cancel.is_cancelled() {
-            return ToolResult::error(
+            return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": "Question cancelled by user",
@@ -119,7 +124,7 @@ impl Tool for AskUserQuestionTool {
         // 返回特殊格式的结果，让 CLI 层知道需要用户输入
         // 格式: __ASK_USER__: question
         let response = if !options.is_empty() && !allow_free_input {
-            ToolResult::success(
+            TypedToolResult::success_msg(
                 serde_json::json!({
                     "status": "success",
                     "message": format!("__ASK_USER_SELECT__: {}", question),
@@ -132,7 +137,7 @@ impl Tool for AskUserQuestionTool {
                 .to_string(),
             )
         } else {
-            ToolResult::success(
+            TypedToolResult::success_msg(
                 serde_json::json!({
                     "status": "success",
                     "message": format!("__ASK_USER__: {}", question),

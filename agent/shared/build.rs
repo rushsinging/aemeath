@@ -1,65 +1,108 @@
 //! build.rs: 两个职责
 //! 1. 从 git tag 注入版本号到编译期常量（`cargo:rustc-env=AEMEATH_VERSION`）
-//! 2. 从 `// tool_schema: {...}` 注释生成 ToolSchema impl
+//! 2. 用 syn 解析 `src/tool/types/*.rs` 中的 struct 定义，生成 ToolSchema impl
 
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
-/// 解析 `// tool_schema: {...}` 注释，生成 ToolSchema impl 代码。
-fn parse_tool_schema_comment(content: &str, struct_name: &str) -> Option<String> {
-    let struct_pattern = format!("pub struct {}", struct_name);
-    let struct_pos = content.find(&struct_pattern)?;
-    let before_struct = &content[..struct_pos];
-    let marker = "// tool_schema:";
-    let marker_pos = before_struct.rfind(marker)?;
-    let line_start = before_struct[..marker_pos]
-        .rfind('\n')
-        .map(|p| p + 1)
-        .unwrap_or(0);
-    let comment_line = before_struct[line_start..].lines().next()?;
-    let json_start = comment_line.find('{')?;
-    let json_end = comment_line.find('}')?;
-    let fields_str = &comment_line[json_start + 1..json_end];
+/// 将 Rust 类型映射到 JSON Schema 片段。
+fn rust_type_to_json_schema(ty: &syn::Type, known_types: &HashSet<String>) -> String {
+    match ty {
+        syn::Type::Path(type_path) => {
+            let segments: Vec<String> = type_path
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect();
+            let name = segments.last().unwrap().as_str();
 
+            match name {
+                "String" | "PathBuf" | "OsString" => r#"{"type": "string"}"#.to_string(),
+                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
+                | "i128" | "isize" => r#"{"type": "integer"}"#.to_string(),
+                "f32" | "f64" => r#"{"type": "number"}"#.to_string(),
+                "bool" => r#"{"type": "boolean"}"#.to_string(),
+                "Value" => r#"{}"#.to_string(),
+                "Option" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            let inner = rust_type_to_json_schema(inner_ty, known_types);
+                            return inner.replacen('}', r#","nullable": true}"#, 1);
+                        }
+                    }
+                    r#"{"type": "object"}"#.to_string()
+                }
+                "Vec" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            let items = rust_type_to_json_schema(inner_ty, known_types);
+                            return format!(r#"{{"type": "array", "items": {items}}}"#);
+                        }
+                    }
+                    r#"{"type": "array"}"#.to_string()
+                }
+                "HashMap" | "BTreeMap" => r#"{"type": "object"}"#.to_string(),
+                "Box" => {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &type_path.path.segments.last().unwrap().arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                            return rust_type_to_json_schema(inner_ty, known_types);
+                        }
+                    }
+                    r#"{"type": "object"}"#.to_string()
+                }
+                other if known_types.contains(other) => r#"{"type": "object"}"#.to_string(),
+                other => {
+                    println!(
+                        "cargo:warning=build.rs: 类型 `{other}` 未在 tool types 模块中定义，\
+                         降级为 object。如需精确 schema，请将定义移入 tool types。"
+                    );
+                    r#"{"type": "object"}"#.to_string()
+                }
+            }
+        }
+        syn::Type::Reference(type_ref) => rust_type_to_json_schema(&type_ref.elem, known_types),
+        _ => {
+            panic!("build.rs: 无法解析的类型 {:?} in tool type struct.", ty);
+        }
+    }
+}
+
+/// 从 struct 定义提取字段，生成 ToolSchema impl。
+fn generate_tool_schema_impl(
+    item: &syn::ItemStruct,
+    known_types: &HashSet<String>,
+) -> Option<String> {
+    let struct_name = item.ident.to_string();
     let mut properties = Vec::new();
     let mut required = Vec::new();
 
-    for field_def in fields_str.split(',') {
-        let field_def = field_def.trim();
-        if field_def.is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = field_def.split(':').collect();
-        if parts.len() != 2 {
-            continue;
-        }
-        let field_name = parts[0].trim();
-        let type_str = parts[1].trim();
-        let is_optional = type_str.ends_with('?');
-        let base_type = if is_optional {
-            type_str[..type_str.len() - 1].trim()
-        } else {
-            type_str
+    for field in &item.fields {
+        let field_name = match &field.ident {
+            Some(name) => name.to_string(),
+            None => continue,
         };
-        let schema_type = match base_type {
-            "string" => r#"{"type": "string"}"#,
-            "integer" => r#"{"type": "integer"}"#,
-            "number" => r#"{"type": "number"}"#,
-            "boolean" => r#"{"type": "boolean"}"#,
-            "object" => r#"{"type": "object"}"#,
-            "array" => r#"{"type": "array"}"#,
-            _ => r#"{"type": "object"}"#,
-        };
-        properties.push(format!("            \"{}\": {}", field_name, schema_type));
-        if !is_optional {
-            required.push(format!("            \"{}\"", field_name));
+
+        let is_option = is_option_type(&field.ty);
+        let schema = rust_type_to_json_schema(&field.ty, known_types);
+
+        properties.push(format!("            \"{field_name}\": {schema}"));
+        if !is_option {
+            required.push(format!("            \"{field_name}\""));
         }
     }
 
     let properties_str = properties.join(",\n");
     let required_str = required.join(",\n");
+    let sp = "    ";
 
     let schema = if required.is_empty() {
         format!(
@@ -68,8 +111,7 @@ fn parse_tool_schema_comment(content: &str, struct_name: &str) -> Option<String>
              {sp}\"properties\": {{\n\
              {properties_str}\n\
              {sp}}}\n\
-             }}",
-            sp = "    "
+             }}"
         )
     } else {
         format!(
@@ -81,14 +123,26 @@ fn parse_tool_schema_comment(content: &str, struct_name: &str) -> Option<String>
              {sp}\"required\": [\n\
              {required_str}\n\
              {sp}]\n\
-             }}",
-            sp = "    "
+             }}"
         )
     };
 
     Some(format!(
-        "\nimpl ToolSchema for {struct_name} {{\n    fn data_schema() -> Value {{\n        serde_json::json!({schema})\n    }}\n}}\n"
+        "\nimpl ToolSchema for {struct_name} {{\n\
+         {sp}fn data_schema() -> Value {{\n\
+         {sp}{sp}serde_json::json!({schema})\n\
+         {sp}}}\n\
+         }}\n"
     ))
+}
+
+fn is_option_type(ty: &syn::Type) -> bool {
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            return segment.ident == "Option";
+        }
+    }
+    false
 }
 
 fn main() {
@@ -96,7 +150,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/refs/tags");
     println!("cargo:rerun-if-changed=.git/HEAD");
 
-    let output = Command::new("git")
+    let output = std::process::Command::new("git")
         .args(["describe", "--tags", "--abbrev=0"])
         .output();
 
@@ -109,7 +163,7 @@ fn main() {
         println!("cargo:rustc-env=AEMEATH_VERSION={version}");
     }
 
-    // --- 2. ToolSchema 代码生成 ---
+    // --- 2. ToolSchema 代码生成（syn 解析） ---
     let out_dir = env::var("OUT_DIR").unwrap();
     let types_dir = Path::new("src/tool/types");
 
@@ -120,8 +174,11 @@ fn main() {
     println!("cargo:rerun-if-changed=src/tool/types");
 
     let mut impls = Vec::new();
-    let skip_files = ["mod.rs", "support.rs"];
-    let struct_re = regex::Regex::new(r"pub struct (\w+)").unwrap();
+    let skip_files = ["mod.rs"];
+
+    // 第一遍：收集所有 struct 名
+    let mut known_types = HashSet::new();
+    let mut all_files = Vec::new();
 
     for entry in fs::read_dir(types_dir).unwrap() {
         let entry = entry.unwrap();
@@ -135,19 +192,43 @@ fn main() {
         }
 
         let content = fs::read_to_string(&path).unwrap();
+        let syn_file: syn::File = syn::parse_str(&content).unwrap_or_else(|e| {
+            panic!("build.rs: syn 解析 {} 失败: {e}", path.display());
+        });
 
-        // 找所有 struct 定义
-        for caps in struct_re.captures_iter(&content) {
-            let struct_name = caps.get(1).unwrap().as_str();
-            if let Some(impl_code) = parse_tool_schema_comment(&content, struct_name) {
-                impls.push(impl_code);
+        for item in &syn_file.items {
+            if let syn::Item::Struct(item_struct) = item {
+                if matches!(item_struct.vis, syn::Visibility::Public(_)) {
+                    known_types.insert(item_struct.ident.to_string());
+                }
+            }
+        }
+
+        all_files.push((path.clone(), syn_file));
+    }
+
+    // 第二遍：为 Result struct 生成 ToolSchema impl
+    for (path, syn_file) in &all_files {
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        if filename == "support.rs" {
+            continue;
+        }
+
+        for item in &syn_file.items {
+            if let syn::Item::Struct(item_struct) = item {
+                if !matches!(item_struct.vis, syn::Visibility::Public(_)) {
+                    continue;
+                }
+                if let Some(impl_code) = generate_tool_schema_impl(item_struct, &known_types) {
+                    impls.push(impl_code);
+                }
             }
         }
     }
 
     let output_path = Path::new(&out_dir).join("generated_impls.rs");
     let mut output = String::new();
-    output.push_str("// Generated by build.rs — do not edit manually.\n");
+    output.push_str("// Generated by build.rs (syn parsing) — do not edit manually.\n");
     output.push_str("use serde_json::Value;\n");
     for impl_code in &impls {
         output.push_str(impl_code);

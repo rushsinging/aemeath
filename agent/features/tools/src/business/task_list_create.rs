@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_list_create::TaskListCreateResult;
@@ -10,7 +10,8 @@ pub struct TaskListCreateTool {
 }
 
 #[async_trait]
-impl Tool for TaskListCreateTool {
+impl TypedTool for TaskListCreateTool {
+    type Output = TaskListCreateResult;
     fn name(&self) -> &str {
         "TaskListCreate"
     }
@@ -42,11 +43,15 @@ impl Tool for TaskListCreateTool {
         5
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskListCreateResult> {
         let subject = match input.get("subject").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "missing required parameter: subject",
                     "data": {}
@@ -56,7 +61,7 @@ impl Tool for TaskListCreateTool {
         let summary = match input.get("summary").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "missing required parameter: summary",
                     "data": {}
@@ -65,7 +70,7 @@ impl Tool for TaskListCreateTool {
         };
 
         let batch = self.store.create_list(subject.clone(), summary).await;
-        ToolResult::success_json(serde_json::json!({
+        TypedToolResult::success_value(serde_json::json!({
             "status": "success",
             "message": format!(
                 "Task list #{} created. Subject: {}",
@@ -117,11 +122,6 @@ mod tests {
 
         assert!(!result.is_error);
         assert!(result.output.contains("Task list #0 created"));
-        assert!(
-            result.content["data"]["batch_id"].as_str().is_some(),
-            "data should contain batch_id, got: {}",
-            result.content["data"]
-        );
         assert_eq!(
             store.active_list().await.unwrap().summary.as_deref(),
             Some("修复 task 状态")
@@ -139,7 +139,6 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.output.contains("summary"));
-        assert_eq!(result.content["status"].as_str(), Some("error"));
     }
 
     #[tokio::test]

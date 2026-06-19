@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::grep::GrepResult;
@@ -15,7 +15,8 @@ const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
 }];
 
 #[async_trait]
-impl Tool for GrepTool {
+impl TypedTool for GrepTool {
+    type Output = GrepResult;
     fn name(&self) -> &str {
         "Grep"
     }
@@ -43,11 +44,11 @@ impl Tool for GrepTool {
         &PATH_ACCESS
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<GrepResult> {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return ToolResult::error(
+                return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
                         "message": "Missing required parameter: pattern",
@@ -91,7 +92,7 @@ impl Tool for GrepTool {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 if stdout.is_empty() {
-                    ToolResult::success(
+                    TypedToolResult::success_msg(
                         serde_json::json!({
                             "status": "success",
                             "message": "No matches found",
@@ -116,7 +117,7 @@ impl Tool for GrepTool {
                         })
                         .collect();
                     let total_matches = parsed_matches.len() as u64;
-                    ToolResult::success(
+                    TypedToolResult::success_msg(
                         serde_json::json!({
                             "status": "success",
                             "message": format!("Found {} matches", total_matches),
@@ -130,7 +131,7 @@ impl Tool for GrepTool {
                     )
                 }
             }
-            Err(e) => ToolResult::error(
+            Err(e) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
                     "message": format!("Search failed: {e}"),

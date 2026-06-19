@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::read::ReadResult;
@@ -13,7 +13,8 @@ const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
 }];
 
 #[async_trait]
-impl Tool for FileReadTool {
+impl TypedTool for FileReadTool {
+    type Output = ReadResult;
     fn name(&self) -> &str {
         "Read"
     }
@@ -41,11 +42,11 @@ impl Tool for FileReadTool {
         &FILE_ACCESS
     }
 
-    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<ReadResult> {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "missing required parameter: file_path",
                     "data": {}
@@ -56,7 +57,7 @@ impl Tool for FileReadTool {
         // Path has already been validated and normalised by PolicyEngine
         let path = std::path::PathBuf::from(file_path);
         if !path.exists() {
-            return ToolResult::error_json(serde_json::json!({
+            return TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": format!("file not found: {file_path}"),
                 "data": { "file_path": file_path }
@@ -99,7 +100,7 @@ impl Tool for FileReadTool {
                         start_line: 0,
                         total_lines: 0,
                     };
-                    ToolResult::success_json(serde_json::json!({
+                    TypedToolResult::success_value(serde_json::json!({
                         "status": "success",
                         "message": "(empty file)",
                         "data": serde_json::to_value(&data).unwrap()
@@ -113,14 +114,14 @@ impl Tool for FileReadTool {
                         start_line: start as u64,
                         total_lines: total as u64,
                     };
-                    ToolResult::success_json(serde_json::json!({
+                    TypedToolResult::success_value(serde_json::json!({
                         "status": "success",
                         "message": format!("Read {} lines from {}", line_count, file_path),
                         "data": serde_json::to_value(&data).unwrap()
                     }))
                 }
             }
-            Err(e) => ToolResult::error_json(serde_json::json!({
+            Err(e) => TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": format!("failed to read file: {e}"),
                 "data": { "file_path": file_path }
@@ -139,13 +140,13 @@ fn is_image_extension(path: &str) -> bool {
         .unwrap_or(false)
 }
 
-async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
+async fn read_image_file(file_path: &str, path: &Path) -> TypedToolResult<ReadResult> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let data = match tokio::fs::read(path).await {
         Ok(d) => d,
         Err(e) => {
-            return ToolResult::error_json(serde_json::json!({
+            return TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": format!("failed to read image: {e}"),
                 "data": { "file_path": file_path }
@@ -154,7 +155,7 @@ async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
     };
 
     if data.is_empty() {
-        return ToolResult::error_json(serde_json::json!({
+        return TypedToolResult::error_value(serde_json::json!({
             "status": "error",
             "message": "image file is empty",
             "data": { "file_path": file_path }
@@ -167,14 +168,14 @@ async fn read_image_file(file_path: &str, path: &Path) -> ToolResult {
 
     // 5MB base64 limit
     if base64.len() > 5 * 1024 * 1024 {
-        return ToolResult::error_json(serde_json::json!({
+        return TypedToolResult::error_value(serde_json::json!({
             "status": "error",
             "message": format!("image too large: {} bytes (base64: {} bytes, max: 5MB)", size, base64.len()),
             "data": { "file_path": file_path, "size": size, "base64_len": base64.len() }
         }));
     }
 
-    ToolResult::success_json(serde_json::json!({
+    TypedToolResult::success_value(serde_json::json!({
         "status": "success",
         "message": format!("Image: {}", file_path),
         "data": { "description": format!("Image: {} ({} bytes, {})", file_path, size, media_type), "file_path": file_path }

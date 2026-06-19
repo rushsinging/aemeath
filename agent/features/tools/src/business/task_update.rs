@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_update::TaskUpdateResult;
@@ -19,7 +19,8 @@ pub struct TaskUpdateTool {
 }
 
 #[async_trait]
-impl Tool for TaskUpdateTool {
+impl TypedTool for TaskUpdateTool {
+    type Output = TaskUpdateResult;
     fn name(&self) -> &str {
         "TaskUpdate"
     }
@@ -58,12 +59,16 @@ impl Tool for TaskUpdateTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskUpdateResult> {
         let now = current_timestamp_millis();
         let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": "missing required parameter: taskId",
                     "data": {}
@@ -75,7 +80,7 @@ impl Tool for TaskUpdateTool {
         let task_id = match self.store.resolve_display_id(&input_id).await {
             Some(global_id) => global_id,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("task not found: {input_id}"),
                     "data": { "task_id": input_id }
@@ -183,13 +188,13 @@ impl Tool for TaskUpdateTool {
                 let status = format!("{:?}", task.status);
 
                 let message = format!("Task #{} updated", display_id);
-                ToolResult::success_json(serde_json::json!({
+                TypedToolResult::success_value(serde_json::json!({
                     "status": "success",
                     "message": message,
                     "data": serde_json::to_value(TaskUpdateResult { task_id: display_id, status }).unwrap()
                 }))
             }
-            None => ToolResult::error_json(serde_json::json!({
+            None => TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": format!("task not found: {input_id}"),
                 "data": { "task_id": input_id }

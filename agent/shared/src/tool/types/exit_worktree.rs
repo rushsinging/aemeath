@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 /// Typed result returned by the `exit_worktree` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-// tool_schema: {branch: string, path: string, message: string}
 pub struct ExitWorktreeResult {
     pub branch: String,
     pub path_base: PathBuf,

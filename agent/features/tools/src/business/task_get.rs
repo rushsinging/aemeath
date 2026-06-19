@@ -1,6 +1,7 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_get::TaskGetResult;
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
 
@@ -9,7 +10,8 @@ pub struct TaskGetTool {
 }
 
 #[async_trait]
-impl Tool for TaskGetTool {
+impl TypedTool for TaskGetTool {
+    type Output = TaskGetResult;
     fn name(&self) -> &str {
         "TaskGet"
     }
@@ -35,11 +37,15 @@ impl Tool for TaskGetTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<TaskGetResult> {
         let input_id = input["taskId"].as_str().unwrap_or("");
 
         if input_id.is_empty() {
-            return ToolResult::error_json(serde_json::json!({
+            return TypedToolResult::error_value(serde_json::json!({
                 "status": "error",
                 "message": "Task ID is required",
                 "data": {}
@@ -50,7 +56,7 @@ impl Tool for TaskGetTool {
         let task_id = match self.store.resolve_display_id(input_id).await {
             Some(global_id) => global_id,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("Task not found: {}", input_id),
                     "data": {}
@@ -61,7 +67,7 @@ impl Tool for TaskGetTool {
         let task = match self.store.get(&task_id).await {
             Some(t) => t,
             None => {
-                return ToolResult::error_json(serde_json::json!({
+                return TypedToolResult::error_value(serde_json::json!({
                     "status": "error",
                     "message": format!("Task not found: {}", input_id),
                     "data": {}
@@ -122,7 +128,7 @@ impl Tool for TaskGetTool {
             task_data["blocks"] = serde_json::json!(blocks);
         }
 
-        ToolResult::success_json(serde_json::json!({
+        TypedToolResult::success_value(serde_json::json!({
             "status": "success",
             "message": format!("Task #{}: {}", display_id, task.subject),
             "data": {
