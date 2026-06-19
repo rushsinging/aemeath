@@ -52,7 +52,7 @@ async fn call_tool_with_timeout(
     tokio::select! {
         _ = ctx.cancel.cancelled() => {
             let message = tool_call_cancelled_message(name);
-            log::info!(target: LOG_TARGET, "{message}");
+            log::debug!(target: LOG_TARGET, "{message}");
             Err(message)
         }
         result = tokio::time::timeout(

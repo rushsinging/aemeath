@@ -197,7 +197,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 depth += 1;
                             }
                             let remaining = self.max_retries.saturating_sub(attempt + 1);
-                            log::warn!(target: LOG_TARGET,
+                            log::debug!(target: LOG_TARGET,
                                 "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
                                 self.config.source_key,
                                 self.model,
@@ -292,7 +292,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                         source = cause.source();
                         depth += 1;
                     }
-                    log::warn!(target: LOG_TARGET,
+                    log::debug!(target: LOG_TARGET,
                         "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
                         self.config.source_key,
                         self.model,

@@ -53,7 +53,7 @@ impl<'a> SubAgentRun<'a> {
     ) {
         for (id, _provider_id, output, _content, is_error, _) in results.iter() {
             let data = build_json_logger_tool_result_data(id, output, *is_error, call_info);
-            log::info!(
+            log::debug!(
                 target: LOG_TARGET,
                 "tool_result: {}",
                 serde_json::to_string(&data).unwrap_or_default()

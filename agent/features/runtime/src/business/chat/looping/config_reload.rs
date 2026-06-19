@@ -100,7 +100,7 @@ pub fn check_config_changes(registry: &mut SourceSnapshotRegistry) -> ConfigDiff
         };
     }
 
-    log::info!(target: LOG_TARGET,
+    log::debug!(target: LOG_TARGET,
         "[config_reload] detected {} file change(s)",
         changes.len()
     );

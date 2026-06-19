@@ -451,11 +451,9 @@ pub(crate) async fn parse_openai_stream(
                             arguments.chars().rev().take(200).collect::<String>();
                         let tail: String = tail_rev.chars().rev().collect();
                         log::warn!(target: LOG_TARGET,
-                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed.",
-                            name, id, delta_count, arguments.len(), e
+                            "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed. head: {} | tail: {}",
+                            name, id, delta_count, arguments.len(), e, head, tail
                         );
-                        log::warn!(target: LOG_TARGET, "[openai-compat stream] truncated args head: {}", head);
-                        log::warn!(target: LOG_TARGET, "[openai-compat stream] truncated args tail: {}", tail);
                         if is_eof && truncated_tool.is_none() {
                             truncated_tool = Some((
                                 id.clone(),

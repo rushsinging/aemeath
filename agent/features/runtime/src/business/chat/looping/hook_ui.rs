@@ -30,7 +30,7 @@ where
         data: HookData,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = runner.matching_hooks(event, tool_name);
-        log::info!(target: LOG_TARGET,
+        log::debug!(target: LOG_TARGET,
             "hook ui dispatch: event={} tool_name={:?} matched={}",
             hook_event_name(event),
             tool_name,

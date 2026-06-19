@@ -309,7 +309,7 @@ impl ConversationModel {
             );
         }
         self.move_tool_results_after_tool_call(&chat_id, &turn_id, bound_id.as_ref());
-        crate::tui::log_debug!(
+        crate::tui::log_trace!(
             "model bound tool_call_update chat_id={} turn_id={} id={} provider_id={:?} bound_id={} name={} index={} status={:?} bound={} args_len={} has_block={} blocks_after={}",
             chat_id,
             turn_id,

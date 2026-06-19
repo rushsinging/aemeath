@@ -212,7 +212,7 @@ fn user_message_with_images(text: String, image_paths: Vec<String>) -> Message {
 
     // 图片已在首轮消息中通过 ChatMessage::user_with_images() 发送；
     // 排队消息（processing 期间追加）不携带图片数据。
-    log::info!(target: LOG_TARGET,
+    log::debug!(target: LOG_TARGET,
         "queued message has {} image_paths (ignored, images only sent with first message)",
         image_paths.len()
     );

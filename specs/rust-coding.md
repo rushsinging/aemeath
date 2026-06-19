@@ -69,6 +69,8 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 
 ### Log 规范
 
+> **日志 level 等级选择**：见 `specs/logging.md` 的「日志级别策略」章节（5 级定义 + per-layer 细则）。选择 `trace/debug/info/warn/error` 时 **MUST** 对照该章节。
+
 - **MUST** 所有 `log::xxx!` 调用显式指定 `target:` 参数，格式为 `target: "crate_name::module"`。
   - 例：`log::info!(target: "runtime::loop_runner", "...")`
   - 例：`log::debug!(target: "provider::client", "...")`

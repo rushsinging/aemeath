@@ -213,7 +213,7 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::Value::String(self.role_name_for_log.clone()),
             );
         }
-        log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+        log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
         logging::context::set_current_turn(turn_number);
     }
 
@@ -243,7 +243,7 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::Value::String(self.role_name_for_log.clone()),
             );
         }
-        log::info!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
+        log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
         logging::context::set_current_turn(turn_number);
     }
 
@@ -268,7 +268,7 @@ impl<'a> SubAgentRun<'a> {
     fn log_tool_calls(&self, turn_number: usize, tool_calls: &[crate::business::agent::ToolCall]) {
         for tool_call in tool_calls {
             let data = build_json_logger_tool_call_data(tool_call);
-            log::info!(
+            log::debug!(
                 target: LOG_TARGET,
                 "tool_call: {}",
                 serde_json::to_string(&data).unwrap_or_default()
