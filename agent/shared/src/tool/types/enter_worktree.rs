@@ -11,3 +11,14 @@ pub struct EnterWorktreeResult {
     pub working_root: PathBuf,
     pub guidance: String,
 }
+
+/// Typed input for the `enter_worktree` tool.
+///
+/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct EnterWorktreeInput {
+    /// 可选：worktree 根目录路径（绝对或相对路径）。省略时从 branch 推导为 .worktrees/<安全分支名>
+    pub path: Option<String>,
+    /// 可选：目标路径不存在时创建的新分支名；path 省略时必须提供。创建时固定基于 main
+    pub branch: Option<String>,
+}

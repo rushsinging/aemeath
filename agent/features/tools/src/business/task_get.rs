@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::task_get::TaskGetResult;
+use share::tool::types::task_get::{TaskGetInput, TaskGetResult};
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
 
@@ -19,16 +19,8 @@ impl TypedTool for TaskGetTool {
         "Retrieve a task by ID. Returns task details including subject, description, status, and dependencies."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "taskId": {
-                    "type": "string",
-                    "description": "The ID of the task to retrieve"
-                }
-            },
-            "required": ["taskId"]
-        })
+        use share::tool::types::ToolSchema;
+        TaskGetInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -46,7 +38,11 @@ impl TypedTool for TaskGetTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskGetResult> {
-        let input_id = input["taskId"].as_str().unwrap_or("");
+        let args: TaskGetInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+        let input_id = args.taskId.as_str();
 
         if input_id.is_empty() {
             return TypedToolResult::error("Task ID is required");

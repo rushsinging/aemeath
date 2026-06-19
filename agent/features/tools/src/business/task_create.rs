@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::task_create::TaskCreateResult;
+use share::tool::types::task_create::{TaskCreateInput, TaskCreateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStore};
 
@@ -39,27 +39,8 @@ impl TypedTool for TaskCreateTool {
            Launch Agent for independent tasks that can run in parallel."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "subject": { "type": "string", "description": "A brief title for the task" },
-                "description": { "type": "string", "description": "What needs to be done" },
-                "activeForm": { "type": "string", "description": "Present continuous form for spinner display" },
-                "priority": {
-                    "type": "string",
-                    "enum": ["low", "normal", "high", "urgent"],
-                    "description": "Task priority level"
-                },
-                "sessionId": { "type": "string", "description": "Session ID to associate with this task" },
-                "owner": { "type": "string", "description": "Task owner" },
-                "tags": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Tags for categorization"
-                }
-            },
-            "required": ["subject", "description"]
-        })
+        use share::tool::types::ToolSchema;
+        TaskCreateInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -77,41 +58,28 @@ impl TypedTool for TaskCreateTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskCreateResult> {
-        let subject = match input.get("subject").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
+        let args: TaskCreateInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
                 return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
-                        "message": "missing required parameter: subject",
+                        "message": format!("invalid input: {e}"),
                         "data": {}
                     })
                     .to_string(),
                 )
             }
         };
-        let description = match input.get("description").and_then(|v| v.as_str()) {
-            Some(d) => d.to_string(),
-            None => {
-                return TypedToolResult::error(
-                    serde_json::json!({
-                        "status": "error",
-                        "message": "missing required parameter: description",
-                        "data": {}
-                    })
-                    .to_string(),
-                )
-            }
-        };
-        let active_form = input
-            .get("activeForm")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+
+        let subject = args.subject;
+        let description = args.description;
+        let active_form = args.activeForm;
 
         // Parse priority
-        let priority = input
-            .get("priority")
-            .and_then(|v| v.as_str())
+        let priority = args
+            .priority
+            .as_deref()
             .and_then(TaskPriority::parse)
             .unwrap_or_default();
 
@@ -122,22 +90,15 @@ impl TypedTool for TaskCreateTool {
             .await;
 
         // Set additional fields if provided
-        if let Some(session_id) = input.get("sessionId").and_then(|v| v.as_str()) {
+        if let Some(session_id) = args.sessionId {
             self.store
-                .update(&task.id, |t| t.session_id = Some(session_id.to_string()))
+                .update(&task.id, |t| t.session_id = Some(session_id))
                 .await;
         }
-        if let Some(owner) = input.get("owner").and_then(|v| v.as_str()) {
-            self.store
-                .update(&task.id, |t| t.owner = Some(owner.to_string()))
-                .await;
+        if let Some(owner) = args.owner {
+            self.store.update(&task.id, |t| t.owner = Some(owner)).await;
         }
-        if let Some(tags) = input.get("tags").and_then(|v| v.as_array()) {
-            let tags: Vec<String> = tags
-                .iter()
-                .filter_map(|t| t.as_str())
-                .map(|s| s.to_string())
-                .collect();
+        if let Some(tags) = args.tags {
             self.store.update(&task.id, |t| t.tags = tags).await;
         }
 

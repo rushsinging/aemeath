@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::ask_user::AskUserQuestionResult;
+use share::tool::types::ask_user::{AskUserQuestionInput, AskUserQuestionResult};
 
 pub struct AskUserQuestionTool;
 
@@ -15,41 +15,8 @@ impl TypedTool for AskUserQuestionTool {
         "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": "The question prompt only. Do not include selectable choices here; put choices in options."
-                },
-                "options": {
-                    "type": "array",
-                    "items": {
-                        "oneOf": [
-                            { "type": "string" },
-                            {
-                                "type": "object",
-                                "properties": {
-                                    "title": { "type": "string", "description": "Short label shown as the main choice text" },
-                                    "description": { "type": "string", "description": "Optional longer explanation shown below the title" }
-                                },
-                                "required": ["title"]
-                            }
-                        ]
-                    },
-                    "description": "Optional list of predefined answer choices. Each choice MUST be one separate array item — either a plain string or an object { title, description }. Do not combine choices into one string or embed them in question."
-                },
-                "allow_free_input": {
-                    "type": "boolean",
-                    "description": "If true, user can provide any answer (not limited to options)"
-                },
-                "default": {
-                    "type": "string",
-                    "description": "Optional default answer if user skips"
-                }
-            },
-            "required": ["question"]
-        })
+        use share::tool::types::ToolSchema;
+        AskUserQuestionInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -67,7 +34,11 @@ impl TypedTool for AskUserQuestionTool {
         input: Value,
         ctx: &ToolExecutionContext,
     ) -> TypedToolResult<AskUserQuestionResult> {
-        let question = input["question"].as_str().unwrap_or("");
+        let args: AskUserQuestionInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+        let question = args.question.as_str();
 
         if question.is_empty() {
             return TypedToolResult::error(
@@ -81,8 +52,9 @@ impl TypedTool for AskUserQuestionTool {
         }
 
         // 构建提示消息
-        let options: Vec<String> = input["options"]
-            .as_array()
+        let options: Vec<String> = args
+            .options
+            .as_ref()
             .map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -90,8 +62,8 @@ impl TypedTool for AskUserQuestionTool {
             })
             .unwrap_or_default();
 
-        let allow_free_input = input["allow_free_input"].as_bool().unwrap_or(true);
-        let default = input["default"].as_str();
+        let allow_free_input = args.allow_free_input.unwrap_or(true);
+        let default = args.default.as_deref();
 
         let mut prompt = question.to_string();
 
@@ -199,14 +171,10 @@ mod tests {
     }
 
     #[test]
-    fn test_input_schema_options_supports_object_format() {
+    fn test_input_schema_options_is_array() {
         let tool = AskUserQuestionTool;
         let schema = tool.input_schema();
-        let items = &schema["properties"]["options"]["items"];
-        // oneOf 包含 string 和 object 两种格式
-        assert!(items.get("oneOf").is_some());
-        let one_of = items["oneOf"].as_array().unwrap();
-        assert!(one_of.iter().any(|s| s["type"] == "string"));
-        assert!(one_of.iter().any(|s| s["type"] == "object"));
+        // 生成的 schema 中 options 是数组类型（具体 item 形态由描述文本约束）。
+        assert_eq!(schema["properties"]["options"]["type"], "array");
     }
 }

@@ -8,3 +8,14 @@ use serde_json::Value;
 pub struct WebSearchResult {
     pub results: Vec<Value>,
 }
+
+/// Typed input for the `web_search` tool.
+///
+/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WebSearchInput {
+    /// The search query
+    pub query: String,
+    /// Maximum number of results to return (default 5, max 10)
+    pub limit: Option<u64>,
+}

@@ -2,7 +2,7 @@ use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::skill_ops::Skill;
-use share::tool::types::skill::SkillResult;
+use share::tool::types::skill::{SkillInput, SkillResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -23,20 +23,8 @@ impl TypedTool for SkillTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "skill": {
-                    "type": "string",
-                    "description": "The skill name to execute"
-                },
-                "args": {
-                    "type": "string",
-                    "description": "Optional arguments for the skill"
-                }
-            },
-            "required": ["skill"]
-        })
+        use share::tool::types::ToolSchema;
+        SkillInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -56,19 +44,31 @@ impl TypedTool for SkillTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<SkillResult> {
-        let skill_name = match input.get("skill").and_then(|v| v.as_str()) {
-            Some(s) => s,
-            None => {
+        let args: SkillInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
                 return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
-                        "message": "missing required parameter: skill",
+                        "message": format!("invalid input: {e}"),
                         "data": {}
                     })
                     .to_string(),
                 )
             }
         };
+
+        if args.skill.is_empty() {
+            return TypedToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: skill",
+                    "data": {}
+                })
+                .to_string(),
+            );
+        }
+        let skill_name = args.skill.as_str();
 
         let skills = self.skills.lock().await;
         let skill = match skills.get(skill_name) {

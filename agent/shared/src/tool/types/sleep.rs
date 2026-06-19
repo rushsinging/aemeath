@@ -7,3 +7,12 @@ use serde::{Deserialize, Serialize};
 pub struct SleepResult {
     pub duration_ms: u64,
 }
+
+/// Typed input for the `sleep` tool.
+///
+/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SleepInput {
+    /// Duration to sleep in milliseconds (max 60000)
+    pub duration_ms: u64,
+}

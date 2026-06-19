@@ -5,28 +5,13 @@
 
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use share::tool::types::plan_mode::PlanModeResult;
+use share::tool::types::plan_mode::{EnterPlanModeInput, ExitPlanModeInput, PlanModeResult};
 
 /// Tool to enter plan mode
 pub struct EnterPlanModeTool;
 
 /// Tool to exit plan mode
 pub struct ExitPlanModeTool;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanModeInput {
-    /// Optional reason for entering plan mode
-    #[serde(default)]
-    pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExitPlanModeInput {
-    /// Whether to execute the planned actions
-    #[serde(default)]
-    pub execute: bool,
-}
 
 #[async_trait]
 impl TypedTool for EnterPlanModeTool {
@@ -41,16 +26,8 @@ impl TypedTool for EnterPlanModeTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string",
-                    "description": "Optional reason for entering plan mode"
-                }
-            },
-            "required": []
-        })
+        use share::tool::types::ToolSchema;
+        EnterPlanModeInput::data_schema()
     }
 
     async fn call(
@@ -58,7 +35,7 @@ impl TypedTool for EnterPlanModeTool {
         input: serde_json::Value,
         ctx: &ToolExecutionContext,
     ) -> TypedToolResult<PlanModeResult> {
-        let _args: PlanModeInput = match serde_json::from_value(input) {
+        let _args: EnterPlanModeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("Invalid input: {}", e), "data": null}).to_string()),
         };
@@ -94,17 +71,8 @@ impl TypedTool for ExitPlanModeTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "execute": {
-                    "type": "boolean",
-                    "description": "Whether to execute the planned actions",
-                    "default": false
-                }
-            },
-            "required": []
-        })
+        use share::tool::types::ToolSchema;
+        ExitPlanModeInput::data_schema()
     }
     fn data_schema(&self) -> serde_json::Value {
         use share::tool::types::ToolSchema;
@@ -128,7 +96,7 @@ impl TypedTool for ExitPlanModeTool {
             }
         }
 
-        if args.execute {
+        if args.execute.unwrap_or(false) {
             TypedToolResult::success_msg(
                 serde_json::json!({"status": "success", "message": "Exited plan mode. The planned actions will now be executed. Note: Simulated tool calls need to be re-invoked.", "data": {"execute": true}}).to_string(),
             )

@@ -2,7 +2,7 @@ use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde_json::Value;
-use share::tool::types::web_search::WebSearchResult;
+use share::tool::types::web_search::{WebSearchInput, WebSearchResult};
 
 pub struct WebSearchTool;
 
@@ -16,22 +16,8 @@ impl TypedTool for WebSearchTool {
         "Search the web for information. Returns search results with titles, URLs, and snippets.\n\nUsage:\n- Use this tool when you need to find current information, documentation, or answers to questions\n- Results include titles, URLs, and brief snippets\n- You can then use WebFetch to get full content from specific URLs"
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default 5, max 10)",
-                    "minimum": 1,
-                    "maximum": 10
-                }
-            },
-            "required": ["query"]
-        })
+        use share::tool::types::ToolSchema;
+        WebSearchInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -49,8 +35,21 @@ impl TypedTool for WebSearchTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<WebSearchResult> {
-        let query = input["query"].as_str().unwrap_or("");
-        let limit = input["limit"].as_u64().unwrap_or(5).min(10) as usize;
+        let args: WebSearchInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
+                return TypedToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": format!("invalid input: {e}"),
+                        "data": null
+                    })
+                    .to_string(),
+                )
+            }
+        };
+        let query = args.query.as_str();
+        let limit = args.limit.unwrap_or(5).min(10) as usize;
 
         if query.is_empty() {
             return TypedToolResult::error(

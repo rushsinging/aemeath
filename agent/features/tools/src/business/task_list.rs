@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::task_list::TaskListResult;
+use share::tool::types::task_list::{TaskListInput, TaskListResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
@@ -23,25 +23,8 @@ impl TypedTool for TaskListTool {
          Call this after completing a task to find the next one to work on."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "status": {
-                    "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "deleted"],
-                    "description": "Filter by status"
-                },
-                "priority": {
-                    "type": "string",
-                    "enum": ["low", "normal", "high", "urgent"],
-                    "description": "Filter by priority"
-                },
-                "sessionId": {
-                    "type": "string",
-                    "description": "Filter by session ID"
-                }
-            },
-        })
+        use share::tool::types::ToolSchema;
+        TaskListInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -59,24 +42,23 @@ impl TypedTool for TaskListTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskListResult> {
+        let args: TaskListInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+
         // Parse filters
-        let status_filter = input
-            .get("status")
-            .and_then(|v| v.as_str())
-            .and_then(|s| match s {
-                "pending" => Some(TaskStatus::Pending),
-                "in_progress" => Some(TaskStatus::InProgress),
-                "completed" => Some(TaskStatus::Completed),
-                "deleted" => Some(TaskStatus::Deleted),
-                _ => None,
-            });
+        let status_filter = args.status.as_deref().and_then(|s| match s {
+            "pending" => Some(TaskStatus::Pending),
+            "in_progress" => Some(TaskStatus::InProgress),
+            "completed" => Some(TaskStatus::Completed),
+            "deleted" => Some(TaskStatus::Deleted),
+            _ => None,
+        });
 
-        let priority_filter = input
-            .get("priority")
-            .and_then(|v| v.as_str())
-            .and_then(TaskPriority::parse);
+        let priority_filter = args.priority.as_deref().and_then(TaskPriority::parse);
 
-        let session_filter = input.get("sessionId").and_then(|v| v.as_str());
+        let session_filter = args.sessionId.as_deref();
 
         // Get tasks with filters
         let mut tasks = self.store.list().await;

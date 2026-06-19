@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::task_update::TaskUpdateResult;
+use share::tool::types::task_update::{TaskUpdateInput, TaskUpdateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
@@ -32,25 +32,8 @@ impl TypedTool for TaskUpdateTool {
          After completing a task, check the unblocked list or call TaskList to find the next available task."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "taskId": { "type": "string", "description": "The ID of the task to update" },
-                "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "deleted"] },
-                "subject": { "type": "string" },
-                "description": { "type": "string" },
-                "activeForm": { "type": "string" },
-                "owner": { "type": "string" },
-                "priority": { "type": "string", "enum": ["low", "normal", "high", "urgent"] },
-                "progress": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Progress percentage (0-100)" },
-                "progressMessage": { "type": "string", "description": "Progress status message" },
-                "addBlockedBy": { "type": "array", "items": { "type": "string" } },
-                "addBlocks": { "type": "array", "items": { "type": "string" } },
-                "addTags": { "type": "array", "items": { "type": "string" } },
-                "removeTags": { "type": "array", "items": { "type": "string" } }
-            },
-            "required": ["taskId"]
-        })
+        use share::tool::types::ToolSchema;
+        TaskUpdateInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -69,10 +52,11 @@ impl TypedTool for TaskUpdateTool {
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskUpdateResult> {
         let now = current_timestamp_millis();
-        let input_id = match input.get("taskId").and_then(|v| v.as_str()) {
-            Some(id) => id.to_string(),
-            None => return TypedToolResult::error("missing required parameter: taskId"),
+        let args: TaskUpdateInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
+        let input_id = args.taskId.clone();
 
         // Resolve display number (batch-local id) to global task id
         let task_id = match self.store.resolve_display_id(&input_id).await {
@@ -81,22 +65,13 @@ impl TypedTool for TaskUpdateTool {
         };
 
         // Pre-resolve dependency display numbers to global ids (must be async)
-        let resolved_blocked_by =
-            if let Some(arr) = input.get("addBlockedBy").and_then(|v| v.as_array()) {
-                let display_ids: Vec<String> = arr
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
-                self.store.resolve_display_ids(&display_ids).await
-            } else {
-                Vec::new()
-            };
-        let resolved_blocks = if let Some(arr) = input.get("addBlocks").and_then(|v| v.as_array()) {
-            let display_ids: Vec<String> = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-            self.store.resolve_display_ids(&display_ids).await
+        let resolved_blocked_by = if let Some(display_ids) = args.addBlockedBy.as_deref() {
+            self.store.resolve_display_ids(display_ids).await
+        } else {
+            Vec::new()
+        };
+        let resolved_blocks = if let Some(display_ids) = args.addBlocks.as_deref() {
+            self.store.resolve_display_ids(display_ids).await
         } else {
             Vec::new()
         };
@@ -105,7 +80,7 @@ impl TypedTool for TaskUpdateTool {
             .store
             .update(&task_id, |task| {
                 // Status update
-                if let Some(status) = input.get("status").and_then(|v| v.as_str()) {
+                if let Some(status) = args.status.as_deref() {
                     task.status = match status {
                         "pending" => TaskStatus::Pending,
                         "in_progress" => TaskStatus::InProgress,
@@ -116,32 +91,32 @@ impl TypedTool for TaskUpdateTool {
                 }
 
                 // Basic field updates
-                if let Some(subject) = input.get("subject").and_then(|v| v.as_str()) {
-                    task.subject = subject.to_string();
+                if let Some(subject) = args.subject {
+                    task.subject = subject;
                 }
-                if let Some(desc) = input.get("description").and_then(|v| v.as_str()) {
-                    task.description = desc.to_string();
+                if let Some(desc) = args.description {
+                    task.description = desc;
                 }
-                if let Some(af) = input.get("activeForm").and_then(|v| v.as_str()) {
-                    task.active_form = Some(af.to_string());
+                if let Some(af) = args.activeForm {
+                    task.active_form = Some(af);
                 }
-                if let Some(owner) = input.get("owner").and_then(|v| v.as_str()) {
-                    task.owner = Some(owner.to_string());
+                if let Some(owner) = args.owner {
+                    task.owner = Some(owner);
                 }
 
                 // Priority update
-                if let Some(priority) = input.get("priority").and_then(|v| v.as_str()) {
+                if let Some(priority) = args.priority.as_deref() {
                     if let Some(p) = TaskPriority::parse(priority) {
                         task.priority = p;
                     }
                 }
 
                 // Progress update
-                if let Some(progress) = input.get("progress").and_then(|v| v.as_u64()) {
-                    task.progress = (progress as u8).min(100);
+                if let Some(progress) = args.progress {
+                    task.progress = progress.min(100);
                 }
-                if let Some(msg) = input.get("progressMessage").and_then(|v| v.as_str()) {
-                    task.progress_message = Some(msg.to_string());
+                if let Some(msg) = args.progressMessage {
+                    task.progress_message = Some(msg);
                 }
 
                 // Dependency updates — use pre-resolved global ids
@@ -157,18 +132,14 @@ impl TypedTool for TaskUpdateTool {
                 }
 
                 // Tag updates
-                if let Some(add_tags) = input.get("addTags").and_then(|v| v.as_array()) {
+                if let Some(add_tags) = args.addTags {
                     for tag in add_tags {
-                        if let Some(t) = tag.as_str() {
-                            task.add_tag(t.to_string(), now);
-                        }
+                        task.add_tag(tag, now);
                     }
                 }
-                if let Some(remove_tags) = input.get("removeTags").and_then(|v| v.as_array()) {
+                if let Some(remove_tags) = args.removeTags {
                     for tag in remove_tags {
-                        if let Some(t) = tag.as_str() {
-                            task.remove_tag(t, now);
-                        }
+                        task.remove_tag(&tag, now);
                     }
                 }
             })

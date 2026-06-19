@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::sleep::SleepResult;
+use share::tool::types::sleep::{SleepInput, SleepResult};
 
 pub struct SleepTool;
 
@@ -15,18 +15,8 @@ impl TypedTool for SleepTool {
         "Pause execution for a specified duration. Useful for waiting for asynchronous operations or rate limiting."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "duration_ms": {
-                    "type": "integer",
-                    "description": "Duration to sleep in milliseconds (max 60000)",
-                    "minimum": 0,
-                    "maximum": 60000
-                }
-            },
-            "required": ["duration_ms"]
-        })
+        use share::tool::types::ToolSchema;
+        SleepInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -40,7 +30,11 @@ impl TypedTool for SleepTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<SleepResult> {
-        let duration_ms = input["duration_ms"].as_u64().unwrap_or(1000);
+        let args: SleepInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+        let duration_ms = args.duration_ms;
 
         // Limit sleep duration to 60 seconds
         let duration_ms = duration_ms.min(60000);

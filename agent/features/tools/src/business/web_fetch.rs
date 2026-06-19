@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::web_fetch::WebFetchResult;
+use share::tool::types::web_fetch::{WebFetchInput, WebFetchResult};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 use tokio::process::Command;
@@ -107,20 +107,8 @@ impl TypedTool for WebFetchTool {
     }
 
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to fetch"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in milliseconds (default 30000)"
-                }
-            },
-            "required": ["url"]
-        })
+        use share::tool::types::ToolSchema;
+        WebFetchInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -140,13 +128,13 @@ impl TypedTool for WebFetchTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<WebFetchResult> {
-        let raw_url = match input.get("url").and_then(|v| v.as_str()) {
-            Some(u) => u,
-            None => {
+        let args: WebFetchInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
                 return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
-                        "message": "missing required parameter: url",
+                        "message": format!("invalid input: {e}"),
                         "data": null
                     })
                     .to_string(),
@@ -154,10 +142,19 @@ impl TypedTool for WebFetchTool {
             }
         };
 
-        let timeout_ms = input
-            .get("timeout")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(30_000);
+        if args.url.is_empty() {
+            return TypedToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: url",
+                    "data": null
+                })
+                .to_string(),
+            );
+        }
+        let raw_url = args.url.as_str();
+
+        let timeout_ms = args.timeout.unwrap_or(30_000);
 
         // Validate URL and upgrade http to https
         let mut url = match validate_url(raw_url) {

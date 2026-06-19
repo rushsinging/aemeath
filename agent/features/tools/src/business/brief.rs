@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::brief::BriefResult;
+use share::tool::types::brief::{BriefInput, BriefResult};
 
 /// BriefTool generates a brief summary of the work done in the current session.
 pub struct BriefTool;
@@ -16,30 +16,8 @@ impl TypedTool for BriefTool {
         "Generate a brief summary of work completed in this session. Useful for creating status updates, documenting progress, or preparing handoff notes."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "format": {
-                    "type": "string",
-                    "description": "Output format for the brief",
-                    "enum": ["markdown", "text", "json"],
-                    "default": "markdown"
-                },
-                "include": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["files_changed", "commands_run", "decisions", "pending_tasks", "errors"]
-                    },
-                    "description": "What to include in the brief (default: all)"
-                },
-                "title": {
-                    "type": "string",
-                    "description": "Custom title for the brief (optional)"
-                }
-            },
-            "required": []
-        })
+        use share::tool::types::ToolSchema;
+        BriefInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -53,10 +31,14 @@ impl TypedTool for BriefTool {
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<BriefResult> {
-        let format = input["format"].as_str().unwrap_or("markdown");
-        let title = input["title"].as_str().unwrap_or("Session Brief");
-        let include: Vec<&str> = if let Some(arr) = input["include"].as_array() {
-            arr.iter().filter_map(|v| v.as_str()).collect()
+        let args: BriefInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+        };
+        let format = args.format.as_deref().unwrap_or("markdown");
+        let title = args.title.as_deref().unwrap_or("Session Brief");
+        let include: Vec<&str> = if let Some(arr) = args.include.as_ref() {
+            arr.iter().map(|s| s.as_str()).collect()
         } else {
             vec![
                 "files_changed",

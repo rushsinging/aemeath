@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::write::WriteResult;
+use share::tool::types::write::{WriteInput, WriteResult};
 use share::tool::{PathAccess, PathKind};
 
 pub struct FileWriteTool;
@@ -21,22 +21,8 @@ impl TypedTool for FileWriteTool {
         "Writes a file to the local filesystem. Requires `file_path` and `content`. For existing files, Read must be called first. Prefer Edit for modifications; use Write for new files or complete rewrites."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Absolute or workspace-relative path of the file to create or overwrite. Required.",
-                    "minLength": 1
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Full text content to write into the file. Required (use empty string for an empty file)."
-                }
-            },
-            "required": ["file_path", "content"],
-            "additionalProperties": false
-        })
+        use share::tool::types::ToolSchema;
+        WriteInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -57,28 +43,27 @@ impl TypedTool for FileWriteTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<WriteResult> {
-        let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => return TypedToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!(
-                    "missing required parameter: file_path. Write takes both `file_path` (absolute or workspace-relative path) and `content` (string). Received keys: [{}]",
-                    input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
-                ),
-                "data": {}
-            }).to_string()),
+        let received_keys = input
+            .as_object()
+            .map(|o| o.keys().cloned().collect::<Vec<_>>().join(", "))
+            .unwrap_or_default();
+        let args: WriteInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
+                return TypedToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": format!(
+                            "invalid input ({e}). Write takes both `file_path` (absolute or workspace-relative path) and `content` (string). Received keys: [{received_keys}]"
+                        ),
+                        "data": {}
+                    })
+                    .to_string(),
+                )
+            }
         };
-        let content = match input.get("content").and_then(|v| v.as_str()) {
-            Some(c) => c,
-            None => return TypedToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!(
-                    "missing required parameter: content. Write takes both `file_path` and `content` (string). Received keys: [{}]",
-                    input.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default()
-                ),
-                "data": {}
-            }).to_string()),
-        };
+        let file_path = args.file_path.as_str();
+        let content = args.content.as_str();
         // Path has already been validated and normalised by PolicyEngine,
         // including the read-before-write check for existing files.
         let path = std::path::PathBuf::from(file_path);

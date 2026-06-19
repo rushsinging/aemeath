@@ -1,7 +1,7 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::glob::GlobResult;
+use share::tool::types::glob::{GlobInput, GlobResult};
 use share::tool::{PathAccess, PathKind};
 
 pub struct GlobTool;
@@ -21,14 +21,8 @@ impl TypedTool for GlobTool {
         "Fast file pattern matching tool. Supports glob patterns (e.g. \"**/*.rs\"). Returns paths sorted by modification time."
     }
     fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": { "type": "string", "description": "Glob pattern (e.g. \"**/*.rs\")" },
-                "path": { "type": "string", "description": "Directory to search in (defaults to cwd)" }
-            },
-            "required": ["pattern"]
-        })
+        use share::tool::types::ToolSchema;
+        GlobInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -49,21 +43,22 @@ impl TypedTool for GlobTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<GlobResult> {
-        let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
-            Some(p) => p,
-            None => {
+        let args: GlobInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
                 return TypedToolResult::error(
                     serde_json::json!({
                         "status": "error",
-                        "message": "missing required parameter: pattern",
+                        "message": format!("invalid input: {e}"),
                         "data": {}
                     })
                     .to_string(),
                 )
             }
         };
+        let pattern = args.pattern.as_str();
         // Path has already been validated and normalised by PolicyEngine
-        let base_dir = match input.get("path").and_then(|v| v.as_str()) {
+        let base_dir = match args.path.as_deref() {
             Some(p) => std::path::PathBuf::from(p),
             None => {
                 // Fallback to cwd if path is missing
