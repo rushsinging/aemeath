@@ -132,6 +132,7 @@ where
     };
 
     let messages_at_start = messages.len();
+    let mut active_summary: Option<String> = None;
     let mut last_api_input_tokens: u64 = 0;
     let mut last_api_output_tokens: u64 = 0;
     let mut cached_tokens: Option<u64> = None;
@@ -219,9 +220,9 @@ where
         }
 
         loop_fsm.transition(ChatLoopTransition::Compact);
-        // LLM 视图：compact/microcompact 产生的截断视图，None 时用原始 messages。
-        // 真相源 messages 永不截断，保证 session 持久化的是完整对话。
-        let llm_view = auto_compact(
+        // compact：发生时替换 messages 为 recent tail，summary 走 system。
+        // resume 保护 + 产生时定型原则下，messages 产生后只在 compact 时被替换。
+        if let Some(outcome) = auto_compact(
             &sink,
             &hook_ui,
             &hook_runner,
@@ -238,7 +239,13 @@ where
             &cwd,
             &ctx.client,
         )
-        .await;
+        .await
+        {
+            messages = outcome.messages;
+            active_summary = Some(outcome.summary);
+            sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+                .await;
+        }
         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
         let gate = drain_and_apply_gate(
@@ -268,15 +275,13 @@ where
         // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
         task_reminder_state.update_from_messages(turn_count as u64, &messages);
 
-        // 使用 LLM 视图（compact 后的截断版本）；无 compact 时用原始 messages
-        let view_messages: &[Message] = llm_view.as_deref().unwrap_or(&messages);
         let messages_for_api: Vec<Message> = build_api_messages(
             &user_context,
             &language,
             &mut task_reminder_state,
             turn_count as u64,
             &task_store,
-            view_messages,
+            &messages,
         )
         .await;
 
@@ -292,17 +297,27 @@ where
         let request_id = uuid::Uuid::now_v7().to_string();
         logging::context::set_current_request_id(request_id);
 
+        // summary 注入 system_blocks（compact 后的摘要走 system 通道）
+        let mut effective_system_blocks = system_blocks.clone();
+        if let Some(ref summary) = active_summary {
+            effective_system_blocks.push(provider::api::SystemBlock {
+                block_type: "text".to_string(),
+                text: format!("<compact-summary>\n{summary}\n</compact-summary>"),
+                cache_control: None,
+            });
+        }
+
         log_llm_input(
             &messages_for_api,
             messages.len(),
-            &system_blocks,
+            &effective_system_blocks,
             &tool_schemas,
         );
 
         let api_start = std::time::Instant::now();
         let response = client
             .stream_message(
-                &system_blocks,
+                &effective_system_blocks,
                 &messages_for_api,
                 &tool_schemas,
                 &mut handler,

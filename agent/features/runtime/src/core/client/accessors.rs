@@ -38,6 +38,10 @@ pub struct RuntimeHandle {
     // ─── SDK 状态 ───
     pub(crate) current_cancel: Arc<Mutex<Option<tokio_util::sync::CancellationToken>>>,
     pub(crate) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
+    /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
+    pub(crate) frozen_chats: Arc<Mutex<Vec<crate::business::session::ChatSegment>>>,
+    /// 活跃链的 compact summary（走 system 通道注入）。
+    pub(crate) active_summary: Arc<Mutex<Option<String>>>,
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
     pub(crate) change_rx: watch::Receiver<ChangeSet>,

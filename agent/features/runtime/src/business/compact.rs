@@ -5,12 +5,10 @@
 //! ## 上下文管理策略（3 层）
 //!
 //! 1. **工具结果截断** — 每条结果的大小限制。超长结果在加入对话历史前截断为预览。
-//! 2. **微压缩 (Microcompact)** — 清除旧消息中的工具结果内容。
-//! 3. **完整压缩** — 基于 LLM 的早期对话历史摘要。
+//! 2. **完整压缩** — 基于 LLM 的早期对话历史摘要（summary 走 system 通道，recent tail 保留）。
 
 // 子模块声明
 pub mod autocompact;
-pub mod micro;
 pub mod restore;
 pub mod summary;
 mod token_estimation;
@@ -30,9 +28,6 @@ pub use truncate::{
 
 // autocompact 模块
 pub use autocompact::{AutoCompactState, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES};
-
-// micro 模块
-pub use micro::microcompact;
 
 // summary 模块
 pub use summary::{
