@@ -1,5 +1,6 @@
 use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
 use super::common::{file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
 use super::{
@@ -8,6 +9,21 @@ use super::{
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+
+/// 从 `payload.content` (typed JSON Value) 中按 dotted path 提取 u64 字段。
+///
+/// path 形如 `"data.line_count"`，先走 `content` 的子对象查找再逐层下钻；
+/// 任一节点缺失或类型不匹配返回 `None`。TUI 渲染层 inline helper，避免引入
+/// 对 share/sdk 类型的硬依赖（typed 字段在 share::tool::types::read 中定义，
+/// 但本模块不 import share，确保渲染层可独立编译与测试）。
+fn data_field_u64(payload: Option<&ToolResultPayload>, path: &str) -> Option<u64> {
+    let payload = payload?;
+    let mut current: &serde_json::Value = &payload.content;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    current.as_u64()
+}
 
 // ── Bash ─────────────────────────────────────────────────────────
 
@@ -93,10 +109,12 @@ impl ToolDisplay for ReadDisplay {
         ])
     }
     /// 当 result 到达后，使用实际读取的行数更新 header。
+    /// typed 路径优先：直接从 `payload.content.data.line_count` 读取；
+    /// typed 字段缺失时回退到原 regex 解析 `output` 文本（兼容旧 ToolResult）。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
-        result_summary: Option<&str>,
+        result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
@@ -104,15 +122,13 @@ impl ToolDisplay for ReadDisplay {
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
 
-        // 尝试从 result_summary 中解析实际行数
-        let actual_lines = result_summary.and_then(|summary| {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
-                if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
-                    return parse_line_count_from_message(message);
-                }
-            }
-            parse_line_count_from_message(summary)
-        });
+        // typed 优先：data.line_count (issue #273 引入的 typed R 字段)
+        let actual_lines = data_field_u64(result_payload, "data.line_count")
+            .map(|n| n as usize)
+            // regex 回退：旧 ToolResult 仅 message 含 "Read N lines from ..."
+            .or_else(|| {
+                result_payload.and_then(|p| parse_line_count_from_message(&p.output))
+            });
 
         let range_info = match actual_lines {
             Some(actual) => {
@@ -179,34 +195,23 @@ impl ToolDisplay for WriteDisplay {
         format!("{} {display_path} {bytes} bytes", self.display_name())
     }
     /// 当 result 到达后，使用实际写入的字节数更新 header。
+    /// typed 路径优先：直接从 `payload.content.data.bytes_written` 读取；
+    /// typed 字段缺失时回退到原 regex 解析 `output` 文本（兼容旧 ToolResult）。
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
-        result_summary: Option<&str>,
+        result_payload: Option<&ToolResultPayload>,
     ) -> Line<'static> {
         let path = file_path(input);
         let display_path = truncate_path(path, 60);
 
-        // 尝试从 result_summary 中解析实际写入字节数
-        let actual_bytes = result_summary.and_then(|summary| {
-            // 尝试解析 JSON: {"message":"Wrote N bytes to ...", "data":{"bytes_written":N}}
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(summary) {
-                // 优先从 data.bytes_written 获取
-                if let Some(b) = json
-                    .get("data")
-                    .and_then(|d| d.get("bytes_written"))
-                    .and_then(|v| v.as_u64())
-                {
-                    return Some(b as usize);
-                }
-                // 回退：从 message 解析 "Wrote N bytes to"
-                if let Some(msg) = json.get("message").and_then(|v| v.as_str()) {
-                    return parse_bytes_from_message(msg);
-                }
-            }
-            // 直接解析文本
-            parse_bytes_from_message(summary)
-        });
+        // typed 优先：data.bytes_written (issue #273 引入的 typed R 字段)
+        let actual_bytes = data_field_u64(result_payload, "data.bytes_written")
+            .map(|n| n as usize)
+            // regex 回退：旧 ToolResult 仅 message 含 "Wrote N bytes to ..."
+            .or_else(|| {
+                result_payload.and_then(|p| parse_bytes_from_message(&p.output))
+            });
 
         // 计算入参中的字节数（回退值）
         let input_bytes = input

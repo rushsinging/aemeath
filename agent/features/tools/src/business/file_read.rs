@@ -94,14 +94,14 @@ impl Tool for FileReadTool {
                     ToolResult::success_json(serde_json::json!({
                         "status": "success",
                         "message": "(empty file)",
-                        "data": { "content": "", "file_path": file_path }
+                        "data": { "content": "", "file_path": file_path, "line_count": 0u64 }
                     }))
                 } else {
                     let line_count = end - start;
                     ToolResult::success_json(serde_json::json!({
                         "status": "success",
                         "message": format!("Read {} lines from {}", line_count, file_path),
-                        "data": { "content": numbered, "file_path": file_path }
+                        "data": { "content": numbered, "file_path": file_path, "line_count": line_count }
                     }))
                 }
             }
