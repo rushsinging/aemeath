@@ -2,6 +2,9 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::{PathAccess, PathKind};
+use share::tool::types::grep::GrepResult;
+use share::tool::types::support::Match;
+use std::path::PathBuf;
 use tokio::process::Command;
 
 pub struct GrepTool;
@@ -92,24 +95,33 @@ impl Tool for GrepTool {
                         serde_json::json!({
                             "status": "success",
                             "message": "No matches found",
-                            "data": {
-                                "matches": [],
-                                "match_count": 0
-                            }
+                            "data": serde_json::to_value(GrepResult { matches: vec![], total_matches: 0, query: pattern.to_string() }).unwrap()
                         })
                         .to_string(),
                     )
                 } else {
                     let lines: Vec<&str> = stdout.lines().take(250).collect();
-                    let match_count = lines.len();
+                    let parsed_matches: Vec<Match> = lines.iter().filter_map(|line| {
+                        let mut parts = line.splitn(3, ':');
+                        let file = parts.next()?;
+                        let line_num = parts.next()?.parse::<u64>().ok()?;
+                        let text = parts.next().unwrap_or("").to_string();
+                        Some(Match {
+                            file_path: PathBuf::from(file),
+                            line_number: line_num,
+                            line: text,
+                        })
+                    }).collect();
+                    let total_matches = parsed_matches.len() as u64;
                     ToolResult::success(
                         serde_json::json!({
                             "status": "success",
-                            "message": format!("Found {} matches", match_count),
-                            "data": {
-                                "matches": lines,
-                                "match_count": match_count
-                            }
+                            "message": format!("Found {} matches", total_matches),
+                            "data": serde_json::to_value(GrepResult {
+                                matches: parsed_matches,
+                                total_matches,
+                                query: pattern.to_string(),
+                            }).unwrap()
                         })
                         .to_string(),
                     )

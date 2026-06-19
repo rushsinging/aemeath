@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::{PathAccess, PathKind};
+use share::tool::types::glob::GlobResult;
 
 pub struct GlobTool;
 
@@ -73,7 +74,7 @@ impl Tool for GlobTool {
                         serde_json::json!({
                             "status": "success",
                             "message": "No files matched",
-                            "data": { "files": [], "count": 0 }
+                            "data": serde_json::to_value(GlobResult { files: vec![], count: 0 }).unwrap()
                         })
                         .to_string(),
                     )
@@ -84,7 +85,7 @@ impl Tool for GlobTool {
                         serde_json::json!({
                             "status": "success",
                             "message": message,
-                            "data": { "files": matches, "count": count }
+                            "data": serde_json::to_value(GlobResult { files: matches.clone(), count: matches.len() as u64 }).unwrap()
                         })
                         .to_string(),
                     )

@@ -6,6 +6,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 // tool_schema: {reason: string, execute: boolean?}
 pub struct PlanModeResult {
-    pub mode: String,
-    pub content: String,
+    pub reason: String,
+    pub execute: Option<bool>,
 }

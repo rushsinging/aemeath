@@ -8,6 +8,6 @@ use serde::{Deserialize, Serialize};
 // tool_schema: {matches: array, total_matches: integer, query: string}
 pub struct GrepResult {
     pub matches: Vec<Match>,
-    pub match_count: usize,
-    pub truncated: bool,
+    pub total_matches: u64,
+    pub query: String,
 }

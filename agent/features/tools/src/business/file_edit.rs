@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::{PathAccess, PathKind};
+use share::tool::types::edit::EditResult;
 
 pub struct FileEditTool;
 
@@ -196,7 +197,6 @@ impl Tool for FileEditTool {
         } else {
             new_string.to_string()
         };
-        let diff_start_line = start_line_of_match(&content, &matched_old).unwrap_or(1);
         let new_content = if replace_all {
             content.replace(&matched_old, &actual_new)
         } else {
@@ -205,28 +205,16 @@ impl Tool for FileEditTool {
         match tokio::fs::write(path, &new_content).await {
             Ok(()) => {
                 let occurrences = if replace_all { count } else { 1 };
-                let fuzzy_note = if is_fuzzy {
-                    " (fuzzy matched, indentation adapted)"
-                } else {
-                    ""
+                let data = EditResult {
+                    file_path: file_path.to_string(),
+                    replacements_made: occurrences as u64,
+                    dry_run: false,
                 };
-                let diff_text = format!(
-                    "---DIFF:LINE:{diff_start_line}---\n{}\n---DIFF:LINE:{diff_start_line}---\n{}",
-                    matched_old, actual_new,
-                );
                 ToolResult::success(
                     serde_json::json!({
                         "status": "success",
                         "message": format!("Replaced {occurrences} occurrence(s) in {file_path}"),
-                        "data": {
-                            "file_path": file_path,
-                            "occurrences": occurrences,
-                            "fuzzy_note": fuzzy_note,
-                            "diff_start_line": diff_start_line,
-                            "old_content": matched_old,
-                            "new_content": actual_new,
-                            "diff": diff_text,
-                        }
+                        "data": serde_json::to_value(&data).unwrap()
                     })
                     .to_string(),
                 )

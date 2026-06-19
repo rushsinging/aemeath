@@ -7,5 +7,5 @@ use serde::{Deserialize, Serialize};
 // tool_schema: {name: string, path: string}
 pub struct SkillResult {
     pub name: String,
-    pub output: String,
+    pub path: String,
 }

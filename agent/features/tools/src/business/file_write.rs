@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::{PathAccess, PathKind};
+use share::tool::types::write::WriteResult;
 
 pub struct FileWriteTool;
 
@@ -89,17 +90,20 @@ impl Tool for FileWriteTool {
             }
         }
         match tokio::fs::write(path, content).await {
-            Ok(()) => ToolResult::success(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("Wrote {} bytes to {file_path}", content.len()),
-                    "data": {
-                        "file_path": file_path,
-                        "bytes_written": content.len()
-                    }
-                })
-                .to_string(),
-            ),
+            Ok(()) => {
+                let data = WriteResult {
+                    file_path: file_path.to_string(),
+                    bytes_written: content.len() as u64,
+                };
+                ToolResult::success(
+                    serde_json::json!({
+                        "status": "success",
+                        "message": format!("Wrote {} bytes to {file_path}", content.len()),
+                        "data": serde_json::to_value(&data).unwrap()
+                    })
+                    .to_string(),
+                )
+            }
             Err(e) => ToolResult::error(
                 serde_json::json!({
                     "status": "error",

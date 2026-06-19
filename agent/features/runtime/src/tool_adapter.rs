@@ -19,7 +19,6 @@ use share::tool::types::{
     EnterWorktreeResult,
     ExitWorktreeResult,
     BriefResult,
-    ConfigResult,
     LspResult,
     PlanModeResult,
     MemoryResult,
@@ -65,7 +64,6 @@ impl ToolResultAdapter for AskUserQuestionResult {}
 impl ToolResultAdapter for EnterWorktreeResult {}
 impl ToolResultAdapter for ExitWorktreeResult {}
 impl ToolResultAdapter for BriefResult {}
-impl ToolResultAdapter for ConfigResult {}
 impl ToolResultAdapter for LspResult {}
 impl ToolResultAdapter for PlanModeResult {}
 impl ToolResultAdapter for MemoryResult {}

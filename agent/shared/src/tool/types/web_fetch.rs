@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 // tool_schema: {url: string, title: string, content: string, truncated: boolean}
 pub struct WebFetchResult {
     pub url: String,
-    pub byte_count: u64,
-    pub char_count: u64,
+    pub title: String,
+    pub content: String,
     pub truncated: bool,
 }

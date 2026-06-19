@@ -2,6 +2,7 @@ use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
 use crate::business::mcp_manager::McpConnectionManager;
 use crate::LOG_TARGET;
+use share::tool::types::mcp_manager::McpManagerResult;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -104,12 +105,12 @@ impl Tool for McpToolWrapper {
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
             Ok(output) => {
-                let limited = crate::business::mcp::limit_tool_response(
-                    &output,
-                    crate::business::mcp::DEFAULT_MAX_TOOL_RESPONSE_BYTES,
-                );
-                let data =
-                    serde_json::from_str::<Value>(&limited).unwrap_or(Value::String(limited));
+                let _ = output; // MCP server output not used in structured result
+                let data = serde_json::to_value(McpManagerResult {
+                    name: self.tool_name.clone(),
+                    action: "call_tool".to_string(),
+                })
+                .unwrap_or_default();
                 ToolResult::success(
                     serde_json::json!({
                         "status": "success",

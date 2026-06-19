@@ -1,6 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::task_list_create::TaskListCreateResult;
 use std::sync::Arc;
 use storage::api::TaskStore;
 
@@ -71,15 +72,7 @@ impl Tool for TaskListCreateTool {
                 "Task list #{} created. Subject: {}",
                 batch.id, subject
             ),
-            "data": {
-                "batch_id": batch.id,
-                "subject": subject,
-                "summary": summary_text,
-                "next_steps": format!(
-                    "You can now create tasks with TaskCreate — they will automatically attach to task list #{}.",
-                    batch.id
-                )
-            }
+            "data": serde_json::to_value(TaskListCreateResult { batch_id: batch.id.to_string() }).unwrap()
         }))
     }
 }

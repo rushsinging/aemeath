@@ -1,5 +1,7 @@
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use crate::business::mcp::McpClient;
+#[allow(unused_imports)]
+use share::tool::types::mcp_tool::McpToolResult;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;

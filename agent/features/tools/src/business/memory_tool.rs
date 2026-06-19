@@ -8,6 +8,7 @@ mod tests;
 use crate::api::{Tool, ToolExecutionContext, ToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::tool::types::memory::MemoryResult;
 
 pub struct MemoryTool;
 

@@ -7,6 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 // tool_schema: {name: string, action: string}
 pub struct McpManagerResult {
+    pub name: String,
     pub action: String,
-    pub status: String,
 }

@@ -6,5 +6,5 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 // tool_schema: {batch_id: string}
 pub struct TaskListCreateResult {
-    pub task_id: String,
+    pub batch_id: String,
 }

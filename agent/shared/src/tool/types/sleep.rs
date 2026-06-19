@@ -6,5 +6,5 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 // tool_schema: {duration_ms: integer}
 pub struct SleepResult {
-    pub slept_ms: u64,
+    pub duration_ms: u64,
 }
