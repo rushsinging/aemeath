@@ -13,6 +13,12 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
 
+    /// 输出数据的 JSON Schema（用于 TUI 结构化显示）。
+    /// 默认返回 `Value::Null`。
+    fn data_schema(&self) -> Value {
+        Value::Null
+    }
+
     fn is_read_only(&self) -> bool {
         false
     }
@@ -128,6 +134,12 @@ pub trait TypedTool: Send + Sync {
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
 
+    /// 输出数据的 JSON Schema（用于 TUI 结构化显示）。
+    /// 默认返回 `Value::Null`，工具可以覆盖以提供 schema。
+    fn data_schema(&self) -> Value {
+        Value::Null
+    }
+
     fn is_read_only(&self) -> bool {
         false
     }
@@ -179,6 +191,10 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
 
     fn input_schema(&self) -> Value {
         self.0.input_schema()
+    }
+
+    fn data_schema(&self) -> Value {
+        self.0.data_schema()
     }
 
     fn is_read_only(&self) -> bool {

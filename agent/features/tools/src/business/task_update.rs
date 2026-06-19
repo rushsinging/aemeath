@@ -52,6 +52,10 @@ impl TypedTool for TaskUpdateTool {
             "required": ["taskId"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        TaskUpdateResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         false
     }

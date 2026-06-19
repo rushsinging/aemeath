@@ -41,6 +41,10 @@ impl TypedTool for BriefTool {
             "required": []
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        BriefResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         true
     }

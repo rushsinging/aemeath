@@ -43,6 +43,10 @@ impl TypedTool for TaskListTool {
             },
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        TaskListResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         true
     }

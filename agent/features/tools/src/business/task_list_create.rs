@@ -30,6 +30,10 @@ impl TypedTool for TaskListCreateTool {
             "required": ["subject", "summary"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        TaskListCreateResult::data_schema()
+    }
 
     fn is_read_only(&self) -> bool {
         false

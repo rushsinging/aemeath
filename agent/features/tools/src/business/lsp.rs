@@ -45,6 +45,10 @@ impl TypedTool for LspTool {
             "required": ["operation", "filePath"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        LspResult::data_schema()
+    }
 
     fn is_read_only(&self) -> bool {
         true

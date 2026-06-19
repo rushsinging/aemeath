@@ -61,6 +61,10 @@ impl TypedTool for TaskCreateTool {
             "required": ["subject", "description"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        TaskCreateResult::data_schema()
+    }
     fn is_read_only(&self) -> bool {
         false
     }

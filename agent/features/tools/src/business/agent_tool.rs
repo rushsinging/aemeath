@@ -55,6 +55,10 @@ impl TypedTool for AgentTool {
             "required": ["prompt", "description"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        AgentResult::data_schema()
+    }
 
     fn is_read_only(&self) -> bool {
         false

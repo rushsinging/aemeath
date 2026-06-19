@@ -176,6 +176,10 @@ impl TypedTool for ExitWorktreeTool {
             "required": []
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        ExitWorktreeResult::data_schema()
+    }
 
     async fn call(
         &self,

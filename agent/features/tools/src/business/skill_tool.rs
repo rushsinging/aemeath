@@ -38,6 +38,10 @@ impl TypedTool for SkillTool {
             "required": ["skill"]
         })
     }
+    fn data_schema(&self) -> Value {
+        use share::tool::types::ToolSchema;
+        SkillResult::data_schema()
+    }
 
     fn is_read_only(&self) -> bool {
         false

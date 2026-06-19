@@ -11,13 +11,15 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use serde::de::DeserializeOwned;
 
-/// 从 `payload.content.data` 反序列化到 typed struct。
+/// 从 `payload.content` 反序列化到 typed struct。
 ///
-/// 返回 `None` 当 payload 缺失、data 字段缺失、或反序列化失败。
+/// 返回 `None` 当 payload 缺失、content 为 Null、或反序列化失败。
 fn typed_data<T: DeserializeOwned>(payload: Option<&ToolResultPayload>) -> Option<T> {
     let payload = payload?;
-    let data = payload.content.get("data")?;
-    serde_json::from_value(data.clone()).ok()
+    if payload.content.is_null() {
+        return None;
+    }
+    serde_json::from_value(payload.content.clone()).ok()
 }
 
 // ── Bash ─────────────────────────────────────────────────────────
