@@ -1,7 +1,7 @@
 # Update Feature 规格
 
 > 路径触发：`agent/features/update/**`
-> 场景触发：改版本检查逻辑 / 缓存策略 / 更新渠道配置
+> 场景触发：改版本检查逻辑 / 更新渠道配置
 
 ## 架构
 
@@ -11,7 +11,7 @@
 agent/features/update/src/
 ├── lib.rs        # LOG_TARGET = "aemeath:agent:update"
 ├── api.rs        # 公共 API re-export（跨 crate 经此模块）
-├── contract.rs   # 内部数据结构（CacheEntry, GitHubRelease）+ 单元测试
+├── contract.rs   # 内部数据结构（GitHubRelease）+ 单元测试
 └── gateway.rs    # 版本检查核心逻辑（UpdateGateway impl UpdateService）
 ```
 
@@ -22,23 +22,28 @@ agent/features/update/src/
 ```rust
 #[async_trait]
 pub trait UpdateService: Send + Sync + 'static {
-    async fn check_latest(&self) -> Result<VersionCheck, SdkError>;      // 带 24h 缓存
-    async fn force_check(&self) -> Result<VersionCheck, SdkError>;       // 忽略缓存
+    async fn check_latest(&self) -> Result<VersionCheck, SdkError>;      // 每次查 API（无缓存）
+    async fn force_check(&self) -> Result<VersionCheck, SdkError>;       // 显式强制刷新
     async fn perform_update(&self) -> Result<UpdateResult, SdkError>;    // PR3 实现
 }
 ```
 
 > `VersionCheck` / `UpdateResult` 使用 `String` 类型（非 `semver::Version`），避免 sdk 依赖 semver。
+>
+> **无缓存策略**：`check_latest` 和 `force_check` 行为一致——每次都直接调 GitHub Releases API。
+> 理由：GitHub 匿名 API 限速 60 次/小时，普通 dev tool 实际不会打满；
+> 无缓存可避免过期数据漏报新版本，同时省掉 cache 文件 IO + 路径常量 + spec 章节。
+> `force_check` 保留为公开方法，主要供 `aemeath update --check` 等显式场景调用，语义清晰。
 
 ## 版本检查策略
 
-| 场景 | 方法 | 缓存 |
-|---|---|---|
-| TUI 启动 | `force_check()` | 忽略，每次查 API |
-| Quiet 模式 `-q` | `check_latest()` | 24h 门控 |
-| `aemeath update --check` | `force_check()` | 忽略 |
-| `aemeath update` | `force_check()` → `perform_update()` | 忽略 |
-| TUI `/update` | `perform_update()` | 忽略 |
+| 场景 | 方法 |
+|---|---|
+| TUI 启动 | `check_latest()` |
+| Quiet 模式 `-q` | `check_latest()` |
+| `aemeath update --check` | `force_check()` |
+| `aemeath update` | `force_check()` → `perform_update()` |
+| TUI `/update` | `perform_update()` |
 
 ## 自动更新流程（`perform_update`）
 
@@ -76,13 +81,6 @@ pub trait UpdateService: Send + Sync + 'static {
 | 权限不足 | 提示「原子替换失败」 |
 | 平台不支持 | 提示当前平台无对应 artifact |
 
-## 缓存
-
-- 文件路径：`~/.agents/update_check.json`
-- 结构：`{ last_check, latest_version, latest_url }`
-- 有效期：24 小时（`CACHE_MAX_AGE_HOURS`）
-- 写入失败静默降级，不影响主流程
-
 ## GitHub API
 
 - Endpoint：`https://api.github.com/repos/rushsinging/aemeath/releases/latest`
@@ -116,7 +114,7 @@ pub struct UpdateConfig {
 ## 验证
 
 ```bash
-cargo test -p update                    # 12 个单元测试
+cargo test -p update                    # 17 个单元测试
 cargo clippy -p update -p cli           # 零 warning
 bash .agents/hooks/check-architecture-guards.sh  # 17 个 guard 通过
 ```

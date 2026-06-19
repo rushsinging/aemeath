@@ -20,7 +20,6 @@ pub const MCP_CONFIG_FILE: &str = "mcp.json";
 pub const HISTORY_FILE: &str = "history.json";
 pub const COST_HISTORY_FILE: &str = "cost_history.json";
 pub const SETTINGS_FILE: &str = "settings.json";
-pub const UPDATE_CHECK_FILE: &str = "update_check.json";
 
 /// 解析 home 目录（读取 `$HOME`）。
 ///
@@ -164,10 +163,6 @@ pub fn global_settings_path() -> PathBuf {
     global_agents_dir().join(SETTINGS_FILE)
 }
 
-pub fn global_update_check_path() -> PathBuf {
-    global_agents_dir().join(UPDATE_CHECK_FILE)
-}
-
 pub fn old_global_skills_dir() -> PathBuf {
     PathBuf::from(OLD_AEMEATH_DIR_NAME).join(SKILLS_DIR_NAME)
 }
@@ -292,10 +287,6 @@ mod tests {
         assert_eq!(
             global_settings_path(),
             temp_agents_dir.join("settings.json")
-        );
-        assert_eq!(
-            global_update_check_path(),
-            temp_agents_dir.join("update_check.json")
         );
     }
 

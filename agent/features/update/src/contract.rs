@@ -1,17 +1,6 @@
 //! Update feature 内部数据结构（不跨 crate 暴露）。
 
-use serde::{Deserialize, Serialize};
-
-/// 缓存文件结构（`~/.agents/update_check.json`）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CacheEntry {
-    /// 上次检查时间（ISO 8601 / RFC 3339）。
-    pub last_check: String,
-    /// 最新版本号（不含 `v` 前缀）。
-    pub latest_version: String,
-    /// Release 页面 URL。
-    pub latest_url: String,
-}
+use serde::Deserialize;
 
 /// GitHub Releases API 响应（仅提取需要的字段）。
 #[derive(Debug, Deserialize)]
@@ -31,18 +20,6 @@ pub(crate) struct GitHubRelease {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_cache_entry_serialize_deserialize() {
-        let entry = CacheEntry {
-            last_check: "2026-06-18T12:00:00Z".to_string(),
-            latest_version: "0.9.0".to_string(),
-            latest_url: "https://github.com/rushsinging/aemeath/releases/tag/v0.9.0".to_string(),
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        let deserialized: CacheEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.latest_version, "0.9.0");
-    }
 
     #[test]
     fn test_github_release_deserialize() {

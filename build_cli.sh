@@ -35,6 +35,16 @@ TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
 echo ">>> cargo build --release --package cli --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
+
+# build.rs 不再从 git tag 读版本号；显式 AEMEATH_VERSION 未设置时
+# 二进制内嵌的是 Cargo.toml 占位符 0.0.0（dev build 标识）。
+# 如果想为本地构建打某个版本号，可手动 `AEMEATH_VERSION=0.1.0 ./build_cli.sh`。
+if [[ -z "${AEMEATH_VERSION:-}" ]]; then
+    echo ">>> AEMEATH_VERSION 未设置 → 二进制版本号 = 0.0.0（dev build）"
+else
+    echo ">>> AEMEATH_VERSION=$AEMEATH_VERSION → 二进制版本号同上"
+fi
+
 cargo build --release --package cli --jobs "$CARGO_BUILD_JOBS"
 
 mkdir -p "$INSTALL_DIR"
