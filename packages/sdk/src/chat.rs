@@ -37,9 +37,12 @@ pub struct ChatInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatInputEvent {
     /// 普通用户消息，延展当前 Chat 为新的 Turn。
+    ///
+    /// `images` 携带图片数据（base64 + media_type），使内联/粘贴/文件图片均能
+    /// 经事件通道存活到达 LLM（#402：A1 之前只带 display_path，内联图被丢）。
     UserMessage {
         text: String,
-        image_paths: Vec<String>,
+        images: Vec<crate::ToolResultImage>,
     },
     /// 忙碌期间输入的 slash/control command，永不作为 user message 发给 LLM。
     ControlCommand { raw: String },
@@ -48,19 +51,19 @@ pub enum ChatInputEvent {
 }
 
 impl ChatInputEvent {
-    pub fn user_message(text: impl Into<String>, image_paths: Vec<String>) -> Self {
+    pub fn user_message(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
         Self::UserMessage {
             text: text.into(),
-            image_paths,
+            images,
         }
     }
 
-    pub fn classify_text(text: impl Into<String>, image_paths: Vec<String>) -> Self {
+    pub fn classify_text(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
         let text = text.into();
         if text.trim_start().starts_with('/') {
             Self::ControlCommand { raw: text }
         } else {
-            Self::UserMessage { text, image_paths }
+            Self::UserMessage { text, images }
         }
     }
 }
@@ -96,17 +99,27 @@ mod tests {
 
     #[test]
     fn test_chat_input_event_classify_text_user_message() {
-        let event = ChatInputEvent::classify_text("继续分析", vec!["a.png".to_string()]);
-        assert!(matches!(
-            event,
-            ChatInputEvent::UserMessage { ref text, ref image_paths }
-                if text == "继续分析" && image_paths == &["a.png".to_string()]
-        ));
+        let img = crate::ToolResultImage {
+            base64: "AAAA".to_string(),
+            media_type: "image/png".to_string(),
+        };
+        let event = ChatInputEvent::classify_text("继续分析", vec![img.clone()]);
+        match event {
+            ChatInputEvent::UserMessage { text, images } => {
+                assert_eq!(text, "继续分析");
+                assert_eq!(images, vec![img]);
+            }
+            other => panic!("expected UserMessage, got {other:?}"),
+        }
     }
 
     #[test]
     fn test_chat_input_event_classify_text_control_command() {
-        let event = ChatInputEvent::classify_text("  /clear", vec!["ignored.png".to_string()]);
+        let img = crate::ToolResultImage {
+            base64: "x".to_string(),
+            media_type: "image/png".to_string(),
+        };
+        let event = ChatInputEvent::classify_text("  /clear", vec![img]);
         assert!(matches!(
             event,
             ChatInputEvent::ControlCommand { ref raw } if raw == "  /clear"

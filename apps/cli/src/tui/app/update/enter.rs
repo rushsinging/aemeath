@@ -42,16 +42,13 @@ impl App {
     /// 非忙（首条）与忙时（插话）提交共用本路径——回显交由 runtime 的 MessagesSync
     /// 单一真相驱动（A1 不动回显机制），此处只入队「排队中」占位并发送事件。
     pub(super) fn submit_user_input_event(&mut self, submission: InputSubmission) -> UpdateResult {
-        // 图片以路径形式随事件携带（base64 内联图片暂无路径，A1 runtime gate 仅首条
-        // 请求消息内联图片，事件通道的 image_paths 由后续工作处理）。
-        let image_paths: Vec<String> = submission
-            .images
-            .iter()
-            .filter_map(|img| img.display_path.clone())
-            .collect();
+        // 图片携带 base64 数据（含内联/粘贴图，display_path 可能为 None）经事件通道送达
+        // runtime，由 runtime 组装 image block（#402）。
+        let images: Vec<sdk::ToolResultImage> =
+            submission.images.into_iter().map(Into::into).collect();
         let event = sdk::ChatInputEvent::UserMessage {
             text: submission.text.clone(),
-            image_paths,
+            images,
         };
         // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
         self.input.push_queue(submission.text);
@@ -80,6 +77,16 @@ mod tests {
             Effect::SendChatInputEvent {
                 event: sdk::ChatInputEvent::UserMessage { text, .. },
             } => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
+    /// 提取本次提交产生的 `SendChatInputEvent` 的 `UserMessage` 图片（断言辅助）。
+    fn sent_user_message_images(result: &UpdateResult) -> Option<&Vec<sdk::ToolResultImage>> {
+        result.effects.iter().find_map(|effect| match effect {
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::UserMessage { images, .. },
+            } => Some(images),
             _ => None,
         })
     }
@@ -175,6 +182,32 @@ mod tests {
             busy_event,
             sdk::ChatInputEvent::UserMessage { ref text, .. } if text == "hello busy"
         ));
+    }
+
+    /// #402 回归：内联/粘贴图片（`display_path: None` 但有 base64）必须经事件通道
+    /// 携带 base64，而非被 `display_path` filter 丢弃。
+    #[test]
+    fn test_submit_carries_inline_image_base64() {
+        let mut app = test_app();
+        let submission = InputSubmission {
+            text: "看图".to_string(),
+            display_text: "看图".to_string(),
+            images: vec![sdk::ClipboardImageView {
+                base64: "aW1nZGF0YQ==".to_string(),
+                media_type: "image/png".to_string(),
+                final_size: 7,
+                display_path: None,
+                width: None,
+                height: None,
+            }],
+        };
+
+        let result = app.submit_user_input_event(submission);
+
+        let images = sent_user_message_images(&result).expect("应发出带 images 的 UserMessage");
+        assert_eq!(images.len(), 1, "内联图片不应被丢弃");
+        assert_eq!(images[0].base64, "aW1nZGF0YQ==");
+        assert_eq!(images[0].media_type, "image/png");
     }
 
     #[test]

@@ -430,7 +430,7 @@ mod tests {
         let (tx, port) = TuiInputEventPort::channel();
         tx.send(sdk::ChatInputEvent::UserMessage {
             text: "x".into(),
-            image_paths: vec![],
+            images: vec![],
         })
         .unwrap();
         assert!(port.recv_next().await.is_some());

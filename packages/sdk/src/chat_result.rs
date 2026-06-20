@@ -3,7 +3,7 @@
 use crate::chat_event::ChatEvent;
 
 /// 工具结果中的图片载荷。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ToolResultImage {
     pub base64: String,
     pub media_type: String,

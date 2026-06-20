@@ -211,7 +211,7 @@ impl App {
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::UserMessage {
                             text: prompt,
-                            image_paths: Vec::new(),
+                            images: Vec::new(),
                         });
                 }
             }
