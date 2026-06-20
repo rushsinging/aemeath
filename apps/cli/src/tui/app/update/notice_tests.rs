@@ -371,3 +371,32 @@ fn test_spinner_tick_active_marks_output_dirty() {
         "active 时 SpinnerTick 应标脏 output，以驱动运行中 tool 的 gutter 动画"
     );
 }
+
+#[test]
+fn test_refresh_skips_assemble_when_revision_unchanged() {
+    let mut app = make_app();
+    app.append_system_notice("一条消息"); // 产生 change，revision 前进
+    app.refresh_output_document_from_model();
+    let after_first = app.assemble_count;
+    // conversation 未变，再次 refresh：应命中 memo，不重新 assemble。
+    app.refresh_output_document_from_model();
+    assert_eq!(
+        app.assemble_count, after_first,
+        "conversation 未变时 refresh 应复用 view_model，不重新 assemble"
+    );
+}
+
+#[test]
+fn test_refresh_assembles_again_after_conversation_mutates() {
+    let mut app = make_app();
+    app.append_system_notice("第一条");
+    app.refresh_output_document_from_model();
+    let after_first = app.assemble_count;
+    app.append_system_notice("第二条"); // conversation 变化 → revision 前进
+    app.refresh_output_document_from_model();
+    assert_eq!(
+        app.assemble_count,
+        after_first + 1,
+        "conversation 变化后 refresh 应以新 revision 重新 assemble"
+    );
+}

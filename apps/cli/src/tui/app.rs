@@ -26,6 +26,12 @@ use std::time::Instant;
 
 pub use event::{StatusContextUpdate, UiEvent, UiTurnContext};
 
+/// `refresh_output_document_from_model` 的 assemble 产物 memo。
+pub(crate) struct OutputViewCache {
+    pub(crate) revision: u64,
+    pub(crate) view_model: crate::tui::view_model::OutputViewModel,
+}
+
 /// Main TUI application
 pub struct App {
     // 视图组件（直接持有，不随 State 变化重建）
@@ -33,6 +39,12 @@ pub struct App {
     pub input_area: InputArea,
     pub status_bar: StatusBar,
     pub(crate) output_document_renderer: OutputDocumentRenderer,
+    /// memo：缓存上次 assemble 的 (revision, view_model)。revision 不变即复用，
+    /// 跳过 `assemble_from_conversation` 的全量遍历+clone（大会话伪卡死根治）。
+    pub(crate) output_view_cache: Option<OutputViewCache>,
+    /// 测试探针：assemble 实际执行次数，验证 memo 是否跳过重建。
+    #[cfg(test)]
+    pub(crate) assemble_count: usize,
     // 纯数据子状态
     pub chat: ChatState,
     pub input: InputState,
@@ -161,6 +173,9 @@ impl App {
             input_area: InputArea::new(),
             status_bar,
             output_document_renderer: OutputDocumentRenderer::default(),
+            output_view_cache: None,
+            #[cfg(test)]
+            assemble_count: 0,
             chat: ChatState::default(),
             input: InputState::default(),
             session: SessionState {
