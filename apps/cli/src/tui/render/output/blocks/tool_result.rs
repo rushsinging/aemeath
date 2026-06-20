@@ -4,7 +4,7 @@
 //! gutter 在组合期注入（续行等宽空白），结构上隔离 #65 的 fence 状态机泄漏。
 
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
-use crate::tui::render::output::primitives::wrap::wrap_spans_to_rendered_lines;
+use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::{result_policy, ResultPolicy, ResultRender};
 use crate::tui::render::theme;
@@ -128,9 +128,11 @@ fn format_result_lines(
         match iter.next() {
             None => break,
             Some(line) => {
-                out.extend(wrap_spans_to_rendered_lines(
+                out.extend(wrap_spans_with_prefix(
                     vec![Span::styled(line.to_string(), base)],
                     width as usize,
+                    None,
+                    WrapMode::Word,
                 ));
             }
         }
@@ -175,9 +177,11 @@ fn format_result_lines_tail(
     // get(start..) 返回 Option，不会 panic
     if let Some(remaining) = all_lines.get(start..) {
         for line in remaining {
-            out.extend(wrap_spans_to_rendered_lines(
+            out.extend(wrap_spans_with_prefix(
                 vec![Span::styled(line.to_string(), base)],
                 width as usize,
+                None,
+                WrapMode::Word,
             ));
         }
     }
