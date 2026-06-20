@@ -47,6 +47,10 @@ impl InputEventDrainPort for EmptyInputEvents {
     fn drain_input_events<'a>(&'a self) -> crate::business::chat::looping::InputEventFuture<'a> {
         Box::pin(async { Vec::new() })
     }
+
+    fn recv_next_input<'a>(&'a self) -> crate::business::chat::looping::InputEventOptFuture<'a> {
+        Box::pin(async { None })
+    }
 }
 
 #[derive(Clone, Default)]

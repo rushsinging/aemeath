@@ -31,9 +31,14 @@ pub trait QueueDrainPort: Send + Sync + 'static {
     fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a>;
 }
 
+pub type InputEventOptFuture<'a> =
+    Pin<Box<dyn Future<Output = Option<ChatInputEvent>> + Send + 'a>>;
+
 /// runtime drain 忙碌期间追加输入事件的端口。
 pub trait ChatInputEventPort: Send + Sync + 'static {
     fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a>;
+    /// 阻塞等待下一条输入；None = 通道关闭（shutdown）。
+    fn recv_next<'a>(&'a self) -> InputEventOptFuture<'a>;
 }
 
 /// TUI 可直接渲染的任务状态视图。

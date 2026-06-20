@@ -57,6 +57,11 @@ impl sdk::ChatInputEventPort for TuiInputEventPort {
     fn drain_input_events<'a>(&'a self) -> sdk::InputEventFuture<'a> {
         Box::pin(async move { self.drain_input_events().await })
     }
+
+    // TODO(A1-Task5): 临时桩——Task 5 替换为真实 mpsc 实现。
+    fn recv_next<'a>(&'a self) -> sdk::InputEventOptFuture<'a> {
+        Box::pin(async { None })
+    }
 }
 
 pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
