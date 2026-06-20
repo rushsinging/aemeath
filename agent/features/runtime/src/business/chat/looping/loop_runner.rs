@@ -1,5 +1,6 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::business::agent::Agent;
+use crate::business::chat::looping::apply_gate;
 use crate::business::chat::looping::compact::auto_compact;
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
@@ -565,13 +566,54 @@ where
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
-                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
-                    loop_fsm.assert_state(
-                        ChatLoopState::Done,
-                        "completed loop finalizes after stop hooks pass",
-                    );
+                    // 回合完成、stop hook 放行：发出 Done，但不退出常驻 loop。
+                    // 进入空闲态阻塞等待下一条输入；通道关闭才 shutdown 退出。
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
-                    break;
+                    loop_fsm.transition(ChatLoopTransition::Idle);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Idle,
+                        "completed loop idles after stop hooks pass",
+                    );
+                    let mut shutdown = false;
+                    loop {
+                        match await_idle_input(&input_events, &mut pending_input).await {
+                            IdleResult::Resumed => {
+                                // 处理空闲期收到的事件：append 用户消息 / 识别 Cancel/clear。
+                                let gate = apply_gate(
+                                    GateKind::BeforeLlm,
+                                    &mut pending_input,
+                                    &sink,
+                                    &mut messages,
+                                )
+                                .await;
+                                match gate.decision {
+                                    GateDecision::AbortCurrentLoop
+                                    | GateDecision::CancelCurrentLoop => {
+                                        // 空闲期收到 Cancel/clear：丢弃，保持空闲，继续等下一条。
+                                        continue;
+                                    }
+                                    GateDecision::Proceed | GateDecision::ContinueNextTurn => {
+                                        // 收到用户消息（已 append 进 messages）：恢复运行。
+                                        break;
+                                    }
+                                }
+                            }
+                            IdleResult::Shutdown => {
+                                shutdown = true;
+                                break;
+                            }
+                        }
+                    }
+                    if shutdown {
+                        loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                        loop_fsm.assert_state(
+                            ChatLoopState::Done,
+                            "idle loop shuts down on channel close",
+                        );
+                        break;
+                    }
+                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                    continue;
                 }
                 {
                     loop_fsm.transition(ChatLoopTransition::AwaitTool);
@@ -721,5 +763,27 @@ where
                 break;
             }
         }
+    }
+}
+
+/// 空闲等待结果：收到下一条输入（恢复运行）或通道关闭（shutdown）。
+enum IdleResult {
+    Resumed,
+    Shutdown,
+}
+
+/// 回合完成后阻塞等待下一条输入：
+/// - 收到事件 → push 进 `pending` 缓冲，返回 `Resumed`（由调用方经 gate 处理）。
+/// - `None`（通道关闭）→ 返回 `Shutdown`，调用方退出常驻 loop。
+async fn await_idle_input<I: InputEventDrainPort>(
+    input_events: &I,
+    pending: &mut PendingInputBuffer,
+) -> IdleResult {
+    match input_events.recv_next_input().await {
+        Some(event) => {
+            pending.push(event);
+            IdleResult::Resumed
+        }
+        None => IdleResult::Shutdown,
     }
 }

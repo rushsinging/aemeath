@@ -778,6 +778,153 @@ async fn test_stall_triggers_stop_hook_check() {
     );
 }
 
+/// Channel-backed input port: 投递事件经 `recv_next_input` 阻塞返回，
+/// drop 发送端关闭通道使 `recv_next_input` 返回 `None`（= shutdown）。
+#[derive(Clone)]
+struct ChannelInputEvents {
+    rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<sdk::ChatInputEvent>>>,
+}
+
+impl ChannelInputEvents {
+    fn new() -> (
+        tokio::sync::mpsc::UnboundedSender<sdk::ChatInputEvent>,
+        Self,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (
+            tx,
+            Self {
+                rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            },
+        )
+    }
+}
+
+impl InputEventDrainPort for ChannelInputEvents {
+    fn drain_input_events<'a>(&'a self) -> crate::business::chat::looping::InputEventFuture<'a> {
+        Box::pin(async move {
+            let mut rx = self.rx.lock().await;
+            let mut events = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+            events
+        })
+    }
+
+    fn recv_next_input<'a>(&'a self) -> crate::business::chat::looping::InputEventOptFuture<'a> {
+        Box::pin(async move {
+            let mut rx = self.rx.lock().await;
+            rx.recv().await
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_loop_persists_across_turns_until_shutdown() {
+    // 常驻 loop 跨回合：喂 "first" → 完成回合 1 → 喂 "second" → 完成回合 2
+    // → drop 发送端关闭通道 → loop shutdown 退出（不 hang）。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    // driver：轮询 sink 事件，见到第 1 个 DoneWithDuration 后投递 "second"，
+    // 见到第 2 个 DoneWithDuration 后 drop 发送端关闭通道触发 shutdown。
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration）。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        // 等回合 2 完成（第 2 个 DoneWithDuration），再关闭通道。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            SequenceProvider::new(vec!["turn one final", "turn two final"]),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-persistent-loop".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: CancellationToken::new(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 两回合各产生一个 DoneWithDuration（常驻 loop 跨回合存活）。
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 2,
+        "常驻 loop 应跨两回合产生 2 个 DoneWithDuration: {events:?}"
+    );
+    // 两回合的用户消息均被处理（first 在回合 1，second 在回合 2）。
+    assert!(
+        events.iter().any(|event| event == "Text:turn one final"),
+        "回合 1 应调用 LLM: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| event == "Text:turn two final"),
+        "回合 2 应调用 LLM: {events:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_stop_hook_block_limit_stops_loop() {
     // #372 缺陷 3：Stop hook 连续阻断超过 MAX_STOP_HOOK_BLOCKS(5) 强制停止
