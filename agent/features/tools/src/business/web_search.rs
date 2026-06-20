@@ -179,14 +179,9 @@ fn format_search_results(
     results: Vec<SearchResult>,
 ) -> TypedToolResult<WebSearchResult> {
     if results.is_empty() {
-        let data = serde_json::to_value(WebSearchResult { results: vec![] }).unwrap_or_default();
-        return TypedToolResult::success_msg(
-            serde_json::json!({
-                "status": "success",
-                "message": "No search results found",
-                "data": data
-            })
-            .to_string(),
+        return TypedToolResult::success(
+            "No search results found",
+            WebSearchResult { results: vec![] },
         );
     }
 
@@ -201,18 +196,24 @@ fn format_search_results(
         })
         .collect();
 
-    let data = serde_json::to_value(WebSearchResult {
-        results: results_json,
-    })
-    .unwrap_or_default();
-
-    TypedToolResult::success_msg(
-        serde_json::json!({
-            "status": "success",
-            "message": format!("Found {} search results", results.len()),
-            "data": data
-        })
-        .to_string(),
+    TypedToolResult::success(
+        format!(
+            "Found {} search results\n\n{}",
+            results.len(),
+            results_json
+                .iter()
+                .map(|r| {
+                    let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = r.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    let snippet = r.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
+                    format!("- {} ({})\n  {}", title, url, snippet)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+        WebSearchResult {
+            results: results_json,
+        },
     )
 }
 

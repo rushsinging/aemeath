@@ -69,7 +69,7 @@ impl TypedTool for GrepTool {
 
         let output = if is_rg_available().await {
             let mut cmd = Command::new("rg");
-            cmd.arg("-n").arg("--no-heading").arg(pattern);
+            cmd.arg("-n").arg("-H").arg("--no-heading").arg(pattern);
             if let Some(g) = glob_filter {
                 cmd.arg("--glob").arg(g);
             }
@@ -90,13 +90,13 @@ impl TypedTool for GrepTool {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 if stdout.is_empty() {
-                    TypedToolResult::success_msg(
-                        serde_json::json!({
-                            "status": "success",
-                            "message": "No matches found",
-                            "data": serde_json::to_value(GrepResult { matches: vec![], total_matches: 0, query: pattern.to_string() }).unwrap()
-                        })
-                        .to_string(),
+                    TypedToolResult::success(
+                        "No matches found",
+                        GrepResult {
+                            matches: vec![],
+                            total_matches: 0,
+                            query: pattern.to_string(),
+                        },
                     )
                 } else {
                     let lines: Vec<&str> = stdout.lines().take(250).collect();
@@ -115,17 +115,19 @@ impl TypedTool for GrepTool {
                         })
                         .collect();
                     let total_matches = parsed_matches.len() as u64;
-                    TypedToolResult::success_msg(
-                        serde_json::json!({
-                            "status": "success",
-                            "message": format!("Found {} matches", total_matches),
-                            "data": serde_json::to_value(GrepResult {
-                                matches: parsed_matches,
-                                total_matches,
-                                query: pattern.to_string(),
-                            }).unwrap()
-                        })
-                        .to_string(),
+                    let query = pattern.to_string();
+                    let body = parsed_matches
+                        .iter()
+                        .map(|m| format!("{}:{}: {}", m.file_path.display(), m.line_number, m.line))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    TypedToolResult::success(
+                        format!("Found {} matches\n\n{}", total_matches, body),
+                        GrepResult {
+                            matches: parsed_matches,
+                            total_matches,
+                            query,
+                        },
                     )
                 }
             }

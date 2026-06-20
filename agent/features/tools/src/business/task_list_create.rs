@@ -104,7 +104,7 @@ mod tests {
             .await;
 
         assert!(!result.is_error);
-        assert!(result.output.contains("Task list #0 created"));
+        assert!(result.text.contains("Task list #0 created"));
         assert_eq!(
             store.active_list().await.unwrap().summary.as_deref(),
             Some("修复 task 状态")
@@ -121,7 +121,7 @@ mod tests {
             .await;
 
         assert!(result.is_error);
-        assert!(result.output.contains("summary"));
+        assert!(result.text.contains("summary"));
     }
 
     #[tokio::test]
@@ -164,7 +164,7 @@ mod tests {
             .await;
         let first_elapsed = first_start.elapsed();
 
-        assert!(!first.is_error, "首次调用应成功，实际：{}", first.output);
+        assert!(!first.is_error, "首次调用应成功，实际：{}", first.text);
 
         // 完成首个 batch 全部任务以允许新建第二个 batch
         store.complete_list().await;
@@ -178,11 +178,7 @@ mod tests {
             .await;
         let second_elapsed = second_start.elapsed();
 
-        assert!(
-            !second.is_error,
-            "第二次调用应成功，实际：{}",
-            second.output
-        );
+        assert!(!second.is_error, "第二次调用应成功，实际：{}", second.text);
 
         // 工具层首次调用应远低于 dispatcher 层 120s 超时；用 1s 作为宽松阈值。
         assert!(
