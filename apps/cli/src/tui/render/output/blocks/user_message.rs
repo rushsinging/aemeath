@@ -1,4 +1,4 @@
-use crate::tui::render::output::primitives::wrap::wrap_spans_to_rendered_lines;
+use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
@@ -14,9 +14,11 @@ pub fn render_user_message(block_id: &str, view: &TextBlockView, ctx: &RenderCtx
             lines.push(RenderedLine::empty());
             continue;
         }
-        lines.extend(wrap_spans_to_rendered_lines(
+        lines.extend(wrap_spans_with_prefix(
             vec![Span::styled(line.to_string(), style)],
             ctx.text_width as usize,
+            None,
+            WrapMode::Word,
         ));
     }
     if lines.is_empty() {

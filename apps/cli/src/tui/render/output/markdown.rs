@@ -1,7 +1,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::tui::render::output::primitives::wrap::wrap_spans_to_rendered_lines;
+use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::theme;
 
 mod table;
@@ -110,7 +110,7 @@ pub fn inline_markdown_lines(
 }
 
 fn wrap_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Line<'static>> {
-    wrap_spans_to_rendered_lines(spans, max_width)
+    wrap_spans_with_prefix(spans, max_width, None, WrapMode::Word)
         .into_iter()
         .map(|line| Line::from(line.spans))
         .collect()
