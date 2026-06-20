@@ -119,13 +119,9 @@ impl TypedTool for TaskCreateTool {
 
         let display_id = self.store.format_display_id(&task.id).await;
 
-        TypedToolResult::success_msg(
-            serde_json::json!({
-                "status": "success",
-                "message": format!("Task #{} created: {}", display_id, task.subject),
-                "data": serde_json::to_value(TaskCreateResult { task_id: task.id }).unwrap()
-            })
-            .to_string(),
+        TypedToolResult::success(
+            format!("Task #{} created: {}", display_id, task.subject),
+            TaskCreateResult { task_id: task.id },
         )
     }
 }

@@ -364,6 +364,6 @@ mod tests {
             )
             .await;
 
-        assert!(!result.is_error, "edit should succeed: {}", result.output);
+        assert!(!result.is_error, "edit should succeed: {}", result.text);
     }
 }

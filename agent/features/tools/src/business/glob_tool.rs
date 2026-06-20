@@ -74,24 +74,22 @@ impl TypedTool for GlobTool {
                     .collect();
                 matches.sort();
                 if matches.is_empty() {
-                    TypedToolResult::success_msg(
-                        serde_json::json!({
-                            "status": "success",
-                            "message": "No files matched",
-                            "data": serde_json::to_value(GlobResult { files: vec![], count: 0 }).unwrap()
-                        })
-                        .to_string(),
+                    TypedToolResult::success(
+                        "No files matched",
+                        GlobResult {
+                            files: vec![],
+                            count: 0,
+                        },
                     )
                 } else {
                     let count = matches.len();
-                    let message = format!("Found {count} files");
-                    TypedToolResult::success_msg(
-                        serde_json::json!({
-                            "status": "success",
-                            "message": message,
-                            "data": serde_json::to_value(GlobResult { files: matches.clone(), count: matches.len() as u64 }).unwrap()
-                        })
-                        .to_string(),
+                    let list = matches.join("\n");
+                    TypedToolResult::success(
+                        format!("Found {count} files\n{list}"),
+                        GlobResult {
+                            files: matches.clone(),
+                            count: count as u64,
+                        },
                     )
                 }
             }

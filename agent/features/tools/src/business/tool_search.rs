@@ -60,13 +60,15 @@ impl TypedTool for ToolSearchTool {
 
         if query.is_empty() {
             let tool_names: Vec<&str> = tools.iter().map(|(n, _)| n.as_str()).collect();
-            return TypedToolResult::success_msg(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("Available tools ({})", tools.len()),
-                    "data": {"tools": tool_names}
-                })
-                .to_string(),
+            return TypedToolResult::success(
+                format!(
+                    "Available tools ({})\n{}",
+                    tools.len(),
+                    tool_names.join("\n")
+                ),
+                ToolSearchResult {
+                    tools: tool_names.iter().map(|n| n.to_string()).collect(),
+                },
             );
         }
 
@@ -83,24 +85,23 @@ impl TypedTool for ToolSearchTool {
             .collect();
 
         if matching.is_empty() {
-            return TypedToolResult::success_msg(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("No tools found matching '{}'", query),
-                    "data": {"tools": []}
-                })
-                .to_string(),
+            return TypedToolResult::success(
+                format!("No tools found matching '{}'", query),
+                ToolSearchResult { tools: vec![] },
             );
         }
 
         let tool_names: Vec<&str> = matching.iter().map(|(n, _)| n.as_str()).collect();
-        TypedToolResult::success_msg(
-            serde_json::json!({
-                "status": "success",
-                "message": format!("Found {} tool(s) matching '{}'", matching.len(), query),
-                "data": {"tools": tool_names}
-            })
-            .to_string(),
+        TypedToolResult::success(
+            format!(
+                "Found {} tool(s) matching '{}'\n{}",
+                matching.len(),
+                query,
+                tool_names.join("\n")
+            ),
+            ToolSearchResult {
+                tools: tool_names.iter().map(|n| n.to_string()).collect(),
+            },
         )
     }
 }

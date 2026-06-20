@@ -141,9 +141,16 @@ async fn get_diagnostics(
 
             // Truncate very long output
             if combined.len() > 10000 {
-                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Diagnostics completed (truncated)", "data": serde_json::to_value(LspResult { output: format!("{}...\n[truncated]", slice_head(&combined, 10000)) }).unwrap()}).to_string())
+                let truncated_output = format!("{}...\n[truncated]", slice_head(&combined, 10000));
+                TypedToolResult::success(
+                    truncated_output.clone(),
+                    LspResult { output: truncated_output },
+                )
             } else {
-                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Diagnostics completed", "data": serde_json::to_value(LspResult { output: combined }).unwrap()}).to_string())
+                TypedToolResult::success(
+                    combined.clone(),
+                    LspResult { output: combined },
+                )
             }
         }
         Err(e) => TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to run diagnostics: {e}"), "data": null}).to_string()),
@@ -214,9 +221,15 @@ async fn get_symbols(
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             if stdout.is_empty() {
-                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "no symbols found", "data": serde_json::to_value(LspResult { output: String::new() }).unwrap()}).to_string())
+                TypedToolResult::success(
+                    "no symbols found",
+                    LspResult { output: String::new() },
+                )
             } else {
-                TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Symbols found", "data": serde_json::to_value(LspResult { output: stdout.to_string() }).unwrap()}).to_string())
+                TypedToolResult::success(
+                    stdout.to_string(),
+                    LspResult { output: stdout.to_string() },
+                )
             }
         }
         Err(e) => TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("failed to get symbols: {e}"), "data": null}).to_string()),
