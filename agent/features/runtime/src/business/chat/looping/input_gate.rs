@@ -8,9 +8,13 @@ use std::future::Future;
 use std::pin::Pin;
 
 pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>> + Send + 'a>>;
+pub type InputEventOptFuture<'a> =
+    Pin<Box<dyn Future<Output = Option<ChatInputEvent>> + Send + 'a>>;
 
 pub trait InputEventDrainPort: Clone + Send + Sync + 'static {
     fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a>;
+    /// 阻塞等待下一条输入；None = 通道关闭（shutdown）。
+    fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +230,10 @@ impl InputEventDrainPort for EmptyInputEventDrainPort {
     fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a> {
         Box::pin(async { Vec::new() })
     }
+
+    fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a> {
+        Box::pin(async { None })
+    }
 }
 
 #[derive(Clone, Default)]
@@ -242,6 +250,61 @@ mod tests {
     use super::*;
     use crate::business::chat::looping::events::EventFuture;
     use std::sync::{Arc, Mutex};
+    use tokio::sync::mpsc;
+
+    /// Mock port backed by tokio mpsc; supports both drain and blocking recv.
+    #[derive(Clone)]
+    struct MockInputPort {
+        rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<ChatInputEvent>>>,
+    }
+
+    impl MockInputPort {
+        fn new() -> (mpsc::UnboundedSender<ChatInputEvent>, Self) {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (
+                tx,
+                Self {
+                    rx: Arc::new(tokio::sync::Mutex::new(rx)),
+                },
+            )
+        }
+    }
+
+    impl InputEventDrainPort for MockInputPort {
+        fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a> {
+            Box::pin(async move {
+                let mut rx = self.rx.lock().await;
+                let mut events = Vec::new();
+                while let Ok(event) = rx.try_recv() {
+                    events.push(event);
+                }
+                events
+            })
+        }
+
+        fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a> {
+            Box::pin(async move {
+                let mut rx = self.rx.lock().await;
+                rx.recv().await
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_recv_next_input_returns_event_then_none_on_close() {
+        // MockInputPort: 用 tokio::sync::mpsc 支持 recv_next
+        let (tx, port) = MockInputPort::new();
+        tx.send(ChatInputEvent::UserMessage {
+            text: "hi".into(),
+            image_paths: vec![],
+        })
+        .unwrap();
+        let first = port.recv_next_input().await;
+        assert!(matches!(first, Some(ChatInputEvent::UserMessage { .. })));
+        drop(tx); // 关闭通道
+        let after_close = port.recv_next_input().await;
+        assert!(after_close.is_none(), "通道关闭后返回 None=shutdown");
+    }
 
     #[derive(Clone)]
     struct TestInputEventPort {
@@ -259,6 +322,17 @@ mod tests {
     impl InputEventDrainPort for TestInputEventPort {
         fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a> {
             Box::pin(async move { self.events.lock().unwrap().drain(..).collect() })
+        }
+
+        fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a> {
+            Box::pin(async move {
+                let mut events = self.events.lock().unwrap();
+                if events.is_empty() {
+                    None
+                } else {
+                    Some(events.remove(0))
+                }
+            })
         }
     }
 

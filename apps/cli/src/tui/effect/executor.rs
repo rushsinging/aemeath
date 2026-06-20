@@ -18,6 +18,10 @@ impl App {
         match effect {
             Effect::None | Effect::RequestRender => {}
             Effect::QuitApplication => {
+                // #390 A1 常驻 loop shutdown：先 drop input_event_tx，使常驻 loop 的
+                // recv_next 收到 None（所有 sender 已 drop = shutdown）→ loop 干净退出 →
+                // 流结束 → 消费任务自然完成。再 abort 句柄兜底，避免任何残留 await 挂起。
+                self.chat.clear_input_event_buffer();
                 self.chat.abort_processing_handle();
                 self.layout.request_exit();
             }
@@ -53,7 +57,7 @@ impl App {
     }
 
     fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
-        if self.chat.input_event_buffer.is_none() {
+        if self.chat.input_event_tx.is_none() {
             self.append_error_notice("当前 Chat 输入通道不可用，已保留在队列中等待兜底 drain");
             return;
         }

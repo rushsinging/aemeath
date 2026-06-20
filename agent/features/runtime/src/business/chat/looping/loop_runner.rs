@@ -1,5 +1,6 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::business::agent::Agent;
+use crate::business::chat::looping::apply_gate;
 use crate::business::chat::looping::compact::auto_compact;
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
@@ -8,7 +9,7 @@ use crate::business::chat::looping::finalize::{
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::business::chat::looping::loop_helpers::{
-    chat_loop_transition_for_gate_exit, drain_and_apply_gate, is_user_cancelled_provider_error,
+    drain_and_apply_gate, is_user_cancelled_provider_error,
 };
 use crate::business::chat::looping::loop_phases::{
     build_api_messages, handle_turn_boundary_config,
@@ -27,6 +28,7 @@ use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
+use share::message::Role;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -55,7 +57,13 @@ where
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
     pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
     pub allow_all: bool,
-    pub cancel: CancellationToken,
+    /// 会话级取消令牌槽（常驻 actor 可重建）。
+    ///
+    /// loop 在每个回合开始时从该槽读取「当前 token」用于本回合的 LLM 调用、
+    /// tool 执行；外部（`cancel_impl`）锁该槽对当前 token 调 `cancel()` 触发取消。
+    /// 处理完一次取消后，loop 把槽**重置为新 token** 供下个回合，避免常驻 loop
+    /// 中被取消的 token 永久污染后续回合。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
+    pub cancel: Arc<std::sync::Mutex<CancellationToken>>,
     pub task_store: Arc<storage::api::TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
@@ -94,7 +102,7 @@ where
         session_reminders,
         agent_runner,
         allow_all,
-        cancel,
+        cancel: cancel_slot,
         task_store,
         max_tool_concurrency,
         max_agent_concurrency,
@@ -117,34 +125,34 @@ where
         hook_runner.project_dir(),
         hook_runner.hook_count()
     );
-    let agent = Agent {
-        registry: &registry,
-        ctx: tools::api::ToolExecutionContext {
-            cwd: cwd.clone(),
-            workspace: workspace.clone(),
-            cancel: cancel.clone(),
-            read_files: read_files.clone(),
-            agent_runner: agent_runner.clone(),
-            session_reminders: Some(session_reminders.clone()),
-            memory_config: memory_config.clone(),
-            plan_mode: None,
-            allow_all,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            agent_semaphore,
-            progress_tx: None,
-            parent_session_id: Some(session_id.clone()),
-            registry: Some(registry.clone() as std::sync::Arc<dyn tools::api::ToolListProvider>),
-        },
-    };
+    // `agent` 在每个回合内构造（见 loop 体顶部）：它持有「当前回合 token」的 clone，
+    // 使 LLM 调用与 tool 执行观测到同一个 token。常驻 loop 中 token 会在 cancel 后重置，
+    // 因此 agent 不能在 loop 外只构造一次（否则会固化已取消的旧 token）。
 
-    let messages_at_start = messages.len();
+    // 取消回滚基线（per-turn）。常驻 loop 中已完成回合的消息累积在同一个
+    // `messages` Vec 里，若用 loop 启动时的固定基线回滚，会把先前已完成回合一并删除
+    // （数据丢失）。因此每个回合在「本回合用户消息已入 messages、但本回合 assistant/tool
+    // 输出尚未产生」处重新捕获基线，使 cancel 只回滚当前回合内容、保留先前已完成回合。
+    //
+    // 捕获时机（与重构前 per-`chat()` 语义对齐：彼时 `messages` 已含本回合用户消息，
+    // cancel 保留用户消息、只回滚 partial assistant/tool 输出）：
+    // - 回合开始（loop 顶）先按当时 `messages.len()` 设基线：resume / ContinueNextTurn
+    //   路径在上一轮 `continue` 前已 append 本回合用户消息，故此处已计入；首回合若为预置
+    //   seed 同样计入。覆盖回合起点 `cancel.is_cancelled()` 早退场景。
+    // - BeforeLlm 门禁后再次刷新：覆盖「首回合空 seed 经门禁 append 用户消息」「同回合
+    //   ContinueNextTurn 经门禁 append」等用户消息在本回合迭代内才入 messages 的情形。
+    //
+    // 声明为未初始化：每个回合在 loop 顶（见下）无条件赋值后才会被读，避免「初始值从未
+    // 被读取」的 dead-store 告警。
+    let mut turn_rollback_baseline: usize;
     let mut active_summary: Option<String> = None;
     let mut last_api_input_tokens: u64 = 0;
     let mut last_api_output_tokens: u64 = 0;
     let mut cached_tokens: Option<u64> = None;
     let mut reasoning_tokens: Option<u64> = None;
-    let turn_start = std::time::Instant::now();
+    // per-user-turn：每个新 USER 回合开始时重置（见 loop 体内的回合边界重置），
+    // 使 `DoneWithDuration` 的 duration 反映本回合时长而非会话总时长（#390 A1）。
+    let mut turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
     let mut stall_detector = StallDetector::new();
@@ -159,12 +167,113 @@ where
     let mut config_snapshot =
         crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
     loop {
+        // ── loop 顶部空闲门（Task 4，位于回合头之前）──
+        // 若没有「待 assistant 响应的用户回合」（末条消息非 User），且 pending_input
+        // 缓冲也为空（上游还没有新输入就绪），则在发出任何回合信号之前先 idle-wait：
+        // 等到真正收到 UserMessage 后才开始本回合。
+        //
+        // **必须置于 `turn_count += 1` / `StartTurn` / `TurnChanged` /
+        // `handle_turn_boundary_config` 之前**：否则空 seed 启动（TUI start-once 场景）
+        // 会在尚无用户输入时就发出 `TurnChanged(1)`、跑 turn 边界配置，产生「回合 1 /
+        // 处理中」的假信号；前置后，回合编号与回合信号只在真正有输入、回合真正开始时
+        // 才推进（首个真实回合 = 1）。
+        //
+        // 这使 chat() 能以空 messages 或纯历史（末尾为 assistant）启动，loop 会阻塞
+        // 等待第一条输入，而不是以空消息列表发起回合。
+        //
+        // 与回合完成后的空闲（completion arm）协作：completion arm 已 idle-wait 并把下
+        // 一条 UserMessage append 进 messages 后再 continue；此时 has_pending_user_turn
+        // 为 true，不会触发 double-wait。
+        //
+        // FSM 注意：此处 FSM 处于 Running 态（loop 首轮默认 Running；后续轮经
+        // `ResumeRunning` 回到 Running）。loop-top idle 是「回合前置等待」，不经过
+        // Stopping→Idle→Done 路径；Shutdown 时直接从 Running 经 TryStop→StopSucceeded
+        // 到 Done。
+        //
+        // `None` cancel_slot：前置等待不重置 cancel 槽——此时 loop 体的 `cancel` clone
+        // 尚未读取（在本门之后才 `current_cancel_token`），重置会破坏首回合的外部 cancel。
+        if !has_pending_user_turn(&messages) && pending_input.is_empty() {
+            match idle_until_resume_or_shutdown(
+                &input_events,
+                &sink,
+                &mut pending_input,
+                &mut messages,
+                None,
+            )
+            .await
+            {
+                IdleResult::Resumed => {
+                    // messages 已含新 UserMessage（由 idle 门内的 BeforeLlm gate 附加），
+                    // pending_input 已清空。继续进入下方回合头：turn_count 推进、
+                    // turn_rollback_baseline 在用户消息已入、assistant 未产生处捕获。
+                }
+                IdleResult::Shutdown => {
+                    loop_fsm.transition(ChatLoopTransition::TryStop);
+                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Done,
+                        "loop-top idle shuts down on channel close",
+                    );
+                    break;
+                }
+            }
+        }
+
         turn_count += 1;
         let turn_id = ChatTurnId::new_v7();
         let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id);
         loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
             .await;
+
+        // 回合开始：以当前 messages 长度设取消回滚基线。此时本回合用户消息已由上一轮
+        // 的 idle-resume / ContinueNextTurn gate（在 `continue` 之前）append 完成，或来自
+        // 首回合 seed；先前已完成回合的消息均位于基线之内，cancel 不会触及。
+        turn_rollback_baseline = messages.len();
+
+        // ── 新 USER 回合边界：重置 per-user-turn 局部状态（#390 A1 跨回合泄漏修复）──
+        // A1 把 loop 改为常驻（一个 loop 跨多个用户回合），导致原本 per-`chat()`（≈
+        // per-user-turn）的 `stall_detector` / `turn_start` 退化为 per-session，跨回合泄漏：
+        // - stall_detector：滑窗累积各回合 assistant 指纹，3 个独立回合各回一句相同短语
+        //   （如 "Done."）会在第 3 回合误判「重复输出」停机（误报）。
+        // - turn_start：从回合 2 起 `DoneWithDuration` 的 duration 变成会话总时长而非本回合。
+        //
+        // **判据（单一机制）**：仅当本回合是由一条「真正的新用户消息」开启时才重置——即
+        // 末条消息 role=User、非 tool-result、且非 system-generated。这恰好覆盖所有新用户
+        // 回合入口（loop 顶空闲门 resume、完成臂 idle resume、cancel idle resume、
+        // ContinueNextTurn gate append），且**排除回合内的工具轮次再迭代**（工具结果消息
+        // role 虽为 User 但 `has_tool_results()` 为真）与 stop-hook 阻断重试（注入的是
+        // system-generated 用户消息）——因此单个回合内卡在循环仍能被 stall 检测捕获。
+        if is_new_user_turn_message(messages.last()) {
+            stall_detector = StallDetector::new();
+            turn_start = std::time::Instant::now();
+        }
+
+        // ── 回合开始：从共享槽读取「当前回合 token」 ──
+        // 锁仅用于 clone token 后立即释放（std::sync::Mutex，NEVER 跨 .await 持有）。
+        // 外部 cancel_impl 锁同一槽对当前 token 调 cancel()；本回合的 LLM/tool 共用该 token。
+        // cancel 处理后会 reset_cancel(&cancel_slot) 把槽换成新 token，下回合再从槽读取。
+        let cancel = current_cancel_token(&cancel_slot);
+        let agent = Agent {
+            registry: &registry,
+            ctx: tools::api::ToolExecutionContext {
+                cwd: cwd.clone(),
+                workspace: workspace.clone(),
+                cancel: cancel.clone(),
+                read_files: read_files.clone(),
+                agent_runner: agent_runner.clone(),
+                session_reminders: Some(session_reminders.clone()),
+                memory_config: memory_config.clone(),
+                plan_mode: None,
+                allow_all,
+                max_tool_concurrency,
+                max_agent_concurrency,
+                agent_semaphore: agent_semaphore.clone(),
+                progress_tx: None,
+                parent_session_id: Some(session_id.clone()),
+                registry: Some(registry.clone() as std::sync::Arc<dyn tools::api::ToolListProvider>),
+            },
+        };
 
         // ── turn 边界：检测配置/指令/guidance 文件变更 ──
         handle_turn_boundary_config(
@@ -183,6 +292,8 @@ where
             crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
         if cancel.is_cancelled() {
+            // 回合起点即发现 token 已取消（外部在回合边界触发 cancel）：
+            // 先看排队输入能否续跑；否则中止本回合、重置 token、回空闲。
             let outcome = drain_and_apply_gate(
                 GateKind::BeforeFinish,
                 &mut pending_input,
@@ -196,34 +307,28 @@ where
                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                 continue;
             }
-            messages.truncate(messages_at_start);
-            sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                .await;
-            sink.send_event(RuntimeStreamEvent::Cancelled {
-                context: turn_context.clone(),
-            })
-            .await;
-            loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
-            let outcome = AgentRunOutcome {
-                status: AgentRunStatus::Cancelled,
-                turns: turn_count,
-                duration: turn_start.elapsed(),
-                role: None,
-                model: client.model_name().to_string(),
-            };
-            let _ = finalize_main_loop(
-                &outcome,
+            match cancel_to_idle(
                 &sink,
-                &hook_ui,
-                &hook_runner,
-                &session_id,
+                &input_events,
+                &mut loop_fsm,
+                &mut messages,
+                &mut pending_input,
+                &cancel_slot,
+                turn_rollback_baseline,
                 &turn_context,
-                &task_store,
-                &language,
             )
-            .await;
-            loop_fsm.assert_state(ChatLoopState::Done, "cancel finalizes loop");
-            break;
+            .await
+            {
+                IdleResult::Resumed => continue,
+                IdleResult::Shutdown => {
+                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Done,
+                        "cancel idle shuts down on channel close",
+                    );
+                    break;
+                }
+            }
         }
 
         loop_fsm.transition(ChatLoopTransition::Compact);
@@ -287,15 +392,37 @@ where
                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
             }
             GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop => {
-                loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
-                loop_fsm.assert_state(ChatLoopState::Done, "before-llm gate exits loop");
-                sink.send_event(RuntimeStreamEvent::Cancelled {
-                    context: turn_context.clone(),
-                })
-                .await;
-                break;
+                // before-llm 门禁收到取消 / /clear：中止本回合、重置 token、回空闲（不退 loop）。
+                match cancel_to_idle(
+                    &sink,
+                    &input_events,
+                    &mut loop_fsm,
+                    &mut messages,
+                    &mut pending_input,
+                    &cancel_slot,
+                    turn_rollback_baseline,
+                    &turn_context,
+                )
+                .await
+                {
+                    IdleResult::Resumed => continue,
+                    IdleResult::Shutdown => {
+                        loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                        loop_fsm.assert_state(
+                            ChatLoopState::Done,
+                            "before-llm cancel idle shuts down on channel close",
+                        );
+                        break;
+                    }
+                }
             }
         }
+
+        // BeforeLlm 门禁后刷新取消回滚基线：此处 messages 已含本回合用户消息
+        // （首回合空 seed 经门禁 append，或同回合 ContinueNextTurn 经门禁 append），
+        // 但本回合 LLM/tool 输出尚未产生。后续 assistant 消息（line ~440）、tool 结果
+        // （line ~655）才是 cancel 应回滚的「本回合 partial 输出」。
+        turn_rollback_baseline = messages.len();
 
         // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
         task_reminder_state.update_from_messages(turn_count as u64, &messages);
@@ -565,13 +692,36 @@ where
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
-                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
-                    loop_fsm.assert_state(
-                        ChatLoopState::Done,
-                        "completed loop finalizes after stop hooks pass",
-                    );
+                    // 回合完成、stop hook 放行：发出 Done，但不退出常驻 loop。
+                    // 进入空闲态阻塞等待下一条输入；通道关闭才 shutdown 退出。
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
-                    break;
+                    loop_fsm.transition(ChatLoopTransition::Idle);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Idle,
+                        "completed loop idles after stop hooks pass",
+                    );
+                    match idle_until_resume_or_shutdown(
+                        &input_events,
+                        &sink,
+                        &mut pending_input,
+                        &mut messages,
+                        Some(&cancel_slot),
+                    )
+                    .await
+                    {
+                        IdleResult::Shutdown => {
+                            loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                            loop_fsm.assert_state(
+                                ChatLoopState::Done,
+                                "idle loop shuts down on channel close",
+                            );
+                            break;
+                        }
+                        IdleResult::Resumed => {
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                            continue;
+                        }
+                    }
                 }
                 {
                     loop_fsm.transition(ChatLoopTransition::AwaitTool);
@@ -609,13 +759,29 @@ where
                         gate.decision,
                         GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
                     ) {
-                        loop_fsm.transition(chat_loop_transition_for_gate_exit(gate.decision));
-                        loop_fsm.assert_state(ChatLoopState::Done, "after-tool gate exits loop");
-                        sink.send_event(RuntimeStreamEvent::Cancelled {
-                            context: turn_context.clone(),
-                        })
-                        .await;
-                        break;
+                        // tool 执行后门禁收到取消 / /clear：中止本回合、重置 token、回空闲。
+                        match cancel_to_idle(
+                            &sink,
+                            &input_events,
+                            &mut loop_fsm,
+                            &mut messages,
+                            &mut pending_input,
+                            &cancel_slot,
+                            turn_rollback_baseline,
+                            &turn_context,
+                        )
+                        .await
+                        {
+                            IdleResult::Resumed => continue,
+                            IdleResult::Shutdown => {
+                                loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                                loop_fsm.assert_state(
+                                    ChatLoopState::Done,
+                                    "after-tool cancel idle shuts down on channel close",
+                                );
+                                break;
+                            }
+                        }
                     }
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
@@ -629,34 +795,30 @@ where
                     // generic abort/network errors as cancellation rather than API errors.
                     || cancel.is_cancelled()
                 {
-                    messages.truncate(messages_at_start);
-                    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                        .await;
-                    sink.send_event(RuntimeStreamEvent::Cancelled {
-                        context: turn_context.clone(),
-                    })
-                    .await;
-                    loop_fsm.transition(ChatLoopTransition::CancelCurrentLoop);
-                    let outcome = AgentRunOutcome {
-                        status: AgentRunStatus::Cancelled,
-                        turns: turn_count,
-                        duration: turn_start.elapsed(),
-                        role: None,
-                        model: client.model_name().to_string(),
-                    };
-                    let _ = finalize_main_loop(
-                        &outcome,
+                    // LLM 调用被取消（provider 报 Cancelled，或本回合 token 已取消）：
+                    // 中止本回合、重置 token、回空闲（常驻 loop 不退出）。
+                    match cancel_to_idle(
                         &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        &session_id,
+                        &input_events,
+                        &mut loop_fsm,
+                        &mut messages,
+                        &mut pending_input,
+                        &cancel_slot,
+                        turn_rollback_baseline,
                         &turn_context,
-                        &task_store,
-                        &language,
                     )
-                    .await;
-                    loop_fsm.assert_state(ChatLoopState::Done, "api cancel finalizes loop");
-                    break;
+                    .await
+                    {
+                        IdleResult::Resumed => continue,
+                        IdleResult::Shutdown => {
+                            loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                            loop_fsm.assert_state(
+                                ChatLoopState::Done,
+                                "api cancel idle shuts down on channel close",
+                            );
+                            break;
+                        }
+                    }
                 }
 
                 let error_msg = e.to_string();
@@ -722,4 +884,192 @@ where
             }
         }
     }
+}
+
+/// 空闲等待结果：收到下一条输入（恢复运行）或通道关闭（shutdown）。
+enum IdleResult {
+    Resumed,
+    Shutdown,
+}
+
+/// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
+/// 最后一条消息是 User 角色 → 有待答回合（true）；
+/// 否则（空、末尾是 assistant / tool / system）→ 无待答回合（false）。
+///
+/// 用于 loop 顶部空闲门：若无待答回合且 pending_input 也为空，
+/// 则先 idle-wait 直到收到真实 UserMessage 才开始回合。
+fn has_pending_user_turn(messages: &[Message]) -> bool {
+    matches!(messages.last(), Some(m) if m.role == Role::User)
+}
+
+/// 判断「本回合是否由一条真正的新用户消息开启」（#390 A1 跨回合泄漏修复用）。
+///
+/// 返回 `true` 仅当 `last` 是一条**真正的新用户输入**：
+/// - role = User，且
+/// - 不是工具结果消息（工具结果 role 虽为 User，但 `has_tool_results()` 为真——
+///   这对应回合内的工具轮次再迭代，NEVER 视为新回合），且
+/// - 不是 system-generated 用户消息（stop-hook 阻断注入的反馈，回合仍在继续）。
+///
+/// 用于在新 USER 回合边界（且仅在该边界）重置 `stall_detector` / `turn_start`，
+/// 既消除跨回合泄漏，又保留单个回合内的 stall 检测能力。
+pub(super) fn is_new_user_turn_message(last: Option<&Message>) -> bool {
+    matches!(
+        last,
+        Some(m)
+            if m.role == Role::User
+                && !m.has_tool_results()
+                && m.source() != share::message::MessageSource::SystemGenerated
+    )
+}
+
+/// 回合完成后阻塞等待下一条输入：
+/// - 收到事件 → push 进 `pending` 缓冲，返回 `Resumed`（由调用方经 gate 处理）。
+/// - `None`（通道关闭）→ 返回 `Shutdown`，调用方退出常驻 loop。
+async fn await_idle_input<I: InputEventDrainPort>(
+    input_events: &I,
+    pending: &mut PendingInputBuffer,
+) -> IdleResult {
+    match input_events.recv_next_input().await {
+        Some(event) => {
+            pending.push(event);
+            IdleResult::Resumed
+        }
+        None => IdleResult::Shutdown,
+    }
+}
+
+/// 读取共享槽里「当前回合 token」的 clone。
+///
+/// 锁仅在 clone 期间持有后立即释放（`std::sync::Mutex`，NEVER 跨 `.await`）。
+/// `CancellationToken::clone` 共享内部取消状态：外部 `cancel_impl` 锁同一槽对
+/// 当前 token 调 `cancel()` 后，本回合持有的 clone 同样变为已取消，从而被观测到。
+fn current_cancel_token(slot: &std::sync::Mutex<CancellationToken>) -> CancellationToken {
+    slot.lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+}
+
+/// 将共享槽重置为一个全新的、未取消的 token。
+///
+/// 常驻 loop 处理完一次取消后调用：被取消的旧 token 已永久处于 cancelled 状态，
+/// 若不替换，则下个回合从槽读到的仍是 cancelled token，会立即「胎死腹中」。
+/// 替换为新 token 后，下回合 `current_cancel_token` 读到干净 token；同时 `cancel_impl`
+/// 之后再触发取消会作用在这个新 token 上（针对的是「新一轮」工作，语义正确）。
+fn reset_cancel(slot: &std::sync::Mutex<CancellationToken>) {
+    let fresh = CancellationToken::new();
+    match slot.lock() {
+        Ok(mut guard) => *guard = fresh,
+        Err(poisoned) => *poisoned.into_inner() = fresh,
+    }
+}
+
+/// 进入空闲态：阻塞等待下一条「真正的新用户消息」，期间忽略不产生用户消息的事件。
+///
+/// 返回 `Resumed` 表示已有新用户消息 append 进 `messages`，调用方应恢复跑回合；
+/// 返回 `Shutdown` 表示输入通道关闭，调用方应退出常驻 loop。
+///
+/// 空闲期语义：
+/// - 单独 `ControlCommand`（/save、/model…）/ `Cancel` / `/clear` 都 append 0 条用户
+///   消息 → 保持空闲，继续等下一条，NEVER 在陈旧历史上跑空回合。
+///
+/// `cancel_slot` 参数统一了两种调用场景（DRY，消除两个近乎相同的空闲函数）：
+/// - `Some(slot)`：**回合完成 / cancel 后的空闲**。此时 loop 已经跑过 LLM/tool，
+///   `cancel_impl` 可能已取消「当前槽里的 token」。为避免这枚 stale-cancelled token
+///   污染随后真正恢复的回合，在「收到新用户消息恢复运行前」以及「空闲期观测到
+///   abort/cancel 决策时」都 `reset_cancel`，保证新回合必从干净 token 起步。
+/// - `None`：**loop 顶部首回合前置等待**。此时 loop 尚未开始任何 LLM 调用，
+///   且 loop 体的 `cancel` clone 在本函数返回**之后**才从槽读取，故**不能** `reset_cancel`
+///   ——重置会丢弃外部已经持有引用的 token，破坏首回合的外部 cancel 能力。
+async fn idle_until_resume_or_shutdown<I, S>(
+    input_events: &I,
+    sink: &S,
+    pending: &mut PendingInputBuffer,
+    messages: &mut Vec<Message>,
+    cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
+) -> IdleResult
+where
+    I: InputEventDrainPort,
+    S: ChatEventSink,
+{
+    loop {
+        match await_idle_input(input_events, pending).await {
+            IdleResult::Resumed => {
+                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages).await;
+                if gate.appended_user_messages > 0 {
+                    // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
+                    // 并发兜底：空闲期间外部可能对槽里的 token 直接调过 cancel()
+                    // （`cancel_impl`，无对应输入事件经过本臂），使其变为已取消。
+                    // 若不处理，下个真实回合会读到这枚 stale-cancelled token 而被误取消。
+                    // 因此在恢复运行前无条件重置为干净 token（仅 `Some` 场景；首回合前置
+                    // 等待 `None` 不重置——见函数文档）。
+                    if let Some(slot) = cancel_slot {
+                        reset_cancel(slot);
+                    }
+                    return IdleResult::Resumed;
+                }
+                if matches!(
+                    gate.decision,
+                    GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
+                ) {
+                    // 空闲期取消（经输入通道的 Cancel/`/clear` 事件）：重置 token，
+                    // 防止这枚已取消的 token 污染下一个真实回合（仅 `Some` 场景）。
+                    if let Some(slot) = cancel_slot {
+                        reset_cancel(slot);
+                    }
+                }
+                // 0 append（命令 / 取消 / 空）→ 留在空闲，继续等下一条输入。
+                continue;
+            }
+            IdleResult::Shutdown => return IdleResult::Shutdown,
+        }
+    }
+}
+
+/// 中止当前回合并回到空闲（常驻 actor 的取消语义）。
+///
+/// 取消不再退出 loop：本函数回滚本回合产生的消息、发出 `Cancelled`、**重置取消令牌**，
+/// 然后经空闲机制阻塞等待下一条输入。返回 `Resumed`（收到新用户消息，调用方 `continue`
+/// 跑新回合）或 `Shutdown`（输入通道关闭，调用方 `break` 退出 loop）。
+///
+/// 并发要点：必须在进入空闲*之前* `reset_cancel`，使下个回合从槽读到干净 token。
+/// 重置后到进入空闲之间若发生 stale 的二次取消（外部对新 token 调 cancel），由空闲臂
+/// （`idle_until_resume_or_shutdown` 中的 abort/cancel 决策分支）再次 reset 兜底。
+#[allow(clippy::too_many_arguments)]
+async fn cancel_to_idle<I, S>(
+    sink: &S,
+    input_events: &I,
+    loop_fsm: &mut ChatLoopFsm,
+    messages: &mut Vec<Message>,
+    pending_input: &mut PendingInputBuffer,
+    cancel_slot: &std::sync::Mutex<CancellationToken>,
+    rollback_baseline: usize,
+    turn_context: &RuntimeTurnContext,
+) -> IdleResult
+where
+    I: InputEventDrainPort,
+    S: ChatEventSink,
+{
+    // 回滚到本回合基线（per-turn）：仅截掉当前回合产生的 assistant/tool 输出，
+    // 保留本回合用户消息与所有先前已完成回合的消息，再同步给消费者。
+    messages.truncate(rollback_baseline);
+    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+        .await;
+    sink.send_event(RuntimeStreamEvent::Cancelled {
+        context: turn_context.clone(),
+    })
+    .await;
+    // 重置取消令牌：被取消的旧 token 已永久 cancelled，必须换新 token 供下个回合。
+    reset_cancel(cancel_slot);
+    // FSM：回合中止 → 经 Stopping 进入 Idle（与回合完成后的空闲态共用 Idle 状态）。
+    loop_fsm.transition(ChatLoopTransition::TryStop);
+    loop_fsm.transition(ChatLoopTransition::Idle);
+    loop_fsm.assert_state(ChatLoopState::Idle, "cancel aborts turn then idles");
+    idle_until_resume_or_shutdown(
+        input_events,
+        sink,
+        pending_input,
+        messages,
+        Some(cancel_slot),
+    )
+    .await
 }

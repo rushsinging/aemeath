@@ -81,6 +81,15 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
             }
         })
     }
+
+    fn recv_next_input<'a>(&'a self) -> crate::business::chat::InputEventOptFuture<'a> {
+        Box::pin(async move {
+            match &self.inner {
+                Some(port) => port.recv_next().await,
+                None => None,
+            }
+        })
+    }
 }
 
 fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {

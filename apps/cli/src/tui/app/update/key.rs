@@ -1,17 +1,14 @@
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
-use crate::tui::app::{App, UiEvent};
+use crate::tui::app::App;
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::input::change::{
-    submitted_display_text_from_changes, submitted_text_from_changes,
-};
+use crate::tui::model::input::change::submitted_submission_from_changes;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
-use tokio::sync::mpsc;
 
 /// Ctrl+C 动作。
 /// 提取为纯函数以便单元测试。
@@ -68,7 +65,6 @@ impl App {
     pub(super) fn update_key(
         &mut self,
         key: crossterm::event::KeyEvent,
-        ui_tx: &mpsc::Sender<UiEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
@@ -165,24 +161,34 @@ impl App {
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if !self.model.input.document.is_empty() {
                     let changes = self.model.input.apply(InputIntent::Submit);
-                    let input = submitted_text_from_changes(&changes).unwrap_or_default();
-                    let display_input = submitted_display_text_from_changes(&changes)
-                        .unwrap_or_else(|| input.clone());
-                    let event = sdk::ChatInputEvent::classify_text(input.clone(), Vec::new());
-                    // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
-                    self.input.push_queue(input.clone());
-                    self.enqueue_submission_echo(display_input);
+                    let Some(submission) = submitted_submission_from_changes(&changes) else {
+                        return UpdateResult::none();
+                    };
+                    // 忙时 slash/control command 保持现有 mid-turn 行为：作为
+                    // ControlCommand 事件入通道，永不作为 user message 发给 LLM（A3/#391）。
+                    if submission.text.starts_with('/') {
+                        let event = sdk::ChatInputEvent::ControlCommand {
+                            raw: submission.text.clone(),
+                        };
+                        self.input.push_queue(submission.text.clone());
+                        self.enqueue_submission_echo(submission.display_text);
+                        self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
+                            StatusNotice::warning("message event queued"),
+                        ));
+                        return UpdateResult::one(Effect::SendChatInputEvent { event });
+                    }
+                    // 忙时普通消息：与首条提交统一经事件通道发 UserMessage。
                     self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
                         StatusNotice::warning("message event queued"),
                     ));
-                    return UpdateResult::one(Effect::SendChatInputEvent { event });
+                    return self.submit_user_input_event(submission);
                 }
             }
             (_, KeyCode::Enter) if !self.chat.is_processing => {
                 if completion_visible {
                     self.apply_current_suggestion();
                 } else if !self.model.input.document.is_empty() {
-                    return self.update_enter(ui_tx, spawn_refs);
+                    return self.update_enter();
                 }
             }
             _ if handle_scroll_key(self, key, key.modifiers) => {}

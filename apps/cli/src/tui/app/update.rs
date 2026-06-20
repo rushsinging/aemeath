@@ -15,7 +15,6 @@ pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
-use crate::tui::effect::session::processing::SpawnContext;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
@@ -101,18 +100,6 @@ impl UpdateResult {
             pending_slash: None,
         }
     }
-
-    pub fn spawn_processing(spawn_ctx: SpawnContext) -> Self {
-        Self {
-            effects: Vec::new(),
-            spawn_effect: Some(SpawnAgentChatEffect {
-                chat_id: "legacy-processing".to_string(),
-                prompt: String::new(),
-                context: Some(spawn_ctx),
-            }),
-            pending_slash: None,
-        }
-    }
 }
 
 impl App {
@@ -127,7 +114,7 @@ impl App {
         match msg {
             TuiMsg::Ui(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
             TuiMsg::AgentEvent(ev) => self.update_agent_event(ev, ui_tx, spawn_refs),
-            TuiMsg::Key(key) => self.update_key(key, ui_tx, spawn_refs),
+            TuiMsg::Key(key) => self.update_key(key, spawn_refs),
             TuiMsg::Mouse(mouse) => {
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
                 UpdateResult {
@@ -200,7 +187,7 @@ impl App {
                 );
                 UpdateResult::none()
             }
-            TuiMsg::TerminalKey(key) => self.update_key(key, ui_tx, spawn_refs),
+            TuiMsg::TerminalKey(key) => self.update_key(key, spawn_refs),
             TuiMsg::TerminalMouse(mouse) => {
                 let effects = self.handle_mouse_event(mouse, self.layout.output_area_rect);
                 UpdateResult {

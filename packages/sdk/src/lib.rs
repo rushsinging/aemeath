@@ -47,9 +47,9 @@ pub use session::{
 };
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
-    ClipboardImageView, InputEventFuture, MemoryConfigView, PasteKind, QueueDrainPort, QueueFuture,
-    ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView, ReminderView,
-    SkillView, TaskStatusView, TuiLaunchContext,
+    ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
+    QueueDrainPort, QueueFuture, ReflectionConfigView, ReflectionMemorySuggestionView,
+    ReflectionOutputView, ReminderView, SkillView, TaskStatusView, TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,

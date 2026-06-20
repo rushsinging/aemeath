@@ -11,7 +11,7 @@ pub(crate) struct ChatState {
     pub turn_count: usize,
     pub pending_reflection: Option<sdk::ReflectionOutputView>,
     pub applying_reflection: Option<sdk::ReflectionOutputView>,
-    pub input_event_buffer: Option<std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>>,
+    pub input_event_tx: Option<tokio::sync::mpsc::UnboundedSender<sdk::ChatInputEvent>>,
     pub processing_handle: Option<crate::tui::effect::session::processing::ProcessingHandle>,
     pub is_processing: bool,
     pub is_cancelling: bool,
@@ -45,25 +45,26 @@ impl ChatState {
 
     pub(crate) fn start_input_event_buffer(
         &mut self,
-    ) -> std::sync::Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>> {
-        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        self.input_event_buffer = Some(buffer.clone());
-        buffer
+    ) -> crate::tui::effect::session::processing::TuiInputEventPort {
+        let (tx, port) = crate::tui::effect::session::processing::TuiInputEventPort::channel();
+        self.input_event_tx = Some(tx);
+        port
     }
 
     pub(crate) fn clear_input_event_buffer(&mut self) {
-        self.input_event_buffer = None;
+        self.input_event_tx = None;
     }
 
     pub(crate) fn push_input_event(&mut self, event: sdk::ChatInputEvent) -> usize {
-        let Some(buffer) = &self.input_event_buffer else {
+        let Some(tx) = &self.input_event_tx else {
             return 0;
         };
-        let Ok(mut events) = buffer.lock() else {
+        // send() only fails when receiver dropped; treat as unavailable.
+        if tx.send(event).is_err() {
+            self.input_event_tx = None;
             return 0;
-        };
-        events.push(event);
-        events.len()
+        }
+        1
     }
 
     pub(crate) fn reset_runtime_state(&mut self) {
@@ -128,7 +129,7 @@ impl Default for ChatState {
             turn_count: 0,
             pending_reflection: None,
             applying_reflection: None,
-            input_event_buffer: None,
+            input_event_tx: None,
             processing_handle: None,
             is_processing: false,
             is_cancelling: false,

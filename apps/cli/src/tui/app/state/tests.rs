@@ -196,7 +196,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_enter_starts_model_conversation_for_tool_rendering() {
+    async fn test_submit_then_messages_sync_echoes_user_message() {
+        // #390 A1：常驻模型下，首条提交经事件通道发往 loop（不再 update_enter 内 StartChat）；
+        // 用户回显由 runtime 的 MessagesSync 单一真相驱动。模拟该流程：Enter 提交 →
+        // runtime 追加 user message 后回传 MessagesSync → TUI 回显 `> search bug 76`。
         let mut app = App::new(
             "sess-e2e".to_string(),
             std::path::PathBuf::from("/tmp/aemeath"),
@@ -210,9 +213,38 @@ mod tests {
         let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(8);
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
-        let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
+        // 提交：不再立即 StartChat，仅产生 SendChatInputEvent。
+        let result = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
+        assert!(
+            result.effects.iter().any(|effect| matches!(
+                effect,
+                crate::tui::effect::effect::Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::UserMessage { text, .. }
+                } if text == "search bug 76"
+            )),
+            "首条提交应经事件通道发 UserMessage"
+        );
 
-        assert!(app.model.conversation.active_chat_id.is_some());
+        // 模拟 runtime 回传 MessagesSync（gate 追加 user message 后的单一真相同步）。
+        let _ = app.update(
+            TuiMsg::Ui(UiEvent::MessagesSync(vec![sdk::ChatMessage::user_text(
+                "search bug 76",
+            )])),
+            &ui_tx,
+            &spawn_refs,
+        );
+
+        let has_user_echo = app.model.conversation.blocks.iter().any(|block| {
+            matches!(
+                block,
+                crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. }
+                    if text == "search bug 76"
+            )
+        });
+        assert!(
+            has_user_echo,
+            "MessagesSync 应回显用户消息为 UserMessage 块"
+        );
     }
 
     #[tokio::test]
@@ -236,6 +268,15 @@ mod tests {
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
         let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
+        // #390 A1：用户回显改由 runtime MessagesSync 驱动（提交不再立即 StartChat）。
+        // 模拟 runtime 追加 user message 后的 MessagesSync 同步，使 `> search bug 76` 回显。
+        let _ = app.update(
+            TuiMsg::Ui(UiEvent::MessagesSync(vec![sdk::ChatMessage::user_text(
+                "search bug 76",
+            )])),
+            &ui_tx,
+            &spawn_refs,
+        );
         for event in grep_after_thinking_events() {
             let _ = app.update(TuiMsg::Ui(event), &ui_tx, &spawn_refs);
         }

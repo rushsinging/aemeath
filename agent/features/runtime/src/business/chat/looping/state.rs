@@ -8,6 +8,9 @@ pub enum ChatLoopState {
     Compacting,
     Stopping,
     StopHookBlocked,
+    /// 回合完成、stop hook 放行后的空闲态：常驻 loop 阻塞等待下一条输入。
+    /// 收到输入经 `ResumeRunning` 回到 `Running`；通道关闭经 `StopSucceeded` 到 `Done`。
+    Idle,
     Done,
 }
 
@@ -20,6 +23,8 @@ pub enum ChatLoopTransition {
     TryStop,
     StopBlocked,
     StopSucceeded,
+    /// 回合完成后进入空闲等待（常驻 actor 核心）。
+    Idle,
     ResumeRunning,
     AbortCurrentLoop,
     CancelCurrentLoop,
@@ -57,6 +62,9 @@ impl ChatLoopState {
             }
             (Self::Stopping, ChatLoopTransition::StopBlocked) => Some(Self::StopHookBlocked),
             (Self::Stopping, ChatLoopTransition::StopSucceeded) => Some(Self::Done),
+            // 回合完成后进入空闲；空闲态收到关闭信号经 StopSucceeded 终结到 Done。
+            (Self::Stopping, ChatLoopTransition::Idle) => Some(Self::Idle),
+            (Self::Idle, ChatLoopTransition::StopSucceeded) => Some(Self::Done),
             (_, ChatLoopTransition::AbortCurrentLoop | ChatLoopTransition::CancelCurrentLoop) => {
                 Some(Self::Done)
             }
@@ -183,6 +191,55 @@ mod tests {
         assert_eq!(
             fsm.transition(ChatLoopTransition::AwaitTool),
             ChatLoopState::Done
+        );
+        assert_eq!(fsm.invalid_transition_count(), 1);
+    }
+
+    #[test]
+    fn test_chat_loop_state_idle_resumes_running_on_input() {
+        // 回合完成（Stopping）→ Idle，收到输入 → ResumeRunning 回到 Running（常驻 loop）。
+        let mut fsm = ChatLoopFsm::default();
+
+        assert_eq!(
+            fsm.transition(ChatLoopTransition::TryStop),
+            ChatLoopState::Stopping
+        );
+        assert_eq!(
+            fsm.transition(ChatLoopTransition::Idle),
+            ChatLoopState::Idle
+        );
+        assert_eq!(
+            fsm.transition(ChatLoopTransition::ResumeRunning),
+            ChatLoopState::Running
+        );
+        assert_eq!(fsm.invalid_transition_count(), 0);
+    }
+
+    #[test]
+    fn test_chat_loop_state_idle_shuts_down_to_done() {
+        // 空闲态收到通道关闭 → StopSucceeded 终结到 Done。
+        let mut fsm = ChatLoopFsm::default();
+
+        fsm.transition(ChatLoopTransition::TryStop);
+        assert_eq!(
+            fsm.transition(ChatLoopTransition::Idle),
+            ChatLoopState::Idle
+        );
+        assert_eq!(
+            fsm.transition(ChatLoopTransition::StopSucceeded),
+            ChatLoopState::Done
+        );
+        assert_eq!(fsm.invalid_transition_count(), 0);
+    }
+
+    #[test]
+    fn test_chat_loop_state_idle_only_reachable_from_stopping() {
+        // Idle 转换只在 Stopping 态合法；从 Running 直接 Idle 视为非法转换。
+        let mut fsm = ChatLoopFsm::default();
+
+        assert_eq!(
+            fsm.transition(ChatLoopTransition::Idle),
+            ChatLoopState::Running
         );
         assert_eq!(fsm.invalid_transition_count(), 1);
     }
