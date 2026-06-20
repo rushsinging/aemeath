@@ -17,6 +17,7 @@ fn test_ctx(cwd: PathBuf) -> ToolExecutionContext {
         session_reminders: Some(Arc::new(Mutex::new(share::tool::SessionReminders::new()))),
         memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
+        lang: "en".to_string(),
         allow_all: false,
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,

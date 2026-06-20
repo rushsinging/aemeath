@@ -70,6 +70,7 @@ mod tests {
             session_reminders: None,
             memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
+            lang: "en".to_string(),
             allow_all: false,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,

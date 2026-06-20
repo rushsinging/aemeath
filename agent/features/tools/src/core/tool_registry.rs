@@ -63,13 +63,19 @@ impl ToolRegistry {
     }
 
     pub fn schemas(&self) -> Vec<Value> {
+        self.schemas_for(share::i18n::DEFAULT_LANG)
+    }
+
+    /// 按 lang 生成 tool schema（注入 LLM 用）。description 走 `description_for(lang)`，
+    /// 未覆盖的工具自动降级到默认语言英文。
+    pub fn schemas_for(&self, lang: &str) -> Vec<Value> {
         self.tools
             .read()
             .values()
             .map(|tool| {
                 serde_json::json!({
                     "name": tool.name(),
-                    "description": tool.description(),
+                    "description": tool.description_for(lang),
                     "input_schema": tool.input_schema(),
                     "data_schema": tool.data_schema(),
                 })

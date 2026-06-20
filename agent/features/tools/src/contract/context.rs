@@ -21,6 +21,9 @@ pub struct ToolExecutionContext {
     pub memory_config: share::config::MemoryConfig,
     /// Whether we're in plan mode (simulated tool execution)
     pub plan_mode: Option<bool>,
+    /// Current language code (`"en"` / `"zh"`), used to select i18n text sent to the LLM.
+    /// Defaults to [`share::i18n::DEFAULT_LANG`] (`"en"`) when unknown.
+    pub lang: String,
     /// Whether all tools are auto-approved (skip injection checks)
     pub allow_all: bool,
     /// Maximum number of concurrent tool executions (from tools.maxConcurrency)

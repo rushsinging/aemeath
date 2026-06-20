@@ -27,6 +27,7 @@ pub fn version() -> &'static str {
 pub mod adapter;
 pub mod config;
 pub mod error;
+pub mod i18n;
 pub mod memory;
 pub mod memory_ops;
 pub mod message;
