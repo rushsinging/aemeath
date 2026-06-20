@@ -28,7 +28,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
         image_count: 0,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let orphan = vm
         .roots
         .iter()
@@ -91,7 +91,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         is_error: false,
         image_count: 0,
     });
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let diagnostics = vm
         .roots
         .iter()
@@ -127,7 +127,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         image_count: 0,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let orphan = vm
         .roots
         .iter()
@@ -224,7 +224,7 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
         image_count: 0,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let expected_id = ToolCallId::new("call_orphaned");
     let block = vm
         .roots

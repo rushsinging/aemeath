@@ -254,9 +254,17 @@ impl App {
 
     pub(crate) fn refresh_output_document_from_model(&mut self) {
         let before_lines = self.output_area.document().total_lines();
+        let working_root = self
+            .model
+            .runtime
+            .workspace
+            .working_root
+            .as_deref()
+            .map(std::path::Path::new);
         let view_model = OutputViewAssembler::assemble_from_conversation(
             &self.model.conversation,
             self.view_state.output.version,
+            working_root,
         );
         let root_count = view_model.roots.len();
         let width = self.output_document_width();

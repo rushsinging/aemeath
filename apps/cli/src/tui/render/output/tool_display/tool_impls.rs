@@ -2,7 +2,7 @@ use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::common::{file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
+use super::common::{display_path, file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
@@ -10,6 +10,7 @@ use super::{
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use serde::de::DeserializeOwned;
+use std::path::Path;
 
 /// 从 `payload.content` 反序列化到 typed struct。
 ///
@@ -29,7 +30,7 @@ impl ToolDisplay for BashDisplay {
     fn name(&self) -> &str {
         "Bash"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         let cmd = str_arg(input, "command", "");
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
         if cmd.is_empty() {
@@ -66,6 +67,7 @@ impl ToolDisplay for BashDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
         let result: Option<sdk::tool_result::BashResult> = typed_data(result_payload);
@@ -155,18 +157,24 @@ impl ToolDisplay for ReadDisplay {
     fn name(&self) -> &str {
         "Read"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, working_root: Option<&Path>) -> String {
         let path = file_path(input);
-        let display_path = truncate_path(path, 60);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 60);
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1; // 转为 1-based
         let end = offset + limit;
         format!("{} {display_path} {start}:{end}", self.display_name())
     }
-    fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
+    fn format_header_line(
+        &self,
+        input: &serde_json::Value,
+        working_root: Option<&Path>,
+    ) -> Line<'static> {
         let path = file_path(input);
-        let display_path = truncate_path(path, 60);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 60);
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
@@ -187,9 +195,11 @@ impl ToolDisplay for ReadDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        working_root: Option<&Path>,
     ) -> Line<'static> {
         let path = file_path(input);
-        let display_path = truncate_path(path, 60);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 60);
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
         let start = offset + 1;
@@ -253,9 +263,10 @@ impl ToolDisplay for WriteDisplay {
     fn name(&self) -> &str {
         "Write"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, working_root: Option<&Path>) -> String {
         let path = file_path(input);
-        let display_path = truncate_path(path, 60);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 60);
         // 从 input 的 content 计算字节数
         let bytes = input
             .get("content")
@@ -270,9 +281,11 @@ impl ToolDisplay for WriteDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        working_root: Option<&Path>,
     ) -> Line<'static> {
         let path = file_path(input);
-        let display_path = truncate_path(path, 60);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 60);
 
         // typed 优先：WriteResult.bytes_written
         let actual_bytes = typed_data::<sdk::tool_result::WriteResult>(result_payload)
@@ -331,9 +344,10 @@ impl ToolDisplay for EditDisplay {
     fn name(&self) -> &str {
         "Edit"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, working_root: Option<&Path>) -> String {
         let path = file_path(input);
-        let display_path = truncate_path(path, 60);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 60);
         // 从 input 的 old_string/new_string 计算变更统计
         let old_len = input
             .get("old_string")
@@ -354,12 +368,14 @@ impl ToolDisplay for EditDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        working_root: Option<&Path>,
     ) -> Line<'static> {
         let path = file_path(input);
+        let rel = display_path(path, working_root);
         let suffix = typed_data::<sdk::tool_result::EditResult>(result_payload)
             .map(|r| format!(" (Replaced {})", r.replacements_made))
             .unwrap_or_default();
-        build_header_line(self.display_name(), path, &suffix)
+        build_header_line(self.display_name(), &rel, &suffix)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // old/new 内容由 result 子块的 diff 渲染展示
@@ -389,7 +405,7 @@ impl ToolDisplay for GlobDisplay {
     fn name(&self) -> &str {
         "Glob"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         let pattern = str_arg(input, "pattern", "");
         if pattern.is_empty() {
             self.display_name().to_string()
@@ -402,6 +418,7 @@ impl ToolDisplay for GlobDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let pattern = str_arg(input, "pattern", "");
         let n = typed_data::<sdk::tool_result::GlobResult>(result_payload).map(|r| r.count);
@@ -442,10 +459,11 @@ impl ToolDisplay for GrepDisplay {
     fn name(&self) -> &str {
         "Grep"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, working_root: Option<&Path>) -> String {
         let pattern = str_arg(input, "pattern", "");
         let path = str_arg(input, "path", ".");
-        let display_path = truncate_path(path, 40);
+        let rel = display_path(path, working_root);
+        let display_path = truncate_path(&rel, 40);
         if pattern.is_empty() {
             format!("{} in {display_path}", self.display_name())
         } else {
@@ -456,13 +474,15 @@ impl ToolDisplay for GrepDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        working_root: Option<&Path>,
     ) -> Line<'static> {
         let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
         let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let rel = display_path(path, working_root);
         let arg = if pattern.is_empty() {
-            format!("in {path}")
+            format!("in {rel}")
         } else {
-            format!("/{pattern}/, path={path}")
+            format!("/{pattern}/, path={rel}")
         };
         let n = typed_data::<sdk::tool_result::GrepResult>(result_payload).map(|r| r.total_matches);
         let suffix = n.map(|c| format!(" ({c} matches)")).unwrap_or_default();
@@ -495,7 +515,7 @@ impl ToolDisplay for AgentDisplay {
     fn name(&self) -> &str {
         "Agent"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         let desc = str_arg(input, "description", "sub-task");
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
@@ -533,6 +553,7 @@ impl ToolDisplay for AgentDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let description = input
             .get("description")
@@ -557,7 +578,7 @@ impl ToolDisplay for EnterWorktreeDisplay {
     fn name(&self) -> &str {
         "EnterWorktree"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         let target = input
             .get("branch")
             .and_then(|branch| branch.as_str())
@@ -572,6 +593,7 @@ impl ToolDisplay for EnterWorktreeDisplay {
         &self,
         _input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let result: Option<sdk::tool_result::EnterWorktreeResult> = typed_data(result_payload);
         let branch = result
@@ -608,13 +630,14 @@ impl ToolDisplay for ExitWorktreeDisplay {
     fn name(&self) -> &str {
         "ExitWorktree"
     }
-    fn format_header(&self, _input: &serde_json::Value) -> String {
+    fn format_header(&self, _input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         self.display_name().to_string()
     }
     fn format_header_line_with_result(
         &self,
         _input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let path_suffix = typed_data::<sdk::tool_result::ExitWorktreeResult>(result_payload)
             .map(|r| format!(" (back to {})", r.working_root.display()))
@@ -648,7 +671,7 @@ impl ToolDisplay for WebFetchDisplay {
     fn name(&self) -> &str {
         "WebFetch"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         let url = str_arg(input, "url", "");
         if url.is_empty() {
             self.display_name().to_string()
@@ -661,6 +684,7 @@ impl ToolDisplay for WebFetchDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("");
         let result: Option<sdk::tool_result::WebFetchResult> = typed_data(result_payload);
@@ -704,7 +728,7 @@ impl ToolDisplay for AskUserQuestionDisplay {
     fn name(&self) -> &str {
         "AskUserQuestion"
     }
-    fn format_header(&self, input: &serde_json::Value) -> String {
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
         let question = str_arg(input, "question", "");
         if question.is_empty() {
             self.display_name().to_string()
@@ -729,6 +753,7 @@ impl ToolDisplay for AskUserQuestionDisplay {
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
+        _working_root: Option<&Path>,
     ) -> Line<'static> {
         let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
         let n = typed_data::<sdk::tool_result::AskUserQuestionResult>(result_payload)

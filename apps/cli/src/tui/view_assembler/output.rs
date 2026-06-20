@@ -17,6 +17,7 @@ impl OutputViewAssembler {
     pub fn assemble_from_conversation(
         conversation: &ConversationModel,
         version: u64,
+        working_root: Option<&std::path::Path>,
     ) -> OutputViewModel {
         let mut roots: Vec<BlockNode> = Vec::new();
         if conversation.timeline.items().is_empty() {
@@ -61,6 +62,7 @@ impl OutputViewAssembler {
                         &reference.context.chat_id,
                         &reference.context.turn_id,
                         &reference.tool_call_id,
+                        working_root,
                     ) {
                         let mut parent =
                             leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));
@@ -341,6 +343,7 @@ fn find_tool_view(
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
+    working_root: Option<&std::path::Path>,
 ) -> Option<ToolCallBlockView> {
     let call = find_tool_call(conversation, chat_id, turn_id, tool_id)?;
     let (icon, semantic_status, style) = map_tool_status(call.status);
@@ -404,6 +407,7 @@ fn find_tool_view(
         // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
         result_summary,
         result_payload,
+        working_root: working_root.map(|p| p.to_path_buf()),
         collapsible: true,
         collapsed: false,
     })

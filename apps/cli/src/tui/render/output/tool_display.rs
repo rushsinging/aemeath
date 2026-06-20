@@ -9,6 +9,7 @@ use common::truncate_json;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::LazyLock;
 
 // ── ToolRenderPolicy 系统 ──────────────────────────────────────────
@@ -82,14 +83,19 @@ pub trait ToolDisplay: Send + Sync {
 
     /// Format the header line as plain string.
     /// `input` 是解析后的 JSON。
-    fn format_header(&self, input: &serde_json::Value) -> String;
+    /// `working_root` 用于路径相对化（issue #342），工具可选择消费或忽略。
+    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String;
 
     /// Format the header line as styled `Line`。默认实现将 `format_header` 的输出按
     /// `display_name` 前缀拆分：tool name 用 `ACCENT_BRIGHT`（Mauve）着色突出，
     /// 其余文本保持 raw（由调用方的 line base style 统一赋色）。
     /// 需要对 header 不同部分施加不同颜色的工具可覆写此方法。
-    fn format_header_line(&self, input: &serde_json::Value) -> Line<'static> {
-        let text = self.format_header(input);
+    fn format_header_line(
+        &self,
+        input: &serde_json::Value,
+        working_root: Option<&Path>,
+    ) -> Line<'static> {
+        let text = self.format_header(input, working_root);
         let name = self.display_name().to_string();
         // 用 display_name 作为 tool name 的锚点，不依赖 strip_prefix 匹配
         if let Some(rest) = text.strip_prefix(&name) {
@@ -115,8 +121,9 @@ pub trait ToolDisplay: Send + Sync {
         &self,
         input: &serde_json::Value,
         _result_payload: Option<&ToolResultPayload>,
+        working_root: Option<&Path>,
     ) -> Line<'static> {
-        self.format_header_line(input)
+        self.format_header_line(input, working_root)
     }
 
     /// Format detail lines shown below the header.
@@ -178,12 +185,13 @@ pub fn format_tool_call(
     name: &str,
     raw_json: &str,
     result_payload: Option<&ToolResultPayload>,
+    working_root: Option<&Path>,
 ) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header_line_with_result(&parsed, result_payload);
+        let header = display.format_header_line_with_result(&parsed, result_payload, working_root);
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -240,6 +248,7 @@ mod tests {
             "TaskListCreate",
             r#"{"subject":"修复 bug 84","summary":"修复渲染"}"#,
             None,
+            None,
         );
         let text = line_to_string(&header);
         assert!(
@@ -258,6 +267,7 @@ mod tests {
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
             None,
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
@@ -273,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_create_compact_no_description() {
-        let (header, details) = format_tool_call("TaskCreate", r#"{"subject":"分析"}"#, None);
+        let (header, details) = format_tool_call("TaskCreate", r#"{"subject":"分析"}"#, None, None);
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
         assert!(
@@ -289,6 +299,7 @@ mod tests {
             "TaskUpdate",
             r#"{"taskId":"42","status":"completed"}"#,
             None,
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("42"), "header 应包含 taskId: {text}");
@@ -302,7 +313,7 @@ mod tests {
     #[test]
     fn test_format_tool_call_uses_display_name_in_header() {
         // Bash → Run
-        let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, None);
+        let (header, _) = format_tool_call("Bash", r#"{"command":"ls"}"#, None, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Run "),
@@ -310,7 +321,7 @@ mod tests {
         );
 
         // Grep → Search
-        let (header, _) = format_tool_call("Grep", r#"{"pattern":"foo"}"#, None);
+        let (header, _) = format_tool_call("Grep", r#"{"pattern":"foo"}"#, None, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Search "),
@@ -318,7 +329,7 @@ mod tests {
         );
 
         // Glob → Find
-        let (header, _) = format_tool_call("Glob", r#"{"pattern":"*.rs"}"#, None);
+        let (header, _) = format_tool_call("Glob", r#"{"pattern":"*.rs"}"#, None, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Find "),
@@ -328,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_unknown_tool_uses_fallback() {
-        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#, None);
+        let (header, details) = format_tool_call("UnknownTool", r#"{"key":"value"}"#, None, None);
         let text = line_to_string(&header);
         assert_eq!(text, "● UnknownTool");
         assert!(!details.is_empty(), "fallback 应截断 JSON");
@@ -336,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_invalid_json_uses_fallback() {
-        let (header, _details) = format_tool_call("TaskListCreate", "not json", None);
+        let (header, _details) = format_tool_call("TaskListCreate", "not json", None, None);
         // 不应 panic，应 fallback。display name 为 "New Task List"。
         let text = line_to_string(&header);
         assert!(text.contains("New Task List"));
@@ -377,7 +388,7 @@ mod tests {
         // 回归 #218：含中文的超长 Bash 命令按字节切片会落在多字节字符内部触发 panic。
         let cmd = "gh pr create --title 'fix(runtime): 使用人类可读摘要替代 JSON 作为 tool call summary' --body '## 问题'";
         let raw = serde_json::json!({ "command": cmd }).to_string();
-        let (header, _details) = format_tool_call("Bash", &raw, None);
+        let (header, _details) = format_tool_call("Bash", &raw, None, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Run "),
@@ -394,7 +405,7 @@ mod tests {
         // 回归 #218：含中文的超长路径经 truncate_path 尾部截断不应 panic。
         let path = format!("/项目/{}/数据/报告为准的文件名.rs", "子目录".repeat(20));
         let raw = serde_json::json!({ "file_path": path }).to_string();
-        let (header, _details) = format_tool_call("Read", &raw, None);
+        let (header, _details) = format_tool_call("Read", &raw, None, None);
         let text = line_to_string(&header);
         assert!(
             text.starts_with("Read "),
@@ -409,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_bash_empty_command_no_question_mark() {
-        let (header, _details) = format_tool_call("Bash", "{}", None);
+        let (header, _details) = format_tool_call("Bash", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Run",
@@ -420,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_glob_empty_pattern_no_question_mark() {
-        let (header, _details) = format_tool_call("Glob", "{}", None);
+        let (header, _details) = format_tool_call("Glob", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Find",
@@ -431,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_grep_empty_pattern_no_question_mark() {
-        let (header, _details) = format_tool_call("Grep", r#"{"path":"."}"#, None);
+        let (header, _details) = format_tool_call("Grep", r#"{"path":"."}"#, None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Search in .",
@@ -442,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_create_empty_subject_no_question_mark() {
-        let (header, _details) = format_tool_call("TaskCreate", "{}", None);
+        let (header, _details) = format_tool_call("TaskCreate", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Task",
@@ -458,6 +469,7 @@ mod tests {
             "TaskCreate",
             r#"{"subject":"分析","description":"查看结构"}"#,
             None,
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("分析"), "header: {text}");
@@ -466,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_update_empty_id_no_question_mark() {
-        let (header, _details) = format_tool_call("TaskUpdate", "{}", None);
+        let (header, _details) = format_tool_call("TaskUpdate", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Task",
@@ -478,7 +490,7 @@ mod tests {
     #[test]
     fn test_format_tool_call_task_update_with_id_no_status() {
         // 回归：id 给定但 status 缺失时，header 应只显示 id。
-        let (header, _details) = format_tool_call("TaskUpdate", r#"{"taskId":"42"}"#, None);
+        let (header, _details) = format_tool_call("TaskUpdate", r#"{"taskId":"42"}"#, None, None);
         let text = line_to_string(&header);
         assert!(text.contains("42"));
         assert!(!text.contains('?'));
@@ -489,6 +501,7 @@ mod tests {
         let (header, _) = format_tool_call(
             "TaskUpdate",
             r#"{"taskId":"7","addBlockedBy":["4","5","6"]}"#,
+            None,
             None,
         );
         let text = line_to_string(&header);
@@ -505,6 +518,7 @@ mod tests {
             "TaskUpdate",
             r#"{"taskId":"2","status":"InProgress","addBlockedBy":["1"]}"#,
             None,
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("→ InProgress"), "应包含 status: {text}");
@@ -513,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_get_empty_id_no_question_mark() {
-        let (header, _details) = format_tool_call("TaskGet", "{}", None);
+        let (header, _details) = format_tool_call("TaskGet", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Task",
@@ -524,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_stop_empty_id_no_question_mark() {
-        let (header, _details) = format_tool_call("TaskStop", "{}", None);
+        let (header, _details) = format_tool_call("TaskStop", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Stop Task",
@@ -535,7 +549,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
-        let (header, _details) = format_tool_call("TaskListCreate", "{}", None);
+        let (header, _details) = format_tool_call("TaskListCreate", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "New Task List",
@@ -546,7 +560,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_skill_empty_no_question_mark() {
-        let (header, _details) = format_tool_call("Skill", "{}", None);
+        let (header, _details) = format_tool_call("Skill", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(text, "Skill");
         assert!(!text.contains('?'));
@@ -554,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_lsp_both_empty_no_question_mark() {
-        let (header, _details) = format_tool_call("LSP", "{}", None);
+        let (header, _details) = format_tool_call("LSP", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(text, "LSP");
         assert!(!text.contains('?'));
@@ -562,7 +576,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_lsp_only_operation_no_path() {
-        let (header, _details) = format_tool_call("LSP", r#"{"operation":"hover"}"#, None);
+        let (header, _details) = format_tool_call("LSP", r#"{"operation":"hover"}"#, None, None);
         let text = line_to_string(&header);
         assert_eq!(text, "LSP::hover");
         assert!(!text.contains('?'));
@@ -570,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_lsp_only_path_no_operation() {
-        let (header, _details) = format_tool_call("LSP", r#"{"filePath":"/tmp/x.rs"}"#, None);
+        let (header, _details) = format_tool_call("LSP", r#"{"filePath":"/tmp/x.rs"}"#, None, None);
         let text = line_to_string(&header);
         assert_eq!(text, "LSP /tmp/x.rs");
         assert!(!text.contains('?'));
@@ -582,6 +596,7 @@ mod tests {
             "LSP",
             r#"{"operation":"hover","filePath":"/tmp/x.rs"}"#,
             None,
+            None,
         );
         let text = line_to_string(&header);
         assert_eq!(text, "LSP::hover /tmp/x.rs");
@@ -590,7 +605,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_web_fetch_empty_url_no_question_mark() {
-        let (header, _details) = format_tool_call("WebFetch", "{}", None);
+        let (header, _details) = format_tool_call("WebFetch", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(text, "WebFetch");
         assert!(!text.contains('?'));
@@ -598,7 +613,7 @@ mod tests {
 
     #[test]
     fn test_format_tool_call_ask_user_question_empty_no_question_mark() {
-        let (header, _details) = format_tool_call("AskUserQuestion", "{}", None);
+        let (header, _details) = format_tool_call("AskUserQuestion", "{}", None, None);
         let text = line_to_string(&header);
         assert_eq!(
             text, "Ask",
@@ -628,6 +643,7 @@ mod tests {
             "Read",
             r#"{"file_path":"/src/lib.rs","offset":0,"limit":2000}"#,
             Some(&payload),
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("Read "), "header: {text}");
@@ -655,6 +671,7 @@ mod tests {
             "Write",
             r#"{"file_path":"/tmp/x.rs","content":"abc"}"#,
             Some(&payload),
+            None,
         );
         let text = line_to_string(&header);
         assert!(text.contains("Write "), "header: {text}");
@@ -679,11 +696,95 @@ mod tests {
             "Read",
             r#"{"file_path":"/src/legacy.rs","offset":0,"limit":2000}"#,
             Some(&payload),
+            None,
         );
         let text = line_to_string(&header);
         assert!(
             text.contains("(200 lines)"),
             "typed 缺失时 regex fallback 应生效: {text}"
+        );
+    }
+
+    // ── Issue #342：working_root 路径相对化端到端 ──────────────────
+
+    #[test]
+    fn test_format_tool_call_read_path_relativized_with_working_root() {
+        let root = std::path::Path::new("/home/user/project");
+        let raw = serde_json::json!({
+            "file_path": "/home/user/project/src/main.rs",
+            "offset": 0,
+            "limit": 100
+        })
+        .to_string();
+        let (header, _) = format_tool_call("Read", &raw, None, Some(root));
+        let text = line_to_string(&header);
+        assert!(
+            text.contains("src/main.rs"),
+            "header 应显示相对路径 'src/main.rs'，实际: {text}"
+        );
+        assert!(
+            !text.contains("/home/user/project/src/main.rs"),
+            "header 不应包含绝对路径: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_read_path_no_working_root_shows_raw() {
+        // working_root 为 None 时应显示原始路径（不相对化）
+        let raw = serde_json::json!({
+            "file_path": "/home/user/project/src/main.rs",
+            "offset": 0,
+            "limit": 100
+        })
+        .to_string();
+        let (header, _) = format_tool_call("Read", &raw, None, None);
+        let text = line_to_string(&header);
+        assert!(
+            text.contains("/home/user/project/src/main.rs"),
+            "working_root=None 时应显示原始绝对路径: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_write_path_relativized() {
+        let root = std::path::Path::new("/work/repo");
+        let raw = serde_json::json!({"file_path": "/work/repo/lib/mod.rs", "content": "hello"})
+            .to_string();
+        let (header, _) = format_tool_call("Write", &raw, None, Some(root));
+        let text = line_to_string(&header);
+        assert!(
+            text.contains("lib/mod.rs"),
+            "Write header 应显示相对路径: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_edit_path_relativized() {
+        let root = std::path::Path::new("/work/repo");
+        let raw = serde_json::json!({
+            "file_path": "/work/repo/src/lib.rs",
+            "old_string": "a",
+            "new_string": "b"
+        })
+        .to_string();
+        let (header, _) = format_tool_call("Edit", &raw, None, Some(root));
+        let text = line_to_string(&header);
+        assert!(
+            text.contains("src/lib.rs"),
+            "Edit header 应显示相对路径: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_grep_path_relativized() {
+        let root = std::path::Path::new("/work/repo");
+        let raw = serde_json::json!({"pattern": "foo", "path": "/work/repo/src"}).to_string();
+        let (header, _) = format_tool_call("Grep", &raw, None, Some(root));
+        let text = line_to_string(&header);
+        assert!(text.contains("src"), "Grep header 应显示相对路径: {text}");
+        assert!(
+            !text.contains("/work/repo/src"),
+            "Grep header 不应包含绝对路径: {text}"
         );
     }
 }

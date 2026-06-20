@@ -19,7 +19,7 @@ fn test_output_assembler_renders_task_list_create_tool_call() {
         "Task list #0 created",
     );
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let diagnostic_count = vm
         .roots
         .iter()
@@ -56,7 +56,7 @@ fn test_output_assembler_renders_task_create_tool_call() {
         "Task #0 created",
     );
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let tool = vm
         .roots
         .iter()
@@ -85,7 +85,7 @@ fn test_output_assembler_renders_task_update_tool_call() {
         "Task #1 updated",
     );
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let tool = vm
         .roots
         .iter()

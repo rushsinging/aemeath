@@ -115,6 +115,10 @@ pub struct ToolCallBlockView {
     /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），
     /// 不依赖手工解析 message 字符串。
     pub result_payload: Option<ToolResultPayload>,
+    /// 当前 worktree 根（用于 tool header 路径相对化，issue #342）。
+    /// 由 view_assembler 从 `WorkspaceService::current_root()` 填充。
+    /// 纳入 `Hash` 派生 → worktree 切换时 `cache_version()` 自动变化，block 缓存自动失效。
+    pub working_root: Option<std::path::PathBuf>,
     pub collapsible: bool,
     pub collapsed: bool,
 }
