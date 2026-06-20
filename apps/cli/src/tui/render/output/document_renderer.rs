@@ -7,7 +7,7 @@ use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 use ratatui::style::Style;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// gutted 缓存的 key：唯一决定 gutted block 内容（含 gutter）的所有参数。
 /// 静态 block 的 `marker_frame` 为 `None`；运行中 ToolCall 每次闪烁周期推进时失效。
@@ -79,10 +79,11 @@ impl OutputDocumentRenderer {
             groups.push(group);
         }
         let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
-        let live_ids = collect_rendered_block_ids(&blocks);
-        self.cache.retain(&live_ids);
+        // O(n) 构建 HashSet，使后续两处 retain 各降为 O(n) 而非 O(n²)。
+        let live_set: HashSet<&str> = blocks.iter().map(|b| b.block_id.as_str()).collect();
+        self.cache.retain(&live_set);
         // gutted 缓存同步清理：移除已不在渲染树中的条目，防止内存泄漏。
-        self.gutted.retain(|id, _| live_ids.iter().any(|l| l == id));
+        self.gutted.retain(|id, _| live_set.contains(id.as_str()));
         RenderedDocument { blocks }
     }
 
@@ -190,10 +191,6 @@ impl OutputDocumentRenderer {
     pub fn gutted_render_count(&self) -> usize {
         self.gutted_render_count.get()
     }
-}
-
-fn collect_rendered_block_ids(blocks: &[RenderedBlock]) -> Vec<String> {
-    blocks.iter().map(|block| block.block_id.clone()).collect()
 }
 
 fn wrap_user_message_card_lines(lines: &mut Vec<RenderedLine>) {
