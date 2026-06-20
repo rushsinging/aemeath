@@ -89,16 +89,6 @@ impl<T: Serialize + Send + 'static> TypedToolResult<T> {
         }
     }
 
-    /// 从字符串构造成功结果（data 为 None）。
-    pub fn success_msg(output: impl Into<String>) -> Self {
-        Self {
-            output: output.into(),
-            data: None,
-            is_error: false,
-            images: vec![],
-        }
-    }
-
     /// 添加图片。
     pub fn with_image(mut self, base64: String, media_type: String) -> Self {
         self.images.push(ImageData { base64, media_type });

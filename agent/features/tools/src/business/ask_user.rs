@@ -100,30 +100,22 @@ impl TypedTool for AskUserQuestionTool {
         // 返回特殊格式的结果，让 CLI 层知道需要用户输入
         // 格式: __ASK_USER__: question
         let response = if !options.is_empty() && !allow_free_input {
-            TypedToolResult::success_msg(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("__ASK_USER_SELECT__: {}", question),
-                    "data": serde_json::to_value(AskUserQuestionResult {
-                        question_type: "select".to_string(),
-                        options: options.iter().map(|o| Value::String(o.clone())).collect(),
-                        allow_free_input: false,
-                    }).unwrap()
-                })
-                .to_string(),
+            TypedToolResult::success(
+                format!("__ASK_USER_SELECT__: {}", question),
+                AskUserQuestionResult {
+                    question_type: "select".to_string(),
+                    options: options.iter().map(|o| Value::String(o.clone())).collect(),
+                    allow_free_input: false,
+                },
             )
         } else {
-            TypedToolResult::success_msg(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("__ASK_USER__: {}", question),
-                    "data": serde_json::to_value(AskUserQuestionResult {
-                        question_type: "free_input".to_string(),
-                        options: options.iter().map(|o| Value::String(o.clone())).collect(),
-                        allow_free_input: true,
-                    }).unwrap()
-                })
-                .to_string(),
+            TypedToolResult::success(
+                format!("__ASK_USER__: {}", question),
+                AskUserQuestionResult {
+                    question_type: "free_input".to_string(),
+                    options: options.iter().map(|o| Value::String(o.clone())).collect(),
+                    allow_free_input: true,
+                },
             )
         };
 

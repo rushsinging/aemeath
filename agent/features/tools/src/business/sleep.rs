@@ -65,13 +65,9 @@ impl TypedTool for SleepTool {
             );
         }
 
-        TypedToolResult::success_msg(
-            serde_json::json!({
-                "status": "success",
-                "message": format!("Slept for {}ms", duration_ms),
-                "data": serde_json::to_value(SleepResult { duration_ms }).unwrap()
-            })
-            .to_string(),
+        TypedToolResult::success(
+            format!("Slept for {}ms", duration_ms),
+            SleepResult { duration_ms },
         )
     }
 }
