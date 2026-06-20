@@ -261,6 +261,8 @@ impl TypedTool for BashTool {
             Ok(status) => {
                 let stdout = String::from_utf8_lossy(&stdout);
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
+                // `cd` 改变了 path_base 时通知 workspace 并记录新值，回传给 LLM（#414）。
+                let cd_path_base: Option<std::path::PathBuf> = new_path_base.clone();
                 if let Some(new_path_base) = new_path_base {
                     if let Err(e) = ctx.workspace_control().set_path_base(new_path_base) {
                         return TypedToolResult::error(e.to_string());
@@ -313,6 +315,7 @@ impl TypedTool for BashTool {
                     signal: status.signal(),
                     #[cfg(not(unix))]
                     signal: None,
+                    path_base: cd_path_base,
                 };
                 // 构造 TUI 显示文本：stdout + stderr（如有），让 TUI 显示实际命令输出
                 // 而非 "Command executed successfully" 这类元信息（display > message 优先级）

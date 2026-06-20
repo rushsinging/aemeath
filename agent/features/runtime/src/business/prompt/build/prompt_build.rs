@@ -100,10 +100,11 @@ GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → Tas
  - Do not use emojis unless the user explicitly requests it.
 
 # Environment
- - Working directory: {cwd_str}
- - Is a git repository: {is_git}
- - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
- - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#;
+  - Working directory: {cwd_str}
+  - Is a git repository: {is_git}
+  - path_base = the base for resolving relative paths (relative paths are joined to path_base to form absolute paths); working_root = the safety boundary (absolute paths MUST fall inside it or be rejected).
+  - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
+  - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#;
 
 const STATIC_SYSTEM_PROMPT_ZH: &str = r#"你是一个交互式 agent，帮助用户完成软件工程任务。请使用下面的指令和可用工具来辅助用户。
 
@@ -165,10 +166,11 @@ GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → Tas
  - Do not use emojis unless the user explicitly requests it.
 
 # Environment
- - Working directory: {cwd_str}
- - Is a git repository: {is_git}
- - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
- - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#;
+  - Working directory: {cwd_str}
+  - Is a git repository: {is_git}
+  - path_base = 相对路径解析基（相对路径会与 path_base 拼接成绝对路径）；working_root = 安全边界（绝对路径必须位于其下，否则被拒绝）。
+  - Prefer relative paths for Read, Edit, Write, Glob, Grep, and Bash paths. If you need an absolute path, it MUST be inside the current workspace.
+  - Do not reuse absolute paths from another checkout, main branch workspace, previous worktree, memory, or old conversation. When EnterWorktree or ExitWorktree returns a new path_base/working_root in its tool result, use that latest tool result as the current workspace context. If a tool says a path is outside the workspace, retry with a relative path or with the current workspace."#;
 
 /// Falls back to English for unknown languages.
 fn static_system_prompt_for(cwd_str: &str, is_git: bool, lang: &str) -> String {
