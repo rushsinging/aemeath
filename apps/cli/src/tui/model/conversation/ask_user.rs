@@ -6,7 +6,6 @@
 use super::block::{AskUserPhase, AskUserSlot, ConversationBlock};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
-use crate::tui::model::conversation::ask_user_timeline::sync_ask_user_timeline_item;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// AskUser 交互块的固定 id（同一时刻至多一个）。
@@ -34,8 +33,8 @@ pub struct AskUserSnapshot {
 impl ConversationModel {
     /// 读取当前 AskUserBatch 块的交互状态快照（无块时返回 None）。
     pub fn ask_user_snapshot(&self) -> Option<AskUserSnapshot> {
-        self.blocks.iter().find_map(|block| {
-            if let ConversationBlock::AskUserBatch {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
                 slots,
                 active_index,
                 phase,
@@ -45,7 +44,7 @@ impl ConversationModel {
                 confirm_cursor,
                 confirmed,
                 ..
-            } = block
+            } = item
             {
                 let slot = slots.get(*active_index);
                 Some(AskUserSnapshot {
@@ -109,7 +108,7 @@ impl ConversationModel {
 
     /// 回答当前激活问题，自动前进到下一题或进入确认页。
     pub(super) fn answer_current_ask_user(&mut self, answer: String) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             slots,
             active_index,
             phase,
@@ -120,7 +119,7 @@ impl ConversationModel {
             confirm_cursor,
             confirmed,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             // 设置当前问题答案
             if let Some(slot) = slots.get_mut(*active_index) {
@@ -151,7 +150,7 @@ impl ConversationModel {
 
     /// 确认页导航到某项（重新作答）。
     pub(super) fn navigate_ask_user_to(&mut self, index: usize) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             slots,
             active_index,
             phase,
@@ -160,7 +159,7 @@ impl ConversationModel {
             chat_input_active,
             chat_input_text,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             if index >= slots.len() {
                 return Vec::new();
@@ -179,12 +178,12 @@ impl ConversationModel {
 
     /// 更新当前激活问题的选项光标（越界自动夹取）。
     pub(super) fn set_ask_user_cursor(&mut self, cursor: usize) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             slots,
             active_index,
             cursor: current,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             let total = slots
                 .get(*active_index)
@@ -201,12 +200,12 @@ impl ConversationModel {
 
     /// 切换当前激活问题中某选项的勾选状态。内建选项不可勾选。
     pub(super) fn toggle_ask_user_selected(&mut self, index: usize) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             slots,
             active_index,
             selected,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             let llm_count = slots
                 .get(*active_index)
@@ -225,11 +224,11 @@ impl ConversationModel {
 
     /// 设置当前激活问题是否处于 Type something 子态。
     pub(super) fn set_ask_user_chat_input(&mut self, active: bool) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             chat_input_active,
             chat_input_text,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             *chat_input_active = active;
             if !active {
@@ -242,11 +241,11 @@ impl ConversationModel {
 
     /// 追加字符到 Type something 输入框。
     pub(super) fn append_ask_user_chat_char(&mut self, ch: char) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             chat_input_active,
             chat_input_text,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             if *chat_input_active {
                 chat_input_text.push(ch);
@@ -258,11 +257,11 @@ impl ConversationModel {
 
     /// 删除 Type something 输入框末尾字符。
     pub(super) fn delete_ask_user_chat_char(&mut self) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             chat_input_active,
             chat_input_text,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             if *chat_input_active {
                 chat_input_text.pop();
@@ -274,12 +273,12 @@ impl ConversationModel {
 
     /// 获取 Type something 输入框文本。
     pub fn ask_user_chat_text(&self) -> Option<String> {
-        self.blocks.iter().find_map(|block| {
-            if let ConversationBlock::AskUserBatch {
+        self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::AskUserBatch {
                 chat_input_active: true,
                 chat_input_text,
                 ..
-            } = block
+            } = item
             {
                 Some(chat_input_text.clone())
             } else {
@@ -290,11 +289,11 @@ impl ConversationModel {
 
     /// 更新确认页导航光标（范围 0..=N+1）。
     pub(super) fn set_ask_user_confirm_cursor(&mut self, cursor: usize) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch {
+        if let Some(OutputTimelineItem::AskUserBatch {
             slots,
             confirm_cursor,
             ..
-        }) = self.ask_user_block_mut()
+        }) = self.ask_user_timeline_item_mut()
         {
             let max = slots.len() + 1; // N 个问题项 + 提交 + 取消
             *confirm_cursor = cursor.min(max);
@@ -305,7 +304,9 @@ impl ConversationModel {
 
     /// 确认提交所有答案（block 进入终态）。
     pub(super) fn confirm_ask_user_batch(&mut self) -> Vec<ConversationChange> {
-        if let Some(ConversationBlock::AskUserBatch { confirmed, .. }) = self.ask_user_block_mut() {
+        if let Some(OutputTimelineItem::AskUserBatch { confirmed, .. }) =
+            self.ask_user_timeline_item_mut()
+        {
             *confirmed = true;
             return self.ask_user_updated();
         }
@@ -324,7 +325,6 @@ impl ConversationModel {
     }
 
     fn ask_user_updated(&mut self) -> Vec<ConversationChange> {
-        sync_ask_user_timeline_item(&self.blocks, self.timeline.items_mut());
         vec![
             ConversationChange::AskUserUpdated {
                 id: ASK_USER_BLOCK_ID.to_string(),
@@ -333,10 +333,11 @@ impl ConversationModel {
         ]
     }
 
-    fn ask_user_block_mut(&mut self) -> Option<&mut ConversationBlock> {
-        self.blocks
+    fn ask_user_timeline_item_mut(&mut self) -> Option<&mut OutputTimelineItem> {
+        self.timeline
+            .items_mut()
             .iter_mut()
-            .find(|block| matches!(block, ConversationBlock::AskUserBatch { .. }))
+            .find(|item| matches!(item, OutputTimelineItem::AskUserBatch { .. }))
     }
 
     /// 移除已存在的 AskUserBatch 块，返回是否实际移除。
@@ -380,23 +381,24 @@ mod tests {
         model.apply(ConversationIntent::ShowAskUserBatch { slots });
     }
 
-    fn batch_block(model: &ConversationModel) -> &ConversationBlock {
+    fn timeline_item(model: &ConversationModel) -> &OutputTimelineItem {
         model
-            .blocks
+            .timeline
+            .items()
             .iter()
-            .find(|b| matches!(b, ConversationBlock::AskUserBatch { .. }))
-            .expect("ask user batch block")
+            .find(|i| matches!(i, OutputTimelineItem::AskUserBatch { .. }))
+            .expect("ask user batch timeline item")
     }
 
     #[test]
     fn test_show_ask_user_batch_initializes_answering_phase() {
         let mut model = ConversationModel::default();
         show_batch(&mut model, vec![make_slot("q1", "问题1", &["A", "B"])]);
-        if let ConversationBlock::AskUserBatch {
+        if let OutputTimelineItem::AskUserBatch {
             phase,
             active_index,
             ..
-        } = batch_block(&model)
+        } = timeline_item(&model)
         {
             assert_eq!(*phase, AskUserPhase::Answering);
             assert_eq!(*active_index, 0);
@@ -416,12 +418,12 @@ mod tests {
         model.apply(ConversationIntent::AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        if let ConversationBlock::AskUserBatch {
+        if let OutputTimelineItem::AskUserBatch {
             active_index,
             phase,
             slots,
             ..
-        } = batch_block(&model)
+        } = timeline_item(&model)
         {
             assert_eq!(*active_index, 1);
             assert_eq!(*phase, AskUserPhase::Answering);
@@ -445,12 +447,12 @@ mod tests {
         model.apply(ConversationIntent::AnswerCurrentAskUser {
             answer: "B".to_string(),
         });
-        if let ConversationBlock::AskUserBatch {
+        if let OutputTimelineItem::AskUserBatch {
             phase,
             confirm_cursor,
             slots,
             ..
-        } = batch_block(&model)
+        } = timeline_item(&model)
         {
             assert_eq!(*phase, AskUserPhase::Confirming);
             assert_eq!(*confirm_cursor, 2); // 默认在「提交」
@@ -467,7 +469,7 @@ mod tests {
             answer: "A".to_string(),
         });
         model.apply(ConversationIntent::ConfirmAskUserBatch);
-        if let ConversationBlock::AskUserBatch { confirmed, .. } = batch_block(&model) {
+        if let OutputTimelineItem::AskUserBatch { confirmed, .. } = timeline_item(&model) {
             assert!(*confirmed);
         }
     }
@@ -479,9 +481,9 @@ mod tests {
         model.apply(ConversationIntent::AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        if let ConversationBlock::AskUserBatch {
+        if let OutputTimelineItem::AskUserBatch {
             confirmed, phase, ..
-        } = batch_block(&model)
+        } = timeline_item(&model)
         {
             assert!(*confirmed);
             assert_eq!(*phase, AskUserPhase::Answering); // phase 不变，直接 confirmed
@@ -495,7 +497,7 @@ mod tests {
         model.apply(ConversationIntent::AnswerCurrentAskUser {
             answer: "自由输入".to_string(),
         });
-        if let ConversationBlock::AskUserBatch { confirmed, .. } = batch_block(&model) {
+        if let OutputTimelineItem::AskUserBatch { confirmed, .. } = timeline_item(&model) {
             assert!(*confirmed);
         }
     }
@@ -519,13 +521,13 @@ mod tests {
         });
         // 导航回第 0 题重新作答
         model.apply(ConversationIntent::NavigateAskUserTo { index: 0 });
-        if let ConversationBlock::AskUserBatch {
+        if let OutputTimelineItem::AskUserBatch {
             active_index,
             phase,
             cursor,
             chat_input_active,
             ..
-        } = batch_block(&model)
+        } = timeline_item(&model)
         {
             assert_eq!(*active_index, 0);
             assert_eq!(*phase, AskUserPhase::Answering);
