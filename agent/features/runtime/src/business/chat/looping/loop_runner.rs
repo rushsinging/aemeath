@@ -28,6 +28,7 @@ use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
+use share::message::Role;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -252,6 +253,45 @@ where
                     loop_fsm.assert_state(
                         ChatLoopState::Done,
                         "cancel idle shuts down on channel close",
+                    );
+                    break;
+                }
+            }
+        }
+
+        // ── loop 顶部空闲门（Task 4）──
+        // 若没有「待 assistant 响应的用户回合」（末条消息非 User），且 pending_input
+        // 缓冲也为空（上游还没有新输入就绪），则在进入本次回合的 LLM 调用之前先
+        // idle-wait：等到真正收到 UserMessage 后才继续。
+        //
+        // 这使 chat() 能以空 messages 或纯历史（末尾为 assistant）启动，loop 会阻塞
+        // 等待第一条输入，而不是以空消息列表发起 LLM 调用。
+        //
+        // 与回合完成后的空闲（completion arm）协作：completion arm 已 idle-wait 并把下
+        // 一条 UserMessage append 进 messages 后再 continue；此时 has_pending_user_turn
+        // 为 true，不会触发 double-wait。
+        //
+        // FSM 注意：此处 FSM 处于 Running 态（StartTurn 已 transition）。
+        // loop-top idle 是「回合前置等待」，不经过 Stopping→Idle→Done 路径；
+        // Shutdown 时直接从 Running 经 TryStop→StopSucceeded 到 Done。
+        if !has_pending_user_turn(&messages) && pending_input.is_empty() {
+            match wait_for_first_turn_input(&input_events, &sink, &mut pending_input, &mut messages)
+                .await
+            {
+                IdleResult::Resumed => {
+                    // messages 已含新 UserMessage（由 wait_for_first_turn_input 内
+                    // 的 BeforeLlm gate 附加），pending_input 已清空。
+                    // 刷新 turn_rollback_baseline：用户消息已入、assistant 未产生。
+                    turn_rollback_baseline = messages.len();
+                    // 正常继续进入 compact → BeforeLlm gate（gate 此时 pending 为空，
+                    // 是无操作 drain，不重复附加）。
+                }
+                IdleResult::Shutdown => {
+                    loop_fsm.transition(ChatLoopTransition::TryStop);
+                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Done,
+                        "loop-top idle shuts down on channel close",
                     );
                     break;
                 }
@@ -819,6 +859,16 @@ enum IdleResult {
     Shutdown,
 }
 
+/// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
+/// 最后一条消息是 User 角色 → 有待答回合（true）；
+/// 否则（空、末尾是 assistant / tool / system）→ 无待答回合（false）。
+///
+/// 用于 loop 顶部空闲门：若无待答回合且 pending_input 也为空，
+/// 则先 idle-wait 直到收到真实 UserMessage 才开始回合。
+fn has_pending_user_turn(messages: &[Message]) -> bool {
+    matches!(messages.last(), Some(m) if m.role == Role::User)
+}
+
 /// 回合完成后阻塞等待下一条输入：
 /// - 收到事件 → push 进 `pending` 缓冲，返回 `Resumed`（由调用方经 gate 处理）。
 /// - `None`（通道关闭）→ 返回 `Shutdown`，调用方退出常驻 loop。
@@ -904,6 +954,41 @@ where
                     reset_cancel(cancel_slot);
                 }
                 // 0 append（命令 / 取消 / 空）→ 留在空闲，继续等下一条输入。
+                continue;
+            }
+            IdleResult::Shutdown => return IdleResult::Shutdown,
+        }
+    }
+}
+
+/// Loop 顶部前置等待：在回合尚未开始前等到首条「真实的新用户消息」。
+///
+/// 与 `idle_until_resume_or_shutdown` 的区别：本函数**不** `reset_cancel`，
+/// 因为此时 loop 尚未开始任何 LLM 调用，不存在被 stale-cancelled token 污染的风险；
+/// 保留 cancel 槽不变，使调用方在后续 LLM 调用时能正常被取消。
+///
+/// 返回 `Resumed` 表示已有新用户消息 append 进 `messages`，可继续跑回合；
+/// 返回 `Shutdown` 表示输入通道关闭，调用方应退出常驻 loop。
+async fn wait_for_first_turn_input<I, S>(
+    input_events: &I,
+    sink: &S,
+    pending: &mut PendingInputBuffer,
+    messages: &mut Vec<Message>,
+) -> IdleResult
+where
+    I: InputEventDrainPort,
+    S: ChatEventSink,
+{
+    loop {
+        match await_idle_input(input_events, pending).await {
+            IdleResult::Resumed => {
+                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages).await;
+                if gate.appended_user_messages > 0 {
+                    // 收到真正的新用户消息（已 append 进 messages）：前置等待结束。
+                    // 不重置 cancel 槽（与 idle_until_resume_or_shutdown 的区别）。
+                    return IdleResult::Resumed;
+                }
+                // 0 append（命令 / 取消 / 空）→ 留在等待态，继续等下一条输入。
                 continue;
             }
             IdleResult::Shutdown => return IdleResult::Shutdown,

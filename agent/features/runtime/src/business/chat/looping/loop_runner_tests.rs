@@ -1652,3 +1652,178 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         "重置 token 后回合 3 应正常调用 LLM 并完成: {events:?}"
     );
 }
+
+/// Task 4：loop 顶部无待答回合时必须先 idle-wait，收到 UserMessage 后才调 LLM。
+///
+/// 用一个计数 provider 追踪 LLM 调用次数。在投递任何输入前，先给 loop 充分调度
+/// 机会（yield 若干轮），断言此时 LLM 调用数为 0（loop 正处于 loop-top idle-wait）。
+/// 随后投递一条 UserMessage，等 DoneWithDuration 出现，断言恰好一次 LLM 调用。
+/// 最后 drop 发送端，loop shutdown 退出（无 hang）。
+///
+/// RED 阶段：当前 loop 在 `process_chat_loop` 顶部直接进入 BeforeLlm gate，
+/// 即使 messages 为空也不会 idle-wait，调用 LLM 时 messages_for_api 为空
+/// 导致 LLM provider 被调用（或回合逻辑异常）。实现 `has_pending_user_turn` +
+/// 顶部 idle 门后，测试应变绿。
+#[tokio::test]
+async fn test_chat_impl_idle_until_first_input_event() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // === 计数 provider：记录 LLM 调用次数 ===
+    #[derive(Clone)]
+    struct CountingProvider {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    #[async_trait]
+    impl LlmProvider for CountingProvider {
+        async fn stream_message(
+            &self,
+            _system: &[SystemBlock],
+            _messages: &[Message],
+            _tool_schemas: &[serde_json::Value],
+            handler: &mut dyn StreamHandler,
+            _cancel: &CancellationToken,
+        ) -> Result<StreamResponse, provider::LlmError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let text = "hi response";
+            handler.on_text(text);
+            Ok(StreamResponse {
+                assistant_message: Message {
+                    role: Role::Assistant,
+                    content: vec![share::message::ContentBlock::Text {
+                        text: text.to_string(),
+                    }],
+                    metadata: None,
+                },
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cached_tokens: None,
+                    cache_creation_tokens: None,
+                    reasoning_tokens: None,
+                },
+                stop_reason: StopReason::EndTurn,
+            })
+        }
+
+        fn model_name(&self) -> &str {
+            "test-model"
+        }
+
+        fn provider_name(&self) -> &str {
+            "test-provider"
+        }
+
+        fn set_reasoning(&self, _enabled: bool) {}
+
+        fn is_reasoning(&self) -> bool {
+            false
+        }
+    }
+
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let call_counter = Arc::new(AtomicUsize::new(0));
+    let provider = CountingProvider {
+        calls: call_counter.clone(),
+    };
+
+    // driver：先给 loop 充分调度机会（不投递任何输入），断言 LLM 未被调用；
+    // 再投递 UserMessage("hi")，等 DoneWithDuration；最后关闭通道触发 shutdown。
+    let driver_sink = sink.clone();
+    let driver_counter = call_counter.clone();
+    let driver = tokio::spawn(async move {
+        // 给 loop 充分调度机会（200 次 yield）——若 loop 不 idle-wait，
+        // 会直接进入 BeforeLlm gate 并调用 LLM。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+
+        // 关键断言 RED：当前 loop 无 loop-top idle，此时 LLM 已被调用（test 失败）。
+        // 实现后 loop 在 loop-top idle-wait 阻塞，LLM 调用数应为 0。
+        assert_eq!(
+            driver_counter.load(Ordering::SeqCst),
+            0,
+            "无待答用户回合时 loop 必须 idle-wait，不得立即调用 LLM"
+        );
+        // 此时也不应有 Done（无 LLM 调用必然无完成）。
+        assert!(
+            driver_sink.events().iter().all(|e| e != "DoneWithDuration"),
+            "未投递输入前不得出现 DoneWithDuration: {:?}",
+            driver_sink.events()
+        );
+
+        // 投递首条 UserMessage，loop 应从 idle 恢复、运行一个回合、发出 DoneWithDuration。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("hi", Vec::new()))
+            .unwrap();
+
+        // 等 DoneWithDuration（最多 10s）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // 恰好一次 LLM 调用。
+        assert_eq!(
+            driver_counter.load(Ordering::SeqCst),
+            1,
+            "投递 UserMessage 后应恰好调用一次 LLM"
+        );
+
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(), // 空 messages：无待答回合，loop 必须先 idle-wait
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-idle-until-first-input".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 整个生命周期内恰好一次 LLM 调用（"hi" 回合）。
+    assert_eq!(
+        call_counter.load(Ordering::SeqCst),
+        1,
+        "全程应恰好一次 LLM 调用: {events:?}"
+    );
+    // 产出一个 DoneWithDuration（一个完整回合）。
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.as_str() == "DoneWithDuration")
+            .count(),
+        1,
+        "应产出恰好一个 DoneWithDuration: {events:?}"
+    );
+}
