@@ -1207,11 +1207,11 @@ impl LlmProvider for CancellableThenNormalProvider {
         if call_index == 0 {
             // 回合 1：阻塞等待 cancel，被取消后返回 Cancelled（模拟 provider 侧取消）。
             cancel.cancelled().await;
-            return Err(provider::LlmError::Cancelled);
+            return Err(provider::api::LlmError::Cancelled);
         }
         // 回合 2+：正常完成（关键：此时若 token 未重置，会立刻 Cancelled）。
         if cancel.is_cancelled() {
-            return Err(provider::LlmError::Cancelled);
+            return Err(provider::api::LlmError::Cancelled);
         }
         let text = format!("turn {} final", call_index + 1);
         handler.on_text(&text);
@@ -1436,10 +1436,10 @@ impl LlmProvider for CompleteThenCancellableProvider {
         // 回合 1 / 回合 3：正常完成（token 已重置，不应被陈旧 cancel 污染）。
         if call_index == 1 {
             cancel.cancelled().await;
-            return Err(provider::LlmError::Cancelled);
+            return Err(provider::api::LlmError::Cancelled);
         }
         if cancel.is_cancelled() {
-            return Err(provider::LlmError::Cancelled);
+            return Err(provider::api::LlmError::Cancelled);
         }
         let text = format!("turn {} assistant", call_index + 1);
         handler.on_text(&text);
