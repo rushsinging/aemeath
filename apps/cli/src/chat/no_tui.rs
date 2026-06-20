@@ -86,6 +86,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::BlockComplete { .. } => {}
         sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::MessagesSync(_)
+        | sdk::ChatEvent::UserMessagesAdded { .. }
         | sdk::ChatEvent::Usage { .. }
         | sdk::ChatEvent::LiveTps(_)
         | sdk::ChatEvent::TurnChanged(_)

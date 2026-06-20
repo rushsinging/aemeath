@@ -262,6 +262,9 @@ pub(crate) fn runtime_event_to_sdk_event(
                     .collect(),
             )
         }
+        crate::business::chat::RuntimeStreamEvent::UserMessagesAdded { items } => {
+            ChatEvent::UserMessagesAdded { items }
+        }
         crate::business::chat::RuntimeStreamEvent::Done { context } => ChatEvent::Done {
             context: ChatEventContext::new(context.chat_id, context.turn_id),
         },

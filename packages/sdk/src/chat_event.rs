@@ -27,6 +27,13 @@ pub enum ToolCallStatusView {
     Running,
 }
 
+/// 已归宿（落账）的单条用户输入，携带 InputId 以供 TUI 按 id 清占位。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddedInput {
+    pub id: crate::InputId,
+    pub text: String,
+}
+
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
@@ -88,6 +95,8 @@ pub enum ChatEvent {
     },
     /// runtime 同步当前 messages。
     MessagesSync(Vec<ChatMessage>),
+    /// 批量用户输入归宿通知（每条含 InputId）。TUI 用 id 清占位并回显；A2 仅建立通道，消费留待 A3。
+    UserMessagesAdded { items: Vec<AddedInput> },
     /// Chat 完成。
     Done { context: ChatEventContext },
     /// Chat 完成并附带耗时毫秒。
