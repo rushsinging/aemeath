@@ -1,7 +1,6 @@
 use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
-use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
@@ -50,6 +49,28 @@ impl App {
         }
     }
 
+    /// #390 A1：建立常驻 chat() 处理回路（启动一次 + `/clear` 后自愈重建）。
+    ///
+    /// 经 `build_spawn_context` 建一条新的 input_events 通道（sender 存入
+    /// `chat.input_event_tx`，port 随 `ChatRequest.input_events` 传给 runtime），
+    /// 以当前历史 `messages` 调一次 `chat()` 并 spawn 长生命周期流消费任务。
+    /// 已存在通道（`input_event_tx` 为 Some）时为 no-op，调用安全幂等。
+    fn ensure_persistent_processing(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        if self.chat.input_event_tx.is_some() {
+            return;
+        }
+        let spawn_refs = processing::SpawnContextRefs {
+            agent_client: self.agent_client.clone(),
+        };
+        match self.build_spawn_context(ui_tx, &spawn_refs) {
+            Some(spawn_ctx) => {
+                let handle = processing::spawn_processing(spawn_ctx);
+                self.chat.set_processing_handle(handle);
+            }
+            None => self.append_error_notice("SDK agent client is unavailable"),
+        }
+    }
+
     pub(crate) async fn run_loop(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -72,6 +93,12 @@ impl App {
         self.update_project_context().await;
         self.draw(terminal)?;
         self.refresh_output_document_from_model();
+
+        // #390 A1：常驻 chat() 模型——启动时调一次 chat()，常驻 loop 顶部 idle-wait
+        // 直到首条 UserMessage 经 input_events 通道到达；此后每次提交（首条 / 插话）
+        // 都复用此通道，不再 per-submit spawn。messages 为当前历史（新会话为空，
+        // resume 为已加载历史）。
+        self.ensure_persistent_processing(&ui_tx);
 
         loop {
             let loop_now = Instant::now();
@@ -174,24 +201,18 @@ impl App {
                     .handle_slash_command_with_events(&input, Some(ui_tx.clone()))
                     .await;
                 if let Some(prompt) = review_prompt {
-                    self.model
-                        .conversation
-                        .apply(ConversationIntent::StartChat {
-                            submission: input.clone(),
-                        });
-                    self.mark_output_dirty();
-                    self.chat
-                        .messages
-                        .push(sdk::ChatMessage::user_text(&prompt));
+                    // #390 A1：slash 命令产出的 LLM prompt（如 /review）改为经常驻
+                    // input_events 通道发往 loop，不再 spawn 新 chat。回显由 runtime 的
+                    // MessagesSync 单一真相驱动（与普通提交一致）。
                     interrupted.store(false, Ordering::Relaxed);
+                    self.chat.clear_tool_activity();
                     self.spinner_phase(SpinnerPhase::Thinking);
                     self.chat.start_processing();
-                    if let Some(spawn_ctx) = self.build_spawn_context(&ui_tx, &spawn_refs) {
-                        let handle = processing::spawn_processing(spawn_ctx);
-                        self.chat.set_processing_handle(handle);
-                    } else {
-                        self.append_error_notice("SDK agent client is unavailable");
-                    }
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::UserMessage {
+                            text: prompt,
+                            image_paths: Vec::new(),
+                        });
                 }
             }
 
@@ -208,7 +229,21 @@ impl App {
             if self.layout.should_exit {
                 break;
             }
+
+            // #390 A1：自愈式重建常驻 loop。`/clear` 等会经 reset_runtime_state drop
+            // input_event_tx → 常驻 loop shutdown 退出。会话未结束时在此重建一次，
+            // 使 `/clear` 后的提交仍可经事件通道驱动新一轮（#391 再统一 /clear 语义）。
+            if !self.layout.should_exit && self.chat.input_event_tx.is_none() {
+                self.ensure_persistent_processing(&ui_tx);
+            }
         }
+
+        // #390 A1 常驻 loop 退出收尾（覆盖所有退出路径：/exit、/quit、Ctrl+C 强退等）：
+        // drop input_event_tx → 常驻 loop recv_next 收到 None（shutdown）→ loop 干净退出，
+        // 不再 hang；再 abort 消费句柄兜底。clear_input_event_buffer 幂等，重复调用安全。
+        self.chat.clear_input_event_buffer();
+        self.chat.abort_processing_handle();
+
         Ok(())
     }
 }

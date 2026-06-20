@@ -85,11 +85,10 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
     app.model
         .input
         .apply(InputIntent::InsertPastedText("a\nb\nc\nd".to_string()));
-    let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
-    let result = app.update_key(key, &ui_tx, &spawn_refs);
+    let result = app.update_key(key, &spawn_refs);
 
     assert_eq!(app.input.queue_preview(), "a\nb\nc\nd");
     assert_eq!(
@@ -118,11 +117,10 @@ fn test_up_arrow_restores_all_queued_input_to_input_area() {
     app.input.push_queue("second".to_string());
     app.enqueue_submission_echo("second");
 
-    let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
 
-    let _ = app.update_key(key, &ui_tx, &spawn_refs);
+    let _ = app.update_key(key, &spawn_refs);
 
     // queue 应被清空
     assert_eq!(app.input.queue_len(), 0);
@@ -146,11 +144,10 @@ fn test_up_arrow_history_recall_when_queue_empty() {
     // queue 为空
     assert_eq!(app.input.queue_len(), 0);
 
-    let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
 
-    let _ = app.update_key(key, &ui_tx, &spawn_refs);
+    let _ = app.update_key(key, &spawn_refs);
 
     // queue 空时应走 history recall
     assert_eq!(app.model.input.document.buffer, "past input");
