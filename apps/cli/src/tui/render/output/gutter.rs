@@ -11,7 +11,7 @@ use ratatui::text::Span;
 /// marker 列字符宽度（字形 1 + 空格 1）。
 pub const GUTTER_WIDTH: usize = 2;
 const PER_DEPTH_INDENT: usize = 2;
-const TOOL_MARKER_BLINK_DIVISOR: u64 = 4;
+pub const TOOL_MARKER_BLINK_DIVISOR: u64 = 4;
 /// depth 上限防御（防 `" ".repeat()` 爆内存）。实际对话树深度通常 ≤ 4
 /// （root + tool result 子块），256 已是巨幅冗余，仅用于 fuzz / 错误输入。
 const MAX_GUTTER_DEPTH: usize = 256;

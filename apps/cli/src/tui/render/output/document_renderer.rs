@@ -7,12 +7,30 @@ use crate::tui::render::output_area::types::MAX_LINES;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{BlockNode, OutputViewModel};
 use ratatui::style::Style;
+use std::collections::HashMap;
+
+/// gutted 缓存的 key：唯一决定 gutted block 内容（含 gutter）的所有参数。
+/// 静态 block 的 `marker_frame` 为 `None`；运行中 ToolCall 每次闪烁周期推进时失效。
+#[derive(PartialEq, Eq, Clone)]
+struct GuttedKey {
+    block_version: u64,
+    text_width: u16,
+    depth: usize,
+    /// 仅运行中 ToolCall 有值（= animation_frame / BLINK_DIVISOR），其他 block 为 None。
+    marker_frame: Option<u64>,
+}
 
 #[derive(Default)]
 pub struct OutputDocumentRenderer {
     cache: BlockCache,
+    /// 带 gutter 的 block 缓存：key = block_id，value = (GuttedKey, gutted RenderedBlock)。
+    /// 命中时直接 clone（lines 为 Rc，廉价）；未命中则走完整 render_self + apply_gutter 路径。
+    gutted: HashMap<String, (GuttedKey, RenderedBlock)>,
     #[cfg(test)]
     render_count: std::cell::Cell<usize>,
+    /// 统计 gutted 缓存未命中（重新渲染）次数，用于测试断言。
+    #[cfg(test)]
+    gutted_render_count: std::cell::Cell<usize>,
 }
 
 impl OutputDocumentRenderer {
@@ -63,6 +81,8 @@ impl OutputDocumentRenderer {
         let blocks = trim_root_groups_to_max_lines(groups, MAX_LINES);
         let live_ids = collect_rendered_block_ids(&blocks);
         self.cache.retain(&live_ids);
+        // gutted 缓存同步清理：移除已不在渲染树中的条目，防止内存泄漏。
+        self.gutted.retain(|id, _| live_ids.iter().any(|l| l == id));
         RenderedDocument { blocks }
     }
 
@@ -77,6 +97,41 @@ impl OutputDocumentRenderer {
         // #329 契约：block 内部 wrap 宽度 = outer_width - gutter_width(depth)，
         // 保证 wrap 后 line 加回 gutter 总可见宽 ≤ outer_width（content_area.width）。
         let text_width = gutter::effective_block_width(outer_width, depth);
+
+        // 计算 gutted 缓存 key：运行中 ToolCall 的 marker_frame 随动画帧推进而变化，
+        // 导致每次闪烁周期自动失效；其他 block 的 marker_frame 为 None，跨帧稳定命中。
+        let marker_frame = match &node.kind {
+            crate::tui::view_model::output::OutputBlockKind::ToolCall(t)
+                if t.semantic_status
+                    == crate::tui::view_model::output::ToolSemanticStatus::Running =>
+            {
+                Some(animation_frame / gutter::TOOL_MARKER_BLINK_DIVISOR)
+            }
+            _ => None,
+        };
+        let gkey = GuttedKey {
+            block_version: node.block_version,
+            text_width,
+            depth,
+            marker_frame,
+        };
+
+        // gutted 缓存命中：key 完全一致时直接复用（lines 为 Rc，clone 廉价）。
+        if let Some((cached_key, cached_block)) = self.gutted.get(&node.block_id) {
+            if *cached_key == gkey {
+                out.push(cached_block.clone());
+                for child in &node.children {
+                    self.render_node(child, outer_width, depth + 1, animation_frame, out);
+                }
+                return;
+            }
+        }
+
+        // gutted 缓存未命中：走完整 render_self + apply_gutter 路径。
+        #[cfg(test)]
+        self.gutted_render_count
+            .set(self.gutted_render_count.get() + 1);
+
         let key = CacheKey {
             version: node.block_version,
             text_width,
@@ -94,6 +149,7 @@ impl OutputDocumentRenderer {
         }
         // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
         // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
+        // 注：(*rendered.lines).clone() 解 Rc 为 Vec，仅在未命中路径付此开销。
         let mut gutted = crate::tui::render::output::gutter::apply_gutter_with_frame(
             &node.kind,
             depth,
@@ -111,10 +167,14 @@ impl OutputDocumentRenderer {
         if depth == 0 {
             gutted.insert(0, RenderedLine::default());
         }
-        out.push(RenderedBlock {
+        let block = RenderedBlock {
             block_id: rendered.block_id,
             lines: std::rc::Rc::new(gutted),
-        });
+        };
+        // 存入 gutted 缓存，供后续帧复用。
+        self.gutted
+            .insert(node.block_id.clone(), (gkey, block.clone()));
+        out.push(block);
         for child in &node.children {
             self.render_node(child, outer_width, depth + 1, animation_frame, out);
         }
@@ -123,6 +183,12 @@ impl OutputDocumentRenderer {
     #[cfg(test)]
     pub fn render_count(&self) -> usize {
         self.render_count.get()
+    }
+
+    /// gutted 缓存未命中次数（即实际重新渲染次数）；用于测试断言缓存命中行为。
+    #[cfg(test)]
+    pub fn gutted_render_count(&self) -> usize {
+        self.gutted_render_count.get()
     }
 }
 

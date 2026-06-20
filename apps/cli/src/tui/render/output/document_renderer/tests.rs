@@ -448,6 +448,36 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
 }
 
 #[test]
+fn test_gutted_cache_reuses_static_block_across_frames() {
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: "a".to_string(),
+        text: "静态文本".to_string(),
+        style: SemanticStyle::Normal,
+    });
+    let node = BlockNode {
+        block_id: "a".to_string(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    };
+    let vm = OutputViewModel {
+        roots: vec![node],
+        version: 1,
+        follow_tail_hint: true,
+    };
+    let mut r = OutputDocumentRenderer::default();
+    let _ = r.render_model_document(&vm, 80, 80, 0);
+    let after_first = r.gutted_render_count();
+    // 同一 vm、frame 推进：静态 block 应命中 gutted 缓存，不重算。
+    let _ = r.render_model_document(&vm, 80, 80, 1);
+    assert_eq!(
+        r.gutted_render_count(),
+        after_first,
+        "静态 block 跨 frame 应复用 gutted 缓存"
+    );
+}
+
+#[test]
 fn test_render_tree_various_widths_keep_every_line_within_outer_width() {
     // 横扫多种 outer_width / text 长度组合，确保 wrap 边界 + gutter 后不超。
     // 修复前：text 长度 = outer_width 时必失败；修复后全过。
