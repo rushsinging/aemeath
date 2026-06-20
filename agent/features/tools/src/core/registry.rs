@@ -14,8 +14,6 @@ use tokio::sync::Mutex;
 
 use super::tool_registry::ToolRegistry;
 
-use crate::contract::tool::TypedToolAdapter;
-
 /// 工具集 profile：决定哪些工具被注册。取代历史的 3 个近重复 `register_*` 函数，
 /// 工具清单只定义一次（见 [`register_tools`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +71,7 @@ pub fn register_tools(
     macro_rules! reg {
         ($name:literal, $tool:expr) => {
             if !profile.excludes($name) {
-                registry.register(Box::new(TypedToolAdapter::new($tool)));
+                registry.register($tool);
             }
         };
     }

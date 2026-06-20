@@ -1,6 +1,6 @@
 //! List resources from connected MCP servers
 
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::business::mcp::McpClient;
 use crate::LOG_TARGET;
 use async_trait::async_trait;
@@ -31,7 +31,9 @@ pub struct McpResource {
 }
 
 #[async_trait]
-impl Tool for ListMcpResourcesTool {
+impl TypedTool for ListMcpResourcesTool {
+    type Output = Value;
+
     fn name(&self) -> &str {
         "ListMcpResources"
     }
@@ -60,7 +62,11 @@ impl Tool for ListMcpResourcesTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
         let server_filter = input.get("server").and_then(|s| s.as_str());
 
         let clients = self.clients.lock().await;
@@ -90,11 +96,11 @@ impl Tool for ListMcpResourcesTool {
                     let client = c.lock().await;
                     available_servers.push(client.name().to_string());
                 }
-                return ToolResult::error(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Server '{}' not found. Available servers: {}", filter, available_servers.join(", ")),
-                    "data": null
-                }).to_string());
+                return TypedToolResult::error(format!(
+                    "Server '{}' not found. Available servers: {}",
+                    filter,
+                    available_servers.join(", ")
+                ));
             }
         }
 
@@ -122,21 +128,13 @@ impl Tool for ListMcpResourcesTool {
         }
 
         if resources.is_empty() {
-            ToolResult::success(serde_json::json!({
-                "status": "success",
-                "message": "No resources found. MCP servers may still provide tools even if they have no resources.",
-                "data": null
-            }).to_string())
+            TypedToolResult::success(
+                "No resources found. MCP servers may still provide tools even if they have no resources.",
+                Value::Null,
+            )
         } else {
             let data = serde_json::to_value(&resources).unwrap_or_default();
-            ToolResult::success(
-                serde_json::json!({
-                    "status": "success",
-                    "message": format!("Found {} resource(s)", resources.len()),
-                    "data": data
-                })
-                .to_string(),
-            )
+            TypedToolResult::success(format!("Found {} resource(s)", resources.len()), data)
         }
     }
 }
