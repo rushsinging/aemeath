@@ -21,6 +21,9 @@ pub struct ConversationModel {
     pub agent_progress: Vec<AgentProgressEntry>,
     next_chat_sequence: usize,
     next_block_sequence: usize,
+    /// 单调递增的内容版本号；每次产生 change 的 apply +1。
+    /// 供渲染层 memo `assemble_from_conversation`：revision 不变即可复用上次 view_model。
+    revision: u64,
     active_text_block_id: Option<String>,
     active_text_context: Option<(ChatId, ChatTurnId)>,
     active_thinking_block_id: Option<String>,
@@ -45,7 +48,7 @@ impl ConversationModel {
     }
 
     pub fn apply(&mut self, intent: ConversationIntent) -> Vec<ConversationChange> {
-        match intent {
+        let changes = match intent {
             ConversationIntent::StartChat { submission } => self.start_chat(submission),
             ConversationIntent::AppendUserMessage { text } => self.append_user_message(text),
             ConversationIntent::ObserveToolCallStart {
@@ -142,7 +145,16 @@ impl ConversationModel {
             }
             ConversationIntent::ConfirmAskUserBatch => self.confirm_ask_user_batch(),
             ConversationIntent::DismissAskUserBatch => self.dismiss_ask_user_batch(),
+        };
+        if !changes.is_empty() {
+            self.revision = self.revision.wrapping_add(1);
         }
+        changes
+    }
+
+    /// 当前内容版本号，供渲染层 memo。
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
@@ -570,5 +582,45 @@ impl ConversationModel {
     pub(super) fn active_chat_mut(&mut self) -> Option<&mut Chat> {
         let active = self.active_chat_id.clone()?;
         self.chats.iter_mut().find(|chat| chat.id == active)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_revision_starts_at_zero() {
+        let model = ConversationModel::default();
+        assert_eq!(model.revision(), 0, "新建 conversation revision 应为 0");
+    }
+
+    #[test]
+    fn test_revision_bumps_on_mutating_apply() {
+        let mut model = ConversationModel::default();
+        let before = model.revision();
+        let changes = model.apply(ConversationIntent::AppendUserMessage {
+            text: "你好".to_string(),
+        });
+        assert!(!changes.is_empty(), "AppendUserMessage 应产生 change");
+        assert_eq!(
+            model.revision(),
+            before + 1,
+            "产生 change 的 apply 应使 revision +1"
+        );
+    }
+
+    #[test]
+    fn test_revision_unchanged_on_noop_apply() {
+        let mut model = ConversationModel::default();
+        let before = model.revision();
+        // 空文本的 ObserveAssistantText 返回空 change（no-op）。
+        let changes = model.apply(ConversationIntent::ObserveAssistantText {
+            chat_id: ChatId::new("c1"),
+            turn_id: ChatTurnId::new("t1"),
+            text: String::new(),
+        });
+        assert!(changes.is_empty(), "空文本 ObserveAssistantText 应为 no-op");
+        assert_eq!(model.revision(), before, "no-op apply 不应改 revision");
     }
 }
