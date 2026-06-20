@@ -38,6 +38,7 @@ pub(crate) fn evaluate_calls(
             PolicyDecision::Deny { reason } => {
                 denied.push(DeniedCall {
                     id: call.id.to_string(),
+                    provider_id: call.provider_id.clone(),
                     name: call.name.clone(),
                     reason,
                 });

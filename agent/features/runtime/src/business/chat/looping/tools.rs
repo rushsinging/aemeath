@@ -110,6 +110,11 @@ where
 {
     let mut denied_results = Vec::new();
     for call in denied {
+        log::warn!(
+            target: LOG_TARGET,
+            "tool call denied by policy: name={}, reason={}, runtime_id={}, provider_id={}",
+            call.name, call.reason, call.id, call.provider_id,
+        );
         let _ = hook_ui
             .run_plain(
                 hook_runner,
@@ -146,12 +151,14 @@ where
             is_error: true,
             images: Vec::new(),
         };
-        denied_results.push(ToolExecution::from_parts(
+        let execution = ToolExecution::from_parts(
             call_id,
-            call.id.clone(),
+            call.provider_id.clone(),
             call.name.clone(),
             outcome,
-        ));
+        );
+        send_tool_result(sink, context, &execution).await;
+        denied_results.push(execution);
     }
     denied_results
 }

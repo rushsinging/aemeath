@@ -31,7 +31,11 @@ pub struct PolicyEngine<'a> {
 /// A tool call that was denied by the engine, with the reason.
 #[derive(Debug, Clone)]
 pub struct DeniedCall {
+    /// Runtime-assigned UUIDv7 — used for TUI event matching.
     pub id: String,
+    /// LLM's original tool_call ID (e.g. `call_xxx`) — used for API
+    /// `tool_use_id` so the model can correlate the result.
+    pub provider_id: String,
     pub name: String,
     pub reason: String,
 }
@@ -133,6 +137,13 @@ impl<'a> PolicyEngine<'a> {
                         && !read_files_snapshot.contains(raw)
                         && !read_files_snapshot.contains(path.to_string_lossy().as_ref())
                     {
+                        log::warn!(
+                            target: "aemeath:agent:runtime",
+                            "read-before-write denied: raw_input=\"{}\", resolved=\"{}\", read_files_snapshot={:?}",
+                            raw,
+                            path.display(),
+                            read_files_snapshot,
+                        );
                         return PolicyDecision::Deny {
                             reason: format!(
                                 "You must read {} before editing it. Use the Read tool first.",
