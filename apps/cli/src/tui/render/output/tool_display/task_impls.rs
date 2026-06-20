@@ -56,10 +56,42 @@ impl ToolDisplay for TaskUpdateDisplay {
             return self.display_name().to_string();
         }
         let status = str_arg(input, "status", "");
-        if status.is_empty() {
+        let blocked_by = input
+            .get("addBlockedBy")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        let subject = str_arg(input, "subject", "");
+        let priority = str_arg(input, "priority", "");
+        let progress = input.get("progress").and_then(|v| v.as_u64());
+
+        // 构建摘要片段（按重要性排序）
+        let mut parts = Vec::new();
+        if !status.is_empty() {
+            parts.push(format!("→ {status}"));
+        }
+        if !blocked_by.is_empty() {
+            parts.push(format!("blocked by [{blocked_by}]"));
+        }
+        if !subject.is_empty() {
+            parts.push(truncate_ellipsis(subject, 40));
+        }
+        if !priority.is_empty() {
+            parts.push(format!("p={priority}"));
+        }
+        if let Some(pct) = progress {
+            parts.push(format!("{pct}%"));
+        }
+
+        if parts.is_empty() {
             format!("{} {id}", self.display_name())
         } else {
-            format!("{} {id} → {status}", self.display_name())
+            format!("{} {id} — {}", self.display_name(), parts.join(", "))
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
