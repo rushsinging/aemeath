@@ -5,7 +5,7 @@ use sdk::CharIdx;
 use crate::tui::render::display::safe_text::clamp_split_index;
 use crate::tui::render::theme;
 
-use crate::tui::render::output::primitives::wrap::wrap_spans_with_prefix;
+use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay_with_fg, SelRange};
 use crate::tui::render::output_area::render::sel_range_for_bounds;
 use crate::tui::render::output_area::OutputArea;
@@ -29,6 +29,7 @@ impl OutputArea {
                     vec![ratatui::text::Span::styled(text.clone(), style)],
                     self.term_width,
                     Some(ratatui::text::Span::styled("  ".to_string(), style)),
+                    WrapMode::Char,
                 );
                 for (wrap_idx, rendered) in wrapped.into_iter().enumerate() {
                     let logic_idx = base_idx + i;
