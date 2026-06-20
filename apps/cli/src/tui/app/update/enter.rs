@@ -47,6 +47,7 @@ impl App {
         let images: Vec<sdk::ToolResultImage> =
             submission.images.into_iter().map(Into::into).collect();
         let event = sdk::ChatInputEvent::UserMessage {
+            id: sdk::InputId::new_v7(),
             text: submission.text.clone(),
             images,
         };

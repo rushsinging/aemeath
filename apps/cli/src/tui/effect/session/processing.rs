@@ -430,6 +430,7 @@ mod tests {
     async fn test_tui_input_port_recv_next_and_close() {
         let (tx, port) = TuiInputEventPort::channel();
         tx.send(sdk::ChatInputEvent::UserMessage {
+            id: sdk::InputId::new_v7(),
             text: "x".into(),
             images: vec![],
         })

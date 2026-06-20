@@ -82,7 +82,7 @@ impl PendingInputBuffer {
 
     fn should_accept(&mut self, event: &ChatInputEvent) -> bool {
         match event {
-            ChatInputEvent::UserMessage { text, images } => self
+            ChatInputEvent::UserMessage { text, images, .. } => self
                 .seen_user_messages
                 .insert((text.clone(), images.clone())),
             ChatInputEvent::ControlCommand { .. } | ChatInputEvent::Cancel => true,
@@ -165,7 +165,8 @@ where
                     break;
                 }
             }
-            ChatInputEvent::UserMessage { text, images } => {
+            ChatInputEvent::UserMessage { id, text, images } => {
+                let _ = id; // Task 4 will use id for homing
                 log::info!(target: LOG_TARGET, "{}",
                     serde_json::to_string(&serde_json::json!({
                         "event_type": "user_input",
@@ -295,6 +296,7 @@ mod tests {
         // MockInputPort: 用 tokio::sync::mpsc 支持 recv_next
         let (tx, port) = MockInputPort::new();
         tx.send(ChatInputEvent::UserMessage {
+            id: sdk::InputId::new_v7(),
             text: "hi".into(),
             images: vec![],
         })

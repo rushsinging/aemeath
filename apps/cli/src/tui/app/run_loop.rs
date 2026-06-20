@@ -210,6 +210,7 @@ impl App {
                     self.chat.start_processing();
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::UserMessage {
+                            id: sdk::InputId::new_v7(),
                             text: prompt,
                             images: Vec::new(),
                         });
