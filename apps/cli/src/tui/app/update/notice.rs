@@ -62,6 +62,21 @@ impl App {
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
+    /// 按 InputId 精确清除单条「排队中」用户提交，并刷新 live-status 投影。
+    ///
+    /// 用于 UserMessagesAdded handler 按 input_id 逐条清除占位的场景：仅移除与
+    /// 给定 `input_id` 匹配的那一条，不影响其他排队项。
+    /// 与 `clear_queued_submission_echo`（全清）成对提供，各有适用场景。
+    pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &sdk::InputId) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::ClearQueuedSubmissionById {
+                input_id: input_id.clone(),
+            });
+        self.mark_output_dirty();
+        self.refresh_live_status_from_model();
+    }
+
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 替代旧的命令式 `OutputArea::push_error`；错误经 `ConversationBlock::Error`

@@ -119,6 +119,9 @@ impl ConversationModel {
                 self.queue_submission(input_id, text)
             }
             ConversationIntent::ClearQueuedSubmissions => self.clear_queued_submissions(),
+            ConversationIntent::ClearQueuedSubmissionById { input_id } => {
+                self.clear_queued_submission_by_id(&input_id)
+            }
             ConversationIntent::RecordAgentProgress {
                 chat_id,
                 turn_id,
@@ -445,6 +448,27 @@ impl ConversationModel {
             .retain(|item| !matches!(item, OutputTimelineItem::QueuedUserMessage { .. }));
         vec![
             ConversationChange::QueuedSubmissionsCleared { count },
+            ConversationChange::OutputDirty,
+        ]
+    }
+
+    fn clear_queued_submission_by_id(
+        &mut self,
+        input_id: &sdk::InputId,
+    ) -> Vec<ConversationChange> {
+        let before = self.queued_submissions.len();
+        self.queued_submissions.retain(|q| &q.input_id != input_id);
+        self.blocks.retain(|b| {
+            !matches!(b,
+                ConversationBlock::QueuedUserMessage { input_id: bid, .. } if bid == input_id)
+        });
+        self.timeline.retain(|it| {
+            !matches!(it,
+                OutputTimelineItem::QueuedUserMessage { input_id: tid, .. } if tid == input_id)
+        });
+        let removed = before - self.queued_submissions.len();
+        vec![
+            ConversationChange::QueuedSubmissionsCleared { count: removed },
             ConversationChange::OutputDirty,
         ]
     }
