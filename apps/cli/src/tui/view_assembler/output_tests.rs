@@ -11,7 +11,7 @@ fn test_output_assembler_maps_tool_status_to_icon() {
     let mut conversation = ConversationModel::default();
     add_completed_tool_after_thinking(&mut conversation, "Read", "ok");
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let tool = vm
         .roots
         .iter()
@@ -34,7 +34,7 @@ fn test_output_assembler_keeps_tool_result_inside_tool_after_thinking() {
         "/tmp/docs/bug/active.md:18:match",
     );
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let diagnostic_results = vm
         .roots
         .iter()
@@ -67,7 +67,7 @@ fn test_output_assembler_embedded_result_carries_output_for_preview() {
     let full_output = "line1\nline2\nline3\nline4\nline5\nline6";
     add_completed_tool_after_thinking(&mut conversation, "Read", full_output);
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let diagnostic_results = vm
         .roots
         .iter()
@@ -114,7 +114,7 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
         text: "我看到 active bug 列表，下面是分析。".to_string(),
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let tool_node = vm
         .roots
         .iter()
@@ -180,7 +180,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         status: ToolCallStatus::Ready,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let diagnostics = vm
         .roots
         .iter()
@@ -231,7 +231,7 @@ fn test_output_assembler_uses_error_summary_for_failed_tool_result() {
     let mut conversation = ConversationModel::default();
     add_failed_tool_after_thinking(&mut conversation, "Read", "permission denied");
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 7, None);
     let tool = vm
         .roots
         .iter()
@@ -253,7 +253,7 @@ fn test_output_assembler_attaches_tool_result_as_child_of_tool_call() {
     let mut conversation = ConversationModel::default();
     add_completed_tool_after_thinking(&mut conversation, "Read", "ok");
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
 
     let tool_node = vm
         .roots
@@ -306,7 +306,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         status: ToolCallStatus::Ready,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let tool = vm
         .roots
         .iter()
@@ -361,7 +361,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         status: ToolCallStatus::Ready,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
 
     let tool_node = vm
         .roots
@@ -420,7 +420,7 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         image_count: 0,
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let tool = vm
         .roots
         .iter()
@@ -474,7 +474,7 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
         message: "Agent turn 1/200, messages: 2, est_tokens: 500".to_string(),
     });
 
-    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1);
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
     let tool = vm
         .roots
         .iter()

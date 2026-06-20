@@ -45,6 +45,7 @@ mod tests {
             activity_summary: None,
             result_summary: None,
             result_payload: None,
+            working_root: None,
             collapsible: true,
             collapsed: false,
         });
