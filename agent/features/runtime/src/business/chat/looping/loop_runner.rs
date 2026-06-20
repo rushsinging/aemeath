@@ -165,6 +165,58 @@ where
     let mut config_snapshot =
         crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
     loop {
+        // ── loop 顶部空闲门（Task 4，位于回合头之前）──
+        // 若没有「待 assistant 响应的用户回合」（末条消息非 User），且 pending_input
+        // 缓冲也为空（上游还没有新输入就绪），则在发出任何回合信号之前先 idle-wait：
+        // 等到真正收到 UserMessage 后才开始本回合。
+        //
+        // **必须置于 `turn_count += 1` / `StartTurn` / `TurnChanged` /
+        // `handle_turn_boundary_config` 之前**：否则空 seed 启动（TUI start-once 场景）
+        // 会在尚无用户输入时就发出 `TurnChanged(1)`、跑 turn 边界配置，产生「回合 1 /
+        // 处理中」的假信号；前置后，回合编号与回合信号只在真正有输入、回合真正开始时
+        // 才推进（首个真实回合 = 1）。
+        //
+        // 这使 chat() 能以空 messages 或纯历史（末尾为 assistant）启动，loop 会阻塞
+        // 等待第一条输入，而不是以空消息列表发起回合。
+        //
+        // 与回合完成后的空闲（completion arm）协作：completion arm 已 idle-wait 并把下
+        // 一条 UserMessage append 进 messages 后再 continue；此时 has_pending_user_turn
+        // 为 true，不会触发 double-wait。
+        //
+        // FSM 注意：此处 FSM 处于 Running 态（loop 首轮默认 Running；后续轮经
+        // `ResumeRunning` 回到 Running）。loop-top idle 是「回合前置等待」，不经过
+        // Stopping→Idle→Done 路径；Shutdown 时直接从 Running 经 TryStop→StopSucceeded
+        // 到 Done。
+        //
+        // `None` cancel_slot：前置等待不重置 cancel 槽——此时 loop 体的 `cancel` clone
+        // 尚未读取（在本门之后才 `current_cancel_token`），重置会破坏首回合的外部 cancel。
+        if !has_pending_user_turn(&messages) && pending_input.is_empty() {
+            match idle_until_resume_or_shutdown(
+                &input_events,
+                &sink,
+                &mut pending_input,
+                &mut messages,
+                None,
+            )
+            .await
+            {
+                IdleResult::Resumed => {
+                    // messages 已含新 UserMessage（由 idle 门内的 BeforeLlm gate 附加），
+                    // pending_input 已清空。继续进入下方回合头：turn_count 推进、
+                    // turn_rollback_baseline 在用户消息已入、assistant 未产生处捕获。
+                }
+                IdleResult::Shutdown => {
+                    loop_fsm.transition(ChatLoopTransition::TryStop);
+                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                    loop_fsm.assert_state(
+                        ChatLoopState::Done,
+                        "loop-top idle shuts down on channel close",
+                    );
+                    break;
+                }
+            }
+        }
+
         turn_count += 1;
         let turn_id = ChatTurnId::new_v7();
         let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id);
@@ -253,45 +305,6 @@ where
                     loop_fsm.assert_state(
                         ChatLoopState::Done,
                         "cancel idle shuts down on channel close",
-                    );
-                    break;
-                }
-            }
-        }
-
-        // ── loop 顶部空闲门（Task 4）──
-        // 若没有「待 assistant 响应的用户回合」（末条消息非 User），且 pending_input
-        // 缓冲也为空（上游还没有新输入就绪），则在进入本次回合的 LLM 调用之前先
-        // idle-wait：等到真正收到 UserMessage 后才继续。
-        //
-        // 这使 chat() 能以空 messages 或纯历史（末尾为 assistant）启动，loop 会阻塞
-        // 等待第一条输入，而不是以空消息列表发起 LLM 调用。
-        //
-        // 与回合完成后的空闲（completion arm）协作：completion arm 已 idle-wait 并把下
-        // 一条 UserMessage append 进 messages 后再 continue；此时 has_pending_user_turn
-        // 为 true，不会触发 double-wait。
-        //
-        // FSM 注意：此处 FSM 处于 Running 态（StartTurn 已 transition）。
-        // loop-top idle 是「回合前置等待」，不经过 Stopping→Idle→Done 路径；
-        // Shutdown 时直接从 Running 经 TryStop→StopSucceeded 到 Done。
-        if !has_pending_user_turn(&messages) && pending_input.is_empty() {
-            match wait_for_first_turn_input(&input_events, &sink, &mut pending_input, &mut messages)
-                .await
-            {
-                IdleResult::Resumed => {
-                    // messages 已含新 UserMessage（由 wait_for_first_turn_input 内
-                    // 的 BeforeLlm gate 附加），pending_input 已清空。
-                    // 刷新 turn_rollback_baseline：用户消息已入、assistant 未产生。
-                    turn_rollback_baseline = messages.len();
-                    // 正常继续进入 compact → BeforeLlm gate（gate 此时 pending 为空，
-                    // 是无操作 drain，不重复附加）。
-                }
-                IdleResult::Shutdown => {
-                    loop_fsm.transition(ChatLoopTransition::TryStop);
-                    loop_fsm.transition(ChatLoopTransition::StopSucceeded);
-                    loop_fsm.assert_state(
-                        ChatLoopState::Done,
-                        "loop-top idle shuts down on channel close",
                     );
                     break;
                 }
@@ -672,7 +685,7 @@ where
                         &sink,
                         &mut pending_input,
                         &mut messages,
-                        &cancel_slot,
+                        Some(&cancel_slot),
                     )
                     .await
                     {
@@ -915,18 +928,24 @@ fn reset_cancel(slot: &std::sync::Mutex<CancellationToken>) {
 /// 返回 `Resumed` 表示已有新用户消息 append 进 `messages`，调用方应恢复跑回合；
 /// 返回 `Shutdown` 表示输入通道关闭，调用方应退出常驻 loop。
 ///
-/// 空闲期语义（与回合完成后空闲一致）：
+/// 空闲期语义：
 /// - 单独 `ControlCommand`（/save、/model…）/ `Cancel` / `/clear` 都 append 0 条用户
 ///   消息 → 保持空闲，继续等下一条，NEVER 在陈旧历史上跑空回合。
-/// - 空闲期收到 `Cancel`（gate 决策 `CancelCurrentLoop`，或 `/clear` 的 `AbortCurrentLoop`）：
-///   此时 `cancel_impl` 可能已取消「当前槽里的 token」。为避免这枚 stale-cancelled token
-///   污染随后真正恢复的回合，**在 idle 内观测到 abort/cancel 决策时重置 token**。
+///
+/// `cancel_slot` 参数统一了两种调用场景（DRY，消除两个近乎相同的空闲函数）：
+/// - `Some(slot)`：**回合完成 / cancel 后的空闲**。此时 loop 已经跑过 LLM/tool，
+///   `cancel_impl` 可能已取消「当前槽里的 token」。为避免这枚 stale-cancelled token
+///   污染随后真正恢复的回合，在「收到新用户消息恢复运行前」以及「空闲期观测到
+///   abort/cancel 决策时」都 `reset_cancel`，保证新回合必从干净 token 起步。
+/// - `None`：**loop 顶部首回合前置等待**。此时 loop 尚未开始任何 LLM 调用，
+///   且 loop 体的 `cancel` clone 在本函数返回**之后**才从槽读取，故**不能** `reset_cancel`
+///   ——重置会丢弃外部已经持有引用的 token，破坏首回合的外部 cancel 能力。
 async fn idle_until_resume_or_shutdown<I, S>(
     input_events: &I,
     sink: &S,
     pending: &mut PendingInputBuffer,
     messages: &mut Vec<Message>,
-    cancel_slot: &std::sync::Mutex<CancellationToken>,
+    cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
 ) -> IdleResult
 where
     I: InputEventDrainPort,
@@ -941,8 +960,11 @@ where
                     // 并发兜底：空闲期间外部可能对槽里的 token 直接调过 cancel()
                     // （`cancel_impl`，无对应输入事件经过本臂），使其变为已取消。
                     // 若不处理，下个真实回合会读到这枚 stale-cancelled token 而被误取消。
-                    // 因此在恢复运行前无条件重置为干净 token，保证「新回合必从干净 token 起步」。
-                    reset_cancel(cancel_slot);
+                    // 因此在恢复运行前无条件重置为干净 token（仅 `Some` 场景；首回合前置
+                    // 等待 `None` 不重置——见函数文档）。
+                    if let Some(slot) = cancel_slot {
+                        reset_cancel(slot);
+                    }
                     return IdleResult::Resumed;
                 }
                 if matches!(
@@ -950,45 +972,12 @@ where
                     GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
                 ) {
                     // 空闲期取消（经输入通道的 Cancel/`/clear` 事件）：重置 token，
-                    // 防止这枚已取消的 token 污染下一个真实回合。
-                    reset_cancel(cancel_slot);
+                    // 防止这枚已取消的 token 污染下一个真实回合（仅 `Some` 场景）。
+                    if let Some(slot) = cancel_slot {
+                        reset_cancel(slot);
+                    }
                 }
                 // 0 append（命令 / 取消 / 空）→ 留在空闲，继续等下一条输入。
-                continue;
-            }
-            IdleResult::Shutdown => return IdleResult::Shutdown,
-        }
-    }
-}
-
-/// Loop 顶部前置等待：在回合尚未开始前等到首条「真实的新用户消息」。
-///
-/// 与 `idle_until_resume_or_shutdown` 的区别：本函数**不** `reset_cancel`，
-/// 因为此时 loop 尚未开始任何 LLM 调用，不存在被 stale-cancelled token 污染的风险；
-/// 保留 cancel 槽不变，使调用方在后续 LLM 调用时能正常被取消。
-///
-/// 返回 `Resumed` 表示已有新用户消息 append 进 `messages`，可继续跑回合；
-/// 返回 `Shutdown` 表示输入通道关闭，调用方应退出常驻 loop。
-async fn wait_for_first_turn_input<I, S>(
-    input_events: &I,
-    sink: &S,
-    pending: &mut PendingInputBuffer,
-    messages: &mut Vec<Message>,
-) -> IdleResult
-where
-    I: InputEventDrainPort,
-    S: ChatEventSink,
-{
-    loop {
-        match await_idle_input(input_events, pending).await {
-            IdleResult::Resumed => {
-                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages).await;
-                if gate.appended_user_messages > 0 {
-                    // 收到真正的新用户消息（已 append 进 messages）：前置等待结束。
-                    // 不重置 cancel 槽（与 idle_until_resume_or_shutdown 的区别）。
-                    return IdleResult::Resumed;
-                }
-                // 0 append（命令 / 取消 / 空）→ 留在等待态，继续等下一条输入。
                 continue;
             }
             IdleResult::Shutdown => return IdleResult::Shutdown,
@@ -1035,5 +1024,12 @@ where
     loop_fsm.transition(ChatLoopTransition::TryStop);
     loop_fsm.transition(ChatLoopTransition::Idle);
     loop_fsm.assert_state(ChatLoopState::Idle, "cancel aborts turn then idles");
-    idle_until_resume_or_shutdown(input_events, sink, pending_input, messages, cancel_slot).await
+    idle_until_resume_or_shutdown(
+        input_events,
+        sink,
+        pending_input,
+        messages,
+        Some(cancel_slot),
+    )
+    .await
 }

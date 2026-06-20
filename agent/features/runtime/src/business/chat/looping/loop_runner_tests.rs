@@ -1751,6 +1751,16 @@ async fn test_chat_impl_idle_until_first_input_event() {
             "未投递输入前不得出现 DoneWithDuration: {:?}",
             driver_sink.events()
         );
+        // Finding 2：idle gate 已前置到回合头之前，空 seed 启动在收到首条输入前
+        // 不得发出任何 TurnChanged（否则是「回合 1 / 处理中」假信号）。
+        assert!(
+            driver_sink
+                .events()
+                .iter()
+                .all(|e| !e.starts_with("TurnChanged")),
+            "未投递输入前不得发出 TurnChanged（前置 idle gate 避免假回合）: {:?}",
+            driver_sink.events()
+        );
 
         // 投递首条 UserMessage，loop 应从 idle 恢复、运行一个回合、发出 DoneWithDuration。
         input_tx
@@ -1825,5 +1835,121 @@ async fn test_chat_impl_idle_until_first_input_event() {
             .count(),
         1,
         "应产出恰好一个 DoneWithDuration: {events:?}"
+    );
+    // Finding 2：全程恰好一次 TurnChanged，且回合编号为 1（首个真实回合 = 1，
+    // 前置 idle gate 不会消耗回合号）。空 seed 启动不产生假回合。
+    let turn_changes: Vec<&String> = events
+        .iter()
+        .filter(|e| e.starts_with("TurnChanged"))
+        .collect();
+    assert_eq!(
+        turn_changes,
+        vec![&"TurnChanged:1".to_string()],
+        "空 seed 启动应恰好发出一次 TurnChanged:1（首个真实回合编号为 1）: {events:?}"
+    );
+}
+
+/// Finding 2 专项：空 seed 启动时，loop-top idle gate 位于回合头之前，
+/// 收到首条真实输入前 NEVER 发出任何回合信号（`TurnChanged`）或 turn 边界副作用。
+///
+/// 与 `test_chat_impl_idle_until_first_input_event` 的区别：本测试以 `RecordingSink`
+/// 捕获「投递首条输入的那一刻」的事件快照，**确定性**断言该快照内不含 `TurnChanged`
+/// （前置 idle gate 的直接观测）。若 gate 仍位于 `TurnChanged` 之后（回归），快照会
+/// 含 `TurnChanged:1` 假信号 → 断言失败。随后真实输入触发恰好一个回合（`TurnChanged:1`
+/// 在输入之后出现），drop 发送端关闭通道使 loop shutdown 退出。
+#[tokio::test]
+async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    // 注意：loop 启动前 NEVER 投递任何输入（空 seed + 无 pending）→ loop 必先 idle-wait。
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        // 给 loop 充分调度机会去（错误地）跑回合头、发 TurnChanged。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        // 捕获「投递首条输入前」的事件快照。
+        let snapshot_before_input = driver_sink.events();
+        assert!(
+            snapshot_before_input
+                .iter()
+                .all(|e| !e.starts_with("TurnChanged")),
+            "空 seed 启动在收到首条输入前不得发出 TurnChanged（前置 idle gate 避免假回合）: {snapshot_before_input:?}"
+        );
+        assert_eq!(
+            driver_provider.calls().len(),
+            0,
+            "收到首条输入前不得调用 LLM: {snapshot_before_input:?}"
+        );
+
+        // 投递首条真实用户消息 → 恢复运行、产出恰好一个回合。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            provider.clone(),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(), // 空 seed：无待答回合，loop 必须先 idle-wait
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-no-turn-signal-before-first-input".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 首条输入触发后：恰好一次 TurnChanged，编号 1（首个真实回合 = 1）。
+    let turn_changes: Vec<&String> = events
+        .iter()
+        .filter(|e| e.starts_with("TurnChanged"))
+        .collect();
+    assert_eq!(
+        turn_changes,
+        vec![&"TurnChanged:1".to_string()],
+        "真实输入后应恰好发出一次 TurnChanged:1: {events:?}"
+    );
+    // TurnChanged 必在首次 LLM 调用（输入处理后）之前的同一回合内；整体恰好一次 LLM 调用。
+    assert_eq!(
+        provider.calls(),
+        vec!["hello".to_string()],
+        "全程应恰好被首条真实用户消息触发一次 LLM 调用: {events:?}"
     );
 }
