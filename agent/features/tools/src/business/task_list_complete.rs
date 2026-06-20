@@ -104,7 +104,7 @@ mod tests {
         let result = tool.call(serde_json::json!({}), &test_ctx()).await;
 
         assert!(result.is_error);
-        assert!(result.output.contains("no active task list"));
+        assert!(result.text.contains("no active task list"));
     }
 
     #[tokio::test]

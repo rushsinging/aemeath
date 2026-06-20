@@ -186,7 +186,7 @@ async fn test_agent_tool_task_id_missing_task_errors() {
         .await;
 
     assert!(result.is_error);
-    assert!(result.output.contains("task not found"));
+    assert!(result.text.contains("task not found"));
 }
 
 #[tokio::test]

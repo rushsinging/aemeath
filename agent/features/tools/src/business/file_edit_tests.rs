@@ -61,10 +61,10 @@ async fn test_file_edit_success_diff_marker_includes_real_line_number() {
         )
         .await;
 
-    assert!(!result.is_error, "edit should succeed: {}", result.output);
+    assert!(!result.is_error, "edit should succeed: {}", result.text);
     assert!(
-        result.output.contains("---DIFF:LINE:2---"),
+        result.text.contains("---DIFF:LINE:2---"),
         "diff marker should include real line number, got: {}",
-        result.output
+        result.text
     );
 }

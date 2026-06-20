@@ -62,27 +62,27 @@ pub trait Tool: Send + Sync {
 
 /// Typed tool result（工具源返回这个）。
 pub struct TypedToolResult<T: Serialize + Send + 'static> {
-    /// 文本输出（TUI 显示 + 发给 LLM）
-    pub output: String,
-    /// 结构化数据（adapter 自动序列化为 JSON）
+    /// 给 LLM 的文本（经 `to_llm_view` text-first 投影）。
+    pub text: String,
+    /// 结构化数据（adapter 自动序列化为 JSON，给 TUI）。
     pub data: Option<T>,
     pub is_error: bool,
     pub images: Vec<ImageData>,
 }
 
 impl<T: Serialize + Send + 'static> TypedToolResult<T> {
-    pub fn success(output: impl Into<String>, data: T) -> Self {
+    pub fn success(text: impl Into<String>, data: T) -> Self {
         Self {
-            output: output.into(),
+            text: text.into(),
             data: Some(data),
             is_error: false,
             images: vec![],
         }
     }
 
-    pub fn error(output: impl Into<String>) -> Self {
+    pub fn error(text: impl Into<String>) -> Self {
         Self {
-            output: output.into(),
+            text: text.into(),
             data: None,
             is_error: true,
             images: vec![],
@@ -200,7 +200,7 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
             None => Value::Null,
         };
         ToolResult {
-            output: result.output,
+            output: result.text,
             content,
             is_error: result.is_error,
             images: result.images,
