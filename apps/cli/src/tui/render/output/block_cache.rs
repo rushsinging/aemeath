@@ -2,7 +2,6 @@
 
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
 use std::collections::HashMap;
-use std::rc::Rc;
 
 /// block cache key。`text_width` 与 `RenderCtx.text_width` 同义：
 /// 已扣除 gutter 的可用文本宽度（参见 #329 语义约定）。
@@ -65,6 +64,7 @@ impl BlockCache {
 mod tests {
     use super::*;
     use crate::tui::render::output::rendered::RenderedLine;
+    use std::rc::Rc;
 
     fn block(id: &str, n: usize) -> RenderedBlock {
         RenderedBlock {
