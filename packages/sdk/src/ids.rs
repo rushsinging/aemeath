@@ -254,6 +254,59 @@ impl ToolCallId {
 impl_id_type!(ToolCallId);
 
 // ---------------------------------------------------------------------------
+// InputId
+// ---------------------------------------------------------------------------
+
+/// Internal input ID (UUIDv7).
+#[derive(Debug, Clone)]
+pub struct InputId(Uuid, String);
+
+impl InputId {
+    /// Generate a new UUIDv7 input ID.
+    pub fn new_v7() -> Self {
+        let uuid = Uuid::now_v7();
+        Self(uuid, cache(uuid))
+    }
+
+    /// Create a InputId from a legacy string or generate new UUIDv7.
+    /// Alias for `from_legacy_or_new` — use `new_v7()` for fresh IDs.
+    pub fn new(s: impl AsRef<str>) -> Self {
+        Self::from_legacy_or_new(s.as_ref())
+    }
+
+    /// Parse a UUIDv7 string as a InputId.
+    pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {
+        let uuid = Uuid::parse_str(s).map_err(|_| IdParseError::InvalidUuid(s.to_string()))?;
+        if uuid.get_version_num() != 7 {
+            return Err(IdParseError::NotVersion7(s.to_string()));
+        }
+        Ok(Self(uuid, cache(uuid)))
+    }
+
+    /// Convert from legacy string or generate new UUIDv7.
+    /// If the input is a valid UUIDv7, preserves it.
+    /// Otherwise, deterministically generates a UUIDv7 from the input string.
+    pub fn from_legacy_or_new(s: &str) -> Self {
+        Self::parse_uuid7(s).unwrap_or_else(|_| {
+            let uuid = deterministic_uuidv7(s);
+            Self(uuid, cache(uuid))
+        })
+    }
+
+    /// Get the inner UUID.
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+
+    /// Get string representation (borrowed from the cached field).
+    pub fn as_str(&self) -> &str {
+        &self.1
+    }
+}
+
+impl_id_type!(InputId);
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -398,6 +451,22 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_string(), "expected string, got: {parsed}");
         let restored: ChatTurnId = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, original);
+    }
+
+    #[test]
+    fn test_input_id_new_v7_is_version_7() {
+        let id = InputId::new_v7();
+        assert_eq!(id.as_uuid().get_version_num(), 7);
+    }
+
+    #[test]
+    fn test_input_id_serde_roundtrip_preserves_uuid() {
+        let original = InputId::new_v7();
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_string(), "expected string, got: {parsed}");
+        let restored: InputId = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, original);
     }
 }

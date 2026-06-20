@@ -39,7 +39,7 @@ pub use commands::{
 };
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
-pub use ids::{ChatId, ChatTurnId, IdParseError, ToolCallId};
+pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, ToolCallId};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use session::{
