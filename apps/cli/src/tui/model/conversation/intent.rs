@@ -69,7 +69,6 @@ pub enum ConversationIntent {
         input_id: sdk::InputId,
         text: String,
     },
-    ClearQueuedSubmissions,
     ClearQueuedSubmissionById {
         input_id: sdk::InputId,
     },

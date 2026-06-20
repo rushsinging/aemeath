@@ -15,36 +15,12 @@ fn test_app() -> App {
     )
 }
 
-#[test]
-fn test_update_ui_drain_queued_input_clears_placeholder_without_user_echo() {
-    let mut app = test_app();
-    app.input.push_queue("a\nb\nc".to_string());
-    app.enqueue_submission_echo(sdk::InputId::new_v7(), "[Copied Text 1]");
-    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
-    let (ui_tx, _ui_rx) = mpsc::channel(1);
-    let spawn_refs = SpawnContextRefs { agent_client: None };
-
-    app.update_ui(UiEvent::DrainQueuedInput { reply_tx }, &ui_tx, &spawn_refs);
-
-    assert_eq!(reply_rx.try_recv(), Ok(vec!["a\nb\nc".to_string()]));
-    assert!(app.model.conversation.blocks.iter().all(
-        |block| !matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")
-    ));
-    assert!(app
-        .model
-        .conversation
-        .blocks
-        .iter()
-        .all(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. })));
-}
-
 /// A3 Task 4: MessagesSync 退出 display —— 仅镜像 chat.messages，不产生 UserMessage 回显块，
-/// 也不清除队列或占位（回显与占位清理由 UserMessagesAdded 负责）。
+/// 也不清除占位（回显与占位清理由 UserMessagesAdded 负责）。
 #[test]
 fn test_update_ui_messages_sync_only_mirrors_no_echo() {
     let mut app = test_app();
     app.chat.messages.push(sdk::ChatMessage::user_text("first"));
-    app.input.push_queue("a\nb\nc".to_string());
     let echo_id = sdk::InputId::new_v7();
     app.enqueue_submission_echo(echo_id.clone(), "[Copied Text 1]");
     let messages = vec![
@@ -64,8 +40,7 @@ fn test_update_ui_messages_sync_only_mirrors_no_echo() {
         !matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")
     }));
 
-    // 队列与占位未被清除（归 UserMessagesAdded 负责）
-    assert_eq!(app.input.queue_len(), 1, "MessagesSync 不应清队列");
+    // 占位未被清除（归 UserMessagesAdded 负责）
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         1,

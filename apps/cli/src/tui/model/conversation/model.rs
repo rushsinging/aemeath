@@ -118,7 +118,6 @@ impl ConversationModel {
             ConversationIntent::QueueSubmission { input_id, text } => {
                 self.queue_submission(input_id, text)
             }
-            ConversationIntent::ClearQueuedSubmissions => self.clear_queued_submissions(),
             ConversationIntent::ClearQueuedSubmissionById { input_id } => {
                 self.clear_queued_submission_by_id(&input_id)
             }
@@ -435,19 +434,6 @@ impl ConversationModel {
         });
         vec![
             ConversationChange::QueuedSubmissionAdded { id },
-            ConversationChange::OutputDirty,
-        ]
-    }
-
-    fn clear_queued_submissions(&mut self) -> Vec<ConversationChange> {
-        let count = self.queued_submissions.len();
-        self.queued_submissions.clear();
-        self.blocks
-            .retain(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. }));
-        self.timeline
-            .retain(|item| !matches!(item, OutputTimelineItem::QueuedUserMessage { .. }));
-        vec![
-            ConversationChange::QueuedSubmissionsCleared { count },
             ConversationChange::OutputDirty,
         ]
     }

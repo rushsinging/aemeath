@@ -1,6 +1,6 @@
 use super::*;
 
-/// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位，input_queue 为空。
+/// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位。
 #[test]
 fn test_busy_slash_no_placeholder() {
     let mut app = App::new(
@@ -28,42 +28,11 @@ fn test_busy_slash_no_placeholder() {
         "busy-slash 应产出 ControlCommand 事件，got: {:?}",
         result.effects
     );
-    // input_queue 应为空——slash 命令不入文本队列
-    assert_eq!(app.input.queue_len(), 0, "busy-slash 后 input_queue 应为空");
     // conversation 中不应有 QueuedUserMessage 块
     assert!(
         app.model.conversation.queued_submissions.is_empty(),
         "busy-slash 后不应建占位 QueuedUserMessage"
     );
-}
-
-/// Task 5 (A3) — Up 键：input_queue 非空时不再恢复文本（光标/历史导航）。
-#[test]
-fn test_up_arrow_no_queue_restore_when_queue_nonempty() {
-    let mut app = App::new(
-        "test-session".to_string(),
-        std::path::PathBuf::from("/tmp"),
-        "test-model".to_string(),
-    );
-    app.chat.start_processing();
-    // 手动往 queue 放一条（模拟旧路径遗留，或其他来源）
-    app.input.push_queue("queued-text".to_string());
-    // input area 为空
-    assert!(app.model.input.document.is_empty());
-
-    let spawn_refs = SpawnContextRefs { agent_client: None };
-    let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
-
-    let _ = app.update_key(key, &spawn_refs);
-
-    // input area 不应被恢复为 queue 内容
-    assert!(
-        app.model.input.document.is_empty(),
-        "Up 键不应再将 queue 内容恢复到 input area，got: {:?}",
-        app.model.input.document.buffer
-    );
-    // queue 不应被清空（Up 键不再触发 drain）
-    assert_eq!(app.input.queue_len(), 1, "Up 键不应 drain input_queue");
 }
 
 #[test]
@@ -156,12 +125,6 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
 
     let result = app.update_key(key, &spawn_refs);
 
-    // A3 Task 1：忙时提交文本统一走事件通道，不再双写 input_queue（#390 A3 Task 1）。
-    assert_eq!(
-        app.input.queue_len(),
-        0,
-        "忙时 submit 后 input_queue 应为空"
-    );
     assert_eq!(
         app.live_status_view_model().queued_lines,
         vec!["> [Copied 4 lines]"]
@@ -174,8 +137,7 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
     ));
 }
 
-/// Task 5 (A3) — Up 键队列召回分支已删除：队列非空时 Up 键走光标/历史导航，不恢复队列内容。
-/// 原测试断言 Up 键恢复 queue，现已翻转为新行为。
+/// Task 5 (A3) — Up 键走光标/历史导航，不清除占位区。
 #[test]
 fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
     let mut app = App::new(
@@ -184,10 +146,8 @@ fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
         "test-model".to_string(),
     );
     app.chat.start_processing();
-    // 入队两条消息（模拟旧路径写入，Up 键不再召回）
-    app.input.push_queue("first".to_string());
+    // 入队两条占位（模拟忙时提交）
     app.enqueue_submission_echo(sdk::InputId::new_v7(), "first");
-    app.input.push_queue("second".to_string());
     app.enqueue_submission_echo(sdk::InputId::new_v7(), "second");
 
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -195,14 +155,12 @@ fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
 
     let _ = app.update_key(key, &spawn_refs);
 
-    // Task 5: queue 不应被清空（Up 键不再 drain queue）
-    assert_eq!(app.input.queue_len(), 2, "Up 键不应 drain input_queue");
     // input area 不应被恢复
     assert!(
         app.model.input.document.is_empty(),
         "Up 键不应恢复 queue 内容到 input area"
     );
-    // queued_submissions 不应被清除（Up 键不再触发 clear_queued_submission_echo）
+    // queued_submissions 不应被清除（Up 键不触发清占位）
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         2,
@@ -211,7 +169,7 @@ fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
 }
 
 #[test]
-fn test_up_arrow_history_recall_when_queue_empty() {
+fn test_up_arrow_history_recall() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -221,14 +179,12 @@ fn test_up_arrow_history_recall_when_queue_empty() {
     app.model
         .input
         .apply(InputIntent::ReplaceHistory(vec!["past input".to_string()]));
-    // queue 为空
-    assert_eq!(app.input.queue_len(), 0);
 
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
 
     let _ = app.update_key(key, &spawn_refs);
 
-    // queue 空时应走 history recall
+    // Up 键走 history recall
     assert_eq!(app.model.input.document.buffer, "past input");
 }

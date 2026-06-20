@@ -237,16 +237,6 @@ impl App {
                 }
                 self.spinner_stop();
             }
-            UiEvent::DrainQueuedInput { reply_tx } => {
-                let queued = self.input.drain_queue();
-                if !queued.is_empty() {
-                    // 只清除「排队中」显示块（QueuedUserMessage）。正式 UserMessage
-                    // 由 Runtime 的 MessagesSync 单一真相同步，避免 drain 后双重渲染。
-                    self.clear_queued_submission_echo();
-                    self.spinner_phase(SpinnerPhase::ThinkingQueued);
-                }
-                let _ = reply_tx.send(queued);
-            }
             UiEvent::CurrentTurnChanged(turn) => {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });
             }

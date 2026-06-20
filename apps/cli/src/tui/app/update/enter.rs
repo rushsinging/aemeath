@@ -22,7 +22,6 @@ impl App {
             return UpdateResult::none();
         }
         if submission.text.starts_with('/') {
-            self.input.push_queue(submission.text.clone());
             return UpdateResult {
                 effects: Vec::new(),
                 spawn_effect: None,
@@ -236,10 +235,9 @@ mod tests {
         assert!(has_queued, "首条复制文本应以折叠占位符入排队显示");
     }
 
-    /// Step 1（A3 Task 1）：submit 后 input_queue 必须为空——文本已统一走事件通道，
-    /// 不应再双写 input_queue（双 append 根因）。
+    /// Step 1（A3 Task 1）：submit 后文本统一走事件通道，effects 含 SendChatInputEvent::UserMessage。
     #[test]
-    fn submit_does_not_push_queue() {
+    fn submit_routes_via_event_channel() {
         let mut app = test_app();
         app.model
             .input
@@ -247,12 +245,6 @@ mod tests {
 
         let result = app.update_enter();
 
-        // 文本队列必须为空——只走事件通道
-        assert!(
-            app.input.input_queue.is_empty(),
-            "submit 后 input_queue 应为空，当前 = {:?}",
-            app.input.input_queue
-        );
         // effects 必须含一个 SendChatInputEvent::UserMessage
         assert_eq!(
             sent_user_message_text(&result),

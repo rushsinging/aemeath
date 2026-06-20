@@ -902,44 +902,6 @@ fn test_queue_submission_pushes_queued_user_message_block() {
 }
 
 #[test]
-fn test_clear_queued_submissions_removes_blocks() {
-    // 边界 + 清理：冲刷队列后 QueuedUserMessage 块应被全部移除。
-    let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::QueueSubmission {
-        input_id: sdk::InputId::new_v7(),
-        text: "a".to_string(),
-    });
-    model.apply(ConversationIntent::QueueSubmission {
-        input_id: sdk::InputId::new_v7(),
-        text: "b".to_string(),
-    });
-
-    let changes = model.apply(ConversationIntent::ClearQueuedSubmissions);
-
-    assert!(changes.iter().any(|c| matches!(
-        c,
-        ConversationChange::QueuedSubmissionsCleared { count } if *count == 2
-    )));
-    assert!(model.queued_submissions.is_empty());
-    assert!(!model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::QueuedUserMessage { .. }
-    )));
-}
-
-#[test]
-fn test_clear_queued_submissions_on_empty_is_noop() {
-    // 错误/空路径：无排队项时清理返回 count=0，不 panic。
-    let mut model = ConversationModel::default();
-    let changes = model.apply(ConversationIntent::ClearQueuedSubmissions);
-
-    assert!(changes.iter().any(|c| matches!(
-        c,
-        ConversationChange::QueuedSubmissionsCleared { count } if *count == 0
-    )));
-}
-
-#[test]
 fn test_clear_queued_by_id_removes_only_matching_entry() {
     // 入队 3 条占位（A/B/C），按 B 的 input_id 精确清除后，
     // queued_submissions / blocks / timeline 三处各只剩 A 和 C。

@@ -127,10 +127,6 @@ pub enum AppEvent {
     },
     /// Unified lifecycle hook event.
     HookEvent(sdk::HookEventView),
-    /// Background agent loop requests queued user input before next LLM call.
-    DrainQueuedInput {
-        reply_tx: tokio::sync::oneshot::Sender<Vec<String>>,
-    },
     /// 当前 turn 变化，需要由 CLI 边界记录到 runtime bootstrap。
     CurrentTurnChanged(usize),
     /// Current tool path base/working root changed.
