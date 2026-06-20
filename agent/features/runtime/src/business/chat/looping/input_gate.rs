@@ -3,7 +3,7 @@ use crate::business::chat::looping::queue::{QueueDrainPort, QueueFuture};
 use crate::LOG_TARGET;
 use sdk::ChatInputEvent;
 use share::message::Message;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -56,14 +56,11 @@ pub struct GateOutcome {
 #[derive(Debug, Clone, Default)]
 pub struct PendingInputBuffer {
     events: VecDeque<ChatInputEvent>,
-    seen_user_messages: HashSet<(String, Vec<sdk::ToolResultImage>)>,
 }
 
 impl PendingInputBuffer {
     pub fn push(&mut self, event: ChatInputEvent) {
-        if self.should_accept(&event) {
-            self.events.push_back(event);
-        }
+        self.events.push_back(event);
     }
 
     pub fn extend(&mut self, events: impl IntoIterator<Item = ChatInputEvent>) {
@@ -78,15 +75,6 @@ impl PendingInputBuffer {
 
     pub fn len(&self) -> usize {
         self.events.len()
-    }
-
-    fn should_accept(&mut self, event: &ChatInputEvent) -> bool {
-        match event {
-            ChatInputEvent::UserMessage { text, images, .. } => self
-                .seen_user_messages
-                .insert((text.clone(), images.clone())),
-            ChatInputEvent::ControlCommand { .. } | ChatInputEvent::Cancel => true,
-        }
     }
 
     fn drain(&mut self) -> Vec<ChatInputEvent> {
@@ -139,9 +127,10 @@ where
     let mut appended_user_messages = 0usize;
     let mut dropped_events = 0usize;
     let mut decision = GateDecision::Proceed;
+    let mut added: Vec<sdk::AddedInput> = Vec::new();
 
     let events = buffer.drain();
-    let mut appended_this_gate = Vec::new();
+    let mut appended_this_gate = 0usize;
     let mut iter = events.into_iter().peekable();
     while let Some(event) = iter.next() {
         match event {
@@ -157,25 +146,18 @@ where
                 });
                 if kind == ControlCommandKind::Abort {
                     dropped_events = iter.count();
-                    for _ in 0..appended_this_gate.len() {
+                    for _ in 0..appended_this_gate {
                         messages.pop();
                     }
                     appended_user_messages = 0;
+                    added.clear();
                     decision = GateDecision::AbortCurrentLoop;
                     break;
                 }
             }
             ChatInputEvent::UserMessage { id, text, images } => {
-                let _ = id; // Task 4 will use id for homing
-                log::info!(target: LOG_TARGET, "{}",
-                    serde_json::to_string(&serde_json::json!({
-                        "event_type": "user_input",
-                        "text": &text,
-                        "image_count": images.len(),
-                    })).unwrap_or_default()
-                );
-                messages.push(user_message_with_images(text, images));
-                appended_this_gate.push(());
+                added.push(append_user_message(messages, id, text, images));
+                appended_this_gate += 1;
                 appended_user_messages += 1;
             }
         }
@@ -183,6 +165,8 @@ where
 
     if appended_user_messages > 0 {
         sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+            .await;
+        sink.send_event(RuntimeStreamEvent::UserMessagesAdded { items: added })
             .await;
     }
 
@@ -199,6 +183,23 @@ where
         appended_user_messages,
         dropped_events,
     }
+}
+
+fn append_user_message(
+    messages: &mut Vec<Message>,
+    id: sdk::InputId,
+    text: String,
+    images: Vec<sdk::ToolResultImage>,
+) -> sdk::AddedInput {
+    log::info!(target: LOG_TARGET, "{}",
+        serde_json::to_string(&serde_json::json!({
+            "event_type": "user_input",
+            "text": &text,
+            "image_count": images.len(),
+        })).unwrap_or_default()
+    );
+    messages.push(user_message_with_images(text.clone(), images));
+    sdk::AddedInput { id, text }
 }
 
 fn classify_control_command(raw: &str) -> ControlCommandKind {
@@ -395,7 +396,8 @@ mod tests {
         assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
         assert_eq!(outcome.appended_user_messages, 1);
         assert_eq!(messages.last().unwrap().text_content(), "继续");
-        assert_eq!(sink.events.lock().unwrap().len(), 1);
+        // 现在 append 时发 MessagesSync + UserMessagesAdded 两个事件
+        assert_eq!(sink.events.lock().unwrap().len(), 2);
     }
 
     /// #402 回归：带图 UserMessage 事件必须组装出 base64 image block 送达 LLM，
@@ -551,7 +553,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_loop_gate_deduplicates_push_and_pull_user_message() {
+    async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
+        let mut buffer = PendingInputBuffer::default();
+        // 含重复文本：验证不去重
+        let input = TestInputEventPort::new(vec![
+            ChatInputEvent::user_message("same", Vec::new()),
+            ChatInputEvent::user_message("same", Vec::new()),
+        ]);
+        let sink = TestSink::default();
+        let mut messages = Vec::new();
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+        )
+        .await;
+
+        assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
+        assert_eq!(messages.len(), 2);
+        let added = sink.events.lock().unwrap().iter().find_map(|e| match e {
+            RuntimeStreamEvent::UserMessagesAdded { items } => Some(items.clone()),
+            _ => None,
+        });
+        let items = added.expect("应发出一个 UserMessagesAdded 批事件");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].text, "same");
+        assert_eq!(items[1].text, "same");
+        assert_ne!(items[0].id, items[1].id, "每条提交一个独立 id");
+    }
+
+    #[tokio::test]
+    async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
+        // 设计 §8：不去重。queue 和 input 各来一条相同文本，两条都 append。
         let mut buffer = PendingInputBuffer::default();
         let queue = TestQueuePort::new(Some(vec!["same".to_string()]));
         let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("same", Vec::new())]);
@@ -568,7 +605,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(outcome.appended_user_messages, 1);
-        assert_eq!(messages.len(), 1);
+        assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
+        assert_eq!(messages.len(), 2);
     }
 }
