@@ -90,7 +90,12 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
 
     let result = app.update_key(key, &spawn_refs);
 
-    assert_eq!(app.input.queue_preview(), "a\nb\nc\nd");
+    // A3 Task 1：忙时提交文本统一走事件通道，不再双写 input_queue（#390 A3 Task 1）。
+    assert_eq!(
+        app.input.queue_len(),
+        0,
+        "忙时 submit 后 input_queue 应为空"
+    );
     assert_eq!(
         app.live_status_view_model().queued_lines,
         vec!["> [Copied 4 lines]"]

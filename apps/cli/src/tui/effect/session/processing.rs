@@ -380,9 +380,9 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             .agent_client
             .chat(sdk::ChatRequest {
                 messages: ctx.messages,
-                queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
-                    ctx.queue_request_tx.clone(),
-                ))),
+                // 文本队列已断开（#390 A3 Task 1）：统一走 input_events 事件通道，
+                // queue_drain 置 None；TuiQueueDrainPort 本体保留供 Task 6 统一删除。
+                queue_drain: None,
                 input_events: Some(Arc::new(ctx.input_event_port.clone())),
             })
             .await

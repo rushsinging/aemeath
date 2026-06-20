@@ -54,7 +54,7 @@ impl App {
             images,
         };
         // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
-        self.input.push_queue(submission.text);
+        // 注意：submission.text 仅经事件通道送达 runtime，不再双写 input_queue（#390 A3 Task 1）。
         self.enqueue_submission_echo(input_id, submission.display_text);
         UpdateResult::one(Effect::SendChatInputEvent { event })
     }
@@ -234,6 +234,31 @@ mod tests {
             )
         });
         assert!(has_queued, "首条复制文本应以折叠占位符入排队显示");
+    }
+
+    /// Step 1（A3 Task 1）：submit 后 input_queue 必须为空——文本已统一走事件通道，
+    /// 不应再双写 input_queue（双 append 根因）。
+    #[test]
+    fn submit_does_not_push_queue() {
+        let mut app = test_app();
+        app.model
+            .input
+            .apply(InputIntent::InsertText("hello queue".to_string()));
+
+        let result = app.update_enter();
+
+        // 文本队列必须为空——只走事件通道
+        assert!(
+            app.input.input_queue.is_empty(),
+            "submit 后 input_queue 应为空，当前 = {:?}",
+            app.input.input_queue
+        );
+        // effects 必须含一个 SendChatInputEvent::UserMessage
+        assert_eq!(
+            sent_user_message_text(&result),
+            Some("hello queue"),
+            "effects 应含 SendChatInputEvent::UserMessage"
+        );
     }
 
     /// Step 1（A3 Task 1）：submit 后，占位块携带的 input_id 与事件 id 相同。
