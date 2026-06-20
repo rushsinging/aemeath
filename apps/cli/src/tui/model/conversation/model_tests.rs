@@ -1239,10 +1239,11 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
     )));
 }
 
-/// A4.2 TDD：完整回合（user / assistant / tool-call / tool-result / agent-progress）后
-/// `timeline.items()` 包含 AgentProgress，且顺序合理（工具调用后紧跟进度条目）。
+/// timeline 镜像验证：完整回合（user / assistant / tool-call / tool-result）后
+/// timeline 应包含 UserMessage、AssistantText、ToolCall、ToolResult，
+/// 且 AgentProgress **不进 timeline**（进度通过 tool_calls[].activities 内联渲染）。
 #[test]
-fn test_timeline_mirrors_blocks_includes_agent_progress() {
+fn test_timeline_mirrors_blocks_no_agent_progress() {
     let mut model = ConversationModel::default();
     let chat_id = super::ids::ChatId::new("chat-a42");
     let turn_id = super::ids::ChatTurnId::new("turn-a42");
@@ -1274,7 +1275,7 @@ fn test_timeline_mirrors_blocks_includes_agent_progress() {
         index: 0,
     });
 
-    // 4. Agent progress
+    // 4. Agent progress — 不进 timeline，只写入 tool_calls[].activities
     model.apply(ConversationIntent::RecordAgentProgress {
         chat_id: chat_id.clone(),
         turn_id: turn_id.clone(),
@@ -1295,23 +1296,42 @@ fn test_timeline_mirrors_blocks_includes_agent_progress() {
         image_count: 0,
     });
 
-    // AgentProgress が timeline に含まれることを断言
-    let has_agent_progress = model.timeline.items().iter().any(|item| {
-        matches!(
-            item,
-            OutputTimelineItem::AgentProgress { tool_id: tid, message, .. }
-                if *tid == tool_id && message == "analysing codebase"
-        )
-    });
+    // AgentProgress が timeline に含まれないことを断言（双显示防止）
+    let has_agent_progress = model
+        .timeline
+        .items()
+        .iter()
+        .any(|item| matches!(item, OutputTimelineItem::AgentProgress { .. }));
     assert!(
-        has_agent_progress,
-        "timeline.items() should contain AgentProgress after record_agent_progress; items = {:?}",
+        !has_agent_progress,
+        "timeline.items() MUST NOT contain AgentProgress (it is inline-rendered via \
+         tool_calls[].activities); items = {:?}",
         model
             .timeline
             .items()
             .iter()
             .map(|i| i.id().into_owned())
             .collect::<Vec<_>>()
+    );
+
+    // 进度消息写入对应 tool_call.activities（内联渲染路径）
+    let turn = model
+        .chats
+        .iter()
+        .flat_map(|ch| ch.turns.iter())
+        .find(|t| t.id == turn_id);
+    let activities = turn
+        .and_then(|t| {
+            t.tool_calls.iter().find(|c| {
+                c.id.as_ref()
+                    .is_some_and(|id| id.as_ref() == tool_id.to_string())
+            })
+        })
+        .map(|c| c.activities.clone())
+        .unwrap_or_default();
+    assert!(
+        activities.iter().any(|a| a.contains("analysing codebase")),
+        "tool_call.activities should contain the progress message; activities = {activities:?}"
     );
 
     // 全 timeline 条目的 id 不重复（种类完整、无重）
