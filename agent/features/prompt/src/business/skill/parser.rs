@@ -167,13 +167,14 @@ Use this skill whenever you need to create a git commit.
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::unique_skill_dir;
     use super::*;
     use std::io::Write;
 
     #[test]
     fn test_parse_skill_dir_name_as_name() {
         // Simulate real layout: <skills-dir>/cm/SKILL.md
-        let base = std::env::temp_dir().join("aemeath_test_skill_1");
+        let base = unique_skill_dir("dir_name_as_name");
         let dir = base.join("cm");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("SKILL.md");
@@ -193,7 +194,7 @@ mod tests {
     #[test]
     fn test_parse_skill_alias_from_dir() {
         // frontmatter specifies a different name than the dir name
-        let base = std::env::temp_dir().join("aemeath_test_skill_2");
+        let base = unique_skill_dir("alias_from_dir");
         let dir = base.join("my-dir");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("SKILL.md");
@@ -210,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_read_skill_content_lazy() {
-        let base = std::env::temp_dir().join("aemeath_test_skill_lazy");
+        let base = unique_skill_dir("content_lazy");
         let dir = base.join("my-skill");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("SKILL.md");
