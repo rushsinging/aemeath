@@ -15,6 +15,12 @@ impl Default for ToolRegistry {
     }
 }
 
+/// 工具名规范化：注册与查找使用同一套 key（统一转 ASCII 小写），
+/// 保证大小写不同的工具名查找命中、并避免语义重复的注册项。
+fn normalize_key(name: &str) -> String {
+    name.to_ascii_lowercase()
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
@@ -25,19 +31,22 @@ impl ToolRegistry {
     /// 注册一个工具（自动包裹 [`TypedToolAdapter`]）。
     ///
     /// 所有工具统一实现 [`TypedTool`]；registry 内部自动适配为 `dyn Tool`
-    /// 存入 `HashMap`。工具名（key）由 `TypedTool::name()` 决定。
+    /// 存入 `HashMap`。工具名（key）由 `TypedTool::name()` 决定，
+    /// 经 [`normalize_key`] 统一小写后作为存储 key。
     pub fn register<T: TypedTool + 'static>(&self, tool: T) {
         let adapter = TypedToolAdapter::new(tool);
-        let name = adapter.name().to_string();
-        self.tools.write().insert(name, Arc::new(adapter));
+        let key = normalize_key(adapter.name());
+        self.tools.write().insert(key, Arc::new(adapter));
     }
 
     pub fn unregister(&self, name: &str) -> bool {
-        self.tools.write().remove(name).is_some()
+        let key = normalize_key(name);
+        self.tools.write().remove(&key).is_some()
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.tools.read().contains_key(name)
+        let key = normalize_key(name);
+        self.tools.read().contains_key(&key)
     }
 
     pub fn len(&self) -> usize {
@@ -49,7 +58,8 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.read().get(name).cloned()
+        let key = normalize_key(name);
+        self.tools.read().get(&key).cloned()
     }
 
     pub fn schemas(&self) -> Vec<Value> {
@@ -154,5 +164,49 @@ mod tests {
 
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.get("dummy").unwrap().description(), "second");
+    }
+
+    #[test]
+    fn test_tool_registry_lookup_is_case_insensitive() {
+        let registry = ToolRegistry::new();
+        registry.register(DummyTool::new("Read", "file read tool"));
+
+        assert!(registry.get("read").is_some());
+        assert!(registry.get("READ").is_some());
+        assert!(registry.get("Read").is_some());
+        assert!(registry.contains("read"));
+        assert!(registry.contains("READ"));
+        assert!(registry.get("write").is_none());
+    }
+
+    #[test]
+    fn test_tool_registry_duplicate_different_case_is_same_key() {
+        let registry = ToolRegistry::new();
+        registry.register(DummyTool::new("Bash", "first"));
+        registry.register(DummyTool::new("BASH", "second"));
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.get("bash").unwrap().description(), "second");
+    }
+
+    #[test]
+    fn test_tool_registry_unregister_is_case_insensitive() {
+        let registry = ToolRegistry::new();
+        registry.register(DummyTool::new("Edit", "file edit tool"));
+
+        assert!(registry.unregister("EDIT"));
+        assert!(!registry.contains("edit"));
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_tool_registry_preserves_mcp_qualified_name_with_underscores() {
+        // MCP 工具 key 形如 mcp__server__Tool —— 小写化不应破坏跨段语义（查找仍命中）
+        let registry = ToolRegistry::new();
+        registry.register(DummyTool::new("mcp__Server__Tool", "mcp tool"));
+
+        assert!(registry.get("mcp__server__tool").is_some());
+        assert!(registry.get("MCP__SERVER__TOOL").is_some());
+        assert_eq!(registry.len(), 1);
     }
 }
