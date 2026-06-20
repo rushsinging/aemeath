@@ -150,7 +150,9 @@ where
     let mut last_api_output_tokens: u64 = 0;
     let mut cached_tokens: Option<u64> = None;
     let mut reasoning_tokens: Option<u64> = None;
-    let turn_start = std::time::Instant::now();
+    // per-user-turn：每个新 USER 回合开始时重置（见 loop 体内的回合边界重置），
+    // 使 `DoneWithDuration` 的 duration 反映本回合时长而非会话总时长（#390 A1）。
+    let mut turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
     let mut task_reminder_state = TaskReminderState::new();
     let mut stall_detector = StallDetector::new();
@@ -228,6 +230,24 @@ where
         // 的 idle-resume / ContinueNextTurn gate（在 `continue` 之前）append 完成，或来自
         // 首回合 seed；先前已完成回合的消息均位于基线之内，cancel 不会触及。
         turn_rollback_baseline = messages.len();
+
+        // ── 新 USER 回合边界：重置 per-user-turn 局部状态（#390 A1 跨回合泄漏修复）──
+        // A1 把 loop 改为常驻（一个 loop 跨多个用户回合），导致原本 per-`chat()`（≈
+        // per-user-turn）的 `stall_detector` / `turn_start` 退化为 per-session，跨回合泄漏：
+        // - stall_detector：滑窗累积各回合 assistant 指纹，3 个独立回合各回一句相同短语
+        //   （如 "Done."）会在第 3 回合误判「重复输出」停机（误报）。
+        // - turn_start：从回合 2 起 `DoneWithDuration` 的 duration 变成会话总时长而非本回合。
+        //
+        // **判据（单一机制）**：仅当本回合是由一条「真正的新用户消息」开启时才重置——即
+        // 末条消息 role=User、非 tool-result、且非 system-generated。这恰好覆盖所有新用户
+        // 回合入口（loop 顶空闲门 resume、完成臂 idle resume、cancel idle resume、
+        // ContinueNextTurn gate append），且**排除回合内的工具轮次再迭代**（工具结果消息
+        // role 虽为 User 但 `has_tool_results()` 为真）与 stop-hook 阻断重试（注入的是
+        // system-generated 用户消息）——因此单个回合内卡在循环仍能被 stall 检测捕获。
+        if is_new_user_turn_message(messages.last()) {
+            stall_detector = StallDetector::new();
+            turn_start = std::time::Instant::now();
+        }
 
         // ── 回合开始：从共享槽读取「当前回合 token」 ──
         // 锁仅用于 clone token 后立即释放（std::sync::Mutex，NEVER 跨 .await 持有）。
@@ -880,6 +900,26 @@ enum IdleResult {
 /// 则先 idle-wait 直到收到真实 UserMessage 才开始回合。
 fn has_pending_user_turn(messages: &[Message]) -> bool {
     matches!(messages.last(), Some(m) if m.role == Role::User)
+}
+
+/// 判断「本回合是否由一条真正的新用户消息开启」（#390 A1 跨回合泄漏修复用）。
+///
+/// 返回 `true` 仅当 `last` 是一条**真正的新用户输入**：
+/// - role = User，且
+/// - 不是工具结果消息（工具结果 role 虽为 User，但 `has_tool_results()` 为真——
+///   这对应回合内的工具轮次再迭代，NEVER 视为新回合），且
+/// - 不是 system-generated 用户消息（stop-hook 阻断注入的反馈，回合仍在继续）。
+///
+/// 用于在新 USER 回合边界（且仅在该边界）重置 `stall_detector` / `turn_start`，
+/// 既消除跨回合泄漏，又保留单个回合内的 stall 检测能力。
+pub(super) fn is_new_user_turn_message(last: Option<&Message>) -> bool {
+    matches!(
+        last,
+        Some(m)
+            if m.role == Role::User
+                && !m.has_tool_results()
+                && m.source() != share::message::MessageSource::SystemGenerated
+    )
 }
 
 /// 回合完成后阻塞等待下一条输入：

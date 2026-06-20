@@ -57,6 +57,7 @@ impl InputEventDrainPort for EmptyInputEvents {
 struct RecordingSink {
     events: Arc<Mutex<Vec<String>>>,
     messages_syncs: Arc<Mutex<Vec<Vec<Message>>>>,
+    done_durations: Arc<Mutex<Vec<std::time::Duration>>>,
 }
 
 impl ChatEventSink for RecordingSink {
@@ -87,7 +88,10 @@ impl RecordingSink {
                         .unwrap_or_default()
                 )
             }
-            RuntimeStreamEvent::DoneWithDuration { .. } => "DoneWithDuration".to_string(),
+            RuntimeStreamEvent::DoneWithDuration { duration, .. } => {
+                self.done_durations.lock().unwrap().push(duration);
+                "DoneWithDuration".to_string()
+            }
             RuntimeStreamEvent::HookEvent(event) => {
                 format!("HookEvent:{}:{:?}", event.hook_name, event.status)
             }
@@ -121,6 +125,10 @@ impl RecordingSink {
 
     fn synced_messages(&self) -> Vec<Vec<Message>> {
         self.messages_syncs.lock().unwrap().clone()
+    }
+
+    fn done_durations(&self) -> Vec<std::time::Duration> {
+        self.done_durations.lock().unwrap().clone()
     }
 }
 
@@ -923,6 +931,240 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         events.iter().any(|event| event == "Text:turn two final"),
         "回合 2 应调用 LLM: {events:?}"
     );
+}
+
+/// 每次 LLM 调用固定返回同一条极短回复，并 sleep 固定时长。
+/// 用于 #390 A1 跨回合泄漏回归：
+/// - 相同回复 → 若 `stall_detector` 跨回合泄漏，第 3 回合会误判 stall 停机。
+/// - 固定 sleep → 若 `turn_start` 跨回合泄漏，`DoneWithDuration` 的 duration
+///   会随回合累加（第 N 回合 ≈ N*sleep）；重置后每回合 ≈ 单次 sleep。
+#[derive(Clone)]
+struct IdenticalReplyProvider {
+    reply: String,
+    per_turn_delay: std::time::Duration,
+}
+
+impl IdenticalReplyProvider {
+    fn new(reply: &str, per_turn_delay: std::time::Duration) -> Self {
+        Self {
+            reply: reply.to_string(),
+            per_turn_delay,
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for IdenticalReplyProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+        _cancel: &CancellationToken,
+    ) -> Result<StreamResponse, provider::LlmError> {
+        tokio::time::sleep(self.per_turn_delay).await;
+        handler.on_text(&self.reply);
+        Ok(StreamResponse {
+            assistant_message: Message {
+                role: share::message::Role::Assistant,
+                content: vec![share::message::ContentBlock::Text {
+                    text: self.reply.clone(),
+                }],
+                metadata: None,
+            },
+            usage: Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+            },
+            stop_reason: StopReason::EndTurn,
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning(&self, _enabled: bool) {}
+
+    fn is_reasoning(&self) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn test_stall_detector_resets_across_user_turns() {
+    // #390 A1 回归：常驻 loop 跨 3 个独立 USER 回合，每回合 LLM 返回**完全相同**的
+    // 极短回复（"Done."）。重构前每个 `chat()` 持有独立 StallDetector，跨回合不可能
+    // 累积；A1 把 loop 改为常驻后 detector 在 loop 外只构造一次，3 个相同回复会在第 3
+    // 回合触发 "[agent loop stopped: LLM is producing repetitive output]" 误报。
+    //
+    // 修复：每个新 USER 回合开始时重置 stall_detector（同时重置 turn_start）。
+    // 期望：3 个回合都正常完成（3 个 DoneWithDuration），无 stall 停机 SystemMessage。
+    //
+    // 同时验证 turn_start 不跨回合泄漏（Finding 2）：每回合 LLM sleep 固定时长，
+    // 若 turn_start 泄漏，第 3 回合 duration 会累积成 ~3*delay；重置后各回合 ~delay。
+    let per_turn_delay = std::time::Duration::from_millis(40);
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // 回合 1 的用户消息在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("turn-1", Vec::new()))
+        .unwrap();
+
+    // driver：每见到一个新的 DoneWithDuration 就投递下一回合输入；最后无条件关闭通道。
+    //
+    // **必须有界**：修复前第 3 回合会误触发 stall 停机，loop 直接 break（不产生第 3 个
+    // DoneWithDuration）。若 driver 无界轮询「done_count>=3」会永久阻塞，掩盖失败为 hang。
+    // 改为「有界等待 + stall 信号提前退出 + 无条件 drop 发送端」，使修复前以**断言失败**
+    // （而非 hang）暴露 RED；修复后 3 回合正常完成 → GREEN。
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 有界等待 done_count 达到 target 或观测到 stall 停机（提前退出）。
+        async fn wait_for(sink: &RecordingSink, target: usize) {
+            for _ in 0..400 {
+                let events = sink.events();
+                let done_count = events
+                    .iter()
+                    .filter(|event| event.as_str() == "DoneWithDuration")
+                    .count();
+                let stalled = events.iter().any(|e| e.contains("repetitive output"));
+                if done_count >= target || stalled {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+        for (next, target) in [("turn-2", 1usize), ("turn-3", 2usize)] {
+            wait_for(&driver_sink, target).await;
+            let _ = input_tx.send(sdk::ChatInputEvent::user_message(next, Vec::new()));
+        }
+        wait_for(&driver_sink, 3).await;
+        drop(input_tx); // 无条件关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            IdenticalReplyProvider::new("Done.", per_turn_delay),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-stall-reset-across-turns".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+
+    // Finding 1：3 个相同短回复回合均正常完成，无 stall 误报。
+    assert!(
+        !events.iter().any(|e| e.contains("repetitive output")),
+        "相同短回复不应跨独立 USER 回合触发 stall 停机: {events:?}"
+    );
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 3,
+        "3 个独立 USER 回合应各产生 1 个 DoneWithDuration: {events:?}"
+    );
+
+    // Finding 2（轻量断言）：turn_start 每回合重置，duration 不随回合累积。
+    // 若未重置，第 3 回合 duration ≈ 3*delay；重置后各回合 ≈ delay。
+    // 取「第 3 回合 < 前两回合 duration 之和」作为非累积的稳健判据。
+    let durations = sink.done_durations();
+    assert_eq!(durations.len(), 3, "应有 3 个 duration: {durations:?}");
+    assert!(
+        durations[2] < durations[0] + durations[1],
+        "turn_start 应每回合重置：第 3 回合 duration ({:?}) 不应累积到 >= 前两回合之和 ({:?} + {:?})",
+        durations[2],
+        durations[0],
+        durations[1]
+    );
+}
+
+#[test]
+fn test_is_new_user_turn_message_genuine_user() {
+    // 正常路径：真正的新用户输入 → true（应触发 per-turn 重置）。
+    let msg = Message::user("turn-1");
+    assert!(super::loop_runner::is_new_user_turn_message(Some(&msg)));
+}
+
+#[test]
+fn test_is_new_user_turn_message_tool_result_is_not_new_turn() {
+    // 边界：工具结果消息 role 虽为 User，但 has_tool_results() 为真 → false
+    // （对应回合内工具轮次再迭代，NEVER 视为新回合，必须保留单回合 stall 检测）。
+    let tool_msg = Message::tool_results_rich(vec![(
+        "tool-id-1".to_string(),
+        "ok".to_string(),
+        serde_json::Value::String("ok".to_string()),
+        false,
+        Vec::new(),
+    )]);
+    assert!(tool_msg.has_tool_results());
+    assert!(!super::loop_runner::is_new_user_turn_message(Some(
+        &tool_msg
+    )));
+}
+
+#[test]
+fn test_is_new_user_turn_message_system_generated_is_not_new_turn() {
+    // 边界：stop-hook 阻断注入的 system-generated 用户消息 → false（回合仍在继续）。
+    let sys_msg = Message::system_generated_user("<system-reminder>keep working</system-reminder>");
+    assert!(!super::loop_runner::is_new_user_turn_message(Some(
+        &sys_msg
+    )));
+}
+
+#[test]
+fn test_is_new_user_turn_message_assistant_or_empty_is_not_new_turn() {
+    // 错误/空路径：assistant 消息或空 messages → false。
+    let assistant = Message {
+        role: Role::Assistant,
+        content: vec![share::message::ContentBlock::Text {
+            text: "hi".to_string(),
+        }],
+        metadata: None,
+    };
+    assert!(!super::loop_runner::is_new_user_turn_message(Some(
+        &assistant
+    )));
+    assert!(!super::loop_runner::is_new_user_turn_message(None));
 }
 
 /// 记录每次 LLM 调用时 messages 中最后一条用户消息的文本。
