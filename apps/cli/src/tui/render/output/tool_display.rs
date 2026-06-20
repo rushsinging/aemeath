@@ -485,6 +485,33 @@ mod tests {
     }
 
     #[test]
+    fn test_format_tool_call_task_update_shows_blocked_by() {
+        let (header, _) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"7","addBlockedBy":["4","5","6"]}"#,
+            None,
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("7"), "应包含 taskId: {text}");
+        assert!(
+            text.contains("blocked by [4,5,6]"),
+            "应包含 blockedBy: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_task_update_shows_status_and_blocked_by() {
+        let (header, _) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"2","status":"InProgress","addBlockedBy":["1"]}"#,
+            None,
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("→ InProgress"), "应包含 status: {text}");
+        assert!(text.contains("blocked by [1]"), "应包含 blockedBy: {text}");
+    }
+
+    #[test]
     fn test_format_tool_call_task_get_empty_id_no_question_mark() {
         let (header, _details) = format_tool_call("TaskGet", "{}", None);
         let text = line_to_string(&header);
