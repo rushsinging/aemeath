@@ -66,6 +66,7 @@ pub enum OutputTimelineItem {
     },
     QueuedUserMessage {
         id: String,
+        input_id: sdk::InputId,
         text: String,
     },
     AgentProgress {

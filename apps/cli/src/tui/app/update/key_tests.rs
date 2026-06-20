@@ -113,9 +113,9 @@ fn test_up_arrow_restores_all_queued_input_to_input_area() {
     app.chat.start_processing();
     // 入队两条消息
     app.input.push_queue("first".to_string());
-    app.enqueue_submission_echo("first");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "first");
     app.input.push_queue("second".to_string());
-    app.enqueue_submission_echo("second");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "second");
 
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);

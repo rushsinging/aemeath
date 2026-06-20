@@ -15,7 +15,7 @@ fn test_app() -> App {
 fn test_update_ui_drain_queued_input_clears_placeholder_without_user_echo() {
     let mut app = test_app();
     app.input.push_queue("a\nb\nc".to_string());
-    app.enqueue_submission_echo("[Copied Text 1]");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "[Copied Text 1]");
     let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -39,7 +39,7 @@ fn test_update_ui_messages_sync_echoes_original_user_message() {
     let mut app = test_app();
     app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     app.input.push_queue("a\nb\nc".to_string());
-    app.enqueue_submission_echo("[Copied Text 1]");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "[Copied Text 1]");
     let messages = vec![
         sdk::ChatMessage::user_text("first"),
         sdk::ChatMessage::user_text("a\nb\nc"),

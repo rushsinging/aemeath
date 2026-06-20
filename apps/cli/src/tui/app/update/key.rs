@@ -171,7 +171,10 @@ impl App {
                             raw: submission.text.clone(),
                         };
                         self.input.push_queue(submission.text.clone());
-                        self.enqueue_submission_echo(submission.display_text);
+                        self.enqueue_submission_echo(
+                            sdk::InputId::new_v7(),
+                            submission.display_text,
+                        );
                         self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
                             StatusNotice::warning("message event queued"),
                         ));

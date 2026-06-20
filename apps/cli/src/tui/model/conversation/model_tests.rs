@@ -887,6 +887,7 @@ fn test_queue_submission_pushes_queued_user_message_block() {
     // OutputArea::queued_messages 命令式显示路径）。
     let mut model = ConversationModel::default();
     let changes = model.apply(ConversationIntent::QueueSubmission {
+        input_id: sdk::InputId::new_v7(),
         text: "排队的消息".to_string(),
     });
 
@@ -905,9 +906,11 @@ fn test_clear_queued_submissions_removes_blocks() {
     // 边界 + 清理：冲刷队列后 QueuedUserMessage 块应被全部移除。
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::QueueSubmission {
+        input_id: sdk::InputId::new_v7(),
         text: "a".to_string(),
     });
     model.apply(ConversationIntent::QueueSubmission {
+        input_id: sdk::InputId::new_v7(),
         text: "b".to_string(),
     });
 

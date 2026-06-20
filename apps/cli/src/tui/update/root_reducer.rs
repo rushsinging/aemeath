@@ -123,6 +123,7 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
                     let changes = model
                         .conversation
                         .apply(ConversationIntent::QueueSubmission {
+                            input_id: sdk::InputId::new_v7(),
                             text: submission.text,
                         });
                     apply_conversation_changes(&mut result, &changes);

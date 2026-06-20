@@ -35,10 +35,17 @@ impl App {
     ///
     /// 一致性约定：`input_queue` 为权威发送队列，`queued_submissions` 是其显示投影；
     /// 入队（此处）与出队（`clear_queued_submission_echo`）成对维护，二者始终同步。
-    pub(crate) fn enqueue_submission_echo(&mut self, text: impl Into<String>) {
+    pub(crate) fn enqueue_submission_echo(
+        &mut self,
+        input_id: sdk::InputId,
+        text: impl Into<String>,
+    ) {
         self.model
             .conversation
-            .apply(ConversationIntent::QueueSubmission { text: text.into() });
+            .apply(ConversationIntent::QueueSubmission {
+                input_id,
+                text: text.into(),
+            });
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
