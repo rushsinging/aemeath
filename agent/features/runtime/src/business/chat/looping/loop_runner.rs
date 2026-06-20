@@ -128,7 +128,22 @@ where
     // 使 LLM 调用与 tool 执行观测到同一个 token。常驻 loop 中 token 会在 cancel 后重置，
     // 因此 agent 不能在 loop 外只构造一次（否则会固化已取消的旧 token）。
 
-    let messages_at_start = messages.len();
+    // 取消回滚基线（per-turn）。常驻 loop 中已完成回合的消息累积在同一个
+    // `messages` Vec 里，若用 loop 启动时的固定基线回滚，会把先前已完成回合一并删除
+    // （数据丢失）。因此每个回合在「本回合用户消息已入 messages、但本回合 assistant/tool
+    // 输出尚未产生」处重新捕获基线，使 cancel 只回滚当前回合内容、保留先前已完成回合。
+    //
+    // 捕获时机（与重构前 per-`chat()` 语义对齐：彼时 `messages` 已含本回合用户消息，
+    // cancel 保留用户消息、只回滚 partial assistant/tool 输出）：
+    // - 回合开始（loop 顶）先按当时 `messages.len()` 设基线：resume / ContinueNextTurn
+    //   路径在上一轮 `continue` 前已 append 本回合用户消息，故此处已计入；首回合若为预置
+    //   seed 同样计入。覆盖回合起点 `cancel.is_cancelled()` 早退场景。
+    // - BeforeLlm 门禁后再次刷新：覆盖「首回合空 seed 经门禁 append 用户消息」「同回合
+    //   ContinueNextTurn 经门禁 append」等用户消息在本回合迭代内才入 messages 的情形。
+    //
+    // 声明为未初始化：每个回合在 loop 顶（见下）无条件赋值后才会被读，避免「初始值从未
+    // 被读取」的 dead-store 告警。
+    let mut turn_rollback_baseline: usize;
     let mut active_summary: Option<String> = None;
     let mut last_api_input_tokens: u64 = 0;
     let mut last_api_output_tokens: u64 = 0;
@@ -155,6 +170,11 @@ where
         loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
             .await;
+
+        // 回合开始：以当前 messages 长度设取消回滚基线。此时本回合用户消息已由上一轮
+        // 的 idle-resume / ContinueNextTurn gate（在 `continue` 之前）append 完成，或来自
+        // 首回合 seed；先前已完成回合的消息均位于基线之内，cancel 不会触及。
+        turn_rollback_baseline = messages.len();
 
         // ── 回合开始：从共享槽读取「当前回合 token」 ──
         // 锁仅用于 clone token 后立即释放（std::sync::Mutex，NEVER 跨 .await 持有）。
@@ -221,7 +241,7 @@ where
                 &mut messages,
                 &mut pending_input,
                 &cancel_slot,
-                messages_at_start,
+                turn_rollback_baseline,
                 &turn_context,
             )
             .await
@@ -307,7 +327,7 @@ where
                     &mut messages,
                     &mut pending_input,
                     &cancel_slot,
-                    messages_at_start,
+                    turn_rollback_baseline,
                     &turn_context,
                 )
                 .await
@@ -324,6 +344,12 @@ where
                 }
             }
         }
+
+        // BeforeLlm 门禁后刷新取消回滚基线：此处 messages 已含本回合用户消息
+        // （首回合空 seed 经门禁 append，或同回合 ContinueNextTurn 经门禁 append），
+        // 但本回合 LLM/tool 输出尚未产生。后续 assistant 消息（line ~440）、tool 结果
+        // （line ~655）才是 cancel 应回滚的「本回合 partial 输出」。
+        turn_rollback_baseline = messages.len();
 
         // Scan last assistant message for TaskCreate/TaskUpdate before building reminder
         task_reminder_state.update_from_messages(turn_count as u64, &messages);
@@ -668,7 +694,7 @@ where
                             &mut messages,
                             &mut pending_input,
                             &cancel_slot,
-                            messages_at_start,
+                            turn_rollback_baseline,
                             &turn_context,
                         )
                         .await
@@ -705,7 +731,7 @@ where
                         &mut messages,
                         &mut pending_input,
                         &cancel_slot,
-                        messages_at_start,
+                        turn_rollback_baseline,
                         &turn_context,
                     )
                     .await
@@ -902,15 +928,16 @@ async fn cancel_to_idle<I, S>(
     messages: &mut Vec<Message>,
     pending_input: &mut PendingInputBuffer,
     cancel_slot: &std::sync::Mutex<CancellationToken>,
-    messages_at_start: usize,
+    rollback_baseline: usize,
     turn_context: &RuntimeTurnContext,
 ) -> IdleResult
 where
     I: InputEventDrainPort,
     S: ChatEventSink,
 {
-    // 回滚本回合追加的消息，并同步给消费者。
-    messages.truncate(messages_at_start);
+    // 回滚到本回合基线（per-turn）：仅截掉当前回合产生的 assistant/tool 输出，
+    // 保留本回合用户消息与所有先前已完成回合的消息，再同步给消费者。
+    messages.truncate(rollback_baseline);
     sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
         .await;
     sink.send_event(RuntimeStreamEvent::Cancelled {

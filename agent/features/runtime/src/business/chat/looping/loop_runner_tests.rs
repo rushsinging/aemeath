@@ -1373,17 +1373,282 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         events.iter().any(|e| e == "Text:turn 2 final"),
         "重置 token 后回合 2 应正常调用 LLM 并完成: {events:?}"
     );
-    // 回滚断言：回合 1 取消后 "first" 用户消息被回滚，不应残留在最终历史里
-    // 与回合 2 的 assistant 响应共存。检查最终一次 MessagesSync 不含 "first"。
-    let last_sync = sink.synced_messages().into_iter().next_back();
-    if let Some(messages) = last_sync {
-        assert!(
-            messages.iter().all(|m| m.text_content() != "first"),
-            "回合 1 取消应回滚 'first' 用户消息: {:?}",
-            messages
-                .iter()
-                .map(|m| m.text_content())
-                .collect::<Vec<_>>()
-        );
+    // 回滚断言（per-turn 基线语义，与重构前 per-`chat()` 一致）：cancel 把基线设在
+    // 「本回合用户消息已入、assistant 未产生」处，故取消只回滚本回合的 partial
+    // assistant/tool 输出，**保留本回合用户消息 "first"**。检查取消回滚那次
+    // MessagesSync（Cancelled 之前最近一次）应含 "first" 但不含任何 assistant 文本。
+    let cancelled_idx = events
+        .iter()
+        .position(|e| e == "Cancelled")
+        .expect("应有 Cancelled 事件");
+    let syncs_before_cancel = events[..cancelled_idx]
+        .iter()
+        .filter(|e| e.starts_with("MessagesSync"))
+        .count();
+    assert!(
+        syncs_before_cancel >= 1,
+        "Cancelled 前应至少有一次 MessagesSync（回滚同步）: {events:?}"
+    );
+    let rollback_snapshot = &sink.synced_messages()[syncs_before_cancel - 1];
+    let rollback_texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
+    assert!(
+        rollback_texts.iter().any(|t| t == "first"),
+        "per-turn 基线设在用户消息之后：回合 1 取消应保留本回合用户消息 'first': {rollback_texts:?}"
+    );
+    assert!(
+        rollback_texts.iter().all(|t| t != "turn 2 final"),
+        "回合 1 取消的回滚快照不应含回合 2 的 assistant 输出: {rollback_texts:?}"
+    );
+}
+
+/// 回合 1 正常完成、回合 2 进行中阻塞等待 cancel、回合 3 正常完成。
+/// 用于验证「取消晚于首回合的回合时，先前已完成回合的消息必须存活」。
+#[derive(Clone)]
+struct CompleteThenCancellableProvider {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl CompleteThenCancellableProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
     }
+}
+
+#[async_trait]
+impl LlmProvider for CompleteThenCancellableProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<StreamResponse, provider::LlmError> {
+        let call_index = {
+            let mut guard = self.calls.lock().unwrap();
+            let idx = *guard;
+            *guard += 1;
+            idx
+        };
+        // 回合 2（call_index == 1）：阻塞等 cancel，被取消后返回 Cancelled。
+        // 回合 1 / 回合 3：正常完成（token 已重置，不应被陈旧 cancel 污染）。
+        if call_index == 1 {
+            cancel.cancelled().await;
+            return Err(provider::LlmError::Cancelled);
+        }
+        if cancel.is_cancelled() {
+            return Err(provider::LlmError::Cancelled);
+        }
+        let text = format!("turn {} assistant", call_index + 1);
+        handler.on_text(&text);
+        Ok(StreamResponse {
+            assistant_message: Message {
+                role: Role::Assistant,
+                content: vec![share::message::ContentBlock::Text { text }],
+                metadata: None,
+            },
+            usage: Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+            },
+            stop_reason: StopReason::EndTurn,
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning(&self, _enabled: bool) {}
+
+    fn is_reasoning(&self) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_later_turn_preserves_completed_prior_turns() {
+    // #390 A1（Important，data-loss）：常驻 loop 中先前回合已完成的消息累积在同一个
+    // `messages` Vec。若 cancel 回滚用「loop 启动时的固定基线」，取消任何「非首回合」会把
+    // 先前已完成回合一并截掉（整段对话坍缩到首条）。修复后 cancel 改用 per-turn 基线，
+    // 只回滚当前回合的 partial 输出，先前已完成回合的 user+assistant 必须存活。
+    //
+    // 时序：
+    //   回合 1：投递 "turn1-user" → LLM 正常返回 "turn 1 assistant" → 完成、进入空闲。
+    //   回合 2：投递 "turn2-user" → LLM 阻塞等 cancel → 外部 cancel → 回滚回空闲。
+    //   回合 3：投递 "turn3-user" → LLM 正常完成（新 token 未被污染）→ shutdown。
+    //
+    // 关键断言：回合 2 被取消后的 MessagesSync 中，回合 1 的 "turn1-user" 与
+    // "turn 1 assistant" 必须仍存在（pre-fix `truncate(loop_start_baseline=0)` 会删除它们）。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    // 共享 cancel 槽：模拟外部 cancel_impl。
+    let cancel_slot = Arc::new(Mutex::new(CancellationToken::new()));
+    let provider = CompleteThenCancellableProvider::new();
+
+    // 回合 1 的用户消息在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("turn1-user", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver_slot = cancel_slot.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration），loop 进入空闲。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 投递回合 2 的用户消息：恢复运行，LLM（第 2 次调用）阻塞等 cancel。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("turn2-user", Vec::new()))
+            .unwrap();
+        // 等回合 2 的 LLM 调用真正开始（call count >= 2），确保 cancel 落在「回合进行中」。
+        loop {
+            if *driver_provider.calls.lock().unwrap() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 外部 cancel：锁槽取消当前 live token。
+        driver_slot.lock().unwrap().cancel();
+        // 等回合 2 被取消（出现 Cancelled 事件）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 投递回合 3 的用户消息：恢复运行并完成回合 3。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("turn3-user", Vec::new()))
+            .unwrap();
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            provider.clone(),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-cancel-preserves-prior-turns".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: cancel_slot.clone(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 回合1→回合2取消→回合3→shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 回合 2 被取消：发出 Cancelled。
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "回合 2 进行中 cancel 应发出 Cancelled 事件: {events:?}"
+    );
+
+    // 关键回归断言：回合 2 取消后第一次 MessagesSync（cancel_to_idle 内的回滚同步）
+    // 必须仍包含回合 1 的 user+assistant。pre-fix 用 loop_start_baseline=0 回滚 →
+    // 这两条被删除 → 断言失败；修复后 per-turn 基线保留它们 → 通过。
+    let cancelled_idx = events
+        .iter()
+        .position(|e| e == "Cancelled")
+        .expect("应有 Cancelled 事件");
+    // cancel_to_idle 先发 MessagesSync（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
+    // MessagesSync 对应的快照即「取消回滚后的 messages」。
+    let syncs = sink.synced_messages();
+    // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 MessagesSync。
+    let messages_sync_count_before_cancel = events[..cancelled_idx]
+        .iter()
+        .filter(|e| e.starts_with("MessagesSync"))
+        .count();
+    assert!(
+        messages_sync_count_before_cancel >= 1,
+        "Cancelled 前应至少有一次 MessagesSync（回滚同步）: {events:?}"
+    );
+    let rollback_snapshot = &syncs[messages_sync_count_before_cancel - 1];
+    let texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
+    assert!(
+        texts.iter().any(|t| t == "turn1-user"),
+        "回合 2 取消不得删除回合 1 的用户消息 'turn1-user': {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t == "turn 1 assistant"),
+        "回合 2 取消不得删除回合 1 的 assistant 响应 'turn 1 assistant': {texts:?}"
+    );
+    // 回合 2 的 partial 输出（用户消息 'turn2-user' 之后无 assistant，因 LLM 被取消）：
+    // 'turn2-user' 应被回滚（与重构前语义一致：保留用户消息这一点见下），实际本回合
+    // 用户消息也属当前回合内容、应回滚到 per-turn 基线之内。本回合用户消息保留与否取决于
+    // 捕获点：本实现把基线设在「用户消息已入、assistant 未产生」处，故回合 2 用户消息保留。
+    assert!(
+        texts.iter().any(|t| t == "turn2-user"),
+        "per-turn 基线设在用户消息之后：回合 2 取消应保留本回合用户消息 'turn2-user': {texts:?}"
+    );
+
+    // cancel 后未退 loop：回合 3 正常完成，总计 2 个 DoneWithDuration。
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 2,
+        "回合 1 与回合 3 各产出一个 DoneWithDuration（cancel 不退 loop）: {events:?}"
+    );
+    // 回合 3 的 assistant 响应出现（新 token 未被陈旧 cancel 污染）。
+    assert!(
+        events.iter().any(|e| e == "Text:turn 3 assistant"),
+        "重置 token 后回合 3 应正常调用 LLM 并完成: {events:?}"
+    );
 }
