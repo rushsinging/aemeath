@@ -136,7 +136,7 @@ fn test_enqueue_submission_echo_renders_queued_block_into_model() {
     // 正常路径：入队即时显示——派发后 QueuedUserMessage 块进入模型。
     // 渲染不再经 document block，改为 live-status projection。
     let mut app = make_app();
-    app.enqueue_submission_echo("排队中的输入");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "排队中的输入");
 
     let has_queued = app.model.conversation.blocks.iter().any(|block| {
         matches!(block, ConversationBlock::QueuedUserMessage { text, .. } if text == "排队中的输入")
@@ -163,7 +163,7 @@ fn test_enqueue_submission_echo_renders_queued_block_into_model() {
 #[test]
 fn test_enqueue_submission_echo_refreshes_live_status_projection() {
     let mut app = make_app();
-    app.enqueue_submission_echo("排队中的输入");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "排队中的输入");
 
     assert_eq!(
         app.live_status_view_model().queued_lines,
@@ -175,7 +175,7 @@ fn test_enqueue_submission_echo_refreshes_live_status_projection() {
 #[test]
 fn test_enqueue_submission_echo_uses_display_text_for_copied_text() {
     let mut app = make_app();
-    app.enqueue_submission_echo("[Copied Text 1]");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "[Copied Text 1]");
 
     let has_queued = app.model.conversation.blocks.iter().any(|block| {
         matches!(block, ConversationBlock::QueuedUserMessage { text, .. } if text == "[Copied Text 1]")
@@ -185,57 +185,6 @@ fn test_enqueue_submission_echo_uses_display_text_for_copied_text() {
         app.live_status_view_model().queued_lines,
         vec!["> [Copied Text 1]"]
     );
-}
-
-#[test]
-fn test_clear_queued_submission_echo_removes_queued_blocks_no_double_display() {
-    // 边界 + 关键：drain 时先清排队块，再以正式 UserMessage 回显——
-    // 验证清除后不再有 QueuedUserMessage（避免与已发送回显双显示）。
-    let mut app = make_app();
-    app.enqueue_submission_echo("第一条");
-    app.enqueue_submission_echo("第二条");
-    assert_eq!(app.model.conversation.queued_submissions.len(), 2);
-
-    app.clear_queued_submission_echo();
-    // 模拟 drain 后正式回显其中一条。
-    app.append_user_echo("第一条");
-
-    assert!(app.model.conversation.queued_submissions.is_empty());
-    let queued_remaining = app
-        .model
-        .conversation
-        .blocks
-        .iter()
-        .filter(|block| matches!(block, ConversationBlock::QueuedUserMessage { .. }))
-        .count();
-    assert_eq!(
-        queued_remaining, 0,
-        "清除后不应残留任何 QueuedUserMessage 排队块"
-    );
-    let user_echoes = app
-        .model
-        .conversation
-        .blocks
-        .iter()
-        .filter(|block| {
-            matches!(block, ConversationBlock::UserMessage { text, .. } if text == "第一条")
-        })
-        .count();
-    assert_eq!(user_echoes, 1, "应仅以一条正式 UserMessage 回显，无双显示");
-}
-
-#[test]
-fn test_clear_queued_submission_echo_on_empty_is_noop() {
-    // 错误/空路径：无排队块时清除应为无副作用 no-op，不 panic、不改变块数量。
-    let mut app = make_app();
-    let before = app.model.conversation.blocks.len();
-    app.clear_queued_submission_echo();
-    assert_eq!(
-        app.model.conversation.blocks.len(),
-        before,
-        "空队列清除不应改变块数量"
-    );
-    assert!(app.model.conversation.queued_submissions.is_empty());
 }
 
 #[test]

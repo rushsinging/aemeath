@@ -21,7 +21,6 @@ pub(super) fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Option<UpdateRe
         KeyCode::Enter => {
             if let Some(model_key) = app.layout.selected_model_key() {
                 let command = format!("/model {}", model_key);
-                app.input.push_queue(command.clone());
                 app.layout.clear_dialog();
                 return Some(UpdateResult {
                     effects: Vec::new(),

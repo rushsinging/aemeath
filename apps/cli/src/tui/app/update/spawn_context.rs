@@ -13,7 +13,6 @@ impl App {
         let input_event_port = self.chat.start_input_event_buffer();
         Some(SpawnContext {
             tx: ui_tx.clone(),
-            queue_request_tx: ui_tx.clone(),
             input_event_port,
             agent_client,
             fallback_context: self.fallback_runtime_context(),

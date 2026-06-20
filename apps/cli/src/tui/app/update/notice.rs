@@ -28,33 +28,39 @@ impl App {
 
     /// 将一条「排队中」用户提交写入单一真相源 `ConversationModel`，并刷新 live-status 投影。
     ///
-    /// 用于「agent 处理期间用户提交输入」场景：在 `InputState::input_queue`
-    /// 入队的同时，派发 `QueueSubmission` 写入 `ConversationModel::queued_submissions`。
-    /// 该列表是排队预览的真相；`OutputArea::queued_submission_lines` 只是 live-status
-    /// 渲染镜像，由 `refresh_live_status_from_model` 经 assembler/adapter 单向写回。
-    ///
-    /// 一致性约定：`input_queue` 为权威发送队列，`queued_submissions` 是其显示投影；
-    /// 入队（此处）与出队（`clear_queued_submission_echo`）成对维护，二者始终同步。
-    pub(crate) fn enqueue_submission_echo(&mut self, text: impl Into<String>) {
+    /// 用于「agent 处理期间用户提交输入」场景：派发 `QueueSubmission` 写入
+    /// `ConversationModel::queued_submissions`（排队预览的真相）；`OutputArea::queued_submission_lines`
+    /// 只是 live-status 渲染镜像，由 `refresh_live_status_from_model` 经 assembler/adapter 单向写回。
+    pub(crate) fn enqueue_submission_echo(
+        &mut self,
+        input_id: sdk::InputId,
+        text: impl Into<String>,
+    ) {
         self.model
             .conversation
-            .apply(ConversationIntent::QueueSubmission { text: text.into() });
+            .apply(ConversationIntent::QueueSubmission {
+                input_id,
+                text: text.into(),
+            });
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
 
-    /// 清除所有「排队中」用户提交，并刷新 live-status 投影。
+    /// 按 InputId 精确清除单条「排队中」用户提交，并刷新 live-status 投影。
     ///
-    /// 在 agent 取用（drain）排队输入时调用：先清除 `queued_submissions`，
-    /// 再由 `append_user_echo` 以正式 `UserMessage` 显示，避免「排队预览」与「已发送
-    /// 回显」双显示。空队列时为无副作用 no-op（`QueuedSubmissionsCleared { count: 0 }`）。
-    pub(crate) fn clear_queued_submission_echo(&mut self) {
+    /// 用于 UserMessagesAdded handler 按 input_id 逐条清除占位的场景：仅移除与
+    /// 给定 `input_id` 匹配的那一条，不影响其他排队项。
+    /// （A3：原「全清」版本已随文本队列废弃一并删除，回显只按 id 精确清除。）
+    pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &sdk::InputId) {
         self.model
             .conversation
-            .apply(ConversationIntent::ClearQueuedSubmissions);
+            .apply(ConversationIntent::ClearQueuedSubmissionById {
+                input_id: input_id.clone(),
+            });
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
+
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 替代旧的命令式 `OutputArea::push_error`；错误经 `ConversationBlock::Error`

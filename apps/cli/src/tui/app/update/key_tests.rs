@@ -1,5 +1,40 @@
 use super::*;
 
+/// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位。
+#[test]
+fn test_busy_slash_no_placeholder() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    app.model
+        .input
+        .apply(InputIntent::InsertPastedText("/foo bar".to_string()));
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+    let result = app.update_key(key, &spawn_refs);
+
+    // 应产出 ControlCommand 事件
+    assert!(
+        matches!(
+            result.effects.as_slice(),
+            [Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::ControlCommand { raw }
+            }] if raw == "/foo bar"
+        ),
+        "busy-slash 应产出 ControlCommand 事件，got: {:?}",
+        result.effects
+    );
+    // conversation 中不应有 QueuedUserMessage 块
+    assert!(
+        app.model.conversation.queued_submissions.is_empty(),
+        "busy-slash 后不应建占位 QueuedUserMessage"
+    );
+}
+
 #[test]
 fn test_ctrlc_action_input_nonempty_clears() {
     assert_eq!(
@@ -90,7 +125,6 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
 
     let result = app.update_key(key, &spawn_refs);
 
-    assert_eq!(app.input.queue_preview(), "a\nb\nc\nd");
     assert_eq!(
         app.live_status_view_model().queued_lines,
         vec!["> [Copied 4 lines]"]
@@ -103,35 +137,39 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
     ));
 }
 
+/// Task 5 (A3) — Up 键走光标/历史导航，不清除占位区。
 #[test]
-fn test_up_arrow_restores_all_queued_input_to_input_area() {
+fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
         "test-model".to_string(),
     );
     app.chat.start_processing();
-    // 入队两条消息
-    app.input.push_queue("first".to_string());
-    app.enqueue_submission_echo("first");
-    app.input.push_queue("second".to_string());
-    app.enqueue_submission_echo("second");
+    // 入队两条占位（模拟忙时提交）
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "first");
+    app.enqueue_submission_echo(sdk::InputId::new_v7(), "second");
 
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
 
     let _ = app.update_key(key, &spawn_refs);
 
-    // queue 应被清空
-    assert_eq!(app.input.queue_len(), 0);
-    // input area 应包含两条排队内容（\n 连接）
-    assert_eq!(app.model.input.document.buffer, "first\nsecond");
-    // 排队显示块应被清除
-    assert!(app.model.conversation.queued_submissions.is_empty());
+    // input area 不应被恢复
+    assert!(
+        app.model.input.document.is_empty(),
+        "Up 键不应恢复 queue 内容到 input area"
+    );
+    // queued_submissions 不应被清除（Up 键不触发清占位）
+    assert_eq!(
+        app.model.conversation.queued_submissions.len(),
+        2,
+        "Up 键不应清除 queued_submissions"
+    );
 }
 
 #[test]
-fn test_up_arrow_history_recall_when_queue_empty() {
+fn test_up_arrow_history_recall() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -141,14 +179,12 @@ fn test_up_arrow_history_recall_when_queue_empty() {
     app.model
         .input
         .apply(InputIntent::ReplaceHistory(vec!["past input".to_string()]));
-    // queue 为空
-    assert_eq!(app.input.queue_len(), 0);
 
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
 
     let _ = app.update_key(key, &spawn_refs);
 
-    // queue 空时应走 history recall
+    // Up 键走 history recall
     assert_eq!(app.model.input.document.buffer, "past input");
 }

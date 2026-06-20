@@ -33,9 +33,8 @@ mod tests {
     // === InputState ===
 
     #[test]
-    fn test_input_state_default_queue_empty() {
+    fn test_input_state_default() {
         let state = InputState::default();
-        assert!(state.input_queue.is_empty());
         assert!(!state.just_pasted);
         assert!(state.ask_user_state.is_none());
     }
@@ -196,10 +195,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_submit_then_messages_sync_echoes_user_message() {
-        // #390 A1：常驻模型下，首条提交经事件通道发往 loop（不再 update_enter 内 StartChat）；
-        // 用户回显由 runtime 的 MessagesSync 单一真相驱动。模拟该流程：Enter 提交 →
-        // runtime 追加 user message 后回传 MessagesSync → TUI 回显 `> search bug 76`。
+    async fn test_submit_then_user_messages_added_echoes_user_message() {
+        // A3 Task 4：MessagesSync 退出 display，用户回显改由 UserMessagesAdded 驱动。
+        // 模拟流程：Enter 提交 → runtime 回传 UserMessagesAdded → TUI 回显 `> search bug 76`；
+        // MessagesSync 仅负责镜像 chat.messages，不再产生 UserMessage 回显块。
         let mut app = App::new(
             "sess-e2e".to_string(),
             std::path::PathBuf::from("/tmp/aemeath"),
@@ -225,11 +224,14 @@ mod tests {
             "首条提交应经事件通道发 UserMessage"
         );
 
-        // 模拟 runtime 回传 MessagesSync（gate 追加 user message 后的单一真相同步）。
+        // 模拟 runtime 回传 UserMessagesAdded（归宿事件，携带 InputId，驱动 TUI 回显）。
+        let input_id = sdk::InputId::new_v7();
+        app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::MessagesSync(vec![sdk::ChatMessage::user_text(
-                "search bug 76",
-            )])),
+            TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::AddedInput {
+                id: input_id,
+                text: "search bug 76".to_string(),
+            }])),
             &ui_tx,
             &spawn_refs,
         );
@@ -243,7 +245,38 @@ mod tests {
         });
         assert!(
             has_user_echo,
-            "MessagesSync 应回显用户消息为 UserMessage 块"
+            "UserMessagesAdded 应回显用户消息为 UserMessage 块"
+        );
+
+        // 同步 MessagesSync 仅镜像，不额外产生回显块
+        let echo_count_before = app
+            .model
+            .conversation
+            .blocks
+            .iter()
+            .filter(|b| {
+                matches!(b, crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. } if text == "search bug 76")
+            })
+            .count();
+        let _ = app.update(
+            TuiMsg::Ui(UiEvent::MessagesSync(vec![sdk::ChatMessage::user_text(
+                "search bug 76",
+            )])),
+            &ui_tx,
+            &spawn_refs,
+        );
+        let echo_count_after = app
+            .model
+            .conversation
+            .blocks
+            .iter()
+            .filter(|b| {
+                matches!(b, crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. } if text == "search bug 76")
+            })
+            .count();
+        assert_eq!(
+            echo_count_before, echo_count_after,
+            "MessagesSync 不应再增加 UserMessage 回显块（已退出 display）"
         );
     }
 
@@ -268,12 +301,15 @@ mod tests {
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
         let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
-        // #390 A1：用户回显改由 runtime MessagesSync 驱动（提交不再立即 StartChat）。
-        // 模拟 runtime 追加 user message 后的 MessagesSync 同步，使 `> search bug 76` 回显。
+        // A3 Task 4：用户回显改由 UserMessagesAdded 归宿事件驱动（MessagesSync 已退出 display）。
+        // 先建占位，再触发 UserMessagesAdded，使 `> search bug 76` 回显。
+        let input_id = sdk::InputId::new_v7();
+        app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::MessagesSync(vec![sdk::ChatMessage::user_text(
-                "search bug 76",
-            )])),
+            TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::AddedInput {
+                id: input_id,
+                text: "search bug 76".to_string(),
+            }])),
             &ui_tx,
             &spawn_refs,
         );
