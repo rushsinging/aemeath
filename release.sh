@@ -19,23 +19,9 @@ fi
 VERSION="${TAG#v}"
 echo "Release version: $VERSION"
 
-# ── 确保在 main 分支 ─────────────────────────────────────────────
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [[ "$BRANCH" != "main" ]]; then
-  echo "Error: must be on main branch, currently on: $BRANCH" >&2
-  exit 1
-fi
-
-# ── 检查工作区干净 ────────────────────────────────────────────────
-if [[ -n "$(git status --porcelain)" ]]; then
-  echo "Error: working tree has uncommitted changes:" >&2
-  git status --short
-  exit 1
-fi
-
-# ── 同步远端 ──────────────────────────────────────────────────────
-echo "Pulling latest from origin/main..."
-git pull origin main
+# ── 拉取远端最新 ─────────────────────────────────────────────────
+echo "Fetching origin..."
+git fetch origin
 
 # ── 检查 tag 是否已存在 ──────────────────────────────────────────
 if git rev-parse "$TAG" >/dev/null 2>&1; then
@@ -44,11 +30,10 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
 fi
 
 # ── 确认 ─────────────────────────────────────────────────────────
-LOCAL_SHA=$(git rev-parse --short HEAD)
 ORIGIN_SHA=$(git rev-parse --short origin/main)
 echo ""
-echo "  Tag:     $TAG"
-echo "  Commit:  $LOCAL_SHA (origin/main: $ORIGIN_SHA)"
+echo "  Tag:         $TAG"
+echo "  Commit:      $ORIGIN_SHA (origin/main)"
 echo ""
 
 read -rp "Create and push tag $TAG? [y/N] " CONFIRM
@@ -57,8 +42,8 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
   exit 0
 fi
 
-# ── 打 tag 并推送 ────────────────────────────────────────────────
-git tag "$TAG"
+# ── 在 origin/main 上打 tag 并推送 ──────────────────────────────
+git tag "$TAG" origin/main
 git push origin "$TAG"
 
 echo ""
