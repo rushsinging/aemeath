@@ -1,9 +1,7 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde_json::Value;
-#[allow(unused_imports)]
-use share::tool::types::mcp_tool::McpToolResult;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -17,7 +15,9 @@ pub struct McpTool {
 }
 
 #[async_trait]
-impl Tool for McpTool {
+impl TypedTool for McpTool {
+    type Output = Value;
+
     fn name(&self) -> &str {
         &self.qualified_name
     }
@@ -38,7 +38,11 @@ impl Tool for McpTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
             Ok(output) => {
@@ -48,23 +52,9 @@ impl Tool for McpTool {
                 );
                 let data =
                     serde_json::from_str::<Value>(&limited).unwrap_or(Value::String(limited));
-                ToolResult::success(
-                    serde_json::json!({
-                        "status": "success",
-                        "message": "MCP tool call succeeded",
-                        "data": data
-                    })
-                    .to_string(),
-                )
+                TypedToolResult::success("MCP tool call succeeded", data)
             }
-            Err(e) => ToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": format!("MCP tool error: {e}"),
-                    "data": null
-                })
-                .to_string(),
-            ),
+            Err(e) => TypedToolResult::error(format!("MCP tool error: {e}")),
         }
     }
 }

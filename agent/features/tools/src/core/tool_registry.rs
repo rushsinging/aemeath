@@ -1,4 +1,5 @@
-use crate::contract::Tool;
+use crate::contract::tool::TypedToolAdapter;
+use crate::contract::{Tool, TypedTool};
 use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -21,10 +22,14 @@ impl ToolRegistry {
         }
     }
 
-    pub fn register(&self, tool: Box<dyn Tool>) {
-        self.tools
-            .write()
-            .insert(tool.name().to_string(), Arc::from(tool));
+    /// 注册一个工具（自动包裹 [`TypedToolAdapter`]）。
+    ///
+    /// 所有工具统一实现 [`TypedTool`]；registry 内部自动适配为 `dyn Tool`
+    /// 存入 `HashMap`。工具名（key）由 `TypedTool::name()` 决定。
+    pub fn register<T: TypedTool + 'static>(&self, tool: T) {
+        let adapter = TypedToolAdapter::new(tool);
+        let name = adapter.name().to_string();
+        self.tools.write().insert(name, Arc::new(adapter));
     }
 
     pub fn unregister(&self, name: &str) -> bool {
@@ -79,7 +84,7 @@ impl crate::contract::ToolListProvider for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::{ToolExecutionContext, ToolResult};
+    use crate::contract::{ToolExecutionContext, TypedTool, TypedToolResult};
     use async_trait::async_trait;
 
     struct DummyTool {
@@ -97,7 +102,9 @@ mod tests {
     }
 
     #[async_trait]
-    impl Tool for DummyTool {
+    impl TypedTool for DummyTool {
+        type Output = Value;
+
         fn name(&self) -> &str {
             &self.name
         }
@@ -110,15 +117,19 @@ mod tests {
             serde_json::json!({"type": "object"})
         }
 
-        async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
-            ToolResult::success("ok")
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            TypedToolResult::success("ok", Value::Null)
         }
     }
 
     #[test]
     fn test_tool_registry_unregister_existing_tool() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(DummyTool::new("dummy", "first")));
+        registry.register(DummyTool::new("dummy", "first"));
 
         assert!(registry.contains("dummy"));
         assert_eq!(registry.len(), 1);
@@ -138,8 +149,8 @@ mod tests {
     #[test]
     fn test_tool_registry_register_overwrites_existing_tool() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(DummyTool::new("dummy", "first")));
-        registry.register(Box::new(DummyTool::new("dummy", "second")));
+        registry.register(DummyTool::new("dummy", "first"));
+        registry.register(DummyTool::new("dummy", "second"));
 
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.get("dummy").unwrap().description(), "second");

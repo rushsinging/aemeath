@@ -1,4 +1,4 @@
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::business::mcp::McpClient;
 use crate::business::mcp_manager::McpConnectionManager;
 use crate::LOG_TARGET;
@@ -65,7 +65,9 @@ fn validate_mcp_input(input: &Value, schema: &Value) -> Result<(), String> {
 }
 
 #[async_trait]
-impl Tool for McpToolWrapper {
+impl TypedTool for McpToolWrapper {
+    type Output = Value;
+
     fn name(&self) -> &str {
         &self.qualified_name
     }
@@ -88,46 +90,28 @@ impl Tool for McpToolWrapper {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
         // Validate input against schema before calling MCP tool
         if let Err(e) = validate_mcp_input(&input, &self.schema) {
             log::warn!(target: LOG_TARGET, "MCP tool {} input validation failed: {}", self.tool_name, e);
-            return ToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": format!("Invalid input for {}: {}", self.tool_name, e),
-                    "data": null
-                })
-                .to_string(),
-            );
+            return TypedToolResult::error(format!("Invalid input for {}: {}", self.tool_name, e));
         }
 
         let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
-            Ok(output) => {
-                let _ = output; // MCP server output not used in structured result
+            Ok(_output) => {
                 let data = serde_json::to_value(McpManagerResult {
                     name: self.tool_name.clone(),
                     action: "call_tool".to_string(),
                 })
                 .unwrap_or_default();
-                ToolResult::success(
-                    serde_json::json!({
-                        "status": "success",
-                        "message": "MCP tool call succeeded",
-                        "data": data
-                    })
-                    .to_string(),
-                )
+                TypedToolResult::success("MCP tool call succeeded", data)
             }
-            Err(e) => ToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": format!("MCP tool error: {}", e),
-                    "data": null
-                })
-                .to_string(),
-            ),
+            Err(e) => TypedToolResult::error(format!("MCP tool error: {}", e)),
         }
     }
 }

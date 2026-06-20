@@ -53,7 +53,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::json;
-    use tools::api::{Tool, ToolExecutionContext, ToolRegistry, ToolResult};
+    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
     fn empty_read_files() -> std::sync::Mutex<std::collections::HashSet<String>> {
         std::sync::Mutex::new(std::collections::HashSet::new())
@@ -73,7 +73,9 @@ mod tests {
     /// checker, simulating BashTool's behaviour.
     struct MockBashTool;
     #[async_trait]
-    impl Tool for MockBashTool {
+    impl TypedTool for MockBashTool {
+        type Output = serde_json::Value;
+
         fn name(&self) -> &str {
             "Bash"
         }
@@ -93,7 +95,11 @@ mod tests {
                 .map(tools::api::is_readonly_command)
                 .unwrap_or(false)
         }
-        async fn call(&self, _: serde_json::Value, _: &ToolExecutionContext) -> ToolResult {
+        async fn call(
+            &self,
+            _: serde_json::Value,
+            _: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
             unreachable!()
         }
     }
@@ -122,7 +128,7 @@ mod tests {
     #[test]
     fn test_evaluate_calls_readonly_bash_is_approved() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(MockBashTool));
+        registry.register(MockBashTool);
         let read_files = empty_read_files();
         let engine = PolicyEngine::new(
             std::path::Path::new("/tmp"),
