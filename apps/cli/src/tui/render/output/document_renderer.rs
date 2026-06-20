@@ -97,7 +97,7 @@ impl OutputDocumentRenderer {
         let mut gutted = crate::tui::render::output::gutter::apply_gutter_with_frame(
             &node.kind,
             depth,
-            rendered.lines,
+            (*rendered.lines).clone(),
             animation_frame,
         );
         if matches!(
@@ -113,7 +113,7 @@ impl OutputDocumentRenderer {
         }
         out.push(RenderedBlock {
             block_id: rendered.block_id,
-            lines: gutted,
+            lines: std::rc::Rc::new(gutted),
         });
         for child in &node.children {
             self.render_node(child, outer_width, depth + 1, animation_frame, out);

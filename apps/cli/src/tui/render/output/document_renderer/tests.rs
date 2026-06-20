@@ -239,9 +239,13 @@ fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
 fn rb(id: &str, lines: usize) -> RenderedBlock {
     use crate::tui::render::output::rendered::RenderedLine;
     use ratatui::text::Span;
+    use std::rc::Rc;
     RenderedBlock {
         block_id: id.into(),
-        lines: vec![RenderedLine::new(vec![Span::raw(id.to_string())]); lines],
+        lines: Rc::new(vec![
+            RenderedLine::new(vec![Span::raw(id.to_string())]);
+            lines
+        ]),
     }
 }
 

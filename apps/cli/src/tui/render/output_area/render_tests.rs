@@ -8,6 +8,7 @@ use crate::tui::view_model::LiveStatusViewModel;
 use crate::tui::view_state::output::OutputViewState;
 use ratatui::{buffer::Buffer, layout::Rect, text::Span};
 use sdk::CharIdx;
+use std::rc::Rc;
 
 fn no_live_status() -> LiveStatusViewModel {
     LiveStatusViewModel::default()
@@ -19,11 +20,11 @@ fn test_render_reserves_scrollbar_column_and_wraps_long_lines() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "a".into(),
-            lines: vec![
+            lines: Rc::new(vec![
                 RenderedLine::new(vec![Span::raw("line 1")]),
                 RenderedLine::new(vec![Span::raw("1234567")]),
                 RenderedLine::new(vec![Span::raw("line 2")]),
-            ],
+            ]),
         }],
     });
     let area_rect = Rect::new(0, 0, 6, 2);
@@ -65,7 +66,7 @@ fn test_render_document_paints_spans_and_overlays_selection() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "a".into(),
-            lines: vec![RenderedLine::new(vec![Span::raw("hello")])],
+            lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("hello")])]),
         }],
     });
     let area_rect = Rect::new(0, 0, 10, 3);
@@ -88,10 +89,10 @@ fn test_output_area_paints_fill_style_for_short_and_empty_lines() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "filled".into(),
-            lines: vec![
+            lines: Rc::new(vec![
                 RenderedLine::from_plain("hi").with_fill_style(fill),
                 RenderedLine::empty().with_fill_style(fill),
-            ],
+            ]),
         }],
     });
     let area_rect = Rect::new(0, 0, 8, 3);
@@ -117,7 +118,7 @@ fn test_output_area_selection_overrides_fill_style_on_text_cells() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "filled".into(),
-            lines: vec![RenderedLine::from_plain("hello").with_fill_style(fill)],
+            lines: Rc::new(vec![RenderedLine::from_plain("hello").with_fill_style(fill)]),
         }],
     });
     let area_rect = Rect::new(0, 0, 8, 2);
@@ -145,7 +146,7 @@ fn test_render_document_with_gutter_offsets_selection_and_skips_gutter() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "a".into(),
-            lines: vec![line],
+            lines: Rc::new(vec![line]),
         }],
     });
     // 选中 plain 字符 [0,3) = "hel"
@@ -186,7 +187,7 @@ fn test_render_user_message_paints_full_visible_line_background() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "u".into(),
-            lines: vec![line],
+            lines: Rc::new(vec![line]),
         }],
     });
     let area_rect = Rect::new(0, 0, 12, 2);
@@ -219,7 +220,7 @@ fn test_click_on_gutter_line_maps_to_content_char() {
     area.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "a".into(),
-            lines: vec![line],
+            lines: Rc::new(vec![line]),
         }],
     });
     let area_rect = Rect::new(0, 0, 12, 3);

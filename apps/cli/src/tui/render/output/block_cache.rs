@@ -2,6 +2,7 @@
 
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// block cache key。`text_width` 与 `RenderCtx.text_width` 同义：
 /// 已扣除 gutter 的可用文本宽度（参见 #329 语义约定）。
@@ -67,7 +68,7 @@ mod tests {
     fn block(id: &str, n: usize) -> RenderedBlock {
         RenderedBlock {
             block_id: id.into(),
-            lines: vec![RenderedLine::default(); n],
+            lines: Rc::new(vec![RenderedLine::default(); n]),
         }
     }
 

@@ -6,6 +6,7 @@ use crate::tui::view_model::output::ToolCallBlockView;
 use crate::tui::view_model::tool_name::tool_display_name;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use std::rc::Rc;
 
 /// 渲染工具调用块：仅 header（标题）+ args detail 行 + 可选的 activity 状态行。
 ///
@@ -92,7 +93,7 @@ pub fn render_tool_call(
 
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 
