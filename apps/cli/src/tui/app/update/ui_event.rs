@@ -95,8 +95,14 @@ impl App {
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
             }
-            // A2：仅建立通道，TUI 消费（按 id 清占位 + 回显）留待 A3。
-            UiEvent::UserMessagesAdded(_items) => return UpdateResult::none(),
+            UiEvent::UserMessagesAdded(items) => {
+                for item in items {
+                    self.clear_queued_submission_echo_by_id(&item.id);
+                    self.append_user_echo(item.text);
+                }
+                self.mark_output_dirty();
+                return UpdateResult::one(Effect::SaveSession { notify: false });
+            }
             UiEvent::MessagesSync(msgs) => {
                 // 比较新旧 messages，提取新增的 user messages 用于回显
                 let old_len = self.chat.messages.len();
