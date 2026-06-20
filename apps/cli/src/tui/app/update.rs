@@ -37,6 +37,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::Error(_) => "Error",
         UiEvent::Cancelled { .. } => "Cancelled",
         UiEvent::MessagesSync(_) => "MessagesSync",
+        UiEvent::UserMessagesAdded(_) => "UserMessagesAdded",
         UiEvent::Done { .. } => "Done",
         UiEvent::DoneWithDuration { .. } => "DoneWithDuration",
         UiEvent::LiveTps(_) => "LiveTps",

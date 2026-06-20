@@ -2,7 +2,7 @@
 
 use crate::{ChatInputEventPort, ChatMessage, QueueDrainPort};
 
-pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
+pub use crate::chat_event::{AddedInput, ChatEvent, ChatEventContext, ToolCallStatusView};
 pub use crate::chat_result::{ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
@@ -38,9 +38,11 @@ pub struct ChatInput {
 pub enum ChatInputEvent {
     /// 普通用户消息，延展当前 Chat 为新的 Turn。
     ///
+    /// `id` 是唯一标识本次输入的 UUIDv7（#390 A2）。
     /// `images` 携带图片数据（base64 + media_type），使内联/粘贴/文件图片均能
     /// 经事件通道存活到达 LLM（#402：A1 之前只带 display_path，内联图被丢）。
     UserMessage {
+        id: crate::InputId,
         text: String,
         images: Vec<crate::ToolResultImage>,
     },
@@ -53,6 +55,7 @@ pub enum ChatInputEvent {
 impl ChatInputEvent {
     pub fn user_message(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
         Self::UserMessage {
+            id: crate::InputId::new_v7(),
             text: text.into(),
             images,
         }
@@ -63,7 +66,11 @@ impl ChatInputEvent {
         if text.trim_start().starts_with('/') {
             Self::ControlCommand { raw: text }
         } else {
-            Self::UserMessage { text, images }
+            Self::UserMessage {
+                id: crate::InputId::new_v7(),
+                text,
+                images,
+            }
         }
     }
 }
@@ -105,7 +112,7 @@ mod tests {
         };
         let event = ChatInputEvent::classify_text("继续分析", vec![img.clone()]);
         match event {
-            ChatInputEvent::UserMessage { text, images } => {
+            ChatInputEvent::UserMessage { text, images, .. } => {
                 assert_eq!(text, "继续分析");
                 assert_eq!(images, vec![img]);
             }
@@ -133,5 +140,15 @@ mod tests {
             ChatInputEvent::Cancel,
             ChatInputEvent::user_message("cancel", Vec::new())
         );
+    }
+
+    #[test]
+    fn test_user_message_generates_v7_input_id() {
+        match ChatInputEvent::user_message("x", vec![]) {
+            ChatInputEvent::UserMessage { id, .. } => {
+                assert_eq!(id.as_uuid().get_version_num(), 7);
+            }
+            other => panic!("expected UserMessage, got {other:?}"),
+        }
     }
 }

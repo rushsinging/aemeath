@@ -149,6 +149,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             elapsed_secs,
         },
         sdk::ChatEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
+        sdk::ChatEvent::UserMessagesAdded { items } => UiEvent::UserMessagesAdded(items),
         sdk::ChatEvent::Done { context } => UiEvent::Done {
             context: context.into(),
         },
@@ -429,6 +430,7 @@ mod tests {
     async fn test_tui_input_port_recv_next_and_close() {
         let (tx, port) = TuiInputEventPort::channel();
         tx.send(sdk::ChatInputEvent::UserMessage {
+            id: sdk::InputId::new_v7(),
             text: "x".into(),
             images: vec![],
         })

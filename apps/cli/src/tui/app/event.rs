@@ -80,6 +80,8 @@ pub enum AppEvent {
         context: UiTurnContext,
     },
     MessagesSync(Vec<sdk::ChatMessage>),
+    /// 批量用户输入归宿通知（每条含 InputId）。A2 仅建立通道，TUI 消费留待 A3。
+    UserMessagesAdded(Vec<sdk::AddedInput>),
     Done {
         context: UiTurnContext,
     },
