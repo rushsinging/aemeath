@@ -10,6 +10,9 @@ impl App {
         self.input.clear_queue();
         // 单一真相源：清空 ConversationModel，使输出文档随之回到空状态。
         self.model.conversation.reset();
+        // 清 assemble memo cache：reset 后 revision 归 0，若旧 cache 恰好 revision==0 会误命中。
+        // 显式清除消除隐式依赖，语义更明确（#425 review Fix 2）。
+        self.output_view_cache = None;
         self.mark_output_dirty();
         self.output_area.reset_runtime_state();
         // 滚动真相归 view_state：清空时同步复位，避免下一帧 adapter 用旧滚动态覆盖 widget。

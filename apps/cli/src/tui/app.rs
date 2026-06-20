@@ -29,6 +29,8 @@ pub use event::{StatusContextUpdate, UiEvent, UiTurnContext};
 /// `refresh_output_document_from_model` 的 assemble 产物 memo。
 pub(crate) struct OutputViewCache {
     pub(crate) revision: u64,
+    /// memo key 第二维：working_root 变化时强制重 assemble，使工具标题路径立即刷新。
+    pub(crate) working_root: Option<String>,
     pub(crate) view_model: crate::tui::view_model::OutputViewModel,
 }
 

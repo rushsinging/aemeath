@@ -260,24 +260,29 @@ impl App {
     pub(crate) fn refresh_output_document_from_model(&mut self) {
         let before_lines = self.output_area.document().total_lines();
         let revision = self.model.conversation.revision();
-        // memo：conversation revision 不变则复用上次 view_model，跳过全量 assemble。
+        let current_working_root: Option<String> = self
+            .model
+            .runtime
+            .workspace
+            .working_root
+            .as_deref()
+            .map(|s| s.to_owned());
+        // memo：conversation revision 不变 且 working_root 不变 则复用上次 view_model，跳过全量 assemble。
+        // working_root 来自 /worktree enter，不推进 revision，需单独纳入 key（#425 review Fix 1）。
         let need_rebuild = self
             .output_view_cache
             .as_ref()
-            .map(|cache| cache.revision != revision)
+            .map(|cache| {
+                cache.revision != revision
+                    || cache.working_root.as_deref() != current_working_root.as_deref()
+            })
             .unwrap_or(true);
         if need_rebuild {
             #[cfg(test)]
             {
                 self.assemble_count += 1;
             }
-            let working_root = self
-                .model
-                .runtime
-                .workspace
-                .working_root
-                .as_deref()
-                .map(std::path::Path::new);
+            let working_root = current_working_root.as_deref().map(std::path::Path::new);
             let view_model = OutputViewAssembler::assemble_from_conversation(
                 &self.model.conversation,
                 revision,
@@ -285,6 +290,7 @@ impl App {
             );
             self.output_view_cache = Some(OutputViewCache {
                 revision,
+                working_root: current_working_root.clone(),
                 view_model,
             });
         }
@@ -295,6 +301,7 @@ impl App {
             .expect("memo cache filled above");
         let view_model = cache.view_model;
         let cached_revision = cache.revision;
+        let cached_working_root = cache.working_root;
         let root_count = view_model.roots.len();
         let width = self.output_document_width();
         // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
@@ -311,6 +318,7 @@ impl App {
         // 无论渲染成败都把 view_model 放回 cache，保留 memo。
         self.output_view_cache = Some(OutputViewCache {
             revision: cached_revision,
+            working_root: cached_working_root,
             view_model,
         });
         let document =
