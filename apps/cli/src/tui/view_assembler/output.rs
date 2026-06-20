@@ -12,12 +12,9 @@ use crate::tui::view_model::{
 };
 use std::collections::HashMap;
 
-type ToolResultEntry<'a> = (&'a str, &'a serde_json::Value, bool, usize);
-
 /// assemble 期一次性构建的工具查找索引，把 O(n²) 线性扫描降为 O(1)。
 pub(super) struct ToolIndex<'a> {
     calls: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), &'a ToolCall>,
-    results: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), ToolResultEntry<'a>>,
 }
 
 impl<'a> ToolIndex<'a> {
@@ -32,25 +29,7 @@ impl<'a> ToolIndex<'a> {
                 }
             }
         }
-        let mut results = HashMap::new();
-        for block in &conversation.blocks {
-            if let crate::tui::model::conversation::block::ConversationBlock::ToolResult {
-                id,
-                chat_id,
-                turn_id,
-                output,
-                content,
-                is_error,
-                image_count,
-            } = block
-            {
-                results.insert(
-                    (chat_id, turn_id, id),
-                    (output.as_str(), content, *is_error, *image_count),
-                );
-            }
-        }
-        Self { calls, results }
+        Self { calls }
     }
 
     pub(super) fn call(
@@ -60,15 +39,6 @@ impl<'a> ToolIndex<'a> {
         tool_id: &ToolCallId,
     ) -> Option<&'a ToolCall> {
         self.calls.get(&(chat_id, turn_id, tool_id)).copied()
-    }
-
-    pub(super) fn result_block(
-        &self,
-        chat_id: &ChatId,
-        turn_id: &ChatTurnId,
-        tool_id: &ToolCallId,
-    ) -> Option<ToolResultEntry<'a>> {
-        self.results.get(&(chat_id, turn_id, tool_id)).copied()
     }
 }
 
@@ -82,9 +52,6 @@ impl OutputViewAssembler {
     ) -> OutputViewModel {
         let mut roots: Vec<BlockNode> = Vec::new();
         let tool_index = ToolIndex::build(conversation);
-        if conversation.timeline.items().is_empty() {
-            assemble_legacy_conversation_blocks(conversation, &tool_index, &mut roots);
-        }
 
         for item in conversation.timeline.items() {
             match item {
@@ -155,34 +122,25 @@ impl OutputViewAssembler {
                     ) {
                         continue;
                     }
-                    let tool_name = find_tool_name_by_id(
+                    // A4.5: 从 chats.tool_calls[].result（ToolResultPayload）读，不再读 blocks。
+                    let Some(call) = find_tool_call(
                         &tool_index,
                         &reference.context.chat_id,
                         &reference.context.turn_id,
                         &reference.tool_call_id,
-                    );
-                    let Some((result_output, result_content, result_is_error, result_image_count)) =
-                        find_tool_result_block(
-                            &tool_index,
-                            &reference.context.chat_id,
-                            &reference.context.turn_id,
-                            &reference.tool_call_id,
-                        )
-                    else {
+                    ) else {
                         continue;
                     };
-                    let display_output = display_text_for_tool_result(
-                        tool_name.as_deref(),
-                        result_output,
-                        result_content,
-                    );
-                    let text = summarize_non_embedded_result(
-                        tool_name.as_deref(),
-                        &display_output,
-                        result_is_error,
-                    );
-                    let text = if result_image_count > 0 {
-                        format!("{text}\n[图片: {}]", result_image_count)
+                    let Some(payload) = call.result.as_ref() else {
+                        continue;
+                    };
+                    let tool_name = Some(call.name.as_str());
+                    let display_output =
+                        display_text_for_tool_result(tool_name, &payload.output, &payload.content);
+                    let text =
+                        summarize_non_embedded_result(tool_name, &display_output, payload.is_error);
+                    let text = if payload.image_count > 0 {
+                        format!("{text}\n[图片: {}]", payload.image_count)
                     } else {
                         text
                     };
@@ -191,7 +149,7 @@ impl OutputViewAssembler {
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
                             key: format!("{}-result", reference.tool_call_id.as_ref()),
                             text,
-                            style: if result_is_error {
+                            style: if payload.is_error {
                                 SemanticStyle::Error
                             } else {
                                 SemanticStyle::Success
@@ -376,18 +334,8 @@ fn tool_result_is_embedded(
         .is_some_and(|payload| !payload.output.is_empty())
 }
 
-/// 查找指定 runtime context 下 tool call id 对应的工具名称。
-fn find_tool_name_by_id(
-    index: &ToolIndex<'_>,
-    chat_id: &ChatId,
-    turn_id: &ChatTurnId,
-    tool_id: &ToolCallId,
-) -> Option<String> {
-    find_tool_call(index, chat_id, turn_id, tool_id).map(|call| call.name.clone())
-}
-
 /// 对非嵌入/孤儿 ToolResult 生成摘要文本：优先用工具的 `format_result_summary`，
-/// 工具名未知（id 错位导致 `find_tool_name_by_id`=None）时回退通用完成摘要。
+/// 工具名未知时回退通用完成摘要。
 ///
 /// **绝不**把完整原始 output 当文本刷出——这是 #87 的泄漏源（旧逻辑在工具名未知时
 /// 截断原始 output 当摘要，导致带行号正文 + "lines omitted" 刷屏）。
@@ -411,8 +359,8 @@ fn find_tool_view(
     let (icon, semantic_status, style) = map_tool_status(call.status);
     // 同时计算 result_summary（展示文本）与 result_payload（结构化 payload，
     // 供 TUI Display 走 typed 字段渲染 header）。
-    // A4.1: 直接从 ChatTurn.tool_calls[i].result（ToolResultPayload）取字段，
-    // 不再读 blocks ToolResult index，blocks 写入仅作 A4.5/A4.6 删除前的并存冗余。
+    // A4.1/A4.5: 直接从 ChatTurn.tool_calls[i].result（ToolResultPayload）取字段，
+    // 不读 blocks（blocks fallback 已在 A4.5 删除）。
     let (result_summary, result_payload) = match call
         .result
         .as_ref()
@@ -481,18 +429,6 @@ fn find_tool_view(
     })
 }
 
-/// 在索引中查找匹配 `(chat_id, turn_id, tool_id)` 的 ToolResult block，
-/// 返回 `(output, content, is_error, image_count)` 元组。
-/// A4.5/A4.6 删 blocks 后此函数随之删除。暂保留供并存冗余期兼容。
-fn find_tool_result_block<'a>(
-    index: &ToolIndex<'a>,
-    chat_id: &ChatId,
-    turn_id: &ChatTurnId,
-    tool_id: &ToolCallId,
-) -> Option<(&'a str, &'a serde_json::Value, bool, usize)> {
-    index.result_block(chat_id, turn_id, tool_id)
-}
-
 fn find_tool_call<'a>(
     index: &ToolIndex<'a>,
     chat_id: &ChatId,
@@ -500,50 +436,6 @@ fn find_tool_call<'a>(
     tool_id: &ToolCallId,
 ) -> Option<&'a ToolCall> {
     index.call(chat_id, turn_id, tool_id)
-}
-
-fn assemble_legacy_conversation_blocks(
-    conversation: &ConversationModel,
-    tool_index: &ToolIndex<'_>,
-    roots: &mut Vec<BlockNode>,
-) {
-    for block in &conversation.blocks {
-        let crate::tui::model::conversation::block::ConversationBlock::ToolResult {
-            id,
-            chat_id,
-            turn_id,
-            output,
-            content,
-            is_error,
-            image_count,
-        } = block
-        else {
-            continue;
-        };
-        if tool_result_is_embedded(tool_index, chat_id, turn_id, id) {
-            continue;
-        }
-        let tool_name = find_tool_name_by_id(tool_index, chat_id, turn_id, id);
-        let display_output = display_text_for_tool_result(tool_name.as_deref(), output, content);
-        let text = summarize_non_embedded_result(tool_name.as_deref(), &display_output, *is_error);
-        let text = if *image_count > 0 {
-            format!("{text}\n[图片: {image_count}]")
-        } else {
-            text
-        };
-        roots.push(leaf(
-            format!("{}-result", id.as_ref()),
-            OutputBlockKind::DiagnosticNotice(TextBlockView {
-                key: format!("{}-result", id.as_ref()),
-                text,
-                style: if *is_error {
-                    SemanticStyle::Error
-                } else {
-                    SemanticStyle::Success
-                },
-            }),
-        ));
-    }
 }
 
 fn display_text_for_tool_result(

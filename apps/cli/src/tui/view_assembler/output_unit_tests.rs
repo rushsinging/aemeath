@@ -200,54 +200,26 @@ fn test_summarize_non_embedded_empty() {
     assert_eq!(summarize_non_embedded_result(Some("Read"), "", false), "");
 }
 
+/// A4.5: blocks fallback 已删除。timeline ToolResult 指向不存在的 tool_call_id 时，
+/// assembler 静默跳过（find_tool_call → None → continue），不产出任何块。
 #[test]
-fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
-    // 复现 #87 实测 bug（LEAK-TRACE 日志确认）：ConversationBlock::ToolResult 的 id
-    // 在 chats.turns.tool_calls 中找不到（find_tool_name_by_id=None），旧逻辑经
-    // truncate 把完整带行号 output 当摘要逐行刷出（正文刷屏）。修复后只显示通用完成摘要。
-    use crate::tui::model::conversation::block::ConversationBlock;
+fn test_timeline_tool_result_with_unknown_id_is_silently_skipped() {
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 
     let mut conversation = ConversationModel::default();
-    // chats 为空 → 没有任何 tool_call 与该 ToolResult id 匹配（模拟 id 错位）。
-    let output = (1..=1295)
-        .map(|i| format!("{i}\t# 活动中 Bug 行"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    conversation.blocks.push(ConversationBlock::ToolResult {
-        id: ToolCallId::new("call_orphaned"),
-        chat_id: ChatId::new("chat-orphaned"),
-        turn_id: ChatTurnId::new("turn-orphaned"),
-        output: output.clone(),
-        content: serde_json::json!({ "text": "test output" }),
-        is_error: false,
-        image_count: 0,
-    });
+    // 直接向 timeline 注入一个 ToolResult，但 chats 中没有对应的 tool_call。
+    // A4.5 后：find_tool_call → None → continue，不产出任何块（不泄漏原始内容）。
+    conversation.timeline.push_tool_result_ref(
+        ChatId::new("chat-x"),
+        ChatTurnId::new("turn-x"),
+        ToolCallId::new("call-missing"),
+    );
 
     let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
-    let expected_id = ToolCallId::new("call_orphaned");
-    let block = vm
-        .roots
-        .iter()
-        .find(|block| block.block_id.contains(&expected_id.to_string()))
-        .expect("应有该 ToolResult 对应的块");
-    let OutputBlockKind::DiagnosticNotice(text_view) = &block.kind else {
-        panic!("应为 DiagnosticNotice");
-    };
     assert!(
-        !text_view.text.contains("活动中 Bug 行"),
-        "不应刷出原始 output 正文，实际: {}",
-        text_view.text
-    );
-    assert!(
-        !text_view.text.contains("lines omitted"),
-        "不应截断刷出原始内容，实际: {}",
-        text_view.text
-    );
-    assert!(
-        text_view.text.starts_with('✓'),
-        "应为通用完成摘要，实际: {}",
-        text_view.text
+        vm.roots.is_empty(),
+        "未知 tool_call_id 的 ToolResult 不应产出任何块，实际: {:?}",
+        vm.roots.iter().map(|b| &b.block_id).collect::<Vec<_>>()
     );
 }
 
@@ -282,8 +254,10 @@ fn test_tool_index_call_matches_linear_scan() {
     );
 }
 
+/// A4.5: result_block 已删除；tool result 数据现在通过 ToolIndex.call → call.result 读取。
+/// 此测试验证 ToolIndex.call 能正确索引到已完成工具的 result payload（四字段全部匹配）。
 #[test]
-fn test_tool_index_result_block_matches_linear_scan() {
+fn test_tool_index_call_result_payload_matches_observed_values() {
     use super::ToolIndex;
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
     use crate::tui::model::conversation::intent::ConversationIntent;
@@ -295,7 +269,6 @@ fn test_tool_index_result_block_matches_linear_scan() {
     let turn = ChatTurnId::new("t1");
     let tool = ToolCallId::new("tool-r1");
 
-    // 先登记 ToolCallStart（provider_id 为 Option<String>）
     conv.apply(ConversationIntent::ObserveToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
@@ -304,7 +277,6 @@ fn test_tool_index_result_block_matches_linear_scan() {
         name: "Bash".to_string(),
         index: 0,
     });
-    // 升级 status 到 Ready
     conv.apply(ConversationIntent::ObserveToolCallUpdate {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
@@ -315,7 +287,6 @@ fn test_tool_index_result_block_matches_linear_scan() {
         arguments: None,
         status: ToolCallStatus::Ready,
     });
-    // 登记 ToolResult（provider_id 为 String）
     let expected_output = "cmd output line";
     let expected_content = serde_json::json!({ "text": "cmd output line" });
     let expected_is_error = false;
@@ -334,20 +305,27 @@ fn test_tool_index_result_block_matches_linear_scan() {
 
     let index = ToolIndex::build(&conv);
 
-    // 正常路径：应命中并返回正确四元组
-    let result = index.result_block(&chat, &turn, &tool);
-    assert!(result.is_some(), "已登记 tool result 应命中索引");
-    let (output, content, is_error, image_count) = result.unwrap();
-    assert_eq!(output, expected_output, "output 应匹配");
-    assert_eq!(content, &expected_content, "content 应匹配");
-    assert_eq!(is_error, expected_is_error, "is_error 应匹配");
-    assert_eq!(image_count, expected_image_count, "image_count 应匹配");
+    // A4.5 路径：通过 call → call.result 读取 payload（不再走 result_block）
+    let call = index
+        .call(&chat, &turn, &tool)
+        .expect("已登记 tool call 应命中索引");
+    let payload = call
+        .result
+        .as_ref()
+        .expect("已完成 tool call 应有 result payload");
+    assert_eq!(payload.output, expected_output, "output 应匹配");
+    assert_eq!(payload.content, expected_content, "content 应匹配");
+    assert_eq!(payload.is_error, expected_is_error, "is_error 应匹配");
+    assert_eq!(
+        payload.image_count, expected_image_count,
+        "image_count 应匹配"
+    );
 
     // 边界路径：未登记的 tool_id 应返回 None
     assert!(
         index
-            .result_block(&chat, &turn, &ToolCallId::new("no-such-tool"))
+            .call(&chat, &turn, &ToolCallId::new("no-such-tool"))
             .is_none(),
-        "未登记 tool 的 result_block 应返回 None"
+        "未登记 tool 应返回 None"
     );
 }
