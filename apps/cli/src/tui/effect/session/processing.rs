@@ -3,39 +3,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Clone)]
-pub(crate) struct TuiQueueDrainPort {
-    tx: mpsc::Sender<UiEvent>,
-}
-
-impl TuiQueueDrainPort {
-    pub(crate) fn new(tx: mpsc::Sender<UiEvent>) -> Self {
-        Self { tx }
-    }
-
-    pub(crate) async fn drain_queued_input(&self) -> Option<Vec<String>> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        if self
-            .tx
-            .send(UiEvent::DrainQueuedInput { reply_tx })
-            .await
-            .is_err()
-        {
-            return None;
-        }
-        match reply_rx.await {
-            Ok(queued) if !queued.is_empty() => Some(queued),
-            _ => None,
-        }
-    }
-}
-
-impl sdk::QueueDrainPort for TuiQueueDrainPort {
-    fn drain_queued_input<'a>(&'a self) -> sdk::QueueFuture<'a> {
-        Box::pin(async move { self.drain_queued_input().await })
-    }
-}
-
-#[derive(Clone)]
 pub(crate) struct TuiInputEventPort {
     rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<sdk::ChatInputEvent>>>,
 }
@@ -208,7 +175,6 @@ pub(crate) struct SpawnContextRefs {
 
 pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
-    pub queue_request_tx: mpsc::Sender<UiEvent>,
     pub input_event_port: TuiInputEventPort,
     pub agent_client: Arc<dyn sdk::AgentClient>,
     pub fallback_context: UiTurnContext,
@@ -380,9 +346,8 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             .agent_client
             .chat(sdk::ChatRequest {
                 messages: ctx.messages,
-                queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
-                    ctx.queue_request_tx.clone(),
-                ))),
+                // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
+                queue_drain: None,
                 input_events: Some(Arc::new(ctx.input_event_port.clone())),
             })
             .await
@@ -528,69 +493,14 @@ mod tests {
         assert!(matches!(event, UiEvent::TaskStatusChanged));
     }
 
-    /// 回归 #104：DrainQueuedInput 事件从 TUI input queue 取出排队消息后，
-    /// 回显为 UserMessage 并返回给调用方，确保 TUI 显示排队消息。
     #[tokio::test]
-    async fn test_drain_queued_input_returns_messages_and_clears_queue() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
-        let port = TuiQueueDrainPort::new(tx);
-
-        // 模拟 TUI 主线程收到 DrainQueuedInput 后回复排队消息
-        let replier = tokio::spawn(async move {
-            if let Some(UiEvent::DrainQueuedInput { reply_tx }) = rx.recv().await {
-                let _ = reply_tx.send(vec!["排队消息A".to_string(), "排队消息B".to_string()]);
-            }
-        });
-
-        let result = port.drain_queued_input().await;
-        replier.await.unwrap();
-
-        assert_eq!(
-            result,
-            Some(vec!["排队消息A".to_string(), "排队消息B".to_string()]),
-            "drain 应返回排队的消息列表"
-        );
-    }
-
-    /// 回归 #104：DrainQueuedInput 在队列为空时返回 None。
-    #[tokio::test]
-    async fn test_drain_queued_input_returns_none_when_empty() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
-        let port = TuiQueueDrainPort::new(tx);
-
-        let replier = tokio::spawn(async move {
-            if let Some(UiEvent::DrainQueuedInput { reply_tx }) = rx.recv().await {
-                let _ = reply_tx.send(Vec::<String>::new());
-            }
-        });
-
-        let result = port.drain_queued_input().await;
-        replier.await.unwrap();
-
-        assert!(result.is_none(), "空队列应返回 None");
-    }
-
-    /// 回归 #104：DrainQueuedInput 在通道断开时返回 None。
-    #[tokio::test]
-    async fn test_drain_queued_input_returns_none_when_channel_dropped() {
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
-        drop(rx);
-        let port = TuiQueueDrainPort::new(tx);
-
-        let result = port.drain_queued_input().await;
-        assert!(result.is_none(), "通道断开应返回 None");
-    }
-
-    #[tokio::test]
-    async fn test_spawn_processing_done_does_not_drain_queue_again() {
+    async fn test_spawn_processing_done_emits_done_event() {
         let (ui_tx, mut ui_rx) = tokio::sync::mpsc::channel(16);
-        let (queue_tx, mut queue_rx) = tokio::sync::mpsc::channel(16);
         let client = Arc::new(DoneOnlyAgentClient::default());
 
         let (_input_tx, input_port) = TuiInputEventPort::channel();
         spawn_processing(SpawnContext {
             tx: ui_tx,
-            queue_request_tx: queue_tx,
             input_event_port: input_port,
             agent_client: client.clone(),
             fallback_context: UiTurnContext {
@@ -611,13 +521,6 @@ mod tests {
             UiEvent::Done { context }
                 if context.chat_id == expected_chat && context.turn_id == expected_turn
         ));
-
-        let drain_request =
-            tokio::time::timeout(std::time::Duration::from_millis(50), queue_rx.recv()).await;
-        assert!(
-            !matches!(drain_request, Ok(Some(UiEvent::DrainQueuedInput { .. }))),
-            "Done 后不应再次 drain TUI input queue"
-        );
         assert_eq!(client.sync_calls.load(Ordering::SeqCst), 0);
     }
 

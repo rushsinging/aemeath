@@ -22,7 +22,6 @@ impl App {
             return UpdateResult::none();
         }
         if submission.text.starts_with('/') {
-            self.input.push_queue(submission.text.clone());
             return UpdateResult {
                 effects: Vec::new(),
                 spawn_effect: None,
@@ -46,14 +45,16 @@ impl App {
         // runtime，由 runtime 组装 image block（#402）。
         let images: Vec<sdk::ToolResultImage> =
             submission.images.into_iter().map(Into::into).collect();
+        // 生成一次 InputId，同时用于事件 id 与占位块 input_id——两者必须相同（#390 A3）。
+        let input_id = sdk::InputId::new_v7();
         let event = sdk::ChatInputEvent::UserMessage {
-            id: sdk::InputId::new_v7(),
+            id: input_id.clone(),
             text: submission.text.clone(),
             images,
         };
-        // 入队即时显示「排队中」块（QueuedUserMessage），由 MessagesSync drain 时清理。
-        self.input.push_queue(submission.text);
-        self.enqueue_submission_echo(submission.display_text);
+        // 入队即时显示「排队中」块（QueuedUserMessage，携 input_id），由归宿事件
+        // UserMessagesAdded 按 id 清除（#390 A3）。submission.text 仅经事件通道送达 runtime。
+        self.enqueue_submission_echo(input_id, submission.display_text);
         UpdateResult::one(Effect::SendChatInputEvent { event })
     }
 }
@@ -232,6 +233,70 @@ mod tests {
             )
         });
         assert!(has_queued, "首条复制文本应以折叠占位符入排队显示");
+    }
+
+    /// Step 1（A3 Task 1）：submit 后文本统一走事件通道，effects 含 SendChatInputEvent::UserMessage。
+    #[test]
+    fn submit_routes_via_event_channel() {
+        let mut app = test_app();
+        app.model
+            .input
+            .apply(InputIntent::InsertText("hello queue".to_string()));
+
+        let result = app.update_enter();
+
+        // effects 必须含一个 SendChatInputEvent::UserMessage
+        assert_eq!(
+            sent_user_message_text(&result),
+            Some("hello queue"),
+            "effects 应含 SendChatInputEvent::UserMessage"
+        );
+    }
+
+    /// Step 1（A3 Task 1）：submit 后，占位块携带的 input_id 与事件 id 相同。
+    ///
+    /// 同一次提交生成一个 InputId，分别写入：
+    /// 1. `ChatInputEvent::UserMessage { id }` 事件；
+    /// 2. `ConversationBlock::QueuedUserMessage { input_id }` 占位块。
+    ///
+    /// 两者必须相等——这是 Task 2 按 id 清占位的前提。
+    #[test]
+    fn submit_placeholder_carries_input_id() {
+        let mut app = test_app();
+        app.model
+            .input
+            .apply(InputIntent::InsertText("hello id".to_string()));
+
+        let result = app.update_enter();
+
+        // 取事件里的 id
+        let event_id = result.effects.iter().find_map(|effect| match effect {
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::UserMessage { id, .. },
+            } => Some(id.clone()),
+            _ => None,
+        });
+        let event_id = event_id.expect("应产生 SendChatInputEvent UserMessage");
+
+        // 取占位块里的 input_id
+        let block_input_id = app
+            .model
+            .conversation
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                crate::tui::model::conversation::block::ConversationBlock::QueuedUserMessage {
+                    input_id,
+                    ..
+                } => Some(input_id.clone()),
+                _ => None,
+            });
+        let block_input_id = block_input_id.expect("应产生 QueuedUserMessage 占位块");
+
+        assert_eq!(
+            event_id, block_input_id,
+            "占位块 input_id 必须与事件 id 相同"
+        );
     }
 
     /// 测试辅助：执行 update 返回的 `SendChatInputEvent` effect（同 executor 行为）。

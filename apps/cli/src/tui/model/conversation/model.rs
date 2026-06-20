@@ -115,8 +115,12 @@ impl ConversationModel {
             ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
             ConversationIntent::AppendHookNotice { content } => self.append_hook_notice(content),
             ConversationIntent::AppendError { text } => self.append_error(text),
-            ConversationIntent::QueueSubmission { text } => self.queue_submission(text),
-            ConversationIntent::ClearQueuedSubmissions => self.clear_queued_submissions(),
+            ConversationIntent::QueueSubmission { input_id, text } => {
+                self.queue_submission(input_id, text)
+            }
+            ConversationIntent::ClearQueuedSubmissionById { input_id } => {
+                self.clear_queued_submission_by_id(&input_id)
+            }
             ConversationIntent::RecordAgentProgress {
                 chat_id,
                 turn_id,
@@ -407,16 +411,25 @@ impl ConversationModel {
         ]
     }
 
-    fn queue_submission(&mut self, text: String) -> Vec<ConversationChange> {
+    fn queue_submission(
+        &mut self,
+        input_id: sdk::InputId,
+        text: String,
+    ) -> Vec<ConversationChange> {
         let id = self.next_block_id("queued");
-        self.queued_submissions
-            .push(QueuedSubmission::new(id.clone(), text.clone()));
+        self.queued_submissions.push(QueuedSubmission::new(
+            id.clone(),
+            input_id.clone(),
+            text.clone(),
+        ));
         self.blocks.push(ConversationBlock::QueuedUserMessage {
             id: id.clone(),
+            input_id: input_id.clone(),
             text: text.clone(),
         });
         self.timeline.push(OutputTimelineItem::QueuedUserMessage {
             id: id.clone(),
+            input_id,
             text,
         });
         vec![
@@ -425,15 +438,23 @@ impl ConversationModel {
         ]
     }
 
-    fn clear_queued_submissions(&mut self) -> Vec<ConversationChange> {
-        let count = self.queued_submissions.len();
-        self.queued_submissions.clear();
-        self.blocks
-            .retain(|block| !matches!(block, ConversationBlock::QueuedUserMessage { .. }));
-        self.timeline
-            .retain(|item| !matches!(item, OutputTimelineItem::QueuedUserMessage { .. }));
+    fn clear_queued_submission_by_id(
+        &mut self,
+        input_id: &sdk::InputId,
+    ) -> Vec<ConversationChange> {
+        let before = self.queued_submissions.len();
+        self.queued_submissions.retain(|q| &q.input_id != input_id);
+        self.blocks.retain(|b| {
+            !matches!(b,
+                ConversationBlock::QueuedUserMessage { input_id: bid, .. } if bid == input_id)
+        });
+        self.timeline.retain(|it| {
+            !matches!(it,
+                OutputTimelineItem::QueuedUserMessage { input_id: tid, .. } if tid == input_id)
+        });
+        let removed = before - self.queued_submissions.len();
         vec![
-            ConversationChange::QueuedSubmissionsCleared { count },
+            ConversationChange::QueuedSubmissionsCleared { count: removed },
             ConversationChange::OutputDirty,
         ]
     }

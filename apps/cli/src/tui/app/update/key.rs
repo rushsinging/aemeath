@@ -166,12 +166,12 @@ impl App {
                     };
                     // 忙时 slash/control command 保持现有 mid-turn 行为：作为
                     // ControlCommand 事件入通道，永不作为 user message 发给 LLM（A3/#391）。
+                    // slash 命令是控制命令、无 UserMessagesAdded 归宿，剥离 MessagesSync
+                    // 全清后建占位会残留——故不建占位、不入文本队列（A3 Task 5）。
                     if submission.text.starts_with('/') {
                         let event = sdk::ChatInputEvent::ControlCommand {
                             raw: submission.text.clone(),
                         };
-                        self.input.push_queue(submission.text.clone());
-                        self.enqueue_submission_echo(submission.display_text);
                         self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
                             StatusNotice::warning("message event queued"),
                         ));
@@ -218,12 +218,9 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Up) => {
                 if completion_visible {
                     self.handle_input_intent(InputIntent::SelectCompletionPrevious);
-                } else if !self.input.input_queue.is_empty() {
-                    // input queue 非空：全部恢复到 input area（\n 连接），清空 queue 和显示块
-                    let queued = self.input.drain_queue();
-                    self.handle_input_intent(InputIntent::ReplaceText(queued.join("\n")));
-                    self.clear_queued_submission_echo();
                 } else {
+                    // Task 5 (A3)：删除「input_queue 非空 → drain + 恢复文本」中间分支。
+                    // Up 键统一走光标上移 / 历史导航，不再召回文本队列。
                     self.handle_input_intent(InputIntent::MoveCursorUp);
                 }
             }

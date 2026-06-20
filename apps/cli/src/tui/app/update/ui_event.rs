@@ -95,28 +95,18 @@ impl App {
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
             }
-            // A2：仅建立通道，TUI 消费（按 id 清占位 + 回显）留待 A3。
-            UiEvent::UserMessagesAdded(_items) => return UpdateResult::none(),
-            UiEvent::MessagesSync(msgs) => {
-                // 比较新旧 messages，提取新增的 user messages 用于回显
-                let old_len = self.chat.messages.len();
-                // 显式分类：只回显**真正的用户输入**消息（含 Text 块），typed 判定。
-                // 取代历史 `role==user && !text_content().is_empty()` 启发式——后者会把
-                // tool_result 消息（含 text-first 字段）误当用户消息回显（#386）。
-                let new_user_texts: Vec<String> = msgs
-                    .iter()
-                    .skip(old_len)
-                    .filter(|m| m.is_user_input())
-                    .map(|m| m.text_content())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                self.chat.messages = msgs;
-                self.input.clear_queue();
-                self.clear_queued_submission_echo();
-                // 将新增的 user messages 正式回显到 conversation model
-                for text in new_user_texts {
-                    self.append_user_echo(text);
+            UiEvent::UserMessagesAdded(items) => {
+                for item in items {
+                    self.clear_queued_submission_echo_by_id(&item.id);
+                    self.append_user_echo(item.text);
                 }
+                self.mark_output_dirty();
+                return UpdateResult::one(Effect::SaveSession { notify: false });
+            }
+            UiEvent::MessagesSync(msgs) => {
+                // A3：MessagesSync 退出 display，仅作镜像 + 落盘；
+                // 用户回显改由 UserMessagesAdded 归宿事件驱动。
+                self.chat.messages = msgs;
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
@@ -246,16 +236,6 @@ impl App {
                         Some(crate::tui::app::state::AskUserState { reply_tx, items });
                 }
                 self.spinner_stop();
-            }
-            UiEvent::DrainQueuedInput { reply_tx } => {
-                let queued = self.input.drain_queue();
-                if !queued.is_empty() {
-                    // 只清除「排队中」显示块（QueuedUserMessage）。正式 UserMessage
-                    // 由 Runtime 的 MessagesSync 单一真相同步，避免 drain 后双重渲染。
-                    self.clear_queued_submission_echo();
-                    self.spinner_phase(SpinnerPhase::ThinkingQueued);
-                }
-                let _ = reply_tx.send(queued);
             }
             UiEvent::CurrentTurnChanged(turn) => {
                 return UpdateResult::one(Effect::SetCurrentTurn { turn });

@@ -66,9 +66,12 @@ pub enum ConversationIntent {
         text: String,
     },
     QueueSubmission {
+        input_id: sdk::InputId,
         text: String,
     },
-    ClearQueuedSubmissions,
+    ClearQueuedSubmissionById {
+        input_id: sdk::InputId,
+    },
     RecordAgentProgress {
         chat_id: ChatId,
         turn_id: ChatTurnId,
