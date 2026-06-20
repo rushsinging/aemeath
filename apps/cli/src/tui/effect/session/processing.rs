@@ -37,30 +37,35 @@ impl sdk::QueueDrainPort for TuiQueueDrainPort {
 
 #[derive(Clone)]
 pub(crate) struct TuiInputEventPort {
-    buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>,
+    rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<sdk::ChatInputEvent>>>,
 }
 
 impl TuiInputEventPort {
-    pub(crate) fn new(buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>) -> Self {
-        Self { buffer }
-    }
-
-    pub(crate) async fn drain_input_events(&self) -> Vec<sdk::ChatInputEvent> {
-        match self.buffer.lock() {
-            Ok(mut events) => events.drain(..).collect(),
-            Err(_) => Vec::new(),
-        }
+    pub(crate) fn channel() -> (mpsc::UnboundedSender<sdk::ChatInputEvent>, Self) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            tx,
+            Self {
+                rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            },
+        )
     }
 }
 
 impl sdk::ChatInputEventPort for TuiInputEventPort {
-    fn drain_input_events<'a>(&'a self) -> sdk::InputEventFuture<'a> {
-        Box::pin(async move { self.drain_input_events().await })
+    fn recv_next<'a>(&'a self) -> sdk::InputEventOptFuture<'a> {
+        Box::pin(async move { self.rx.lock().await.recv().await })
     }
 
-    // TODO(A1-Task5): 临时桩——Task 5 替换为真实 mpsc 实现。
-    fn recv_next<'a>(&'a self) -> sdk::InputEventOptFuture<'a> {
-        Box::pin(async { None })
+    fn drain_input_events<'a>(&'a self) -> sdk::InputEventFuture<'a> {
+        Box::pin(async move {
+            let mut rx = self.rx.lock().await;
+            let mut events = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+            events
+        })
     }
 }
 
@@ -203,7 +208,7 @@ pub(crate) struct SpawnContextRefs {
 pub(crate) struct SpawnContext {
     pub tx: mpsc::Sender<UiEvent>,
     pub queue_request_tx: mpsc::Sender<UiEvent>,
-    pub input_event_buffer: Arc<std::sync::Mutex<Vec<sdk::ChatInputEvent>>>,
+    pub input_event_port: TuiInputEventPort,
     pub agent_client: Arc<dyn sdk::AgentClient>,
     pub fallback_context: UiTurnContext,
     pub messages: Vec<sdk::ChatMessage>,
@@ -377,9 +382,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
                 queue_drain: Some(Arc::new(TuiQueueDrainPort::new(
                     ctx.queue_request_tx.clone(),
                 ))),
-                input_events: Some(Arc::new(TuiInputEventPort::new(
-                    ctx.input_event_buffer.clone(),
-                ))),
+                input_events: Some(Arc::new(ctx.input_event_port.clone())),
             })
             .await
         {
@@ -411,6 +414,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::watch;
 
@@ -419,6 +423,19 @@ mod tests {
             sdk::ids::ChatId::new("chat-test"),
             sdk::ids::ChatTurnId::new("turn-test"),
         )
+    }
+
+    #[tokio::test]
+    async fn test_tui_input_port_recv_next_and_close() {
+        let (tx, port) = TuiInputEventPort::channel();
+        tx.send(sdk::ChatInputEvent::UserMessage {
+            text: "x".into(),
+            image_paths: vec![],
+        })
+        .unwrap();
+        assert!(port.recv_next().await.is_some());
+        drop(tx);
+        assert!(port.recv_next().await.is_none());
     }
 
     #[test]
@@ -568,10 +585,11 @@ mod tests {
         let (queue_tx, mut queue_rx) = tokio::sync::mpsc::channel(16);
         let client = Arc::new(DoneOnlyAgentClient::default());
 
+        let (_input_tx, input_port) = TuiInputEventPort::channel();
         spawn_processing(SpawnContext {
             tx: ui_tx,
             queue_request_tx: queue_tx,
-            input_event_buffer: Arc::new(std::sync::Mutex::new(Vec::new())),
+            input_event_port: input_port,
             agent_client: client.clone(),
             fallback_context: UiTurnContext {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),

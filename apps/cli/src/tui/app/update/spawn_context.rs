@@ -10,11 +10,11 @@ impl App {
         spawn_refs: &SpawnContextRefs,
     ) -> Option<SpawnContext> {
         let agent_client = spawn_refs.agent_client.as_ref()?.clone();
-        let input_event_buffer = self.chat.start_input_event_buffer();
+        let input_event_port = self.chat.start_input_event_buffer();
         Some(SpawnContext {
             tx: ui_tx.clone(),
             queue_request_tx: ui_tx.clone(),
-            input_event_buffer,
+            input_event_port,
             agent_client,
             fallback_context: self.fallback_runtime_context(),
             messages: self.chat.messages.clone(),

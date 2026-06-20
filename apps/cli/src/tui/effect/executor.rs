@@ -53,7 +53,7 @@ impl App {
     }
 
     fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
-        if self.chat.input_event_buffer.is_none() {
+        if self.chat.input_event_tx.is_none() {
             self.append_error_notice("当前 Chat 输入通道不可用，已保留在队列中等待兜底 drain");
             return;
         }
