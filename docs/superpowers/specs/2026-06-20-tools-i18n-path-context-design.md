@@ -70,9 +70,11 @@ MCP 工具（2 个，description 来自远端 server 动态字符串）：
 description 在注册期被调用生成 tool schema 发给 LLM。现有签名 `fn description(&self) -> &str`。
 
 采用「保留无参 description + 新增带 lang 的 description_for」：
-- 保留 `fn description(&self) -> &str` 返回默认语言（中文），向后兼容。
+- 保留 `fn description(&self) -> &str` 返回默认语言（英文），向后兼容。
 - 新增带默认实现的 trait 方法 `fn description_for(&self, lang: &str) -> Cow<'_, str>`，默认委托 `description()`。
 - 需要双语的工具覆盖 `description_for`，按 lang 返回对应文案；不覆盖的（含 2 个 MCP 工具）自动走默认，优雅降级。
+
+默认语言选英文的理由：29 个内置工具中绝大多数 description 已是英文硬编码，默认英文使阶段一/二的迁移成本最低，只 worktree/memory 等少数中文文案需补英文分支。
 
 不采用直接改 `description` 签名的原因：会强制 31 个实现（含无法按 lang 切换的 MCP 工具）全部改动，且 MCP 工具无合理双语文案来源。
 
@@ -82,7 +84,7 @@ description 在注册期消费，但 lang 是会话级属性。
 
 采用「schema 组装时显式传 lang」：
 - `ToolRegistry` 新增 `schemas_for(lang: &str)`，内部调用 `description_for(lang)`。
-- 旧 `schemas()` 保留，委托 `schemas_for("zh")`（默认中文）兼容。
+- 旧 `schemas()` 保留，委托 `schemas_for("en")`（默认英文）兼容。
 - runtime（`loop_runner.rs:290` 附近调用 `registry.schemas()`）改为传当前 `language`。
 
 理由：lang 是会话级、非全局态，显式传参比全局变量清晰，registry 无需持可变 lang 状态。
@@ -96,13 +98,13 @@ description 在注册期消费，但 lang 是会话级属性。
 - 避免引入 .ftl 文件、编译时检查等复杂度。
 - 与 runtime 层现有 `match lang { "zh" => ..., _ => ... }` 风格一致。
 
-文案表定义在每个工具文件内（或同模块新建 i18n.rs）。示例（worktree.rs）：
+文案表定义在每个工具文件内（或同模块新建 i18n.rs）。默认分支（`_`）返回英文，`"zh"` 分支返回中文。示例（worktree.rs）：
 
 ```rust
 fn enter_worktree_description(lang: &str) -> &'static str {
     match lang {
-        "en" => "Enter or create a git worktree directory ...",
-        _ => "进入或创建 git worktree 目录 ...",
+        "zh" => "进入或创建 git worktree 目录 ...",
+        _ =>    "Enter or create a git worktree directory ...",
     }
 }
 ```
@@ -136,10 +138,10 @@ fn enter_worktree_description(lang: &str) -> &'static str {
 | T1 | `contract/context.rs` | `ToolExecutionContext` 增加 `pub lang: String` 字段 |
 | T1 | `loop_runner.rs:259`、`runner/setup.rs:167`、所有测试构造点（`runner/tests.rs:251`、`agent_tests.rs:49` 等） | 透传 lang |
 | T2 | `contract/tool.rs:105` | TypedTool 新增 `fn description_for(&self, lang: &str) -> Cow<'_, str>` 默认实现 |
-| T2 | `core/tool_registry.rs` | 新增 `schemas_for(lang)`，旧 `schemas()` 委托默认中文 |
+| T2 | `core/tool_registry.rs` | 新增 `schemas_for(lang)`，旧 `schemas()` 委托默认英文 |
 | T2 | `loop_runner.rs:290` | `registry.schemas()` 改传当前 language |
 
-验证：`cargo build` + `cargo test -p aemeath-tools` + `cargo clippy --workspace`。本阶段不改变任何文案（只搭基础设施 + 默认走中文），行为零变化。
+验证：`cargo build` + `cargo test -p aemeath-tools` + `cargo clippy --workspace`。本阶段不改变任何文案（只搭基础设施 + 默认走英文），行为零变化。
 
 ### 阶段二：路径上下文通知（依赖阶段一，三个子 issue 并行 PR）
 
@@ -176,7 +178,7 @@ fn enter_worktree_description(lang: &str) -> &'static str {
 3. 阶段三文案量大、易遗漏。缓解：以工具为单位逐个迁移 + 测试，不追求一次性全量；可分多个小 PR。
 4. MCP 工具 description 无法双语是已知限制，文档与 issue 中明确标注，不作为本伞范围。
 
-## 开放问题
+## 已定问题
 
-- description 默认语言选中文（与 worktree/memory 现状一致）还是英文（与多数工具现状一致）？本设计暂定中文（项目默认语言），待 review 确认。
-- 阶段三是否引入文案 lint（如检查每个 match lang 都覆盖 en/zh）？暂不引入，靠 review 把关。
+- **description 默认语言：英文**。29 个内置工具中绝大多数 description 已是英文硬编码，默认英文迁移成本最低；只 worktree/memory 等少数中文文案需补英文分支。match 的默认分支（`_`）返回英文。
+- **不引入文案 lint**。文案量有限（约 30 个工具），自建 i18n lint 成本高、误报率高；靠 review + 终端冒烟（en/zh 各跑一遍）覆盖。漏译暴露时是「文案显示成错的语言」，冒烟一眼可见，非隐蔽 bug。
