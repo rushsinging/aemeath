@@ -180,13 +180,16 @@ impl TypedTool for FileEditTool {
         match tokio::fs::write(path, &new_content).await {
             Ok(()) => {
                 let occurrences = if replace_all { count } else { 1 };
+                let diff_start_line = start_line_of_match(&content, &matched_old).unwrap_or(1);
                 let data = EditResult {
                     file_path: file_path.to_string(),
                     replacements_made: occurrences as u64,
                     dry_run: false,
                 };
                 TypedToolResult::success(
-                    format!("Replaced {occurrences} occurrence(s) in {file_path}"),
+                    format!(
+                        "Replaced {occurrences} occurrence(s) in {file_path}\n---DIFF:LINE:{diff_start_line}---\n{matched_old}\n---DIFF:LINE:{diff_start_line}---\n{actual_new}"
+                    ),
                     data,
                 )
             }
@@ -203,7 +206,6 @@ impl TypedTool for FileEditTool {
 }
 
 /// Return the 1-based line number where `needle` starts in `content`.
-#[cfg(test)]
 fn start_line_of_match(content: &str, needle: &str) -> Option<usize> {
     let byte_pos = content.find(needle)?;
     Some(content[..byte_pos].lines().count() + 1)
@@ -300,70 +302,5 @@ fn adapt_indentation(matched_old: &str, model_old: &str, model_new: &str) -> Str
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-    use std::sync::{Arc, Mutex};
-
-    fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext {
-        let mut read_files = HashSet::new();
-        read_files.insert(read_file);
-        ToolExecutionContext {
-            cwd: root.clone(),
-            workspace: project::api::WorkspaceService::new(root),
-            cancel: tokio_util::sync::CancellationToken::new(),
-            read_files: Arc::new(Mutex::new(read_files)),
-            agent_runner: None,
-            session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
-            plan_mode: None,
-            allow_all: false,
-            max_tool_concurrency: 4,
-            max_agent_concurrency: 4,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            progress_tx: None,
-            parent_session_id: None,
-            registry: None,
-        }
-    }
-
-    #[test]
-    fn test_start_line_of_match_normal_path() {
-        let content = "one\ntwo\nthree\n";
-
-        assert_eq!(start_line_of_match(content, "two\nthree"), Some(2));
-    }
-
-    #[test]
-    fn test_start_line_of_match_boundary_first_line() {
-        assert_eq!(start_line_of_match("one\ntwo\n", "one"), Some(1));
-    }
-
-    #[test]
-    fn test_start_line_of_match_error_when_missing() {
-        assert_eq!(start_line_of_match("one\ntwo\n", "missing"), None);
-    }
-
-    #[tokio::test]
-    async fn test_file_edit_success_diff_marker_includes_real_line_number() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sample.rs");
-        tokio::fs::write(&path, "one\ntwo\nthree\n").await.unwrap();
-        let file_path = path.to_string_lossy().to_string();
-        let ctx = test_ctx(dir.path().to_path_buf(), file_path.clone());
-        let tool = FileEditTool;
-
-        let result = tool
-            .call(
-                serde_json::json!({
-                    "file_path": file_path,
-                    "old_string": "two",
-                    "new_string": "TWO"
-                }),
-                &ctx,
-            )
-            .await;
-
-        assert!(!result.is_error, "edit should succeed: {}", result.text);
-    }
-}
+#[path = "file_edit_tests.rs"]
+mod file_edit_tests;
