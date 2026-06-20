@@ -141,9 +141,8 @@ pub enum PolicyDecision {
 ///
 /// The default `R = serde_json::Value` preserves full backward
 /// compatibility: existing call sites that build
-/// `ToolResult::success(...)` / `ToolResult::error_json(...)` keep
-/// compiling without change, because `ToolResult<Value>` is structurally
-/// the same shape they used before.
+/// `ToolResult::success(...)` / `ToolResult::error(...)` keep
+/// compiling without change.
 ///
 /// Going forward, a tool `T` declares
 /// `impl Tool for T { type Result = ToolResult<MyResult>; }` so that
@@ -152,9 +151,9 @@ pub enum PolicyDecision {
 ///
 /// `data` is wrapped in `Option<R>` so that:
 ///
-/// - the constructors (`success`, `error`, `success_json`, `error_json`,
-///   `text`, `json`) can populate the legacy `output` / `content` fields
-///   without forcing every `R` to implement `Default`, and
+/// - the constructors (`success`, `error`, `text`) populate the
+///   legacy `output` / `content` fields without forcing every `R` to
+///   implement `Default`, and
 /// - new tool impls that opt into a typed `R` can still leave `data`
 ///   as `None` while the migration to typed payloads is in flight.
 ///
@@ -180,30 +179,11 @@ impl<R> ToolResult<R> {
         Self::text(output, true)
     }
 
-    pub fn success_json(content: serde_json::Value) -> Self {
-        Self::json(content, false)
-    }
-
-    pub fn error_json(content: serde_json::Value) -> Self {
-        Self::json(content, true)
-    }
-
     pub fn text(output: impl Into<String>, is_error: bool) -> Self {
         let output = output.into();
         Self {
             content: serde_json::json!({ "text": output }),
             output,
-            is_error,
-            images: Vec::new(),
-            data: None,
-        }
-    }
-
-    pub fn json(content: serde_json::Value, is_error: bool) -> Self {
-        let output = display_text_from_content(&content);
-        Self {
-            output,
-            content,
             is_error,
             images: Vec::new(),
             data: None,
@@ -267,30 +247,6 @@ mod tests {
         assert_eq!(result.output, "ok");
         assert!(!result.is_error);
         assert_eq!(result.content, serde_json::json!({ "text": "ok" }));
-    }
-
-    #[test]
-    fn test_tool_result_json_prefers_display_text() {
-        let result: ToolResult = ToolResult::success_json(serde_json::json!({
-            "display": "shown in tui",
-            "message": "message for llm",
-            "data": { "value": 1 }
-        }));
-
-        assert_eq!(result.output, "shown in tui");
-        assert_eq!(result.content["data"]["value"], 1);
-    }
-
-    #[test]
-    fn test_tool_result_json_falls_back_to_message_text_or_serialized_json() {
-        let message: ToolResult = ToolResult::success_json(serde_json::json!({ "message": "msg" }));
-        let text: ToolResult = ToolResult::success_json(serde_json::json!({ "text": "txt" }));
-        let other: ToolResult = ToolResult::error_json(serde_json::json!({ "items": [1, 2] }));
-
-        assert_eq!(message.output, "msg");
-        assert_eq!(text.output, "txt");
-        assert_eq!(other.output, r#"{"items":[1,2]}"#);
-        assert!(other.is_error);
     }
 }
 
