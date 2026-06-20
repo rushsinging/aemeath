@@ -10,6 +10,67 @@ use crate::tui::view_model::{
     HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
     TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus, MAX_BLOCK_DEPTH,
 };
+use std::collections::HashMap;
+
+type ToolResultEntry<'a> = (&'a str, &'a serde_json::Value, bool, usize);
+
+/// assemble 期一次性构建的工具查找索引，把 O(n²) 线性扫描降为 O(1)。
+pub(super) struct ToolIndex<'a> {
+    calls: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), &'a ToolCall>,
+    results: HashMap<(&'a ChatId, &'a ChatTurnId, &'a ToolCallId), ToolResultEntry<'a>>,
+}
+
+impl<'a> ToolIndex<'a> {
+    pub(super) fn build(conversation: &'a ConversationModel) -> Self {
+        let mut calls = HashMap::new();
+        for chat in &conversation.chats {
+            for turn in &chat.turns {
+                for call in &turn.tool_calls {
+                    if let Some(id) = call.id.as_ref() {
+                        calls.insert((&chat.id, &turn.id, id), call);
+                    }
+                }
+            }
+        }
+        let mut results = HashMap::new();
+        for block in &conversation.blocks {
+            if let crate::tui::model::conversation::block::ConversationBlock::ToolResult {
+                id,
+                chat_id,
+                turn_id,
+                output,
+                content,
+                is_error,
+                image_count,
+            } = block
+            {
+                results.insert(
+                    (chat_id, turn_id, id),
+                    (output.as_str(), content, *is_error, *image_count),
+                );
+            }
+        }
+        Self { calls, results }
+    }
+
+    pub(super) fn call(
+        &self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+        tool_id: &ToolCallId,
+    ) -> Option<&'a ToolCall> {
+        self.calls.get(&(chat_id, turn_id, tool_id)).copied()
+    }
+
+    pub(super) fn result_block(
+        &self,
+        chat_id: &ChatId,
+        turn_id: &ChatTurnId,
+        tool_id: &ToolCallId,
+    ) -> Option<ToolResultEntry<'a>> {
+        self.results.get(&(chat_id, turn_id, tool_id)).copied()
+    }
+}
 
 pub struct OutputViewAssembler;
 
@@ -20,8 +81,9 @@ impl OutputViewAssembler {
         working_root: Option<&std::path::Path>,
     ) -> OutputViewModel {
         let mut roots: Vec<BlockNode> = Vec::new();
+        let tool_index = ToolIndex::build(conversation);
         if conversation.timeline.items().is_empty() {
-            assemble_legacy_conversation_blocks(conversation, &mut roots);
+            assemble_legacy_conversation_blocks(conversation, &tool_index, &mut roots);
         }
 
         for item in conversation.timeline.items() {
@@ -58,7 +120,7 @@ impl OutputViewAssembler {
                 }
                 OutputTimelineItem::ToolCall { reference } => {
                     if let Some(tool) = find_tool_view(
-                        conversation,
+                        &tool_index,
                         &reference.context.chat_id,
                         &reference.context.turn_id,
                         &reference.tool_call_id,
@@ -86,7 +148,7 @@ impl OutputViewAssembler {
                 }
                 OutputTimelineItem::ToolResult { reference } => {
                     if tool_result_is_embedded(
-                        conversation,
+                        &tool_index,
                         &reference.context.chat_id,
                         &reference.context.turn_id,
                         &reference.tool_call_id,
@@ -94,14 +156,14 @@ impl OutputViewAssembler {
                         continue;
                     }
                     let tool_name = find_tool_name_by_id(
-                        conversation,
+                        &tool_index,
                         &reference.context.chat_id,
                         &reference.context.turn_id,
                         &reference.tool_call_id,
                     );
                     let Some((result_output, result_content, result_is_error, result_image_count)) =
                         find_tool_result_block(
-                            conversation,
+                            &tool_index,
                             &reference.context.chat_id,
                             &reference.context.turn_id,
                             &reference.tool_call_id,
@@ -304,24 +366,24 @@ fn push_child_checked(parent: &mut BlockNode, child: BlockNode, depth: usize) {
 }
 
 fn tool_result_is_embedded(
-    conversation: &ConversationModel,
+    index: &ToolIndex<'_>,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
 ) -> bool {
-    find_tool_call(conversation, chat_id, turn_id, tool_id)
+    find_tool_call(index, chat_id, turn_id, tool_id)
         .and_then(|call| call.result.as_ref())
         .is_some_and(|result| !result.is_empty())
 }
 
 /// 查找指定 runtime context 下 tool call id 对应的工具名称。
 fn find_tool_name_by_id(
-    conversation: &ConversationModel,
+    index: &ToolIndex<'_>,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
 ) -> Option<String> {
-    find_tool_call(conversation, chat_id, turn_id, tool_id).map(|call| call.name.clone())
+    find_tool_call(index, chat_id, turn_id, tool_id).map(|call| call.name.clone())
 }
 
 /// 对非嵌入/孤儿 ToolResult 生成摘要文本：优先用工具的 `format_result_summary`，
@@ -339,19 +401,19 @@ fn summarize_non_embedded_result(tool_name: Option<&str>, output: &str, is_error
 }
 
 fn find_tool_view(
-    conversation: &ConversationModel,
+    index: &ToolIndex<'_>,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
     working_root: Option<&std::path::Path>,
 ) -> Option<ToolCallBlockView> {
-    let call = find_tool_call(conversation, chat_id, turn_id, tool_id)?;
+    let call = find_tool_call(index, chat_id, turn_id, tool_id)?;
     let (icon, semantic_status, style) = map_tool_status(call.status);
     // 同时计算 result_summary（展示文本）与 result_payload（结构化 payload，
     // 供 TUI Display 走 typed 字段渲染 header），避免两遍扫描 tool result block。
     let (result_summary, result_payload) =
         match call.result.as_deref().filter(|result| !result.is_empty()) {
-            Some(result) => match find_tool_result_block(conversation, chat_id, turn_id, tool_id) {
+            Some(result) => match find_tool_result_block(index, chat_id, turn_id, tool_id) {
                 Some((output, content, is_error, image_count)) => {
                     let owned = ToolResultPayload::new(
                         output.to_string(),
@@ -413,52 +475,29 @@ fn find_tool_view(
     })
 }
 
-/// 在 `conversation.blocks` 中查找匹配 `(chat_id, turn_id, tool_id)` 的 ToolResult block，
+/// 在索引中查找匹配 `(chat_id, turn_id, tool_id)` 的 ToolResult block，
 /// 返回 `(output, content, is_error, image_count)` 元组。
-/// 替代原先构造借用 struct `ToolResultPayload<'a>` 的版本——assembler 端已转成 owned
-/// payload 写入 `ToolCallBlockView.result_payload`，无需保留借用。
 fn find_tool_result_block<'a>(
-    conversation: &'a ConversationModel,
+    index: &ToolIndex<'a>,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
 ) -> Option<(&'a str, &'a serde_json::Value, bool, usize)> {
-    conversation.blocks.iter().find_map(|block| match block {
-        crate::tui::model::conversation::block::ConversationBlock::ToolResult {
-            id,
-            chat_id: result_chat_id,
-            turn_id: result_turn_id,
-            output,
-            content,
-            is_error,
-            image_count,
-        } if id == tool_id && result_chat_id == chat_id && result_turn_id == turn_id => {
-            Some((output.as_str(), content, *is_error, *image_count))
-        }
-        _ => None,
-    })
+    index.result_block(chat_id, turn_id, tool_id)
 }
 
 fn find_tool_call<'a>(
-    conversation: &'a ConversationModel,
+    index: &ToolIndex<'a>,
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
 ) -> Option<&'a ToolCall> {
-    conversation
-        .chats
-        .iter()
-        .find(|chat| &chat.id == chat_id)
-        .and_then(|chat| chat.turns.iter().find(|turn| &turn.id == turn_id))
-        .and_then(|turn| {
-            turn.tool_calls
-                .iter()
-                .find(|call| call.id.as_ref() == Some(tool_id))
-        })
+    index.call(chat_id, turn_id, tool_id)
 }
 
 fn assemble_legacy_conversation_blocks(
     conversation: &ConversationModel,
+    tool_index: &ToolIndex<'_>,
     roots: &mut Vec<BlockNode>,
 ) {
     for block in &conversation.blocks {
@@ -474,10 +513,10 @@ fn assemble_legacy_conversation_blocks(
         else {
             continue;
         };
-        if tool_result_is_embedded(conversation, chat_id, turn_id, id) {
+        if tool_result_is_embedded(tool_index, chat_id, turn_id, id) {
             continue;
         }
-        let tool_name = find_tool_name_by_id(conversation, chat_id, turn_id, id);
+        let tool_name = find_tool_name_by_id(tool_index, chat_id, turn_id, id);
         let display_output = display_text_for_tool_result(tool_name.as_deref(), output, content);
         let text = summarize_non_embedded_result(tool_name.as_deref(), &display_output, *is_error);
         let text = if *image_count > 0 {

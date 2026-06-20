@@ -250,3 +250,34 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
         text_view.text
     );
 }
+
+#[test]
+fn test_tool_index_call_matches_linear_scan() {
+    use super::ToolIndex;
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::model::ConversationModel;
+
+    let mut conv = ConversationModel::default();
+    let chat = ChatId::new("c1");
+    let turn = ChatTurnId::new("t1");
+    let tool = ToolCallId::new("tool-1");
+    conv.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        id: tool.clone(),
+        provider_id: Some("p".to_string()),
+        name: "Read".to_string(),
+        index: 0,
+    });
+
+    let index = ToolIndex::build(&conv);
+    let via_index = index.call(&chat, &turn, &tool).map(|c| c.name.clone());
+    assert_eq!(via_index.as_deref(), Some("Read"), "索引应命中已登记 tool");
+    assert!(
+        index
+            .call(&chat, &turn, &ToolCallId::new("missing"))
+            .is_none(),
+        "未登记 tool 应返回 None"
+    );
+}
