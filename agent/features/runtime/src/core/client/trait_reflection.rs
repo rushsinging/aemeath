@@ -331,7 +331,7 @@ mod tests {
             &client,
             vec![sdk::ChatMessage {
                 role: "user".to_string(),
-                content: serde_json::Value::String("请反思当前会话".to_string()),
+                content: vec![sdk::ContentBlock::text("请反思当前会话")],
                 metadata: None,
             }],
         )
@@ -367,7 +367,7 @@ mod tests {
             &client,
             vec![sdk::ChatMessage {
                 role: "user".to_string(),
-                content: serde_json::Value::String("只有一轮也要强制反思".to_string()),
+                content: vec![sdk::ContentBlock::text("只有一轮也要强制反思")],
                 metadata: None,
             }],
         )

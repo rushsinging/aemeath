@@ -273,7 +273,9 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
             share::message::Role::User => "user".to_string(),
             share::message::Role::Assistant => "assistant".to_string(),
         },
-        content: serde_json::to_value(&message.content).unwrap_or(serde_json::Value::Null),
+        // share::ContentBlock 与 sdk::ContentBlock 同形（serde 成同一 JSON），经 round-trip 映射。
+        content: serde_json::from_value(serde_json::to_value(&message.content).unwrap_or_default())
+            .unwrap_or_default(),
         metadata: message.metadata.map(|metadata| sdk::ChatMessageMetadata {
             source: match metadata.source {
                 share::message::MessageSource::User => sdk::ChatMessageSource::User,
@@ -290,11 +292,13 @@ pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Mes
         "assistant" => share::message::Role::Assistant,
         _ => share::message::Role::User,
     };
-    let content = serde_json::from_value(message.content).unwrap_or_else(|_| {
-        vec![share::message::ContentBlock::Text {
-            text: String::new(),
-        }]
-    });
+    let content =
+        serde_json::from_value(serde_json::to_value(&message.content).unwrap_or_default())
+            .unwrap_or_else(|_| {
+                vec![share::message::ContentBlock::Text {
+                    text: String::new(),
+                }]
+            });
     let metadata = message
         .metadata
         .map(|metadata| share::message::MessageMetadata {

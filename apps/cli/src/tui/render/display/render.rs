@@ -180,10 +180,7 @@ impl std::fmt::Display for HistoryDisplayParseError {
 
 impl HistoryDisplayMessage {
     fn parse(msg: &sdk::ChatMessage) -> Result<Self, HistoryDisplayParseError> {
-        let blocks = msg
-            .content
-            .as_array()
-            .ok_or(HistoryDisplayParseError::ContentNotArray)?;
+        let blocks = msg.content.as_slice();
         match msg.role.as_str() {
             "user" => parse_history_user(blocks),
             "assistant" => parse_history_assistant(blocks),
@@ -193,7 +190,7 @@ impl HistoryDisplayMessage {
 }
 
 fn parse_history_user(
-    blocks: &[serde_json::Value],
+    blocks: &[sdk::ContentBlock],
 ) -> Result<HistoryDisplayMessage, HistoryDisplayParseError> {
     let parsed_blocks = parse_history_user_blocks(blocks)?;
     let mut text = String::new();
@@ -215,55 +212,32 @@ fn parse_history_user(
 }
 
 fn parse_history_assistant(
-    blocks: &[serde_json::Value],
+    blocks: &[sdk::ContentBlock],
 ) -> Result<HistoryDisplayMessage, HistoryDisplayParseError> {
     let mut parsed = Vec::new();
     for block in blocks {
-        let object = block
-            .as_object()
-            .ok_or(HistoryDisplayParseError::BlockNotObject)?;
-        let kind = object
-            .get("type")
-            .and_then(|value| value.as_str())
-            .ok_or(HistoryDisplayParseError::MissingBlockType)?;
-        match kind {
-            "text" => {
-                let text = object
-                    .get("text")
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingText)?;
-                parsed.push(HistoryAssistantBlock::Text(text.to_string()));
+        match block {
+            sdk::ContentBlock::Text { text } => {
+                parsed.push(HistoryAssistantBlock::Text(text.clone()));
             }
-            "thinking" => {
-                let text = object
-                    .get("thinking")
-                    .or_else(|| object.get("text"))
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingText)?;
-                parsed.push(HistoryAssistantBlock::Thinking(text.to_string()));
+            sdk::ContentBlock::Thinking { thinking } => {
+                parsed.push(HistoryAssistantBlock::Thinking(thinking.clone()));
             }
-            "tool_use" => {
-                let id = object
-                    .get("id")
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingToolUseId)?;
-                let name = object
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .ok_or(HistoryDisplayParseError::MissingToolUseName)?;
-                let input = object
-                    .get("input")
-                    .cloned()
-                    .ok_or(HistoryDisplayParseError::MissingToolUseInput)?;
+            sdk::ContentBlock::ToolUse { id, name, input } => {
                 parsed.push(HistoryAssistantBlock::ToolUse {
-                    id: id.to_string(),
-                    name: name.to_string(),
-                    input,
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
                 });
             }
-            other => {
+            sdk::ContentBlock::ToolResult { .. } => {
                 return Err(HistoryDisplayParseError::UnsupportedAssistantBlock(
-                    other.to_string(),
+                    "tool_result".to_string(),
+                ))
+            }
+            sdk::ContentBlock::Image { .. } => {
+                return Err(HistoryDisplayParseError::UnsupportedAssistantBlock(
+                    "image".to_string(),
                 ))
             }
         }
@@ -291,48 +265,31 @@ enum HistoryUserBlock<'a> {
 }
 
 fn parse_history_user_blocks(
-    blocks: &[serde_json::Value],
+    blocks: &[sdk::ContentBlock],
 ) -> Result<Vec<HistoryUserBlock<'_>>, HistoryDisplayParseError> {
     blocks
         .iter()
-        .map(|block| {
-            let object = block
-                .as_object()
-                .ok_or(HistoryDisplayParseError::BlockNotObject)?;
-            let kind = object
-                .get("type")
-                .and_then(|value| value.as_str())
-                .ok_or(HistoryDisplayParseError::MissingBlockType)?;
-            match kind {
-                "text" => {
-                    let text = object
-                        .get("text")
-                        .and_then(|value| value.as_str())
-                        .ok_or(HistoryDisplayParseError::MissingText)?;
-                    Ok(HistoryUserBlock::Text(text))
-                }
-                "tool_result" => {
-                    let tool_use_id = object
-                        .get("tool_use_id")
-                        .and_then(|value| value.as_str())
-                        .ok_or(HistoryDisplayParseError::MissingToolResultId)?;
-                    let content = object
-                        .get("content")
-                        .ok_or(HistoryDisplayParseError::MissingToolResultContent)?;
-                    let is_error = object
-                        .get("is_error")
-                        .and_then(|value| value.as_bool())
-                        .unwrap_or(false);
-                    Ok(HistoryUserBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        is_error,
-                    })
-                }
-                other => Err(HistoryDisplayParseError::UnsupportedUserBlock(
-                    other.to_string(),
-                )),
-            }
+        .map(|block| match block {
+            sdk::ContentBlock::Text { text } => Ok(HistoryUserBlock::Text(text.as_str())),
+            sdk::ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+                ..
+            } => Ok(HistoryUserBlock::ToolResult {
+                tool_use_id: tool_use_id.as_str(),
+                content,
+                is_error: *is_error,
+            }),
+            sdk::ContentBlock::Thinking { .. } => Err(
+                HistoryDisplayParseError::UnsupportedUserBlock("thinking".to_string()),
+            ),
+            sdk::ContentBlock::ToolUse { .. } => Err(
+                HistoryDisplayParseError::UnsupportedUserBlock("tool_use".to_string()),
+            ),
+            sdk::ContentBlock::Image { .. } => Err(HistoryDisplayParseError::UnsupportedUserBlock(
+                "image".to_string(),
+            )),
         })
         .collect()
 }
@@ -343,10 +300,7 @@ fn collect_following_tool_results(
     let Some(user_msg) = subsequent_msg else {
         return std::collections::HashMap::new();
     };
-    let Some(blocks) = user_msg.content.as_array() else {
-        return std::collections::HashMap::new();
-    };
-    let Ok(parsed_blocks) = parse_history_user_blocks(blocks) else {
+    let Ok(parsed_blocks) = parse_history_user_blocks(user_msg.content.as_slice()) else {
         return std::collections::HashMap::new();
     };
     parsed_blocks
@@ -412,7 +366,7 @@ mod tests {
         )
     }
 
-    fn message(role: &str, content: serde_json::Value) -> sdk::ChatMessage {
+    fn message(role: &str, content: Vec<sdk::ContentBlock>) -> sdk::ChatMessage {
         sdk::ChatMessage {
             role: role.to_string(),
             content,
@@ -423,7 +377,9 @@ mod tests {
     fn user_text(text: &str) -> sdk::ChatMessage {
         message(
             "user",
-            serde_json::json!([{ "type": "text", "text": text }]),
+            vec![sdk::ContentBlock::Text {
+                text: text.to_string(),
+            }],
         )
     }
 
@@ -436,21 +392,6 @@ mod tests {
 
         assert!(app.model.conversation.blocks.iter().any(|block| {
             matches!(block, ConversationBlock::UserMessage { text, .. } if text == "hello")
-        }));
-    }
-
-    #[test]
-    fn test_render_history_message_reports_non_array_user_content() {
-        let mut app = app();
-        let msg = message("user", serde_json::Value::String("hello".to_string()));
-
-        app.render_history_message(&msg, None);
-
-        assert!(!app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::UserMessage { text, .. } if text == "hello")
-        }));
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text.contains("无法恢复一条历史消息"))
         }));
     }
 
@@ -478,10 +419,14 @@ mod tests {
         app.render_history_message(&user_text("hello"), None);
         let msg = message(
             "assistant",
-            serde_json::json!([
-                { "type": "thinking", "thinking": "plan" },
-                { "type": "text", "text": "answer" }
-            ]),
+            vec![
+                sdk::ContentBlock::Thinking {
+                    thinking: "plan".to_string(),
+                },
+                sdk::ContentBlock::Text {
+                    text: "answer".to_string(),
+                },
+            ],
         );
 
         app.render_history_message(&msg, None);
@@ -500,11 +445,20 @@ mod tests {
         app.render_history_message(&user_text("hello"), None);
         let assistant = message(
             "assistant",
-            serde_json::json!([{ "type": "tool_use", "id": "tool-1", "name": "Read", "input": { "file_path": "a.rs" } }]),
+            vec![sdk::ContentBlock::ToolUse {
+                id: "tool-1".to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({ "file_path": "a.rs" }),
+            }],
         );
         let tool_result = message(
             "user",
-            serde_json::json!([{ "type": "tool_result", "tool_use_id": "tool-1", "content": "done", "is_error": false }]),
+            vec![sdk::ContentBlock::ToolResult {
+                tool_use_id: "tool-1".to_string(),
+                content: serde_json::json!("done"),
+                is_error: false,
+                text: None,
+            }],
         );
 
         app.render_history_message(&assistant, Some(&tool_result));
@@ -527,38 +481,7 @@ mod tests {
     fn test_render_history_message_reports_empty_assistant_message() {
         let mut app = app();
         app.render_history_message(&user_text("hello"), None);
-        let msg = message("assistant", serde_json::json!([]));
-
-        app.render_history_message(&msg, None);
-
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text.contains("无法恢复一条历史消息"))
-        }));
-    }
-
-    #[test]
-    fn test_render_history_message_reports_invalid_tool_use() {
-        let mut app = app();
-        app.render_history_message(&user_text("hello"), None);
-        let msg = message(
-            "assistant",
-            serde_json::json!([{ "type": "tool_use", "id": "tool-1", "input": {} }]),
-        );
-
-        app.render_history_message(&msg, None);
-
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text.contains("无法恢复一条历史消息"))
-        }));
-    }
-
-    #[test]
-    fn test_render_history_message_reports_invalid_tool_result_when_rendered_directly() {
-        let mut app = app();
-        let msg = message(
-            "user",
-            serde_json::json!([{ "type": "tool_result", "content": "done" }]),
-        );
+        let msg = message("assistant", vec![]);
 
         app.render_history_message(&msg, None);
 
@@ -572,7 +495,9 @@ mod tests {
         let mut app = app();
         let msg = message(
             "system",
-            serde_json::json!([{ "type": "text", "text": "notice" }]),
+            vec![sdk::ContentBlock::Text {
+                text: "notice".to_string(),
+            }],
         );
 
         app.render_history_message(&msg, None);

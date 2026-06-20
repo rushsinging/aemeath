@@ -57,7 +57,6 @@ fn extract_user_input_text(message: &sdk::ChatMessage) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::path::PathBuf;
 
     #[test]
@@ -90,11 +89,16 @@ mod tests {
     fn test_extract_user_input_history_joins_text_blocks_only() {
         let messages = vec![sdk::ChatMessage {
             role: "user".to_string(),
-            content: json!([
-                { "type": "text", "text": "hello " },
-                { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "abc" } },
-                { "type": "text", "text": "world" }
-            ]),
+            content: vec![
+                sdk::ContentBlock::text("hello "),
+                sdk::ContentBlock::Image {
+                    source: sdk::ImageSource::Base64 {
+                        media_type: "image/png".to_string(),
+                        data: "abc".to_string(),
+                    },
+                },
+                sdk::ContentBlock::text("world"),
+            ],
             metadata: None,
         }];
 

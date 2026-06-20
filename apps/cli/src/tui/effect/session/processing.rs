@@ -466,11 +466,9 @@ mod tests {
 
     #[test]
     fn test_sdk_event_to_ui_event_maps_messages_sync() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::MessagesSync(vec![sdk::ChatMessage {
-            role: "user".to_string(),
-            content: serde_json::json!([{ "type": "text", "text": "hello" }]),
-            metadata: None,
-        }]));
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::MessagesSync(vec![
+            sdk::ChatMessage::user_text("hello"),
+        ]));
 
         match event {
             UiEvent::MessagesSync(messages) => assert_eq!(messages[0].text_content(), "hello"),
