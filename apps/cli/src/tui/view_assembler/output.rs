@@ -493,28 +493,6 @@ fn find_tool_result_block<'a>(
     index.result_block(chat_id, turn_id, tool_id)
 }
 
-/// A4.1: 从 `chats` 中按 (chat_id, turn_id, tool_id) 定位对应 `ToolCall.result`，
-/// 返回对 model 端 `ToolResultPayload` 的引用。
-/// A4.2 起可用于 timeline-first 渲染路径取字段（替代旧 `find_tool_result_block`）。
-#[allow(dead_code)]
-pub(super) fn find_tool_result_in_turn<'a>(
-    chats: &'a [crate::tui::model::conversation::chat::Chat],
-    chat_id: &ChatId,
-    turn_id: &ChatTurnId,
-    tool_id: &ToolCallId,
-) -> Option<&'a crate::tui::model::conversation::tool_result_payload::ToolResultPayload> {
-    chats
-        .iter()
-        .find(|chat| &chat.id == chat_id)
-        .and_then(|chat| chat.turns.iter().find(|turn| &turn.id == turn_id))
-        .and_then(|turn| {
-            turn.tool_calls
-                .iter()
-                .find(|call| call.id.as_ref() == Some(tool_id))
-        })
-        .and_then(|call| call.result.as_ref())
-}
-
 fn find_tool_call<'a>(
     index: &ToolIndex<'a>,
     chat_id: &ChatId,

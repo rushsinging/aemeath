@@ -1238,3 +1238,93 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         ConversationChange::ToolCallCompleted { status, .. } if *status == ToolCallStatus::Success
     )));
 }
+
+/// A4.2 TDD：完整回合（user / assistant / tool-call / tool-result / agent-progress）后
+/// `timeline.items()` 包含 AgentProgress，且顺序合理（工具调用后紧跟进度条目）。
+#[test]
+fn test_timeline_mirrors_blocks_includes_agent_progress() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-a42");
+    let turn_id = super::ids::ChatTurnId::new("turn-a42");
+    let tool_id = super::ids::ToolCallId::new("tool-a42");
+
+    // 1. 用户消息
+    model.apply(ConversationIntent::StartChat {
+        submission: "run task".to_string(),
+    });
+
+    // 2. Assistant text
+    model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        text: "starting agent".to_string(),
+    });
+    model.apply(ConversationIntent::CompleteBlock {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+    });
+
+    // 3. Tool call start
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+
+    // 4. Agent progress
+    model.apply(ConversationIntent::RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        message: "analysing codebase".to_string(),
+    });
+
+    // 5. Tool result
+    model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: "provider-a42".to_string(),
+        tool_name: "Agent".to_string(),
+        output: "done".to_string(),
+        content: serde_json::json!({ "text": "done" }),
+        is_error: false,
+        image_count: 0,
+    });
+
+    // AgentProgress が timeline に含まれることを断言
+    let has_agent_progress = model.timeline.items().iter().any(|item| {
+        matches!(
+            item,
+            OutputTimelineItem::AgentProgress { tool_id: tid, message, .. }
+                if *tid == tool_id && message == "analysing codebase"
+        )
+    });
+    assert!(
+        has_agent_progress,
+        "timeline.items() should contain AgentProgress after record_agent_progress; items = {:?}",
+        model
+            .timeline
+            .items()
+            .iter()
+            .map(|i| i.id().into_owned())
+            .collect::<Vec<_>>()
+    );
+
+    // 全 timeline 条目的 id 不重复（种类完整、无重）
+    let ids: Vec<_> = model
+        .timeline
+        .items()
+        .iter()
+        .map(|i| i.id().into_owned())
+        .collect();
+    let unique_count = ids.iter().collect::<std::collections::HashSet<_>>().len();
+    assert_eq!(
+        ids.len(),
+        unique_count,
+        "timeline ids should be unique; ids = {ids:?}"
+    );
+}

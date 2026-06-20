@@ -483,7 +483,7 @@ impl ConversationModel {
         const STREAM_CAP: usize = 4 * 1024;
 
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
-        // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
+        // activity_summary 的内联实时显示路径）。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
                 c.id.as_ref()
@@ -512,7 +512,22 @@ impl ConversationModel {
             tool_id.to_string(),
             message.clone(),
         ));
-        vec![ConversationChange::OutputDirty]
+        // A4.2：同步推 timeline，使 timeline 成为 blocks/mutation 的完整镜像。
+        // AgentProgress 在 timeline 中提供历史存档；内联实时显示路径仍由
+        // tool_calls[].activities 驱动（ToolCallBlock.activity_summary）。
+        let progress_id = self.next_block_id("progress");
+        self.timeline.push(OutputTimelineItem::AgentProgress {
+            id: progress_id.clone(),
+            tool_id: tool_id.clone(),
+            message: message.clone(),
+        });
+        vec![
+            ConversationChange::AgentProgressRecorded {
+                block_id: progress_id,
+                tool_id: tool_id.to_string(),
+            },
+            ConversationChange::OutputDirty,
+        ]
     }
     fn append_or_extend_text_block(
         &mut self,
