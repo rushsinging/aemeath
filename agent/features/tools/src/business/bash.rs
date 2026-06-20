@@ -521,14 +521,14 @@ mod tests {
         assert!(!result.is_error);
         // output 应包含 stdout 内容，而非 "Command executed successfully"
         assert!(
-            result.output.contains("hello_world_12345"),
+            result.text.contains("hello_world_12345"),
             "output 应包含 stdout，实际: {}",
-            result.output
+            result.text
         );
         assert!(
-            !result.output.contains("Command executed successfully"),
+            !result.text.contains("Command executed successfully"),
             "output 不应是元信息 'Command executed successfully'，实际: {}",
-            result.output
+            result.text
         );
         // data 中应有 stdout 字段
         let data = result.data.expect("应有 data");
@@ -649,9 +649,9 @@ mod tests {
 
         assert!(!result.is_error);
         assert!(
-            result.output.contains("no_channel_test_98765"),
+            result.text.contains("no_channel_test_98765"),
             "output should contain echoed text even without progress_tx, got: {}",
-            result.output
+            result.text
         );
     }
 
@@ -793,14 +793,14 @@ mod tests {
         assert!(result.is_error);
         // 消息应包含 "signal" 而非无信息的 "exit code -1"
         assert!(
-            result.output.contains("signal"),
+            result.text.contains("signal"),
             "error message should contain signal info, got: {}",
-            result.output
+            result.text
         );
         assert!(
-            result.output.contains("SIGKILL"),
+            result.text.contains("SIGKILL"),
             "error message should contain signal name, got: {}",
-            result.output
+            result.text
         );
     }
 }

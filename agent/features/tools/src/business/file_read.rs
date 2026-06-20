@@ -92,16 +92,15 @@ impl TypedTool for FileReadTool {
                 } else {
                     let line_count = end - start;
                     let data = ReadResult {
-                        content: numbered,
+                        content: numbered.clone(),
                         file_path: file_path.to_string(),
                         line_count: line_count as u64,
                         start_line: start as u64,
                         total_lines: total as u64,
                     };
-                    TypedToolResult::success(
-                        format!("Read {} lines from {}", line_count, file_path),
-                        data,
-                    )
+                    // output = 完整带行号内容（给 LLM，经 to_llm_view text-first）；
+                    // data = 同样内容的结构化 ReadResult（给 TUI）。
+                    TypedToolResult::success(numbered, data)
                 }
             }
             Err(e) => TypedToolResult::error(format!("failed to read file: {e}")),

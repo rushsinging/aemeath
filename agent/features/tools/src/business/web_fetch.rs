@@ -209,29 +209,24 @@ impl TypedTool for WebFetchTool {
                             truncated.chars().count(),
                             body.chars().count()
                         );
-                        TypedToolResult::success_msg(serde_json::json!({
-                            "status": "success",
-                            "message": format!("Fetched {} (truncated, showing first {} chars of {} total)", url, truncated.chars().count(), body.chars().count()),
-                            "data": serde_json::to_value(WebFetchResult {
+                        TypedToolResult::success(
+                            truncated_content.clone(),
+                            WebFetchResult {
                                 url: url.to_string(),
                                 title: String::new(),
                                 content: truncated_content,
                                 truncated: true,
-                            }).unwrap()
-                        }).to_string())
+                            },
+                        )
                     } else {
-                        TypedToolResult::success_msg(
-                            serde_json::json!({
-                                "status": "success",
-                                "message": format!("Fetched {}", url),
-                                "data": serde_json::to_value(WebFetchResult {
-                                    url: url.to_string(),
-                                    title: String::new(),
-                                    content: body.to_string(),
-                                    truncated: false,
-                                }).unwrap()
-                            })
-                            .to_string(),
+                        TypedToolResult::success(
+                            body.to_string(),
+                            WebFetchResult {
+                                url: url.to_string(),
+                                title: String::new(),
+                                content: body.to_string(),
+                                truncated: false,
+                            },
                         )
                     }
                 } else {

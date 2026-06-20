@@ -5,6 +5,7 @@
 //! - **Confirming**：所有 Q→A 摘要列表 + 提交/取消操作
 //! - **Confirmed**（终态）：简洁的 Q→A 列表
 
+use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView};
@@ -13,90 +14,19 @@ use ratatui::text::Span;
 use sdk::OptionItem;
 use unicode_width::UnicodeWidthStr;
 
-/// 将文本按指定显示列宽自动换行，返回多行字符串。
-fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
-    if max_width == 0 {
-        return text.lines().map(|l| l.to_string()).collect();
-    }
-    let mut result = Vec::new();
-    for paragraph in text.split('\n') {
-        if paragraph.is_empty() {
-            result.push(String::new());
-            continue;
-        }
-        let mut current_line = String::new();
-        let mut current_width = 0;
-        for word in paragraph.split_whitespace() {
-            let word_width = word.width();
-            let space = if current_line.is_empty() { 0 } else { 1 };
-            if current_line.is_empty() {
-                for chunk in split_into_chunks(word, max_width) {
-                    if current_line.is_empty() {
-                        current_line = chunk;
-                        current_width = current_line.width();
-                    } else {
-                        result.push(current_line);
-                        current_line = chunk;
-                        current_width = current_line.width();
-                    }
-                }
-            } else if current_width + space + word_width <= max_width {
-                current_line.push(' ');
-                current_line.push_str(word);
-                current_width += space + word_width;
-            } else {
-                result.push(current_line);
-                current_line = String::new();
-                current_width = 0;
-                for chunk in split_into_chunks(word, max_width) {
-                    if current_line.is_empty() {
-                        current_line = chunk;
-                        current_width = current_line.width();
-                    } else {
-                        result.push(current_line);
-                        current_line = chunk;
-                        current_width = current_line.width();
-                    }
-                }
-            }
-        }
-        if !current_line.is_empty() {
-            result.push(current_line);
-        }
-    }
-    if result.is_empty() {
-        result.push(String::new());
-    }
-    result
-}
-
-fn split_into_chunks(s: &str, max_width: usize) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    let mut current_w = 0;
-    for ch in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if current_w + cw > max_width && !current.is_empty() {
-            chunks.push(current);
-            current = String::new();
-            current_w = 0;
-        }
-        current.push(ch);
-        current_w += cw;
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
-}
-
 /// 渲染单个选项的行。
+///
+/// `active` 控制 marker（❯/✓）；title 行使用 `title_style`；
+/// description 按 `max_width` 自动换行（word-aware），续行缩进与 title 对齐，
+/// description 固定 `TEXT_DIM` 样式。
 fn option_lines(
     index: usize,
     option: &OptionItem,
     active: bool,
+    title_style: Style,
     multi_select: bool,
-) -> Vec<(String, Option<Style>)> {
+    max_width: usize,
+) -> Vec<RenderedLine> {
     let prefix = if multi_select {
         let check = if active { "✓" } else { " " };
         format!("  [{check}] {}. ", index + 1)
@@ -104,25 +34,30 @@ fn option_lines(
         let marker = if active { "❯" } else { " " };
         format!("  {marker} {}. ", index + 1)
     };
-    let continuation = " ".repeat(prefix.chars().count());
-    let mut lines = Vec::new();
+    let prefix_width = prefix.width();
+    let mut result = Vec::new();
 
-    let title_line = format!("{prefix}{}", option.title);
-    lines.push((title_line, None));
+    // title 行（单行，不 wrap）
+    result.push(RenderedLine::new(vec![Span::styled(
+        format!("{prefix}{}", option.title),
+        title_style,
+    )]));
 
+    // description：按剩余可用宽度 word-wrap，续行缩进对齐 title 文本起始列
     if let Some(desc) = &option.description {
-        for line in desc.lines() {
-            lines.push((
-                format!("{continuation}{line}"),
-                Some(Style::default().fg(theme::TEXT_DIM)),
-            ));
-        }
+        let avail = max_width.saturating_sub(prefix_width);
+        let continuation = Span::raw(" ".repeat(prefix_width));
+        let desc_style = Style::default().fg(theme::TEXT_DIM);
+        let wrapped = wrap_spans_with_prefix(
+            vec![Span::styled(desc.clone(), desc_style)],
+            avail,
+            Some(continuation),
+            WrapMode::Word,
+        );
+        result.extend(wrapped);
     }
 
-    if lines.is_empty() {
-        lines.push((prefix, None));
-    }
-    lines
+    result
 }
 
 /// 截断文本到指定显示宽度（尾部加 `…`）。
@@ -217,7 +152,7 @@ pub fn render_ask_user_batch(
 fn render_answering(
     block_id: &str,
     view: &AskUserBatchBlockView,
-    _ctx: &RenderCtx,
+    ctx: &RenderCtx,
     header_style: Style,
     hint_style: Style,
     normal_style: Style,
@@ -258,10 +193,19 @@ fn render_answering(
 
     lines.push(RenderedLine::new(vec![Span::raw("")]));
 
-    // 当前激活问题
+    // 当前激活问题（按段落 wrap，空段保留空行）
     let active_slot = &view.slots[view.active_index];
-    for line in wrap_text(&active_slot.question, question_max_width) {
-        lines.push(RenderedLine::new(vec![Span::styled(line, header_style)]));
+    for paragraph in active_slot.question.split('\n') {
+        if paragraph.is_empty() {
+            lines.push(RenderedLine::empty());
+            continue;
+        }
+        lines.extend(wrap_spans_with_prefix(
+            vec![Span::styled(paragraph.to_string(), header_style)],
+            question_max_width,
+            None,
+            WrapMode::Word,
+        ));
     }
 
     let multi = active_slot.multi_select;
@@ -309,17 +253,15 @@ fn render_answering(
         let is_cursor = !view.chat_input_active && i == view.cursor;
         let is_checked = multi && view.selected.get(i).copied().unwrap_or(false);
         let active = is_cursor || is_checked;
-        for (line_idx, (content, override_style)) in option_lines(i, option, active, multi)
-            .into_iter()
-            .enumerate()
-        {
-            let style = override_style.unwrap_or(if active && line_idx == 0 {
-                header_style
-            } else {
-                normal_style
-            });
-            lines.push(RenderedLine::new(vec![Span::styled(content, style)]));
-        }
+        let title_style = if active { header_style } else { normal_style };
+        lines.extend(option_lines(
+            i,
+            option,
+            active,
+            title_style,
+            multi,
+            ctx.text_width as usize,
+        ));
     }
 
     // Type something 子态（LLM 选项中的最后一项被选中时激活）
@@ -579,25 +521,57 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_text_short_text_no_wrap() {
-        let lines = wrap_text("hello world", 80);
-        assert_eq!(lines, vec!["hello world"]);
+    fn test_answering_wraps_long_option_description() {
+        // issue #403：长 description 应按可用宽度自动换行，而非整段溢出
+        let long_desc =
+            "这是一段很长的选项描述文本用来测试在窄终端宽度下是否会被自动换行而不溢出显示边界";
+        let opt = sdk::OptionItem::new("选项A", long_desc);
+        let mut options = vec![opt];
+        options.push(sdk::OptionItem::title_only("Type something...".to_string()));
+        let slot = AskUserSlotView {
+            id: "q-1".into(),
+            question: "选哪个?".into(),
+            options,
+            llm_option_count: 1,
+            multi_select: false,
+            default: None,
+            answer: None,
+        };
+        let view = batch_view(vec![slot], 0, AskUserPhaseView::Answering);
+        let block = render_ask_user_batch("ask", &view, &RenderCtx { text_width: 40 });
+
+        // description 内容必须可见（未被丢弃）
+        assert!(
+            block.lines.iter().any(|l| l.plain.contains("自动换行")),
+            "description 应可见: {:?}",
+            block.lines.iter().map(|l| &l.plain).collect::<Vec<_>>()
+        );
+        // 任何行都不应超过可用宽度（核心：长 description 应换行而非溢出）
+        for l in &block.lines {
+            assert!(
+                l.plain.width() <= 40,
+                "行宽超过 40: {:?} ({} 列)",
+                l.plain,
+                l.plain.width()
+            );
+        }
     }
 
     #[test]
-    fn test_wrap_text_long_text_wraps() {
-        let lines = wrap_text("aaa bbb ccc ddd eee fff", 11);
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "aaa bbb ccc");
-        assert_eq!(lines[1], "ddd eee fff");
-    }
-
-    #[test]
-    fn test_wrap_text_chinese_wraps_by_char() {
-        let lines = wrap_text("这是一段很长的中文文本用来测试自动换行", 20);
-        assert!(lines.len() >= 2);
-        for line in &lines {
-            assert!(line.width() <= 20);
+    fn test_option_lines_wraps_description_with_continuation_indent() {
+        // 续行应与 title 文本起始列对齐（prefix 宽度）
+        let opt = sdk::OptionItem::new("标题", "aaa bbb ccc ddd eee fff");
+        let lines = option_lines(0, &opt, true, Style::default(), false, 12);
+        // 第一行是 title
+        assert!(lines[0].plain.contains("1. 标题"));
+        // 后续行是 description 续行，应以空格缩进对齐
+        for l in lines.iter().skip(1) {
+            assert!(
+                l.plain.starts_with(' '),
+                "description 续行应缩进: {:?}",
+                l.plain
+            );
+            assert!(l.plain.width() <= 12, "续行不超宽: {:?}", l.plain);
         }
     }
 }

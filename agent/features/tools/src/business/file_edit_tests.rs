@@ -61,10 +61,16 @@ async fn test_file_edit_success_diff_marker_includes_real_line_number() {
         )
         .await;
 
-    assert!(!result.is_error, "edit should succeed: {}", result.output);
+    assert!(!result.is_error, "edit should succeed: {}", result.text);
     assert!(
-        result.output.contains("---DIFF:LINE:2---"),
+        result.text.contains("---DIFF:LINE:2---"),
         "diff marker should include real line number, got: {}",
-        result.output
+        result.text
+    );
+    // 落盘验证：确认文件内容真的被改写（此前无任何测试读回文件，回归盲区）
+    let persisted = tokio::fs::read_to_string(&path).await.unwrap();
+    assert_eq!(
+        persisted, "one\nTWO\nthree\n",
+        "文件应已落盘新内容: {persisted}"
     );
 }

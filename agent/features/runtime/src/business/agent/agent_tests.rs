@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
-use tools::api::{Tool, ToolExecutionContext, ToolRegistry, ToolResult};
+use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
 /// A tool that records the start time and sleeps briefly.
 /// Marked as concurrency-safe or not depending on constructor.
@@ -16,7 +16,9 @@ struct TimedTool {
 }
 
 #[async_trait]
-impl Tool for TimedTool {
+impl TypedTool for TimedTool {
+    type Output = Value;
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -29,14 +31,18 @@ impl Tool for TimedTool {
     fn is_concurrency_safe(&self) -> bool {
         self.safe
     }
-    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        _input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
         self.start_times.lock().unwrap().push(now);
         tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
-        ToolResult::success("done")
+        TypedToolResult::success("done", Value::Null)
     }
 }
 
@@ -73,18 +79,18 @@ fn tool_cancelled_message_names_tool() {
 async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = ToolRegistry::new();
-    registry.register(Box::new(TimedTool {
+    registry.register(TimedTool {
         name: "parallel_a".to_string(),
         safe: true,
         start_times: start_times.clone(),
         sleep_ms: 200,
-    }));
-    registry.register(Box::new(TimedTool {
+    });
+    registry.register(TimedTool {
         name: "parallel_b".to_string(),
         safe: true,
         start_times: start_times.clone(),
         sleep_ms: 200,
-    }));
+    });
 
     let ctx = test_ctx();
     let agent = Agent {
@@ -139,18 +145,18 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
 async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = ToolRegistry::new();
-    registry.register(Box::new(TimedTool {
+    registry.register(TimedTool {
         name: "seq_a".to_string(),
         safe: false,
         start_times: start_times.clone(),
         sleep_ms: 150,
-    }));
-    registry.register(Box::new(TimedTool {
+    });
+    registry.register(TimedTool {
         name: "seq_b".to_string(),
         safe: false,
         start_times: start_times.clone(),
         sleep_ms: 150,
-    }));
+    });
 
     let ctx = test_ctx();
     let agent = Agent {
@@ -203,7 +209,9 @@ async fn test_execute_tools_preserves_original_order() {
     }
 
     #[async_trait]
-    impl Tool for OrderTool {
+    impl TypedTool for OrderTool {
+        type Output = Value;
+
         fn name(&self) -> &str {
             &self.name
         }
@@ -216,30 +224,34 @@ async fn test_execute_tools_preserves_original_order() {
         fn is_concurrency_safe(&self) -> bool {
             true
         }
-        async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
             let seq = self.order_counter.fetch_add(1, AtomicOrdering::SeqCst);
             self.results.lock().unwrap().push((self.name.clone(), seq));
-            ToolResult::success(format!("seq={seq}"))
+            TypedToolResult::success(format!("seq={seq}"), Value::Null)
         }
     }
 
     let results = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = ToolRegistry::new();
-    registry.register(Box::new(OrderTool {
+    registry.register(OrderTool {
         name: "tool_c".to_string(),
         order_counter: counter.clone(),
         results: results.clone(),
-    }));
-    registry.register(Box::new(OrderTool {
+    });
+    registry.register(OrderTool {
         name: "tool_a".to_string(),
         order_counter: counter.clone(),
         results: results.clone(),
-    }));
-    registry.register(Box::new(OrderTool {
+    });
+    registry.register(OrderTool {
         name: "tool_b".to_string(),
         order_counter: counter.clone(),
         results: results.clone(),
-    }));
+    });
 
     let ctx = test_ctx();
     let agent = Agent {
@@ -290,16 +302,18 @@ async fn test_execute_tools_preserves_original_order() {
 #[tokio::test]
 async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() {
     let registry = ToolRegistry::new();
-    registry.register(Box::new(TimedTool {
+    registry.register(TimedTool {
         name: "slow_tool".to_string(),
         safe: true,
         start_times: Arc::new(std::sync::Mutex::new(Vec::new())),
         sleep_ms: 20,
-    }));
+    });
 
     struct ShortTimeoutTool;
     #[async_trait]
-    impl Tool for ShortTimeoutTool {
+    impl TypedTool for ShortTimeoutTool {
+        type Output = Value;
+
         fn name(&self) -> &str {
             "short_timeout"
         }
@@ -312,12 +326,16 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
         fn timeout_secs(&self) -> u64 {
             0
         }
-        async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> ToolResult {
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            ToolResult::success("too late")
+            TypedToolResult::success("too late", Value::Null)
         }
     }
-    registry.register(Box::new(ShortTimeoutTool));
+    registry.register(ShortTimeoutTool);
 
     let agent = Agent {
         registry: &registry,
@@ -348,18 +366,18 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
 async fn test_execute_tools_mixed_concurrent_and_sequential() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
     let registry = ToolRegistry::new();
-    registry.register(Box::new(TimedTool {
+    registry.register(TimedTool {
         name: "parallel".to_string(),
         safe: true,
         start_times: start_times.clone(),
         sleep_ms: 100,
-    }));
-    registry.register(Box::new(TimedTool {
+    });
+    registry.register(TimedTool {
         name: "sequential".to_string(),
         safe: false,
         start_times: start_times.clone(),
         sleep_ms: 100,
-    }));
+    });
 
     let ctx = test_ctx();
     let agent = Agent {

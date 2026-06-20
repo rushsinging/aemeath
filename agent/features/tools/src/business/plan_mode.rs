@@ -43,13 +43,14 @@ impl TypedTool for EnterPlanModeTool {
         // Set plan mode in context
         if let Some(mode) = ctx.plan_mode.as_ref() {
             if *mode {
-                return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Already in plan mode", "data": null}).to_string());
+                return TypedToolResult::success("Already in plan mode", PlanModeResult::default());
             }
         }
 
         // Note: The actual mode change happens in the agent runner
-        TypedToolResult::success_msg(
-            serde_json::json!({"status": "success", "message": "Entered plan mode. Tool calls will be simulated and not executed. Use ExitPlanMode to return to normal execution mode.", "data": null}).to_string(),
+        TypedToolResult::success(
+            "Entered plan mode. Tool calls will be simulated and not executed. Use ExitPlanMode to return to normal execution mode.".to_string(),
+            PlanModeResult::default(),
         )
     }
 
@@ -92,17 +93,23 @@ impl TypedTool for ExitPlanModeTool {
         // Check if we're in plan mode
         if let Some(mode) = ctx.plan_mode.as_ref() {
             if !*mode {
-                return TypedToolResult::success_msg(serde_json::json!({"status": "success", "message": "Not in plan mode", "data": null}).to_string());
+                return TypedToolResult::success("Not in plan mode", PlanModeResult::default());
             }
         }
 
         if args.execute.unwrap_or(false) {
-            TypedToolResult::success_msg(
-                serde_json::json!({"status": "success", "message": "Exited plan mode. The planned actions will now be executed. Note: Simulated tool calls need to be re-invoked.", "data": {"execute": true}}).to_string(),
+            TypedToolResult::success(
+                "Exited plan mode. The planned actions will now be executed. Note: Simulated tool calls need to be re-invoked.".to_string(),
+                PlanModeResult { reason: String::new(), execute: Some(true) },
             )
         } else {
-            TypedToolResult::success_msg(
-                serde_json::json!({"status": "success", "message": "Exited plan mode. Returning to normal execution without running planned actions.", "data": {"execute": false}}).to_string(),
+            TypedToolResult::success(
+                "Exited plan mode. Returning to normal execution without running planned actions."
+                    .to_string(),
+                PlanModeResult {
+                    reason: String::new(),
+                    execute: Some(false),
+                },
             )
         }
     }

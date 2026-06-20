@@ -13,6 +13,7 @@
 3. 引入新规则或约定时，**MUST** 先征得用户同意再更新本文件或任一 `specs/` 分片。
 4. **MUST** 遵循 DRY 原则。类型、辅助函数、常量、数据访问逻辑 **MUST** 定义一次、到处引用。**NEVER** 在多个文件重复相同逻辑。
 5. **MUST NOT** 手动调整代码格式。格式化由 `cargo fmt` / `rustfmt` 处理，只关注逻辑变更。
+6. **MUST** 遵循 TDD（测试先行）。新增或修改核心逻辑前，**MUST** 先新增或修改对应测试（feature 先写表达期望行为的测试、bug 先写复现问题的失败测试、重构先确认现有测试覆盖目标行为），再用 `cargo test` 验证修改结果；细节见 `specs/rust-coding.md`。
 
 ## 渐进式披露（Progressive Disclosure）
 
@@ -127,6 +128,16 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 如果同一问题既可临时止血也能彻底重构，**MUST** 同时给出最小化补丁和根因级彻底方案，并说明两者优劣、成本与风险。对于存在复发风险、明显设计缺陷或结构性不合理的情况，**SHOULD** 默认推荐并优先实施彻底方案，除非用户明确要求只做最小修改。
 
 创建新 issue 时 **MUST** 应用 `kind:bug` 或 `kind:feature` label（按问题类型二选一），有明确优先级时再加 `priority:high|medium|low`。`migrated-from:docs` 仅用于历史迁移条目。
+
+### 大型工作的拆分与跟踪（总 → 分 / 伞 issue）
+
+跨多个子系统、需多个 PR 才能完成的大型工作，**MUST** 按"总 → 分"组织，**NEVER** 塞进单一 issue 或单一 PR：
+
+1. **建伞（umbrella）issue 放大纲**：承载整体设计大纲、范围边界、子任务清单；大纲指向对应设计文档（`docs/superpowers/specs/`）。伞 issue 是该工作范围的**单一真相**。
+2. **拆子 issue**：每个可独立验证、独立 PR 的单元拆成一个子 issue；子 issue body **MUST** 链接回伞 issue，伞 issue **MUST** 列出全部子 issue。
+3. **标注依赖与并行性**：伞 issue **MUST** 对每个子 issue 标明——**可否并行**、**被谁 block / block 谁**，并据此排执行顺序。
+4. **跟进进度**：伞 issue 维护进度清单（每个子 issue：未开始 / 进行中 / 已合入）；状态变化时 **MUST** 同步更新伞 issue。
+5. **范围调整同步**：子任务执行中若发现更根本的问题需重做或移动范围，**MUST** 在伞 issue 与相关子 issue 同步调整（移入 / 移出 / 新建），保持伞 issue 大纲与依赖图始终为真。
 
 ### Git 工作流
 

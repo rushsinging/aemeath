@@ -89,13 +89,9 @@ impl TypedTool for FileWriteTool {
                     file_path: file_path.to_string(),
                     bytes_written: content.len() as u64,
                 };
-                TypedToolResult::success_msg(
-                    serde_json::json!({
-                        "status": "success",
-                        "message": format!("Wrote {} bytes to {file_path}", content.len()),
-                        "data": serde_json::to_value(&data).unwrap()
-                    })
-                    .to_string(),
+                TypedToolResult::success(
+                    format!("Wrote {} bytes to {file_path}", content.len()),
+                    data,
                 )
             }
             Err(e) => TypedToolResult::error(

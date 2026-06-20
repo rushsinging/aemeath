@@ -81,6 +81,15 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 
 ## 测试规范
 
+### TDD（测试先行）
+
+- **MUST** 新增/修改任何核心逻辑前，**MUST** 先写或改对应测试：feature 先写表达期望行为的测试（初始失败），bug 先写复现 bug 的失败测试，重构先确认现有测试已覆盖目标行为。
+- **MUST** 实现/修复后，对应测试 **MUST** 通过（`cargo test -p <crate>` 绿）；测试 **NEVER** 为迁就实现而削弱断言。
+- **SHOULD** 遵循 Red → Green → Refactor 节奏：先红（失败测试）、再绿（最小实现通过）、最后重构。
+- 豁免沿用下方覆盖豁免（UI 渲染、`main.rs` 入口、一行委托/包装）。
+
+### 覆盖要求
+
 - **MUST** 每个包含公共函数的模块文件末尾有 `#[cfg(test)] mod tests`。
 - **MUST** 每个公共函数至少 3 个测试用例：正常路径、边界条件、错误路径。
 - **MUST** 测试使用 `assert!` / `assert_eq!` / `matches!` 显式断言，不可仅打印后人工观察。

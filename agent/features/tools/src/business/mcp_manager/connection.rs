@@ -354,7 +354,7 @@ impl McpConnectionManager {
                         client: client_arc.clone(),
                     };
 
-                    registry.register(Box::new(mcp_tool));
+                    registry.register(mcp_tool);
                 }
             }
         }

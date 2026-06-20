@@ -90,16 +90,14 @@ impl TypedTool for SkillTool {
         drop(skills);
 
         // Skill content is materialized by prompt domain before registration.
-        TypedToolResult::success_msg(
-            serde_json::json!({
-                "status": "success",
-                "message": format!("Skill '{}' loaded", skill.name),
-                "data": serde_json::to_value(SkillResult {
-                    name: skill.name,
-                    path: skill.source_path.to_string_lossy().to_string()
-                }).unwrap()
-            })
-            .to_string(),
+        let path = skill.source_path.to_string_lossy().to_string();
+        let output = format!("Skill '{}' loaded", skill.name);
+        TypedToolResult::success(
+            output,
+            SkillResult {
+                name: skill.name,
+                path,
+            },
         )
     }
 }

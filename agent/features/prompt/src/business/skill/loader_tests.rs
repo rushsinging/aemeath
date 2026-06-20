@@ -1,9 +1,10 @@
+use super::super::test_support::unique_skill_dir;
 use super::*;
 use std::io::Write;
 
 #[test]
 fn test_load_skills_from_subdir() {
-    let base = std::env::temp_dir().join("aemeath_test_skill_3");
+    let base = unique_skill_dir("from_subdir");
     let sub = base.join("review");
     std::fs::create_dir_all(&sub).unwrap();
 
@@ -26,13 +27,13 @@ fn test_load_skills_from_subdir() {
     assert!(skills.iter().any(|s| s.name == "hello"), "direct skill");
     assert!(skills.iter().any(|s| s.name == "review"), "sub-dir skill");
 
-    std::fs::remove_dir_all(&base).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn test_load_skills_nested_with_namespace() {
     // Simulate: ~/.agents/skills/superpowers/skills/brainstorming/SKILL.md
-    let base = std::env::temp_dir().join("aemeath_test_skill_ns");
+    let base = unique_skill_dir("nested_ns");
     let deep = base
         .join("superpowers")
         .join("skills")
@@ -55,13 +56,13 @@ fn test_load_skills_nested_with_namespace() {
         "original name should be an alias"
     );
 
-    std::fs::remove_dir_all(&base).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn test_load_skills_ignores_non_skills_dirs() {
     // Non-"skills" dirs at nested levels should be skipped
-    let base = std::env::temp_dir().join("aemeath_test_skill_ignore");
+    let base = unique_skill_dir("ignore_non_skills");
     let pkg = base.join("superpowers");
     let skills_dir = pkg.join("skills").join("my-skill");
     let agents_dir = pkg.join("agents");
@@ -101,13 +102,13 @@ fn test_load_skills_ignores_non_skills_dirs() {
     );
     assert_eq!(skills[0].name, "superpowers:my-skill");
 
-    std::fs::remove_dir_all(&base).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn test_load_skills_no_namespace_for_regular_dirs() {
     // Regular skill directories (no `skills/` child) should NOT get namespace prefix
-    let base = std::env::temp_dir().join("aemeath_test_no_ns");
+    let base = unique_skill_dir("no_ns_regular_dirs");
     let sub = base.join("review");
     std::fs::create_dir_all(&sub).unwrap();
 
@@ -122,18 +123,12 @@ fn test_load_skills_no_namespace_for_regular_dirs() {
         "no namespace prefix for regular dirs"
     );
 
-    std::fs::remove_dir_all(&base).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn test_load_all_skills_prefers_project_claude_skills() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_skill_claude_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let base = unique_skill_dir("prefers_claude_skills");
     let claude_skills = base.join(".claude").join("skills");
     let agents_skills = base.join(".agents").join("skills");
     std::fs::create_dir_all(&claude_skills).unwrap();
@@ -156,18 +151,12 @@ fn test_load_all_skills_prefers_project_claude_skills() {
     assert!(skills.contains_key("demo"));
     assert_eq!(skills["demo"].source_path, claude_skills.join("demo.md"));
 
-    std::fs::remove_dir_all(base).unwrap();
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]
 fn test_load_all_skills_falls_back_to_project_agents_skills() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_skill_agents_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let base = unique_skill_dir("fallback_agents_skills");
     let project_skills = base.join(".agents").join("skills");
     std::fs::create_dir_all(&project_skills).unwrap();
     let mut file = std::fs::File::create(project_skills.join("demo.md")).unwrap();
@@ -182,18 +171,12 @@ fn test_load_all_skills_falls_back_to_project_agents_skills() {
     assert!(skills.contains_key("demo"));
     assert_eq!(skills["demo"].source_path, project_skills.join("demo.md"));
 
-    std::fs::remove_dir_all(base).unwrap();
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]
 fn test_load_all_skills_includes_builtin_commit_skill() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_builtin_commit_skill_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let base = unique_skill_dir("builtin_commit");
     std::fs::create_dir_all(&base).unwrap();
 
     let skills = load_all_skills(&base, &[]);
@@ -210,18 +193,12 @@ fn test_load_all_skills_includes_builtin_commit_skill() {
     assert!(content.contains("Co-Authored-By: Aemeath"));
     assert!(content.contains("git commit"));
 
-    std::fs::remove_dir_all(base).unwrap();
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]
 fn test_load_all_skills_scans_project_global_and_extra_dirs() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_skill_all_dirs_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let base = unique_skill_dir("all_dirs_scan");
     let project_skills = base.join(".agents").join("skills");
     let extra_skills = base.join("extra-skills");
     std::fs::create_dir_all(&project_skills).unwrap();
@@ -253,7 +230,7 @@ fn test_load_all_skills_scans_project_global_and_extra_dirs() {
         extra_skills.join("extra.md")
     );
 
-    std::fs::remove_dir_all(base).unwrap();
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]
@@ -267,13 +244,7 @@ fn test_global_skills_dir_points_to_home_agents_skills() {
 
 #[test]
 fn test_project_skill_can_override_builtin_commit_skill() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_builtin_commit_override_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let base = unique_skill_dir("builtin_commit_override");
     let project_skills = base.join(".agents").join("skills");
     std::fs::create_dir_all(&project_skills).unwrap();
     let mut file = std::fs::File::create(project_skills.join("commit.md")).unwrap();
@@ -291,18 +262,12 @@ fn test_project_skill_can_override_builtin_commit_skill() {
         project_skills.join("commit.md")
     );
 
-    std::fs::remove_dir_all(base).unwrap();
+    let _ = std::fs::remove_dir_all(base);
 }
 
 #[test]
 fn test_load_all_skills_does_not_auto_migrate_project_aemeath_skills() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_skill_no_auto_migration_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let base = unique_skill_dir("no_auto_migration");
     let old_skills = base.join(".aemeath").join("skills");
     std::fs::create_dir_all(&old_skills).unwrap();
     let mut file = std::fs::File::create(old_skills.join("legacy.md")).unwrap();
@@ -318,5 +283,5 @@ fn test_load_all_skills_does_not_auto_migrate_project_aemeath_skills() {
     assert!(!new_skills.exists());
     assert!(!skills.contains_key("legacy"));
 
-    std::fs::remove_dir_all(base).unwrap();
+    let _ = std::fs::remove_dir_all(base);
 }

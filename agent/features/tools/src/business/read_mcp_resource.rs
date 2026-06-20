@@ -1,6 +1,6 @@
 //! Read a specific MCP resource by URI
 
-use crate::api::{Tool, ToolExecutionContext, ToolResult};
+use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::business::mcp::McpClient;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,9 @@ pub struct ReadMcpResourceOutput {
 }
 
 #[async_trait]
-impl Tool for ReadMcpResourceTool {
+impl TypedTool for ReadMcpResourceTool {
+    type Output = Value;
+
     fn name(&self) -> &str {
         "ReadMcpResource"
     }
@@ -68,7 +70,11 @@ impl Tool for ReadMcpResourceTool {
         true
     }
 
-    async fn call(&self, input: serde_json::Value, _ctx: &ToolExecutionContext) -> ToolResult {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
         let server_name = input
             .get("server")
             .and_then(|s| s.as_str())
@@ -79,24 +85,10 @@ impl Tool for ReadMcpResourceTool {
             .unwrap_or_default();
 
         if server_name.is_empty() {
-            return ToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": "server parameter is required",
-                    "data": null
-                })
-                .to_string(),
-            );
+            return TypedToolResult::error("server parameter is required");
         }
         if uri.is_empty() {
-            return ToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": "uri parameter is required",
-                    "data": null
-                })
-                .to_string(),
-            );
+            return TypedToolResult::error("uri parameter is required");
         }
 
         let clients = self.clients.lock().await;
@@ -119,11 +111,11 @@ impl Tool for ReadMcpResourceTool {
                 let client = c.lock().await;
                 available_servers.push(client.name().to_string());
             }
-            return ToolResult::error(serde_json::json!({
-                "status": "error",
-                "message": format!("Server '{}' not found. Available servers: {}", server_name, available_servers.join(", ")),
-                "data": null
-            }).to_string());
+            return TypedToolResult::error(format!(
+                "Server '{}' not found. Available servers: {}",
+                server_name,
+                available_servers.join(", ")
+            ));
         }
 
         let client = client_arc.as_ref().unwrap().lock().await;
@@ -201,30 +193,15 @@ impl Tool for ReadMcpResourceTool {
                             contents: output_contents,
                         };
                         let data = serde_json::to_value(&output).unwrap_or_default();
-                        ToolResult::success(serde_json::json!({
-                            "status": "success",
-                            "message": format!("Read {} resource content(s)", output.contents.len()),
-                            "data": data
-                        }).to_string())
+                        TypedToolResult::success(
+                            format!("Read {} resource content(s)", output.contents.len()),
+                            data,
+                        )
                     }
-                    Err(e) => ToolResult::error(
-                        serde_json::json!({
-                            "status": "error",
-                            "message": format!("Invalid response: {}", e),
-                            "data": null
-                        })
-                        .to_string(),
-                    ),
+                    Err(e) => TypedToolResult::error(format!("Invalid response: {}", e)),
                 }
             }
-            Err(e) => ToolResult::error(
-                serde_json::json!({
-                    "status": "error",
-                    "message": format!("Failed to read resource: {}", e),
-                    "data": null
-                })
-                .to_string(),
-            ),
+            Err(e) => TypedToolResult::error(format!("Failed to read resource: {}", e)),
         }
     }
 }

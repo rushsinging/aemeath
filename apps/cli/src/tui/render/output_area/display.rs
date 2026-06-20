@@ -2,6 +2,7 @@ use sdk::CharIdx;
 use unicode_width::UnicodeWidthChar;
 
 use crate::tui::render::display::safe_text;
+use crate::tui::render::output::primitives::wrap::{wrap_text_to_strings, WrapMode};
 
 /// Truncate a string to fit within `max_width` Unicode display columns,
 /// appending "..." if truncated.
@@ -51,34 +52,11 @@ pub fn screen_col_to_char_idx(text: &str, screen_col: usize) -> CharIdx {
 }
 
 /// Split a string into lines that fit within `max_width` display columns.
+///
+/// 断行真相源为 `primitives::wrap`；此处仅做 sanitize（去 ANSI/控制字符）后转调。
 pub fn wrap_line(text: &str, max_width: usize) -> Vec<String> {
-    let text = sanitize_for_display(text);
-
-    if max_width == 0 {
-        return vec![text];
-    }
-
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut current_width = 0usize;
-
-    for ch in text.chars() {
-        let ch_width = ch.width().unwrap_or(1);
-
-        if current_width + ch_width > max_width {
-            result.push(std::mem::take(&mut current));
-            current_width = 0;
-        }
-
-        current.push(ch);
-        current_width += ch_width;
-    }
-
-    if !current.is_empty() || result.is_empty() {
-        result.push(current);
-    }
-
-    result
+    let sanitized = sanitize_for_display(text);
+    wrap_text_to_strings(&sanitized, max_width, WrapMode::Char)
 }
 
 /// 计算 wrap 后每个 chunk 在原始文本中的 char 偏移 (start, end)
