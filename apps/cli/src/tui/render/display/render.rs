@@ -474,7 +474,10 @@ mod tests {
             .find(|call| call.id.as_ref() == Some(&expected_tool_id))
             .expect("tool call should be restored");
         assert_eq!(tool_call.status, ToolCallStatus::Success);
-        assert_eq!(tool_call.result.as_deref(), Some("done"));
+        assert_eq!(
+            tool_call.result.as_ref().map(|p| p.output.as_str()),
+            Some("done")
+        );
     }
 
     #[test]

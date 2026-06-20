@@ -5,6 +5,7 @@ use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
+use super::tool_result_payload::ToolResultPayload;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 #[test]
@@ -144,4 +145,69 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
                 && reference.context.turn_id == expected_turn_id
                 && reference.tool_call_id == expected_tool_id
     )));
+}
+
+/// A4.1 TDD：observe_tool_result 后对应 ChatTurn.tool_calls[i].result 应为 Some(ToolResultPayload)
+/// 且字段值正确（output / content / is_error / image_count 全部匹配）。
+#[test]
+fn test_tool_result_payload_stored_in_turn() {
+    let mut model = ConversationModel::default();
+    let chat_id = ChatId::new("chat-a41");
+    let turn_id = ChatTurnId::new("turn-a41");
+    let tool_id = ToolCallId::new("tool-a41");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+
+    // 登记 ToolCallStart
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+    });
+
+    let expected_output = "file contents here".to_string();
+    let expected_content = serde_json::json!({ "text": "file contents here" });
+    let expected_is_error = false;
+    let expected_image_count = 0usize;
+
+    // 登记 ToolResult
+    model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        provider_id: "prov-a41".to_string(),
+        id: tool_id.clone(),
+        tool_name: "Read".to_string(),
+        output: expected_output.clone(),
+        content: expected_content.clone(),
+        is_error: expected_is_error,
+        image_count: expected_image_count,
+    });
+
+    // 断言：ToolCall.result 应为 Some(ToolResultPayload) 且字段正确
+    let call = model
+        .chats
+        .iter()
+        .find(|chat| chat.id == chat_id)
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == turn_id))
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|c| c.id.as_ref() == Some(&tool_id))
+        })
+        .expect("tool call should exist after observe_tool_result");
+
+    let expected_payload = ToolResultPayload::new(
+        expected_output,
+        expected_content,
+        expected_is_error,
+        expected_image_count,
+    );
+    assert_eq!(
+        call.result,
+        Some(expected_payload),
+        "tool_calls[i].result 应为 Some(ToolResultPayload) 且字段正确"
+    );
 }

@@ -344,7 +344,10 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         .expect("live runtime turn should exist");
     assert_eq!(live_turn_model.tool_calls.len(), 1);
     assert_eq!(
-        live_turn_model.tool_calls[0].result.as_deref(),
+        live_turn_model.tool_calls[0]
+            .result
+            .as_ref()
+            .map(|p| p.output.as_str()),
         Some("workspace manifest")
     );
     let tool_id = super::ids::ToolCallId::new("tool-1");
@@ -430,7 +433,10 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     let turn_id = super::ids::ChatTurnId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
     let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
-    let skill_result = turn.tool_calls[0].result.as_deref();
+    let skill_result = turn.tool_calls[0]
+        .result
+        .as_ref()
+        .map(|p| p.output.as_str());
     assert_ne!(
         skill_result,
         Some("//! Configuration file management"),
@@ -454,8 +460,8 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     ));
     assert!(read_call
         .result
-        .as_deref()
-        .is_some_and(|output| output.contains("Configuration file management")));
+        .as_ref()
+        .is_some_and(|p| p.output.contains("Configuration file management")));
 }
 
 #[test]
@@ -570,7 +576,8 @@ fn test_conversation_late_tool_call_binds_existing_result() {
             .unwrap()
             .tool_calls[0]
             .result
-            .as_deref(),
+            .as_ref()
+            .map(|p| p.output.as_str()),
         Some("line1\nline2")
     );
     assert_eq!(

@@ -373,7 +373,7 @@ fn tool_result_is_embedded(
 ) -> bool {
     find_tool_call(index, chat_id, turn_id, tool_id)
         .and_then(|call| call.result.as_ref())
-        .is_some_and(|result| !result.is_empty())
+        .is_some_and(|payload| !payload.output.is_empty())
 }
 
 /// 查找指定 runtime context 下 tool call id 对应的工具名称。
@@ -410,24 +410,30 @@ fn find_tool_view(
     let call = find_tool_call(index, chat_id, turn_id, tool_id)?;
     let (icon, semantic_status, style) = map_tool_status(call.status);
     // 同时计算 result_summary（展示文本）与 result_payload（结构化 payload，
-    // 供 TUI Display 走 typed 字段渲染 header），避免两遍扫描 tool result block。
-    let (result_summary, result_payload) =
-        match call.result.as_deref().filter(|result| !result.is_empty()) {
-            Some(result) => match find_tool_result_block(index, chat_id, turn_id, tool_id) {
-                Some((output, content, is_error, image_count)) => {
-                    let owned = ToolResultPayload::new(
-                        output.to_string(),
-                        content.clone(),
-                        is_error,
-                        image_count,
-                    );
-                    let text = display_text_for_tool_result(Some(&call.name), result, content);
-                    (Some(text), Some(owned))
-                }
-                None => (Some(result.to_string()), None),
-            },
-            None => (None, None),
-        };
+    // 供 TUI Display 走 typed 字段渲染 header）。
+    // A4.1: 直接从 ChatTurn.tool_calls[i].result（ToolResultPayload）取字段，
+    // 不再读 blocks ToolResult index，blocks 写入仅作 A4.5/A4.6 删除前的并存冗余。
+    let (result_summary, result_payload) = match call
+        .result
+        .as_ref()
+        .filter(|payload| !payload.output.is_empty())
+    {
+        Some(model_payload) => {
+            let view_payload = ToolResultPayload::new(
+                model_payload.output.clone(),
+                model_payload.content.clone(),
+                model_payload.is_error,
+                model_payload.image_count,
+            );
+            let text = display_text_for_tool_result(
+                Some(&call.name),
+                &model_payload.output,
+                &model_payload.content,
+            );
+            (Some(text), Some(view_payload))
+        }
+        None => (None, None),
+    };
     crate::tui::log_debug!(
         "assemble tool_call_view chat_id={} turn_id={} id={} name={} status={:?} args_len={} result_len={} activity_count={}",
         chat_id.as_ref(),
@@ -477,6 +483,7 @@ fn find_tool_view(
 
 /// 在索引中查找匹配 `(chat_id, turn_id, tool_id)` 的 ToolResult block，
 /// 返回 `(output, content, is_error, image_count)` 元组。
+/// A4.5/A4.6 删 blocks 后此函数随之删除。暂保留供并存冗余期兼容。
 fn find_tool_result_block<'a>(
     index: &ToolIndex<'a>,
     chat_id: &ChatId,
@@ -484,6 +491,28 @@ fn find_tool_result_block<'a>(
     tool_id: &ToolCallId,
 ) -> Option<(&'a str, &'a serde_json::Value, bool, usize)> {
     index.result_block(chat_id, turn_id, tool_id)
+}
+
+/// A4.1: 从 `chats` 中按 (chat_id, turn_id, tool_id) 定位对应 `ToolCall.result`，
+/// 返回对 model 端 `ToolResultPayload` 的引用。
+/// A4.2 起可用于 timeline-first 渲染路径取字段（替代旧 `find_tool_result_block`）。
+#[allow(dead_code)]
+pub(super) fn find_tool_result_in_turn<'a>(
+    chats: &'a [crate::tui::model::conversation::chat::Chat],
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<&'a crate::tui::model::conversation::tool_result_payload::ToolResultPayload> {
+    chats
+        .iter()
+        .find(|chat| &chat.id == chat_id)
+        .and_then(|chat| chat.turns.iter().find(|turn| &turn.id == turn_id))
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|call| call.id.as_ref() == Some(tool_id))
+        })
+        .and_then(|call| call.result.as_ref())
 }
 
 fn find_tool_call<'a>(
