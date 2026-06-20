@@ -578,7 +578,7 @@ where
                     loop {
                         match await_idle_input(&input_events, &mut pending_input).await {
                             IdleResult::Resumed => {
-                                // 处理空闲期收到的事件：append 用户消息 / 识别 Cancel/clear。
+                                // 处理空闲期收到的事件：append 用户消息 / 识别 Cancel/clear / 命令。
                                 let gate = apply_gate(
                                     GateKind::BeforeLlm,
                                     &mut pending_input,
@@ -586,17 +586,19 @@ where
                                     &mut messages,
                                 )
                                 .await;
-                                match gate.decision {
-                                    GateDecision::AbortCurrentLoop
-                                    | GateDecision::CancelCurrentLoop => {
-                                        // 空闲期收到 Cancel/clear：丢弃，保持空闲，继续等下一条。
-                                        continue;
-                                    }
-                                    GateDecision::Proceed | GateDecision::ContinueNextTurn => {
-                                        // 收到用户消息（已 append 进 messages）：恢复运行。
-                                        break;
-                                    }
+                                // 仅当确有新用户消息 append 时才退出空闲跑回合。
+                                // 单独的 ControlCommand（如 /save、/model、/provider）append 0 条
+                                // 用户消息、decision 仍为 Proceed —— 此时若退出 idle 会在陈旧历史上
+                                // 跑一个无新输入的空回合，违反 ControlCommand「永不作为 user message
+                                // 发给 LLM」契约。Cancel/clear（Abort/Cancel 决策）同样 append 0 条，
+                                // 被本条件一并涵盖 → 保持空闲继续等下一条。
+                                // （命令副作用的实际应用属 Task 3 / #391 范畴，此处只负责不跑空回合。）
+                                if gate.appended_user_messages > 0 {
+                                    // 收到用户消息（已 append 进 messages）：恢复运行。
+                                    break;
                                 }
+                                // 0 append（命令 / 取消 / 空）→ 留在空闲，继续等下一条输入。
+                                continue;
                             }
                             IdleResult::Shutdown => {
                                 shutdown = true;

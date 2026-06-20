@@ -925,6 +925,203 @@ async fn test_loop_persists_across_turns_until_shutdown() {
     );
 }
 
+/// 记录每次 LLM 调用时 messages 中最后一条用户消息的文本。
+/// 用于确定性地检测「空闲期命令触发的陈旧历史空回合」：
+/// 合法回合每次调用前都有新用户消息（"first" / "second"）；
+/// bug 触发的空回合会在 "first" 之后、"second" 之前再次以 "first" 为末条用户消息调用 LLM。
+#[derive(Clone)]
+struct RecordingProvider {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for RecordingProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+        _cancel: &CancellationToken,
+    ) -> Result<StreamResponse, provider::LlmError> {
+        let last_user = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == Role::User)
+            .map(|message| message.text_content())
+            .unwrap_or_default();
+        self.calls.lock().unwrap().push(last_user.clone());
+        let text = format!("response to {last_user}");
+        handler.on_text(&text);
+        Ok(StreamResponse {
+            assistant_message: Message {
+                role: Role::Assistant,
+                content: vec![share::message::ContentBlock::Text { text }],
+                metadata: None,
+            },
+            usage: Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+            },
+            stop_reason: StopReason::EndTurn,
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning(&self, _enabled: bool) {}
+
+    fn is_reasoning(&self) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn test_idle_control_command_does_not_run_spurious_turn() {
+    // #390 A1（Important）：空闲期收到一个不 append 任何用户消息的 ControlCommand
+    // （如 /save / /model / /provider，apply_gate 返回 Proceed 且 appended_user_messages=0）
+    // 时，loop 必须保持空闲，NEVER 在陈旧历史上跑空回合。随后投递真实 UserMessage
+    // 才恢复运行并产出恰好一个新回合；drop 发送端关闭通道后 loop shutdown 退出。
+    //
+    // 确定性检测：RecordingProvider 记录每次 LLM 调用时末条用户消息文本。合法序列恰为
+    // ["first", "second"]；bug 会插入一次陈旧 "first" 调用 → 序列变
+    // ["first", "first", "second"]（断言失败）。
+    //
+    // 同步屏障：driver 等 DoneWithDuration（回合 1 完成、loop 已进入空闲态、下一处通道
+    // 消费者必为 await_idle_input）后再投递 /save，确保命令落到 idle 臂而非被回合终结
+    // 路径的 BeforeFinish gate 提前 drain 掉。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration）→ loop 已进入空闲态阻塞于
+        // await_idle_input；此时投递的 /save 必由 idle 臂消费。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 空闲期投递一个 ControlCommand（/save：SideEffect，append 0 条用户消息）。
+        input_tx
+            .send(sdk::ChatInputEvent::ControlCommand {
+                raw: "/save".to_string(),
+            })
+            .unwrap();
+        // 给 loop 充分调度机会去（错误地）消费命令、退出空闲、跑陈旧历史空回合。
+        // 若 bug 存在，这会产生第 2 次 LLM 调用（末条用户消息仍为 "first"）。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        // 命令处理后 LLM 调用数仍应为 1（保持空闲，无空回合）。
+        assert_eq!(
+            driver_provider.calls(),
+            vec!["first".to_string()],
+            "空闲期单独 ControlCommand 不得触发 LLM 调用（应仍只有 first 一次）"
+        );
+
+        // 现在投递真实用户消息，应恢复运行并完成回合 2（第 2 次 LLM 调用）。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            provider.clone(),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-idle-control-command".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: CancellationToken::new(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    // 关键断言（确定性）：LLM 调用序列恰为 ["first", "second"]。
+    // bug 会插入陈旧 "first" 调用 → ["first", "first", "second"]，断言失败。
+    assert_eq!(
+        provider.calls(),
+        vec!["first".to_string(), "second".to_string()],
+        "LLM 应恰好被两条真实用户消息触发；命令不得引发陈旧历史空回合"
+    );
+    // 命令的 raw 文本绝不应作为 user message 进入消息历史。
+    assert!(
+        sink.synced_messages()
+            .into_iter()
+            .flatten()
+            .all(|message| message.text_content() != "/save"),
+        "ControlCommand 永不作为 user message 进入历史: {:?}",
+        sink.events()
+    );
+}
+
 #[tokio::test]
 async fn test_stop_hook_block_limit_stops_loop() {
     // #372 缺陷 3：Stop hook 连续阻断超过 MAX_STOP_HOOK_BLOCKS(5) 强制停止
