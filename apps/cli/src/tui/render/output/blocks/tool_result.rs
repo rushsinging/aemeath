@@ -12,6 +12,7 @@ use crate::tui::view_model::output::ToolResultBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use serde_json::Value;
+use std::rc::Rc;
 
 const OMITTED_LINE_COUNT_LIMIT: usize = 10_000;
 
@@ -99,7 +100,7 @@ pub fn render_tool_result(
 
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 

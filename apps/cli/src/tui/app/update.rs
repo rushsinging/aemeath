@@ -172,7 +172,11 @@ impl App {
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
                 self.view_state.spinner.advance();
-                self.mark_output_dirty();
+                // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
+                // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
+                if self.model.runtime.spinner.active {
+                    self.mark_output_dirty();
+                }
                 crate::tui::log_trace!(
                     "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
                     before_frame,
@@ -254,32 +258,70 @@ impl App {
 
     pub(crate) fn refresh_output_document_from_model(&mut self) {
         let before_lines = self.output_area.document().total_lines();
-        let working_root = self
+        let revision = self.model.conversation.revision();
+        let current_working_root: Option<String> = self
             .model
             .runtime
             .workspace
             .working_root
             .as_deref()
-            .map(std::path::Path::new);
-        let view_model = OutputViewAssembler::assemble_from_conversation(
-            &self.model.conversation,
-            self.view_state.output.version,
-            working_root,
-        );
+            .map(|s| s.to_owned());
+        // memo：conversation revision 不变 且 working_root 不变 则复用上次 view_model，跳过全量 assemble。
+        // working_root 来自 /worktree enter，不推进 revision，需单独纳入 key（#425 review Fix 1）。
+        let need_rebuild = self
+            .output_view_cache
+            .as_ref()
+            .map(|cache| {
+                cache.revision != revision
+                    || cache.working_root.as_deref() != current_working_root.as_deref()
+            })
+            .unwrap_or(true);
+        if need_rebuild {
+            #[cfg(test)]
+            {
+                self.assemble_count += 1;
+            }
+            let working_root = current_working_root.as_deref().map(std::path::Path::new);
+            let view_model = OutputViewAssembler::assemble_from_conversation(
+                &self.model.conversation,
+                revision,
+                working_root,
+            );
+            self.output_view_cache = Some(OutputViewCache {
+                revision,
+                working_root: current_working_root.clone(),
+                view_model,
+            });
+        }
+        // take 出 owned view_model，render 期间释放对 cache 的不可变借用，render 后放回。
+        let cache = self
+            .output_view_cache
+            .take()
+            .expect("memo cache filled above");
+        let view_model = cache.view_model;
+        let cached_revision = cache.revision;
+        let cached_working_root = cache.working_root;
         let root_count = view_model.roots.len();
         let width = self.output_document_width();
         // 文档构建（含各 block 的字符串处理）放在 draw 之外，draw 循环的 catch_unwind
         // 只保护「把已构建文档画进 buffer」，无法兜住这里的 panic。对称地在构建侧兜底：
         // 一旦构建 panic（已落 panic.log），保留旧文档并提示用户，避免崩溃与糊屏。
+        let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.output_document_renderer.render_model_document(
+                &view_model,
+                width,
+                self.output_area.term_width,
+                self.view_state.animation.spinner_frame,
+            )
+        }));
+        // 无论渲染成败都把 view_model 放回 cache，保留 memo。
+        self.output_view_cache = Some(OutputViewCache {
+            revision: cached_revision,
+            working_root: cached_working_root,
+            view_model,
+        });
         let document =
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.output_document_renderer.render_model_document(
-                    &view_model,
-                    width,
-                    self.output_area.term_width,
-                    self.view_state.animation.spinner_frame,
-                )
-            })) {
+            match render_result {
                 Ok(document) => document,
                 Err(_) => {
                     crate::tui::log_warn!(
@@ -293,8 +335,8 @@ impl App {
             };
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
-            "tui.output.refresh_document version={} width={} term_width={} spinner_frame={} roots={} conversation_blocks={} chats={} before_lines={} after_lines={}",
-            self.view_state.output.version,
+            "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} conversation_blocks={} chats={} before_lines={} after_lines={} rebuilt={}",
+            revision,
             width,
             self.output_area.term_width,
             self.view_state.animation.spinner_frame,
@@ -302,7 +344,8 @@ impl App {
             self.model.conversation.blocks.len(),
             self.model.conversation.chats.len(),
             before_lines,
-            after_lines
+            after_lines,
+            need_rebuild
         );
         self.output_area.replace_document(document);
     }
@@ -404,3 +447,4 @@ impl App {
 
 /// Type alias so update.rs can use `App` without circular path
 use super::App;
+use super::OutputViewCache;

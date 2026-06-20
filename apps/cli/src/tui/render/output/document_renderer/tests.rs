@@ -239,9 +239,13 @@ fn test_user_message_blank_lines_receive_fill_style_without_filler_text() {
 fn rb(id: &str, lines: usize) -> RenderedBlock {
     use crate::tui::render::output::rendered::RenderedLine;
     use ratatui::text::Span;
+    use std::rc::Rc;
     RenderedBlock {
         block_id: id.into(),
-        lines: vec![RenderedLine::new(vec![Span::raw(id.to_string())]); lines],
+        lines: Rc::new(vec![
+            RenderedLine::new(vec![Span::raw(id.to_string())]);
+            lines
+        ]),
     }
 }
 
@@ -440,6 +444,36 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
         "depth=1：gutter(4) + content 可见总宽 {} 应 ≤ outer_width {}（#329）",
         visible,
         outer_width
+    );
+}
+
+#[test]
+fn test_gutted_cache_reuses_static_block_across_frames() {
+    let kind = OutputBlockKind::AssistantMessage(TextBlockView {
+        key: "a".to_string(),
+        text: "静态文本".to_string(),
+        style: SemanticStyle::Normal,
+    });
+    let node = BlockNode {
+        block_id: "a".to_string(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    };
+    let vm = OutputViewModel {
+        roots: vec![node],
+        version: 1,
+        follow_tail_hint: true,
+    };
+    let mut r = OutputDocumentRenderer::default();
+    let _ = r.render_model_document(&vm, 80, 80, 0);
+    let after_first = r.gutted_render_count();
+    // 同一 vm、frame 推进：静态 block 应命中 gutted 缓存，不重算。
+    let _ = r.render_model_document(&vm, 80, 80, 1);
+    assert_eq!(
+        r.gutted_render_count(),
+        after_first,
+        "静态 block 跨 frame 应复用 gutted 缓存"
     );
 }
 

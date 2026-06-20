@@ -320,6 +320,7 @@ mod tests {
     use crate::tui::view_model::LiveStatusViewModel;
     use ratatui::{buffer::Buffer, layout::Rect, text::Span};
     use sdk::CharIdx;
+    use std::rc::Rc;
 
     fn no_live_status() -> LiveStatusViewModel {
         LiveStatusViewModel::default()
@@ -331,11 +332,11 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
-                lines: vec![
+                lines: Rc::new(vec![
                     RenderedLine::new(vec![Span::raw("line 1")]),
                     RenderedLine::new(vec![Span::raw("1234567")]),
                     RenderedLine::new(vec![Span::raw("line 2")]),
-                ],
+                ]),
             }],
         });
         let area_rect = Rect::new(0, 0, 6, 2);
@@ -377,7 +378,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("hello")])],
+                lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("hello")])]),
             }],
         });
         let area_rect = Rect::new(0, 0, 10, 3);
@@ -400,10 +401,10 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "filled".into(),
-                lines: vec![
+                lines: Rc::new(vec![
                     RenderedLine::from_plain("hi").with_fill_style(fill),
                     RenderedLine::empty().with_fill_style(fill),
-                ],
+                ]),
             }],
         });
         let area_rect = Rect::new(0, 0, 8, 3);
@@ -429,7 +430,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "filled".into(),
-                lines: vec![RenderedLine::from_plain("hello").with_fill_style(fill)],
+                lines: Rc::new(vec![RenderedLine::from_plain("hello").with_fill_style(fill)]),
             }],
         });
         let area_rect = Rect::new(0, 0, 8, 2);
@@ -457,7 +458,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
-                lines: vec![line],
+                lines: Rc::new(vec![line]),
             }],
         });
         // 选中 plain 字符 [0,3) = "hel"
@@ -498,7 +499,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "u".into(),
-                lines: vec![line],
+                lines: Rc::new(vec![line]),
             }],
         });
         let area_rect = Rect::new(0, 0, 12, 2);
@@ -531,7 +532,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
-                lines: vec![line],
+                lines: Rc::new(vec![line]),
             }],
         });
         let area_rect = Rect::new(0, 0, 12, 3);
@@ -591,7 +592,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "first".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("abcdefghij")])],
+                lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("abcdefghij")])]),
             }],
         });
         area.render(area_rect, &mut buf, &view, &no_live_status());
@@ -606,7 +607,7 @@ mod tests {
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "second".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("xy")])],
+                lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("xy")])]),
             }],
         });
         area.render(area_rect, &mut buf, &view, &no_live_status());

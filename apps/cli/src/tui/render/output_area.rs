@@ -67,14 +67,15 @@ impl OutputArea {
     pub(crate) fn set_plain_document_lines(&mut self, count: usize) {
         use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
         use ratatui::text::Span;
+        use std::rc::Rc;
 
-        let lines = (0..count)
+        let lines: Vec<RenderedLine> = (0..count)
             .map(|i| RenderedLine::new(vec![Span::raw(format!("line {i}"))]))
             .collect();
         self.document = RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "test".into(),
-                lines,
+                lines: Rc::new(lines),
             }],
         };
     }
@@ -85,6 +86,7 @@ mod tests {
     use super::*;
     use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
     use ratatui::text::Span;
+    use std::rc::Rc;
 
     #[test]
     fn test_output_area_replace_document_replaces_content() {
@@ -92,7 +94,7 @@ mod tests {
         let document = RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
-                lines: vec![RenderedLine::new(vec![Span::raw("x")])],
+                lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("x")])]),
             }],
         };
         area.replace_document(document);

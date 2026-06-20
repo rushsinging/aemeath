@@ -250,3 +250,104 @@ fn test_non_embedded_tool_result_with_unknown_id_does_not_leak_raw_output() {
         text_view.text
     );
 }
+
+#[test]
+fn test_tool_index_call_matches_linear_scan() {
+    use super::ToolIndex;
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::model::ConversationModel;
+
+    let mut conv = ConversationModel::default();
+    let chat = ChatId::new("c1");
+    let turn = ChatTurnId::new("t1");
+    let tool = ToolCallId::new("tool-1");
+    conv.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        id: tool.clone(),
+        provider_id: Some("p".to_string()),
+        name: "Read".to_string(),
+        index: 0,
+    });
+
+    let index = ToolIndex::build(&conv);
+    let via_index = index.call(&chat, &turn, &tool).map(|c| c.name.clone());
+    assert_eq!(via_index.as_deref(), Some("Read"), "索引应命中已登记 tool");
+    assert!(
+        index
+            .call(&chat, &turn, &ToolCallId::new("missing"))
+            .is_none(),
+        "未登记 tool 应返回 None"
+    );
+}
+
+#[test]
+fn test_tool_index_result_block_matches_linear_scan() {
+    use super::ToolIndex;
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::model::ConversationModel;
+    use crate::tui::model::conversation::tool_call::ToolCallStatus;
+
+    let mut conv = ConversationModel::default();
+    let chat = ChatId::new("c1");
+    let turn = ChatTurnId::new("t1");
+    let tool = ToolCallId::new("tool-r1");
+
+    // 先登记 ToolCallStart（provider_id 为 Option<String>）
+    conv.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        id: tool.clone(),
+        provider_id: Some("prov-1".to_string()),
+        name: "Bash".to_string(),
+        index: 0,
+    });
+    // 升级 status 到 Ready
+    conv.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        id: tool.clone(),
+        provider_id: Some("prov-1".to_string()),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: None,
+        status: ToolCallStatus::Ready,
+    });
+    // 登记 ToolResult（provider_id 为 String）
+    let expected_output = "cmd output line";
+    let expected_content = serde_json::json!({ "text": "cmd output line" });
+    let expected_is_error = false;
+    let expected_image_count: usize = 2;
+    conv.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        provider_id: "prov-1".to_string(),
+        id: tool.clone(),
+        tool_name: "Bash".to_string(),
+        output: expected_output.to_string(),
+        content: expected_content.clone(),
+        is_error: expected_is_error,
+        image_count: expected_image_count,
+    });
+
+    let index = ToolIndex::build(&conv);
+
+    // 正常路径：应命中并返回正确四元组
+    let result = index.result_block(&chat, &turn, &tool);
+    assert!(result.is_some(), "已登记 tool result 应命中索引");
+    let (output, content, is_error, image_count) = result.unwrap();
+    assert_eq!(output, expected_output, "output 应匹配");
+    assert_eq!(content, &expected_content, "content 应匹配");
+    assert_eq!(is_error, expected_is_error, "is_error 应匹配");
+    assert_eq!(image_count, expected_image_count, "image_count 应匹配");
+
+    // 边界路径：未登记的 tool_id 应返回 None
+    assert!(
+        index
+            .result_block(&chat, &turn, &ToolCallId::new("no-such-tool"))
+            .is_none(),
+        "未登记 tool 的 result_block 应返回 None"
+    );
+}

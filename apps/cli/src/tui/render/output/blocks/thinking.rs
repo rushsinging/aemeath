@@ -3,6 +3,7 @@ use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
+use std::rc::Rc;
 use unicode_width::UnicodeWidthChar;
 
 pub fn render_thinking(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) -> RenderedBlock {
@@ -19,7 +20,7 @@ pub fn render_thinking(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) ->
     }
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 

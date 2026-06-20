@@ -203,16 +203,17 @@ mod document_selection_tests {
     use crate::tui::view_model::LiveStatusViewModel;
     use ratatui::text::Span;
     use sdk::CharIdx;
+    use std::rc::Rc;
     #[test]
     fn test_copy_selection_returns_plain_chars_across_lines() {
         let mut area = OutputArea::new();
         area.replace_document(RenderedDocument {
             blocks: vec![RenderedBlock {
                 block_id: "a".into(),
-                lines: vec![
+                lines: Rc::new(vec![
                     RenderedLine::with_plain(vec![Span::raw("**bold**")], "bold".into()),
                     RenderedLine::new(vec![Span::raw("世界")]),
-                ],
+                ]),
             }],
         });
         let view = output_selection_view_for_test((0, CharIdx::new(0)), (1, CharIdx::new(2)));

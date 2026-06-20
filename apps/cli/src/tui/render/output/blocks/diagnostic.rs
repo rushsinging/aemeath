@@ -4,6 +4,7 @@ use crate::tui::view_model::output::{HookNoticeBlockView, TextBlockView};
 use crate::tui::view_model::style::SemanticStyle;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
+use std::rc::Rc;
 
 pub fn semantic_color(style: SemanticStyle) -> Color {
     match style {
@@ -41,7 +42,7 @@ fn render_text_lines(block_id: &str, text: &str, semantic_style: SemanticStyle) 
     }
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 

@@ -12,6 +12,7 @@ use crate::tui::view_model::output::{AskUserBatchBlockView, AskUserPhaseView, As
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use sdk::OptionItem;
+use std::rc::Rc;
 use unicode_width::UnicodeWidthStr;
 
 /// 渲染单个选项的行。
@@ -233,7 +234,7 @@ fn render_answering(
         )]));
         return RenderedBlock {
             block_id: block_id.to_string(),
-            lines,
+            lines: Rc::new(lines),
         };
     }
 
@@ -278,7 +279,7 @@ fn render_answering(
     lines.push(RenderedLine::new(vec![Span::raw("")]));
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 
@@ -345,7 +346,7 @@ fn render_confirming(
 
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 
@@ -374,7 +375,7 @@ fn render_confirmed(
     let _ = header_style;
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 
@@ -547,7 +548,7 @@ mod tests {
             block.lines.iter().map(|l| &l.plain).collect::<Vec<_>>()
         );
         // 任何行都不应超过可用宽度（核心：长 description 应换行而非溢出）
-        for l in &block.lines {
+        for l in block.lines.iter() {
             assert!(
                 l.plain.width() <= 40,
                 "行宽超过 40: {:?} ({} 列)",

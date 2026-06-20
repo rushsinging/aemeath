@@ -25,6 +25,9 @@ impl App {
         self.view_state.output.clear_selection();
         self.view_state.status_sel.clear_selection();
         self.view_state.input_sel.clear_selection();
+        // resize 改变渲染宽度 → document 必须按新宽度重 wrap（仅 refresh 能做）。
+        // 显式标脏 output，不再依赖 SpinnerTick 每帧标脏的便车（A1 后 idle 不再标脏）。
+        self.mark_output_dirty();
     }
 }
 
@@ -74,6 +77,21 @@ mod tests {
         assert_eq!(app.view_state.output.last_visible_height, 17);
         assert_eq!(app.view_state.output.last_document_total_lines, 0);
         assert!(app.view_state.output.auto_scroll);
+    }
+
+    #[test]
+    fn test_handle_resize_marks_output_dirty() {
+        // 回归（#425 A1 关联）：resize 改变渲染宽度，document 必须按新宽度重 wrap。
+        // 重 wrap 只能由 refresh_output_document_from_model 触发，故 resize MUST 标脏 output。
+        // A1 前 idle resize 搭 SpinnerTick 每 90ms 标脏的便车；A1 后 idle 不再标脏，
+        // 若 handle_resize 不显式标脏，idle resize 将不重 wrap（显示错乱）。
+        let mut app = test_app();
+        app.view_state.dirty.clear_output();
+        app.handle_resize(100, 30);
+        assert!(
+            app.view_state.dirty.output,
+            "resize 改变宽度必须标脏 output，不能依赖 SpinnerTick 便车"
+        );
     }
 
     #[test]

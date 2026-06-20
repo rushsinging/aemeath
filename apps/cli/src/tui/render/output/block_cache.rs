@@ -48,10 +48,11 @@ impl BlockCache {
         rendered
     }
 
-    /// 清除不在 `live_ids` 中的缓存条目（防内存泄漏）。
-    pub fn retain(&mut self, live_ids: &[String]) {
-        self.map
-            .retain(|id, _| live_ids.iter().any(|live_id| live_id == id));
+    /// 清除不在 `live_set` 中的缓存条目（防内存泄漏）。
+    /// 调用方应先将 live ids 收入 `HashSet<&str>`（O(n) 构建），
+    /// 使此处每个条目的成员查询为 O(1)，整体 O(n) 而非 O(n²)。
+    pub fn retain(&mut self, live_set: &std::collections::HashSet<&str>) {
+        self.map.retain(|id, _| live_set.contains(id.as_str()));
     }
 
     pub fn contains(&self, block_id: &str) -> bool {
@@ -63,11 +64,12 @@ impl BlockCache {
 mod tests {
     use super::*;
     use crate::tui::render::output::rendered::RenderedLine;
+    use std::rc::Rc;
 
     fn block(id: &str, n: usize) -> RenderedBlock {
         RenderedBlock {
             block_id: id.into(),
-            lines: vec![RenderedLine::default(); n],
+            lines: Rc::new(vec![RenderedLine::default(); n]),
         }
     }
 
@@ -140,7 +142,8 @@ mod tests {
             },
             |_| block("b", 1),
         );
-        cache.retain(&["a".to_string()]);
+        let live_set: std::collections::HashSet<&str> = ["a"].into_iter().collect();
+        cache.retain(&live_set);
 
         assert!(cache.contains("a"));
         assert!(

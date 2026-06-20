@@ -3,6 +3,8 @@
 //! 不变式：每个 `RenderedLine` 的 `plain` 等于其 `spans` 可见文本拼接
 //! （见 primitives / blocks 各组件单测断言）。
 
+use std::rc::Rc;
+
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -108,13 +110,13 @@ impl RenderedLine {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedBlock {
     pub block_id: String,
-    pub lines: Vec<RenderedLine>,
+    pub lines: Rc<Vec<RenderedLine>>,
 }
 
 impl RenderedBlock {
     /// 为 block 内所有行设置统一填充样式。
     pub fn with_line_fill_style(mut self, style: Style) -> Self {
-        for line in &mut self.lines {
+        for line in Rc::make_mut(&mut self.lines) {
             line.set_fill_style(style);
         }
         self
@@ -186,11 +188,11 @@ mod tests {
             blocks: vec![
                 RenderedBlock {
                     block_id: "a".into(),
-                    lines: vec![RenderedLine::default(), RenderedLine::default()],
+                    lines: Rc::new(vec![RenderedLine::default(), RenderedLine::default()]),
                 },
                 RenderedBlock {
                     block_id: "b".into(),
-                    lines: vec![RenderedLine::default()],
+                    lines: Rc::new(vec![RenderedLine::default()]),
                 },
             ],
         };

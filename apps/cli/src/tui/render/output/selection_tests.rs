@@ -10,6 +10,7 @@ use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
 use crate::tui::view_state::output::OutputViewState;
 use ratatui::{buffer::Buffer, layout::Rect, text::Span};
 use sdk::CharIdx;
+use std::rc::Rc;
 
 fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
     LiveStatusViewModel {
@@ -40,14 +41,14 @@ fn render_view_for_area(area: &Rect) -> OutputViewState {
 
 /// 测试辅助：以若干纯文本行填充 document（单 block）。
 fn set_plain_lines(output: &mut OutputArea, texts: &[&str]) {
-    let lines = texts
+    let lines: Vec<RenderedLine> = texts
         .iter()
         .map(|text| RenderedLine::new(vec![Span::raw(text.to_string())]))
         .collect();
     output.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "test".into(),
-            lines,
+            lines: Rc::new(lines),
         }],
     });
 }
@@ -356,7 +357,7 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
     output.replace_document(RenderedDocument {
         blocks: vec![RenderedBlock {
             block_id: "g".into(),
-            lines: vec![line],
+            lines: Rc::new(vec![line]),
         }],
     });
     let area = Rect::new(0, 0, 20, 3);

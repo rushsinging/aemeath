@@ -3,6 +3,7 @@ use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLin
 use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
 use ratatui::style::Style;
+use std::rc::Rc;
 
 pub fn render_assistant_message(
     block_id: &str,
@@ -18,7 +19,7 @@ pub fn render_assistant_message(
     }
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 

@@ -4,6 +4,7 @@ use crate::tui::render::theme;
 use crate::tui::view_model::output::TextBlockView;
 use ratatui::style::Style;
 use ratatui::text::Span;
+use std::rc::Rc;
 
 pub fn render_user_message(block_id: &str, view: &TextBlockView, ctx: &RenderCtx) -> RenderedBlock {
     let style = Style::default().fg(theme::USER).bg(theme::USER_BG);
@@ -26,7 +27,7 @@ pub fn render_user_message(block_id: &str, view: &TextBlockView, ctx: &RenderCtx
     }
     RenderedBlock {
         block_id: block_id.to_string(),
-        lines,
+        lines: Rc::new(lines),
     }
 }
 
