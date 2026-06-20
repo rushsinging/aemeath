@@ -194,17 +194,16 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {
         let result = self.0.call(input, ctx).await;
-        let content = match &result.data {
+        let data = match &result.data {
             Some(data) => serde_json::to_value(data)
                 .expect("TypedToolAdapter: data serialization should not fail"),
             None => Value::Null,
         };
         ToolResult {
-            output: result.text,
-            content,
+            text: result.text,
+            data,
             is_error: result.is_error,
             images: result.images,
-            data: None,
         }
     }
 }

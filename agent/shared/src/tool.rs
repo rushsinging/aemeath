@@ -46,11 +46,11 @@ impl ToolOutcome {
         }
     }
 
-    /// 从工具返回的 [`ToolResult`] 映射（保持现有 `data = content` 行为）。
+    /// 从工具返回的 [`ToolResult`] 映射（1:1，字段命名已对齐）。
     pub fn from_tool_result(r: ToolResult) -> Self {
         Self {
-            text: r.output,
-            data: r.content,
+            text: r.text,
+            data: r.data,
             is_error: r.is_error,
             images: r.images,
         }
@@ -82,11 +82,10 @@ mod tool_outcome_tests {
     #[test]
     fn test_tool_outcome_from_tool_result_maps_fields() {
         let r = super::ToolResult {
-            output: "out".to_string(),
-            content: serde_json::json!({"k": "v"}),
+            text: "out".to_string(),
+            data: serde_json::json!({"k": "v"}),
             is_error: false,
             images: vec![],
-            data: None,
         };
         let o = ToolOutcome::from_tool_result(r);
         assert_eq!(o.text, "out");
@@ -137,56 +136,36 @@ pub enum PolicyDecision {
     Deny { reason: String },
 }
 
-/// Generic tool result, parameterised over the typed payload `R`.
+/// Tool execution result（执行态，非泛型）。
 ///
-/// The default `R = serde_json::Value` preserves full backward
-/// compatibility: existing call sites that build
-/// `ToolResult::success(...)` / `ToolResult::error(...)` keep
-/// compiling without change.
-///
-/// Going forward, a tool `T` declares
-/// `impl Tool for T { type Result = ToolResult<MyResult>; }` so that
-/// downstream consumers (TUI, server, persistence) can read the typed
-/// payload directly from `ToolResult::data`.
-///
-/// `data` is wrapped in `Option<R>` so that:
-///
-/// - the constructors (`success`, `error`, `text`) populate the
-///   legacy `output` / `content` fields without forcing every `R` to
-///   implement `Default`, and
-/// - new tool impls that opt into a typed `R` can still leave `data`
-///   as `None` while the migration to typed payloads is in flight.
-///
-/// See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
-/// (plan 方案 D) for the design rationale.
+/// 字段命名与 [`ToolOutcome`] 完全对齐：`text→LLM / data→TUI`。
+/// `Tool::call` 返回本类型；`ToolOutcome::from_tool_result` 直接 1:1 映射。
 #[derive(Debug, Clone)]
-pub struct ToolResult<R = serde_json::Value> {
-    pub output: String,
-    pub content: serde_json::Value,
+pub struct ToolResult {
+    /// 给 LLM 的文本。
+    pub text: String,
+    /// 结构化数据（给 TUI 反序列化渲染）。
+    pub data: serde_json::Value,
     pub is_error: bool,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
-    /// Typed payload (see struct docs).
-    pub data: Option<R>,
 }
 
-impl<R> ToolResult<R> {
-    pub fn success(output: impl Into<String>) -> Self {
-        Self::text(output, false)
+impl ToolResult {
+    pub fn success(text: impl Into<String>) -> Self {
+        Self::text(text, false)
     }
 
-    pub fn error(output: impl Into<String>) -> Self {
-        Self::text(output, true)
+    pub fn error(text: impl Into<String>) -> Self {
+        Self::text(text, true)
     }
 
-    pub fn text(output: impl Into<String>, is_error: bool) -> Self {
-        let output = output.into();
+    pub fn text(text: impl Into<String>, is_error: bool) -> Self {
         Self {
-            content: serde_json::json!({ "text": output }),
-            output,
+            text: text.into(),
+            data: serde_json::Value::Null,
             is_error,
             images: Vec::new(),
-            data: None,
         }
     }
 
@@ -194,46 +173,17 @@ impl<R> ToolResult<R> {
         self.images.push(ImageData { base64, media_type });
         self
     }
-
-    /// Attach a typed payload to this result.
-    pub fn with_data(mut self, data: R) -> Self {
-        self.data = Some(data);
-        self
-    }
-
-    /// 获取显示文本（从 content 中提取）
-    /// 优先级：display > message > text > 序列化 JSON
-    pub fn display_text(&self) -> String {
-        display_text_from_content(&self.content)
-    }
 }
 
-// Manual `Default` impl covers any `R`. The legacy `data: Value` ergonomics
-// are preserved by initialising `data` to `None` (see the constructors
-// above) and letting callers opt-in with `with_data`.
-impl<R> Default for ToolResult<R> {
+impl Default for ToolResult {
     fn default() -> Self {
         Self {
-            output: String::new(),
-            content: serde_json::Value::Null,
+            text: String::new(),
+            data: serde_json::Value::Null,
             is_error: false,
             images: Vec::new(),
-            data: None,
         }
     }
-}
-
-fn display_text_from_content(content: &serde_json::Value) -> String {
-    if let Some(display) = content.get("display").and_then(|value| value.as_str()) {
-        return display.to_string();
-    }
-    if let Some(message) = content.get("message").and_then(|value| value.as_str()) {
-        return message.to_string();
-    }
-    if let Some(text) = content.get("text").and_then(|value| value.as_str()) {
-        return text.to_string();
-    }
-    content.to_string()
 }
 
 #[cfg(test)]
@@ -244,9 +194,9 @@ mod tests {
     fn test_tool_result_success_wraps_text_payload() {
         let result: ToolResult = ToolResult::success("ok");
 
-        assert_eq!(result.output, "ok");
+        assert_eq!(result.text, "ok");
         assert!(!result.is_error);
-        assert_eq!(result.content, serde_json::json!({ "text": "ok" }));
+        assert_eq!(result.data, serde_json::Value::Null);
     }
 }
 
