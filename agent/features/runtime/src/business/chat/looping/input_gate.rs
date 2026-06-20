@@ -56,7 +56,7 @@ pub struct GateOutcome {
 #[derive(Debug, Clone, Default)]
 pub struct PendingInputBuffer {
     events: VecDeque<ChatInputEvent>,
-    seen_user_messages: HashSet<(String, Vec<String>)>,
+    seen_user_messages: HashSet<(String, Vec<sdk::ToolResultImage>)>,
 }
 
 impl PendingInputBuffer {
@@ -82,9 +82,9 @@ impl PendingInputBuffer {
 
     fn should_accept(&mut self, event: &ChatInputEvent) -> bool {
         match event {
-            ChatInputEvent::UserMessage { text, image_paths } => self
+            ChatInputEvent::UserMessage { text, images } => self
                 .seen_user_messages
-                .insert((text.clone(), image_paths.clone())),
+                .insert((text.clone(), images.clone())),
             ChatInputEvent::ControlCommand { .. } | ChatInputEvent::Cancel => true,
         }
     }
@@ -165,15 +165,15 @@ where
                     break;
                 }
             }
-            ChatInputEvent::UserMessage { text, image_paths } => {
+            ChatInputEvent::UserMessage { text, images } => {
                 log::info!(target: LOG_TARGET, "{}",
                     serde_json::to_string(&serde_json::json!({
                         "event_type": "user_input",
                         "text": &text,
-                        "image_paths": &image_paths,
+                        "image_count": images.len(),
                     })).unwrap_or_default()
                 );
-                messages.push(user_message_with_images(text, image_paths));
+                messages.push(user_message_with_images(text, images));
                 appended_this_gate.push(());
                 appended_user_messages += 1;
             }
@@ -209,18 +209,18 @@ fn classify_control_command(raw: &str) -> ControlCommandKind {
     }
 }
 
-fn user_message_with_images(text: String, image_paths: Vec<String>) -> Message {
-    if image_paths.is_empty() {
+fn user_message_with_images(text: String, images: Vec<sdk::ToolResultImage>) -> Message {
+    if images.is_empty() {
         return Message::user(text);
     }
-
-    // 图片已在首轮消息中通过 ChatMessage::user_with_images() 发送；
-    // 排队消息（processing 期间追加）不携带图片数据。
-    log::debug!(target: LOG_TARGET,
-        "queued message has {} image_paths (ignored, images only sent with first message)",
-        image_paths.len()
-    );
-    Message::user(text)
+    // 事件携带的 base64 图片组装为 image content block 送达 LLM（#402）。
+    Message::user_with_images(
+        text,
+        images
+            .into_iter()
+            .map(|img| (img.base64, img.media_type))
+            .collect(),
+    )
 }
 
 #[derive(Clone, Default)]
@@ -296,7 +296,7 @@ mod tests {
         let (tx, port) = MockInputPort::new();
         tx.send(ChatInputEvent::UserMessage {
             text: "hi".into(),
-            image_paths: vec![],
+            images: vec![],
         })
         .unwrap();
         let first = port.recv_next_input().await;
@@ -394,6 +394,49 @@ mod tests {
         assert_eq!(outcome.appended_user_messages, 1);
         assert_eq!(messages.last().unwrap().text_content(), "继续");
         assert_eq!(sink.events.lock().unwrap().len(), 1);
+    }
+
+    /// #402 回归：带图 UserMessage 事件必须组装出 base64 image block 送达 LLM，
+    /// 而非只发文本（A1 持久化模型曾把图片丢弃）。
+    #[tokio::test]
+    async fn test_user_message_with_images_assembles_image_block() {
+        use share::message::{ContentBlock, ImageSource};
+        let img = sdk::ToolResultImage {
+            base64: "Zm9vYmFy".to_string(),
+            media_type: "image/png".to_string(),
+        };
+        let mut buffer = PendingInputBuffer::default();
+        let input =
+            TestInputEventPort::new(vec![ChatInputEvent::user_message("看这张图", vec![img])]);
+        let sink = TestSink::default();
+        let mut messages = Vec::new();
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+        )
+        .await;
+
+        assert_eq!(outcome.appended_user_messages, 1);
+        let last = messages.last().expect("应追加一条消息");
+        assert_eq!(last.text_content(), "看这张图");
+        let has_image = last.content.iter().any(|block| {
+            matches!(
+                block,
+                ContentBlock::Image {
+                    source: ImageSource::Base64 { data, media_type },
+                } if data == "Zm9vYmFy" && media_type == "image/png"
+            )
+        });
+        assert!(
+            has_image,
+            "带图 UserMessage 应组装出 base64 image block，实际 content={:?}",
+            last.content
+        );
     }
 
     #[tokio::test]
