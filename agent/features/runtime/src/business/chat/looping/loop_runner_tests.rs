@@ -310,7 +310,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -389,7 +389,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -469,7 +469,7 @@ async fn test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env() 
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -528,7 +528,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -654,7 +654,7 @@ async fn test_continue_false_json_treated_as_block() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -739,7 +739,7 @@ async fn test_stall_triggers_stop_hook_check() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -886,7 +886,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1087,7 +1087,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1148,7 +1148,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: CancellationToken::new(),
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1170,4 +1170,220 @@ async fn test_stop_hook_block_limit_stops_loop() {
         "should emit block-limit SystemMessage: {:?}",
         events
     );
+}
+
+/// 第 1 次调用阻塞直到 cancel 被触发后返回 `LlmError::Cancelled`，
+/// 第 2 次及以后调用立即返回正常响应。用于模拟「回合进行中被取消、
+/// 随后新回合正常完成」的场景。
+#[derive(Clone)]
+struct CancellableThenNormalProvider {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl CancellableThenNormalProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for CancellableThenNormalProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<StreamResponse, provider::LlmError> {
+        let call_index = {
+            let mut guard = self.calls.lock().unwrap();
+            let idx = *guard;
+            *guard += 1;
+            idx
+        };
+        if call_index == 0 {
+            // 回合 1：阻塞等待 cancel，被取消后返回 Cancelled（模拟 provider 侧取消）。
+            cancel.cancelled().await;
+            return Err(provider::LlmError::Cancelled);
+        }
+        // 回合 2+：正常完成（关键：此时若 token 未重置，会立刻 Cancelled）。
+        if cancel.is_cancelled() {
+            return Err(provider::LlmError::Cancelled);
+        }
+        let text = format!("turn {} final", call_index + 1);
+        handler.on_text(&text);
+        Ok(StreamResponse {
+            assistant_message: Message {
+                role: Role::Assistant,
+                content: vec![share::message::ContentBlock::Text { text }],
+                metadata: None,
+            },
+            usage: Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+            },
+            stop_reason: StopReason::EndTurn,
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning(&self, _enabled: bool) {}
+
+    fn is_reasoning(&self) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_aborts_turn_then_returns_to_idle() {
+    // #390 A1 Task 3：回合进行中 cancel → 发出 Cancelled、回滚本回合消息、
+    // **回到空闲**（不退 loop）；随后投递新 UserMessage → 新回合正常完成；
+    // 最后 drop 发送端关闭通道 → loop shutdown 退出。
+    //
+    // 取消令牌生命周期（并发关键）：cancel 槽改为 Arc<Mutex<CancellationToken>>，
+    // 外部（模拟 cancel_impl）锁槽 .cancel() 当前 token；loop 处理 cancel 后
+    // 将槽重置为新 token 供下回合。若未重置，回合 2 的 LLM 调用会立即 Cancelled。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    // 共享 cancel 槽：loop 与「外部取消者」共用，模拟 RuntimeHandle.current_cancel。
+    let cancel_slot = Arc::new(Mutex::new(CancellationToken::new()));
+    let provider = CancellableThenNormalProvider::new();
+
+    // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver_slot = cancel_slot.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 的 LLM 调用真正开始（call count >= 1），此时 provider 正阻塞于
+        // cancel.cancelled()。再触发取消，确保取消落在「回合进行中」。
+        loop {
+            if *driver_provider.calls.lock().unwrap() >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 外部取消（模拟 cancel_impl）：锁槽，取消当前 live token。
+        driver_slot.lock().unwrap().cancel();
+
+        // 等回合 1 被取消（出现 Cancelled 事件）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "Cancelled") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        // 投递「陈旧的第二次 cancel」：若 loop 在重置后又把这个取消错误地
+        // 应用到下回合，会污染回合 2。这里用 input 通道的 Cancel 事件模拟
+        // 空闲期的 stale cancel（应被 idle 臂吞掉、保持空闲）。
+        input_tx.send(sdk::ChatInputEvent::Cancel).unwrap();
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+
+        // 投递真实用户消息：应恢复运行并完成回合 2（新 token 未被污染）。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → recv_next_input 返回 None → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            provider.clone(),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        cwd: std::env::current_dir().unwrap(),
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-cancel-then-idle".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: cancel_slot.clone(),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 cancel→idle→新回合→shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 回合 1 被取消：发出 Cancelled。
+    assert!(
+        events.iter().any(|e| e == "Cancelled"),
+        "回合 1 进行中 cancel 应发出 Cancelled 事件: {events:?}"
+    );
+    // cancel 后未退 loop：回合 2 正常完成，恰好一个 DoneWithDuration。
+    let done_count = events
+        .iter()
+        .filter(|e| e.as_str() == "DoneWithDuration")
+        .count();
+    assert_eq!(
+        done_count, 1,
+        "cancel 应回空闲、不退 loop；新回合应正常完成产出 1 个 DoneWithDuration: {events:?}"
+    );
+    // 回合 2 的 LLM 响应文本出现（说明新 token 未被陈旧 cancel 污染）。
+    assert!(
+        events.iter().any(|e| e == "Text:turn 2 final"),
+        "重置 token 后回合 2 应正常调用 LLM 并完成: {events:?}"
+    );
+    // 回滚断言：回合 1 取消后 "first" 用户消息被回滚，不应残留在最终历史里
+    // 与回合 2 的 assistant 响应共存。检查最终一次 MessagesSync 不含 "first"。
+    let last_sync = sink.synced_messages().into_iter().next_back();
+    if let Some(messages) = last_sync {
+        assert!(
+            messages.iter().all(|m| m.text_content() != "first"),
+            "回合 1 取消应回滚 'first' 用户消息: {:?}",
+            messages
+                .iter()
+                .map(|m| m.text_content())
+                .collect::<Vec<_>>()
+        );
+    }
 }

@@ -12,12 +12,15 @@ pub(super) async fn chat_impl(
     me: &AgentClientImpl,
     input: ChatRequest,
 ) -> Result<ChatStream, SdkError> {
-    let cancel = tokio_util::sync::CancellationToken::new();
+    // 会话级取消槽：每次 chat() 启动时重置为一个全新、未取消的 token。
+    // 常驻 loop 会从该共享槽逐回合读取「当前 token」，并在每次取消后自行重置
+    // （见 loop_runner::reset_cancel），因此此处只需保证起点干净。
     *me.inner
         .current_cancel
         .lock()
         .map_err(|_| SdkError::Internal("当前 chat 取消锁已损坏".to_string()))? =
-        Some(cancel.clone());
+        tokio_util::sync::CancellationToken::new();
+    let cancel_slot = me.inner.current_cancel.clone();
     let queue_drain = input.queue_drain.clone();
     let input_events = input.input_events.clone();
     let messages: Vec<_> = input.messages.into_iter().map(message_from_sdk).collect();
@@ -78,7 +81,7 @@ pub(super) async fn chat_impl(
             session_reminders: Arc::new(Mutex::new(Default::default())),
             agent_runner: Some(inner.context.agent_runner.clone()),
             allow_all: inner.context.allow_all,
-            cancel,
+            cancel: cancel_slot,
             task_store: inner.context.task_store.clone(),
             max_tool_concurrency: inner.max_tool_concurrency,
             max_agent_concurrency: inner.max_agent_concurrency,
@@ -90,8 +93,10 @@ pub(super) async fn chat_impl(
             active_summary: inner.active_summary.clone(),
         })
         .await;
+        // loop 退出（shutdown / clear）后把取消槽重置为干净 token，
+        // 避免遗留的已取消 token 影响后续可能复用同一 RuntimeHandle 的 chat()。
         if let Ok(mut guard) = inner.current_cancel.lock() {
-            *guard = None;
+            *guard = tokio_util::sync::CancellationToken::new();
         }
     });
     Ok(ChatStream::new(rx))

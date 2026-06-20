@@ -1,22 +1,11 @@
 //! 小型辅助函数，从 `loop_runner` 中提取以减小文件体积。
 
 use crate::business::chat::looping::{
-    apply_gate, drain_sources, ChatEventSink, ChatLoopTransition, GateDecision, GateKind,
-    InputEventDrainPort, PendingInputBuffer, QueueDrainPort,
+    apply_gate, drain_sources, ChatEventSink, GateKind, InputEventDrainPort, PendingInputBuffer,
+    QueueDrainPort,
 };
 use crate::business::chat::GateOutcome;
 use share::message::Message;
-
-/// 将 gate 退出决策映射为对应的 FSM 转换。
-pub(crate) fn chat_loop_transition_for_gate_exit(decision: GateDecision) -> ChatLoopTransition {
-    match decision {
-        GateDecision::AbortCurrentLoop => ChatLoopTransition::AbortCurrentLoop,
-        GateDecision::CancelCurrentLoop => ChatLoopTransition::CancelCurrentLoop,
-        GateDecision::Proceed | GateDecision::ContinueNextTurn => {
-            unreachable!("only abort/cancel decisions should exit the chat loop")
-        }
-    }
-}
 
 /// 判断 provider 错误是否为用户主动取消。
 pub(crate) fn is_user_cancelled_provider_error(error: &provider::api::LlmError) -> bool {
