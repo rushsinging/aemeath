@@ -258,6 +258,7 @@ mod tests {
     /// 同一次提交生成一个 InputId，分别写入：
     /// 1. `ChatInputEvent::UserMessage { id }` 事件；
     /// 2. `ConversationBlock::QueuedUserMessage { input_id }` 占位块。
+    ///
     /// 两者必须相等——这是 Task 2 按 id 清占位的前提。
     #[test]
     fn submit_placeholder_carries_input_id() {
