@@ -104,25 +104,9 @@ impl App {
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::MessagesSync(msgs) => {
-                // 比较新旧 messages，提取新增的 user messages 用于回显
-                let old_len = self.chat.messages.len();
-                // 显式分类：只回显**真正的用户输入**消息（含 Text 块），typed 判定。
-                // 取代历史 `role==user && !text_content().is_empty()` 启发式——后者会把
-                // tool_result 消息（含 text-first 字段）误当用户消息回显（#386）。
-                let new_user_texts: Vec<String> = msgs
-                    .iter()
-                    .skip(old_len)
-                    .filter(|m| m.is_user_input())
-                    .map(|m| m.text_content())
-                    .filter(|t| !t.is_empty())
-                    .collect();
+                // A3：MessagesSync 退出 display，仅作镜像 + 落盘；
+                // 用户回显改由 UserMessagesAdded 归宿事件驱动。
                 self.chat.messages = msgs;
-                self.input.clear_queue();
-                self.clear_queued_submission_echo();
-                // 将新增的 user messages 正式回显到 conversation model
-                for text in new_user_texts {
-                    self.append_user_echo(text);
-                }
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
