@@ -173,7 +173,11 @@ impl App {
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
                 self.view_state.spinner.advance();
-                self.mark_output_dirty();
+                // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
+                // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
+                if self.model.runtime.spinner.active {
+                    self.mark_output_dirty();
+                }
                 crate::tui::log_trace!(
                     "tui.spinner.tick before_frame={} after_frame={} before_version={} after_version={} anim_frame={} active={} phase={:?} verb={} dirty_output={}",
                     before_frame,

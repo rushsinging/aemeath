@@ -337,3 +337,37 @@ fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
         );
     }
 }
+
+#[test]
+fn test_spinner_tick_idle_does_not_mark_output_dirty() {
+    use crate::tui::app::event::UiEvent;
+    use crate::tui::effect::session::processing::SpawnContextRefs;
+    use crate::tui::update::msg::TuiMsg;
+    let mut app = make_app();
+    app.model.runtime.spinner.active = false; // idle / 已完成
+    app.view_state.dirty.clear_output();
+    let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    app.update(TuiMsg::SpinnerTick, &ui_tx, &spawn_refs);
+    assert!(
+        !app.view_state.dirty.output,
+        "idle 时 SpinnerTick 不应标脏 output（否则空闲态每 90ms 全量重建整会话）"
+    );
+}
+
+#[test]
+fn test_spinner_tick_active_marks_output_dirty() {
+    use crate::tui::app::event::UiEvent;
+    use crate::tui::effect::session::processing::SpawnContextRefs;
+    use crate::tui::update::msg::TuiMsg;
+    let mut app = make_app();
+    app.model.runtime.spinner.active = true; // 处理中，需要 gutter 动画
+    app.view_state.dirty.clear_output();
+    let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    app.update(TuiMsg::SpinnerTick, &ui_tx, &spawn_refs);
+    assert!(
+        app.view_state.dirty.output,
+        "active 时 SpinnerTick 应标脏 output，以驱动运行中 tool 的 gutter 动画"
+    );
+}
