@@ -30,13 +30,12 @@
 - 首条与中途**同构**：都走 `ChatInputEvent::UserMessage { id, text, image_paths }`。
 - runtime **单一** `append_user_message(id, text, images)`：append 进工作集 + 发归宿事件。**只此一处**（不再散落 input_gate / chat_impl，也不再由 TUI 预拼）。`input_gate` 回归纯 gating（drain + 决策），不碰回显。
 
-### 3.3 correlation id 归宿（保证 drain==回显一致）
-- **`InputId`**（ULID，复用 `sdk::ids` 既有 ULID 体系，新增一个 newtype）；TUI 提交时分配，全链路携带。
-- runtime 对**每条**输入回带同 id 的归宿事件：
-  - 接受 → `UserMessageAdded { id, text }`（= 回显）。
-  - 去重/abort 丢弃 → `UserMessageDropped { id }`。
-- TUI 占位块以 **id 为 key**，按归宿事件清除/回显——一致性**由 id 构造保证**，与顺序/去重/abort 无关。
-- **去重改为按 id**（防重发），**移除内容去重**（用户可重复发同一文本）；任何被丢弃的 id 都发 `Dropped` 通知，杜绝孤儿占位。
+### 3.3 correlation id 批量归宿（保证 drain==回显一致）
+- **`InputId`**（ULID，复用 `sdk::ids` 既有 ULID 体系，新增一个 newtype）；每条提交（入 `input_queue` 时）分配一个 id，全链路携带。
+- **批量 drain**：runtime drain 一次性拉取所有待处理输入，append 后回**一个数组事件** `UserMessagesAdded { items: Vec<AddedInput> }`（`AddedInput { id: InputId, text: String }`，按 drain 顺序）。一次 idle 唤醒/一个 gate 点 = 一个批事件。
+- TUI 收到后：按 **id list** 从 `input_queue` 清除对应占位块，并按顺序回显为真实用户块。占位↔回显一致**由 id 构造保证**。
+- **不去重**：只按 id 清/弹，**不做任何去重**（用户可重复发同一文本）；移除现有内容去重 `seen_user_messages`。
+- abort/`/clear` 导致的"已入队但需撤销"由 #391 处理（见 §6），本设计为其预留 reset/cancel 接口；正常路径只有 `UserMessagesAdded` 一种归宿。
 
 ### 3.4 TUI 纯化
 - 只发 `ChatInputEvent`；回显**只**来自 `UserMessageAdded`；占位**只**靠 id 归宿事件清。
@@ -50,8 +49,8 @@
 | 阶段 | 内容 | 行为变化 | 验收 |
 |---|---|---|---|
 | **A1** | 常驻 loop：spawn 一次 + 回合间 await 输入；chat() 契约 → 启动会话 + 事件/通知流 | ✅ 生命周期变 | 纯逻辑单测 loop 跨回合；**TUI 肉眼验**对话连续性 |
-| **A2** | `InputId` + 统一输入事件（首条也走事件）+ 单一 `append_user_message` + `UserMessageAdded/Dropped` 归宿 + id 去重（去内容去重） | ✅ 输入路径变 | 单测 append→归宿事件、id 对应、去重→Dropped；**TUI 验**首条/插话 |
-| **A3** | TUI 纯化：回显只认归宿事件、占位按 id 清、MessagesSync 退出 display | ✅ 回显机制变 | 单测投影；**TUI 验**占位清除/不重不漏不错位（回归 #386） |
+| **A2** | `InputId` + 统一输入事件（首条也走事件）+ 单一 `append_user_message` + **批量 `UserMessagesAdded` 数组归宿**（移除内容去重，不去重） | ✅ 输入路径变 | 单测 append→批事件、id list 对应；**TUI 验**首条/插话 |
+| **A3** | TUI 纯化：回显只认归宿事件、占位按 **id list** 清、MessagesSync 退出 display | ✅ 回显机制变 | 单测投影；**TUI 验**占位清除/不重不漏不错位（回归 #386） |
 | **A4** | timeline 单一真相：删 legacy blocks + view_assembler 归一 | ❌ 产出等价 | 单测 intents→view 树；三路一致性 |
 
 A1-A3 行为敏感（强交互），A4 行为等价。
@@ -66,7 +65,7 @@ A1-A3 行为敏感（强交互），A4 行为等价。
 ## 6. 风险
 
 - **runtime 核心 loop 生命周期改造**，影响所有对话；A1-A3 强交互、失败模式纯视觉。**MUST 与用户配合做 TUI 验收**（改一段→跑→看）。
-- 取消 / abort / `/clear` 语义在常驻 loop 下需重新对齐（原靠 loop break，现靠状态机回到空闲）。
+- 取消 / abort / `/clear` 语义在常驻 loop 下需重新对齐（原靠 loop break，现靠状态机回到空闲）——已拆出 **#391** 单独跟踪；本设计为其预留 reset/cancel 接口，不含其实现。
 - 并发：常驻 loop 的可变状态（messages、turn 状态）单一 owner，避免与 sync 锁竞争。
 
 ## 7. 非目标（YAGNI）
@@ -77,5 +76,7 @@ A1-A3 行为敏感（强交互），A4 行为等价。
 
 ## 8. 已敲定的 open decisions
 
-- **去重**：移除内容去重，改 id 去重（防重发）；被丢弃 id 必发 `UserMessageDropped`。
-- **id 类型**：新增 `InputId`（ULID，复用既有 id 基建），不复用 `ChatTurnId`（语义不同：一次输入 ≠ 一个回合）。
+- **去重**：**不去重**，只按 id 清/弹；移除现有内容去重 `seen_user_messages`。
+- **归宿事件**：**批量数组** `UserMessagesAdded { items: Vec<AddedInput> }`（drain 一次拉全部），TUI 按 id list 清占位 + 顺序回显。
+- **id 类型**：新增 `InputId`（ULID，复用既有 id 基建），**每条提交一个**；不复用 `ChatTurnId`（语义不同：一次输入 ≠ 一个回合）。
+- **`/clear` / abort**：拆出 #391 单独处理，本设计预留 reset/cancel 接口。
