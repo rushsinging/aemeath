@@ -13,7 +13,18 @@ impl ConversationModel {
         turn_id: &ChatTurnId,
         id: &str,
     ) {
-        let Some(position) = self.blocks.iter().position(|block| {
+        // A4.3：存在性查询改读 timeline（原读 blocks.iter().position）。
+        let orphan_in_timeline = self.timeline.items().iter().any(|item| {
+            matches!(
+                item,
+                OutputTimelineItem::OrphanToolResult { id: orphan_id, .. } if orphan_id == id
+            )
+        });
+        if !orphan_in_timeline {
+            return;
+        }
+        // 双写期：payload 仍从 blocks 提取（A4.6 删 blocks 时切换到从 timeline 读）。
+        let Some(blocks_position) = self.blocks.iter().position(|block| {
             matches!(
                 block,
                 ConversationBlock::OrphanToolResult { id: orphan_id, .. } if orphan_id == id
@@ -27,7 +38,7 @@ impl ConversationModel {
             output,
             content,
             is_error,
-        } = self.blocks.remove(position)
+        } = self.blocks.remove(blocks_position)
         else {
             return;
         };

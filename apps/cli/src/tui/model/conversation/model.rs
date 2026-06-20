@@ -310,14 +310,11 @@ impl ConversationModel {
             }
         }
         self.promote_orphan_tool_result(&chat_id, &turn_id, bound_id.as_ref());
-        let existing_tool_position = self.blocks.iter().position(|block| {
-            matches!(
-                block,
-                ConversationBlock::ToolCall { id: block_id, chat_id: block_chat_id, turn_id: block_turn_id, .. }
-                    if block_chat_id == &chat_id && block_turn_id == &turn_id && block_id == &bound_id
-            )
-        });
-        if existing_tool_position.is_none() {
+        // A4.3：存在性查询改读 timeline（原读 blocks.iter().position）。
+        let tool_already_in_timeline =
+            self.timeline
+                .contains_tool_call(&chat_id, &turn_id, bound_id.as_ref());
+        if !tool_already_in_timeline {
             self.insert_tool_call_block_before_active_text(
                 chat_id.clone(),
                 turn_id.clone(),
@@ -337,7 +334,7 @@ impl ConversationModel {
             status,
             bound,
             args_preview.len(),
-                        existing_tool_position.is_some(),
+            tool_already_in_timeline,
             self.blocks.len(),
         );
         vec![

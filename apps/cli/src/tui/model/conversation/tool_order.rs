@@ -1,4 +1,5 @@
 // Tool call 在 blocks 中的位置管理（插入、排序）。
+// A4.3：存在性查询已迁移读 timeline；blocks 写入在 A4.6 删除。
 
 use super::block::ConversationBlock;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
@@ -11,13 +12,11 @@ impl ConversationModel {
         turn_id: ChatTurnId,
         id: ToolCallId,
     ) {
-        if self.blocks.iter().any(|block| {
-            matches!(
-                block,
-                ConversationBlock::ToolCall { id: existing, chat_id: block_chat_id, turn_id: block_turn_id, .. }
-                    if block_chat_id == &chat_id && block_turn_id == &turn_id && existing == &id
-            )
-        }) {
+        // A4.3：存在性查询改读 timeline（原读 blocks）。
+        if self
+            .timeline
+            .contains_tool_call(&chat_id, &turn_id, id.as_ref())
+        {
             return;
         }
         let block = ConversationBlock::ToolCall {
