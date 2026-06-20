@@ -19,21 +19,24 @@ fi
 VERSION="${TAG#v}"
 echo "Release version: $VERSION"
 
-# ── 拉取远端最新 ─────────────────────────────────────────────────
-echo "Fetching origin..."
-git fetch origin
+# ── 获取 repo 信息 ───────────────────────────────────────────────
+REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+
+# ── 获取远端 main SHA（无需 fetch）──────────────────────────────
+ORIGIN_SHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')
+ORIGIN_SHA_SHORT=${ORIGIN_SHA:0:7}
 
 # ── 检查 tag 是否已存在 ──────────────────────────────────────────
-if git rev-parse "$TAG" >/dev/null 2>&1; then
-  echo "Error: tag $TAG already exists (commit $(git rev-parse --short "$TAG"))" >&2
+if gh api "repos/$REPO/git/ref/tags/$TAG" &>/dev/null; then
+  echo "Error: tag $TAG already exists on remote" >&2
   exit 1
 fi
 
 # ── 确认 ─────────────────────────────────────────────────────────
-ORIGIN_SHA=$(git rev-parse --short origin/main)
 echo ""
 echo "  Tag:         $TAG"
-echo "  Commit:      $ORIGIN_SHA (origin/main)"
+echo "  Commit:      $ORIGIN_SHA_SHORT (origin/main)"
+echo "  Repo:        $REPO"
 echo ""
 
 read -rp "Create and push tag $TAG? [y/N] " CONFIRM
@@ -42,10 +45,9 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
   exit 0
 fi
 
-# ── 在 origin/main 上打 tag 并推送 ──────────────────────────────
-git tag "$TAG" origin/main
-git push origin "$TAG"
+# ── 在远端直接创建 tag ──────────────────────────────────────────
+gh api "repos/$REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$ORIGIN_SHA" > /dev/null
 
 echo ""
-echo "Done. Tag $TAG pushed. CI release workflow triggered."
+echo "Done. Tag $TAG created on remote ($ORIGIN_SHA_SHORT). CI release workflow triggered."
 echo "Monitor: gh run list --workflow=release.yml"
