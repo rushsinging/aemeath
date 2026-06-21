@@ -1,6 +1,5 @@
-// Tool call 在 blocks 中的位置管理（插入、排序）。
+// Timeline 工具顺序操作：push_tool_call_ref / push_tool_result_ref / move_tool_result_after_tool_call。
 
-use super::block::ConversationBlock;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
 
@@ -11,64 +10,23 @@ impl ConversationModel {
         turn_id: ChatTurnId,
         id: ToolCallId,
     ) {
-        if self.blocks.iter().any(|block| {
-            matches!(
-                block,
-                ConversationBlock::ToolCall { id: existing, chat_id: block_chat_id, turn_id: block_turn_id, .. }
-                    if block_chat_id == &chat_id && block_turn_id == &turn_id && existing == &id
-            )
-        }) {
+        // A4.3：存在性查询改读 timeline（原读 blocks）。
+        if self
+            .timeline
+            .contains_tool_call(&chat_id, &turn_id, id.as_ref())
+        {
             return;
         }
-        let block = ConversationBlock::ToolCall {
-            id: id.clone(),
-            chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
-        };
         self.timeline.push_tool_call_ref(chat_id, turn_id, id);
-        self.blocks.push(block);
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn insert_tool_result_after_tool_call(
         &mut self,
         chat_id: ChatId,
         turn_id: ChatTurnId,
         id: ToolCallId,
-        output: String,
-        content: serde_json::Value,
-        is_error: bool,
-        image_count: usize,
     ) {
-        self.blocks.retain(|existing| {
-            !matches!(
-                existing,
-                ConversationBlock::ToolResult { id: result_id, chat_id: result_chat_id, turn_id: result_turn_id, .. }
-                    if result_chat_id == &chat_id && result_turn_id == &turn_id && result_id == &id
-            )
-        });
-        self.timeline
-            .push_tool_result_ref(chat_id.clone(), turn_id.clone(), id.clone());
-        let block = ConversationBlock::ToolResult {
-            id: id.clone(),
-            chat_id: chat_id.clone(),
-            turn_id: turn_id.clone(),
-            output,
-            content,
-            is_error,
-            image_count,
-        };
-        let Some(position) = self.blocks.iter().position(|existing| {
-            matches!(
-                existing,
-                ConversationBlock::ToolCall { id: tool_id, chat_id: tool_chat_id, turn_id: tool_turn_id, .. }
-                    if tool_chat_id == &chat_id && tool_turn_id == &turn_id && tool_id == &id
-            )
-        }) else {
-            self.blocks.push(block);
-            return;
-        };
-        self.blocks.insert(position + 1, block);
+        self.timeline.push_tool_result_ref(chat_id, turn_id, id);
     }
 
     pub(super) fn move_tool_results_after_tool_call(
@@ -82,32 +40,5 @@ impl ConversationModel {
             turn_id,
             &ToolCallId::from_legacy_or_new(id),
         );
-        let mut results = Vec::new();
-        let mut index = 0;
-        while index < self.blocks.len() {
-            let should_move = matches!(
-                &self.blocks[index],
-                ConversationBlock::ToolResult { id: result_id, chat_id: result_chat_id, turn_id: result_turn_id, .. }
-                    if result_chat_id == chat_id && result_turn_id == turn_id && result_id.as_ref() == id
-            );
-            if should_move {
-                results.push(self.blocks.remove(index));
-            } else {
-                index += 1;
-            }
-        }
-        for result in results.into_iter().rev() {
-            let Some(position) = self.blocks.iter().position(|existing| {
-                matches!(
-                    existing,
-                    ConversationBlock::ToolCall { id: tool_id, chat_id: tool_chat_id, turn_id: tool_turn_id, .. }
-                        if tool_chat_id == chat_id && tool_turn_id == turn_id && tool_id.as_ref() == id
-                )
-            }) else {
-                self.blocks.push(result);
-                continue;
-            };
-            self.blocks.insert(position + 1, result);
-        }
     }
 }

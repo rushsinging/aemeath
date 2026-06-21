@@ -2,6 +2,7 @@ use super::UpdateResult;
 use crate::tui::app::App;
 use crate::tui::model::conversation::block::AskUserPhase;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -261,13 +262,14 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, item)| {
-                // 从 ConversationModel block 读取答案
+                // 从 timeline 读取答案（timeline 是状态真相源）
                 self.model
                     .conversation
-                    .blocks
+                    .timeline
+                    .items()
                     .iter()
-                    .find_map(|block| {
-                        if let crate::tui::model::conversation::block::ConversationBlock::AskUserBatch { slots, .. } = block {
+                    .find_map(|tl_item| {
+                        if let OutputTimelineItem::AskUserBatch { slots, .. } = tl_item {
                             slots.get(i).and_then(|slot| slot.answer.clone())
                         } else {
                             None

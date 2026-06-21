@@ -116,10 +116,9 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
     );
 
     let expected_tool_id = crate::tui::model::conversation::ids::ToolCallId::new("tool-1");
-    assert!(model.conversation.blocks.iter().any(|block| matches!(
-        block,
-        crate::tui::model::conversation::block::ConversationBlock::ToolCall { id, .. }
-            if *id == expected_tool_id
+    assert!(model.conversation.timeline.items().iter().any(|item| matches!(
+        item,
+        crate::tui::model::output_timeline::OutputTimelineItem::ToolCall { reference } if reference.tool_call_id == expected_tool_id
     )));
 }
 

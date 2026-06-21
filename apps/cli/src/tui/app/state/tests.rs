@@ -236,10 +236,10 @@ mod tests {
             &spawn_refs,
         );
 
-        let has_user_echo = app.model.conversation.blocks.iter().any(|block| {
+        let has_user_echo = app.model.conversation.timeline.items().iter().any(|item| {
             matches!(
-                block,
-                crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. }
+                item,
+                crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. }
                     if text == "search bug 76"
             )
         });
@@ -252,10 +252,11 @@ mod tests {
         let echo_count_before = app
             .model
             .conversation
-            .blocks
+            .timeline
+            .items()
             .iter()
             .filter(|b| {
-                matches!(b, crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. } if text == "search bug 76")
+                matches!(b, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "search bug 76")
             })
             .count();
         let _ = app.update(
@@ -268,10 +269,11 @@ mod tests {
         let echo_count_after = app
             .model
             .conversation
-            .blocks
+            .timeline
+            .items()
             .iter()
             .filter(|b| {
-                matches!(b, crate::tui::model::conversation::block::ConversationBlock::UserMessage { text, .. } if text == "search bug 76")
+                matches!(b, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "search bug 76")
             })
             .count();
         assert_eq!(
