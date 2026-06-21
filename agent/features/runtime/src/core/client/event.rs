@@ -320,6 +320,9 @@ pub(crate) fn runtime_event_to_sdk_event(
             ChatEvent::ConfigReloaded { changed_keys }
         }
         crate::business::chat::RuntimeStreamEvent::SessionReset => ChatEvent::SessionReset,
+        crate::business::chat::RuntimeStreamEvent::UserMessagesWithdrawn { texts } => {
+            ChatEvent::UserMessagesWithdrawn { texts }
+        }
     }
 }
 

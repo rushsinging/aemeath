@@ -77,7 +77,9 @@ impl PendingInputBuffer {
         self.events.len()
     }
 
-    fn drain(&mut self) -> Vec<ChatInputEvent> {
+    /// 批量取出并清空整个缓冲区（#391 S3：撤回 pending 输入用）。
+    /// 空则返回空 Vec。
+    pub fn drain_all(&mut self) -> Vec<ChatInputEvent> {
         self.events.drain(..).collect()
     }
 }
@@ -131,7 +133,7 @@ where
     let mut decision = GateDecision::Proceed;
     let mut added: Vec<sdk::AddedInput> = Vec::new();
 
-    let events = buffer.drain();
+    let events = buffer.drain_all();
     let mut appended_this_gate = 0usize;
     let mut iter = events.into_iter().peekable();
     while let Some(event) = iter.next() {
@@ -176,6 +178,33 @@ where
                     // busy：放回 buffer，等回合结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::Reset);
                 }
+            }
+            // TODO(#391 S3-3): drain_all + 发 UserMessagesWithdrawn
+            ChatInputEvent::WithdrawAll => {
+                // 收集本批剩余 UserMessage 的 text（WithdrawAll 之后的）。
+                let mut texts: Vec<String> = iter
+                    .filter_map(|ev| match ev {
+                        ChatInputEvent::UserMessage { text, .. } => Some(text),
+                        _ => None,
+                    })
+                    .collect();
+                // 回滚本批已 append 的 UserMessage（与 added 顺序一致）。
+                if appended_this_gate > 0 || !texts.is_empty() {
+                    // added 逆序 = append 逆序，拼到 texts 前面保持原始提交顺序。
+                    let mut all_texts: Vec<String> = added.iter().map(|a| a.text.clone()).collect();
+                    all_texts.append(&mut texts);
+                    // 回滚已 append 的 messages。
+                    for _ in 0..appended_this_gate {
+                        messages.pop();
+                    }
+                    appended_user_messages = 0;
+                    added.clear();
+                    sink.send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts: all_texts })
+                        .await;
+                }
+                dropped_events = 0;
+                decision = GateDecision::Proceed;
+                break;
             }
         }
     }
@@ -723,5 +752,136 @@ mod tests {
 
         assert_eq!(outcome.dropped_events, 1, "Reset 后的 UserMessage 应被丢弃");
         assert!(messages.is_empty(), "Reset 清空后不应 append 后续消息");
+    }
+
+    /// #391 S3-1：drain_all 非空 → 返回全部事件 + buffer 清空。
+    #[test]
+    fn test_drain_all_returns_all_events_and_clears() {
+        let mut buffer = PendingInputBuffer::default();
+        let a = ChatInputEvent::user_message("aaa", Vec::new());
+        let b = ChatInputEvent::user_message("bbb", Vec::new());
+        buffer.push(a.clone());
+        buffer.push(b.clone());
+
+        let drained = buffer.drain_all();
+
+        assert_eq!(drained.len(), 2);
+        assert!(matches!(&drained[0], ChatInputEvent::UserMessage { text, .. } if text == "aaa"));
+        assert!(matches!(&drained[1], ChatInputEvent::UserMessage { text, .. } if text == "bbb"));
+        assert!(buffer.is_empty(), "drain_all 后 buffer 应为空");
+    }
+
+    /// #391 S3-1：drain_all 空 → 返回空 Vec，buffer 仍空。
+    #[test]
+    fn test_drain_all_empty_returns_empty_vec() {
+        let mut buffer = PendingInputBuffer::default();
+        let drained = buffer.drain_all();
+        assert!(drained.is_empty());
+        assert!(buffer.is_empty());
+    }
+
+    /// #391 S3-3：WithdrawAll 非空 → 回滚已 append + 收集剩余 text + 发 Withdrawn。
+    #[tokio::test]
+    async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![
+            ChatInputEvent::user_message("aaa", Vec::new()),
+            ChatInputEvent::user_message("bbb", Vec::new()),
+            ChatInputEvent::WithdrawAll,
+        ]);
+        let sink = TestSink::default();
+        let mut messages = Vec::new();
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            true, // idle
+        )
+        .await;
+
+        let texts = sink.events.lock().unwrap().iter().find_map(|e| match e {
+            RuntimeStreamEvent::UserMessagesWithdrawn { texts } => Some(texts.clone()),
+            _ => None,
+        });
+        let texts = texts.expect("应发出 UserMessagesWithdrawn");
+        assert_eq!(
+            texts,
+            vec!["aaa".to_string(), "bbb".to_string()],
+            "应收集所有 UserMessage text（含已 append 的）"
+        );
+        assert!(messages.is_empty(), "WithdrawAll 应回滚已 append 的消息");
+        assert!(buffer.is_empty(), "buffer 应为空");
+        assert_eq!(outcome.appended_user_messages, 0);
+    }
+
+    /// #391 S3-3：WithdrawAll 空（无 UserMessage）→ no-op（无事件）。
+    #[tokio::test]
+    async fn test_withdraw_all_empty_buffer_is_noop() {
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![ChatInputEvent::WithdrawAll]);
+        let sink = TestSink::default();
+        let mut messages = Vec::new();
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            true,
+        )
+        .await;
+
+        let has_withdrawn = sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, RuntimeStreamEvent::UserMessagesWithdrawn { .. }));
+        assert!(!has_withdrawn, "无 UserMessage 时不应发 Withdrawn");
+        assert_eq!(outcome.appended_user_messages, 0);
+    }
+
+    /// #391 S3-3：busy gate 也立即处理 WithdrawAll（回滚 + 收集，不延迟）。
+    #[tokio::test]
+    async fn test_busy_gate_withdraw_all_executes_immediately() {
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![
+            ChatInputEvent::user_message("queued", Vec::new()),
+            ChatInputEvent::WithdrawAll,
+        ]);
+        let sink = TestSink::default();
+        let mut messages = vec![Message::user("existing")];
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            false, // busy
+        )
+        .await;
+
+        let texts = sink.events.lock().unwrap().iter().find_map(|e| match e {
+            RuntimeStreamEvent::UserMessagesWithdrawn { texts } => Some(texts.clone()),
+            _ => None,
+        });
+        assert!(texts.is_some(), "busy gate 也应处理 WithdrawAll");
+        assert_eq!(
+            texts.unwrap(),
+            vec!["queued".to_string()],
+            "只撤回本批 UserMessage"
+        );
+        // existing 保留（上一回合的），queued 被回滚
+        assert_eq!(messages.len(), 1, "queued 应被回滚，只保留 existing");
+        assert_eq!(messages[0].text_content(), "existing");
+        assert_eq!(outcome.appended_user_messages, 0);
     }
 }

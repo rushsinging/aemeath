@@ -55,6 +55,10 @@ pub enum ChatInputEvent {
     /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
     /// **不打断当前回合**（NEVER 调 CancellationToken）。
     Reset,
+    /// 批量撤回所有 pending 输入：清空 PendingInputBuffer + 回传 texts 还原输入框。
+    ///
+    /// 由 busy 态 Up 键触发（#391 S3）。
+    WithdrawAll,
 }
 
 impl ChatInputEvent {

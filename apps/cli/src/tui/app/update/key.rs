@@ -218,9 +218,15 @@ impl App {
             (KeyModifiers::NONE, KeyCode::Up) => {
                 if completion_visible {
                     self.handle_input_intent(InputIntent::SelectCompletionPrevious);
+                } else if self.chat.is_processing
+                    && !self.model.conversation.queued_submissions.is_empty()
+                {
+                    // #391 S3：busy + 有 pending → 发 WithdrawAll（runtime gate 批量撤回 +
+                    // 回传 texts → handler 清占位 + join("\n") 还原输入框）。
+                    return UpdateResult::one(Effect::SendChatInputEvent {
+                        event: sdk::ChatInputEvent::WithdrawAll,
+                    });
                 } else {
-                    // Task 5 (A3)：删除「input_queue 非空 → drain + 恢复文本」中间分支。
-                    // Up 键统一走光标上移 / 历史导航，不再召回文本队列。
                     self.handle_input_intent(InputIntent::MoveCursorUp);
                 }
             }

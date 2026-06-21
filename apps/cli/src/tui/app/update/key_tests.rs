@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::effect::effect::Effect;
 
 /// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位。
 #[test]
@@ -139,7 +140,7 @@ fn test_update_key_queued_copied_text_sends_original_and_previews_placeholder() 
 
 /// Task 5 (A3) — Up 键走光标/历史导航，不清除占位区。
 #[test]
-fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
+fn test_up_arrow_busy_with_queued_sends_withdraw_all() {
     let mut app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -153,18 +154,61 @@ fn test_up_arrow_does_not_restore_queued_input_to_input_area() {
     let spawn_refs = SpawnContextRefs { agent_client: None };
     let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
 
-    let _ = app.update_key(key, &spawn_refs);
+    let result = app.update_key(key, &spawn_refs);
 
-    // input area 不应被恢复
-    assert!(
-        app.model.input.document.is_empty(),
-        "Up 键不应恢复 queue 内容到 input area"
-    );
-    // queued_submissions 不应被清除（Up 键不触发清占位）
+    // #391 S3-5：busy + 有 queued → Up 键发 WithdrawAll（runtime gate 批量撤回）。
+    let has_withdraw = result.effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::WithdrawAll
+            }
+        )
+    });
+    assert!(has_withdraw, "busy + 有 queued 时 Up 键应发 WithdrawAll");
+    // queued_submissions 不在此同步清理（等 runtime 回传 UserMessagesWithdrawn 后清）。
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         2,
-        "Up 键不应清除 queued_submissions"
+        "Up 键自身不清 queued_submissions（由 UiEvent::UserMessagesWithdrawn handler 清）"
+    );
+}
+
+#[test]
+fn test_up_arrow_idle_or_no_queued_moves_cursor() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    // idle 态（未 start_processing）→ MoveCursorUp，不发 WithdrawAll
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+    let result = app.update_key(key, &spawn_refs);
+    let has_withdraw = result.effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::WithdrawAll
+            }
+        )
+    });
+    assert!(!has_withdraw, "idle 态 Up 键不应发 WithdrawAll");
+
+    // busy 但无 queued → 也不发 WithdrawAll
+    app.chat.start_processing();
+    let result2 = app.update_key(key, &spawn_refs);
+    let has_withdraw2 = result2.effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::WithdrawAll
+            }
+        )
+    });
+    assert!(
+        !has_withdraw2,
+        "busy 但无 queued 时 Up 键不应发 WithdrawAll"
     );
 }
 

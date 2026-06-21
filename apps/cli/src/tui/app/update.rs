@@ -59,6 +59,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
         UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
         UiEvent::SessionReset => "SessionReset",
+        UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
     }
 }
 

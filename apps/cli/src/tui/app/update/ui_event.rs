@@ -262,6 +262,17 @@ impl App {
             UiEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
+            // TODO(#391 S3-4): 清全部占位 + texts.join("\n") 还原输入框
+            UiEvent::UserMessagesWithdrawn(texts) => {
+                self.clear_all_queued_submission_echos();
+                if !texts.is_empty() {
+                    self.handle_input_intent(
+                        crate::tui::model::input::intent::InputIntent::ReplaceText(
+                            texts.join("\n"),
+                        ),
+                    );
+                }
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

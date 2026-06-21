@@ -166,6 +166,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))
         }
         sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
+        sdk::ChatEvent::UserMessagesWithdrawn { texts } => UiEvent::UserMessagesWithdrawn(texts),
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }

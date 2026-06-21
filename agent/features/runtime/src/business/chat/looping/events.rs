@@ -109,6 +109,11 @@ pub enum RuntimeStreamEvent {
     },
     /// loop 执行 reset 清理（messages + pending）后发出，通知 TUI 同步清镜像。
     SessionReset,
+    /// 批量撤回 pending 输入：texts 为被撤回的 UserMessage 文本（#391 S3）。
+    /// TUI 收到后清全部占位 + texts.join("\n") 还原输入框。
+    UserMessagesWithdrawn {
+        texts: Vec<String>,
+    },
     Done {
         context: RuntimeTurnContext,
     },
