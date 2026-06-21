@@ -89,6 +89,7 @@ pub async fn run_loop_gate<Q, I, S>(
     input_events: &I,
     sink: &S,
     messages: &mut Vec<Message>,
+    is_idle: bool,
 ) -> GateOutcome
 where
     Q: QueueDrainPort,
@@ -96,7 +97,7 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, messages).await
+    apply_gate(kind, buffer, sink, messages, is_idle).await
 }
 
 pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
@@ -119,6 +120,7 @@ pub async fn apply_gate<S>(
     buffer: &mut PendingInputBuffer,
     sink: &S,
     messages: &mut Vec<Message>,
+    is_idle: bool,
 ) -> GateOutcome
 where
     S: ChatEventSink,
@@ -159,6 +161,21 @@ where
                 added.push(append_user_message(messages, id, text, images));
                 appended_this_gate += 1;
                 appended_user_messages += 1;
+            }
+            ChatInputEvent::Reset => {
+                if is_idle {
+                    // idle：立即清空会话并通知 UI（保持 idle，不退出 loop）。
+                    messages.clear();
+                    added.clear();
+                    appended_user_messages = 0;
+                    sink.send_event(RuntimeStreamEvent::SessionReset).await;
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    buffer.push(ChatInputEvent::Reset);
+                }
             }
         }
     }
@@ -390,6 +407,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -422,6 +440,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -460,6 +479,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -488,6 +508,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -515,6 +536,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -543,6 +565,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -570,6 +593,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
@@ -602,10 +626,102 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            false,
         )
         .await;
 
         assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
         assert_eq!(messages.len(), 2);
+    }
+
+    /// #391 S1-3：idle gate 收到 Reset → 清空 messages + 发 SessionReset，保持 idle。
+    #[tokio::test]
+    async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
+        let sink = TestSink::default();
+        let mut messages = vec![Message::user("old1"), Message::user("resp1")];
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            true, // idle
+        )
+        .await;
+
+        assert_eq!(outcome.decision, GateDecision::Proceed);
+        assert!(
+            messages.is_empty(),
+            "idle Reset 应清空所有消息，实际 {:?}",
+            messages
+        );
+        let has_reset = sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, RuntimeStreamEvent::SessionReset));
+        assert!(has_reset, "应发出 SessionReset 事件");
+    }
+
+    /// #391 S1-3：busy gate 收到 Reset → 放回 buffer，messages 不变，等 idle 处理。
+    #[tokio::test]
+    async fn test_busy_gate_reset_defers_to_buffer() {
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
+        let sink = TestSink::default();
+        let mut messages = vec![Message::user("old1")];
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            false, // busy
+        )
+        .await;
+
+        assert_eq!(messages.len(), 1, "busy gate 不应清空 messages");
+        assert_eq!(buffer.len(), 1, "Reset 应留在 buffer 等待 idle");
+        assert_eq!(outcome.decision, GateDecision::Proceed);
+        let has_reset = sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, RuntimeStreamEvent::SessionReset));
+        assert!(!has_reset, "busy gate 不应发 SessionReset");
+    }
+
+    /// #391 S1-3：idle Reset 后跟 UserMessage → 先清空再 append（Reset break，UserMessage 丢弃）。
+    #[tokio::test]
+    async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![
+            ChatInputEvent::Reset,
+            ChatInputEvent::user_message("after-reset", Vec::new()),
+        ]);
+        let sink = TestSink::default();
+        let mut messages = vec![Message::user("old1")];
+
+        let outcome = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            true, // idle
+        )
+        .await;
+
+        assert_eq!(outcome.dropped_events, 1, "Reset 后的 UserMessage 应被丢弃");
+        assert!(messages.is_empty(), "Reset 清空后不应 append 后续消息");
     }
 }

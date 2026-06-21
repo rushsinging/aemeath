@@ -116,6 +116,7 @@ impl RecordingSink {
             RuntimeStreamEvent::TasksChanged => "TasksChanged".to_string(),
             RuntimeStreamEvent::ConfigReloaded { .. } => "ConfigReloaded".to_string(),
             RuntimeStreamEvent::UserMessagesAdded { .. } => "UserMessagesAdded".to_string(),
+            RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }

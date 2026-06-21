@@ -319,6 +319,7 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
             ChatEvent::ConfigReloaded { changed_keys }
         }
+        crate::business::chat::RuntimeStreamEvent::SessionReset => ChatEvent::SessionReset,
     }
 }
 

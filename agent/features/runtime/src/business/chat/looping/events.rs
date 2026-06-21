@@ -107,6 +107,8 @@ pub enum RuntimeStreamEvent {
     UserMessagesAdded {
         items: Vec<sdk::AddedInput>,
     },
+    /// loop 执行 reset 清理（messages + pending）后发出，通知 TUI 同步清镜像。
+    SessionReset,
     Done {
         context: RuntimeTurnContext,
     },

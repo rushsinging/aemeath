@@ -141,6 +141,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             let keys_str = changed_keys.join(", ");
             UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))
         }
+        sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }

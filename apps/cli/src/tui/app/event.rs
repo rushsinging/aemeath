@@ -139,5 +139,7 @@ pub enum AppEvent {
         latest: String,
         release_url: String,
     },
+    /// runtime 完成 reset 清理，TUI 据此清空镜像。
+    SessionReset,
 }
 pub type UiEvent = AppEvent;

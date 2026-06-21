@@ -50,6 +50,11 @@ pub enum ChatInputEvent {
     ControlCommand { raw: String },
     /// 用户请求取消当前 Chat；与现有 cancel token 幂等合流。
     Cancel,
+    /// 整段会话重置：清空 messages + pending 输入，通知 TUI。
+    ///
+    /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
+    /// **不打断当前回合**（NEVER 调 CancellationToken）。
+    Reset,
 }
 
 impl ChatInputEvent {

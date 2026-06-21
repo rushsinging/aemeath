@@ -136,6 +136,8 @@ pub enum ChatEvent {
     TasksChanged,
     /// 配置/指令/guidance 文件变更通知。
     ConfigReloaded { changed_keys: Vec<String> },
+    /// loop 完成 reset 清理后发出，TUI 据此同步清空镜像。
+    SessionReset,
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
 }

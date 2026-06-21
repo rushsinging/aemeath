@@ -1014,7 +1014,7 @@ where
     loop {
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
-                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages).await;
+                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages, true).await;
                 if gate.appended_user_messages > 0 {
                     // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
                     // 并发兜底：空闲期间外部可能对槽里的 token 直接调过 cancel()

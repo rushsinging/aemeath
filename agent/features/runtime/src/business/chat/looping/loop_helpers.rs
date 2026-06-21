@@ -27,5 +27,5 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, messages).await
+    apply_gate(kind, buffer, sink, messages, false).await
 }

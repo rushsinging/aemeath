@@ -41,6 +41,7 @@ impl App {
             Effect::FetchTaskStatus => self.update_task_status(self.chat.is_processing).await,
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
+            Effect::ResetRuntimeState => self.reset_runtime_state().await,
         }
     }
 
