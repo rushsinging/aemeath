@@ -74,6 +74,25 @@ async fn call_tool_with_timeout(
         return Err(tool_call_cancelled_message(name));
     }
 
+    // 预校验 input 是否符合 schema（issue #430）：一次性收集全部参数错误
+    // （缺失/多余/类型/enum），返回结构化中文消息，加速模型纠正参数污染。
+    // 失败时不占用 Err 通道（保留给 timeout/cancel 等运行时故障）。
+    if let Err(mismatch) =
+        super::input_validation::validate_tool_input(name, &tool.input_schema(), &input)
+    {
+        let message = super::input_validation::format_tool_input_error(&mismatch);
+        log::warn!(
+            target: LOG_TARGET,
+            "tool input validation failed: tool={name}, message={message}"
+        );
+        return Ok(ToolResult {
+            text: message.clone(),
+            data: serde_json::json!({ "status": "error", "message": message }),
+            is_error: true,
+            images: Vec::new(),
+        });
+    }
+
     let timeout = tool.timeout_secs();
     let started = std::time::Instant::now();
     tokio::select! {
