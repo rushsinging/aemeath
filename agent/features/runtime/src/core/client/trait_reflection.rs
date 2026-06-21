@@ -275,7 +275,7 @@ mod tests {
             agent_runner: Arc::new(NoopAgentRunner),
             task_store: Arc::new(storage::api::TaskStore::new()),
             skills_map: std::collections::HashMap::new(),
-            hook_runner: hook::api::HookRunner::empty(cwd.display().to_string()),
+            hook_runner: hook::api::HookRunner::empty(),
             memory_config,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             allow_all: false,

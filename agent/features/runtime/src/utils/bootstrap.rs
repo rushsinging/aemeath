@@ -69,14 +69,23 @@ pub struct LegacyChatBootstrapArgs {
 
 pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 
-pub struct InstructionsLoadedHookRunner<'a>(pub &'a hook::api::HookRunner);
+pub struct InstructionsLoadedHookRunner<'a> {
+    pub hook_runner: &'a hook::api::HookRunner,
+    pub working_root: &'a std::path::Path,
+    pub in_worktree: bool,
+}
 
 #[async_trait::async_trait(?Send)]
 impl prompt::api::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
     async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
         let _ = self
-            .0
-            .on_instructions_loaded(file_path, instruction_type)
+            .hook_runner
+            .on_instructions_loaded(
+                file_path,
+                instruction_type,
+                self.working_root,
+                self.in_worktree,
+            )
             .await;
     }
 }

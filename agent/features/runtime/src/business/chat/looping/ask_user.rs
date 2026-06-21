@@ -6,6 +6,7 @@ use hook::api::HookData;
 use sdk::{AskUserQuestionItem, OptionItem};
 use share::config::hooks::HookEvent;
 use share::tool::ToolOutcome;
+use std::path::Path;
 
 pub(crate) async fn ask_user<S>(
     context: &RuntimeTurnContext,
@@ -13,6 +14,8 @@ pub(crate) async fn ask_user<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -37,6 +40,8 @@ where
                     tool_name: call.name.clone(),
                     permission_rule: "manual".to_string(),
                 }),
+                working_root,
+                in_worktree,
             )
             .await;
     }

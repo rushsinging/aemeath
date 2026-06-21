@@ -119,10 +119,9 @@ where
     // 这里直接读取当前 root 作为 hook/日志的工作目录基准（忽略 seed cwd）。
     let cwd = project::api::WorkspaceRead::current_root(workspace.as_ref());
     let in_worktree = project::api::WorkspaceRead::in_worktree(workspace.as_ref());
-    hook_runner.set_project_context(cwd.display().to_string(), in_worktree);
     log::info!(target: LOG_TARGET,
-        "chat loop hook runner ready: project_dir={} configured_events={}",
-        hook_runner.project_dir(),
+        "chat loop hook runner ready: working_root={} configured_events={}",
+        cwd.display(),
         hook_runner.hook_count()
     );
     // `agent` 在每个回合内构造（见 loop 体顶部）：它持有「当前回合 token」的 clone，
@@ -352,6 +351,8 @@ where
             &cwd,
             &ctx.client,
             &language,
+            &cwd,
+            in_worktree,
         )
         .await
         {
@@ -566,6 +567,8 @@ where
                         &hook_runner,
                         &session_id,
                         &language,
+                        &cwd,
+                        in_worktree,
                     )
                     .await
                     {
@@ -658,6 +661,8 @@ where
                         &hook_runner,
                         &session_id,
                         &language,
+                        &cwd,
+                        in_worktree,
                     )
                     .await
                     {
@@ -740,6 +745,8 @@ where
                         max_agent_concurrency,
                         &cancel,
                         &language,
+                        &cwd,
+                        in_worktree,
                     )
                     .await;
 
@@ -788,8 +795,16 @@ where
                     }
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
-                    run_post_tool_batch(&sink, &hook_ui, &hook_runner, &agent.ctx, turn_count)
-                        .await;
+                    run_post_tool_batch(
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        &agent.ctx,
+                        turn_count,
+                        &cwd,
+                        in_worktree,
+                    )
+                    .await;
                 }
             }
             Err(e) => {
@@ -856,6 +871,8 @@ where
                     &turn_context,
                     &task_store,
                     &language,
+                    &cwd,
+                    in_worktree,
                 )
                 .await
                 {

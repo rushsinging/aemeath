@@ -7,7 +7,7 @@ use crate::business::chat::looping::{
 use crate::LOG_TARGET;
 use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use storage::api::{BatchStatus, TaskStore};
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
@@ -32,6 +32,8 @@ pub(crate) async fn finalize_main_loop<S>(
     context: &RuntimeTurnContext,
     _task_store: &TaskStore,
     language: &str,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -40,8 +42,17 @@ where
 
     match &outcome.status {
         AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
-            run_stop_hook_before_finish(outcome, sink, hook_ui, hook_runner, session_id, language)
-                .await
+            run_stop_hook_before_finish(
+                outcome,
+                sink,
+                hook_ui,
+                hook_runner,
+                session_id,
+                language,
+                working_root,
+                in_worktree,
+            )
+            .await
         }
         AgentRunStatus::Cancelled => {
             let _ = sink
@@ -60,6 +71,8 @@ where
                     HookData::Stop(StopHookData {
                         turns: outcome.turns,
                     }),
+                    working_root,
+                    in_worktree,
                 )
                 .await;
             // #372: StopFailure hook 阻断时回流反馈，让 loop 有机会恢复
@@ -84,6 +97,8 @@ pub(crate) async fn run_stop_hook_before_finish<S>(
     hook_runner: &HookRunner,
     session_id: &str,
     language: &str,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -96,6 +111,8 @@ where
             HookData::Stop(StopHookData {
                 turns: outcome.turns,
             }),
+            working_root,
+            in_worktree,
         )
         .await;
     if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {

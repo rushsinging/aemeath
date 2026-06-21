@@ -74,5 +74,11 @@ pub trait ProviderInfoPort: Send + Sync {
 /// Hook 通知端口——core/ 层通过此 trait 发送 hook 通知，不直接依赖 hook::HookRunner。
 #[async_trait]
 pub trait HookNotificationPort: Send + Sync {
-    async fn on_notification(&self, message: &str, kind: &str);
+    async fn on_notification(
+        &self,
+        message: &str,
+        kind: &str,
+        working_root: &std::path::Path,
+        in_worktree: bool,
+    );
 }
