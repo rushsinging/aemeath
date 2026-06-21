@@ -33,7 +33,12 @@ impl OpenAICompatibleProvider {
         }
 
         // 转换消息
-        for msg in messages {
+        // 找到最后一条 assistant 消息的索引——它是"当前轮"，thinking 完整保留；
+        // 更早的 assistant 消息是"历史轮"，thinking 脱敏为固定占位符 [elided]，
+        // 减少多轮对话中历史 reasoning_content 的 token 累积。
+        let last_assistant_idx = messages.iter().rposition(|m| m.role == Role::Assistant);
+
+        for (msg_idx, msg) in messages.iter().enumerate() {
             let mut content_parts = Vec::new();
             let mut tool_calls: Vec<serde_json::Value> = Vec::new();
             let mut reasoning_content: Option<String> = None;
@@ -100,12 +105,21 @@ impl OpenAICompatibleProvider {
                         }
                     }
                     ContentBlock::Thinking { thinking } => {
-                        // DeepSeek-R1 / thinking 模式要求在下一轮完整回传
-                        // `reasoning_content`，否则触发 HTTP 400。其他不识别此字段的
-                        // provider 会忽略它，因此始终包含是安全的。
+                        // 历史轮的 thinking 脱敏为固定占位符，只保留当前轮（最后一条
+                        // assistant）的完整 thinking。脱敏规则是稳定的——某轮一旦从
+                        // "当前"变成"历史"，其 thinking 永久变为 [elided]，不再变化，
+                        // 因此不破坏 prompt cache。
+                        // DeepSeek-R1 thinking 模式要求 assistant 消息带 reasoning_content
+                        // 字段（占位符/空字符串均可），否则触发 HTTP 400。
+                        let is_current_turn = Some(msg_idx) == last_assistant_idx;
+                        let content = if is_current_turn {
+                            thinking.clone()
+                        } else {
+                            "[elided]".to_string()
+                        };
                         reasoning_content = Some(match reasoning_content.take() {
-                            Some(existing) => existing + thinking,
-                            None => thinking.clone(),
+                            Some(existing) => existing + &content,
+                            None => content,
                         });
                     }
                 }

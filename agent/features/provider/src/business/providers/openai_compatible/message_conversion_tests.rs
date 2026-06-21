@@ -126,3 +126,189 @@ fn test_convert_messages_drops_reasoning_only_assistant() {
     }));
     assert!(converted.is_empty());
 }
+
+#[test]
+fn test_convert_messages_elides_historical_thinking_keeps_current() {
+    let provider = provider_with_reasoning();
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "What is 1+1?".to_string(),
+            }],
+            metadata: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "We need to compute 1+1. The answer is two.".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "two".to_string(),
+                },
+            ],
+            metadata: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "And 2+2?".to_string(),
+            }],
+            metadata: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "Now compute 2+2. The answer is four.".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "four".to_string(),
+                },
+            ],
+            metadata: None,
+        },
+    ];
+    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let assistants: Vec<_> = converted
+        .iter()
+        .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
+        .collect();
+    assert_eq!(assistants.len(), 2, "应有两条 assistant 消息");
+    // 历史轮（第一条 assistant）：thinking 脱敏为固定占位符
+    assert_eq!(
+        assistants[0].get("reasoning_content"),
+        Some(&serde_json::json!("[elided]")),
+        "历史轮 thinking 应被脱敏为 [elided]"
+    );
+    // 当前轮（最后一条 assistant）：thinking 完整保留
+    assert_eq!(
+        assistants[1].get("reasoning_content"),
+        Some(&serde_json::json!("Now compute 2+2. The answer is four.")),
+        "当前轮 thinking 应完整保留"
+    );
+}
+
+#[test]
+fn test_convert_messages_elides_historical_thinking_with_tool_calls() {
+    let provider = provider_with_reasoning();
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "read file".to_string(),
+            }],
+            metadata: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "需要读取文件".to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path":"/tmp/a"}),
+                },
+            ],
+            metadata: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "done?".to_string(),
+            }],
+            metadata: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "当前轮推理".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "done".to_string(),
+                },
+            ],
+            metadata: None,
+        },
+    ];
+    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let assistants: Vec<_> = converted
+        .iter()
+        .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
+        .collect();
+    assert_eq!(assistants.len(), 2);
+    // 历史轮：thinking 脱敏，但 tool_calls 不受影响
+    assert_eq!(
+        assistants[0].get("reasoning_content"),
+        Some(&serde_json::json!("[elided]"))
+    );
+    assert!(
+        assistants[0].get("tool_calls").is_some(),
+        "历史轮 tool_calls 应保留"
+    );
+    // 当前轮完整保留
+    assert_eq!(
+        assistants[1].get("reasoning_content"),
+        Some(&serde_json::json!("当前轮推理"))
+    );
+}
+
+#[test]
+fn test_convert_messages_current_turn_without_thinking_keeps_historical_elided() {
+    let provider = provider_with_reasoning();
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "1+1?".to_string(),
+            }],
+            metadata: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "历史推理内容".to_string(),
+                },
+                ContentBlock::Text {
+                    text: "two".to_string(),
+                },
+            ],
+            metadata: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "2+2?".to_string(),
+            }],
+            metadata: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text {
+                text: "four".to_string(),
+            }],
+            metadata: None,
+        },
+    ];
+    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let assistants: Vec<_> = converted
+        .iter()
+        .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
+        .collect();
+    assert_eq!(assistants.len(), 2);
+    // 历史轮脱敏
+    assert_eq!(
+        assistants[0].get("reasoning_content"),
+        Some(&serde_json::json!("[elided]"))
+    );
+    // 当前轮无 thinking 块但 reasoning 开启 → 空字符串（保持 DeepSeek 兼容）
+    assert_eq!(
+        assistants[1].get("reasoning_content"),
+        Some(&serde_json::json!(""))
+    );
+}

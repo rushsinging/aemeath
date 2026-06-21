@@ -305,22 +305,26 @@ pub fn needs_compaction_with_output(
 /// Check if compaction is needed using actual API-reported token count.
 ///
 /// - `last_input_tokens`: Total input tokens reported by the API (includes cached tokens).
-/// - `last_output_tokens`: Total output tokens reported by the API (includes reasoning tokens).
+/// - `last_output_tokens`: Total output tokens reported by the API. OpenAI-compatible
+///   providers report this as `completion_tokens`, which **includes** reasoning tokens.
+///   Anthropic's `output_tokens` likewise includes generated thinking tokens. Either way,
+///   reasoning is already counted inside `output_tokens` and must NOT be added again.
 /// - `cached_tokens`: Tokens served from prompt cache (still consume context, but cost less/free).
-/// - `reasoning_tokens`: Tokens consumed by reasoning/thinking (consume context).
+/// - `reasoning_tokens`: Tokens consumed by reasoning/thinking. **Already included in
+///   `output_tokens`** for all supported providers — kept as a parameter for call-site
+///   stability and potential logging, but deliberately NOT summed into `total`.
 /// - `context_size`: The model's context window size.
 pub fn needs_compaction_actual(
     last_input_tokens: u64,
     last_output_tokens: u64,
     _cached_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
+    _reasoning_tokens: Option<u64>,
     context_size: usize,
 ) -> bool {
-    let reasoning = reasoning_tokens.unwrap_or(0);
-
-    // All input tokens (including cached) consume context window
-    // Reasoning tokens are extra context consumption
-    let total = last_input_tokens + last_output_tokens + reasoning;
+    // Next-turn input ≈ current input + current output. Reasoning tokens are a subset
+    // of output_tokens (completion_tokens_details.reasoning_tokens ⊂ completion_tokens),
+    // so they are already accounted for — adding them back would double-count.
+    let total = last_input_tokens + last_output_tokens;
 
     let threshold = autocompact_threshold(context_size, 8192) as u64;
     total > threshold
@@ -336,18 +340,18 @@ pub fn needs_compaction_actual(
 ///
 /// - `last_input_tokens`: Total input tokens reported by the API (includes cached tokens).
 /// - `cached_tokens`: Tokens served from prompt cache (still consume context, but cost less/free).
-/// - `reasoning_tokens`: Tokens consumed by reasoning/thinking (consume context).
+/// - `reasoning_tokens`: Tokens consumed by reasoning/thinking. **Already included in the
+///   API's input_tokens** for the next turn — NOT summed separately here.
 /// - `context_size`: The model's context window size.
 pub fn compaction_urgency(
     last_input_tokens: u64,
     _cached_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
+    _reasoning_tokens: Option<u64>,
     context_size: usize,
 ) -> u8 {
-    let reasoning = reasoning_tokens.unwrap_or(0);
-
-    // All input tokens (including cached) consume context window
-    let total = last_input_tokens + reasoning;
+    // Current context occupancy = input_tokens (what the API consumed this turn).
+    // Reasoning tokens are a subset of output_tokens and do not add to current occupancy.
+    let total = last_input_tokens;
 
     let effective = effective_context_window(context_size, 8192) as u64;
     let pct = total * 100 / effective.max(1);
