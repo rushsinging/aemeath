@@ -205,6 +205,7 @@ impl OutputViewAssembler {
                     // 排队输入不再作为 document block 渲染，改为在 spinner 上方固定显示。
                 }
                 OutputTimelineItem::AgentProgress { id, message, .. } => {
+                    // 当前无 mutation 推此 timeline 项；agent 进度内联于 tool_calls[].activities（activity_summary）。误接入会重现 A4.2 双显示回归。
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {

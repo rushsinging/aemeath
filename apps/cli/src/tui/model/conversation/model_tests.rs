@@ -1289,7 +1289,7 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
         image_count: 0,
     });
 
-    // AgentProgress が timeline に含まれないことを断言（双显示防止）
+    // 断言 AgentProgress 不在 timeline（防双显示）
     let has_agent_progress = model
         .timeline
         .items()
