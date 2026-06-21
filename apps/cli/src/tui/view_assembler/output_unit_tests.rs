@@ -329,3 +329,74 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
         "未登记 tool 应返回 None"
     );
 }
+
+/// A4.5 集成断言：独立（非内嵌）ToolResult 渲染路径
+///
+/// 触发条件：output 为空 → `tool_result_is_embedded` = false → 走 standalone DiagnosticNotice 分支。
+/// 断言：is_error=true → style=Error；image_count>0 → 文本含 `[图片: N]`。
+#[test]
+fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
+
+    let mut conv = ConversationModel::default();
+    let chat = ChatId::new("chat-1");
+    let turn = ChatTurnId::new("turn-1");
+    let tool = ToolCallId::new("tool-img");
+
+    // 注册 tool call，使 find_tool_call 能命中（tool_result_is_embedded 需要）。
+    conv.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        id: tool.clone(),
+        provider_id: Some("prov-1".to_string()),
+        name: "Bash".to_string(),
+        index: 0,
+    });
+    conv.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        id: tool.clone(),
+        provider_id: Some("prov-1".to_string()),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: None,
+        status: ToolCallStatus::Ready,
+    });
+    // output 为空 → tool_result_is_embedded=false → 触发非嵌入渲染分支。
+    // is_error=true、image_count=2 → style=Error、文本含 "[图片: 2]"。
+    conv.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat.clone(),
+        turn_id: turn.clone(),
+        provider_id: "prov-1".to_string(),
+        id: tool.clone(),
+        tool_name: "Bash".to_string(),
+        output: String::new(),
+        content: serde_json::json!({}),
+        is_error: true,
+        image_count: 2,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conv, 1, None);
+
+    // 应产出一个 root-level DiagnosticNotice（非嵌入路径）。
+    let notice = vm
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::DiagnosticNotice(tv) => Some(tv),
+            _ => None,
+        })
+        .expect("非嵌入 ToolResult 应产出 DiagnosticNotice");
+
+    assert_eq!(
+        notice.style,
+        SemanticStyle::Error,
+        "is_error=true 时 style 应为 Error，实际: {:?}",
+        notice.style
+    );
+    assert!(
+        notice.text.contains("[图片: 2]"),
+        "image_count=2 时文本应含 \"[图片: 2]\"，实际: {:?}",
+        notice.text
+    );
+}
