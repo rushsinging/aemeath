@@ -1,3 +1,4 @@
+use share::i18n::prompt::git_context_labels::git_context_labels;
 use std::path::PathBuf;
 
 pub async fn is_git_repo(cwd: &PathBuf) -> bool {
@@ -14,24 +15,7 @@ pub async fn is_git_repo(cwd: &PathBuf) -> bool {
 pub async fn collect_git_context(cwd: &PathBuf, lang: &str) -> String {
     use tokio::process::Command;
 
-    let l = match lang {
-        "zh" => GitContextLabels {
-            header: "# Git Context",
-            branch: "当前分支",
-            default_branch: "默认分支",
-            git_user: "Git 用户",
-            status: "状态",
-            recent_commits: "最近提交",
-        },
-        _ => GitContextLabels {
-            header: "# Git Context",
-            branch: "Current branch",
-            default_branch: "Default branch",
-            git_user: "Git user",
-            status: "Status",
-            recent_commits: "Recent commits",
-        },
-    };
+    let l = git_context_labels(lang);
 
     let mut parts: Vec<String> = Vec::new();
     parts.push(l.header.to_string());
@@ -114,13 +98,4 @@ pub async fn collect_git_context(cwd: &PathBuf, lang: &str) -> String {
     } else {
         result
     }
-}
-
-struct GitContextLabels {
-    header: &'static str,
-    branch: &'static str,
-    default_branch: &'static str,
-    git_user: &'static str,
-    status: &'static str,
-    recent_commits: &'static str,
 }

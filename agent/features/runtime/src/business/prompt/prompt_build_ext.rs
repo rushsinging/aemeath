@@ -4,6 +4,7 @@ use crate::utils::bootstrap;
 use hook::api::HookRunner;
 use prompt::api::skill::Skill;
 use share::config::Config;
+use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header, skills_header};
 
 pub async fn build_static_prompt(
     _cwd: &std::path::Path,
@@ -61,10 +62,7 @@ fn append_skills(
             format!("- `{}{}`: {}", s.name, alias_str, s.description)
         })
         .collect();
-    let header = match lang {
-        "zh" => "\n\n# Available Skills\n以下 skill 可通过 Skill 工具调用：\n",
-        _ => "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n",
-    };
+    let header = skills_header(lang);
     prompt.push_str(&format!("{}{}", header, skill_list.join("\n")));
 }
 
@@ -93,13 +91,7 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>, lang: &
             format!("- `{}`{}{}", name, desc, model_info)
         })
         .collect();
-    let footer = match lang {
-        "zh" => "\n没有合适的 role 时，省略 `role` 参数以使用默认模型。",
-        _ => "\nWhen no role fits, omit the `role` parameter to use the default model.",
-    };
-    let header = match lang {
-        "zh" => "\n\n# Available Agent Roles\n以下 agent role 可用于 Agent 工具的 `role` 参数。请为每个任务选择最合适的 role：\n",
-        _ => "\n\n# Available Agent Roles\nThe following agent roles are available for the Agent tool's `role` parameter. Choose the most appropriate role for each task:\n",
-    };
+    let footer = agent_roles_footer(lang);
+    let header = agent_roles_header(lang);
     prompt.push_str(&format!("{}{}{}", header, role_lines.join("\n"), footer));
 }
