@@ -4,7 +4,9 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
-use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+use tools::api::{
+    Tool, ToolExecutionContext, ToolRegistry, TypedTool, TypedToolAdapter, TypedToolResult,
+};
 
 /// A tool that records the start time and sleeps briefly.
 /// Marked as concurrency-safe or not depending on constructor.
@@ -74,6 +76,115 @@ fn tool_cancelled_message_names_tool() {
         super::tool_call_cancelled_message("Bash"),
         "tool.call execution cancelled: tool=Bash"
     );
+}
+
+/// 预校验拦截不符合 schema 的 input（issue #430）：一次性返回全部参数错误，
+/// 不调用工具 `call()`。模拟模型端 token 串扰（Cow/TypedTool/lang 污染 key）。
+#[tokio::test]
+async fn test_call_tool_with_timeout_rejects_polluted_input() {
+    struct WriteLikeTool;
+    #[async_trait]
+    impl TypedTool for WriteLikeTool {
+        type Output = Value;
+        fn name(&self) -> &str {
+            "WriteLike"
+        }
+        fn description(&self) -> &str {
+            "test"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["file_path", "content"]
+            })
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            panic!("call() should not run when input fails pre-validation");
+        }
+    }
+
+    let tool: Arc<dyn Tool> = Arc::new(TypedToolAdapter::new(WriteLikeTool));
+    let ctx = test_ctx();
+    // 模拟 issue #430：噪声 key 挤掉 file_path。
+    let polluted = serde_json::json!({
+        "Cow": "Borrowed(self.description())",
+        "TypedTool": "...",
+        "content": "hi",
+        "lang": "en"
+    });
+    let result = super::call_tool_with_timeout(tool, "WriteLike", polluted, &ctx)
+        .await
+        .expect("pre-validation failure returns Ok, not Err");
+    assert!(result.is_error, "应为错误结果");
+    assert!(
+        result.text.contains("file_path"),
+        "应提示缺失必需字段 file_path：{}",
+        result.text
+    );
+    assert!(
+        result.text.contains("Cow"),
+        "应提示多余字段 Cow：{}",
+        result.text
+    );
+    assert_eq!(result.data["status"], "error", "data.status 应为 error");
+}
+
+/// 合法 input 通过预校验后正常调用工具（验证预校验不误伤）。
+#[tokio::test]
+async fn test_call_tool_with_timeout_accepts_valid_input() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct WriteLikeTool {
+        called: Arc<AtomicBool>,
+    }
+    #[async_trait]
+    impl TypedTool for WriteLikeTool {
+        type Output = Value;
+        fn name(&self) -> &str {
+            "WriteLike"
+        }
+        fn description(&self) -> &str {
+            "test"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["file_path", "content"]
+            })
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            self.called.store(true, Ordering::SeqCst);
+            TypedToolResult::success("ok", Value::Null)
+        }
+    }
+
+    let called = Arc::new(AtomicBool::new(false));
+    let tool: Arc<dyn Tool> = Arc::new(TypedToolAdapter::new(WriteLikeTool {
+        called: called.clone(),
+    }));
+    let ctx = test_ctx();
+    let valid = serde_json::json!({ "file_path": "/tmp/x", "content": "hi" });
+    let result = super::call_tool_with_timeout(tool, "WriteLike", valid, &ctx)
+        .await
+        .expect("valid input should succeed");
+    assert!(!result.is_error, "合法 input 不应报错");
+    assert!(called.load(Ordering::SeqCst), "call() 应被正常调用");
 }
 
 #[tokio::test]
