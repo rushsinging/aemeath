@@ -1,14 +1,29 @@
 //! Typed result for the `tool_search` tool (non-core tool).
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// 单个工具的详细信息。
+///
+/// 由 `ToolSearch` 返回，供 LLM 了解工具的完整能力。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolInfo {
+    /// 工具名称
+    pub name: String,
+    /// 工具描述
+    pub description: String,
+    /// 输入参数 JSON Schema
+    pub input_schema: Value,
+    /// 是否只读（不产生副作用）
+    pub is_read_only: bool,
+}
 
 /// Typed result returned by the `tool_search` tool.
 ///
-/// `tools` lists the names of all tools whose name/description matched
-/// the search query, in stable sort order.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+/// `tools` 包含所有匹配搜索条件的工具详细信息，按相关度排序。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolSearchResult {
-    pub tools: Vec<String>,
+    pub tools: Vec<ToolInfo>,
 }
 
 /// Typed input for the `tool_search` tool.

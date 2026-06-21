@@ -95,6 +95,15 @@ impl crate::contract::ToolListProvider for ToolRegistry {
     fn tool_description(&self, name: &str) -> Option<String> {
         self.get(name).map(|t| t.description().to_string())
     }
+    fn tool_info(&self, name: &str) -> Option<share::tool::types::tool_search::ToolInfo> {
+        self.get(name)
+            .map(|t| share::tool::types::tool_search::ToolInfo {
+                name: t.name().to_string(),
+                description: t.description().to_string(),
+                input_schema: t.input_schema(),
+                is_read_only: t.is_read_only(),
+            })
+    }
 }
 
 #[cfg(test)]

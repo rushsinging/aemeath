@@ -1,13 +1,12 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
-use share::tool::types::tool_search::{ToolSearchInput, ToolSearchResult};
+use share::tool::types::tool_search::{ToolInfo, ToolSearchInput, ToolSearchResult};
 
 /// ToolSearch tool - dynamically searches available tools from the registry.
 ///
-/// Replaces the previous hardcoded tool list. Queries the live `ToolRegistry`
-/// via `ToolExecutionContext.registry`, ensuring newly registered tools (e.g.
-/// MCP tools) are discoverable.
+/// Returns detailed tool info (name, description, input_schema, is_read_only)
+/// sorted by relevance: exact name match > name contains > description contains.
 pub struct ToolSearchTool;
 
 #[async_trait]
@@ -49,94 +48,121 @@ impl TypedTool for ToolSearchTool {
         let query = args.query.to_lowercase();
 
         // 从注册表动态获取工具列表
-        let tools: Vec<(String, String)> = match &ctx.registry {
+        let tools: Vec<ToolInfo> = match &ctx.registry {
             Some(reg) => reg
                 .tool_names()
                 .into_iter()
-                .map(|name| {
-                    let desc = reg.tool_description(&name).unwrap_or_default();
-                    (name, desc)
-                })
+                .filter_map(|name| reg.tool_info(&name))
                 .collect(),
             None => Vec::new(),
         };
 
         if query.is_empty() {
-            let tool_names: Vec<&str> = tools.iter().map(|(n, _)| n.as_str()).collect();
+            let count = tools.len();
+            let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
             return TypedToolResult::success(
-                format!(
-                    "Available tools ({})\n{}",
-                    tools.len(),
-                    tool_names.join("\n")
-                ),
-                ToolSearchResult {
-                    tools: tool_names.iter().map(|n| n.to_string()).collect(),
-                },
+                format!("Available tools ({count})\n{}", names.join("\n")),
+                ToolSearchResult { tools },
             );
         }
 
-        // 搜索匹配的工具
-        let matching: Vec<&(String, String)> = tools
-            .iter()
-            .filter(|(name, desc)| {
-                let name_lower = name.to_lowercase();
-                let desc_lower = desc.to_lowercase();
-                name_lower.contains(&query)
-                    || desc_lower.contains(&query)
-                    || match_keywords(&query, name)
+        // 搜索并按相关度排序
+        let mut matching: Vec<(ToolInfo, f64)> = tools
+            .into_iter()
+            .filter_map(|tool| {
+                let score = compute_relevance(&query, &tool)?;
+                Some((tool, score))
             })
             .collect();
 
+        // 按分数降序排序
+        matching.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
         if matching.is_empty() {
             return TypedToolResult::success(
-                format!("No tools found matching '{}'", query),
+                format!("No tools found matching '{query}'"),
                 ToolSearchResult { tools: vec![] },
             );
         }
 
-        let tool_names: Vec<&str> = matching.iter().map(|(n, _)| n.as_str()).collect();
+        let count = matching.len();
+        let names: Vec<String> = matching.iter().map(|(t, _)| t.name.clone()).collect();
+        let result_tools: Vec<ToolInfo> = matching.into_iter().map(|(t, _)| t).collect();
         TypedToolResult::success(
             format!(
-                "Found {} tool(s) matching '{}'\n{}",
-                matching.len(),
-                query,
-                tool_names.join("\n")
+                "Found {count} tool(s) matching '{query}'\n{}",
+                names.join("\n")
             ),
             ToolSearchResult {
-                tools: tool_names.iter().map(|n| n.to_string()).collect(),
+                tools: result_tools,
             },
         )
     }
 }
 
-fn match_keywords(query: &str, tool_name: &str) -> bool {
-    let tool_lower = tool_name.to_lowercase();
+/// 计算工具与查询的相关度分数。返回 None 表示不匹配。
+///
+/// 分数规则：
+/// - 名称完全匹配：100
+/// - 名称包含查询：80
+/// - 描述包含查询：50
+fn compute_relevance(query: &str, tool: &ToolInfo) -> Option<f64> {
+    let name_lower = tool.name.to_lowercase();
+    let desc_lower = tool.description.to_lowercase();
 
-    // 关键词映射
-    let keyword_mappings = [
-        ("file", vec!["file", "read", "write", "edit"]),
-        ("search", vec!["grep", "glob", "search", "find"]),
-        ("run", vec!["bash", "shell", "execute"]),
-        ("task", vec!["task", "todo"]),
-        ("web", vec!["web", "fetch", "search"]),
-        ("agent", vec!["agent", "subagent"]),
-        ("mcp", vec!["mcp"]),
-        ("skill", vec!["skill"]),
-        ("config", vec!["config", "settings"]),
-        ("ask", vec!["ask", "question", "user"]),
-        ("sleep", vec!["sleep", "wait", "delay"]),
-        ("lsp", vec!["lsp", "language", "intellisense"]),
-    ];
+    if name_lower == query {
+        Some(100.0)
+    } else if name_lower.contains(query) {
+        Some(80.0)
+    } else if desc_lower.contains(query) {
+        Some(50.0)
+    } else {
+        None
+    }
+}
 
-    for (keyword, tools) in keyword_mappings {
-        if query.contains(keyword) || keyword.contains(query) {
-            for t in tools {
-                if tool_lower.contains(t) {
-                    return true;
-                }
-            }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_tool(name: &str, description: &str) -> ToolInfo {
+        ToolInfo {
+            name: name.to_string(),
+            description: description.to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            is_read_only: true,
         }
     }
 
-    false
+    #[test]
+    fn test_compute_relevance_exact_name_match() {
+        let tool = make_tool("Bash", "Execute shell commands");
+        assert_eq!(compute_relevance("bash", &tool), Some(100.0));
+    }
+
+    #[test]
+    fn test_compute_relevance_name_contains() {
+        let tool = make_tool("ToolSearch", "Search for tools");
+        assert_eq!(compute_relevance("search", &tool), Some(80.0));
+    }
+
+    #[test]
+    fn test_compute_relevance_desc_contains() {
+        let tool = make_tool("Bash", "Execute shell commands");
+        assert_eq!(compute_relevance("shell", &tool), Some(50.0));
+    }
+
+    #[test]
+    fn test_compute_relevance_no_match() {
+        let tool = make_tool("Bash", "Execute shell commands");
+        assert_eq!(compute_relevance("file", &tool), None);
+    }
+
+    #[test]
+    fn test_compute_relevance_case_insensitive() {
+        let tool = make_tool("Read", "Read file contents");
+        // query 应该是小写的（调用方已转换）
+        assert_eq!(compute_relevance("read", &tool), Some(100.0));
+        assert_eq!(compute_relevance("read file", &tool), Some(50.0));
+    }
 }
