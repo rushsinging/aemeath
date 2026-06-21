@@ -5,6 +5,7 @@ use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
+use super::tool_result_payload::ToolResultPayload;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 #[test]
@@ -29,9 +30,9 @@ fn test_append_user_message_pushes_block_without_new_chat() {
     assert!(changes
         .iter()
         .any(|change| matches!(change, ConversationChange::UserMessageAppended { .. })));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::UserMessage { text, .. } if text == "我的答复"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::UserMessage { text, .. } if text == "我的答复"
     )));
 }
 
@@ -43,10 +44,10 @@ fn test_append_user_message_on_empty_model_creates_block() {
         text: "孤立回显".to_string(),
     });
     assert!(model.chats.is_empty(), "回显不应创建 chat");
-    assert_eq!(model.blocks.len(), 1);
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::UserMessage { text, .. } if text == "孤立回显"
+    assert_eq!(model.timeline.items().len(), 1);
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::UserMessage { text, .. } if text == "孤立回显"
     )));
 }
 
@@ -57,7 +58,7 @@ fn test_append_user_message_empty_text_still_creates_block() {
     let changes = model.apply(ConversationIntent::AppendUserMessage {
         text: String::new(),
     });
-    assert_eq!(model.blocks.len(), 1);
+    assert_eq!(model.timeline.items().len(), 1);
     assert!(changes
         .iter()
         .any(|change| matches!(change, ConversationChange::OutputDirty)));
@@ -72,12 +73,12 @@ fn test_conversation_reset_clears_all_blocks() {
     model.apply(ConversationIntent::AppendSystemMessage {
         text: "note".to_string(),
     });
-    assert!(!model.blocks.is_empty());
+    assert!(!model.timeline.items().is_empty());
     assert!(model.active_chat_id.is_some());
 
     model.reset();
 
-    assert!(model.blocks.is_empty());
+    assert!(model.timeline.items().is_empty());
     assert!(model.chats.is_empty());
     assert!(model.active_chat_id.is_none());
     assert!(model.queued_submissions.is_empty());
@@ -87,7 +88,7 @@ fn test_conversation_reset_clears_all_blocks() {
 fn test_conversation_reset_on_empty_is_noop() {
     let mut model = ConversationModel::default();
     model.reset();
-    assert!(model.blocks.is_empty());
+    assert!(model.timeline.items().is_empty());
     assert!(model.active_chat_id.is_none());
 }
 
@@ -144,4 +145,69 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
                 && reference.context.turn_id == expected_turn_id
                 && reference.tool_call_id == expected_tool_id
     )));
+}
+
+/// A4.1 TDD：observe_tool_result 后对应 ChatTurn.tool_calls[i].result 应为 Some(ToolResultPayload)
+/// 且字段值正确（output / content / is_error / image_count 全部匹配）。
+#[test]
+fn test_tool_result_payload_stored_in_turn() {
+    let mut model = ConversationModel::default();
+    let chat_id = ChatId::new("chat-a41");
+    let turn_id = ChatTurnId::new("turn-a41");
+    let tool_id = ToolCallId::new("tool-a41");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+
+    // 登记 ToolCallStart
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+    });
+
+    let expected_output = "file contents here".to_string();
+    let expected_content = serde_json::json!({ "text": "file contents here" });
+    let expected_is_error = false;
+    let expected_image_count = 0usize;
+
+    // 登记 ToolResult
+    model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        provider_id: "prov-a41".to_string(),
+        id: tool_id.clone(),
+        tool_name: "Read".to_string(),
+        output: expected_output.clone(),
+        content: expected_content.clone(),
+        is_error: expected_is_error,
+        image_count: expected_image_count,
+    });
+
+    // 断言：ToolCall.result 应为 Some(ToolResultPayload) 且字段正确
+    let call = model
+        .chats
+        .iter()
+        .find(|chat| chat.id == chat_id)
+        .and_then(|chat| chat.turns.iter().find(|turn| turn.id == turn_id))
+        .and_then(|turn| {
+            turn.tool_calls
+                .iter()
+                .find(|c| c.id.as_ref() == Some(&tool_id))
+        })
+        .expect("tool call should exist after observe_tool_result");
+
+    let expected_payload = ToolResultPayload::new(
+        expected_output,
+        expected_content,
+        expected_is_error,
+        expected_image_count,
+    );
+    assert_eq!(
+        call.result,
+        Some(expected_payload),
+        "tool_calls[i].result 应为 Some(ToolResultPayload) 且字段正确"
+    );
 }

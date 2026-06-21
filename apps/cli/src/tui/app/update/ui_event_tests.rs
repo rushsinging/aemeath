@@ -1,6 +1,5 @@
 use super::*;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::conversation::block::ConversationBlock;
 use std::path::PathBuf;
 
 fn make_spawn_refs() -> SpawnContextRefs {
@@ -36,8 +35,8 @@ fn test_update_ui_messages_sync_only_mirrors_no_echo() {
     assert_eq!(app.chat.messages.len(), 2);
 
     // 不产生任何 UserMessage 回显块（退出 display）
-    assert!(app.model.conversation.blocks.iter().all(|block| {
-        !matches!(block, ConversationBlock::UserMessage { text, .. } if text == "a\nb\nc")
+    assert!(app.model.conversation.timeline.items().iter().all(|item| {
+        !matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "a\nb\nc")
     }));
 
     // 占位未被清除（归 UserMessagesAdded 负责）
@@ -62,8 +61,8 @@ fn test_update_ui_messages_sync_does_not_echo_system_generated_user_message() {
 
     app.update_ui(UiEvent::MessagesSync(messages), &ui_tx, &spawn_refs);
 
-    assert!(app.model.conversation.blocks.iter().all(|block| {
-        !matches!(block, ConversationBlock::UserMessage { text, .. } if text == reminder)
+    assert!(app.model.conversation.timeline.items().iter().all(|item| {
+        !matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == reminder)
     }));
 }
 
@@ -100,9 +99,15 @@ fn test_messages_sync_no_display() {
     let user_echo_count = app
         .model
         .conversation
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .filter(|b| matches!(b, ConversationBlock::UserMessage { .. }))
+        .filter(|b| {
+            matches!(
+                b,
+                crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { .. }
+            )
+        })
         .count();
     assert_eq!(
         user_echo_count, 0,
@@ -158,9 +163,15 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
     let queued_blocks = app
         .model
         .conversation
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .filter(|b| matches!(b, ConversationBlock::QueuedUserMessage { .. }))
+        .filter(|b| {
+            matches!(
+                b,
+                crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage { .. }
+            )
+        })
         .count();
     assert_eq!(queued_blocks, 0, "不应有残留 QueuedUserMessage 块");
 
@@ -168,10 +179,15 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
     let user_echo_texts: Vec<&str> = app
         .model
         .conversation
-        .blocks
+        .timeline
+        .items()
         .iter()
         .filter_map(|b| {
-            if let ConversationBlock::UserMessage { text, .. } = b {
+            if let crate::tui::model::output_timeline::OutputTimelineItem::UserMessage {
+                text,
+                ..
+            } = b
+            {
                 Some(text.as_str())
             } else {
                 None

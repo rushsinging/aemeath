@@ -617,7 +617,7 @@ fn bench_refresh_cost_by_conversation_size() {
     println!("\n=== refresh 成本基准（width=100；每 turn = user+assistant+completed tool）===");
     for n in [500usize, 1000, 2000, 4000] {
         let conv = build_conversation(n);
-        let blocks = conv.blocks.len();
+        let blocks = conv.timeline.items().len();
         let rev = conv.revision();
 
         // assemble 全量（A3 memo miss 时、即每个 streaming chunk 的成本）

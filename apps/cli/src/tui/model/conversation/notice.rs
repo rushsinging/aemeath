@@ -1,4 +1,4 @@
-use super::block::{ConversationBlock, HookNoticeContent};
+use super::block::HookNoticeContent;
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
@@ -26,10 +26,6 @@ impl ConversationModel {
         self.clear_active_text_blocks();
         let block_id = self.next_block_id("system");
         let text = strip_system_reminder_envelope_owned(text);
-        self.blocks.push(ConversationBlock::System {
-            id: block_id.clone(),
-            text: text.clone(),
-        });
         self.timeline.push(OutputTimelineItem::System {
             id: block_id.clone(),
             text,
@@ -47,10 +43,6 @@ impl ConversationModel {
     ) -> Vec<ConversationChange> {
         self.clear_active_text_blocks();
         let block_id = self.next_block_id("hook");
-        self.blocks.push(ConversationBlock::HookNotice {
-            id: block_id.clone(),
-            content: content.clone(),
-        });
         self.timeline.push(OutputTimelineItem::HookNotice {
             id: block_id.clone(),
             content,
@@ -65,10 +57,6 @@ impl ConversationModel {
     pub(super) fn append_error(&mut self, text: String) -> Vec<ConversationChange> {
         self.clear_active_text_blocks();
         let block_id = self.next_block_id("error");
-        self.blocks.push(ConversationBlock::Error {
-            id: block_id.clone(),
-            text: text.clone(),
-        });
         self.timeline.push(OutputTimelineItem::Error {
             id: block_id.clone(),
             text,
@@ -92,9 +80,10 @@ mod tests {
         let changes = model.seed_banner();
         assert_eq!(
             model
-                .blocks
+                .timeline
+                .items()
                 .iter()
-                .filter(|b| matches!(b, ConversationBlock::System { .. }))
+                .filter(|b| matches!(b, OutputTimelineItem::System { .. }))
                 .count(),
             BANNER_LINES.len()
         );
@@ -107,10 +96,10 @@ mod tests {
     fn test_seed_banner_first_block_is_title() {
         let mut model = ConversationModel::default();
         model.seed_banner();
-        let first = model.blocks.first().expect("banner block");
+        let first = model.timeline.items().first().expect("banner block");
         assert!(matches!(
             first,
-            ConversationBlock::System { text, .. } if text == "Aemeath - AI Agent"
+            OutputTimelineItem::System { text, .. } if text == "Aemeath - AI Agent"
         ));
     }
 
@@ -134,9 +123,10 @@ mod tests {
             text: "after".to_string(),
         });
         let assistant_blocks = model
-            .blocks
+            .timeline
+            .items()
             .iter()
-            .filter(|b| matches!(b, ConversationBlock::AssistantText { .. }))
+            .filter(|b| matches!(b, OutputTimelineItem::AssistantText { .. }))
             .count();
         assert_eq!(assistant_blocks, 2);
     }
@@ -146,8 +136,8 @@ mod tests {
         let mut model = ConversationModel::default();
         let changes = model.append_error("坏了".to_string());
         assert!(matches!(
-            model.blocks.last(),
-            Some(ConversationBlock::Error { text, .. }) if text == "坏了"
+            model.timeline.items().last(),
+            Some(OutputTimelineItem::Error { text, .. }) if text == "坏了"
         ));
         assert!(changes
             .iter()

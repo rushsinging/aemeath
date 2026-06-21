@@ -344,7 +344,10 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         .expect("live runtime turn should exist");
     assert_eq!(live_turn_model.tool_calls.len(), 1);
     assert_eq!(
-        live_turn_model.tool_calls[0].result.as_deref(),
+        live_turn_model.tool_calls[0]
+            .result
+            .as_ref()
+            .map(|p| p.output.as_str()),
         Some("workspace manifest")
     );
     let tool_id = super::ids::ToolCallId::new("tool-1");
@@ -355,10 +358,12 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
     assert!(timeline_tool_call_ref_exists(
         &model, &live_chat, &live_turn, &tool_id
     ));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolResult { id, output, .. }
-            if *id == tool_id && output == "workspace manifest"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::ToolResult { reference, .. }
+            if reference.context.chat_id == live_chat
+                && reference.context.turn_id == live_turn
+                && reference.tool_call_id == tool_id
     )));
 }
 
@@ -430,7 +435,10 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     let turn_id = super::ids::ChatTurnId::new("turn-1");
     let chat = model.chats.iter().find(|c| c.id == chat_id).unwrap();
     let turn = chat.turns.iter().find(|t| t.id == turn_id).unwrap();
-    let skill_result = turn.tool_calls[0].result.as_deref();
+    let skill_result = turn.tool_calls[0]
+        .result
+        .as_ref()
+        .map(|p| p.output.as_str());
     assert_ne!(
         skill_result,
         Some("//! Configuration file management"),
@@ -454,8 +462,8 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
     ));
     assert!(read_call
         .result
-        .as_deref()
-        .is_some_and(|output| output.contains("Configuration file management")));
+        .as_ref()
+        .is_some_and(|p| p.output.contains("Configuration file management")));
 }
 
 #[test]
@@ -550,13 +558,13 @@ fn test_conversation_late_tool_call_binds_existing_result() {
     });
 
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
-    assert!(!model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::OrphanToolResult { id, .. } if *id == tool_1_id.to_string()
+    assert!(!model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::OrphanToolResult { id, .. } if id == "tool-1"
     )));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolResult { id, .. } if *id == tool_1_id
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::ToolResult { reference, .. } if reference.tool_call_id == tool_1_id
     )));
     assert_eq!(
         model
@@ -570,7 +578,8 @@ fn test_conversation_late_tool_call_binds_existing_result() {
             .unwrap()
             .tool_calls[0]
             .result
-            .as_deref(),
+            .as_ref()
+            .map(|p| p.output.as_str()),
         Some("line1\nline2")
     );
     assert_eq!(
@@ -606,13 +615,13 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
         text: "answer".to_string(),
     });
 
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::Thinking { text, .. } if text == "plan"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::Thinking { text, .. } if text == "plan"
     )));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::AssistantText { text, .. } if text == "answer"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::AssistantText { text, .. } if text == "answer"
     )));
 }
 
@@ -638,10 +647,11 @@ fn test_conversation_starts_new_thinking_block_after_block_complete() {
     });
 
     let thinking_blocks: Vec<_> = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .filter_map(|block| match block {
-            super::block::ConversationBlock::Thinking { text, .. } => Some(text.as_str()),
+        .filter_map(|item| match item {
+            OutputTimelineItem::Thinking { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect();
@@ -680,23 +690,25 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     });
 
     let text_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
+        .position(|item| {
             matches!(
-                block,
-                super::block::ConversationBlock::AssistantText { text, .. } if text == "结论先到"
+                item,
+                OutputTimelineItem::AssistantText { text, .. } if text == "结论先到"
             )
         })
         .expect("assistant text block");
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
     let tool_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
+        .position(|item| {
             matches!(
-                block,
-                super::block::ConversationBlock::ToolCall { id, .. } if *id == tool_1_id
+                item,
+                OutputTimelineItem::ToolCall { reference } if reference.tool_call_id == tool_1_id
             )
         })
         .expect("tool block");
@@ -743,20 +755,24 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
 
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
     let text_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| matches!(
-            block,
-            super::block::ConversationBlock::AssistantText { text, .. } if text == "已经完成的文字"
-        ))
+        .position(|item| {
+            matches!(
+                item,
+                OutputTimelineItem::AssistantText { text, .. } if text == "已经完成的文字"
+            )
+        })
         .expect("assistant text block");
     let tool_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
+        .position(|item| {
             matches!(
-                block,
-                super::block::ConversationBlock::ToolCall { id, .. } if *id == tool_1_id
+                item,
+                OutputTimelineItem::ToolCall { reference } if reference.tool_call_id == tool_1_id
             )
         })
         .expect("tool block");
@@ -894,9 +910,9 @@ fn test_queue_submission_pushes_queued_user_message_block() {
     assert!(changes
         .iter()
         .any(|c| matches!(c, ConversationChange::QueuedSubmissionAdded { .. })));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::QueuedUserMessage { text, .. } if text == "排队的消息"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::QueuedUserMessage { text, .. } if text == "排队的消息"
     )));
     assert_eq!(model.queued_submissions.len(), 1);
 }
@@ -938,22 +954,6 @@ fn test_clear_queued_by_id_removes_only_matching_entry() {
     assert!(model.queued_submissions.iter().any(|q| q.input_id == id_a));
     assert!(model.queued_submissions.iter().any(|q| q.input_id == id_c));
     assert!(!model.queued_submissions.iter().any(|q| q.input_id == id_b));
-
-    // blocks：剩 A、C 的 QueuedUserMessage，无 B
-    let queued_blocks: Vec<_> = model
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            super::block::ConversationBlock::QueuedUserMessage { input_id, text, .. } => {
-                Some((input_id.clone(), text.clone()))
-            }
-            _ => None,
-        })
-        .collect();
-    assert_eq!(queued_blocks.len(), 2);
-    assert!(queued_blocks.iter().any(|(iid, _)| iid == &id_a));
-    assert!(queued_blocks.iter().any(|(iid, _)| iid == &id_c));
-    assert!(!queued_blocks.iter().any(|(iid, _)| iid == &id_b));
 
     // timeline：剩 A、C 的 QueuedUserMessage，无 B
     let queued_timeline: Vec<_> = model
@@ -1130,9 +1130,9 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         c,
         ConversationChange::ToolCallCompleted { status, .. } if *status == ToolCallStatus::Success
     )));
-    assert!(!model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::OrphanToolResult { id, .. } if id == "call_agent_1"
+    assert!(!model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::OrphanToolResult { id, .. } if id == "call_agent_1"
     )));
 }
 
@@ -1230,4 +1230,314 @@ fn test_tool_result_not_orphan_when_no_tool_call_start() {
         c,
         ConversationChange::ToolCallCompleted { status, .. } if *status == ToolCallStatus::Success
     )));
+}
+
+/// timeline 镜像验证：完整回合（user / assistant / tool-call / tool-result）后
+/// timeline 应包含 UserMessage、AssistantText、ToolCall、ToolResult，
+/// 且 AgentProgress **不进 timeline**（进度通过 tool_calls[].activities 内联渲染）。
+#[test]
+fn test_timeline_mirrors_blocks_no_agent_progress() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-a42");
+    let turn_id = super::ids::ChatTurnId::new("turn-a42");
+    let tool_id = super::ids::ToolCallId::new("tool-a42");
+
+    // 1. 用户消息
+    model.apply(ConversationIntent::StartChat {
+        submission: "run task".to_string(),
+    });
+
+    // 2. Assistant text
+    model.apply(ConversationIntent::ObserveAssistantText {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        text: "starting agent".to_string(),
+    });
+    model.apply(ConversationIntent::CompleteBlock {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+    });
+
+    // 3. Tool call start
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+
+    // 4. Agent progress — 不进 timeline，只写入 tool_calls[].activities
+    model.apply(ConversationIntent::RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        message: "analysing codebase".to_string(),
+    });
+
+    // 5. Tool result
+    model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: "provider-a42".to_string(),
+        tool_name: "Agent".to_string(),
+        output: "done".to_string(),
+        content: serde_json::json!({ "text": "done" }),
+        is_error: false,
+        image_count: 0,
+    });
+
+    // AgentProgress が timeline に含まれないことを断言（双显示防止）
+    let has_agent_progress = model
+        .timeline
+        .items()
+        .iter()
+        .any(|item| matches!(item, OutputTimelineItem::AgentProgress { .. }));
+    assert!(
+        !has_agent_progress,
+        "timeline.items() MUST NOT contain AgentProgress (it is inline-rendered via \
+         tool_calls[].activities); items = {:?}",
+        model
+            .timeline
+            .items()
+            .iter()
+            .map(|i| i.id().into_owned())
+            .collect::<Vec<_>>()
+    );
+
+    // 进度消息写入对应 tool_call.activities（内联渲染路径）
+    let turn = model
+        .chats
+        .iter()
+        .flat_map(|ch| ch.turns.iter())
+        .find(|t| t.id == turn_id);
+    let activities = turn
+        .and_then(|t| {
+            t.tool_calls.iter().find(|c| {
+                c.id.as_ref()
+                    .is_some_and(|id| id.as_ref() == tool_id.to_string())
+            })
+        })
+        .map(|c| c.activities.clone())
+        .unwrap_or_default();
+    assert!(
+        activities.iter().any(|a| a.contains("analysing codebase")),
+        "tool_call.activities should contain the progress message; activities = {activities:?}"
+    );
+
+    // 全 timeline 条目的 id 不重复（种类完整、无重）
+    let ids: Vec<_> = model
+        .timeline
+        .items()
+        .iter()
+        .map(|i| i.id().into_owned())
+        .collect();
+    let unique_count = ids.iter().collect::<std::collections::HashSet<_>>().len();
+    assert_eq!(
+        ids.len(),
+        unique_count,
+        "timeline ids should be unique; ids = {ids:?}"
+    );
+}
+
+// --- A4.3 基线测试：位置查询改读 timeline ---
+
+/// A4.3 TDD 基线：insert_tool_call_block_before_active_text 用 timeline 去重
+/// 同一 (chat, turn, id) 的 ToolCall 重复触发后，timeline 中只有 1 个 ToolCall ref。
+#[test]
+fn test_a43_insert_tool_call_dedup_reads_timeline() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-a43-dedup");
+    let turn_id = super::ids::ChatTurnId::new("turn-a43-dedup");
+    let tool_id = super::ids::ToolCallId::new("tool-a43-dedup");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+
+    // ToolCallStart → 第 1 次插入
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+    });
+
+    // ToolCallUpdate with same id → 不应重复插入 ToolCall
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Read".to_string(),
+        index: 0,
+        arguments: Some(r#"{"file_path":"main.rs"}"#.to_string()),
+        status: ToolCallStatus::Ready,
+    });
+
+    let tool_call_count = model
+        .timeline
+        .items()
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                OutputTimelineItem::ToolCall { reference }
+                    if reference.context.chat_id == chat_id
+                        && reference.context.turn_id == turn_id
+                        && reference.tool_call_id == tool_id
+            )
+        })
+        .count();
+
+    assert_eq!(
+        tool_call_count, 1,
+        "timeline 中相同 (chat, turn, id) 的 ToolCall 应仅出现 1 次（去重）"
+    );
+}
+
+/// A4.3 TDD 基线：promote_orphan_tool_result 后 timeline 中孤儿消失、ToolResult 出现
+/// 且 ToolResult 排在 ToolCall 之后（顺序等价）。
+#[test]
+fn test_a43_promote_orphan_timeline_ordering() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-a43-orphan");
+    let turn_id = super::ids::ChatTurnId::new("turn-a43-orphan");
+    let tool_id = super::ids::ToolCallId::new("tool-a43-orphan");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+
+    // 先到达 ToolResult（孤儿）
+    let changes = model.apply(ConversationIntent::ObserveToolResult {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        provider_id: "prov-a43".to_string(),
+        id: tool_id.clone(),
+        tool_name: "Bash".to_string(),
+        output: "output-a43".to_string(),
+        content: serde_json::json!({}),
+        is_error: false,
+        image_count: 0,
+    });
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, ConversationChange::OrphanToolResultObserved { .. })),
+        "先到达的 ToolResult 应为孤儿"
+    );
+
+    // 验证孤儿在 timeline 中
+    let has_orphan = model.timeline.items().iter().any(|item| {
+        matches!(item, OutputTimelineItem::OrphanToolResult { id, .. } if id == tool_id.as_ref())
+    });
+    assert!(has_orphan, "孤儿应出现在 timeline 中");
+
+    // ToolCallStart → 触发 promote_orphan_tool_result
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+    });
+
+    // ToolCallUpdate → 触发 promote_orphan_tool_result（confirm binding）
+    model.apply(ConversationIntent::ObserveToolCallUpdate {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: Some("prov-a43".to_string()),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: None,
+        status: ToolCallStatus::Ready,
+    });
+
+    // 孤儿应从 timeline 中消失
+    let still_orphan = model.timeline.items().iter().any(|item| {
+        matches!(item, OutputTimelineItem::OrphanToolResult { id, .. } if id == tool_id.as_ref())
+    });
+    assert!(!still_orphan, "孤儿提升后应从 timeline 移除");
+
+    // ToolCall 和 ToolResult 均应存在于 timeline，且顺序正确
+    let positions: Vec<_> = model
+        .timeline
+        .items()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, item)| match item {
+            OutputTimelineItem::ToolCall { reference }
+            | OutputTimelineItem::ToolResult { reference }
+                if reference.tool_call_id == tool_id =>
+            {
+                Some(idx)
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(positions.len(), 2, "应有 ToolCall + ToolResult 各一个");
+    assert!(
+        positions[0] < positions[1],
+        "孤儿提升后 ToolResult 应排在 ToolCall 之后（顺序等价）"
+    );
+}
+
+/// A4.3 TDD 基线：observe_tool_call_update 中已存在的 ToolCall 不重复插入 timeline。
+/// 复现 model.rs:313 的查询点：existing_tool_position 改读 timeline。
+#[test]
+fn test_a43_observe_tool_call_update_no_duplicate_timeline_entry() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-a43-dup");
+    let turn_id = super::ids::ChatTurnId::new("turn-a43-dup");
+    let tool_id = super::ids::ToolCallId::new("tool-a43-dup");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+
+    // First: ToolCallStart inserts the tool
+    model.apply(ConversationIntent::ObserveToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Write".to_string(),
+        index: 0,
+    });
+
+    // Multiple ToolCallUpdates with same id — should NOT create duplicate ToolCall entries
+    for _ in 0..3 {
+        model.apply(ConversationIntent::ObserveToolCallUpdate {
+            chat_id: chat_id.clone(),
+            turn_id: turn_id.clone(),
+            id: tool_id.clone(),
+            provider_id: Some("prov-a43-dup".to_string()),
+            name: "Write".to_string(),
+            index: 0,
+            arguments: Some(r#"{"file_path":"a.txt"}"#.to_string()),
+            status: ToolCallStatus::Ready,
+        });
+    }
+
+    let count = model
+        .timeline
+        .items()
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                OutputTimelineItem::ToolCall { reference }
+                    if reference.context.chat_id == chat_id
+                       && reference.context.turn_id == turn_id
+                       && reference.tool_call_id == tool_id
+            )
+        })
+        .count();
+
+    assert_eq!(
+        count, 1,
+        "多次 ToolCallUpdate 后 timeline 中该 ToolCall 仍只有 1 项"
+    );
 }

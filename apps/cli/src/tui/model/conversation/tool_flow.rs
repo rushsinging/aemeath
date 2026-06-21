@@ -1,4 +1,3 @@
-use super::block::ConversationBlock;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
@@ -13,22 +12,23 @@ impl ConversationModel {
         turn_id: &ChatTurnId,
         id: &str,
     ) {
-        let Some(position) = self.blocks.iter().position(|block| {
-            matches!(
-                block,
-                ConversationBlock::OrphanToolResult { id: orphan_id, .. } if orphan_id == id
-            )
-        }) else {
-            return;
-        };
-        let ConversationBlock::OrphanToolResult {
-            id: _,
-            tool_name: _,
-            output,
-            content,
-            is_error,
-        } = self.blocks.remove(position)
-        else {
+        // 从 timeline 查找 OrphanToolResult 并克隆 payload。
+        let orphan_payload = self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::OrphanToolResult {
+                id: orphan_id,
+                output,
+                content,
+                is_error,
+                ..
+            } = item
+            {
+                if orphan_id == id {
+                    return Some((output.clone(), content.clone(), *is_error));
+                }
+            }
+            None
+        });
+        let Some((output, content, is_error)) = orphan_payload else {
             return;
         };
         if self
@@ -36,7 +36,7 @@ impl ConversationModel {
                 chat_id,
                 turn_id,
                 id,
-                ToolResultPayload::new(output.clone(), content.clone(), is_error, 0),
+                ToolResultPayload::new(output, content, is_error, 0),
             )
             .is_some()
         {
@@ -47,10 +47,6 @@ impl ConversationModel {
                 chat_id.clone(),
                 turn_id.clone(),
                 ToolCallId::from_legacy_or_new(id),
-                output,
-                content,
-                is_error,
-                0,
             );
         }
     }
@@ -75,23 +71,15 @@ impl ConversationModel {
             id.as_ref(),
             ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
         ) {
-            self.insert_tool_result_after_tool_call(
-                chat_id.clone(),
-                turn_id.clone(),
-                id.clone(),
-                output,
-                content,
-                is_error,
-                image_count,
-            );
+            self.insert_tool_result_after_tool_call(chat_id.clone(), turn_id.clone(), id.clone());
             crate::tui::log_debug!(
-                "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} blocks_after={}",
+                "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} timeline_items_after={}",
                 id,
                 tool_name,
                 status,
                 is_error,
                 image_count,
-                self.blocks.len(),
+                self.timeline.items().len(),
             );
             return vec![
                 ConversationChange::ToolCallCompleted {
@@ -109,19 +97,12 @@ impl ConversationModel {
             content: content.clone(),
             is_error,
         });
-        self.blocks.push(ConversationBlock::OrphanToolResult {
-            id: id.to_string(),
-            tool_name,
-            output,
-            content,
-            is_error,
-        });
         crate::tui::log_debug!(
-            "model observe tool_result orphan id={} is_error={} image_count={} blocks_after={}",
+            "model observe tool_result orphan id={} is_error={} image_count={} timeline_items_after={}",
             id,
             is_error,
             image_count,
-            self.blocks.len(),
+            self.timeline.items().len(),
         );
         vec![
             ConversationChange::OrphanToolResultObserved { id: id.to_string() },

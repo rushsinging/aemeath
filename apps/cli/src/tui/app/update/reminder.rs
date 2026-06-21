@@ -18,7 +18,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::tui::app::App;
-    use crate::tui::model::conversation::block::ConversationBlock;
     use std::path::PathBuf;
 
     fn make_app() -> App {
@@ -32,10 +31,13 @@ mod tests {
     fn system_texts(app: &App) -> Vec<String> {
         app.model
             .conversation
-            .blocks
+            .timeline
+            .items()
             .iter()
-            .filter_map(|block| match block {
-                ConversationBlock::System { text, .. } => Some(text.clone()),
+            .filter_map(|item| match item {
+                crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } => {
+                    Some(text.clone())
+                }
                 _ => None,
             })
             .collect()

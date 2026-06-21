@@ -232,14 +232,14 @@ impl App {
             reduce_agent_event(&mut self.model, mapping)
         };
         crate::tui::log_trace!(
-            "tui.agent_event reduced event={} dirty_output={} dirty_status={} dirty_dialog={} dirty_input={} effects={} conversation_blocks={} chats={}",
+            "tui.agent_event reduced event={} dirty_output={} dirty_status={} dirty_dialog={} dirty_input={} effects={} timeline_items={} chats={}",
             ui_event_name(&ev),
             model_result.dirty.output,
             model_result.dirty.status,
             model_result.dirty.dialog,
             model_result.dirty.input,
             model_result.effects.len(),
-            self.model.conversation.blocks.len(),
+            self.model.conversation.timeline.items().len(),
             self.model.conversation.chats.len()
         );
         let mut result = self.update_ui(ev, ui_tx, spawn_refs);
@@ -335,13 +335,13 @@ impl App {
             };
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
-            "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} conversation_blocks={} chats={} before_lines={} after_lines={} rebuilt={}",
+            "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
             revision,
             width,
             self.output_area.term_width,
             self.view_state.animation.spinner_frame,
             root_count,
-            self.model.conversation.blocks.len(),
+            self.model.conversation.timeline.items().len(),
             self.model.conversation.chats.len(),
             before_lines,
             after_lines,

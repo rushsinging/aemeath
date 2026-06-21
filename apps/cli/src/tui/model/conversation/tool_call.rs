@@ -8,10 +8,9 @@ pub struct ToolCall {
     pub name: String,
     pub args_preview: String,
     pub status: ToolCallStatus,
-    pub result: Option<String>,
-    pub result_content: Option<serde_json::Value>,
-    pub is_error: bool,
-    pub image_count: usize,
+    /// 工具执行结果（含 output/content/is_error/image_count 四字段）。
+    /// None = 尚未收到结果；Some = 已完成（成功或失败）。
+    pub result: Option<ToolResultPayload>,
     pub activities: Vec<String>,
 }
 
@@ -24,9 +23,6 @@ impl ToolCall {
             args_preview: String::new(),
             status: ToolCallStatus::PendingArgs,
             result: None,
-            result_content: None,
-            is_error: false,
-            image_count: 0,
             activities: Vec::new(),
         }
     }
@@ -61,11 +57,9 @@ impl ToolCall {
         }
     }
     pub fn complete(&mut self, result: ToolResultPayload) {
-        self.result = Some(result.output);
-        self.result_content = Some(result.content);
-        self.is_error = result.is_error;
-        self.image_count = result.image_count;
-        self.status = if result.is_error {
+        let is_error = result.is_error;
+        self.result = Some(result);
+        self.status = if is_error {
             ToolCallStatus::Error
         } else {
             ToolCallStatus::Success
@@ -125,18 +119,20 @@ mod tests {
     fn test_tool_call_completes_success() {
         let mut call = pending_call();
         call.bind();
-        call.complete(ToolResultPayload::new(
+        let payload = ToolResultPayload::new(
             "ok".to_string(),
             serde_json::json!({ "text": "ok" }),
             false,
             0,
-        ));
-        assert_eq!(call.status, ToolCallStatus::Success);
-        assert_eq!(call.result.as_deref(), Some("ok"));
-        assert_eq!(
-            call.result_content,
-            Some(serde_json::json!({ "text": "ok" }))
         );
+        call.complete(payload.clone());
+        assert_eq!(call.status, ToolCallStatus::Success);
+        assert_eq!(call.result.as_ref().map(|p| p.output.as_str()), Some("ok"));
+        assert_eq!(
+            call.result.as_ref().map(|p| &p.content),
+            Some(&serde_json::json!({ "text": "ok" }))
+        );
+        assert_eq!(call.result, Some(payload));
     }
 
     #[test]
@@ -150,7 +146,10 @@ mod tests {
             0,
         ));
         assert_eq!(call.status, ToolCallStatus::Error);
-        assert_eq!(call.result.as_deref(), Some("failed"));
-        assert!(call.is_error);
+        assert_eq!(
+            call.result.as_ref().map(|p| p.output.as_str()),
+            Some("failed")
+        );
+        assert!(call.result.as_ref().is_some_and(|p| p.is_error));
     }
 }
