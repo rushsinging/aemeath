@@ -36,7 +36,7 @@ impl ConversationModel {
                 chat_id,
                 turn_id,
                 id,
-                ToolResultPayload::new(output.clone(), content.clone(), is_error, 0),
+                ToolResultPayload::new(output, content, is_error, 0),
             )
             .is_some()
         {
@@ -47,10 +47,6 @@ impl ConversationModel {
                 chat_id.clone(),
                 turn_id.clone(),
                 ToolCallId::from_legacy_or_new(id),
-                output,
-                content,
-                is_error,
-                0,
             );
         }
     }
@@ -75,15 +71,7 @@ impl ConversationModel {
             id.as_ref(),
             ToolResultPayload::new(output.clone(), content.clone(), is_error, image_count),
         ) {
-            self.insert_tool_result_after_tool_call(
-                chat_id.clone(),
-                turn_id.clone(),
-                id.clone(),
-                output,
-                content,
-                is_error,
-                image_count,
-            );
+            self.insert_tool_result_after_tool_call(chat_id.clone(), turn_id.clone(), id.clone());
             crate::tui::log_debug!(
                 "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} timeline_items_after={}",
                 id,

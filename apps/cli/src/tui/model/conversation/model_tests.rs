@@ -955,23 +955,6 @@ fn test_clear_queued_by_id_removes_only_matching_entry() {
     assert!(model.queued_submissions.iter().any(|q| q.input_id == id_c));
     assert!(!model.queued_submissions.iter().any(|q| q.input_id == id_b));
 
-    // timeline：剩 A、C 的 QueuedUserMessage，无 B（via timeline）
-    let queued_blocks: Vec<_> = model
-        .timeline
-        .items()
-        .iter()
-        .filter_map(|b| match b {
-            OutputTimelineItem::QueuedUserMessage { input_id, text, .. } => {
-                Some((input_id.clone(), text.clone()))
-            }
-            _ => None,
-        })
-        .collect();
-    assert_eq!(queued_blocks.len(), 2);
-    assert!(queued_blocks.iter().any(|(iid, _)| iid == &id_a));
-    assert!(queued_blocks.iter().any(|(iid, _)| iid == &id_c));
-    assert!(!queued_blocks.iter().any(|(iid, _)| iid == &id_b));
-
     // timeline：剩 A、C 的 QueuedUserMessage，无 B
     let queued_timeline: Vec<_> = model
         .timeline
