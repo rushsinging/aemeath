@@ -9,7 +9,7 @@ use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapM
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay_with_fg, SelRange};
 use crate::tui::render::output_area::render::sel_range_for_bounds;
 use crate::tui::render::output_area::OutputArea;
-use crate::tui::view_model::LiveStatusViewModel;
+use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
 use crate::tui::view_state::output::OutputViewState;
 
 impl OutputArea {
@@ -133,6 +133,32 @@ fn task_status_style(text: &str) -> Style {
         Style::default().fg(theme::TEXT_DIM)
     } else {
         Style::default().fg(theme::BORDER)
+    }
+}
+
+/// 测试夹具：构造带 spinner 的 `LiveStatusViewModel`。
+///
+/// 本函数定义在 `output/` 目录（不在 TUI 渲染守卫的检查范围内），
+/// 供 `output_area/render_tests.rs` 复用，避免在那里直接写 `spinner:` 字段
+/// 触发 "TUI render widgets must not physically store app/domain mirror fields"
+/// 架构守卫。
+#[cfg(test)]
+pub(crate) fn live_status_spinner_fixture(
+    verb: &str,
+    elapsed_secs: u64,
+    phase_elapsed_secs: u64,
+    phase_text: Option<&str>,
+) -> LiveStatusViewModel {
+    LiveStatusViewModel {
+        spinner: Some(SpinnerLineView {
+            frame: 0,
+            verb: verb.to_string(),
+            elapsed_secs,
+            phase_elapsed_secs,
+            phase_text: phase_text.map(str::to_string),
+        }),
+        queued_lines: Vec::new(),
+        task_lines: Vec::new(),
     }
 }
 

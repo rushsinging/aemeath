@@ -1,6 +1,7 @@
 use super::render::content_area_for_scrollbar;
 use super::OutputArea;
 use crate::tui::render::output::rendered::{RenderedBlock, RenderedDocument, RenderedLine};
+use crate::tui::render::output::status_line::live_status_spinner_fixture;
 use crate::tui::render::output_area::selection::output_selection_view_for_test;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::render::theme;
@@ -261,4 +262,80 @@ fn test_click_on_gutter_line_maps_to_content_char() {
         Some("he"),
         "点击 gutter 钳到 plain 0，拖到列 4 选到内容字符 2"
     );
+}
+
+#[test]
+fn test_render_spinner_does_not_overflow_into_scrollbar_gap_narrow_terminal() {
+    let mut area = OutputArea::new();
+    // 文档 10 行 + visible=3 → needs_scrollbar=true → content_area.width=30-3=27
+    let doc_lines: Vec<RenderedLine> = (0..10)
+        .map(|i| RenderedLine::new(vec![Span::raw(format!("line {i}"))]))
+        .collect();
+    area.replace_document(RenderedDocument {
+        blocks: vec![RenderedBlock {
+            block_id: "a".into(),
+            lines: Rc::new(doc_lines),
+        }],
+    });
+    let area_rect = Rect::new(0, 0, 30, 3);
+    let view = OutputViewState {
+        last_visible_height: 3,
+        ..Default::default()
+    };
+    let live_status = live_status_spinner_fixture("Synthesizing", 24, 2, Some("Thinking"));
+    let mut buf = Buffer::empty(area_rect);
+
+    area.render(area_rect, &mut buf, &view, &live_status);
+
+    // content_area 宽度 = area.width - SCROLLBAR_RESERVE_COLS = 27
+    let content_width = (area_rect.width as usize).saturating_sub(SCROLLBAR_RESERVE_COLS as usize);
+    // 断言：scrollbar 间隙列（content_width .. area_width - 1）应当为空格或 scrollbar 字符，
+    // 不应出现 spinner 文本片段（'i' 'n' 'g' '(' 等 ASCII 文本）。
+    for row in 0..area_rect.height {
+        for col in content_width..(area_rect.width as usize - 1) {
+            let cell = &buf[(col as u16, row)];
+            let sym = cell.symbol();
+            let first = sym.chars().next().unwrap_or(' ');
+            let is_overflow_char = sym.len() == 1 && first.is_ascii_alphanumeric();
+            assert!(
+                !is_overflow_char,
+                "scrollbar gap row={row} col={col} 出现 spinner 文本片段: {sym:?} (content_width={content_width})"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_render_spinner_does_not_overflow_into_scrollbar_gap_very_narrow_terminal() {
+    let mut area = OutputArea::new();
+    area.replace_document(RenderedDocument {
+        blocks: vec![RenderedBlock {
+            block_id: "a".into(),
+            lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("doc")])]),
+        }],
+    });
+    // 更窄：width=18，content_width=15
+    let area_rect = Rect::new(0, 0, 18, 2);
+    let view = OutputViewState {
+        last_visible_height: 2,
+        ..Default::default()
+    };
+    let live_status = live_status_spinner_fixture("Synthesizing", 24, 2, Some("Thinking"));
+    let mut buf = Buffer::empty(area_rect);
+
+    area.render(area_rect, &mut buf, &view, &live_status);
+
+    let content_width = (area_rect.width as usize).saturating_sub(SCROLLBAR_RESERVE_COLS as usize);
+    for row in 0..area_rect.height {
+        for col in content_width..(area_rect.width as usize - 1) {
+            let cell = &buf[(col as u16, row)];
+            let sym = cell.symbol();
+            let first = sym.chars().next().unwrap_or(' ');
+            let is_overflow_char = sym.len() == 1 && first.is_ascii_alphanumeric();
+            assert!(
+                !is_overflow_char,
+                "very-narrow: scrollbar gap row={row} col={col} spinner 溢出: {sym:?}"
+            );
+        }
+    }
 }
