@@ -22,6 +22,9 @@ impl TypedTool for TaskListTool {
          for tasks that can run in parallel.\n\n\
          Call this after completing a task to find the next one to work on."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_list(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         TaskListInput::data_schema()

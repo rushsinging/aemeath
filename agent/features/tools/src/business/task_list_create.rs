@@ -19,6 +19,9 @@ impl TypedTool for TaskListCreateTool {
     fn description(&self) -> &str {
         "Create a task list for a complex multi-step request (3+ steps, multiple dependencies, or parallel sub-agent coordination). Tasks created afterwards auto-attach to this list."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_list_create(lang))
+    }
 
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
@@ -79,6 +82,7 @@ mod tests {
             session_reminders: None,
             memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
+            lang: "en".to_string(),
             allow_all: false,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,

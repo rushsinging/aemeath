@@ -57,6 +57,7 @@ fn test_ctx() -> ToolExecutionContext {
         session_reminders: None,
         memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
+        lang: "en".to_string(),
         allow_all: true,
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,

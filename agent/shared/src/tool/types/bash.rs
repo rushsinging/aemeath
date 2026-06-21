@@ -1,6 +1,7 @@
 //! Typed result for the `bash` tool (issue #273 core tool).
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Typed result returned by the `bash` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -9,6 +10,10 @@ pub struct BashResult {
     pub stderr: String,
     pub exit_code: i32,
     pub signal: Option<i32>,
+    /// 命令执行后 path_base 发生变化（如 `cd subdir`）时回填的新 path_base（#414）。
+    /// 仅在变化时为 `Some`，未变时为 `None`，减少噪音。历史 tool result 反序列化时缺省为 `None`。
+    #[serde(default)]
+    pub path_base: Option<PathBuf>,
 }
 
 /// Typed input for the `bash` tool.

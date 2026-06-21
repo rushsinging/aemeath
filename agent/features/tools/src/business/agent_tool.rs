@@ -23,6 +23,9 @@ impl TypedTool for AgentTool {
     fn description(&self) -> &str {
         "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, default 200 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `taskId` to bind to a tracked task for automatic status management."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
+    }
 
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;

@@ -21,6 +21,9 @@ impl TypedTool for SkillTool {
     fn description(&self) -> &str {
         "Execute a skill within the conversation. Skills are reusable prompt templates loaded from .claude/skills/ directories.\n\nUsage:\n- Use skill name to invoke (e.g., skill: \"commit\")\n- Optional args are passed to the skill content\n- Available skills are listed in system messages"
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::skill(lang))
+    }
 
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;

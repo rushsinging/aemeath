@@ -31,6 +31,9 @@ impl TypedTool for TaskUpdateTool {
          are now unblocked and ready to execute. Use this to decide what to work on next.\n\n\
          After completing a task, check the unblocked list or call TaskList to find the next available task."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_update(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         TaskUpdateInput::data_schema()

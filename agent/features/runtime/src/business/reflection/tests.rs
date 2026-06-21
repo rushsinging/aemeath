@@ -236,7 +236,7 @@ fn test_format_output_empty_sections() {
         outdated_memories: Vec::new(),
         user_alert: None,
     };
-    let text = ReflectionEngine::format_output(&output);
+    let text = ReflectionEngine::format_output(&output, "zh");
 
     assert!(text.contains("Reflection"));
     assert!(text.contains("暂无明显偏差"));
@@ -248,6 +248,7 @@ fn test_build_prompt_contains_memory_and_summary() {
     let prompt = ReflectionEngine::build_prompt(
         "- [Decision] 使用 JSON 存储",
         "User: 你好\nAssistant: 你好！\n",
+        "zh",
     );
     assert!(prompt.contains("使用 JSON 存储"));
     assert!(prompt.contains("最近对话摘要"));

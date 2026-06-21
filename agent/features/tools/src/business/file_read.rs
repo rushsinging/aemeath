@@ -21,6 +21,9 @@ impl TypedTool for FileReadTool {
     fn description(&self) -> &str {
         "Reads a file from the local filesystem. Supports text files (with line numbers) and images (PNG, JPG, GIF, WebP). Cannot read directories."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::file_read(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         ReadInput::data_schema()

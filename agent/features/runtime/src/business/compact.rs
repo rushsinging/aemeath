@@ -37,8 +37,4 @@ pub use summary::{
 };
 
 // restore 模块
-pub use restore::{
-    assemble_compacted, assemble_compacted_with_files, build_file_restoration,
-    fix_role_alternation, sanitize_tool_pairs, POST_COMPACT_MAX_FILES,
-    POST_COMPACT_MAX_TOKENS_PER_FILE, POST_COMPACT_TOKEN_BUDGET,
-};
+pub use restore::sanitize_tool_pairs;

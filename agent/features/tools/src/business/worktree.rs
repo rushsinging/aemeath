@@ -6,8 +6,10 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use share::i18n::tools::worktree as t;
 use share::tool::types::enter_worktree::{EnterWorktreeInput, EnterWorktreeResult};
 use share::tool::types::exit_worktree::{ExitWorktreeInput, ExitWorktreeResult};
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 /// Tool to enter a git worktree directory
@@ -30,12 +32,13 @@ fn workspace_context_payload(
     branch: &str,
     path_base: &Path,
     working_root: &Path,
+    lang: &str,
 ) -> EnterWorktreeResult {
     EnterWorktreeResult {
         branch: branch.to_string(),
         path_base: path_base.to_path_buf(),
         working_root: working_root.to_path_buf(),
-        guidance: "后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。如果必须使用绝对路径，必须位于当前 working_root 下。不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。".to_string(),
+        guidance: t::enter_guidance(lang).to_string(),
     }
 }
 
@@ -47,14 +50,11 @@ impl TypedTool for EnterWorktreeTool {
     }
 
     fn description(&self) -> &'static str {
-        "进入或创建 git worktree 目录，将当前工作上下文压栈保存。\
-           path 可选：省略时从 branch 推导为 .worktrees/<安全分支名>，其中路径分隔符和敏感字符会替换为 -。\
-           如果目标路径不存在，本工具会自动基于 main 执行 git worktree add 创建 worktree 后再进入。\
-           开 worktree 时必须调用本工具，NEVER 在主 checkout 中用 git checkout -b 或 git switch -c 代替 worktree。\
-           使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree \
-           进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。\
-           注意：不允许嵌套进入，必须先 ExitWorktree 退出当前 worktree 才能进入新的。\
-           已在非 main 分支不代表已在 worktree；应以本工具返回的 path_base/working_root 为准。"
+        t::enter_description(share::i18n::DEFAULT_LANG)
+    }
+
+    fn description_for(&self, lang: &str) -> Cow<'_, str> {
+        Cow::Borrowed(t::enter_description(lang))
     }
 
     fn input_schema(&self) -> Value {
@@ -69,14 +69,20 @@ impl TypedTool for EnterWorktreeTool {
     ) -> TypedToolResult<EnterWorktreeResult> {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return TypedToolResult::error(format!("Invalid input: {}", e)),
+            Err(e) => return TypedToolResult::error(t::invalid_input_error(&ctx.lang, e)),
         };
 
         let display_target = args.path.clone().unwrap_or_else(|| {
             args.branch
                 .clone()
                 .map(|branch| format!("branch {branch}"))
-                .unwrap_or_else(|| "未指定目标".to_string())
+                .unwrap_or_else(|| {
+                    if ctx.lang == "zh" {
+                        "未指定目标".to_string()
+                    } else {
+                        "(unspecified)".to_string()
+                    }
+                })
         });
 
         match ctx
@@ -87,13 +93,23 @@ impl TypedTool for EnterWorktreeTool {
                 let path_base = ctx.workspace_read().current_path_base();
                 let working_root = ctx.workspace_read().current_root();
                 let branch = get_current_branch(&working_root);
-                let headline = format!("已进入 worktree：{}", display_target);
+                let headline = if ctx.lang == "zh" {
+                    format!("已进入 worktree：{}", display_target)
+                } else {
+                    format!("Entered worktree: {}", display_target)
+                };
                 TypedToolResult::success(
                     headline.clone(),
-                    workspace_context_payload(&headline, &branch, &path_base, &working_root),
+                    workspace_context_payload(
+                        &headline,
+                        &branch,
+                        &path_base,
+                        &working_root,
+                        &ctx.lang,
+                    ),
                 )
             }
-            Err(e) => TypedToolResult::error(format!("进入 worktree 失败：{}", e)),
+            Err(e) => TypedToolResult::error(t::enter_error(&ctx.lang, e)),
         }
     }
 
@@ -114,10 +130,11 @@ impl TypedTool for ExitWorktreeTool {
     }
 
     fn description(&self) -> &'static str {
-        "退出当前 worktree，恢复进入前的上下文（从上下文栈中弹出）。\
-         如果提供了 path 参数，则直接切换到指定路径（等效于 EnterWorktree 后立即 pop 栈顶）。\
-         如果没有提供 path 参数，则恢复上一次 EnterWorktree 保存的工作目录。\
-         当上下文栈为空时返回错误。"
+        t::exit_description(share::i18n::DEFAULT_LANG)
+    }
+
+    fn description_for(&self, lang: &str) -> Cow<'_, str> {
+        Cow::Borrowed(t::exit_description(lang))
     }
 
     fn input_schema(&self) -> Value {
@@ -136,7 +153,7 @@ impl TypedTool for ExitWorktreeTool {
     ) -> TypedToolResult<ExitWorktreeResult> {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return TypedToolResult::error(format!("Invalid input: {}", e)),
+            Err(e) => return TypedToolResult::error(t::invalid_input_error(&ctx.lang, e)),
         };
 
         if let Some(path) = args.path {
@@ -146,17 +163,22 @@ impl TypedTool for ExitWorktreeTool {
                     let path_base = ctx.workspace_read().current_path_base();
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
-                    let headline = format!("已切换到：{}", path);
+                    let headline = if ctx.lang == "zh" {
+                        format!("已切换到：{}", path)
+                    } else {
+                        format!("Switched to: {}", path)
+                    };
                     TypedToolResult::success(
                         headline.clone(),
                         ExitWorktreeResult {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
                             working_root: working_root.clone(),
+                            guidance: t::switch_guidance(&ctx.lang, &path),
                         },
                     )
                 }
-                Err(e) => TypedToolResult::error(format!("切换路径失败：{}", e)),
+                Err(e) => TypedToolResult::error(t::switch_error(&ctx.lang, e)),
             }
         } else {
             // 恢复上一上下文
@@ -165,17 +187,22 @@ impl TypedTool for ExitWorktreeTool {
                     let path_base = ctx.workspace_read().current_path_base();
                     let working_root = ctx.workspace_read().current_root();
                     let branch = get_current_branch(&working_root);
-                    let headline = format!("已退出 worktree，恢复到：{}", prev.path_base.display());
+                    let headline = if ctx.lang == "zh" {
+                        format!("已退出 worktree，恢复到：{}", prev.path_base.display())
+                    } else {
+                        format!("Exited worktree, restored to: {}", prev.path_base.display())
+                    };
                     TypedToolResult::success(
                         headline.clone(),
                         ExitWorktreeResult {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
                             working_root: working_root.clone(),
+                            guidance: t::exit_guidance(&ctx.lang, &prev.path_base),
                         },
                     )
                 }
-                Err(e) => TypedToolResult::error(format!("退出 worktree 失败：{}", e)),
+                Err(e) => TypedToolResult::error(t::exit_error(&ctx.lang, e)),
             }
         }
     }
@@ -263,6 +290,7 @@ mod tests {
             "feature",
             Path::new("/repo/.worktrees/feature/subdir"),
             Path::new("/repo/.worktrees/feature"),
+            "zh",
         );
 
         assert_eq!(payload.branch, "feature");
@@ -271,8 +299,16 @@ mod tests {
             Path::new("/repo/.worktrees/feature/subdir")
         );
         assert_eq!(payload.working_root, Path::new("/repo/.worktrees/feature"));
-        assert!(payload
-            .guidance
-            .contains("后续 Read/Edit/Write/Glob/Grep/Bash"));
+        // guidance 区分 path_base/working_root 语义（#413）
+        assert!(payload.guidance.contains("path_base"));
+        assert!(payload.guidance.contains("working_root"));
+    }
+
+    #[test]
+    fn test_workspace_context_payload_guidance_bilingual() {
+        let zh = workspace_context_payload("headline", "b", Path::new("/p"), Path::new("/p"), "zh");
+        let en = workspace_context_payload("headline", "b", Path::new("/p"), Path::new("/p"), "en");
+        assert!(zh.guidance.contains("相对路径"));
+        assert!(en.guidance.contains("relative paths"));
     }
 }

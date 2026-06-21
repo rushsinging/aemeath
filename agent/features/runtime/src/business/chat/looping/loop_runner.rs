@@ -265,6 +265,7 @@ where
                 session_reminders: Some(session_reminders.clone()),
                 memory_config: memory_config.clone(),
                 plan_mode: None,
+                lang: language.clone(),
                 allow_all,
                 max_tool_concurrency,
                 max_agent_concurrency,
@@ -287,7 +288,7 @@ where
 
         // Refresh tool schemas each turn so dynamically registered MCP tools
         // are visible to the LLM once the background connector finishes.
-        let tool_schemas = registry.schemas();
+        let tool_schemas = registry.schemas_for(&language);
         let tool_schema_tokens =
             crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
 
@@ -350,6 +351,7 @@ where
             &memory_config,
             &cwd,
             &ctx.client,
+            &language,
         )
         .await
         {
@@ -633,6 +635,7 @@ where
                             &cwd,
                             client,
                             &system_prompt_text,
+                            &language,
                         )
                         .await
                         {

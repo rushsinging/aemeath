@@ -22,6 +22,7 @@ pub(super) async fn run_reflection_impl(
         &me.inner.cwd,
         client.as_ref(),
         &me.inner.context.system_prompt_text,
+        &me.inner.context.language,
     )
     .await
     .map_err(|e| {

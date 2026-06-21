@@ -18,6 +18,9 @@ impl TypedTool for TaskStopTool {
     fn description(&self) -> &str {
         "Stop a running or pending task. Marks the task as deleted and cancels any associated work."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_stop(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         TaskStopInput::data_schema()

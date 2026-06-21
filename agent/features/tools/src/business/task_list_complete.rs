@@ -19,6 +19,9 @@ impl TypedTool for TaskListCompleteTool {
     fn description(&self) -> &str {
         "Complete the current active task list after all tasks for the current user request are done. This stops future reminders for that completed list."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_list_complete(lang))
+    }
 
     fn input_schema(&self) -> Value {
         serde_json::json!({"type": "object", "properties": {}})
@@ -70,6 +73,7 @@ mod tests {
             session_reminders: None,
             memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
+            lang: "en".to_string(),
             allow_all: false,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,

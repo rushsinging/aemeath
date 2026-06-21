@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
 use share::tool::{ImageData, PathAccess, ToolResult};
+use std::borrow::Cow;
 
 /// 工具列表查询能力（contract 层定义，由 `ToolRegistry` 实现）。
 ///
@@ -22,6 +23,15 @@ pub trait ToolListProvider: Send + Sync {
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
+
+    /// 按 lang 返回本地化 description（注入 LLM 的 tool schema 用）。
+    /// 默认委托 [`description`](Self::description)（默认语言英文），
+    /// 需要双语的工具覆盖此方法。
+    fn description_for(&self, lang: &str) -> Cow<'_, str> {
+        let _ = lang;
+        Cow::Borrowed(self.description())
+    }
+
     fn input_schema(&self) -> Value;
 
     /// 输出数据的 JSON Schema（用于 TUI 结构化显示）。
@@ -103,6 +113,17 @@ pub trait TypedTool: Send + Sync {
 
     fn name(&self) -> &str;
     fn description(&self) -> &str;
+
+    /// 按 lang 返回本地化 description（注入 LLM 的 tool schema 用）。
+    ///
+    /// 默认委托 [`description`](TypedTool::description)（默认语言英文），保证未覆盖的工具
+    /// ——包括无法按 lang 切换的 MCP 动态工具——自动优雅降级。需要双语的工具覆盖此方法，
+    /// 从 `share::i18n::tools::xxx(lang)` 取文案。
+    fn description_for(&self, lang: &str) -> Cow<'_, str> {
+        let _ = lang;
+        Cow::Borrowed(self.description())
+    }
+
     fn input_schema(&self) -> Value;
 
     /// 输出数据的 JSON Schema（用于 TUI 结构化显示）。
@@ -158,6 +179,10 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
 
     fn description(&self) -> &str {
         self.0.description()
+    }
+
+    fn description_for(&self, lang: &str) -> Cow<'_, str> {
+        self.0.description_for(lang)
     }
 
     fn input_schema(&self) -> Value {

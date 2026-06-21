@@ -129,7 +129,7 @@ impl AgentRunner for CliAgentRunner {
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
         tools::api::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
-        let sub_schemas = sub_registry.schemas();
+        let sub_schemas = sub_registry.schemas_for(&ctx.lang);
         let messages = vec![Message::user(prompt)];
         let handler = SilentHandler;
         // For sub-agents, use the system prompt as a single cached block
@@ -177,6 +177,7 @@ impl AgentRunner for CliAgentRunner {
             session_reminders: ctx.session_reminders.clone(),
             memory_config: ctx.memory_config.clone(),
             plan_mode: ctx.plan_mode,
+            lang: ctx.lang.clone(),
             allow_all: ctx.allow_all,
             max_tool_concurrency: ctx.max_tool_concurrency,
             max_agent_concurrency: ctx.max_agent_concurrency,
