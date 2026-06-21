@@ -73,16 +73,16 @@ impl ReflectionEngine {
         apply::apply_outdated(ids, store)
     }
 
-    pub fn format_output(output: &ReflectionOutput) -> String {
-        format::format_output(output)
+    pub fn format_output(output: &ReflectionOutput, lang: &str) -> String {
+        format::format_output(output, lang)
     }
 
     pub fn memory_summary(entries: &[share::memory::MemoryEntry]) -> String {
         store::memory_summary(entries)
     }
 
-    pub fn build_prompt(project_memory: &str, recent_summary: &str) -> String {
-        format::build_prompt(project_memory, recent_summary)
+    pub fn build_prompt(project_memory: &str, recent_summary: &str, lang: &str) -> String {
+        format::build_prompt(project_memory, recent_summary, lang)
     }
 
     pub fn recent_messages_summary(

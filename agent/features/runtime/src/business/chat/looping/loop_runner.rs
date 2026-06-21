@@ -351,6 +351,7 @@ where
             &memory_config,
             &cwd,
             &ctx.client,
+            &language,
         )
         .await
         {
@@ -634,6 +635,7 @@ where
                             &cwd,
                             client,
                             &system_prompt_text,
+                            &language,
                         )
                         .await
                         {

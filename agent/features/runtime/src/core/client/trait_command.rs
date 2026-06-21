@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use sdk::SdkError;
+use share::i18n::runtime::command as t;
 
 use super::accessors::AgentClientImpl;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
 pub(super) async fn execute_command_impl(
-    _me: &AgentClientImpl,
+    me: &AgentClientImpl,
     name: &str,
     args: &str,
     sdk_ctx: sdk::CommandContext,
@@ -16,6 +17,8 @@ pub(super) async fn execute_command_impl(
     use crate::business::state::AppState;
     use crate::core::command::CommandContext as RtCmdCtx;
     use share::config::Config;
+
+    let lang = &me.inner.context.language;
 
     // Build runtime command context
     let state = Arc::new(AppState::default());
@@ -53,14 +56,12 @@ pub(super) async fn execute_command_impl(
                 });
                 return Ok(super::mapping::map_command_result(result));
             }
-            Ok(sdk::CommandResult::Error(format!(
-                "未知命令: /{}",
-                cmd_name
+            Ok(sdk::CommandResult::Error(t::unknown_command(
+                lang, &cmd_name,
             )))
         }
-        None => Ok(sdk::CommandResult::Error(format!(
-            "未知命令: /{}",
-            cmd_name
+        None => Ok(sdk::CommandResult::Error(t::unknown_command(
+            lang, &cmd_name,
         ))),
     }
 }

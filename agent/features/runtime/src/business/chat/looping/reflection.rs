@@ -17,6 +17,7 @@ pub async fn run_reflection(
     cwd: &Path,
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
+    lang: &str,
 ) -> Option<String> {
     run_reflection_with_base_dir(
         config,
@@ -26,6 +27,7 @@ pub async fn run_reflection(
         client,
         system_prompt_text,
         storage::api::memory_base_dir(),
+        lang,
     )
     .await
 }
@@ -36,6 +38,7 @@ pub async fn run_precompact_reflection(
     cwd: &Path,
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
+    lang: &str,
 ) -> Option<String> {
     let compacted_messages =
         crate::business::compact::messages_selected_for_precompact_memory(messages);
@@ -49,6 +52,7 @@ pub async fn run_precompact_reflection(
         client,
         system_prompt_text,
         storage::api::memory_base_dir(),
+        lang,
     )
     .await
 }
@@ -80,6 +84,7 @@ async fn run_forced_reflection_with_base_dir(
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
+    lang: &str,
 ) -> Option<String> {
     match run_complete_reflection_with_base_dir(
         ReflectionRunMode::Forced,
@@ -89,6 +94,7 @@ async fn run_forced_reflection_with_base_dir(
         client,
         system_prompt_text,
         base_dir,
+        lang,
     )
     .await
     {
@@ -108,6 +114,7 @@ async fn run_reflection_with_base_dir(
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
+    lang: &str,
 ) -> Option<String> {
     match run_complete_reflection_with_base_dir(
         ReflectionRunMode::Interval { turn_count },
@@ -117,6 +124,7 @@ async fn run_reflection_with_base_dir(
         client,
         system_prompt_text,
         base_dir,
+        lang,
     )
     .await
     {

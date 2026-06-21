@@ -1,16 +1,21 @@
 use super::types::ReflectionOutput;
+use share::i18n::runtime::reflection as t;
 use share::message::Message;
 
-pub fn format_output(output: &ReflectionOutput) -> String {
-    let mut sections = vec!["Reflection".to_string()];
+pub fn format_output(output: &ReflectionOutput, lang: &str) -> String {
+    let mut sections = vec![t::section_title_reflection(lang).to_string()];
     if output.deviations.is_empty() {
-        sections.push("偏差：暂无明显偏差".to_string());
+        sections.push(t::deviations_empty(lang).to_string());
     } else {
-        sections.push(format!("偏差：\n- {}", output.deviations.join("\n- ")));
+        sections.push(format!(
+            "{}{}",
+            t::deviations_header(lang),
+            output.deviations.join("\n- ")
+        ));
     }
 
     if output.suggested_memories.is_empty() {
-        sections.push("记忆建议：暂无建议".to_string());
+        sections.push(t::suggestions_empty(lang).to_string());
     } else {
         let suggestions = output
             .suggested_memories
@@ -18,20 +23,28 @@ pub fn format_output(output: &ReflectionOutput) -> String {
             .map(|suggestion| format!("- [{:?}] {}", suggestion.category, suggestion.content))
             .collect::<Vec<_>>()
             .join("\n");
-        sections.push(format!("记忆建议：\n{suggestions}"));
+        sections.push(format!("{}{suggestions}", t::suggestions_header(lang)));
     }
 
     if !output.outdated_memories.is_empty() {
-        sections.push(format!("过期记忆：{}", output.outdated_memories.join(", ")));
+        sections.push(format!(
+            "{}{}",
+            t::outdated_header(lang),
+            output.outdated_memories.join(", ")
+        ));
     }
     if let Some(alert) = &output.user_alert {
-        sections.push(format!("用户提醒：{alert}"));
+        sections.push(format!("{}{alert}", t::user_alert_header(lang)));
     }
     sections.join("\n\n")
 }
 
-pub fn build_prompt(project_memory: &str, recent_summary: &str) -> String {
-    crate::business::reflection::prompt::build_reflection_prompt(project_memory, recent_summary)
+pub fn build_prompt(project_memory: &str, recent_summary: &str, lang: &str) -> String {
+    crate::business::reflection::prompt::build_reflection_prompt(
+        project_memory,
+        recent_summary,
+        lang,
+    )
 }
 
 pub fn recent_messages_summary(messages: &[Message], max_chars: usize) -> String {

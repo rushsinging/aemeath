@@ -38,6 +38,7 @@ pub(crate) async fn auto_compact<S>(
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
+    language: &str,
 ) -> Option<CompactOutcome>
 where
     S: ChatEventSink,
@@ -120,6 +121,7 @@ where
         cwd,
         llm_client.as_ref(),
         system_prompt_text,
+        language,
     )
     .await
     {

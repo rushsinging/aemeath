@@ -205,6 +205,7 @@ async fn test_run_complete_reflection_disabled_returns_none() {
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await
     .unwrap();
@@ -231,6 +232,7 @@ async fn test_run_complete_reflection_interval_miss_returns_none() {
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await
     .unwrap();
@@ -258,6 +260,7 @@ async fn test_run_complete_reflection_forced_skips_interval_hit_check() {
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await
     .unwrap()
@@ -300,6 +303,7 @@ async fn test_run_reflection_auto_apply_suggestions_writes_memory() {
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await
     .unwrap()
@@ -353,6 +357,7 @@ async fn test_run_reflection_auto_apply_false_does_not_write_memory() {
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await
     .unwrap();
@@ -388,6 +393,7 @@ async fn test_run_complete_reflection_empty_response_returns_err_empty_response(
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await;
 
@@ -415,6 +421,7 @@ async fn test_run_complete_reflection_unparseable_returns_err_unparseable() {
         &client,
         "system prompt",
         base_dir.clone(),
+        "zh",
     )
     .await;
 

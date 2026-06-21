@@ -68,7 +68,10 @@ fn run_reflection(ctx: &CommandContext) -> CommandResult {
     };
 
     let output = build_lightweight_output(&memories);
-    CommandResult::Success(ReflectionEngine::format_output(&output))
+    CommandResult::Success(ReflectionEngine::format_output(
+        &output,
+        &ctx.config.language,
+    ))
 }
 
 fn build_lightweight_output(memories: &[MemoryEntry]) -> ReflectionOutput {

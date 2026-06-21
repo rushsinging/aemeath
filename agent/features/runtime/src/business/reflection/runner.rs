@@ -1,6 +1,7 @@
 use super::types::{ReflectionError, ReflectionResult};
 use super::{ReflectionEngine, ReflectionOutput};
 use crate::LOG_TARGET;
+use share::i18n::runtime::reflection as t;
 use std::path::{Path, PathBuf};
 use storage::api::MemoryStore;
 
@@ -27,6 +28,7 @@ pub async fn run_complete_reflection(
     cwd: &Path,
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
+    lang: &str,
 ) -> ReflectionResult<Option<CompleteReflectionResult>> {
     run_complete_reflection_with_base_dir(
         mode,
@@ -36,6 +38,7 @@ pub async fn run_complete_reflection(
         client,
         system_prompt_text,
         storage::api::memory_base_dir(),
+        lang,
     )
     .await
 }
@@ -49,6 +52,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
     client: &provider::api::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
+    lang: &str,
 ) -> ReflectionResult<Option<CompleteReflectionResult>> {
     if !should_run_reflection(mode, config) {
         return Ok(None);
@@ -69,7 +73,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
 
     let project_memory = ReflectionEngine::memory_summary(&entries);
     let recent_summary = ReflectionEngine::recent_messages_summary(messages, usize::MAX);
-    let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary);
+    let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary, lang);
 
     let (full_response, input_tokens, output_tokens) =
         call_llm_for_reflection(client, &prompt, system_prompt_text).await?;
@@ -78,14 +82,15 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
         ReflectionError::Unparseable(format!("{e}: {}", truncate_200(&full_response)))
     })?;
 
-    let mut formatted_content = ReflectionEngine::format_output(&output);
+    let mut formatted_content = ReflectionEngine::format_output(&output, lang);
     let mut auto_applied = false;
     if config.reflection.auto_apply_suggestions {
         match ReflectionEngine::apply_output(&output, &mut store) {
             Ok(result) => {
-                formatted_content.push_str(&format!(
-                    "\n已自动应用 Reflection：新增/合并 {} 条记忆，标记 {} 条过时记忆。",
-                    result.suggestions_added, result.outdated_marked
+                formatted_content.push_str(&t::auto_apply_summary(
+                    lang,
+                    result.suggestions_added,
+                    result.outdated_marked,
                 ));
                 auto_applied = true;
             }
