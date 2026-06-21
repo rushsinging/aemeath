@@ -63,7 +63,6 @@ fn phase_text(phase: &SpinnerPhase) -> String {
         SpinnerPhase::Generating => "Generating...".to_string(),
         SpinnerPhase::AgentWorking => "Agent working...".to_string(),
         SpinnerPhase::Reflecting => "Reflecting...".to_string(),
-        SpinnerPhase::ThinkingQueued => "Thinking with queued input...".to_string(),
         SpinnerPhase::Compacting => "Compacting...".to_string(),
         SpinnerPhase::CallingTool(name) => format!("Calling {name}..."),
         SpinnerPhase::CallingTools { remaining } => {
@@ -158,10 +157,6 @@ mod tests {
         assert_eq!(phase_text(&SpinnerPhase::Generating), "Generating...");
         assert_eq!(phase_text(&SpinnerPhase::AgentWorking), "Agent working...");
         assert_eq!(phase_text(&SpinnerPhase::Reflecting), "Reflecting...");
-        assert_eq!(
-            phase_text(&SpinnerPhase::ThinkingQueued),
-            "Thinking with queued input..."
-        );
     }
 
     #[test]
