@@ -23,6 +23,9 @@ impl TypedTool for GrepTool {
     fn description(&self) -> &str {
         "Search file contents using ripgrep regex syntax. Supports glob file filters."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::grep(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         GrepInput::data_schema()

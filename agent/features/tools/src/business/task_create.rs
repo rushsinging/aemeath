@@ -36,7 +36,10 @@ impl TypedTool for TaskCreateTool {
            - Mark as in_progress before starting work\n\
            - Mark as completed when done — the system will show which tasks are unblocked\n\n\
            Use TaskList to discover pending tasks with no unresolved dependencies.\n\
-           Launch Agent for independent tasks that can run in parallel."
+            Launch Agent for independent tasks that can run in parallel."
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_create(lang))
     }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;

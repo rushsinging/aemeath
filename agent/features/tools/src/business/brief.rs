@@ -15,6 +15,9 @@ impl TypedTool for BriefTool {
     fn description(&self) -> &str {
         "Generate a brief summary of work completed in this session. Useful for creating status updates, documenting progress, or preparing handoff notes."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::brief(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         BriefInput::data_schema()

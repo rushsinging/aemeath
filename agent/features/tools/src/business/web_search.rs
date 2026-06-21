@@ -15,6 +15,9 @@ impl TypedTool for WebSearchTool {
     fn description(&self) -> &str {
         "Search the web for information. Returns search results with titles, URLs, and snippets.\n\nUsage:\n- Use this tool when you need to find current information, documentation, or answers to questions\n- Results include titles, URLs, and brief snippets\n- You can then use WebFetch to get full content from specific URLs"
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::web::web_search(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         WebSearchInput::data_schema()

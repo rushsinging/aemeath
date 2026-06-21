@@ -14,6 +14,9 @@ impl TypedTool for SleepTool {
     fn description(&self) -> &str {
         "Pause execution for a specified duration. Useful for waiting for asynchronous operations or rate limiting."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::sleep(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         SleepInput::data_schema()

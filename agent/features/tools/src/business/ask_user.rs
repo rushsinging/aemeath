@@ -14,6 +14,9 @@ impl TypedTool for AskUserQuestionTool {
     fn description(&self) -> &str {
         "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::ask_user(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         AskUserQuestionInput::data_schema()

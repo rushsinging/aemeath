@@ -23,6 +23,9 @@ impl TypedTool for LspTool {
     fn description(&self) -> &str {
         "Get code intelligence information using language tools.\n\nSupported operations:\n- diagnostics: Get compiler errors/warnings for a file\n- definition: Find the definition of a symbol at a position\n- references: Find all references to a symbol\n- symbols: List symbols in a file or workspace\n\nThis tool uses language-specific CLI tools (cargo, tsc, pylint, etc.) to provide code intelligence."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::lsp(lang))
+    }
 
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;

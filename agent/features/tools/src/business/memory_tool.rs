@@ -21,6 +21,9 @@ impl TypedTool for MemoryTool {
     fn description(&self) -> &str {
         "Manage persistent memory. Supports add, delete, search, pin, and list actions."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::memory(lang))
+    }
 
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;

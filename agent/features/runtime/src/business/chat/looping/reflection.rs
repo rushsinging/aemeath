@@ -106,6 +106,7 @@ async fn run_forced_reflection_with_base_dir(
         }
     }
 }
+#[allow(clippy::too_many_arguments)]
 async fn run_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
     turn_count: usize,

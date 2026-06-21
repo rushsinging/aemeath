@@ -24,6 +24,9 @@ impl TypedTool for EnterPlanModeTool {
         "Enter plan mode. In plan mode, tool calls are simulated and not actually executed. \
          Use this when you need to create a detailed plan before taking actions."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::enter_plan_mode(lang))
+    }
 
     fn input_schema(&self) -> serde_json::Value {
         use share::tool::types::ToolSchema;
@@ -69,6 +72,9 @@ impl TypedTool for ExitPlanModeTool {
     fn description(&self) -> &'static str {
         "Exit plan mode and return to normal execution. \
          Optionally execute the planned actions that were simulated."
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::exit_plan_mode(lang))
     }
 
     fn input_schema(&self) -> serde_json::Value {

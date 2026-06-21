@@ -18,6 +18,9 @@ impl TypedTool for TaskGetTool {
     fn description(&self) -> &str {
         "Retrieve a task by ID. Returns task details including subject, description, status, and dependencies."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::task::task_get(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         TaskGetInput::data_schema()

@@ -105,6 +105,9 @@ impl TypedTool for WebFetchTool {
     fn description(&self) -> &str {
         "Fetches content from a URL via HTTP GET. Read-only. Results may be truncated for large content. For GitHub URLs, prefer `gh` CLI."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::web::web_fetch(lang))
+    }
 
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;

@@ -20,6 +20,9 @@ impl TypedTool for GlobTool {
     fn description(&self) -> &str {
         "Fast file pattern matching tool. Supports glob patterns (e.g. \"**/*.rs\"). Returns paths sorted by modification time."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::glob(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         GlobInput::data_schema()

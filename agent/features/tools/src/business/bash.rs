@@ -33,6 +33,9 @@ impl TypedTool for BashTool {
     fn description(&self) -> &str {
         "Executes a bash command and returns its output. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s)."
     }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::bash(lang))
+    }
     fn input_schema(&self) -> Value {
         use share::tool::types::ToolSchema;
         BashInput::data_schema()
