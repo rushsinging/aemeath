@@ -1,5 +1,4 @@
 use super::*;
-use crate::tui::model::conversation::block::ConversationBlock;
 use std::path::PathBuf;
 
 fn make_app() -> App {
@@ -17,9 +16,10 @@ fn test_append_system_notice_pushes_system_block() {
     let has_system = app
         .model
         .conversation
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .any(|block| matches!(block, ConversationBlock::System { text, .. } if text == "你好"));
+        .any(|item| matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } if text == "你好"));
     assert!(
         has_system,
         "系统消息应作为 System block 进入 ConversationModel"
@@ -31,8 +31,8 @@ fn test_append_error_notice_pushes_error_block() {
     let mut app = make_app();
     app.append_error_notice("出错了");
     let has_error =
-        app.model.conversation.blocks.iter().any(
-            |block| matches!(block, ConversationBlock::Error { text, .. } if text == "出错了"),
+        app.model.conversation.timeline.items().iter().any(
+            |item| matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } if text == "出错了"),
         );
     assert!(
         has_error,
@@ -78,8 +78,8 @@ fn test_append_user_echo_pushes_user_block_without_new_chat() {
         chats_before,
         "回显不应新建 chat"
     );
-    let has_user = app.model.conversation.blocks.iter().any(
-        |block| matches!(block, ConversationBlock::UserMessage { text, .. } if text == "我的答复"),
+    let has_user = app.model.conversation.timeline.items().iter().any(
+        |item| matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "我的答复"),
     );
     assert!(
         has_user,
@@ -110,10 +110,10 @@ fn test_append_user_echo_renders_gt_prefix_into_document() {
 #[test]
 fn test_append_user_echo_empty_text_still_creates_block() {
     let mut app = make_app();
-    let before = app.model.conversation.blocks.len();
+    let before = app.model.conversation.timeline.items().len();
     app.append_user_echo("");
     assert_eq!(
-        app.model.conversation.blocks.len(),
+        app.model.conversation.timeline.items().len(),
         before + 1,
         "空回显文本仍应创建一个 UserMessage block"
     );
@@ -122,10 +122,10 @@ fn test_append_user_echo_empty_text_still_creates_block() {
 #[test]
 fn test_append_error_notice_empty_text_still_creates_block() {
     let mut app = make_app();
-    let before = app.model.conversation.blocks.len();
+    let before = app.model.conversation.timeline.items().len();
     app.append_error_notice("");
     assert_eq!(
-        app.model.conversation.blocks.len(),
+        app.model.conversation.timeline.items().len(),
         before + 1,
         "空错误文本仍应创建一个 Error block"
     );
@@ -138,8 +138,8 @@ fn test_enqueue_submission_echo_renders_queued_block_into_model() {
     let mut app = make_app();
     app.enqueue_submission_echo(sdk::InputId::new_v7(), "排队中的输入");
 
-    let has_queued = app.model.conversation.blocks.iter().any(|block| {
-        matches!(block, ConversationBlock::QueuedUserMessage { text, .. } if text == "排队中的输入")
+    let has_queued = app.model.conversation.timeline.items().iter().any(|item| {
+        matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage { text, .. } if text == "排队中的输入")
     });
     assert!(
         has_queued,
@@ -177,8 +177,8 @@ fn test_enqueue_submission_echo_uses_display_text_for_copied_text() {
     let mut app = make_app();
     app.enqueue_submission_echo(sdk::InputId::new_v7(), "[Copied Text 1]");
 
-    let has_queued = app.model.conversation.blocks.iter().any(|block| {
-        matches!(block, ConversationBlock::QueuedUserMessage { text, .. } if text == "[Copied Text 1]")
+    let has_queued = app.model.conversation.timeline.items().iter().any(|item| {
+        matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage { text, .. } if text == "[Copied Text 1]")
     });
     assert!(has_queued, "排队区应显示折叠占位符");
     assert_eq!(

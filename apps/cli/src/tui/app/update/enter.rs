@@ -225,10 +225,10 @@ mod tests {
         // 提交原文（非折叠占位符）经事件通道发送。
         assert_eq!(sent_user_message_text(&result), Some("a\nb\nc\nd"));
         // 排队区即时显示折叠占位符（display_text），正式回显由 MessagesSync 驱动。
-        let has_queued = app.model.conversation.blocks.iter().any(|block| {
+        let has_queued = app.model.conversation.timeline.items().iter().any(|item| {
             matches!(
-                block,
-                crate::tui::model::conversation::block::ConversationBlock::QueuedUserMessage { text, .. }
+                item,
+                crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage { text, .. }
                     if text == "[Copied 4 lines]"
             )
         });
@@ -282,10 +282,11 @@ mod tests {
         let block_input_id = app
             .model
             .conversation
-            .blocks
+            .timeline
+            .items()
             .iter()
-            .find_map(|block| match block {
-                crate::tui::model::conversation::block::ConversationBlock::QueuedUserMessage {
+            .find_map(|item| match item {
+                crate::tui::model::output_timeline::OutputTimelineItem::QueuedUserMessage {
                     input_id,
                     ..
                 } => Some(input_id.clone()),

@@ -358,10 +358,12 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
     assert!(timeline_tool_call_ref_exists(
         &model, &live_chat, &live_turn, &tool_id
     ));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolResult { id, output, .. }
-            if *id == tool_id && output == "workspace manifest"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::ToolResult { reference, .. }
+            if reference.context.chat_id == live_chat
+                && reference.context.turn_id == live_turn
+                && reference.tool_call_id == tool_id
     )));
 }
 
@@ -556,13 +558,13 @@ fn test_conversation_late_tool_call_binds_existing_result() {
     });
 
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
-    assert!(!model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::OrphanToolResult { id, .. } if *id == tool_1_id.to_string()
+    assert!(!model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::OrphanToolResult { id, .. } if id == "tool-1"
     )));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::ToolResult { id, .. } if *id == tool_1_id
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::ToolResult { reference, .. } if reference.tool_call_id == tool_1_id
     )));
     assert_eq!(
         model
@@ -613,13 +615,13 @@ fn test_conversation_streams_text_and_thinking_into_blocks() {
         text: "answer".to_string(),
     });
 
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::Thinking { text, .. } if text == "plan"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::Thinking { text, .. } if text == "plan"
     )));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::AssistantText { text, .. } if text == "answer"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::AssistantText { text, .. } if text == "answer"
     )));
 }
 
@@ -645,10 +647,11 @@ fn test_conversation_starts_new_thinking_block_after_block_complete() {
     });
 
     let thinking_blocks: Vec<_> = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .filter_map(|block| match block {
-            super::block::ConversationBlock::Thinking { text, .. } => Some(text.as_str()),
+        .filter_map(|item| match item {
+            OutputTimelineItem::Thinking { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect();
@@ -687,23 +690,25 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
     });
 
     let text_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
+        .position(|item| {
             matches!(
-                block,
-                super::block::ConversationBlock::AssistantText { text, .. } if text == "结论先到"
+                item,
+                OutputTimelineItem::AssistantText { text, .. } if text == "结论先到"
             )
         })
         .expect("assistant text block");
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
     let tool_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
+        .position(|item| {
             matches!(
-                block,
-                super::block::ConversationBlock::ToolCall { id, .. } if *id == tool_1_id
+                item,
+                OutputTimelineItem::ToolCall { reference } if reference.tool_call_id == tool_1_id
             )
         })
         .expect("tool block");
@@ -750,20 +755,24 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
 
     let tool_1_id = super::ids::ToolCallId::new("tool-1");
     let text_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| matches!(
-            block,
-            super::block::ConversationBlock::AssistantText { text, .. } if text == "已经完成的文字"
-        ))
+        .position(|item| {
+            matches!(
+                item,
+                OutputTimelineItem::AssistantText { text, .. } if text == "已经完成的文字"
+            )
+        })
         .expect("assistant text block");
     let tool_pos = model
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .position(|block| {
+        .position(|item| {
             matches!(
-                block,
-                super::block::ConversationBlock::ToolCall { id, .. } if *id == tool_1_id
+                item,
+                OutputTimelineItem::ToolCall { reference } if reference.tool_call_id == tool_1_id
             )
         })
         .expect("tool block");
@@ -901,9 +910,9 @@ fn test_queue_submission_pushes_queued_user_message_block() {
     assert!(changes
         .iter()
         .any(|c| matches!(c, ConversationChange::QueuedSubmissionAdded { .. })));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::QueuedUserMessage { text, .. } if text == "排队的消息"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::QueuedUserMessage { text, .. } if text == "排队的消息"
     )));
     assert_eq!(model.queued_submissions.len(), 1);
 }
@@ -946,12 +955,13 @@ fn test_clear_queued_by_id_removes_only_matching_entry() {
     assert!(model.queued_submissions.iter().any(|q| q.input_id == id_c));
     assert!(!model.queued_submissions.iter().any(|q| q.input_id == id_b));
 
-    // blocks：剩 A、C 的 QueuedUserMessage，无 B
+    // timeline：剩 A、C 的 QueuedUserMessage，无 B（via timeline）
     let queued_blocks: Vec<_> = model
-        .blocks
+        .timeline
+        .items()
         .iter()
         .filter_map(|b| match b {
-            super::block::ConversationBlock::QueuedUserMessage { input_id, text, .. } => {
+            OutputTimelineItem::QueuedUserMessage { input_id, text, .. } => {
                 Some((input_id.clone(), text.clone()))
             }
             _ => None,
@@ -1137,9 +1147,9 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         c,
         ConversationChange::ToolCallCompleted { status, .. } if *status == ToolCallStatus::Success
     )));
-    assert!(!model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::OrphanToolResult { id, .. } if id == "call_agent_1"
+    assert!(!model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::OrphanToolResult { id, .. } if id == "call_agent_1"
     )));
 }
 

@@ -3,7 +3,7 @@
 //! AskUserBatch 块同一时刻至多一个，使用固定 id `ASK_USER_BLOCK_ID`，
 //! 管理多问 + 确认页的状态机（Answering → Confirming → Confirmed）。
 
-use super::block::{AskUserPhase, AskUserSlot, ConversationBlock};
+use super::block::{AskUserPhase, AskUserSlot};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use crate::tui::model::output_timeline::OutputTimelineItem;
@@ -74,18 +74,6 @@ impl ConversationModel {
         self.clear_active_text_blocks();
         self.remove_ask_user_block();
         let n = slots.len();
-        self.blocks.push(ConversationBlock::AskUserBatch {
-            id: ASK_USER_BLOCK_ID.to_string(),
-            slots: slots.clone(),
-            active_index: 0,
-            phase: AskUserPhase::Answering,
-            cursor: 0,
-            selected: vec![false; first_total],
-            chat_input_active: false,
-            chat_input_text: String::new(),
-            confirm_cursor: n, // 默认停在「全部确认提交」
-            confirmed: false,
-        });
         self.timeline.push(OutputTimelineItem::AskUserBatch {
             id: ASK_USER_BLOCK_ID.to_string(),
             slots,
@@ -342,12 +330,10 @@ impl ConversationModel {
 
     /// 移除已存在的 AskUserBatch 块，返回是否实际移除。
     fn remove_ask_user_block(&mut self) -> bool {
-        let before = self.blocks.len();
-        self.blocks
-            .retain(|block| !matches!(block, ConversationBlock::AskUserBatch { .. }));
+        let before = self.timeline.items().len();
         self.timeline
             .retain(|item| !matches!(item, OutputTimelineItem::AskUserBatch { .. }));
-        before != self.blocks.len()
+        before != self.timeline.items().len()
     }
 }
 
@@ -551,9 +537,9 @@ mod tests {
         assert!(changes
             .iter()
             .any(|c| matches!(c, ConversationChange::AskUserDismissed)));
-        assert!(!model
-            .blocks
-            .iter()
-            .any(|b| matches!(b, ConversationBlock::AskUserBatch { .. })));
+        assert!(!model.timeline.items().iter().any(|b| matches!(
+            b,
+            crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch { .. }
+        )));
     }
 }

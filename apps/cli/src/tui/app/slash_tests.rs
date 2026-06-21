@@ -261,10 +261,11 @@ fn reflection_output(content: &str, auto_applied: bool) -> sdk::ReflectionOutput
 fn system_texts(app: &App) -> Vec<&str> {
     app.model
         .conversation
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .filter_map(|block| match block {
-            crate::tui::model::conversation::block::ConversationBlock::System { text, .. } => {
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } => {
                 Some(text.as_str())
             }
             _ => None,
@@ -275,10 +276,11 @@ fn system_texts(app: &App) -> Vec<&str> {
 fn error_texts(app: &App) -> Vec<&str> {
     app.model
         .conversation
-        .blocks
+        .timeline
+        .items()
         .iter()
-        .filter_map(|block| match block {
-            crate::tui::model::conversation::block::ConversationBlock::Error { text, .. } => {
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } => {
                 Some(text.as_str())
             }
             _ => None,

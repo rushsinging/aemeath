@@ -30,9 +30,9 @@ fn test_append_user_message_pushes_block_without_new_chat() {
     assert!(changes
         .iter()
         .any(|change| matches!(change, ConversationChange::UserMessageAppended { .. })));
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::UserMessage { text, .. } if text == "我的答复"
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::UserMessage { text, .. } if text == "我的答复"
     )));
 }
 
@@ -44,10 +44,10 @@ fn test_append_user_message_on_empty_model_creates_block() {
         text: "孤立回显".to_string(),
     });
     assert!(model.chats.is_empty(), "回显不应创建 chat");
-    assert_eq!(model.blocks.len(), 1);
-    assert!(model.blocks.iter().any(|block| matches!(
-        block,
-        super::block::ConversationBlock::UserMessage { text, .. } if text == "孤立回显"
+    assert_eq!(model.timeline.items().len(), 1);
+    assert!(model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::UserMessage { text, .. } if text == "孤立回显"
     )));
 }
 
@@ -58,7 +58,7 @@ fn test_append_user_message_empty_text_still_creates_block() {
     let changes = model.apply(ConversationIntent::AppendUserMessage {
         text: String::new(),
     });
-    assert_eq!(model.blocks.len(), 1);
+    assert_eq!(model.timeline.items().len(), 1);
     assert!(changes
         .iter()
         .any(|change| matches!(change, ConversationChange::OutputDirty)));
@@ -73,12 +73,12 @@ fn test_conversation_reset_clears_all_blocks() {
     model.apply(ConversationIntent::AppendSystemMessage {
         text: "note".to_string(),
     });
-    assert!(!model.blocks.is_empty());
+    assert!(!model.timeline.items().is_empty());
     assert!(model.active_chat_id.is_some());
 
     model.reset();
 
-    assert!(model.blocks.is_empty());
+    assert!(model.timeline.items().is_empty());
     assert!(model.chats.is_empty());
     assert!(model.active_chat_id.is_none());
     assert!(model.queued_submissions.is_empty());
@@ -88,7 +88,7 @@ fn test_conversation_reset_clears_all_blocks() {
 fn test_conversation_reset_on_empty_is_noop() {
     let mut model = ConversationModel::default();
     model.reset();
-    assert!(model.blocks.is_empty());
+    assert!(model.timeline.items().is_empty());
     assert!(model.active_chat_id.is_none());
 }
 

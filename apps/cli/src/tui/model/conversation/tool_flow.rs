@@ -1,4 +1,3 @@
-use super::block::ConversationBlock;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
@@ -13,33 +12,23 @@ impl ConversationModel {
         turn_id: &ChatTurnId,
         id: &str,
     ) {
-        // A4.3：存在性查询改读 timeline（原读 blocks.iter().position）。
-        let orphan_in_timeline = self.timeline.items().iter().any(|item| {
-            matches!(
-                item,
-                OutputTimelineItem::OrphanToolResult { id: orphan_id, .. } if orphan_id == id
-            )
+        // 从 timeline 查找 OrphanToolResult 并克隆 payload。
+        let orphan_payload = self.timeline.items().iter().find_map(|item| {
+            if let OutputTimelineItem::OrphanToolResult {
+                id: orphan_id,
+                output,
+                content,
+                is_error,
+                ..
+            } = item
+            {
+                if orphan_id == id {
+                    return Some((output.clone(), content.clone(), *is_error));
+                }
+            }
+            None
         });
-        if !orphan_in_timeline {
-            return;
-        }
-        // 双写期：payload 仍从 blocks 提取（A4.6 删 blocks 时切换到从 timeline 读）。
-        let Some(blocks_position) = self.blocks.iter().position(|block| {
-            matches!(
-                block,
-                ConversationBlock::OrphanToolResult { id: orphan_id, .. } if orphan_id == id
-            )
-        }) else {
-            return;
-        };
-        let ConversationBlock::OrphanToolResult {
-            id: _,
-            tool_name: _,
-            output,
-            content,
-            is_error,
-        } = self.blocks.remove(blocks_position)
-        else {
+        let Some((output, content, is_error)) = orphan_payload else {
             return;
         };
         if self
@@ -96,13 +85,13 @@ impl ConversationModel {
                 image_count,
             );
             crate::tui::log_debug!(
-                "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} blocks_after={}",
+                "model observe tool_result embedded id={} tool_name={} status={:?} is_error={} image_count={} timeline_items_after={}",
                 id,
                 tool_name,
                 status,
                 is_error,
                 image_count,
-                self.blocks.len(),
+                self.timeline.items().len(),
             );
             return vec![
                 ConversationChange::ToolCallCompleted {
@@ -120,19 +109,12 @@ impl ConversationModel {
             content: content.clone(),
             is_error,
         });
-        self.blocks.push(ConversationBlock::OrphanToolResult {
-            id: id.to_string(),
-            tool_name,
-            output,
-            content,
-            is_error,
-        });
         crate::tui::log_debug!(
-            "model observe tool_result orphan id={} is_error={} image_count={} blocks_after={}",
+            "model observe tool_result orphan id={} is_error={} image_count={} timeline_items_after={}",
             id,
             is_error,
             image_count,
-            self.blocks.len(),
+            self.timeline.items().len(),
         );
         vec![
             ConversationChange::OrphanToolResultObserved { id: id.to_string() },

@@ -355,7 +355,6 @@ fn tool_result_image_count(content: &serde_json::Value) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::tui::app::App;
-    use crate::tui::model::conversation::block::ConversationBlock;
     use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
     fn app() -> App {
@@ -390,8 +389,8 @@ mod tests {
 
         app.render_history_message(&msg, None);
 
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::UserMessage { text, .. } if text == "hello")
+        assert!(app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "hello")
         }));
     }
 
@@ -402,14 +401,14 @@ mod tests {
 
         app.render_history_message(&msg, None);
 
-        assert!(!app
-            .model
-            .conversation
-            .blocks
-            .iter()
-            .any(|block| { matches!(block, ConversationBlock::UserMessage { .. }) }));
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text.contains("无法恢复一条历史消息"))
+        assert!(!app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(
+                item,
+                crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { .. }
+            )
+        }));
+        assert!(app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } if text.contains("无法恢复一条历史消息"))
         }));
     }
 
@@ -431,11 +430,11 @@ mod tests {
 
         app.render_history_message(&msg, None);
 
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Thinking { text, .. } if text == "plan")
+        assert!(app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::Thinking { text, .. } if text == "plan")
         }));
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::AssistantText { text, .. } if text == "answer")
+        assert!(app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::AssistantText { text, .. } if text == "answer")
         }));
     }
 
@@ -488,8 +487,8 @@ mod tests {
 
         app.render_history_message(&msg, None);
 
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text.contains("无法恢复一条历史消息"))
+        assert!(app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } if text.contains("无法恢复一条历史消息"))
         }));
     }
 
@@ -505,8 +504,8 @@ mod tests {
 
         app.render_history_message(&msg, None);
 
-        assert!(app.model.conversation.blocks.iter().any(|block| {
-            matches!(block, ConversationBlock::Error { text, .. } if text.contains("无法恢复一条历史消息"))
+        assert!(app.model.conversation.timeline.items().iter().any(|item| {
+            matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } if text.contains("无法恢复一条历史消息"))
         }));
     }
 }
