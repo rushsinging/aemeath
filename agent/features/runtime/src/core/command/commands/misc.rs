@@ -31,8 +31,6 @@ inventory::submit! {
         )
         .with_usage(vec![
             "/clear - Clear screen".to_string(),
-            "/clear history - Clear command history".to_string(),
-            "/clear all - Clear everything (requires confirmation)".to_string(),
         ])
         .with_aliases(vec!["cls".to_string()])
     })
@@ -41,11 +39,6 @@ inventory::submit! {
 fn clear_execute(args: &str, _ctx: &mut CommandContext) -> CommandResult {
     match args.trim().to_lowercase().as_str() {
         "" | "screen" => CommandResult::Action(CommandAction::Clear),
-        "history" => CommandResult::Success("History cleared".to_string()),
-        "all" => CommandResult::Confirm {
-            message: "Clear all history and reset session?".to_string(),
-            action: ConfirmAction::ClearAllHistory,
-        },
         _ => CommandResult::Error(format!("Unknown argument: {}", args.trim())),
     }
 }

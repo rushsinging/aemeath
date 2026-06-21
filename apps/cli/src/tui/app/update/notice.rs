@@ -61,6 +61,15 @@ impl App {
         self.refresh_live_status_from_model();
     }
 
+    /// 批量清空所有排队中的提交占位（#391 S3：批量撤回）。
+    pub(crate) fn clear_all_queued_submission_echos(&mut self) {
+        self.model
+            .conversation
+            .apply(ConversationIntent::ClearAllQueuedSubmissions);
+        self.mark_output_dirty();
+        self.refresh_live_status_from_model();
+    }
+
     /// 将一条错误提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
     ///
     /// 替代旧的命令式 `OutputArea::push_error`；错误经 `ConversationBlock::Error`

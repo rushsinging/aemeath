@@ -99,7 +99,6 @@ pub enum CommandAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConfirmAction {
     DeleteSession(String),
-    ClearAllHistory,
     ResetConfig,
     ClearCostHistory,
 }

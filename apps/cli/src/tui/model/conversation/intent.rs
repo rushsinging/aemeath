@@ -72,6 +72,8 @@ pub enum ConversationIntent {
     ClearQueuedSubmissionById {
         input_id: sdk::InputId,
     },
+    /// 批量清空所有排队中的提交占位（#391 S3：批量撤回）。
+    ClearAllQueuedSubmissions,
     RecordAgentProgress {
         chat_id: ChatId,
         turn_id: ChatTurnId,

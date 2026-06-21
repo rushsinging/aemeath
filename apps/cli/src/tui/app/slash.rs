@@ -40,10 +40,7 @@ impl super::App {
                 self.layout.request_exit()
             }
             cmd if cmd == format!("/{}", cmd::CLEAR) => {
-                self.chat.messages.clear();
-                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-                self.output_area.clear();
-                self.reset_runtime_state().await;
+                self.clear_conversation().await;
                 self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
@@ -236,6 +233,30 @@ impl super::App {
         None
     }
 
+    /// #391 方案 B：清空会话。
+    ///
+    /// 即时清 TUI 状态（messages/output/输入框），同时经 `ChatInputEvent::Reset`
+    /// 让 runtime idle gate 统一清空 runtime messages。busy 时先 `cancel()` 使 loop
+    /// 回 idle 处理 Reset；loop 未运行时 fallback 到 `reset_runtime_state`。
+    ///
+    /// `SessionReset` 事件回来后经 `Effect::ResetRuntimeState` 再做完整清理
+    ///（sync agent_client + clear_tasks + drop tx → loop 重建）。
+    async fn clear_conversation(&mut self) {
+        self.chat.messages.clear();
+        self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
+        self.output_area.clear();
+        if self.chat.input_event_tx.is_some() {
+            // loop 运行中：发 Reset，由 runtime gate 统一清空。
+            if let Some(ref ac) = self.agent_client {
+                ac.cancel();
+            }
+            self.chat.push_input_event(sdk::ChatInputEvent::Reset);
+        } else {
+            // loop 未运行（如启动前）→ 直接本地清理。
+            self.reset_runtime_state().await;
+        }
+    }
+
     /// Handle a command action returned by the AgentClient.
     /// Returns Some(prompt) if a message should be sent to the LLM.
     async fn handle_command_action(&mut self, action: sdk::CommandAction) -> Option<String> {
@@ -245,10 +266,7 @@ impl super::App {
                 None
             }
             sdk::CommandAction::Clear => {
-                self.chat.messages.clear();
-                self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-                self.output_area.clear();
-                self.reset_runtime_state().await;
+                self.clear_conversation().await;
                 self.append_system_notice("[cleared]");
                 None
             }

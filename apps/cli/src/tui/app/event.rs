@@ -139,5 +139,9 @@ pub enum AppEvent {
         latest: String,
         release_url: String,
     },
+    /// runtime 完成 reset 清理，TUI 据此清空镜像。
+    SessionReset,
+    /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
+    UserMessagesWithdrawn(Vec<String>),
 }
 pub type UiEvent = AppEvent;

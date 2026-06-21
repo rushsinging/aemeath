@@ -102,7 +102,6 @@ fn same_phase(current: Option<&SpinnerPhase>, next: Option<&SpinnerPhase>) -> bo
         (Some(SpinnerPhase::Generating), Some(SpinnerPhase::Generating)) => true,
         (Some(SpinnerPhase::AgentWorking), Some(SpinnerPhase::AgentWorking)) => true,
         (Some(SpinnerPhase::Reflecting), Some(SpinnerPhase::Reflecting)) => true,
-        (Some(SpinnerPhase::ThinkingQueued), Some(SpinnerPhase::ThinkingQueued)) => true,
         (Some(SpinnerPhase::CallingTool(current)), Some(SpinnerPhase::CallingTool(next))) => {
             current == next
         }

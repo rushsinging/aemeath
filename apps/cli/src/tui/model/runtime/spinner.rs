@@ -12,7 +12,6 @@ pub enum SpinnerPhase {
     Generating,
     AgentWorking,
     Reflecting,
-    ThinkingQueued,
     Compacting,
     CallingTool(String),
     CallingTools {

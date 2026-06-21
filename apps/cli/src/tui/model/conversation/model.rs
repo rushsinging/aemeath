@@ -109,6 +109,7 @@ impl ConversationModel {
             ConversationIntent::ClearQueuedSubmissionById { input_id } => {
                 self.clear_queued_submission_by_id(&input_id)
             }
+            ConversationIntent::ClearAllQueuedSubmissions => self.clear_all_queued_submissions(),
             ConversationIntent::RecordAgentProgress {
                 chat_id,
                 turn_id,
@@ -262,6 +263,18 @@ impl ConversationModel {
                 OutputTimelineItem::QueuedUserMessage { input_id: tid, .. } if tid == input_id)
         });
         let removed = before - self.queued_submissions.len();
+        vec![
+            ConversationChange::QueuedSubmissionsCleared { count: removed },
+            ConversationChange::OutputDirty,
+        ]
+    }
+
+    /// 批量清空所有排队中的提交占位（#391 S3）。
+    fn clear_all_queued_submissions(&mut self) -> Vec<ConversationChange> {
+        let removed = self.queued_submissions.len();
+        self.queued_submissions.clear();
+        self.timeline
+            .retain(|it| !matches!(it, OutputTimelineItem::QueuedUserMessage { .. }));
         vec![
             ConversationChange::QueuedSubmissionsCleared { count: removed },
             ConversationChange::OutputDirty,

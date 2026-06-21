@@ -136,6 +136,10 @@ pub enum ChatEvent {
     TasksChanged,
     /// 配置/指令/guidance 文件变更通知。
     ConfigReloaded { changed_keys: Vec<String> },
+    /// loop 完成 reset 清理后发出，TUI 据此同步清空镜像。
+    SessionReset,
+    /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
+    UserMessagesWithdrawn { texts: Vec<String> },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
 }

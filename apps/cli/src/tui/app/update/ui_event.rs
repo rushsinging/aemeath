@@ -257,6 +257,22 @@ impl App {
                     "[aemeath v{latest} is available (you have v{current}); run `aemeath update` to upgrade | {release_url}]"
                 ));
             }
+            // #391 S1-4：runtime idle gate 已清空 messages 并发 SessionReset。
+            // TUI 收到后经 Effect 异步执行完整 reset_runtime_state（清 UI + sync + tasks）。
+            UiEvent::SessionReset => {
+                return UpdateResult::one(Effect::ResetRuntimeState);
+            }
+            // TODO(#391 S3-4): 清全部占位 + texts.join("\n") 还原输入框
+            UiEvent::UserMessagesWithdrawn(texts) => {
+                self.clear_all_queued_submission_echos();
+                if !texts.is_empty() {
+                    self.handle_input_intent(
+                        crate::tui::model::input::intent::InputIntent::ReplaceText(
+                            texts.join("\n"),
+                        ),
+                    );
+                }
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

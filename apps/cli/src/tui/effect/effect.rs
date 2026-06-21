@@ -57,6 +57,9 @@ pub enum Effect {
     },
     /// 执行自动更新（`/update` 命令触发）。
     RunSelfUpdate,
+    /// 重置 per-conversation runtime 状态（清空消息/输出/任务/UI 状态）。
+    /// 由 SessionReset 事件触发（runtime idle gate 处理 Reset 后回灌）。
+    ResetRuntimeState,
 }
 
 impl Effect {

@@ -101,8 +101,6 @@ pub enum CommandAction {
 pub enum ConfirmAction {
     /// Delete a session
     DeleteSession(String),
-    /// Clear all history
-    ClearAllHistory,
     /// Reset configuration
     ResetConfig,
     /// Clear cost history
