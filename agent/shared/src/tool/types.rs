@@ -90,7 +90,7 @@ pub use task_list_complete::TaskListCompleteResult;
 pub use task_list_create::{TaskListCreateInput, TaskListCreateResult};
 pub use task_stop::{TaskStopInput, TaskStopResult};
 pub use task_update::{TaskUpdateInput, TaskUpdateResult};
-pub use tool_search::{ToolSearchInput, ToolSearchResult};
+pub use tool_search::{ToolInfo, ToolSearchInput, ToolSearchResult};
 pub use web_search::{WebSearchInput, WebSearchResult};
 
 // Generated ToolSchema impls (by build.rs).

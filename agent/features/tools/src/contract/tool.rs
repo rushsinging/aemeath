@@ -2,18 +2,20 @@ use super::ToolExecutionContext;
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
-use share::tool::{ImageData, PathAccess, ToolResult};
+use share::tool::{types::tool_search::ToolInfo, ImageData, PathAccess, ToolResult};
 use std::borrow::Cow;
 
 /// 工具列表查询能力（contract 层定义，由 `ToolRegistry` 实现）。
 ///
-/// 用于 `ToolSearch` 从注册表动态获取已注册工具的 name + description，
+/// 用于 `ToolSearch` 从注册表动态获取已注册工具的完整信息，
 /// 避免 contract 层依赖 core 层的 `ToolRegistry` 具体类型。
 pub trait ToolListProvider: Send + Sync {
     /// 所有已注册工具的 name 列表。
     fn tool_names(&self) -> Vec<String>;
     /// 按 name 获取工具 description。
     fn tool_description(&self, name: &str) -> Option<String>;
+    /// 按 name 获取工具完整信息（含 description、input_schema、is_read_only）。
+    fn tool_info(&self, name: &str) -> Option<ToolInfo>;
 }
 
 /// Type-erased tool trait（registry 存储这个）。
