@@ -375,7 +375,6 @@ fn map_confirm_action(action: crate::core::command::ConfirmAction) -> sdk::Confi
     use crate::core::command::ConfirmAction as Rt;
     match action {
         Rt::DeleteSession(id) => sdk::ConfirmAction::DeleteSession(id),
-        Rt::ClearAllHistory => sdk::ConfirmAction::ClearAllHistory,
         Rt::ResetConfig => sdk::ConfirmAction::ResetConfig,
         Rt::ClearCostHistory => sdk::ConfirmAction::ClearCostHistory,
     }
