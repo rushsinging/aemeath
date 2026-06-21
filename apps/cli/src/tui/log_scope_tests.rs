@@ -4,11 +4,11 @@ mod tests {
         "apps/cli/src/tui/adapter/agent_event.rs",
         "apps/cli/src/tui/adapter/tool_flow_projector.rs",
         "apps/cli/src/tui/app/update/spinner.rs",
-        "apps/cli/src/tui/model/conversation/model.rs",
+        "apps/cli/src/tui/model/conversation/tool_observe.rs",
         "apps/cli/src/tui/model/conversation/tool_flow.rs",
         "apps/cli/src/tui/render/output/blocks/tool_call.rs",
         "apps/cli/src/tui/render/output/blocks/tool_result.rs",
-        "apps/cli/src/tui/view_assembler/output.rs",
+        "apps/cli/src/tui/view_assembler/output_tool_view.rs",
     ];
 
     const FORBIDDEN_HIGH_VOLUME_LOG_FILES: &[&str] = &[
