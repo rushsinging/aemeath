@@ -159,6 +159,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
             .as_ref()
             .map(|c| c.language.as_str())
             .unwrap_or("en"),
+        false, // 初始构建时 workspace 未初始化，非 worktree
     )
     .await;
 
@@ -170,6 +171,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         &hook_runner,
         prompt_parts.clone(),
         &skills,
+        false, // 初始构建时 workspace 未初始化，非 worktree
     )
     .await;
     let system_blocks = vec![

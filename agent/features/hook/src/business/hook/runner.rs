@@ -4,79 +4,38 @@ use crate::business::hook::data::{HookData, HookInput};
 use crate::business::hook::result::{HookJsonOutput, HookResult};
 use crate::LOG_TARGET;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
 use std::time::Duration;
 
 /// Hook 运行器
 #[derive(Debug, Clone)]
 pub struct HookRunner {
     pub(crate) config: HooksConfig,
-    /// 项目根目录
-    pub(crate) project_dir: Arc<Mutex<String>>,
-    /// 当前工作根是否在 git worktree 中（注入 `AEMEATH_IN_WORKTREE`）。
-    pub(crate) in_worktree: Arc<Mutex<bool>>,
 }
 
 impl HookRunner {
     /// 从配置创建 runner
-    pub fn new(config: HooksConfig, project_dir: String) -> Self {
-        Self {
-            config,
-            project_dir: Arc::new(Mutex::new(project_dir)),
-            in_worktree: Arc::new(Mutex::new(false)),
-        }
+    pub fn new(config: HooksConfig) -> Self {
+        Self { config }
     }
 
     /// 创建空 runner（无 hook 配置时使用）
-    pub fn empty(project_dir: String) -> Self {
+    pub fn empty() -> Self {
         Self {
             config: HooksConfig::default(),
-            project_dir: Arc::new(Mutex::new(project_dir)),
-            in_worktree: Arc::new(Mutex::new(false)),
         }
     }
 
     /// 从配置 HashMap 创建（兼容 CLI 层的 config_file 结构）
-    pub fn from_config(config: &share::config::Config, project_dir: String) -> Self {
+    pub fn from_config(config: &share::config::Config) -> Self {
         Self {
             config: config.hooks.clone(),
-            project_dir: Arc::new(Mutex::new(project_dir)),
-            in_worktree: Arc::new(Mutex::new(false)),
         }
     }
 
     /// 返回配置的 hook 事件数量（用于调试日志）
     pub fn hook_count(&self) -> usize {
         self.config.events.len()
-    }
-
-    /// 返回当前 hook 项目目录。
-    pub fn project_dir(&self) -> String {
-        self.project_dir
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_else(|e| e.into_inner().clone())
-    }
-
-    /// 当前工作根是否在 git worktree 中（注入 `AEMEATH_IN_WORKTREE`）。
-    pub fn in_worktree(&self) -> bool {
-        self.in_worktree
-            .lock()
-            .map(|v| *v)
-            .unwrap_or_else(|e| *e.into_inner())
-    }
-
-    /// 同步 hook 项目目录与 worktree 标志，用于 worktree/cwd 切换后更新内置环境变量。
-    /// 两者原子更新，避免 `project_dir` 与 `in_worktree` 不一致。
-    pub fn set_project_context(&self, project_dir: String, in_worktree: bool) {
-        match self.project_dir.lock() {
-            Ok(mut current) => *current = project_dir,
-            Err(poisoned) => *poisoned.into_inner() = project_dir,
-        }
-        match self.in_worktree.lock() {
-            Ok(mut current) => *current = in_worktree,
-            Err(poisoned) => *poisoned.into_inner() = in_worktree,
-        }
     }
 
     /// 获取匹配指定事件和工具名的 hook 列表
@@ -97,18 +56,26 @@ impl HookRunner {
             .unwrap_or_default();
         log::debug!(
             target: LOG_TARGET,
-            "hook match: event={:?} tool_name={:?} matched={} configured_events={} project_dir={}",
+            "hook match: event={:?} tool_name={:?} matched={} configured_events={}",
             event,
             tool_name,
             hooks.len(),
             self.hook_count(),
-            self.project_dir()
         );
         hooks
     }
 
-    /// 执行单个 hook 命令
-    pub async fn execute_hook(&self, hook: &HookEntry, input: &HookInput) -> HookResult {
+    /// 执行单个 hook 命令。
+    ///
+    /// `working_root` 用作 hook 进程的工作目录，并注入 `AEMEATH_PROJECT_DIR` /
+    /// `CLAUDE_PROJECT_DIR` 环境变量。`in_worktree` 注入 `AEMEATH_IN_WORKTREE`。
+    pub async fn execute_hook(
+        &self,
+        hook: &HookEntry,
+        input: &HookInput,
+        working_root: &Path,
+        in_worktree: bool,
+    ) -> HookResult {
         let input_json = match serde_json::to_string(input) {
             Ok(json) => json,
             Err(e) => {
@@ -117,21 +84,21 @@ impl HookRunner {
         };
 
         let timeout = Duration::from_secs(hook.timeout);
-        let project_dir = self.project_dir();
-        let command = self.expand_command_placeholders(&hook.command);
+        let working_root_str = working_root.display().to_string();
+        let command = Self::expand_command_placeholders_static(&hook.command, &working_root_str);
         log::debug!(
             target: LOG_TARGET,
-            "hook start: event={:?} matcher={} command={} project_dir={}",
+            "hook start: event={:?} matcher={} command={} working_root={}",
             input.event,
             hook.matcher,
             command,
-            project_dir
+            working_root_str
         );
 
         let mut child = match tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
-            .current_dir(&project_dir)
+            .current_dir(working_root)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -139,12 +106,9 @@ impl HookRunner {
                 "AEMEATH_HOOK_EVENT",
                 serde_json::to_string(&input.event).unwrap_or_default(),
             )
-            .env("AEMEATH_PROJECT_DIR", &project_dir)
-            .env("CLAUDE_PROJECT_DIR", &project_dir)
-            .env(
-                "AEMEATH_IN_WORKTREE",
-                if self.in_worktree() { "1" } else { "0" },
-            )
+            .env("AEMEATH_PROJECT_DIR", &working_root_str)
+            .env("CLAUDE_PROJECT_DIR", &working_root_str)
+            .env("AEMEATH_IN_WORKTREE", if in_worktree { "1" } else { "0" })
             .envs(input.data.to_env_vars())
             .spawn()
         {
@@ -271,11 +235,10 @@ impl HookRunner {
         }
     }
 
-    pub(crate) fn expand_command_placeholders(&self, command: &str) -> String {
-        let project_dir = self.project_dir();
+    pub(crate) fn expand_command_placeholders_static(command: &str, working_root: &str) -> String {
         command
-            .replace("{AEMEATH_PROJECT_DIR}", &project_dir)
-            .replace("{CLAUDE_PROJECT_DIR}", &project_dir)
+            .replace("{AEMEATH_PROJECT_DIR}", working_root)
+            .replace("{CLAUDE_PROJECT_DIR}", working_root)
     }
 
     /// 运行指定事件的所有匹配 hook
@@ -287,6 +250,8 @@ impl HookRunner {
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
+        working_root: &Path,
+        in_worktree: bool,
     ) -> Vec<HookResult> {
         let hooks = self.matching_hooks(event, tool_name);
         if hooks.is_empty() {
@@ -304,7 +269,9 @@ impl HookRunner {
                 hook.matcher,
                 hook.command
             );
-            let result = self.execute_hook(hook, &input).await;
+            let result = self
+                .execute_hook(hook, &input, working_root, in_worktree)
+                .await;
             log::debug!(
                 target: LOG_TARGET,
                 "hook result: blocked={} error={:?}",
@@ -329,6 +296,8 @@ impl HookRunner {
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
+        working_root: &Path,
+        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = self.matching_hooks(event, tool_name);
         if hooks.is_empty() {
@@ -346,7 +315,9 @@ impl HookRunner {
                 hook.matcher,
                 hook.command
             );
-            let result = self.execute_hook(hook, &input).await;
+            let result = self
+                .execute_hook(hook, &input, working_root, in_worktree)
+                .await;
             let json_output = result.parse_json_output();
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
@@ -371,8 +342,12 @@ impl HookRunner {
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
+        working_root: &Path,
+        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
-        let results = self.run_hooks(event, tool_name, data).await;
+        let results = self
+            .run_hooks(event, tool_name, data, working_root, in_worktree)
+            .await;
         let blocked = results.iter().any(|r| r.blocked);
         (blocked, results)
     }

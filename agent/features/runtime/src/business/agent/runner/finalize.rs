@@ -2,6 +2,7 @@ use crate::LOG_TARGET;
 use hook::api::HookRunner;
 use provider::api::LlmClient;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
+use std::path::Path;
 use std::time::Duration;
 
 /// Agent 循环退出状态
@@ -55,6 +56,8 @@ pub(crate) async fn finalize_sub_agent(
     previous_reasoning: bool,
     restore_max_tokens: bool,
     progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
+    working_root: &Path,
+    in_worktree: bool,
 ) {
     log_agent_outcome(outcome, session_id);
 
@@ -63,7 +66,16 @@ pub(crate) async fn finalize_sub_agent(
         AgentRunStatus::Cancelled | AgentRunStatus::TimedOut | AgentRunStatus::ApiError(_)
     );
     let hook_results = hook_runner
-        .on_subagent_stop(prompt, system, model_spec, output, outcome.turns, is_error)
+        .on_subagent_stop(
+            prompt,
+            system,
+            model_spec,
+            output,
+            outcome.turns,
+            is_error,
+            working_root,
+            in_worktree,
+        )
         .await;
 
     for (_, _, json_output) in &hook_results {

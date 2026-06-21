@@ -4,6 +4,7 @@ mod hook_tests {
     use crate::business::hook::runner::{hook_env_lines, HookRunner};
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use std::collections::HashMap;
+    use std::path::Path;
 
     #[test]
     fn test_matching_hooks_empty_matcher() {
@@ -21,7 +22,7 @@ mod hook_tests {
                 map
             },
         };
-        let runner = HookRunner::new(config, ".".to_string());
+        let runner = HookRunner::new(config);
         let hooks = runner.matching_hooks(HookEvent::PreToolUse, Some("Bash"));
         assert_eq!(hooks.len(), 1);
     }
@@ -49,7 +50,7 @@ mod hook_tests {
                 map
             },
         };
-        let runner = HookRunner::new(config, ".".to_string());
+        let runner = HookRunner::new(config);
 
         let hooks = runner.matching_hooks(HookEvent::PreToolUse, Some("Bash"));
         assert_eq!(hooks.len(), 1);
@@ -61,7 +62,7 @@ mod hook_tests {
 
     #[test]
     fn test_matching_hooks_no_config() {
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let hooks = runner.matching_hooks(HookEvent::PreToolUse, Some("Bash"));
         assert!(hooks.is_empty());
     }
@@ -73,7 +74,7 @@ mod hook_tests {
             command: "echo 'hello from hook'".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::PreToolUse,
             data: HookData::Tool(ToolHookData {
@@ -83,7 +84,9 @@ mod hook_tests {
                 is_error: None,
             }),
         };
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, Path::new("."), false)
+            .await;
         assert!(!result.blocked);
         assert!(result.output.contains("hello from hook"));
         assert!(result.error.is_none());
@@ -96,7 +99,7 @@ mod hook_tests {
             command: "exit 2".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::PreToolUse,
             data: HookData::Tool(ToolHookData {
@@ -106,7 +109,9 @@ mod hook_tests {
                 is_error: None,
             }),
         };
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, Path::new("."), false)
+            .await;
         assert!(result.blocked);
     }
 
@@ -117,13 +122,15 @@ mod hook_tests {
             command: "printf 'bad thing' >&2; exit 1".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::Stop,
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, Path::new("."), false)
+            .await;
 
         assert!(result.blocked);
         assert!(
@@ -138,13 +145,15 @@ mod hook_tests {
             command: "exit 1".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::Stop,
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, Path::new("."), false)
+            .await;
 
         assert!(result.blocked);
         assert!(
@@ -159,7 +168,7 @@ mod hook_tests {
             command: "sleep 10".to_string(),
             timeout: 1,
         };
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::PreToolUse,
             data: HookData::Tool(ToolHookData {
@@ -169,16 +178,23 @@ mod hook_tests {
                 is_error: None,
             }),
         };
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, Path::new("."), false)
+            .await;
         assert!(result.error.is_some());
         assert!(result.error.as_ref().unwrap().contains("超时"));
     }
 
     #[tokio::test]
     async fn test_pre_tool_use_no_hooks() {
-        let runner = HookRunner::empty(".".to_string());
+        let runner = HookRunner::empty();
         let (blocked, results) = runner
-            .pre_tool_use("Bash", serde_json::json!({"command": "ls"}))
+            .pre_tool_use(
+                "Bash",
+                serde_json::json!({"command": "ls"}),
+                Path::new("."),
+                false,
+            )
             .await;
         assert!(!blocked);
         assert!(results.is_empty());
@@ -186,9 +202,9 @@ mod hook_tests {
 
     #[test]
     fn test_expand_command_placeholders_project_dir() {
-        let runner = HookRunner::empty("/tmp/aemeath-project".to_string());
-        let command = runner.expand_command_placeholders(
+        let command = HookRunner::expand_command_placeholders_static(
             "\"{AEMEATH_PROJECT_DIR}/build.sh\" --project \"{CLAUDE_PROJECT_DIR}\"",
+            "/tmp/aemeath-project",
         );
 
         assert_eq!(
@@ -199,8 +215,8 @@ mod hook_tests {
 
     #[test]
     fn test_expand_command_placeholders_without_placeholder() {
-        let runner = HookRunner::empty("/tmp/aemeath-project".to_string());
-        let command = runner.expand_command_placeholders("cargo check");
+        let command =
+            HookRunner::expand_command_placeholders_static("cargo check", "/tmp/aemeath-project");
 
         assert_eq!(command, "cargo check");
     }
@@ -222,13 +238,15 @@ mod hook_tests {
             timeout: 5,
         };
         let project_dir_string = project_dir.display().to_string();
-        let runner = HookRunner::empty(project_dir_string.clone());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::Stop,
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, &project_dir, false)
+            .await;
 
         assert!(!result.blocked);
         assert!(result.error.is_none());
@@ -245,13 +263,15 @@ mod hook_tests {
             command: "printf '%s' \"{AEMEATH_PROJECT_DIR}\"".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty(project_dir.clone());
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::Stop,
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, Path::new(&project_dir), false)
+            .await;
 
         assert!(!result.blocked);
         assert!(result.error.is_none());
@@ -259,7 +279,7 @@ mod hook_tests {
     }
 
     #[tokio::test]
-    async fn test_execute_hook_uses_updated_project_dir_for_env_placeholder_and_cwd() {
+    async fn test_execute_hook_uses_passed_working_root_for_env_placeholder_and_cwd() {
         let initial_dir =
             std::env::temp_dir().join(format!("aemeath-hook-initial-{}", uuid::Uuid::new_v4()));
         let worktree_dir =
@@ -272,14 +292,15 @@ mod hook_tests {
             command: "printf '%s|%s|%s|%s|%s' \"$AEMEATH_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\" \"{AEMEATH_PROJECT_DIR}\" \"{CLAUDE_PROJECT_DIR}\" \"$PWD\"".to_string(),
             timeout: 5,
         };
-        let runner = HookRunner::empty(initial_dir.display().to_string());
-        runner.set_project_context(worktree_dir.display().to_string(), false);
+        let runner = HookRunner::empty();
         let input = HookInput {
             event: HookEvent::Stop,
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner.execute_hook(&hook, &input).await;
+        let result = runner
+            .execute_hook(&hook, &input, &worktree_dir, false)
+            .await;
         let expected = worktree_dir.display().to_string();
         let parts: Vec<&str> = result.output.split('|').collect();
 
@@ -325,9 +346,9 @@ mod hook_tests {
                 map
             },
         };
-        let runner = HookRunner::new(config, project_dir_string.clone());
+        let runner = HookRunner::new(config);
 
-        let results = runner.on_stop(7).await;
+        let results = runner.on_stop(7, &project_dir, false).await;
 
         assert_eq!(results.len(), 1);
         assert!(!results[0].blocked);

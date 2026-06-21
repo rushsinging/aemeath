@@ -10,15 +10,13 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub fn build_hook_runner(config_file: Option<&Config>, cwd: &Path) -> HookRunner {
-    let cwd_str = cwd.display().to_string();
+pub fn build_hook_runner(config_file: Option<&Config>, _cwd: &Path) -> HookRunner {
     let runner = match config_file {
-        Some(config) => HookRunner::from_config(config, cwd_str),
-        None => HookRunner::empty(cwd_str),
+        Some(config) => HookRunner::from_config(config),
+        None => HookRunner::empty(),
     };
     log::info!(target: LOG_TARGET,
-        "hook runner built: project_dir={} configured_events={}",
-        runner.project_dir(),
+        "hook runner built: configured_events={}",
         runner.hook_count()
     );
     runner
@@ -125,7 +123,6 @@ mod tests {
         let hook_runner = build_hook_runner(None, Path::new("."));
 
         assert_eq!(hook_runner.hook_count(), 0);
-        assert_eq!(hook_runner.project_dir(), ".");
     }
 
     #[test]
@@ -145,7 +142,6 @@ mod tests {
         let hook_runner = build_hook_runner(Some(&config), Path::new("project-root"));
 
         assert_eq!(hook_runner.hook_count(), 1);
-        assert_eq!(hook_runner.project_dir(), "project-root");
     }
 
     #[test]

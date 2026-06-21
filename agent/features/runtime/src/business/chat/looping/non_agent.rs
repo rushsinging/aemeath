@@ -4,6 +4,7 @@ use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeT
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use share::tool::ToolOutcome;
+use std::path::Path;
 use std::sync::Arc;
 
 use super::tools::{
@@ -19,6 +20,8 @@ pub(super) async fn execute_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
     language: &str,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -44,6 +47,8 @@ where
             hook_runner,
             other_calls[0],
             language,
+            working_root,
+            in_worktree,
         )
         .await;
     }
@@ -56,6 +61,8 @@ where
         hook_runner,
         &other_calls,
         language,
+        working_root,
+        in_worktree,
     )
     .await
 }
@@ -69,6 +76,8 @@ async fn execute_multiple_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     other_calls: &[&ToolCall],
     language: &str,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -88,6 +97,7 @@ where
                 let hook_runner = hook_runner.clone();
                 let sem = semaphore.clone();
                 let context = context.clone();
+                let working_root = working_root.to_path_buf();
                 async move {
                     if agent.ctx.cancel.is_cancelled() {
                         return (pos, Vec::new());
@@ -101,6 +111,8 @@ where
                         &hook_runner,
                         call,
                         language,
+                        &working_root,
+                        in_worktree,
                     )
                     .await;
                     (pos, result)
@@ -121,7 +133,18 @@ where
         let result_vec = if agent.ctx.cancel.is_cancelled() {
             Vec::new()
         } else {
-            execute_one_non_agent(context, agent, sink, hook_ui, hook_runner, call, language).await
+            execute_one_non_agent(
+                context,
+                agent,
+                sink,
+                hook_ui,
+                hook_runner,
+                call,
+                language,
+                working_root,
+                in_worktree,
+            )
+            .await
         };
         if let Some(r) = result_vec.into_iter().next() {
             results[pos] = Some(r);
@@ -176,6 +199,8 @@ async fn execute_one_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
     language: &str,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -189,6 +214,8 @@ where
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
             }),
+            working_root,
+            in_worktree,
         )
         .await;
     let owned_call = ToolCall {
@@ -209,6 +236,8 @@ where
                 tool_output: None,
                 is_error: None,
             }),
+            working_root,
+            in_worktree,
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
@@ -273,9 +302,6 @@ where
         vec![agent.execute_one_with_ctx(&owned_call, &agent.ctx).await]
     };
 
-    let working_root = agent.ctx.workspace_read().current_root();
-    let in_worktree = agent.ctx.workspace_read().in_worktree();
-    hook_runner.set_project_context(working_root.display().to_string(), in_worktree);
     let workspace = project::api::WorkspacePersist::snapshot(agent.ctx.workspace.as_ref());
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
@@ -295,6 +321,8 @@ where
             &owned_call,
             &ex.outcome.text,
             is_error,
+            working_root,
+            in_worktree,
         )
         .await;
         run_task_hooks(
@@ -304,6 +332,8 @@ where
             &owned_call,
             &ex.outcome.text,
             is_error,
+            working_root,
+            in_worktree,
         )
         .await;
         if task_store_mutation_succeeded(&owned_call.name, is_error) {
@@ -330,6 +360,8 @@ async fn run_task_hooks<S>(
     call: &ToolCall,
     output: &str,
     is_error: bool,
+    working_root: &Path,
+    in_worktree: bool,
 ) where
     S: ChatEventSink,
 {
@@ -347,6 +379,8 @@ async fn run_task_hooks<S>(
                         tool_output: Some(output.to_string()),
                         is_error: Some(false),
                     }),
+                    working_root,
+                    in_worktree,
                 )
                 .await,
         )
@@ -366,6 +400,8 @@ async fn run_task_hooks<S>(
                         tool_output: Some(output.to_string()),
                         is_error: Some(false),
                     }),
+                    working_root,
+                    in_worktree,
                 )
                 .await,
         )

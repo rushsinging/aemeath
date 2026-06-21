@@ -261,7 +261,7 @@ fn test_hook_runner() -> HookRunner {
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events }, ".".to_string())
+    HookRunner::new(HooksConfig { events })
 }
 
 fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner {
@@ -283,7 +283,7 @@ fn blocking_then_success_hook_runner(flag_path: &std::path::Path) -> HookRunner 
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events }, ".".to_string())
+    HookRunner::new(HooksConfig { events })
 }
 
 #[tokio::test]
@@ -483,10 +483,7 @@ async fn test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env() 
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: HookRunner::new(
-            HooksConfig { events },
-            path_base.path().display().to_string(),
-        ),
+        hook_runner: HookRunner::new(HooksConfig { events }),
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -589,7 +586,7 @@ fn continue_false_then_allow_hook_runner(flag_path: &std::path::Path) -> HookRun
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events }, ".".to_string())
+    HookRunner::new(HooksConfig { events })
 }
 
 /// Hook 前 `n` 次阻断 (exit 2)，之后放行。用计数器文件跟踪调用次数。
@@ -613,7 +610,7 @@ fn block_n_times_hook_runner(counter_path: &std::path::Path, n: usize) -> HookRu
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events }, ".".to_string())
+    HookRunner::new(HooksConfig { events })
 }
 
 /// Hook 每次都阻断 (exit 2)。用于验证连续阻断超上限强制停止（#372 缺陷 3）。
@@ -627,7 +624,7 @@ fn always_blocking_hook_runner() -> HookRunner {
             timeout: 5,
         }],
     );
-    HookRunner::new(HooksConfig { events }, ".".to_string())
+    HookRunner::new(HooksConfig { events })
 }
 
 #[tokio::test]

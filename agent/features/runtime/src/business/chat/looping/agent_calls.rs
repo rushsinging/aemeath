@@ -5,6 +5,7 @@ use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeT
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use share::tool::ToolOutcome;
+use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::{ToolExecutionContext, ToolRegistry};
@@ -20,6 +21,8 @@ pub(crate) async fn execute_agent_calls<S>(
     hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -46,6 +49,7 @@ where
                 let hook_runner = hook_runner.clone();
                 let registry_ref = registry.clone();
                 let context = context.clone();
+                let working_root = working_root.to_path_buf();
                 async move {
                     execute_one_agent(
                         &context,
@@ -55,6 +59,8 @@ where
                         hook_runner,
                         registry_ref,
                         &mut ag_ctx,
+                        &working_root,
+                        in_worktree,
                     )
                     .await
                 }
@@ -74,6 +80,8 @@ async fn execute_one_agent<S>(
     hook_runner: hook::api::HookRunner,
     registry: Arc<ToolRegistry>,
     ag_ctx: &mut ToolExecutionContext,
+    working_root: &Path,
+    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -89,6 +97,8 @@ where
                 tool_output: None,
                 is_error: None,
             }),
+            working_root,
+            in_worktree,
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
@@ -122,9 +132,6 @@ where
         .get("Agent")
         .expect("Agent tool not found in registry");
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
-    let working_root = ag_ctx.workspace_read().current_root();
-    let in_worktree = ag_ctx.workspace_read().in_worktree();
-    hook_runner.set_project_context(working_root.display().to_string(), in_worktree);
     let workspace = project::api::WorkspacePersist::snapshot(ag_ctx.workspace.as_ref());
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
@@ -144,6 +151,8 @@ where
         &call,
         &execution.outcome.text,
         execution.outcome.is_error,
+        working_root,
+        in_worktree,
     )
     .await;
     send_tool_result(&sink, context, &execution).await;

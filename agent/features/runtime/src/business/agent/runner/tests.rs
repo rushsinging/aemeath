@@ -242,7 +242,7 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
         ))),
         pool: None,
         agents_config: Arc::new(share::config::AgentsConfig::default()),
-        hook_runner: hook::api::HookRunner::empty(".".to_string()),
+        hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: Arc::new(share::config::ModelsConfig::default()),
     }
