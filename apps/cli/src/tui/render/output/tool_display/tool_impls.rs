@@ -153,6 +153,50 @@ fn build_header_line(name: &str, path: &str, suffix: &str) -> Line<'static> {
 }
 
 struct ReadDisplay;
+
+/// 计算 Read header 的 range_info 后缀。
+///
+/// - `actual_lines = Some(n)`（result 到达）：返回 `start:end (n lines)`
+/// - `actual_lines = None`（running 中）：offset/limit 都默认时返回空字符串，
+///   否则返回 `start:end`（预览范围）
+fn read_range_info(input: &serde_json::Value, actual_lines: Option<usize>) -> String {
+    let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+    let start = offset + 1; // 转为 1-based
+    match actual_lines {
+        Some(actual) => {
+            let actual_end = offset + actual;
+            format!("{start}:{actual_end} ({actual} lines)")
+        }
+        None => {
+            // running 中：只在用户显式传了 offset/limit 时显示预览范围，
+            // 默认值（offset=0, limit=2000）时不显示，等 result 到来再展示实际范围。
+            let has_explicit = input.get("offset").is_some() || input.get("limit").is_some();
+            if has_explicit {
+                format!("{start}:{}", offset + limit)
+            } else {
+                String::new()
+            }
+        }
+    }
+}
+
+/// 构建 Read header 的 spans（name + path + 可选 range_info）。
+fn read_header_spans(name: &str, display_path: &str, range_info: &str) -> Vec<Span<'static>> {
+    let mut spans = vec![
+        Span::styled(name.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
+        Span::raw(format!(" {display_path}")),
+    ];
+    if !range_info.is_empty() {
+        spans.push(Span::raw(" ".to_string()));
+        spans.push(Span::styled(
+            range_info.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
+    }
+    spans
+}
+
 impl ToolDisplay for ReadDisplay {
     fn name(&self) -> &str {
         "Read"
@@ -161,33 +205,20 @@ impl ToolDisplay for ReadDisplay {
         let path = file_path(input);
         let rel = display_path(path, workspace_root);
         let display_path = truncate_path(&rel, 60);
-        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
-        let start = offset + 1; // 转为 1-based
-        let end = offset + limit;
-        format!("{} {display_path} {start}:{end}", self.display_name())
+        let range = read_range_info(input, None);
+        if range.is_empty() {
+            format!("{} {display_path}", self.display_name())
+        } else {
+            format!("{} {display_path} {range}", self.display_name())
+        }
     }
     fn format_header_line(
         &self,
         input: &serde_json::Value,
         workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
-        let display_path = truncate_path(&rel, 60);
-        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
-        let start = offset + 1;
-        let end = offset + limit;
-        let range_info = format!("{start}:{end}");
-        Line::from(vec![
-            Span::styled(
-                self.display_name().to_string(),
-                Style::default().fg(theme::ACCENT_BRIGHT),
-            ),
-            Span::raw(format!(" {display_path} ")),
-            Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
-        ])
+        // 委托给 with_result（传 None），避免 range 逻辑重复。
+        self.format_header_line_with_result(input, None, workspace_root)
     }
     /// 当 result 到达后，使用实际读取的行数更新 header。
     /// 从 `ReadResult.line_count` 反序列化读取；缺失时回退到 regex 解析。
@@ -200,9 +231,6 @@ impl ToolDisplay for ReadDisplay {
         let path = file_path(input);
         let rel = display_path(path, workspace_root);
         let display_path = truncate_path(&rel, 60);
-        let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
-        let start = offset + 1;
 
         // typed 优先：ReadResult.line_count
         let actual_lines = typed_data::<sdk::tool_result::ReadResult>(result_payload)
@@ -210,26 +238,12 @@ impl ToolDisplay for ReadDisplay {
             // regex 回退：旧 ToolResult 仅 message 含 "Read N lines from ..."
             .or_else(|| result_payload.and_then(|p| parse_line_count_from_message(&p.output)));
 
-        let range_info = match actual_lines {
-            Some(actual) => {
-                let actual_end = offset + actual;
-                format!("{start}:{actual_end} ({actual} lines)")
-            }
-            _ => {
-                // 无法解析，不显示 () 部分
-                let end = offset + limit;
-                format!("{start}:{end}")
-            }
-        };
-
-        Line::from(vec![
-            Span::styled(
-                self.display_name().to_string(),
-                Style::default().fg(theme::ACCENT_BRIGHT),
-            ),
-            Span::raw(format!(" {display_path} ")),
-            Span::styled(range_info, Style::default().fg(theme::TEXT_MUTED)),
-        ])
+        let range_info = read_range_info(input, actual_lines);
+        Line::from(read_header_spans(
+            self.display_name(),
+            &display_path,
+            &range_info,
+        ))
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         // 行范围信息已在 header 中，不再需要 details
