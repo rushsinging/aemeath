@@ -10,7 +10,7 @@ pub use crate::business::types::{
     MessageDeltaPayload, MessageStartPayload, StopReason, StreamEvent, StreamResponse, SystemBlock,
     Usage,
 };
-pub use crate::core::provider::LlmProvider;
+pub use crate::core::provider::{LlmProvider, ReasoningLevel};
 pub use crate::LlmError;
 
 /// Provider error alias for the published language.

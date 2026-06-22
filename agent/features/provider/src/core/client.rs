@@ -449,6 +449,12 @@ impl LlmClient {
     pub fn reasoning_effort(&self) -> Option<String> {
         self.provider.reasoning_effort()
     }
+    pub fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
+        self.provider.set_reasoning_level(level);
+    }
+    pub fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        self.provider.max_reasoning_level()
+    }
     pub fn set_max_tokens(&self, max_tokens: u32) {
         self.provider.set_max_tokens(max_tokens);
     }
