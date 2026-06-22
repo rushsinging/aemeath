@@ -41,6 +41,7 @@ LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/provider/src/business/providers/ollama/non_stream.rs", "core"),
     ("agent/features/provider/src/business/providers/ollama/stream.rs", "core"),
     ("agent/features/provider/src/business/providers/ollama.rs", "core"),
+    ("agent/features/provider/src/business/providers/openai_compatible/driver.rs", "core"),
     ("agent/features/provider/src/business/providers/openai_compatible/non_stream.rs", "core"),
     ("agent/features/provider/src/business/providers/openai_compatible/provider.rs", "core"),
     ("agent/features/provider/src/business/providers/openai_compatible/request_body.rs", "core"),
