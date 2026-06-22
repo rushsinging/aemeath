@@ -1,6 +1,19 @@
 //! Bash 命令分类 + tool 类型到 node 的推断。
 //!
 //! 设计文档 §2.3 Bash 分类规则 + 转移信号表。
+//!
+//! ## TODO(轻量声明 phase 2): 用 LLM 声明的 phase 取代关键词分类
+//!
+//! 当前方案是**被动观察**：tool 执行完后靠关键词猜测意图。根本局限在于
+//! 同一个 tool 在不同意图下属于不同阶段——`git diff` 可能是 Explore
+//! （理解现状）也可能是 Verify（确认编辑结果），关键词无法区分。
+//!
+//! 计划引入**轻量声明协议**：LLM 在 tool call 中带一个可选的 `phase`
+//! 字段（`"explore"` / `"plan"` / `"execute"` / `"verify"`），Graph 优
+//! 先使用 LLM 声明的 phase，`classify_bash` 降级为兜底（仅在 LLM 未
+//! 声明 phase 时使用）。
+//!
+//! 更远期的演进方向见 `mod.rs` 模块文档中的「Workflow 演进路线」。
 
 use super::ReasoningNode;
 
@@ -19,6 +32,10 @@ pub enum BashCategory {
 ///
 /// 已知局限：复合命令、管道、自定义脚本可能误分类（约 15%），
 /// 但误分类仅影响 effort 一档差异，不阻塞执行。
+///
+/// TODO(轻量声明 phase 2): 本函数将降级为兜底——当 LLM 通过 tool call
+/// 的 `phase` 字段声明了意图时，直接用声明值，跳过关键词匹配。
+/// 关键词分类仅在 LLM 未声明 phase 时作为 fallback。
 pub fn classify_bash(command: &str) -> BashCategory {
     let cmd = command.to_lowercase();
 

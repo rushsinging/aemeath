@@ -4,6 +4,40 @@
 //!
 //! 核心原则：Graph 是 effort 调节器，不是流程约束器——只推断阶段调 effort，
 //! 不阻塞 tool、不改 agent loop 控制流、不依赖 LLM 配合。
+//!
+//! ## Workflow 演进路线
+//!
+//! 当前（Phase 1）是**被动观察模式**：根据上一个 tool 的类型和结果猜测当前
+//! 阶段，调 effort 档位。根本局限：意图 ≠ tool 类型——`git diff` 可能是
+//! Explore 也可能是 Verify，靠关键词猜不到 100% 准确。
+//!
+//! ### Phase 2: 轻量声明（计划中）
+//!
+//! 让 LLM 在 tool call 中带一个可选的 `phase` 字段声明当前意图。Graph 优先
+//! 使用 LLM 声明的 phase，关键词分类器（`classify.rs`）降级为兜底 fallback。
+//!
+//! - 成本：每次 tool call 多几个 token
+//! - 收益：准确率从 ~85% → 95%+，不再需要维护关键词列表
+//! - 风险：LLM 可能不配合或幻觉，但有 fallback 兜底
+//! - 对本模块的影响：`next_node()` 增加 phase 优先判断分支，
+//!   `classify.rs` 的 `classify_bash` / `infer_node_from_tool` 变成 fallback
+//!
+//! ### Phase 3: 完整 Workflow（远期，独立模块）
+//!
+//! 如果需要更强的流程控制（可阻塞 tool、可重试、可分支恢复、可持久化恢复），
+//! 新建 `business/workflow/` 模块，与本模块并行共存：
+//!
+//! ```text
+//!   agent loop ←→ ReasoningGraph (effort 调节，保持纯观察)
+//!        ↑
+//!   WorkflowEngine (流程控制，独立层)
+//!        ↓
+//!   可阻塞/重试/分支/持久化
+//! ```
+//!
+//! 关键区别：Workflow Engine 拥有控制权（可阻塞 tool 执行），ReasoningGraph
+//! 只做观察调 effort。两者不合并——职责不同、生命周期不同、LLM 交互模型不同。
+//! 详见设计文档 §6.3「Workflow 扩展空间」。
 
 pub mod classify;
 pub mod config;
@@ -150,6 +184,8 @@ impl ReasoningGraph {
                 if *is_error {
                     return ReasoningNode::Plan;
                 }
+                // TODO(轻量声明 phase 2): 优先使用 LLM 通过 tool call `phase`
+                // 字段声明的意图。仅当 LLM 未声明 phase 时，才回退到关键词推断。
                 classify::infer_node_from_tool(tool_name, bash_command.as_deref(), self.current)
             }
             GraphSignal::TextOnly => ReasoningNode::Idle,
