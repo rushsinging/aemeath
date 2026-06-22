@@ -24,6 +24,7 @@ use crate::business::chat::looping::{
     InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeStreamHandler, RuntimeTurnContext,
 };
+use crate::business::reasoning_graph::{GraphRuntimeConfig, GraphSignal, ReasoningGraph};
 use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
@@ -71,6 +72,9 @@ where
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
     pub language: String,
+    /// Reasoning Graph 实例。`None` = 未启用（零行为变更）；`Some` = 启用，
+    /// loop 在 4 个集成点调 transition 调节 effort。
+    pub reasoning_graph: Option<ReasoningGraph>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
     pub frozen_chats: Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
@@ -112,7 +116,9 @@ where
         language,
         frozen_chats,
         active_summary: active_summary_arc,
+        reasoning_graph,
     } = ctx;
+    let mut reasoning_graph = reasoning_graph;
     let hook_ui = HookUi::new(sink.clone());
 
     // workspace service 跨 chat 轮次持有：恢复 session 时已 restore 到正确位置，
@@ -252,6 +258,14 @@ where
         if is_new_user_turn_message(messages.last()) {
             stall_detector = StallDetector::new();
             turn_start = std::time::Instant::now();
+            // ReasoningGraph: 新用户消息触发阶段推断
+            if let Some(graph) = reasoning_graph.as_mut() {
+                let text = messages
+                    .last()
+                    .map(|m| m.text_content())
+                    .unwrap_or_default();
+                graph.transition(GraphSignal::UserMessage { text, turn_count });
+            }
         }
 
         // ── 回合开始：从共享槽读取「当前回合 token」 ──
@@ -474,6 +488,13 @@ where
             &tool_schemas,
         );
 
+        // ReasoningGraph: 按 graph 当前阶段调 effort（仅对支持 reasoning 的模型）
+        if let Some(ref graph) = reasoning_graph {
+            if graph.enabled() && client.is_reasoning() {
+                client.set_reasoning_level(graph.current_effort());
+            }
+        }
+
         let api_start = std::time::Instant::now();
         let response = client
             .stream_message(
@@ -612,6 +633,10 @@ where
                     api_elapsed,
                 );
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                    // ReasoningGraph: 无 tool call → 回 Idle
+                    if let Some(graph) = reasoning_graph.as_mut() {
+                        graph.transition(GraphSignal::TextOnly);
+                    }
                     loop_fsm.transition(ChatLoopTransition::TryStop);
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
@@ -752,6 +777,28 @@ where
                     )
                     .await;
 
+                    // ReasoningGraph: tool 执行完成 → 按结果推断阶段
+                    if let Some(graph) = reasoning_graph.as_mut() {
+                        // 构建 call_id → bash_command 映射（仅 Bash 需要）
+                        let bash_cmds: std::collections::HashMap<&str, &str> = tool_calls
+                            .iter()
+                            .filter(|tc| tc.name == "Bash")
+                            .filter_map(|tc| {
+                                tc.input
+                                    .get("command")
+                                    .and_then(|v| v.as_str())
+                                    .map(|cmd| (tc.provider_id.as_str(), cmd))
+                            })
+                            .collect();
+                        for result in &all_results {
+                            let bash_command = bash_cmds.get(result.provider_id.as_str()).copied();
+                            graph.transition(GraphSignal::ToolCompleted {
+                                tool_name: result.tool_name.clone(),
+                                bash_command: bash_command.map(|s| s.to_string()),
+                                is_error: result.outcome.is_error,
+                            });
+                        }
+                    }
                     // Build tool result message for API
                     messages.push(tool_results_for_api(all_results, &session_id));
                     // Sync after tool execution

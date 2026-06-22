@@ -283,6 +283,7 @@ mod tests {
             verbose: false,
             resume: None,
             language: "en".to_string(),
+            reasoning_graph_config: None,
         };
         let (change_tx, change_rx) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
         let handle = super::super::accessors::RuntimeHandle {

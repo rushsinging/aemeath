@@ -219,6 +219,9 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
             .as_ref()
             .map(|c| c.language.clone())
             .unwrap_or_else(|| "en".to_string()),
+        reasoning_graph_config: config_file.as_ref().map(|c| {
+            crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(&c.reasoning_graph)
+        }),
     };
 
     // 19. 构建 handle
