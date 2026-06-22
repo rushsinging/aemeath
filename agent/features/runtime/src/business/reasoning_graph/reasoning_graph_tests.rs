@@ -1,8 +1,8 @@
 use super::*;
 use provider::api::ReasoningLevel;
 
-fn enabled_config() -> ReasoningGraphConfig {
-    ReasoningGraphConfig {
+fn enabled_config() -> GraphRuntimeConfig {
+    GraphRuntimeConfig {
         enabled: true,
         ..Default::default()
     }
@@ -36,7 +36,7 @@ fn test_graph_starts_idle() {
 
 #[test]
 fn test_enabled_reflects_config() {
-    let graph = ReasoningGraph::new(ReasoningGraphConfig::default());
+    let graph = ReasoningGraph::new(GraphRuntimeConfig::default());
     assert!(!graph.enabled());
 
     let graph = ReasoningGraph::new(enabled_config());
@@ -270,15 +270,13 @@ fn test_current_effort_reflects_node() {
 
 #[test]
 fn test_config_override_changes_effort() {
-    let config = ReasoningGraphConfig {
+    let config = GraphRuntimeConfig {
         enabled: true,
         max_reasoning: ReasoningLevel::Max,
-        nodes: config::NodesConfig {
-            explore: Some(config::NodeEffortConfig {
-                effort: ReasoningLevel::High,
-            }),
-            ..Default::default()
-        },
+        explore_effort: Some(ReasoningLevel::High),
+        plan_effort: None,
+        execute_effort: None,
+        verify_effort: None,
     };
     let graph = ReasoningGraph::new(config);
     let _ = graph;
@@ -289,15 +287,13 @@ fn test_config_override_changes_effort() {
     assert_eq!(g.current_effort(), ReasoningLevel::Medium);
 
     // 用覆盖配置
-    let config = ReasoningGraphConfig {
+    let config = GraphRuntimeConfig {
         enabled: true,
         max_reasoning: ReasoningLevel::Max,
-        nodes: config::NodesConfig {
-            explore: Some(config::NodeEffortConfig {
-                effort: ReasoningLevel::High,
-            }),
-            ..Default::default()
-        },
+        explore_effort: Some(ReasoningLevel::High),
+        plan_effort: None,
+        execute_effort: None,
+        verify_effort: None,
     };
     let mut g2 = ReasoningGraph::new(config);
     g2.current = ReasoningNode::Explore;
