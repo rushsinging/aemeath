@@ -67,14 +67,13 @@ impl HookRunner {
 
     /// 执行单个 hook 命令。
     ///
-    /// `working_root` 用作 hook 进程的工作目录，并注入 `AEMEATH_PROJECT_DIR` /
-    /// `CLAUDE_PROJECT_DIR` 环境变量。`in_worktree` 注入 `AEMEATH_IN_WORKTREE`。
+    /// `workspace_root` 用作 hook 进程的工作目录，并注入 `AEMEATH_PROJECT_DIR` /
+    /// `CLAUDE_PROJECT_DIR` 环境变量。
     pub async fn execute_hook(
         &self,
         hook: &HookEntry,
         input: &HookInput,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> HookResult {
         let input_json = match serde_json::to_string(input) {
             Ok(json) => json,
@@ -84,21 +83,21 @@ impl HookRunner {
         };
 
         let timeout = Duration::from_secs(hook.timeout);
-        let working_root_str = working_root.display().to_string();
-        let command = Self::expand_command_placeholders_static(&hook.command, &working_root_str);
+        let workspace_root_str = workspace_root.display().to_string();
+        let command = Self::expand_command_placeholders_static(&hook.command, &workspace_root_str);
         log::debug!(
             target: LOG_TARGET,
-            "hook start: event={:?} matcher={} command={} working_root={}",
+            "hook start: event={:?} matcher={} command={} workspace_root={}",
             input.event,
             hook.matcher,
             command,
-            working_root_str
+            workspace_root_str
         );
 
         let mut child = match tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&command)
-            .current_dir(working_root)
+            .current_dir(workspace_root)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -106,9 +105,8 @@ impl HookRunner {
                 "AEMEATH_HOOK_EVENT",
                 serde_json::to_string(&input.event).unwrap_or_default(),
             )
-            .env("AEMEATH_PROJECT_DIR", &working_root_str)
-            .env("CLAUDE_PROJECT_DIR", &working_root_str)
-            .env("AEMEATH_IN_WORKTREE", if in_worktree { "1" } else { "0" })
+            .env("AEMEATH_PROJECT_DIR", &workspace_root_str)
+            .env("CLAUDE_PROJECT_DIR", &workspace_root_str)
             .envs(input.data.to_env_vars())
             .spawn()
         {
@@ -235,10 +233,13 @@ impl HookRunner {
         }
     }
 
-    pub(crate) fn expand_command_placeholders_static(command: &str, working_root: &str) -> String {
+    pub(crate) fn expand_command_placeholders_static(
+        command: &str,
+        workspace_root: &str,
+    ) -> String {
         command
-            .replace("{AEMEATH_PROJECT_DIR}", working_root)
-            .replace("{CLAUDE_PROJECT_DIR}", working_root)
+            .replace("{AEMEATH_PROJECT_DIR}", workspace_root)
+            .replace("{CLAUDE_PROJECT_DIR}", workspace_root)
     }
 
     /// 运行指定事件的所有匹配 hook
@@ -250,8 +251,7 @@ impl HookRunner {
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         let hooks = self.matching_hooks(event, tool_name);
         if hooks.is_empty() {
@@ -269,9 +269,7 @@ impl HookRunner {
                 hook.matcher,
                 hook.command
             );
-            let result = self
-                .execute_hook(hook, &input, working_root, in_worktree)
-                .await;
+            let result = self.execute_hook(hook, &input, workspace_root).await;
             log::debug!(
                 target: LOG_TARGET,
                 "hook result: blocked={} error={:?}",
@@ -296,8 +294,7 @@ impl HookRunner {
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = self.matching_hooks(event, tool_name);
         if hooks.is_empty() {
@@ -315,9 +312,7 @@ impl HookRunner {
                 hook.matcher,
                 hook.command
             );
-            let result = self
-                .execute_hook(hook, &input, working_root, in_worktree)
-                .await;
+            let result = self.execute_hook(hook, &input, workspace_root).await;
             let json_output = result.parse_json_output();
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
@@ -342,12 +337,9 @@ impl HookRunner {
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> (bool, Vec<HookResult>) {
-        let results = self
-            .run_hooks(event, tool_name, data, working_root, in_worktree)
-            .await;
+        let results = self.run_hooks(event, tool_name, data, workspace_root).await;
         let blocked = results.iter().any(|r| r.blocked);
         (blocked, results)
     }

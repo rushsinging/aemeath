@@ -78,7 +78,6 @@ pub async fn build_system_prompt_parts(
     hook_runner: &HookRunner,
     _memory_config: &MemoryConfig,
     lang: &str,
-    in_worktree: bool,
 ) -> SystemPromptParts {
     let cwd = &context.cwd;
     let cwd_str = cwd.to_string_lossy();
@@ -110,7 +109,7 @@ pub async fn build_system_prompt_parts(
     }
 
     // --- Project instructions: will be injected as a separate user-context message ---
-    let claude_md = load_agents_md(cwd, hook_runner, cwd, in_worktree).await;
+    let claude_md = load_agents_md(cwd, hook_runner, cwd).await;
 
     SystemPromptParts {
         static_part,
@@ -173,12 +172,7 @@ fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
         .collect()
 }
 
-pub async fn load_agents_md(
-    cwd: &Path,
-    hook_runner: &HookRunner,
-    working_root: &Path,
-    in_worktree: bool,
-) -> String {
+pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner, workspace_root: &Path) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     // Global: ~/.agents/AGENTS.md first, then fallback to ~/.claude/CLAUDE.md
@@ -191,7 +185,7 @@ pub async fn load_agents_md(
             if let Ok(content) = tokio::fs::read_to_string(global_path).await {
                 let file_path_str = global_path.to_string_lossy().to_string();
                 hook_runner
-                    .on_instructions_loaded(&file_path_str, "agents_md", working_root, in_worktree)
+                    .on_instructions_loaded(&file_path_str, "agents_md", workspace_root)
                     .await;
                 parts.push(content);
             }
@@ -205,7 +199,7 @@ pub async fn load_agents_md(
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
                 let file_path_str = project_path.to_string_lossy().to_string();
                 hook_runner
-                    .on_instructions_loaded(&file_path_str, "agents_md", working_root, in_worktree)
+                    .on_instructions_loaded(&file_path_str, "agents_md", workspace_root)
                     .await;
                 parts.push(content);
             }

@@ -79,7 +79,7 @@ impl StatusBar {
         let runtime = &view.runtime;
         let mut context = self.context.clone();
         context.path_base = runtime.context.path_base.clone();
-        context.working_root = runtime.context.working_root.clone();
+        context.workspace_root = runtime.context.workspace_root.clone();
         context.worktree_kind = match runtime.context.kind {
             StatusWorktreeKind::Worktree => WorktreeKind::Worktree,
             StatusWorktreeKind::Main => WorktreeKind::Main,

@@ -351,21 +351,21 @@ fn test_refresh_assembles_again_after_conversation_mutates() {
 }
 
 #[test]
-fn test_refresh_assembles_again_when_working_root_changes() {
-    // Fix 1 回归：/worktree enter 改变 working_root 时，revision 不变，
-    // 但 memo 的 key 应包含 working_root，使工具路径显示刷新。
+fn test_refresh_assembles_again_when_workspace_root_changes() {
+    // Fix 1 回归：/worktree enter 改变 workspace_root 时，revision 不变，
+    // 但 memo 的 key 应包含 workspace_root，使工具路径显示刷新。
     let mut app = make_app();
     app.append_system_notice("一条消息");
     app.refresh_output_document_from_model();
     let after_first = app.assemble_count;
 
-    // conversation 不变（revision 不推进），只改 working_root。
-    app.model.runtime.workspace.working_root = Some("/new/root".to_string());
+    // conversation 不变（revision 不推进），只改 workspace_root。
+    app.model.runtime.workspace.workspace_root = Some("/new/root".to_string());
     app.refresh_output_document_from_model();
 
     assert_eq!(
         app.assemble_count,
         after_first + 1,
-        "working_root 变化时应触发重新 assemble，即使 revision 未变"
+        "workspace_root 变化时应触发重新 assemble，即使 revision 未变"
     );
 }

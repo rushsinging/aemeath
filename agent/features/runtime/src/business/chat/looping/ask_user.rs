@@ -14,8 +14,7 @@ pub(crate) async fn ask_user<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
-    working_root: &Path,
-    in_worktree: bool,
+    workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -40,8 +39,7 @@ where
                     tool_name: call.name.clone(),
                     permission_rule: "manual".to_string(),
                 }),
-                working_root,
-                in_worktree,
+                workspace_root,
             )
             .await;
     }

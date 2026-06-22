@@ -10,7 +10,8 @@ pub struct ProjectContext {
     /// path_base（相对路径解析基准）。
     pub path_base: String,
     /// workspace root（git 根目录）。
-    pub working_root: String,
+    #[serde(alias = "working_root")]
+    pub workspace_root: String,
     /// 当前 git 分支。
     pub git_branch: Option<String>,
 }

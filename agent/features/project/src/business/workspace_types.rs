@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceFrame {
     pub path_base: PathBuf,
-    pub working_root: PathBuf,
+    pub workspace_root: PathBuf,
 }
 
 /// Workspace 层集中错误（用户可见消息为中文）。
@@ -21,7 +21,7 @@ pub enum WorkspaceError {
     MissingPathAndBranch,
     InvalidBranch,
     NestedWorktree {
-        current_working_root: PathBuf,
+        current_workspace_root: PathBuf,
         current_path_base: PathBuf,
     },
     RepoMismatch {
@@ -42,14 +42,14 @@ impl std::fmt::Display for WorkspaceError {
             }
             WorkspaceError::InvalidBranch => write!(f, "branch 不能只包含路径分隔符或敏感字符"),
             WorkspaceError::NestedWorktree {
-                current_working_root,
+                current_workspace_root,
                 current_path_base,
             } => write!(
                 f,
-                "已在 worktree 中（当前 working_root: {}，path_base: {}）。\
+                "已在 worktree 中（当前 workspace_root: {}，path_base: {}）。\
                  如需进入新 worktree，请先 ExitWorktree 退出当前 worktree 再进入新的；\
                  如目标一致，可直接在当前 worktree 继续工作",
-                current_working_root.display(),
+                current_workspace_root.display(),
                 current_path_base.display()
             ),
             WorkspaceError::RepoMismatch { path, repo_root } => write!(
@@ -73,18 +73,18 @@ impl std::error::Error for WorkspaceError {}
 
 /// 读当前 workspace 位置（所有 tool 可用）。
 pub trait WorkspaceRead: Send + Sync {
-    fn current_root(&self) -> PathBuf;
+    fn current_workspace_root(&self) -> PathBuf;
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
     /// 当前工作根是否位于 linked git worktree（`.git/worktrees/*`）。
-    /// 供 hook 注入 `AEMEATH_IN_WORKTREE`，让构建类 hook 在 worktree 中跳过。
+    /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;
 }
 
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
 pub trait WorkspaceControl: Send + Sync {
     fn set_path_base(&self, path: PathBuf) -> Result<(), WorkspaceError>;
-    fn set_working_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError>;
+    fn set_workspace_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError>;
     /// 切换到 `path`（存在性 + 同源校验），不压栈帧。供 ExitWorktree{path} 使用。
     fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError>;
     fn enter(

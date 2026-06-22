@@ -24,7 +24,7 @@ pub fn render_tool_call(
                 &view.title,
                 raw_json,
                 view.result_payload.as_ref(),
-                view.working_root.as_deref(),
+                view.workspace_root.as_deref(),
             )
         })
         .unwrap_or_else(|| {
@@ -130,7 +130,7 @@ mod tests {
             activity_summary: None,
             result_summary: None,
             result_payload: None,
-            working_root: None,
+            workspace_root: None,
             collapsible: false,
             collapsed: false,
         }

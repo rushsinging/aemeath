@@ -29,8 +29,7 @@ where
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = runner.matching_hooks(event, tool_name);
         log::debug!(target: LOG_TARGET,
@@ -55,9 +54,7 @@ where
                 )))
                 .await;
 
-            let result = runner
-                .execute_hook(hook, &input, working_root, in_worktree)
-                .await;
+            let result = runner.execute_hook(hook, &input, workspace_root).await;
             let json_output = result.parse_json_output();
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
@@ -87,10 +84,9 @@ where
         event: HookEvent,
         tool_name: Option<&str>,
         data: HookData,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
-        self.run_json(runner, event, tool_name, data, working_root, in_worktree)
+        self.run_json(runner, event, tool_name, data, workspace_root)
             .await
             .into_iter()
             .map(|(_, result, _)| result)

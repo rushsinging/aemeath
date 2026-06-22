@@ -7,8 +7,8 @@
 
 ## 状态唯一性
 
-- `WorkspaceService`（`src/business/workspace_service.rs`）是**唯一**可变 workspace 状态源，单锁 `Mutex<WorkspaceState>`。**NEVER** 在别处另建可变 workspace 状态或缓存 `working_root` 副本。
-- `WorkspaceState`（`src/business/workspace_state.rs`）持 `initial_cwd` / `working_root` / `path_base` / worktree 栈 `stack`；进入、退出 worktree 即栈 frame 的压入 / 弹出。
+- `WorkspaceService`（`src/business/workspace_service.rs`）是**唯一**可变 workspace 状态源，单锁 `Mutex<WorkspaceState>`。**NEVER** 在别处另建可变 workspace 状态或缓存 `workspace_root` 副本。
+- `WorkspaceState`（`src/business/workspace_state.rs`）持 `initial_cwd` / `workspace_root` / `path_base` / worktree 栈 `stack`；进入、退出 worktree 即栈 frame 的压入 / 弹出。
 - 默认基线分支 `main`、worktree 目录 `.worktrees`（`DEFAULT_WORKTREE_BASE` / `DEFAULT_WORKTREE_DIR`）。
 
 ## COLA 分层（内层不依赖外层）

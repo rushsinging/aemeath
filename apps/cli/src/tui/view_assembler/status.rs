@@ -58,7 +58,7 @@ impl StatusViewAssembler {
             tps: runtime.live_tps.unwrap_or(0.0),
             context: StatusContextViewModel {
                 path_base: runtime.workspace.path_base.clone().unwrap_or_default(),
-                working_root: runtime.workspace.working_root.clone().unwrap_or_default(),
+                workspace_root: runtime.workspace.workspace_root.clone().unwrap_or_default(),
                 branch: runtime
                     .workspace
                     .branch
@@ -224,7 +224,7 @@ mod tests {
         runtime.apply(RuntimeIntent::RecordLiveTps { tps: 42.0 });
         runtime.apply(RuntimeIntent::WorkspaceSnapshotReceived {
             path_base: Some("~/repo/cli".to_string()),
-            working_root: Some("~/repo".to_string()),
+            workspace_root: Some("~/repo".to_string()),
             branch: Some("feature/x".to_string()),
             kind: WorktreeKind::LinkedWorktree,
         });
@@ -251,7 +251,7 @@ mod tests {
         let mut runtime = RuntimeModel::default();
         runtime.apply(RuntimeIntent::WorkspaceSnapshotReceived {
             path_base: Some("/repo".to_string()),
-            working_root: Some("/repo".to_string()),
+            workspace_root: Some("/repo".to_string()),
             branch: Some("   ".to_string()),
             kind: WorktreeKind::MainCheckout,
         });

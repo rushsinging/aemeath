@@ -255,13 +255,13 @@ pub(super) fn workspace_context_to_sdk(
 ) -> WorkspaceContextView {
     WorkspaceContextView {
         path_base: workspace.path_base.into(),
-        working_root: workspace.working_root.into(),
+        workspace_root: workspace.workspace_root.into(),
         context_stack: workspace
             .context_stack
             .into_iter()
             .map(|entry| WorkspaceStackEntryView {
                 path_base: entry.path_base.into(),
-                working_root: entry.working_root.into(),
+                workspace_root: entry.workspace_root.into(),
             })
             .collect(),
     }

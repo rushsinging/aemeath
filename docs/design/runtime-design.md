@@ -156,7 +156,7 @@ struct ToolCall {
 
 原设计用 5 套类型表达同一组 workspace 事实，导致：
 1. **所有权不清**：tools、project、runtime、session 都能重建同一组 workspace 字段
-2. **撕裂读**：`working_root` 与 `path_base` 是两把独立 `Arc<Mutex>`，读者可能观察到中间态
+2. **撕裂读**：`workspace_root` 与 `path_base` 是两把独立 `Arc<Mutex>`，读者可能观察到中间态
 3. **子 agent 共享 bug**：子 agent 经 `Arc` 克隆共享父 agent 的 workspace，`EnterWorktree` 会改到父 agent 的工作目录
 4. **六边形违规**：worktree 业务规则直接内联 `std::process::Command::new("git")`
 
@@ -168,12 +168,12 @@ struct ToolCall {
 - git 进程调用不进 share（`check-share-minimal-kernel.sh` 禁止）
 
 **project 层**（workspace 切片 = 所有者）：
-- `WorkspaceState { initial_cwd, working_root, path_base, stack }` —— 唯一可变 workspace 真相
-- `WorkspaceFrame { path_base, working_root }` —— worktree 栈帧
+- `WorkspaceState { initial_cwd, workspace_root, path_base, stack }` —— 唯一可变 workspace 真相
+- `WorkspaceFrame { path_base, workspace_root }` —— worktree 栈帧
 - `WorkspaceService` —— 包 `Arc<Mutex<WorkspaceState>>`，**一把锁**，enter/exit 原子切换 root/base/stack
 
 三个入站能力 trait（port）：
-- `WorkspaceRead` = `current_root()` / `current_path_base()` / `resolve(rel)`
+- `WorkspaceRead` = `current_workspace_root()` / `current_path_base()` / `resolve(rel)`
 - `WorkspaceControl` = `set_cwd(path)` / `switch_to(path)` / `enter(path, branch)` / `exit()`
 - `WorkspacePersist` = `snapshot()` / `restore(dto)`
 
@@ -181,7 +181,7 @@ struct ToolCall {
 - `GitWorktreeOps` —— trait 与默认实现 `GitCli` 均在 project；测试注入 `FakeGit`
 
 **tools 层**：
-- `ToolContext` → `ToolExecutionContext`：**删除** `working_root` / `path_base` / `context_stack` 三字段，改持有 `Arc<WorkspaceService>`
+- `ToolContext` → `ToolExecutionContext`：**删除** `workspace_root` / `path_base` / `context_stack` 三字段，改持有 `Arc<WorkspaceService>`
 - 对外暴露窄访问器：`workspace_read() -> &dyn WorkspaceRead`（所有 tool）、`workspace_control() -> &dyn WorkspaceControl`（仅 bash + worktree 工具）
 
 **runtime 层**：
@@ -200,7 +200,7 @@ struct ToolCall {
 
 ### 架构 Guard
 
-- **R1** `ToolExecutionContext` 不得含 `working_root` / `path_base` / `context_stack` 字段
+- **R1** `ToolExecutionContext` 不得含 `workspace_root` / `path_base` / `context_stack` 字段
 - **R2** tools 不得直接引用 `PersistedWorkspaceContext` 或 `WorkspacePersist`
 - **R3** 仅 project 可定义 `WorkspaceState`
 - **R4** 生产代码调 `.workspace_control()` 仅限 tools 的 `bash.rs` 与 `worktree.rs`

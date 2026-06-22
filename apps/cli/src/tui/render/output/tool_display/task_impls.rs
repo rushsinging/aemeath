@@ -12,7 +12,7 @@ impl ToolDisplay for TaskCreateDisplay {
     fn name(&self) -> &str {
         "TaskCreate"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let subject = str_arg(input, "subject", "");
         if subject.is_empty() {
             return self.display_name().to_string();
@@ -51,7 +51,7 @@ impl ToolDisplay for TaskUpdateDisplay {
     fn name(&self) -> &str {
         "TaskUpdate"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let id = str_arg(input, "taskId", "");
         if id.is_empty() {
             return self.display_name().to_string();
@@ -118,7 +118,7 @@ impl ToolDisplay for TaskListDisplay {
     fn name(&self) -> &str {
         "TaskList"
     }
-    fn format_header(&self, _input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -148,7 +148,7 @@ impl ToolDisplay for TaskListCreateDisplay {
     fn name(&self) -> &str {
         "TaskListCreate"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let subject = str_arg(input, "subject", "");
         if subject.is_empty() {
             self.display_name().to_string()
@@ -179,7 +179,7 @@ impl ToolDisplay for TaskListCompleteDisplay {
     fn name(&self) -> &str {
         "TaskListComplete"
     }
-    fn format_header(&self, _input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -205,7 +205,7 @@ impl ToolDisplay for SkillDisplay {
     fn name(&self) -> &str {
         "Skill"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let skill = str_arg(input, "skill", "");
         if skill.is_empty() {
             self.display_name().to_string()
@@ -240,7 +240,7 @@ impl ToolDisplay for LspDisplay {
     fn name(&self) -> &str {
         "LSP"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let op = str_arg(input, "operation", "");
         let path = str_arg(input, "filePath", "");
         let name = self.display_name();
@@ -278,7 +278,7 @@ impl ToolDisplay for TaskGetDisplay {
     fn name(&self) -> &str {
         "TaskGet"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let id = str_arg(input, "taskId", "");
         if id.is_empty() {
             self.display_name().to_string()
@@ -313,7 +313,7 @@ impl ToolDisplay for TaskStopDisplay {
     fn name(&self) -> &str {
         "TaskStop"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let id = str_arg(input, "taskId", "");
         if id.is_empty() {
             self.display_name().to_string()
@@ -344,7 +344,7 @@ impl ToolDisplay for EnterPlanModeDisplay {
     fn name(&self) -> &str {
         "EnterPlanMode"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let reason = str_arg(input, "reason", "");
         if reason.is_empty() {
             self.display_name().to_string()
@@ -375,7 +375,7 @@ impl ToolDisplay for ExitPlanModeDisplay {
     fn name(&self) -> &str {
         "ExitPlanMode"
     }
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String {
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         if bool_arg(input, "execute", false) {
             "Execute Plan".to_string()
         } else {

@@ -63,10 +63,10 @@ impl TypedTool for GrepTool {
         };
         let pattern = args.pattern.as_str();
         // Path has already been validated and normalised by PolicyEngine
-        let working_root = ctx.workspace_read().current_root();
+        let workspace_root = ctx.workspace_read().current_workspace_root();
         let search_path = match args.path.as_deref() {
             Some(p) => std::path::PathBuf::from(p),
-            None => working_root.clone(),
+            None => workspace_root.clone(),
         };
         let glob_filter = args.glob.as_deref();
 
@@ -77,7 +77,7 @@ impl TypedTool for GrepTool {
                 cmd.arg("--glob").arg(g);
             }
             cmd.arg(&search_path)
-                .current_dir(&working_root)
+                .current_dir(&workspace_root)
                 .output()
                 .await
         } else {
@@ -86,7 +86,7 @@ impl TypedTool for GrepTool {
             if let Some(g) = glob_filter {
                 cmd.arg("--include").arg(g);
             }
-            cmd.current_dir(&working_root).output().await
+            cmd.current_dir(&workspace_root).output().await
         };
 
         match output {

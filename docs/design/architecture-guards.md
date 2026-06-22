@@ -201,9 +201,9 @@
 
 | 编号 | 规则 | 守护目标 |
 |---|---|---|
-| R1 | `ToolExecutionContext` 定义不得含 `working_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
+| R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
 | R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
-| R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `working_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
+| R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
 | R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
 | R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
 | R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 R2 重叠的兜底 |
@@ -429,7 +429,7 @@
 - **行为**：
   1. 仅对 `Edit` / `Write` 生效，其他工具直接放行；
   2. 解析 `git rev-parse --show-toplevel`，项目外文件放行；
-  3. 若 `AEMEATH_IN_WORKTREE=1` 放行；
+  3. 用 git 原生检测（`git rev-parse --absolute-git-dir` vs `--git-common-dir`）判断是否在 worktree 中，worktree 放行；
   4. 否则输出 "Edit/Write rejected: 在 main 工作区直接修改" 错误并以 exit 2 阻断。
 - **设计意图**：强制 [AGENTS.md](../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
 

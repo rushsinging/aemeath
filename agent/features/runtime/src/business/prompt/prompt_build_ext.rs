@@ -14,7 +14,6 @@ pub async fn build_static_prompt(
     hook_runner: &HookRunner,
     prompt_parts: crate::business::prompt::build::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
-    in_worktree: bool,
 ) -> String {
     let skills_guard = skills.lock().await;
     let guidance_config = config_file
@@ -23,8 +22,7 @@ pub async fn build_static_prompt(
     let language = config_file.map(|c| c.language.as_str()).unwrap_or("en");
     let instructions_hook = bootstrap::InstructionsLoadedHookRunner {
         hook_runner,
-        working_root: cwd,
-        in_worktree,
+        workspace_root: cwd,
     };
     let model_guidance = prompt::api::guidance::resolve_guidance_async(
         model,

@@ -50,7 +50,7 @@ pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {
     let workspace = project::api::WorkspacePersist::snapshot(me.inner.workspace.as_ref());
     let cwd = workspace.path_base.clone();
     let path_base = workspace.path_base.clone();
-    let working_root = workspace.working_root.clone();
+    let workspace_root = workspace.workspace_root.clone();
     let git_branch = project::api::GitWorktreeOps::current_branch(
         &project::api::GitCli,
         std::path::Path::new(&path_base),
@@ -61,7 +61,7 @@ pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {
     ProjectContext {
         cwd,
         path_base,
-        working_root,
+        workspace_root,
         git_branch,
     }
 }

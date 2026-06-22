@@ -73,16 +73,9 @@ impl AgentRunner for CliAgentRunner {
         };
 
         // Call SubagentStart hook
-        let working_root = ctx.workspace_read().current_root();
-        let in_worktree = ctx.workspace_read().in_worktree();
+        let workspace_root = ctx.workspace_read().current_workspace_root();
         let hook_results = hook_runner
-            .on_subagent_start(
-                prompt,
-                &system,
-                resolved_spec.as_deref(),
-                &working_root,
-                in_worktree,
-            )
+            .on_subagent_start(prompt, &system, resolved_spec.as_deref(), &workspace_root)
             .await;
         // Send any system messages from hook results to progress_tx
         for (_, _, json_output) in &hook_results {

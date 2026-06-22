@@ -12,8 +12,7 @@ impl HookRunner {
         &self,
         tool_name: &str,
         permission_rule: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::PermissionRequest,
@@ -22,8 +21,7 @@ impl HookRunner {
                 tool_name: tool_name.to_string(),
                 permission_rule: permission_rule.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -33,8 +31,7 @@ impl HookRunner {
         &self,
         tool_name: &str,
         permission_rule: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::PermissionDenied,
@@ -43,8 +40,7 @@ impl HookRunner {
                 tool_name: tool_name.to_string(),
                 permission_rule: permission_rule.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -54,8 +50,7 @@ impl HookRunner {
         &self,
         notification_text: &str,
         notification_type: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::Notification,
@@ -64,8 +59,7 @@ impl HookRunner {
                 notification_text: notification_text.to_string(),
                 notification_type: notification_type.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -75,8 +69,7 @@ impl HookRunner {
         &self,
         file_path: &str,
         instruction_type: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::InstructionsLoaded,
@@ -85,8 +78,7 @@ impl HookRunner {
                 file_path: file_path.to_string(),
                 instruction_type: instruction_type.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -96,8 +88,7 @@ impl HookRunner {
         &self,
         config_file: &str,
         changed_field: Option<&str>,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::ConfigChange,
@@ -106,8 +97,7 @@ impl HookRunner {
                 config_file: config_file.to_string(),
                 changed_field: changed_field.map(String::from),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -117,8 +107,7 @@ impl HookRunner {
         &self,
         server_name: &str,
         elicitation_text: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::Elicitation,
@@ -128,8 +117,7 @@ impl HookRunner {
                 elicitation_text: Some(elicitation_text.to_string()),
                 user_response: None,
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -139,8 +127,7 @@ impl HookRunner {
         &self,
         server_name: &str,
         user_response: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::ElicitationResult,
@@ -150,8 +137,7 @@ impl HookRunner {
                 elicitation_text: None,
                 user_response: Some(user_response.to_string()),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -163,8 +149,7 @@ impl HookRunner {
         &self,
         original_input: &str,
         expanded_input: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::UserPromptExpansion,
@@ -173,8 +158,7 @@ impl HookRunner {
                 original_input: original_input.to_string(),
                 expanded_input: expanded_input.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -184,8 +168,7 @@ impl HookRunner {
         &self,
         old_cwd: &str,
         new_cwd: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::CwdChanged,
@@ -194,8 +177,7 @@ impl HookRunner {
                 old_cwd: old_cwd.to_string(),
                 new_cwd: new_cwd.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -205,8 +187,7 @@ impl HookRunner {
         &self,
         file_path: &str,
         change_type: &str,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::FileChanged,
@@ -215,8 +196,7 @@ impl HookRunner {
                 file_path: file_path.to_string(),
                 change_type: change_type.to_string(),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }
@@ -226,8 +206,7 @@ impl HookRunner {
         &self,
         teammate_name: &str,
         idle_reason: Option<&str>,
-        working_root: &Path,
-        in_worktree: bool,
+        workspace_root: &Path,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::TeammateIdle,
@@ -236,8 +215,7 @@ impl HookRunner {
                 teammate_name: teammate_name.to_string(),
                 idle_reason: idle_reason.map(String::from),
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await
     }

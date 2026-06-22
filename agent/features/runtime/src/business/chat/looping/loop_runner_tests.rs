@@ -430,18 +430,18 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
 }
 
 #[tokio::test]
-async fn test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env() {
+async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env() {
     let sink = RecordingSink::default();
     let path_base = tempfile::tempdir().unwrap();
-    let working_root = tempfile::tempdir().unwrap();
+    let workspace_root = tempfile::tempdir().unwrap();
     let marker = path_base.path().join("stop-hook-env.txt");
     let marker_path = marker.display().to_string();
     let workspace_dto = crate::business::session::PersistedWorkspaceContext {
         path_base: path_base.path().display().to_string(),
-        working_root: working_root.path().display().to_string(),
+        workspace_root: workspace_root.path().display().to_string(),
         context_stack: vec![crate::business::session::PersistedWorkspaceFrame {
             path_base: path_base.path().display().to_string(),
-            working_root: path_base.path().display().to_string(),
+            workspace_root: path_base.path().display().to_string(),
         }],
     };
     let workspace = project::api::WorkspaceService::new(path_base.path().to_path_buf());
@@ -500,7 +500,7 @@ async fn test_process_chat_loop_uses_workspace_working_root_for_stop_hook_env() 
     let output = std::fs::read_to_string(marker).unwrap();
     let parts: Vec<&str> = output.split('|').collect();
     assert_eq!(parts.len(), 3);
-    let expected = working_root.path().canonicalize().unwrap();
+    let expected = workspace_root.path().canonicalize().unwrap();
     for part in parts {
         assert_eq!(std::fs::canonicalize(part).unwrap(), expected);
     }

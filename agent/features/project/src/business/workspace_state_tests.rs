@@ -8,7 +8,7 @@ fn st(cwd: &str) -> WorkspaceState {
 #[test]
 fn init_consistent() {
     let s = st("/repo");
-    assert_eq!(s.working_root, PathBuf::from("/repo"));
+    assert_eq!(s.workspace_root, PathBuf::from("/repo"));
     assert_eq!(s.path_base, PathBuf::from("/repo"));
     assert!(s.stack.is_empty());
 }
@@ -35,10 +35,10 @@ fn exit_pops_and_restores() {
     let mut s = st("/repo");
     s.stack.push(WorkspaceFrame {
         path_base: "/prev".into(),
-        working_root: "/prev".into(),
+        workspace_root: "/prev".into(),
     });
     s.path_base = "/wt".into();
-    s.working_root = "/wt".into();
+    s.workspace_root = "/wt".into();
     let prev = exit(&mut s).unwrap();
     assert_eq!(prev.path_base, PathBuf::from("/prev"));
     assert_eq!(s.path_base, PathBuf::from("/prev"));
@@ -49,7 +49,7 @@ fn set_path_base_detects_root() {
     let mut s = st("/repo");
     set_path_base(&mut s, PathBuf::from("/repo/sub")).unwrap();
     assert_eq!(s.path_base, PathBuf::from("/repo/sub"));
-    assert_eq!(s.working_root, PathBuf::from("/repo"));
+    assert_eq!(s.workspace_root, PathBuf::from("/repo"));
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn snapshot_restore_roundtrip() {
     s.path_base = "/repo/sub".into();
     s.stack.push(WorkspaceFrame {
         path_base: "/repo".into(),
-        working_root: "/repo".into(),
+        workspace_root: "/repo".into(),
     });
     let dto = snapshot(&s);
     let mut s2 = st("/tmp");
@@ -66,7 +66,7 @@ fn snapshot_restore_roundtrip() {
     let dir = std::env::temp_dir();
     let dto2 = PersistedWorkspaceContext {
         path_base: dir.display().to_string(),
-        working_root: dir.display().to_string(),
+        workspace_root: dir.display().to_string(),
         context_stack: dto.context_stack.clone(),
     };
     restore(&mut s2, &dto2).unwrap();
@@ -79,7 +79,7 @@ fn restore_invalid_path_fails_whole() {
     let mut s = st("/repo");
     let bad = PersistedWorkspaceContext {
         path_base: "/definitely/not/here/xyz".into(),
-        working_root: "/definitely/not/here/xyz".into(),
+        workspace_root: "/definitely/not/here/xyz".into(),
         context_stack: vec![],
     };
     assert!(matches!(
@@ -97,14 +97,14 @@ fn enter_rejects_nested_when_in_worktree() {
     let mut s = st("/repo");
     s.stack.push(WorkspaceFrame {
         path_base: "/prev".into(),
-        working_root: "/prev".into(),
+        workspace_root: "/prev".into(),
     });
     assert!(matches!(
         enter(&mut s, &git, Some("/other".into()), None),
         Err(WorkspaceError::NestedWorktree {
-            current_working_root,
+            current_workspace_root,
             current_path_base,
-        }) if current_working_root == Path::new("/repo")
+        }) if current_workspace_root == Path::new("/repo")
            && current_path_base == Path::new("/repo")
     ));
 }
@@ -121,7 +121,7 @@ fn switch_to_rejects_nonexistent_path() {
     );
     // State must remain unchanged.
     assert_eq!(s.path_base, PathBuf::from("/repo"));
-    assert_eq!(s.working_root, PathBuf::from("/repo"));
+    assert_eq!(s.workspace_root, PathBuf::from("/repo"));
     assert!(s.stack.is_empty());
 }
 
@@ -157,7 +157,7 @@ fn switch_to_rejects_cross_repo() {
     );
     // State must remain unchanged.
     assert_eq!(s.path_base, PathBuf::from("/repo"));
-    assert_eq!(s.working_root, PathBuf::from("/repo"));
+    assert_eq!(s.workspace_root, PathBuf::from("/repo"));
     assert!(s.stack.is_empty());
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -190,8 +190,8 @@ fn switch_to_succeeds_same_repo() {
 
     assert_eq!(s.path_base, canonical_tmp, "path_base should be canonical");
     assert_eq!(
-        s.working_root, worktree_root,
-        "working_root should be worktree root"
+        s.workspace_root, worktree_root,
+        "workspace_root should be worktree root"
     );
     assert!(s.stack.is_empty(), "stack must not be pushed");
 
@@ -231,14 +231,14 @@ fn enter_happy_path_pushes_frame_and_swaps_cwd() {
     // set_path_base does not call show_toplevel.
     git.toplevel
         .insert(canonical_tmp.clone(), worktree_root.clone());
-    // git_common_dir: checked for working_root ("/repo") and worktree_root.
+    // git_common_dir: checked for workspace_root ("/repo") and worktree_root.
     git.common_dir
         .insert(PathBuf::from("/repo"), common.clone());
     git.common_dir.insert(worktree_root.clone(), common.clone());
 
     let mut s = st("/repo");
     let saved_path_base = s.path_base.clone();
-    let saved_working_root = s.working_root.clone();
+    let saved_workspace_root = s.workspace_root.clone();
 
     // Pass the temp dir as an absolute path → resolve_worktree_path returns it directly,
     // target.exists() is true → worktree_add is NOT called.
@@ -246,14 +246,14 @@ fn enter_happy_path_pushes_frame_and_swaps_cwd() {
 
     // Returned frame holds the PRE-change state.
     assert_eq!(frame.path_base, saved_path_base);
-    assert_eq!(frame.working_root, saved_working_root);
+    assert_eq!(frame.workspace_root, saved_workspace_root);
 
     // Stack has exactly one entry (the saved frame).
     assert_eq!(s.stack.len(), 1);
 
     // State updated to the worktree.
     assert_eq!(s.path_base, canonical_tmp);
-    assert_eq!(s.working_root, worktree_root);
+    assert_eq!(s.workspace_root, worktree_root);
 
     // worktree_add was NOT invoked.
     assert!(git.added.lock().unwrap().is_empty());

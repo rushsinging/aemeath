@@ -106,7 +106,7 @@ fn test_render_tool_result_hidden_renders_empty() {
 #[test]
 fn test_render_tool_result_worktree_tools_do_not_truncate_fixed_context_result() {
     // #75：EnterWorktree/ExitWorktree 的结果行数固定且较少，应完整展示，不出现 omitted。
-    let result_text = "已进入 worktree：branch feature/75\n当前分支：feature/75\n当前 path_base：/repo/.worktrees/feature-75\n当前 working_root：/repo/.worktrees/feature-75\n\n后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。\n如果必须使用绝对路径，必须位于当前 working_root 下。\n不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。";
+    let result_text = "已进入 worktree：branch feature/75\n当前分支：feature/75\n当前 path_base：/repo/.worktrees/feature-75\n当前 workspace_root：/repo/.worktrees/feature-75\n\n后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径。\n如果必须使用绝对路径，必须位于当前 workspace_root 下。\n不要继续使用进入 worktree 前的 checkout/main workspace 绝对路径。";
 
     for tool_title in ["EnterWorktree", "ExitWorktree"] {
         let view = result(tool_title, result_text);

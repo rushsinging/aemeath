@@ -40,7 +40,7 @@ pub(super) fn find_tool_view(
     chat_id: &ChatId,
     turn_id: &ChatTurnId,
     tool_id: &ToolCallId,
-    working_root: Option<&std::path::Path>,
+    workspace_root: Option<&std::path::Path>,
 ) -> Option<ToolCallBlockView> {
     let call = find_tool_call(index, chat_id, turn_id, tool_id)?;
     let (icon, semantic_status, style) = map_tool_status(call.status);
@@ -110,7 +110,7 @@ pub(super) fn find_tool_view(
         // 不丢（bind 修复）共同保证，不再退化为纯 "✓ X completed" 摘要。
         result_summary,
         result_payload,
-        working_root: working_root.map(|p| p.to_path_buf()),
+        workspace_root: workspace_root.map(|p| p.to_path_buf()),
         collapsible: true,
         collapsed: false,
     })

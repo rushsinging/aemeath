@@ -105,7 +105,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         activity_summary: None,
         result_summary: Some("```\ncode\n```".into()),
         result_payload: None,
-        working_root: None,
+        workspace_root: None,
         collapsible: false,
         collapsed: false,
     });
@@ -410,7 +410,7 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
         activity_summary: None,
         result_summary: None,
         result_payload: None,
-        working_root: None,
+        workspace_root: None,
         collapsible: false,
         collapsed: false,
     });

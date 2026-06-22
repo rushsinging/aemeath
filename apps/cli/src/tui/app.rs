@@ -29,8 +29,8 @@ pub use event::{StatusContextUpdate, UiEvent, UiTurnContext};
 /// `refresh_output_document_from_model` 的 assemble 产物 memo。
 pub(crate) struct OutputViewCache {
     pub(crate) revision: u64,
-    /// memo key 第二维：working_root 变化时强制重 assemble，使工具标题路径立即刷新。
-    pub(crate) working_root: Option<String>,
+    /// memo key 第二维：workspace_root 变化时强制重 assemble，使工具标题路径立即刷新。
+    pub(crate) workspace_root: Option<String>,
     pub(crate) view_model: crate::tui::view_model::OutputViewModel,
 }
 
@@ -127,24 +127,24 @@ pub(crate) fn worktree_kind_for(
 }
 
 #[cfg(test)]
-pub(crate) fn status_context_for_paths(path_base: &Path, working_root: &Path) -> UiEvent {
+pub(crate) fn status_context_for_paths(path_base: &Path, workspace_root: &Path) -> UiEvent {
     status_context_for_workspace(sdk::WorkspaceContextView {
         path_base: path_base.to_path_buf(),
-        working_root: working_root.to_path_buf(),
+        workspace_root: workspace_root.to_path_buf(),
         context_stack: Vec::new(),
     })
 }
 
 pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView) -> UiEvent {
     let path_base = workspace.path_base.clone();
-    let working_root = workspace.working_root.clone();
+    let workspace_root = workspace.workspace_root.clone();
     UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
         path_base: display_status_path(&path_base),
-        working_root: display_status_path(&working_root),
-        branch: git_branch_for(&working_root),
-        kind: worktree_kind_for(&working_root),
+        workspace_root: display_status_path(&workspace_root),
+        branch: git_branch_for(&workspace_root),
+        kind: worktree_kind_for(&workspace_root),
         raw_path_base: path_base,
-        raw_working_root: working_root,
+        raw_workspace_root: workspace_root,
         workspace,
     })
 }

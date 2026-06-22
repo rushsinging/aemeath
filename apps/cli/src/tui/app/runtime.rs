@@ -76,8 +76,8 @@ impl App {
             Some(agent_client) => agent_client.project(),
         };
         let path_base = empty_to_none(project.path_base);
-        let working_root = empty_to_none(project.working_root);
-        let kind = match working_root.as_deref() {
+        let workspace_root = empty_to_none(project.workspace_root);
+        let kind = match workspace_root.as_deref() {
             Some(root) if self.session.cwd.as_path() != std::path::Path::new(root) => {
                 WorktreeKind::LinkedWorktree
             }
@@ -92,7 +92,7 @@ impl App {
             .runtime
             .apply(RuntimeIntent::WorkspaceSnapshotReceived {
                 path_base,
-                working_root,
+                workspace_root,
                 branch: project.git_branch,
                 kind,
             });

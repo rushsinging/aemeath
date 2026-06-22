@@ -149,15 +149,17 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         },
         sdk::ChatEvent::WorkingDirectoryChanged {
             path_base,
-            working_root,
+            workspace_root,
             workspace,
         } => UiEvent::WorkingDirectoryChanged(StatusContextUpdate {
             path_base: crate::tui::app::display_status_path(std::path::Path::new(&path_base)),
-            working_root: crate::tui::app::display_status_path(std::path::Path::new(&working_root)),
-            branch: crate::tui::app::git_branch_for(std::path::Path::new(&working_root)),
-            kind: crate::tui::app::worktree_kind_for(std::path::Path::new(&working_root)),
+            workspace_root: crate::tui::app::display_status_path(std::path::Path::new(
+                &workspace_root,
+            )),
+            branch: crate::tui::app::git_branch_for(std::path::Path::new(&workspace_root)),
+            kind: crate::tui::app::worktree_kind_for(std::path::Path::new(&workspace_root)),
             raw_path_base: std::path::PathBuf::from(path_base),
-            raw_working_root: std::path::PathBuf::from(working_root),
+            raw_workspace_root: std::path::PathBuf::from(workspace_root),
             workspace,
         }),
         sdk::ChatEvent::TasksChanged => UiEvent::TaskStatusChanged,
@@ -471,10 +473,10 @@ mod tests {
     fn test_sdk_event_to_ui_event_maps_working_directory_changed() {
         let event = sdk_event_to_ui_event(sdk::ChatEvent::WorkingDirectoryChanged {
             path_base: "/tmp".to_string(),
-            working_root: "/tmp".to_string(),
+            workspace_root: "/tmp".to_string(),
             workspace: sdk::WorkspaceContextView {
                 path_base: "/tmp".into(),
-                working_root: "/tmp".into(),
+                workspace_root: "/tmp".into(),
                 context_stack: Vec::new(),
             },
         });

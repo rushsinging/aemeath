@@ -1,6 +1,6 @@
 //! Worktree 工具文案（EnterWorktree / ExitWorktree 的 description、guidance、error）。
 //!
-//! guidance 明确区分 path_base（相对路径解析基）与 working_root（安全边界）语义（#413）。
+//! guidance 明确区分 path_base（相对路径解析基）与 workspace_root（安全边界）语义（#413）。
 //! ExitWorktree guidance 对称（#415）。
 
 use std::path::Path;
@@ -8,8 +8,8 @@ use std::path::Path;
 /// EnterWorktree description。
 pub fn enter_description(lang: &str) -> &'static str {
     match lang {
-        "zh" => "进入或创建 git worktree 目录，将当前工作上下文压栈保存。path 可选：省略时从 branch 推导为 .worktrees/<安全分支名>，其中路径分隔符和敏感字符会替换为 -。如果目标路径不存在，本工具会自动基于 main 执行 git worktree add 创建 worktree 后再进入。开 worktree 时必须调用本工具，NEVER 在主 checkout 中用 git checkout -b 或 git switch -c 代替 worktree。使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree 进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。注意：不允许嵌套进入，必须先 ExitWorktree 退出当前 worktree 才能进入新的。已进入非 main 分支不代表已在 worktree；以本工具返回的 path_base/working_root 为准。",
-        _ => "Enter or create a git worktree directory, pushing the current working context onto a stack. path is optional: when omitted it is derived from branch as .worktrees/<safe-branch-name>, with path separators and sensitive characters replaced by -. If the target path does not exist, this tool runs `git worktree add` based on main to create it before entering. You MUST call this tool to open a worktree; NEVER use `git checkout -b` or `git switch -c` in the main checkout instead. Use case: when you need to work in a worktree on a different branch, you can switch to the target worktree to read files, edit, and run commands, then restore the original context via ExitWorktree when done. Note: nested entry is not allowed; you must ExitWorktree the current one before entering a new one. Being on a non-main branch does not mean you are in a worktree; trust the path_base/working_root returned by this tool.",
+        "zh" => "进入或创建 git worktree 目录，将当前工作上下文压栈保存。path 可选：省略时从 branch 推导为 .worktrees/<安全分支名>，其中路径分隔符和敏感字符会替换为 -。如果目标路径不存在，本工具会自动基于 main 执行 git worktree add 创建 worktree 后再进入。开 worktree 时必须调用本工具，NEVER 在主 checkout 中用 git checkout -b 或 git switch -c 代替 worktree。使用场景：当需要在不同分支的 worktree 中工作时，可以切换到目标 worktree 进行文件读取、编辑、执行命令等操作，完成后通过 ExitWorktree 恢复原始上下文。注意：不允许嵌套进入，必须先 ExitWorktree 退出当前 worktree 才能进入新的。已进入非 main 分支不代表已在 worktree；以本工具返回的 path_base/workspace_root 为准。",
+        _ => "Enter or create a git worktree directory, pushing the current working context onto a stack. path is optional: when omitted it is derived from branch as .worktrees/<safe-branch-name>, with path separators and sensitive characters replaced by -. If the target path does not exist, this tool runs `git worktree add` based on main to create it before entering. You MUST call this tool to open a worktree; NEVER use `git checkout -b` or `git switch -c` in the main checkout instead. Use case: when you need to work in a worktree on a different branch, you can switch to the target worktree to read files, edit, and run commands, then restore the original context via ExitWorktree when done. Note: nested entry is not allowed; you must ExitWorktree the current one before entering a new one. Being on a non-main branch does not mean you are in a worktree; trust the path_base/workspace_root returned by this tool.",
     }
 }
 
@@ -21,14 +21,14 @@ pub fn exit_description(lang: &str) -> &'static str {
     }
 }
 
-/// 进入 worktree 后的 guidance（#413：明确 path_base/working_root 语义）。
+/// 进入 worktree 后的 guidance（#413：明确 path_base/workspace_root 语义）。
 ///
 /// - path_base = 相对路径解析基（LLM 传相对路径时按此拼绝对路径）
-/// - working_root = 安全边界（绝对路径必须位于其下）
+/// - workspace_root = 安全边界（绝对路径必须位于其下）
 pub fn enter_guidance(lang: &str) -> &'static str {
     match lang {
-        "zh" => "已切换工作区上下文。后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径，系统会以返回的 path_base 为解析基拼成绝对路径。如必须使用绝对路径，该路径必须位于 working_root 之内（安全边界），否则会被拒绝。切勿继续使用进入 worktree 前的 checkout/main workspace 绝对路径。",
-        _ => "Workspace context switched. For subsequent Read/Edit/Write/Glob/Grep/Bash calls, prefer relative paths — the system resolves them against the returned path_base to form absolute paths. If an absolute path is unavoidable, it MUST fall inside working_root (the safety boundary) or it will be rejected. Do not keep using absolute paths from the checkout/main workspace you were in before entering the worktree.",
+        "zh" => "已切换工作区上下文。后续 Read/Edit/Write/Glob/Grep/Bash 请优先使用相对路径，系统会以返回的 path_base 为解析基拼成绝对路径。如必须使用绝对路径，该路径必须位于 workspace_root 之内（安全边界），否则会被拒绝。切勿继续使用进入 worktree 前的 checkout/main workspace 绝对路径。",
+        _ => "Workspace context switched. For subsequent Read/Edit/Write/Glob/Grep/Bash calls, prefer relative paths — the system resolves them against the returned path_base to form absolute paths. If an absolute path is unavoidable, it MUST fall inside workspace_root (the safety boundary) or it will be rejected. Do not keep using absolute paths from the checkout/main workspace you were in before entering the worktree.",
     }
 }
 
@@ -38,11 +38,11 @@ pub fn enter_guidance(lang: &str) -> &'static str {
 pub fn exit_guidance(lang: &str, restored_to: &Path) -> String {
     match lang {
         "zh" => format!(
-            "已退出 worktree，恢复到 {restored_to}。后续路径以当前 path_base（相对路径解析基）为准；绝对路径必须位于当前 working_root（安全边界）之内。切勿继续使用刚退出的 worktree 内的绝对路径。",
+            "已退出 worktree，恢复到 {restored_to}。后续路径以当前 path_base（相对路径解析基）为准；绝对路径必须位于当前 workspace_root（安全边界）之内。切勿继续使用刚退出的 worktree 内的绝对路径。",
             restored_to = restored_to.display()
         ),
         _ => format!(
-            "Exited worktree, restored to {restored_to}. Subsequent paths follow the current path_base (relative-path resolution base); absolute paths MUST fall inside the current working_root (safety boundary). Do not keep using absolute paths from the worktree you just exited.",
+            "Exited worktree, restored to {restored_to}. Subsequent paths follow the current path_base (relative-path resolution base); absolute paths MUST fall inside the current workspace_root (safety boundary). Do not keep using absolute paths from the worktree you just exited.",
             restored_to = restored_to.display()
         ),
     }
@@ -54,10 +54,10 @@ pub fn exit_guidance(lang: &str, restored_to: &Path) -> String {
 pub fn switch_guidance(lang: &str, switched_to: &str) -> String {
     match lang {
         "zh" => format!(
-            "已切换到 {switched_to}。后续路径以当前 path_base（相对路径解析基）为准；绝对路径必须位于当前 working_root（安全边界）之内。"
+            "已切换到 {switched_to}。后续路径以当前 path_base（相对路径解析基）为准；绝对路径必须位于当前 workspace_root（安全边界）之内。"
         ),
         _ => format!(
-            "Switched to {switched_to}. Subsequent paths follow the current path_base (relative-path resolution base); absolute paths MUST fall inside the current working_root (safety boundary)."
+            "Switched to {switched_to}. Subsequent paths follow the current path_base (relative-path resolution base); absolute paths MUST fall inside the current workspace_root (safety boundary)."
         ),
     }
 }
@@ -109,14 +109,14 @@ mod tests {
     }
 
     #[test]
-    fn enter_guidance_distinguishes_path_base_and_working_root() {
+    fn enter_guidance_distinguishes_path_base_and_workspace_root() {
         let zh = enter_guidance("zh");
         let en = enter_guidance("en");
         for s in [&zh, &en] {
             assert!(s.contains("path_base"), "guidance must mention path_base");
             assert!(
-                s.contains("working_root"),
-                "guidance must mention working_root"
+                s.contains("workspace_root"),
+                "guidance must mention workspace_root"
             );
         }
         assert_eq!(enter_guidance("fr"), en);

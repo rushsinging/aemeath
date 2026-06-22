@@ -196,8 +196,7 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     let memory_config = MemoryConfig::default();
     let context = PromptContext::new(&cwd, Some("deepseek"), Some("deepseek-chat"));
 
-    let parts =
-        build_system_prompt_parts(&context, &hook_runner, &memory_config, "en", false).await;
+    let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config, "en").await;
 
     std::fs::remove_dir_all(cwd).unwrap();
 
@@ -225,7 +224,7 @@ async fn test_load_agents_md_prefers_project_claude_md() {
     std::fs::write(base.join("CLAUDE.md"), "old project instructions").unwrap();
 
     let hook_runner = HookRunner::new(Default::default());
-    let content = load_agents_md(&base, &hook_runner, &base, false).await;
+    let content = load_agents_md(&base, &hook_runner, &base).await;
 
     assert!(content.contains("old project instructions"));
     assert!(!content.contains("project agents instructions"));
@@ -246,7 +245,7 @@ async fn test_load_agents_md_falls_back_to_project_agents_md() {
     std::fs::write(base.join("AGENTS.md"), "project agents instructions").unwrap();
 
     let hook_runner = HookRunner::new(Default::default());
-    let content = load_agents_md(&base, &hook_runner, &base, false).await;
+    let content = load_agents_md(&base, &hook_runner, &base).await;
 
     assert!(content.contains("project agents instructions"));
 
@@ -270,7 +269,7 @@ async fn test_load_agents_md_reads_project_claude_md_without_migration() {
     let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir);
 
     let hook_runner = HookRunner::new(Default::default());
-    let content = load_agents_md(&base, &hook_runner, &base, false).await;
+    let content = load_agents_md(&base, &hook_runner, &base).await;
 
     assert!(content.contains("old project instructions"));
     assert!(!base.join("AGENTS.md").exists());

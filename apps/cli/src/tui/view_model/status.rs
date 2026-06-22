@@ -61,7 +61,7 @@ pub struct StatusRuntimeViewModel {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StatusContextViewModel {
     pub path_base: String,
-    pub working_root: String,
+    pub workspace_root: String,
     pub branch: Option<String>,
     pub kind: StatusWorktreeKind,
 }

@@ -31,13 +31,13 @@ fn workspace_context_payload(
     _headline: &str,
     branch: &str,
     path_base: &Path,
-    working_root: &Path,
+    workspace_root: &Path,
     lang: &str,
 ) -> EnterWorktreeResult {
     EnterWorktreeResult {
         branch: branch.to_string(),
         path_base: path_base.to_path_buf(),
-        working_root: working_root.to_path_buf(),
+        workspace_root: workspace_root.to_path_buf(),
         guidance: t::enter_guidance(lang).to_string(),
     }
 }
@@ -91,8 +91,8 @@ impl TypedTool for EnterWorktreeTool {
         {
             Ok(_frame) => {
                 let path_base = ctx.workspace_read().current_path_base();
-                let working_root = ctx.workspace_read().current_root();
-                let branch = get_current_branch(&working_root);
+                let workspace_root = ctx.workspace_read().current_workspace_root();
+                let branch = get_current_branch(&workspace_root);
                 let headline = if ctx.lang == "zh" {
                     format!("已进入 worktree：{}", display_target)
                 } else {
@@ -104,7 +104,7 @@ impl TypedTool for EnterWorktreeTool {
                         &headline,
                         &branch,
                         &path_base,
-                        &working_root,
+                        &workspace_root,
                         &ctx.lang,
                     ),
                 )
@@ -161,8 +161,8 @@ impl TypedTool for ExitWorktreeTool {
             match ctx.workspace_control().switch_to(PathBuf::from(&path)) {
                 Ok(()) => {
                     let path_base = ctx.workspace_read().current_path_base();
-                    let working_root = ctx.workspace_read().current_root();
-                    let branch = get_current_branch(&working_root);
+                    let workspace_root = ctx.workspace_read().current_workspace_root();
+                    let branch = get_current_branch(&workspace_root);
                     let headline = if ctx.lang == "zh" {
                         format!("已切换到：{}", path)
                     } else {
@@ -173,7 +173,7 @@ impl TypedTool for ExitWorktreeTool {
                         ExitWorktreeResult {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
-                            working_root: working_root.clone(),
+                            workspace_root: workspace_root.clone(),
                             guidance: t::switch_guidance(&ctx.lang, &path),
                         },
                     )
@@ -185,8 +185,8 @@ impl TypedTool for ExitWorktreeTool {
             match ctx.workspace_control().exit() {
                 Ok(prev) => {
                     let path_base = ctx.workspace_read().current_path_base();
-                    let working_root = ctx.workspace_read().current_root();
-                    let branch = get_current_branch(&working_root);
+                    let workspace_root = ctx.workspace_read().current_workspace_root();
+                    let branch = get_current_branch(&workspace_root);
                     let headline = if ctx.lang == "zh" {
                         format!("已退出 worktree，恢复到：{}", prev.path_base.display())
                     } else {
@@ -197,7 +197,7 @@ impl TypedTool for ExitWorktreeTool {
                         ExitWorktreeResult {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
-                            working_root: working_root.clone(),
+                            workspace_root: workspace_root.clone(),
                             guidance: t::exit_guidance(&ctx.lang, &prev.path_base),
                         },
                     )
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn test_workspace_context_payload_includes_path_base_and_working_root() {
+    fn test_workspace_context_payload_includes_path_base_and_workspace_root() {
         let payload = workspace_context_payload(
             "已进入 worktree：/repo/.worktrees/feature",
             "feature",
@@ -298,10 +298,13 @@ mod tests {
             payload.path_base,
             Path::new("/repo/.worktrees/feature/subdir")
         );
-        assert_eq!(payload.working_root, Path::new("/repo/.worktrees/feature"));
-        // guidance 区分 path_base/working_root 语义（#413）
+        assert_eq!(
+            payload.workspace_root,
+            Path::new("/repo/.worktrees/feature")
+        );
+        // guidance 区分 path_base/workspace_root 语义（#413）
         assert!(payload.guidance.contains("path_base"));
-        assert!(payload.guidance.contains("working_root"));
+        assert!(payload.guidance.contains("workspace_root"));
     }
 
     #[test]

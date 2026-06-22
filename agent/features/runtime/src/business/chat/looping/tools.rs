@@ -33,32 +33,23 @@ pub(crate) async fn execute_tool_round<S>(
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
     language: &str,
-    working_root: &Path,
-    in_worktree: bool,
+    workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
     let path_base = agent.ctx.workspace_read().current_path_base();
-    let workspace_root = agent.ctx.workspace_read().current_root();
+    let current_ws_root = agent.ctx.workspace_read().current_workspace_root();
     let engine = PolicyEngine::new(
         &path_base,
-        &workspace_root,
+        &current_ws_root,
         allow_all,
         &agent.ctx.read_files,
     );
 
     let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
-    let denied_results = deny_tool_calls(
-        &denied,
-        sink,
-        context,
-        hook_ui,
-        hook_runner,
-        working_root,
-        in_worktree,
-    )
-    .await;
+    let denied_results =
+        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
@@ -84,8 +75,7 @@ where
         hook_ui,
         hook_runner,
         &non_agent_approved,
-        working_root,
-        in_worktree,
+        workspace_root,
     )
     .await;
     let non_agent_results = execute_non_agent(
@@ -96,8 +86,7 @@ where
         hook_runner,
         &non_agent_approved,
         language,
-        working_root,
-        in_worktree,
+        workspace_root,
     )
     .await;
     let agent_results = execute_agent_calls(
@@ -110,8 +99,7 @@ where
         hook_runner,
         max_agent_concurrency,
         cancel,
-        working_root,
-        in_worktree,
+        workspace_root,
     )
     .await;
 
@@ -129,8 +117,7 @@ async fn deny_tool_calls<S>(
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    working_root: &Path,
-    in_worktree: bool,
+    workspace_root: &Path,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -151,8 +138,7 @@ where
                     tool_name: call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
-                working_root,
-                in_worktree,
+                workspace_root,
             )
             .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
@@ -199,8 +185,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
     call: &ToolCall,
     output: &str,
     is_error: bool,
-    working_root: &Path,
-    in_worktree: bool,
+    workspace_root: &Path,
 ) where
     S: ChatEventSink,
 {
@@ -217,8 +202,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                     tool_output: Some(output.to_string()),
                     is_error: Some(is_error),
                 }),
-                working_root,
-                in_worktree,
+                workspace_root,
             )
             .await,
     )
@@ -237,8 +221,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                         tool_output: Some(output.to_string()),
                         is_error: Some(is_error),
                     }),
-                    working_root,
-                    in_worktree,
+                    workspace_root,
                 )
                 .await,
         )

@@ -39,8 +39,7 @@ pub(crate) async fn auto_compact<S>(
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
     language: &str,
-    working_root: &std::path::Path,
-    in_worktree: bool,
+    workspace_root: &std::path::Path,
 ) -> Option<CompactOutcome>
 where
     S: ChatEventSink,
@@ -65,8 +64,7 @@ where
                 messages_after: None,
                 was_compacted: false,
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await;
     let pre_compact_blocked = pre_compact_results.iter().any(|(_, result, json)| {
@@ -163,8 +161,7 @@ where
                 messages_after: Some(new_len),
                 was_compacted: true,
             }),
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await;
     for (_entry, _result, json_output) in &post_compact_results {

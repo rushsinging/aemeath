@@ -56,8 +56,7 @@ pub(crate) async fn finalize_sub_agent(
     previous_reasoning: bool,
     restore_max_tokens: bool,
     progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
-    working_root: &Path,
-    in_worktree: bool,
+    workspace_root: &Path,
 ) {
     log_agent_outcome(outcome, session_id);
 
@@ -73,8 +72,7 @@ pub(crate) async fn finalize_sub_agent(
             output,
             outcome.turns,
             is_error,
-            working_root,
-            in_worktree,
+            workspace_root,
         )
         .await;
 

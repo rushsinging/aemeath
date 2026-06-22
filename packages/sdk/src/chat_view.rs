@@ -118,14 +118,16 @@ impl std::fmt::Display for AgentProgressEventView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceStackEntryView {
     pub path_base: PathBuf,
-    pub working_root: PathBuf,
+    #[serde(alias = "working_root")]
+    pub workspace_root: PathBuf,
 }
 
 /// TUI 可展示的 workspace 上下文视图。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceContextView {
     pub path_base: PathBuf,
-    pub working_root: PathBuf,
+    #[serde(alias = "working_root")]
+    pub workspace_root: PathBuf,
     pub context_stack: Vec<WorkspaceStackEntryView>,
 }
 
@@ -233,15 +235,15 @@ mod tests {
     fn test_workspace_context_view_keeps_paths() {
         let view = WorkspaceContextView {
             path_base: "/repo/sub".into(),
-            working_root: "/repo".into(),
+            workspace_root: "/repo".into(),
             context_stack: vec![WorkspaceStackEntryView {
                 path_base: "/repo".into(),
-                working_root: "/repo".into(),
+                workspace_root: "/repo".into(),
             }],
         };
 
         assert_eq!(view.path_base.to_string_lossy(), "/repo/sub");
-        assert_eq!(view.working_root.to_string_lossy(), "/repo");
+        assert_eq!(view.workspace_root.to_string_lossy(), "/repo");
         assert_eq!(view.context_stack.len(), 1);
     }
 
