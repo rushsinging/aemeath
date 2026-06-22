@@ -150,6 +150,7 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 
 - **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
 - **MUST** worktree 分支完成验证并提交后，通过 **Pull Request** 提交回 `main`；**NEVER** 直接 push 到 `main`（`main` 已受保护，不允许直接推送）。
+- **MUST** 合并 PR 时使用 **Squash merge**，将分支上的多个提交压缩为一个提交后合入 `main`；**NEVER** 使用 rebase merge 或普通 merge commit。
 - **MUST NEVER** 由 agent 自动合并 PR。PR 创建后由用户 review，用户确认后手动合并；agent 只能在用户明确授权后执行合并动作。
 - **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin main` 拉取最新 main；若存在冲突，解决后重新通过验证门禁，才能推送分支并创建 PR。
 
