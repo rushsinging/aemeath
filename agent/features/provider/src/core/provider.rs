@@ -6,6 +6,72 @@ use tokio_util::sync::CancellationToken;
 
 use crate::business::types::{StreamResponse, SystemBlock};
 
+/// 统一推理深度级别——所有 provider 的共同语言。
+///
+/// `Ord` derive 保证 clamp 语义：`desired.min(provider_max).min(user_max)`。
+/// 各 provider 的实际档位能力不同，由 `max_reasoning_level()` 声明上限，
+/// 超出时由调用方 clamp 到可用档位。
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningLevel {
+    /// 关闭 thinking
+    Off,
+    /// 浅度推理（省 token）
+    Low,
+    /// 中等
+    Medium,
+    /// 深度
+    High,
+    /// 超深度（GLM xhigh / DeepSeek max）
+    Xhigh,
+    /// 极限（GLM max）
+    Max,
+}
+
+impl ReasoningLevel {
+    /// 字符串表示，用于日志和调试。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReasoningLevel::Off => "off",
+            ReasoningLevel::Low => "low",
+            ReasoningLevel::Medium => "medium",
+            ReasoningLevel::High => "high",
+            ReasoningLevel::Xhigh => "xhigh",
+            ReasoningLevel::Max => "max",
+        }
+    }
+
+    /// 从字符串解析，大小写不敏感。
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "off" => Some(ReasoningLevel::Off),
+            "low" => Some(ReasoningLevel::Low),
+            "medium" => Some(ReasoningLevel::Medium),
+            "high" => Some(ReasoningLevel::High),
+            "xhigh" => Some(ReasoningLevel::Xhigh),
+            "max" => Some(ReasoningLevel::Max),
+            _ => None,
+        }
+    }
+
+    /// 将本级别 clamp 到 `max` 指定的上限。
+    pub fn clamped_to(self, max: ReasoningLevel) -> ReasoningLevel {
+        if self > max {
+            max
+        } else {
+            self
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {
     fn on_text(&mut self, text: &str);
@@ -82,6 +148,15 @@ pub trait LlmProvider: Send + Sync {
     /// Get current reasoning_effort level.
     fn reasoning_effort(&self) -> Option<String> {
         None
+    }
+
+    /// 统一入口：设置推理深度。各 provider 覆盖此方法做自身映射。
+    fn set_reasoning_level(&self, _level: ReasoningLevel) {}
+
+    /// 声明此 provider 支持的最高档位（graph 用于 clamp 决策）。
+    /// 默认 High，各 driver 按能力覆盖。
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::High
     }
 
     /// Set max_tokens override at runtime. `0` means inherit/default and should be ignored.
