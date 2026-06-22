@@ -222,8 +222,11 @@ trait Provider {
 | **Mimo** | `thinking:disabled` | — | `thinking:enabled` | `enabled` | `enabled` | `enabled` | Medium |
 | **Anthropic** | max_tokens=0 | 1024 | 4096 | 16384 | 32768 | 65536 | Max |
 | **Ollama** | false | — | true | true | true | true | Medium |
+| **LiteLLM** | `reasoning_effort` 不传 | `"low"` | `"medium"` | `"high"` | `"xhigh"` | `"max"` | Max |
 
-**clamp 策略**：请求的档位超出 provider 支持范围时，**向最近的可用档位对齐**（向上优先，防止能力退化）。例如 Mimo `max_level=Medium`，请求 Xhigh 就给 Medium。
+**LiteLLM 特殊说明**：LiteLLM 是 proxy，不是 LLM provider。后端接的模型决定了实际能力，LiteLLM 负责后端适配——客户端只管发 `reasoning_effort` 字符串，LiteLLM 自动转发给后端（OpenAI 转 `reasoning.effort`，Anthropic 转 `thinking.budget_tokens`，DeepSeek 转后端格式等）。因此 `max_level = Max`（不限制），纯透传。用户若知道后端能力有限，用 `--max-reasoning` 自行限制。
+
+**clamp 策略**：请求的档位超出 provider 支持范围时，**向最近的可用档位对齐**（向上优先，防止能力退化）。例如 Mimo `max_level=Medium`，请求 Xhigh 就给 Medium。LiteLLM 例外——`max_level=Max`，clamp 永远不生效，完全依赖 `user.max_level` 和后端自行处理。
 
 **注意**：GLM 文档注明 `low/medium` 会被映射为 `high`，`minimal/none` 会让模型放弃思考——这是 provider 内部的再映射，统一抽象层面只表达意图，实际行为以 provider 文档为准。
 
@@ -560,7 +563,7 @@ graph 的所有 effort 调节依赖统一 `ReasoningLevel` 类型。**MUST** 先
 | 子任务 | 范围 |
 |---|---|
 | `ReasoningLevel` 枚举 + `Provider::set_reasoning_level` / `max_reasoning_level` | `provider/src/core/provider.rs` |
-| 各 driver 映射实现（OpenAI/GLM/DeepSeek/MiniMax/Mimo/Anthropic/Ollama） | 各 `business/providers/*.rs` |
+| 各 driver 映射实现（OpenAI/GLM/DeepSeek/MiniMax/Mimo/Anthropic/Ollama/LiteLLM） | 各 `business/providers/*.rs` |
 | 旧 `set_reasoning` / `set_reasoning_effort` 标记 `#[deprecated]` | `provider.rs` |
 | bootstrap 改用 `set_reasoning_level` | `bootstrap/provider_client.rs` |
 | Config 层简化：删除 `reasoning_effort` / `thinking_max_tokens` / `FlexReasoning::Effort` / `AgentRoleConfig.reasoning` | `types.rs` / `deserialize.rs` / `tools.rs` |
