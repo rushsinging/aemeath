@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a defect — something is broken
+title: "[Bug] "
+labels: ["kind:bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: One or more affected subsystems. Each selection auto-applies the corresponding `area:*` label.
+      multiple: true
+      options:
+        - cli
+        - runtime
+        - tools
+        - provider
+        - prompt
+        - project
+        - storage
+        - policy
+        - hook
+        - audit
+        - update
+        - shared
+        - composition
+        - sdk
+        - logging
+        - specs
+        - docs
+        - github
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Informs prioritization; auto-applies the corresponding `priority:*` label when chosen.
+      multiple: false
+      options:
+        - high
+        - medium
+        - low
+    validations:
+      required: false
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps to reproduce, or a link to a failing run / test.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust version (`rustc --version`), commit SHA, and any relevant env vars.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: Expected vs Actual
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, or references to related issues / specs.

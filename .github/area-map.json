@@ -1,0 +1,33 @@
+{
+  "cli": ["apps/cli/**"],
+  "runtime": ["agent/features/runtime/**"],
+  "tools": ["agent/features/tools/**"],
+  "provider": ["agent/features/provider/**"],
+  "prompt": ["agent/features/prompt/**"],
+  "project": ["agent/features/project/**"],
+  "storage": ["agent/features/storage/**"],
+  "policy": ["agent/features/policy/**"],
+  "hook": ["agent/features/hook/**"],
+  "audit": ["agent/features/audit/**"],
+  "update": ["agent/features/update/**"],
+  "shared": ["agent/shared/**"],
+  "composition": ["agent/composition/**"],
+  "sdk": ["packages/sdk/**"],
+  "logging": ["packages/global/logging/**"],
+  "specs": ["specs/**"],
+  "docs": ["docs/**"],
+  "github": [
+    ".github/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "build_cli.sh",
+    "release.sh",
+    "release.toml",
+    "clean.sh",
+    ".gitignore",
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "TODO.md"
+  ]
+}

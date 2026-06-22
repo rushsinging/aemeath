@@ -1,0 +1,68 @@
+name: Feature request
+description: Request new functionality or an enhancement with a known shape
+title: "[Feature] "
+labels: ["kind:feature"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: One or more affected subsystems. Each selection auto-applies the corresponding `area:*` label.
+      multiple: true
+      options:
+        - cli
+        - runtime
+        - tools
+        - provider
+        - prompt
+        - project
+        - storage
+        - policy
+        - hook
+        - audit
+        - update
+        - shared
+        - composition
+        - sdk
+        - logging
+        - specs
+        - docs
+        - github
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Informs prioritization; auto-applies the corresponding `priority:*` label when chosen.
+      multiple: false
+      options:
+        - high
+        - medium
+        - low
+    validations:
+      required: false
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Who needs this, what problem it solves.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: How we will know it's done. Prefer testable statements.
+    validations:
+      required: true
+  - type: textarea
+    id: open-design-questions
+    attributes:
+      label: Open design questions
+      description: If substantial, the maintainer SHOULD relabel to `kind:rfc`.
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Related issues, specs, or prior art.

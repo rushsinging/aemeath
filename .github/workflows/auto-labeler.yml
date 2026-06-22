@@ -1,0 +1,152 @@
+name: Auto-Labeler
+
+# Automatic labeling for issues and PRs:
+#   - area:*         from changed file paths on PRs, or from issue form Area dropdown
+#   - priority:*     from issue form Priority dropdown
+#   - breaking       from conventional-commit '!' or 'BREAKING CHANGE:' footer on PRs
+#
+# All jobs are ADDITIVE: a label is added when missing but never removed
+# if a human/agent applied it manually.
+on:
+  pull_request:
+    types: [opened, synchronize, edited, reopened]
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: auto-labeler-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  area-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply area:* labels from changed paths
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          changed_files="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          if [[ -z "$changed_files" ]]; then
+            echo "No changed files."
+            exit 0
+          fi
+
+          area_map=".github/area-map.json"
+          matched_areas=()
+          while IFS= read -r area; do
+            while IFS= read -r pattern; do
+              regex="$(printf '%s' "$pattern" | sed -e 's|\*\*|__GLOBSTAR__|g' -e 's/\./\\./g' -e 's|\*|[^/]*|g' -e 's|__GLOBSTAR__|.*|g')"
+              if printf '%s\n' "$changed_files" | grep -qE "^${regex}$"; then
+                matched_areas+=("$area")
+                break
+              fi
+            done < <(jq -r --arg a "$area" '.[$a][]' "$area_map")
+          done < <(jq -r 'keys[]' "$area_map")
+
+          if [[ ${#matched_areas[@]} -eq 0 ]]; then
+            echo "No area match."
+            exit 0
+          fi
+
+          mapfile -t unique_areas < <(printf '%s\n' "${matched_areas[@]}" | sort -u)
+
+          for a in "${unique_areas[@]}"; do
+            echo "Applying: area:${a}"
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "area:${a}" || \
+              echo "::warning::Label 'area:${a}' not found in repo."
+          done
+
+  area-issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Apply area:* labels from issue form's Area dropdown
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          area_block="$(printf '%s' "$ISSUE_BODY" | awk '/^### Area$/{flag=1; next} flag && NF{print; exit}')"
+          if [[ -z "$area_block" ]]; then
+            echo "No '### Area' section found — issue not filed via form."
+            exit 0
+          fi
+          IFS=',' read -ra areas <<<"$area_block"
+          for raw in "${areas[@]}"; do
+            area="$(printf '%s' "$raw" | awk '{$1=$1; print}')"
+            [[ -z "$area" ]] && continue
+            echo "Applying: area:${area}"
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "area:${area}" || \
+              echo "::warning::Label 'area:${area}' not found in repo."
+          done
+
+  priority-issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Apply priority:* labels from issue form's Priority dropdown
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          priority_block="$(printf '%s' "$ISSUE_BODY" | awk '/^### Priority$/{flag=1; next} flag && NF{print; exit}')"
+          if [[ -z "$priority_block" ]]; then
+            echo "No '### Priority' section found."
+            exit 0
+          fi
+          priority="$(printf '%s' "$priority_block" | awk '{$1=$1; print}')"
+          if [[ -z "$priority" || "$priority" == "_No response_" ]]; then
+            echo "No priority selected."
+            exit 0
+          fi
+          echo "Applying: priority:${priority}"
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "priority:${priority}" || \
+            echo "::warning::Label 'priority:${priority}' not found in repo."
+
+  breaking:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Apply breaking label from CC signals
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$PR_TITLE" | grep -qE '^[a-z]+(\([a-z0-9-]+\))?!:'; then
+            echo "CC '!' detected in title."
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label breaking
+            exit 0
+          fi
+          if printf '%s' "$PR_BODY" | grep -qE '^BREAKING CHANGE:'; then
+            echo "'BREAKING CHANGE:' footer detected in body."
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label breaking
+            exit 0
+          fi
+          echo "No breaking-change signal."

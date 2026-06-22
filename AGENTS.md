@@ -117,6 +117,8 @@ aemeath/                    # workspace root
 
 bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按以下步骤执行，**NEVER** 跳过：
 
+新建 issue 时 **SHOULD** 使用 `.github/ISSUE_TEMPLATE/bug.yml` 或 `feature.yml`，以保证 `kind:*`、`area:*`、`priority:*` 标签由 `.github/workflows/auto-labeler.yml` 一致地应用。创建 PR 时 **SHOULD** 使用 `.github/pull_request_template.md` 填写 Summary、Refs、Breaking change、Test plan。
+
 1. **阅读 Issue**：用 `gh issue view <编号> --repo rushsinging/aemeath` 拉取 issue 标题、labels、完整 body（body 顶部有 `<!-- Migrated from: <source> -->` 标记，可追溯到原 `docs/bug/archived/<id>-<slug>.md` 或 `docs/active.md#<id>`）。设计稿类 issue **SHOULD** 配套阅读 `docs/snapshot/specs/<file>.md`，每份 spec 顶部已写入 `> 对应 Issue: <url>` 指针。
 2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。方案中的任务必须拆分为单一、具体、可验证的最小步骤（如“修改 A 文件的 B 函数”“为 C 场景添加测试”“运行 cargo clippy”），**NEVER** 使用“实施并验证”这类宽泛任务概括多个步骤。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划；即使是简单改动，也 **MUST** 先给出简明方案，禁止直接开始修改。
 3. **等待用户明确同意**：在获得用户的明确书面同意（如“同意”、“开始改”）前，**NEVER** 调用 Edit/Write/Bash 等会修改文件或系统状态的工具。如果用户只给出笼统意图（如“修一下”）而未确认具体方案，**MUST** 先呈现方案并等待确认。
@@ -127,7 +129,12 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 
 如果同一问题既可临时止血也能彻底重构，**MUST** 同时给出最小化补丁和根因级彻底方案，并说明两者优劣、成本与风险。对于存在复发风险、明显设计缺陷或结构性不合理的情况，**SHOULD** 默认推荐并优先实施彻底方案，除非用户明确要求只做最小修改。
 
-创建新 issue 时 **MUST** 应用 `kind:bug` 或 `kind:feature` label（按问题类型二选一），有明确优先级时再加 `priority:high|medium|low`。`migrated-from:docs` 仅用于历史迁移条目。
+标签约定：
+- `kind:*`：`kind:bug`（缺陷）、`kind:feature`（功能）、`kind:rfc`（重大设计问题）。创建 issue 时 **MUST** 二选一；涉及重大设计时 **SHOULD** 将 `kind:feature` 重标为 `kind:rfc`。
+- `area:*`：根据改动路径自动标注（映射见 `.github/area-map.json`），多 area 改动可携带多个 `area:*` 标签。
+- `priority:*`：`priority:high`、`priority:medium`、`priority:low`，有明确优先级时 **SHOULD** 添加。
+- `breaking`：PR 标题含 `!` 或 body 含 `BREAKING CHANGE:` 时由 auto-labeler 自动添加。
+- `migrated-from:docs` 仅用于历史迁移条目。
 
 ### 大型工作的拆分与跟踪（总 → 分 / 伞 issue）
 
