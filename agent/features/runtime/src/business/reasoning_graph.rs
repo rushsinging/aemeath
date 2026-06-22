@@ -254,5 +254,5 @@ fn signal_name(signal: &GraphSignal) -> &'static str {
 }
 
 #[cfg(test)]
-#[path = "reasoning_graph_tests.rs"]
+#[path = "reasoning_graph/reasoning_graph_tests.rs"]
 mod tests;
