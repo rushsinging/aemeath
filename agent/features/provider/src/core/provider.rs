@@ -64,6 +64,23 @@ impl ReasoningLevel {
             self
         }
     }
+
+    /// Discriminant as u8，用于 AtomicU8 存储。
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    /// 从 u8 discriminant 还原。
+    pub fn from_u8(v: u8) -> ReasoningLevel {
+        match v {
+            0 => ReasoningLevel::Off,
+            1 => ReasoningLevel::Low,
+            2 => ReasoningLevel::Medium,
+            3 => ReasoningLevel::High,
+            4 => ReasoningLevel::Xhigh,
+            _ => ReasoningLevel::Max,
+        }
+    }
 }
 
 impl std::fmt::Display for ReasoningLevel {
@@ -135,28 +152,24 @@ pub trait LlmProvider: Send + Sync {
     /// Get the provider name
     fn provider_name(&self) -> &str;
 
-    /// Set reasoning/thinking mode at runtime
-    fn set_reasoning(&self, enabled: bool);
-
-    /// Get current reasoning/thinking mode
-    fn is_reasoning(&self) -> bool;
-
-    /// Set reasoning_effort level (e.g. "low", "medium", "high") at runtime.
-    /// Ignored by providers that don't support it.
-    fn set_reasoning_effort(&self, _effort: Option<String>) {}
-
-    /// Get current reasoning_effort level.
-    fn reasoning_effort(&self) -> Option<String> {
-        None
-    }
-
     /// 统一入口：设置推理深度。各 provider 覆盖此方法做自身映射。
     fn set_reasoning_level(&self, _level: ReasoningLevel) {}
+
+    /// 当前推理深度（用于 save/restore）。
+    /// 默认 Off，各 provider 按内部状态覆盖。
+    fn current_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Off
+    }
 
     /// 声明此 provider 支持的最高档位（graph 用于 clamp 决策）。
     /// 默认 High，各 driver 按能力覆盖。
     fn max_reasoning_level(&self) -> ReasoningLevel {
         ReasoningLevel::High
+    }
+
+    /// 是否开启了推理（current_reasoning_level != Off 的便捷判断）。
+    fn is_reasoning(&self) -> bool {
+        !matches!(self.current_reasoning_level(), ReasoningLevel::Off)
     }
 
     /// Set max_tokens override at runtime. `0` means inherit/default and should be ignored.

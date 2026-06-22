@@ -306,14 +306,6 @@ impl LlmProvider for AnthropicProvider {
         "anthropic"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {
-        // Anthropic has its own extended thinking; not controlled here
-    }
-
-    fn is_reasoning(&self) -> bool {
-        self.thinking_max_tokens.load(Ordering::Relaxed) > 0
-    }
-
     fn set_max_tokens(&self, max_tokens: u32) {
         if max_tokens > 0 {
             self.max_tokens.store(max_tokens, Ordering::Relaxed);
@@ -335,6 +327,18 @@ impl LlmProvider for AnthropicProvider {
             ReasoningLevel::Max => 65536,
         };
         self.thinking_max_tokens.store(tokens, Ordering::Relaxed);
+    }
+
+    fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        use crate::core::provider::ReasoningLevel;
+        match self.thinking_max_tokens.load(Ordering::Relaxed) {
+            0 => ReasoningLevel::Off,
+            1..=1024 => ReasoningLevel::Low,
+            1025..=4096 => ReasoningLevel::Medium,
+            4097..=16384 => ReasoningLevel::High,
+            16385..=32768 => ReasoningLevel::Xhigh,
+            _ => ReasoningLevel::Max,
+        }
     }
 
     fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {

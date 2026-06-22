@@ -342,34 +342,6 @@ impl LlmProvider for OpenAICompatibleProvider {
         &self.config.source_key
     }
 
-    fn set_reasoning(&self, enabled: bool) {
-        self.reasoning
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-        if let Ok(mut guard) = self.reasoning_config.lock() {
-            if matches!(*guard, Some(ReasoningConfig::Bool(_))) {
-                *guard = Some(ReasoningConfig::Bool(enabled));
-            }
-        }
-    }
-
-    fn is_reasoning(&self) -> bool {
-        self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn set_reasoning_effort(&self, effort: Option<String>) {
-        if let Ok(mut guard) = self.reasoning_config.lock() {
-            *guard = effort
-                .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })));
-        }
-    }
-
-    fn reasoning_effort(&self) -> Option<String> {
-        self.reasoning_config
-            .lock()
-            .ok()
-            .and_then(|guard| guard.as_ref().and_then(ReasoningConfig::as_effort))
-    }
-
     fn set_max_tokens(&self, max_tokens: u32) {
         if max_tokens > 0 {
             self.max_tokens.store(max_tokens, Ordering::Relaxed);
@@ -421,6 +393,11 @@ impl LlmProvider for OpenAICompatibleProvider {
                 }
             }
         }
+        self.store_reasoning_level(level);
+    }
+
+    fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        self.load_reasoning_level()
     }
 
     fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
