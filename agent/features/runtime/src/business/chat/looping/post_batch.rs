@@ -12,7 +12,6 @@ pub(crate) async fn run_post_tool_batch<S>(
     _ctx: &ToolExecutionContext,
     turn_count: usize,
     workspace_root: &Path,
-    in_worktree: bool,
 ) where
     S: ChatEventSink,
 {
@@ -23,7 +22,6 @@ pub(crate) async fn run_post_tool_batch<S>(
             None,
             HookData::Stop(StopHookData { turns: turn_count }),
             workspace_root,
-            in_worktree,
         )
         .await;
     for (_entry, _result, json_output) in &post_batch_results {

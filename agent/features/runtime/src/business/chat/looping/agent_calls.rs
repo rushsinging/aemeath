@@ -22,7 +22,6 @@ pub(crate) async fn execute_agent_calls<S>(
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -60,7 +59,6 @@ where
                         registry_ref,
                         &mut ag_ctx,
                         &workspace_root,
-                        in_worktree,
                     )
                     .await
                 }
@@ -81,7 +79,6 @@ async fn execute_one_agent<S>(
     registry: Arc<ToolRegistry>,
     ag_ctx: &mut ToolExecutionContext,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -98,7 +95,6 @@ where
                 is_error: None,
             }),
             workspace_root,
-            in_worktree,
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
@@ -152,7 +148,6 @@ where
         &execution.outcome.text,
         execution.outcome.is_error,
         workspace_root,
-        in_worktree,
     )
     .await;
     send_tool_result(&sink, context, &execution).await;

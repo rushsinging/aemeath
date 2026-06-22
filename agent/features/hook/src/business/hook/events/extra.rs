@@ -13,7 +13,6 @@ impl HookRunner {
         tool_name: &str,
         permission_rule: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::PermissionRequest,
@@ -23,7 +22,6 @@ impl HookRunner {
                 permission_rule: permission_rule.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -34,7 +32,6 @@ impl HookRunner {
         tool_name: &str,
         permission_rule: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::PermissionDenied,
@@ -44,7 +41,6 @@ impl HookRunner {
                 permission_rule: permission_rule.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -55,7 +51,6 @@ impl HookRunner {
         notification_text: &str,
         notification_type: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::Notification,
@@ -65,7 +60,6 @@ impl HookRunner {
                 notification_type: notification_type.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -76,7 +70,6 @@ impl HookRunner {
         file_path: &str,
         instruction_type: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::InstructionsLoaded,
@@ -86,7 +79,6 @@ impl HookRunner {
                 instruction_type: instruction_type.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -97,7 +89,6 @@ impl HookRunner {
         config_file: &str,
         changed_field: Option<&str>,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::ConfigChange,
@@ -107,7 +98,6 @@ impl HookRunner {
                 changed_field: changed_field.map(String::from),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -118,7 +108,6 @@ impl HookRunner {
         server_name: &str,
         elicitation_text: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::Elicitation,
@@ -129,7 +118,6 @@ impl HookRunner {
                 user_response: None,
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -140,7 +128,6 @@ impl HookRunner {
         server_name: &str,
         user_response: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::ElicitationResult,
@@ -151,7 +138,6 @@ impl HookRunner {
                 user_response: Some(user_response.to_string()),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -164,7 +150,6 @@ impl HookRunner {
         original_input: &str,
         expanded_input: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::UserPromptExpansion,
@@ -174,7 +159,6 @@ impl HookRunner {
                 expanded_input: expanded_input.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -185,7 +169,6 @@ impl HookRunner {
         old_cwd: &str,
         new_cwd: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::CwdChanged,
@@ -195,7 +178,6 @@ impl HookRunner {
                 new_cwd: new_cwd.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -206,7 +188,6 @@ impl HookRunner {
         file_path: &str,
         change_type: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::FileChanged,
@@ -216,7 +197,6 @@ impl HookRunner {
                 change_type: change_type.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -227,7 +207,6 @@ impl HookRunner {
         teammate_name: &str,
         idle_reason: Option<&str>,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::TeammateIdle,
@@ -237,7 +216,6 @@ impl HookRunner {
                 idle_reason: idle_reason.map(String::from),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }

@@ -77,7 +77,7 @@ pub trait WorkspaceRead: Send + Sync {
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
     /// 当前工作根是否位于 linked git worktree（`.git/worktrees/*`）。
-    /// 供 hook 注入 `AEMEATH_IN_WORKTREE`，让构建类 hook 在 worktree 中跳过。
+    /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;
 }
 

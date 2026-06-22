@@ -15,7 +15,6 @@ pub(crate) async fn ask_user<S>(
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -41,7 +40,6 @@ where
                     permission_rule: "manual".to_string(),
                 }),
                 workspace_root,
-                in_worktree,
             )
             .await;
     }

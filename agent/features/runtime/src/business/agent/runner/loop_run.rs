@@ -47,7 +47,6 @@ pub(super) struct SubAgentRun<'a> {
 impl<'a> SubAgentRun<'a> {
     pub async fn run_loop(mut self) -> String {
         let workspace_root = self.ctx.workspace_read().current_workspace_root();
-        let in_worktree = self.ctx.workspace_read().in_worktree();
         macro_rules! finalize_and_return {
             ($status:expr, $turns:expr, $result:expr) => {{
                 let outcome = AgentRunOutcome {
@@ -71,7 +70,6 @@ impl<'a> SubAgentRun<'a> {
                     self.restore_max_tokens,
                     self.progress_tx.as_ref(),
                     &workspace_root,
-                    in_worktree,
                 )
                 .await;
                 return $result;

@@ -84,9 +84,7 @@ mod hook_tests {
                 is_error: None,
             }),
         };
-        let result = runner
-            .execute_hook(&hook, &input, Path::new("."), false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, Path::new(".")).await;
         assert!(!result.blocked);
         assert!(result.output.contains("hello from hook"));
         assert!(result.error.is_none());
@@ -109,9 +107,7 @@ mod hook_tests {
                 is_error: None,
             }),
         };
-        let result = runner
-            .execute_hook(&hook, &input, Path::new("."), false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, Path::new(".")).await;
         assert!(result.blocked);
     }
 
@@ -128,9 +124,7 @@ mod hook_tests {
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner
-            .execute_hook(&hook, &input, Path::new("."), false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, Path::new(".")).await;
 
         assert!(result.blocked);
         assert!(
@@ -151,9 +145,7 @@ mod hook_tests {
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner
-            .execute_hook(&hook, &input, Path::new("."), false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, Path::new(".")).await;
 
         assert!(result.blocked);
         assert!(
@@ -178,9 +170,7 @@ mod hook_tests {
                 is_error: None,
             }),
         };
-        let result = runner
-            .execute_hook(&hook, &input, Path::new("."), false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, Path::new(".")).await;
         assert!(result.error.is_some());
         assert!(result.error.as_ref().unwrap().contains("超时"));
     }
@@ -189,12 +179,7 @@ mod hook_tests {
     async fn test_pre_tool_use_no_hooks() {
         let runner = HookRunner::empty();
         let (blocked, results) = runner
-            .pre_tool_use(
-                "Bash",
-                serde_json::json!({"command": "ls"}),
-                Path::new("."),
-                false,
-            )
+            .pre_tool_use("Bash", serde_json::json!({"command": "ls"}), Path::new("."))
             .await;
         assert!(!blocked);
         assert!(results.is_empty());
@@ -244,9 +229,7 @@ mod hook_tests {
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner
-            .execute_hook(&hook, &input, &project_dir, false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, &project_dir).await;
 
         assert!(!result.blocked);
         assert!(result.error.is_none());
@@ -270,7 +253,7 @@ mod hook_tests {
         };
 
         let result = runner
-            .execute_hook(&hook, &input, Path::new(&project_dir), false)
+            .execute_hook(&hook, &input, Path::new(&project_dir))
             .await;
 
         assert!(!result.blocked);
@@ -298,9 +281,7 @@ mod hook_tests {
             data: HookData::Stop(StopHookData { turns: 1 }),
         };
 
-        let result = runner
-            .execute_hook(&hook, &input, &worktree_dir, false)
-            .await;
+        let result = runner.execute_hook(&hook, &input, &worktree_dir).await;
         let expected = worktree_dir.display().to_string();
         let parts: Vec<&str> = result.output.split('|').collect();
 
@@ -348,7 +329,7 @@ mod hook_tests {
         };
         let runner = HookRunner::new(config);
 
-        let results = runner.on_stop(7, &project_dir, false).await;
+        let results = runner.on_stop(7, &project_dir).await;
 
         assert_eq!(results.len(), 1);
         assert!(!results[0].blocked);

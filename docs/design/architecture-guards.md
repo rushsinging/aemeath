@@ -429,7 +429,7 @@
 - **行为**：
   1. 仅对 `Edit` / `Write` 生效，其他工具直接放行；
   2. 解析 `git rev-parse --show-toplevel`，项目外文件放行；
-  3. 若 `AEMEATH_IN_WORKTREE=1` 放行；
+  3. 用 git 原生检测（`git rev-parse --absolute-git-dir` vs `--git-common-dir`）判断是否在 worktree 中，worktree 放行；
   4. 否则输出 "Edit/Write rejected: 在 main 工作区直接修改" 错误并以 exit 2 阻断。
 - **设计意图**：强制 [AGENTS.md](../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
 

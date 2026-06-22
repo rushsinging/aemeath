@@ -21,7 +21,6 @@ pub(super) async fn execute_non_agent<S>(
     non_agent_calls: &[ToolCall],
     language: &str,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -48,7 +47,6 @@ where
             other_calls[0],
             language,
             workspace_root,
-            in_worktree,
         )
         .await;
     }
@@ -62,7 +60,6 @@ where
         &other_calls,
         language,
         workspace_root,
-        in_worktree,
     )
     .await
 }
@@ -77,7 +74,6 @@ async fn execute_multiple_non_agent<S>(
     other_calls: &[&ToolCall],
     language: &str,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -112,7 +108,6 @@ where
                         call,
                         language,
                         &workspace_root,
-                        in_worktree,
                     )
                     .await;
                     (pos, result)
@@ -142,7 +137,6 @@ where
                 call,
                 language,
                 workspace_root,
-                in_worktree,
             )
             .await
         };
@@ -200,7 +194,6 @@ async fn execute_one_non_agent<S>(
     call: &ToolCall,
     language: &str,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -215,7 +208,6 @@ where
                 permission_rule: "auto".to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await;
     let owned_call = ToolCall {
@@ -237,7 +229,6 @@ where
                 is_error: None,
             }),
             workspace_root,
-            in_worktree,
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
@@ -322,7 +313,6 @@ where
             &ex.outcome.text,
             is_error,
             workspace_root,
-            in_worktree,
         )
         .await;
         run_task_hooks(
@@ -333,7 +323,6 @@ where
             &ex.outcome.text,
             is_error,
             workspace_root,
-            in_worktree,
         )
         .await;
         if task_store_mutation_succeeded(&owned_call.name, is_error) {
@@ -361,7 +350,6 @@ async fn run_task_hooks<S>(
     output: &str,
     is_error: bool,
     workspace_root: &Path,
-    in_worktree: bool,
 ) where
     S: ChatEventSink,
 {
@@ -380,7 +368,6 @@ async fn run_task_hooks<S>(
                         is_error: Some(false),
                     }),
                     workspace_root,
-                    in_worktree,
                 )
                 .await,
         )
@@ -401,7 +388,6 @@ async fn run_task_hooks<S>(
                         is_error: Some(false),
                     }),
                     workspace_root,
-                    in_worktree,
                 )
                 .await,
         )

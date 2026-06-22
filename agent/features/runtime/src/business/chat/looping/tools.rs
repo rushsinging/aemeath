@@ -34,7 +34,6 @@ pub(crate) async fn execute_tool_round<S>(
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -49,16 +48,8 @@ where
     );
 
     let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
-    let denied_results = deny_tool_calls(
-        &denied,
-        sink,
-        context,
-        hook_ui,
-        hook_runner,
-        workspace_root,
-        in_worktree,
-    )
-    .await;
+    let denied_results =
+        deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
     for call in &approved {
@@ -85,7 +76,6 @@ where
         hook_runner,
         &non_agent_approved,
         workspace_root,
-        in_worktree,
     )
     .await;
     let non_agent_results = execute_non_agent(
@@ -97,7 +87,6 @@ where
         &non_agent_approved,
         language,
         workspace_root,
-        in_worktree,
     )
     .await;
     let agent_results = execute_agent_calls(
@@ -111,7 +100,6 @@ where
         max_agent_concurrency,
         cancel,
         workspace_root,
-        in_worktree,
     )
     .await;
 
@@ -130,7 +118,6 @@ async fn deny_tool_calls<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -152,7 +139,6 @@ where
                     permission_rule: "deny".to_string(),
                 }),
                 workspace_root,
-                in_worktree,
             )
             .await;
         // 发送 ToolCall 事件，让 pending 占位行获取 LLM 的 tool_use_id，
@@ -200,7 +186,6 @@ pub(crate) async fn run_post_tool_hooks<S>(
     output: &str,
     is_error: bool,
     workspace_root: &Path,
-    in_worktree: bool,
 ) where
     S: ChatEventSink,
 {
@@ -218,7 +203,6 @@ pub(crate) async fn run_post_tool_hooks<S>(
                     is_error: Some(is_error),
                 }),
                 workspace_root,
-                in_worktree,
             )
             .await,
     )
@@ -238,7 +222,6 @@ pub(crate) async fn run_post_tool_hooks<S>(
                         is_error: Some(is_error),
                     }),
                     workspace_root,
-                    in_worktree,
                 )
                 .await,
         )

@@ -68,13 +68,12 @@ impl HookRunner {
     /// 执行单个 hook 命令。
     ///
     /// `workspace_root` 用作 hook 进程的工作目录，并注入 `AEMEATH_PROJECT_DIR` /
-    /// `CLAUDE_PROJECT_DIR` 环境变量。`in_worktree` 注入 `AEMEATH_IN_WORKTREE`。
+    /// `CLAUDE_PROJECT_DIR` 环境变量。
     pub async fn execute_hook(
         &self,
         hook: &HookEntry,
         input: &HookInput,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> HookResult {
         let input_json = match serde_json::to_string(input) {
             Ok(json) => json,
@@ -108,7 +107,6 @@ impl HookRunner {
             )
             .env("AEMEATH_PROJECT_DIR", &workspace_root_str)
             .env("CLAUDE_PROJECT_DIR", &workspace_root_str)
-            .env("AEMEATH_IN_WORKTREE", if in_worktree { "1" } else { "0" })
             .envs(input.data.to_env_vars())
             .spawn()
         {
@@ -254,7 +252,6 @@ impl HookRunner {
         tool_name: Option<&str>,
         data: HookData,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         let hooks = self.matching_hooks(event, tool_name);
         if hooks.is_empty() {
@@ -272,9 +269,7 @@ impl HookRunner {
                 hook.matcher,
                 hook.command
             );
-            let result = self
-                .execute_hook(hook, &input, workspace_root, in_worktree)
-                .await;
+            let result = self.execute_hook(hook, &input, workspace_root).await;
             log::debug!(
                 target: LOG_TARGET,
                 "hook result: blocked={} error={:?}",
@@ -300,7 +295,6 @@ impl HookRunner {
         tool_name: Option<&str>,
         data: HookData,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = self.matching_hooks(event, tool_name);
         if hooks.is_empty() {
@@ -318,9 +312,7 @@ impl HookRunner {
                 hook.matcher,
                 hook.command
             );
-            let result = self
-                .execute_hook(hook, &input, workspace_root, in_worktree)
-                .await;
+            let result = self.execute_hook(hook, &input, workspace_root).await;
             let json_output = result.parse_json_output();
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
@@ -346,11 +338,8 @@ impl HookRunner {
         tool_name: Option<&str>,
         data: HookData,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
-        let results = self
-            .run_hooks(event, tool_name, data, workspace_root, in_worktree)
-            .await;
+        let results = self.run_hooks(event, tool_name, data, workspace_root).await;
         let blocked = results.iter().any(|r| r.blocked);
         (blocked, results)
     }

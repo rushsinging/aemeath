@@ -33,7 +33,6 @@ pub(crate) async fn finalize_main_loop<S>(
     _task_store: &TaskStore,
     language: &str,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -50,7 +49,6 @@ where
                 session_id,
                 language,
                 workspace_root,
-                in_worktree,
             )
             .await
         }
@@ -72,7 +70,6 @@ where
                         turns: outcome.turns,
                     }),
                     workspace_root,
-                    in_worktree,
                 )
                 .await;
             // #372: StopFailure hook 阻断时回流反馈，让 loop 有机会恢复
@@ -98,7 +95,6 @@ pub(crate) async fn run_stop_hook_before_finish<S>(
     session_id: &str,
     language: &str,
     workspace_root: &Path,
-    in_worktree: bool,
 ) -> Option<String>
 where
     S: ChatEventSink,
@@ -112,7 +108,6 @@ where
                 turns: outcome.turns,
             }),
             workspace_root,
-            in_worktree,
         )
         .await;
     if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {

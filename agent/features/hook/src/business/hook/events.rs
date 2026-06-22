@@ -15,7 +15,6 @@ impl HookRunner {
         tool_name: &str,
         tool_input: serde_json::Value,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::PreToolUse,
@@ -27,7 +26,6 @@ impl HookRunner {
                 is_error: None,
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -40,7 +38,6 @@ impl HookRunner {
         tool_output: &str,
         is_error: bool,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::PostToolUse,
@@ -52,7 +49,6 @@ impl HookRunner {
                 is_error: Some(is_error),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -62,7 +58,6 @@ impl HookRunner {
         &self,
         prompt: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::UserPromptSubmit,
@@ -71,24 +66,17 @@ impl HookRunner {
                 prompt: prompt.to_string(),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
 
     /// 便捷方法：运行 Stop hooks
-    pub async fn on_stop(
-        &self,
-        turns: usize,
-        workspace_root: &Path,
-        in_worktree: bool,
-    ) -> Vec<HookResult> {
+    pub async fn on_stop(&self, turns: usize, workspace_root: &Path) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::Stop,
             None,
             HookData::Stop(StopHookData { turns }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -97,14 +85,12 @@ impl HookRunner {
     pub async fn on_session_start(
         &self,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         self.run_hooks_with_json(
             HookEvent::SessionStart,
             None,
             HookData::Session(SessionHookData {}),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -113,14 +99,12 @@ impl HookRunner {
     pub async fn on_session_end(
         &self,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         self.run_hooks_with_json(
             HookEvent::SessionEnd,
             None,
             HookData::Session(SessionHookData {}),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -131,7 +115,6 @@ impl HookRunner {
         turns: usize,
         messages_count: usize,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> (bool, Vec<HookResult>) {
         self.run_blocking_hooks(
             HookEvent::PreCompact,
@@ -143,7 +126,6 @@ impl HookRunner {
                 was_compacted: false,
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -155,7 +137,6 @@ impl HookRunner {
         messages_before: usize,
         messages_after: usize,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<HookResult> {
         self.run_hooks(
             HookEvent::PostCompact,
@@ -167,7 +148,6 @@ impl HookRunner {
                 was_compacted: true,
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -179,7 +159,6 @@ impl HookRunner {
         system: &str,
         model_spec: Option<&str>,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         self.run_hooks_with_json(
             HookEvent::SubagentStart,
@@ -193,7 +172,6 @@ impl HookRunner {
                 is_error: None,
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -208,7 +186,6 @@ impl HookRunner {
         turns: usize,
         is_error: bool,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         self.run_hooks_with_json(
             HookEvent::SubagentStop,
@@ -222,7 +199,6 @@ impl HookRunner {
                 is_error: Some(is_error),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -233,7 +209,6 @@ impl HookRunner {
         tool_input: serde_json::Value,
         tool_output: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         self.run_hooks_with_json(
             HookEvent::TaskCreated,
@@ -245,7 +220,6 @@ impl HookRunner {
                 is_error: Some(false),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }
@@ -256,7 +230,6 @@ impl HookRunner {
         tool_input: serde_json::Value,
         tool_output: &str,
         workspace_root: &Path,
-        in_worktree: bool,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         self.run_hooks_with_json(
             HookEvent::TaskCompleted,
@@ -268,7 +241,6 @@ impl HookRunner {
                 is_error: Some(false),
             }),
             workspace_root,
-            in_worktree,
         )
         .await
     }

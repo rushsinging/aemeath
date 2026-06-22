@@ -38,8 +38,13 @@ case "$abs_file" in
     *) exit 0 ;;           # 项目外：直接放行
 esac
 
-# 已在 worktree 中 → 放行
-if [ "${AEMEATH_IN_WORKTREE:-0}" = "1" ]; then
+# 已在 linked worktree 中 → 放行
+# 用 git 原生检测：linked worktree 的 absolute-git-dir（.git/worktrees/<name>）
+# 与 git-common-dir（主仓库 .git）必定不同；main 工作区两者相同。
+abs_git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
+abs_common_dir="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd || true)"
+if [ -n "$abs_git_dir" ] && [ -n "$abs_common_dir" ] \
+   && [ "$abs_git_dir" != "$abs_common_dir" ]; then
     exit 0
 fi
 
