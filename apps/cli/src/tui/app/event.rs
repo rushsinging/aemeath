@@ -143,5 +143,10 @@ pub enum AppEvent {
     SessionReset,
     /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
     UserMessagesWithdrawn(Vec<String>),
+    /// Reasoning Graph 阶段变化（Phase 2）。更新 status bar 的阶段展示。
+    GraphPhaseChanged {
+        node: String,
+        effort: String,
+    },
 }
 pub type UiEvent = AppEvent;
