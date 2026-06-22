@@ -165,31 +165,94 @@ fn classify_bash(command: &str) -> BashCategory {
 
 ### 2.4 Effort 映射
 
+#### 前置：统一 `ReasoningLevel` 抽象（独立 issue #454）
+
+当前 config 层和 provider driver 层对 reasoning 深度的表达**不统一**，需先统一抽象才能让 graph 和其他消费者（compact 阈值联动、成本控制等）用一致接口调 effort。
+
+**现状问题**：
+
+| 层 | 表达方式 | 问题 |
+|---|---|---|
+| Config（`ModelEntryConfig`） | `reasoning: Option<bool>` + `reasoning_effort: Option<String>` + `thinking_max_tokens: u32` | 三种类型表达同一概念 |
+| Provider trait | `set_reasoning(bool)` + `set_reasoning_effort(String)`（默认空实现） | Anthropic/Ollama 不响应 `set_reasoning_effort` |
+| OpenAI 兼容 driver | `reasoning_effort` 字符串 | 仅 OpenAI 原生有 4 档 |
+| Anthropic driver | `thinking_max_tokens` 数字，构造时设定 | 无运行时 setter |
+| Ollama driver | bool 开关 | 只有开/关，无 effort 概念 |
+| GLM driver | `thinking.type` + `reasoning_effort` | 7 档但映射后实际 4 档 |
+| DeepSeek driver | `thinking.type` + `reasoning_effort` | 3 档（off/high/max） |
+| MiniMax driver | `thinking.type`（disabled/adaptive） | 无 effort |
+| Mimo driver | `thinking.type`（enabled/disabled） | 无 effort |
+
+**provider 能力档位不对等**——有些 provider 有 6 档（GLM 5.2+），有些只有 2 档（Ollama/Mimo）。统一抽象不能假设所有 provider 都支持相同档位。
+
+**统一方案**：
+
 ```rust
-impl ReasoningNode {
-    fn default_effort(&self) -> ReasoningEffort {
-        match self {
-            ReasoningNode::Idle   => ReasoningEffort::Inherit,
-            ReasoningNode::Explore => ReasoningEffort::Medium,
-            ReasoningNode::Plan    => ReasoningEffort::High,
-            ReasoningNode::Execute => ReasoningEffort::Low,
-            ReasoningNode::Verify  => ReasoningEffort::Medium,
-        }
+/// 统一推理深度——表达意图，provider 内部做能力 clamp
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReasoningLevel {
+    Off,     // 关闭 thinking
+    Low,     // 浅度推理（省 token）
+    Medium,  // 中等
+    High,    // 深度
+    Xhigh,   // 超深度（GLM xhigh / DeepSeek max）
+    Max,     // 极限（GLM max）
+}
+
+trait Provider {
+    /// 统一入口。各 provider 覆盖此方法做自身映射。
+    fn set_reasoning_level(&self, level: ReasoningLevel);
+
+    /// 声明此 provider 支持的最高档位（graph 用于 clamp 决策）
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::High
     }
 }
 ```
 
-#### Effort 到 provider 参数的映射
+**各 provider 完整映射表**：
 
-不同 provider 的 effort 语义不同：
+| Provider | Off | Low | Medium | High | Xhigh | Max | `max_level` |
+|---|---|---|---|---|---|---|---|
+| **OpenAI** | effort 不传 | `"low"` | `"medium"` | `"high"` | →High | →High | High |
+| **GLM 5.2+** | `thinking:disabled` | `"low"`→映射 high | `"medium"`→映射 high | `"high"` | `"xhigh"` | `"max"` | Max |
+| **GLM <5.2** | `thinking:disabled` | — | `enabled` | `enabled` | `enabled` | `enabled` | Medium |
+| **DeepSeek** | `thinking:disabled` | — | `effort:"high"` | `effort:"high"` | `effort:"max"` | →Xhigh | Xhigh |
+| **MiniMax M3** | `thinking:disabled` | — | `thinking:adaptive` | `adaptive` | `adaptive` | `adaptive` | Medium |
+| **Mimo** | `thinking:disabled` | — | `thinking:enabled` | `enabled` | `enabled` | `enabled` | Medium |
+| **Anthropic** | max_tokens=0 | 1024 | 4096 | 16384 | 32768 | 65536 | Max |
+| **Ollama** | false | — | true | true | true | true | Medium |
 
-| Provider | low | medium | high |
-|---|---|---|---|
-| OpenAI 兼容（reasoning_effort） | `"low"` | `"medium"` | `"high"` |
-| Anthropic（thinking_max_tokens） | 1024 | 4096 | 16384 |
-| Ollama | thinking 关闭 | thinking 开启（默认 budget） | thinking 开启（大 budget） |
+**clamp 策略**：请求的档位超出 provider 支持范围时，**向最近的可用档位对齐**（向上优先，防止能力退化）。例如 Mimo `max_level=Medium`，请求 Xhigh 就给 Medium。
 
-映射通过现有 `LlmClient::set_reasoning_effort()` 实现，**MUST NOT** 新增 provider API。
+**注意**：GLM 文档注明 `low/medium` 会被映射为 `high`，`minimal/none` 会让模型放弃思考——这是 provider 内部的再映射，统一抽象层面只表达意图，实际行为以 provider 文档为准。
+
+#### Graph 的 effort 映射
+
+graph 通过统一 `ReasoningLevel` 映射，不直接关心 provider 差异：
+
+```rust
+impl ReasoningNode {
+    fn default_effort(&self) -> ReasoningLevel {
+        match self {
+            ReasoningNode::Idle   => ReasoningLevel::Off,
+            ReasoningNode::Explore => ReasoningLevel::Medium,
+            ReasoningNode::Plan    => ReasoningLevel::High,
+            ReasoningNode::Execute => ReasoningLevel::Low,
+            ReasoningNode::Verify  => ReasoningLevel::Medium,
+        }
+    }
+}
+
+impl ReasoningGraph {
+    fn apply_effort(&self, client: &LlmClient) {
+        let desired = self.current_effort();
+        let max = client.max_reasoning_level();
+        let actual = desired.min(max); // clamp 到 provider 能力上限
+        client.set_reasoning_level(actual);
+    }
+}
+```
 
 #### 可配置性
 
@@ -209,7 +272,7 @@ effort 映射 **MAY** 通过 `aemeath.json` 配置覆盖：
 }
 ```
 
-`enabled: false` 时回退到当前的静态 effort 行为（零行为变更保证）。
+`enabled: false` 时回退到当前的静态 effort 行为（零行为变更保证）。effort 值支持 `off` / `low` / `medium` / `high` / `xhigh` / `max`，provider 不支持时自动 clamp。
 
 ### 2.5 LLM 对状态机的感知策略
 
@@ -327,15 +390,10 @@ pub enum ReasoningNode {
     Verify,
 }
 
-/// 推理深度级别
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ReasoningEffort {
-    /// 继承 model config 的默认值（不调用 set_reasoning_effort）
-    Inherit,
-    Low,
-    Medium,
-    High,
-}
+/// 推理深度级别——复用 provider 层的统一类型（issue #454）
+/// graph 不定义自己的 effort 枚举，直接用 provider::ReasoningLevel。
+// 引用：use provider::api::ReasoningLevel;
+// 定义位置：agent/features/provider/src/core/provider.rs
 
 /// 转移信号
 #[derive(Debug, Clone)]
@@ -366,8 +424,8 @@ impl ReasoningGraph {
     /// 当前节点
     pub fn current_node(&self) -> ReasoningNode;
 
-    /// 当前节点对应的 effort
-    pub fn current_effort(&self) -> ReasoningEffort;
+    /// 当前节点对应的 effort（返回 provider::ReasoningLevel）
+    pub fn current_effort(&self) -> ReasoningLevel;
 
     /// 消费信号，更新当前节点，返回是否发生变化
     pub fn transition(&mut self, signal: GraphSignal) -> bool;
@@ -385,10 +443,7 @@ logging::context::set_current_model(client.model_name().to_string());
 
 // === 新增：调 LLM 前根据 graph 设置 effort ===
 if reasoning_graph.enabled() {
-    let effort = graph.current_effort();
-    if effort != ReasoningEffort::Inherit {
-        client.set_reasoning_effort(Some(effort.as_str().to_string()));
-    }
+    graph.apply_effort(client); // 内部做 clamp + set_reasoning_level
 }
 
 let api_start = std::time::Instant::now();
@@ -445,16 +500,28 @@ log::info!(
 
 ## 4. 落地计划
 
+### 4.0 前置：统一 `ReasoningLevel` 抽象（issue #454）
+
+graph 的所有 effort 调节依赖统一 `ReasoningLevel` 类型。**MUST** 先完成此前置工作。
+
+| 子任务 | 范围 |
+|---|---|
+| `ReasoningLevel` 枚举 + `Provider::set_reasoning_level` / `max_reasoning_level` | `provider/src/core/provider.rs` |
+| 各 driver 映射实现（OpenAI/GLM/DeepSeek/MiniMax/Mimo/Anthropic/Ollama） | 各 `business/providers/*.rs` |
+| 旧 `set_reasoning` / `set_reasoning_effort` 标记 `#[deprecated]` | `provider.rs` |
+| bootstrap 改用 `set_reasoning_level` | `bootstrap/provider_client.rs` |
+| 现有测试回归验证 | provider 测试套件 |
+
 ### 4.1 Phase 1：纯推断式 graph（MVP）
 
 **目标**：验证推断式 graph 能否有效减少 reasoning token，不改变任何现有行为。
 
 | 子任务 | 范围 | 依赖 |
 |---|---|---|
-| 实现 `ReasoningGraph` 核心类型 | `reasoning_graph/mod.rs` + `classify.rs` | 无 |
+| 实现 `ReasoningGraph` 核心类型 | `reasoning_graph/mod.rs` + `classify.rs` | #454 |
 | Bash 分类器 + tool→node 推断 | `classify.rs` | 核心类型 |
 | 配置反序列化 | `config.rs` + `aemeath.json` schema | 核心类型 |
-| 主 chat loop 集成 | `loop_runner.rs` line ~448 | 核心类型 + 配置 |
+| 主 chat loop 集成 | `loop_runner.rs` line ~448 | 核心类型 + 配置 + #454 |
 | Sub-agent graph 独立实例 | `agent/runner/setup.rs` | 主 loop 集成 |
 | 日志埋点 | `aemeath:agent:runtime` target | 集成完成 |
 | 单元测试（分类器、转移矩阵） | `reasoning_graph_tests.rs` | 核心类型 |
