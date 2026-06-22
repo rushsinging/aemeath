@@ -231,9 +231,9 @@ impl App {
                 break;
             }
 
-            // #390 A1：自愈式重建常驻 loop。`/clear` 等会经 reset_runtime_state drop
-            // input_event_tx → 常驻 loop shutdown 退出。会话未结束时在此重建一次，
-            // 使 `/clear` 后的提交仍可经事件通道驱动新一轮（#391 再统一 /clear 语义）。
+            // 防御性重建：常驻 loop 异常退出（panic / receiver dropped）时 input_event_tx
+            // 变 None，此处检测并重建，使后续提交仍可经事件通道驱动。正常 /clear 不再
+            // drop tx（#391 S2 已统一为 runtime gate 清 messages，loop 存活）。
             if !self.layout.should_exit && self.chat.input_event_tx.is_none() {
                 self.ensure_persistent_processing(&ui_tx);
             }

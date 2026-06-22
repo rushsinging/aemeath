@@ -45,7 +45,7 @@ mod generation_tests {
         vec![
             ("help".into(), "Show available commands".into(), vec![]),
             ("exit".into(), "Exit the agent".into(), vec!["quit".into()]),
-            ("clear".into(), "Clear conversation history".into(), vec![]),
+            ("clear".into(), "Clear conversation".into(), vec![]),
             (
                 "compact".into(),
                 "Manually compact conversation".into(),

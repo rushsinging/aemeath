@@ -25,12 +25,12 @@ inventory::submit! {
     CommandDescriptor::new(|| {
         Command::new(
             "clear".to_string(),
-            "Clear screen or history".to_string(),
+            "Clear conversation".to_string(),
             CommandCategory::Core,
             clear_execute,
         )
         .with_usage(vec![
-            "/clear - Clear screen".to_string(),
+            "/clear - Clear conversation".to_string(),
         ])
         .with_aliases(vec!["cls".to_string()])
     })

@@ -179,7 +179,6 @@ where
                     buffer.push(ChatInputEvent::Reset);
                 }
             }
-            // TODO(#391 S3-3): drain_all + 发 UserMessagesWithdrawn
             ChatInputEvent::WithdrawAll => {
                 // 收集本批剩余 UserMessage 的 text（WithdrawAll 之后的）。
                 let mut texts: Vec<String> = iter

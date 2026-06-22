@@ -73,7 +73,6 @@ impl ChatState {
         self.is_cancelling = false;
         self.pending_reflection = None;
         self.applying_reflection = None;
-        self.clear_input_event_buffer();
         self.clear_processing_handle();
         self.turn_count = 0;
     }
