@@ -14,6 +14,7 @@ pub mod memory;
 pub mod models;
 pub mod paths;
 pub mod permissions;
+pub mod reasoning_graph;
 pub mod skills;
 pub mod snapshot;
 pub mod storage;
@@ -28,6 +29,7 @@ pub use logging::LoggingConfig;
 pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
+pub use reasoning_graph::{NodeEffortConfig, ReasoningGraphConfig, ReasoningGraphNodesConfig};
 pub use skills::SkillsConfig;
 pub use snapshot::{FileChange, FileChangeKind, FileSnapshot};
 pub use storage::StorageConfig;
@@ -133,6 +135,10 @@ pub struct Config {
     #[serde(default)]
     pub logging: LoggingConfig,
 
+    /// Reasoning Graph configuration
+    #[serde(default)]
+    pub reasoning_graph: ReasoningGraphConfig,
+
     /// Guidance system configuration
     #[serde(default)]
     pub guidance: GuidanceConfig,
@@ -163,6 +169,7 @@ impl Default for Config {
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),
             logging: LoggingConfig::default(),
+            reasoning_graph: ReasoningGraphConfig::default(),
             guidance: GuidanceConfig::default(),
             update: UpdateConfig::default(),
             language: default_language(),

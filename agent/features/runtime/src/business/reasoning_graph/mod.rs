@@ -5,9 +5,10 @@
 //! 核心原则：Graph 是 effort 调节器，不是流程约束器——只推断阶段调 effort，
 //! 不阻塞 tool、不改 agent loop 控制流、不依赖 LLM 配合。
 
+pub mod classify;
 pub mod config;
 
-pub use config::ReasoningGraphConfig;
+pub use config::GraphRuntimeConfig;
 
 use provider::api::ReasoningLevel;
 
@@ -81,12 +82,12 @@ pub enum GraphSignal {
 /// Reasoning Graph 状态机。
 pub struct ReasoningGraph {
     current: ReasoningNode,
-    config: ReasoningGraphConfig,
+    config: GraphRuntimeConfig,
 }
 
 impl ReasoningGraph {
     /// 创建 graph 实例。初始节点为 `Idle`。
-    pub fn new(config: ReasoningGraphConfig) -> Self {
+    pub fn new(config: GraphRuntimeConfig) -> Self {
         Self {
             current: ReasoningNode::Idle,
             config,
@@ -149,7 +150,7 @@ impl ReasoningGraph {
                 if *is_error {
                     return ReasoningNode::Plan;
                 }
-                infer_node_from_tool(tool_name, bash_command.as_deref())
+                classify::infer_node_from_tool(tool_name, bash_command.as_deref(), self.current)
             }
             GraphSignal::TextOnly => ReasoningNode::Idle,
             GraphSignal::TurnBoundary => self.current, // 保持
@@ -204,84 +205,6 @@ fn has_complex_intent(text: &str) -> bool {
     ];
     let lower = text.to_lowercase();
     keywords.iter().any(|kw| lower.contains(kw))
-}
-
-/// tool → node 推断。
-///
-/// 设计文档 §2.3 转移信号表 + Bash 分类规则。
-fn infer_node_from_tool(tool_name: &str, bash_command: Option<&str>) -> ReasoningNode {
-    match tool_name {
-        "Read" | "Grep" | "Glob" | "LSP" => ReasoningNode::Explore,
-        "Edit" | "Write" => ReasoningNode::Execute,
-        "Bash" => {
-            let cmd = bash_command.unwrap_or("");
-            match classify_bash(cmd) {
-                BashCategory::Verify => ReasoningNode::Verify,
-                BashCategory::Explore => ReasoningNode::Explore,
-                BashCategory::Execute => ReasoningNode::Execute,
-            }
-        }
-        // Agent / Task / 其他 tool 不改变阶段（保持上一轮节点）
-        _ => ReasoningNode::Explore, // 默认保守：视为探索
-    }
-}
-
-/// Bash 命令分类（设计文档 §2.3 Bash 分类规则）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BashCategory {
-    Verify,
-    Explore,
-    Execute,
-}
-
-fn classify_bash(command: &str) -> BashCategory {
-    let cmd = command.to_lowercase();
-
-    // 验证类：构建 / 测试 / lint
-    let verify_keywords = [
-        "cargo test",
-        "cargo clippy",
-        "cargo check",
-        "cargo build",
-        "npm test",
-        "pytest",
-        "go test",
-        "tsc",
-        "make test",
-        "yarn test",
-        "rustc",
-    ];
-    for kw in &verify_keywords {
-        if cmd.contains(kw) {
-            return BashCategory::Verify;
-        }
-    }
-
-    // 探索类：只读命令
-    let explore_keywords = [
-        "git log",
-        "git diff",
-        "git show",
-        "git status",
-        "git branch",
-        "ls ",
-        "cat ",
-        "head ",
-        "tail ",
-        "wc ",
-        "find ",
-        "grep ",
-        "rg ",
-        "fd ",
-    ];
-    for kw in &explore_keywords {
-        if cmd.contains(kw) {
-            return BashCategory::Explore;
-        }
-    }
-
-    // 默认：执行类
-    BashCategory::Execute
 }
 
 /// 信号的简短名称（用于日志）。
