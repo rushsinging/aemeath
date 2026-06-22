@@ -297,4 +297,16 @@ impl LlmProvider for OllamaProvider {
     fn max_tokens(&self) -> u32 {
         self.current_max_tokens()
     }
+
+    fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
+        use crate::core::provider::ReasoningLevel;
+        // Ollama 仅支持 thinking 开关，无档位概念
+        let enabled = !matches!(level, ReasoningLevel::Off);
+        self.reasoning
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        crate::core::provider::ReasoningLevel::Medium
+    }
 }
