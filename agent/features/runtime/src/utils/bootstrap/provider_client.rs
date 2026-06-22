@@ -1,7 +1,7 @@
 use super::model_runtime::ModelRuntimeSettings;
-use provider::api::openai_compatible::ReasoningConfig;
 use provider::api::ProviderDriverKind;
 use provider::api::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+use provider::contract::ReasoningLevel;
 use share::config::models::ResolvedModel;
 use std::env;
 
@@ -36,22 +36,26 @@ pub fn build_llm_client(
     resolved_model: &ResolvedModel,
     runtime_settings: &ModelRuntimeSettings,
 ) -> LlmClient {
-    let reasoning_effort = runtime_settings.reasoning_effort.clone();
     let client = LlmClient::from_config(LlmConfigOptions {
         driver,
         api_key,
         base_url,
         model,
         max_tokens: runtime_settings.max_tokens,
-        thinking_max_tokens: runtime_settings.thinking_max_tokens,
         reasoning: runtime_settings.reasoning,
-        reasoning_config: reasoning_config(runtime_settings, resolved_model.model.reasoning),
+        reasoning_config: None,
         openai_config: openai_config(driver, &resolved_model.source_key),
     });
 
-    if let Some(effort) = reasoning_effort {
-        client.set_reasoning_effort(Some(effort));
-    }
+    // reasoning: bool → ReasoningLevel 映射：
+    // true  → Medium（用户未指定档位时的合理默认）
+    // false → Off
+    let level = if runtime_settings.reasoning {
+        ReasoningLevel::Medium
+    } else {
+        ReasoningLevel::Off
+    };
+    client.set_reasoning_level(level);
 
     client
 }
@@ -101,28 +105,6 @@ fn openai_config(driver: ProviderDriverKind, source_key: &str) -> Option<OpenAIP
     } else {
         Some(OpenAIProviderConfig::from_driver(driver, source_key))
     }
-}
-
-fn reasoning_config(
-    runtime_settings: &ModelRuntimeSettings,
-    model_reasoning: Option<bool>,
-) -> Option<ReasoningConfig> {
-    runtime_settings
-        .reasoning_effort
-        .as_ref()
-        .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
-        .or_else(|| {
-            // thinking_max_tokens > 0 仅当 reasoning 未显式关闭时才生效。
-            // 若 model_reasoning == Some(false)，说明用户明确关闭了 thinking，
-            // 此时 thinking_max_tokens 仅作为预算上限，不应强制开启 thinking。
-            if runtime_settings.thinking_max_tokens > 0 && model_reasoning != Some(false) {
-                Some(ReasoningConfig::ThinkingBudget(
-                    runtime_settings.thinking_max_tokens,
-                ))
-            } else {
-                model_reasoning.map(ReasoningConfig::Bool)
-            }
-        })
 }
 
 #[cfg(test)]

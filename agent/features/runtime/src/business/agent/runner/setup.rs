@@ -31,7 +31,7 @@ impl AgentRunner for CliAgentRunner {
 
         let max_tokens_override = Self::role_max_tokens_override(role);
         let previous_max_tokens = client.max_tokens();
-        let previous_reasoning = client.is_reasoning();
+        let previous_reasoning_level = client.current_reasoning_level();
         if let Some(max_tokens) = max_tokens_override {
             client.set_max_tokens(max_tokens);
         }
@@ -51,10 +51,16 @@ impl AgentRunner for CliAgentRunner {
             })
             .and_then(|(_, _, entry)| entry.reasoning);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
-        client.set_reasoning(reasoning);
+        let level = if reasoning {
+            provider::contract::ReasoningLevel::Medium
+        } else {
+            provider::contract::ReasoningLevel::Off
+        };
+        client.set_reasoning_level(level);
         log::info!(target: LOG_TARGET,
-            "[SubAgent] reasoning={} max_tokens={:?} (role={:?}, model={:?}, default={})",
+            "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, default={})",
             reasoning,
+            level,
             max_tokens_override,
             role_reasoning,
             model_reasoning,
@@ -219,7 +225,7 @@ impl AgentRunner for CliAgentRunner {
             model_name_for_log,
             resolved_spec,
             previous_max_tokens,
-            previous_reasoning,
+            previous_reasoning_level,
             restore_max_tokens,
             progress: Box::new(progress),
             ctx_context_size: 200_000,

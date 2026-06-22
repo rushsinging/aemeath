@@ -11,7 +11,7 @@ use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::utils::bootstrap::{
     self, apply_config_permission_mode, build_agent_runner, build_hook_runner, init_logging,
     resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_context_size,
-    resolve_model_runtime_settings, spawn_mcp_connect, ReasoningConfigInput,
+    resolve_model_runtime_settings, spawn_mcp_connect,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
 use prompt::api::skill::{load_all_skills, Skill};
@@ -82,20 +82,15 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         &resolved_model.model,
         config_file.as_ref(),
         !args.no_think,
-        ReasoningConfigInput {
-            cli_reasoning_effort: args.reasoning_effort.clone(),
-            env_reasoning_effort: std::env::var("AEMEATH_REASONING_EFFORT").ok(),
-        },
     )
     .map_err(|e| SdkError::Init(e.to_string()))?;
 
     log::info!(target: LOG_TARGET,
-        "[main] source={} api={} model={} reasoning={} effort={:?} args.no_think={}",
+        "[main] source={} api={} model={} reasoning={} args.no_think={}",
         resolved_model.source_key,
         driver.as_str(),
         model,
         runtime_settings.reasoning,
-        runtime_settings.reasoning_effort,
         args.no_think
     );
 
