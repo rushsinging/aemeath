@@ -160,6 +160,7 @@
 | `agent/features/provider/src/business/providers/ollama/non_stream.rs` | `core` | Ollama 非流式 |
 | `agent/features/provider/src/business/providers/ollama/stream.rs` | `core` | Ollama 流式 |
 | `agent/features/provider/src/business/providers/ollama.rs` | `core` | Ollama 入口 |
+| `agent/features/provider/src/business/providers/openai_compatible/driver.rs` | `core` | OpenAI 兼容 driver |
 | `agent/features/provider/src/business/providers/openai_compatible/non_stream.rs` | `core` | OpenAI 兼容非流式 |
 | `agent/features/provider/src/business/providers/openai_compatible/provider.rs` | `core` | OpenAI 兼容入口 |
 | `agent/features/provider/src/business/providers/openai_compatible/request_body.rs` | `core` | OpenAI 兼容请求体 |

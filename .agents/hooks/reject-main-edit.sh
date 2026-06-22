@@ -41,8 +41,12 @@ esac
 # 已在 linked worktree 中 → 放行
 # 用 git 原生检测：linked worktree 的 absolute-git-dir（.git/worktrees/<name>）
 # 与 git-common-dir（主仓库 .git）必定不同；main 工作区两者相同。
-abs_git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
-abs_common_dir="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd || true)"
+# 注意：必须基于 file_path 所在目录判断，而非 hook 进程 cwd——
+# Claude Code 主进程在主工作区启动并 fork hook，hook cwd 固定为主工作区，
+# 与 Edit/Write 的 file_path（可能在 worktree 内）解耦。
+target_dir="$(dirname "$abs_file")"
+abs_git_dir="$(cd "$target_dir" && git rev-parse --absolute-git-dir 2>/dev/null || true)"
+abs_common_dir="$(cd "$target_dir" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd || true)"
 if [ -n "$abs_git_dir" ] && [ -n "$abs_common_dir" ] \
    && [ "$abs_git_dir" != "$abs_common_dir" ]; then
     exit 0

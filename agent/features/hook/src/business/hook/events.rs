@@ -177,6 +177,7 @@ impl HookRunner {
     }
 
     /// 便捷方法：运行 SubagentStop hooks，返回 JSON 输出
+    #[allow(clippy::too_many_arguments)]
     pub async fn on_subagent_stop(
         &self,
         prompt: &str,

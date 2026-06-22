@@ -5,7 +5,7 @@
 use crate::core::command::{
     Command, CommandCategory, CommandContext, CommandDescriptor, CommandResult,
 };
-use provider::contract::ReasoningLevel;
+use provider::api::ReasoningLevel;
 
 inventory::submit! {
     CommandDescriptor::new(|| {

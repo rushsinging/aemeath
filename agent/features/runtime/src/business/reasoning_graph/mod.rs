@@ -9,7 +9,7 @@ pub mod config;
 
 pub use config::ReasoningGraphConfig;
 
-use provider::contract::ReasoningLevel;
+use provider::api::ReasoningLevel;
 
 /// 推理阶段节点。
 ///
