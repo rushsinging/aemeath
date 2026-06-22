@@ -227,6 +227,58 @@ trait Provider {
 
 **注意**：GLM 文档注明 `low/medium` 会被映射为 `high`，`minimal/none` 会让模型放弃思考——这是 provider 内部的再映射，统一抽象层面只表达意图，实际行为以 provider 文档为准。
 
+#### 三层 clamp
+
+最终 effort 由三层上限取最小值：
+
+```
+final_level = min(graph.desired, provider.max_level, user.max_level)
+                └─ graph 动态决策   └─ provider 物理能力   └─ 用户允许上限
+```
+
+- **graph.desired**：当前节点对应的 effort（EXPLORE=Medium / EXECUTE=Low / ...）
+- **provider.max_level**：driver 声明的物理能力上限（`max_reasoning_level()`）
+- **user.max_level**：用户通过 `--max-reasoning <level>` 或 `AEMEATH_MAX_REASONING` 指定的允许上限；未指定时默认 `Max`（不限制）
+
+三层 clamp 保证：用户不会得到比他设定的更深的 thinking，也不会得到 provider 给不了的 thinking。
+
+#### Config 层简化
+
+**核心矛盾**：config 的 `reasoning_effort` / `thinking_max_tokens` 和 graph 是双控制源——graph 启用时每次 turn 覆盖 config 值，用户配置被忽略，造成困惑。
+
+**方案**：config 只保留**模型属性**（是否支持 thinking），移除**运行时决策**（effort 深度）。
+
+**保留**：
+```rust
+// ModelEntryConfig
+pub reasoning: Option<bool>,  // 这个模型是否启用 thinking（None=自动）
+```
+
+**删除**（不兼容，无 deprecated 过渡）：
+
+| 删除项 | 文件 | 原因 |
+|---|---|---|
+| `reasoning_effort: Option<String>` | types.rs | effort 是运行时决策，归 graph / max-reasoning |
+| `thinking_max_tokens: u32` | types.rs | Anthropic 预算移到 driver 内部 Level→tokens 映射 |
+| `FlexReasoning` enum + `Effort` 分支 | deserialize.rs | 简化为 `Option<bool>`，不支持 `{ effort: "..." }` 对象格式 |
+| `AgentRoleConfig.reasoning` | tools.rs | 子代理有自己的 graph 实例（#451），不在 config 写死 |
+| CLI `--reasoning-effort` | CLI args | 改为 `--max-reasoning <level>` |
+| Env `AEMEATH_REASONING_EFFORT` | env | 改为 `AEMEATH_MAX_REASONING` |
+| `ModelRuntimeSettings.reasoning_effort` | model_runtime.rs | 改为 `max_reasoning_level: ReasoningLevel` |
+| `ModelRuntimeSettings.thinking_max_tokens` | model_runtime.rs | 删除 |
+| `validate_reasoning_effort()` | reasoning.rs | 改为 validate `ReasoningLevel` |
+
+**控制权重新划分**：
+
+| 决策 | 控制者 | 入口 |
+|---|---|---|
+| 模型支不支持 thinking | config `reasoning: Option<bool>` | `aemeath.json` |
+| 用户允许的最深深度 | CLI `--max-reasoning` / env `AEMEATH_MAX_REASONING` | 启动参数 |
+| provider 物理上限 | driver `max_reasoning_level()` | 代码内置 |
+| 每次 turn 用多深 | graph `current_effort()` | 运行时自动 |
+
+`graph enabled: false` 时，effort 固定为 `user.max_level`（经 provider clamp 后的值），保持 graph 不干预时行为可预测。
+
 #### Graph 的 effort 映射
 
 graph 通过统一 `ReasoningLevel` 映射，不直接关心 provider 差异：
@@ -247,8 +299,8 @@ impl ReasoningNode {
 impl ReasoningGraph {
     fn apply_effort(&self, client: &LlmClient) {
         let desired = self.current_effort();
-        let max = client.max_reasoning_level();
-        let actual = desired.min(max); // clamp 到 provider 能力上限
+        let provider_max = client.max_reasoning_level();
+        let actual = desired.min(provider_max).min(self.user_max_level());
         client.set_reasoning_level(actual);
     }
 }
@@ -256,12 +308,13 @@ impl ReasoningGraph {
 
 #### 可配置性
 
-effort 映射 **MAY** 通过 `aemeath.json` 配置覆盖：
+graph 节点→effort 映射 **MAY** 通过 `aemeath.json` 配置覆盖：
 
 ```json
 {
   "reasoning_graph": {
     "enabled": true,
+    "max_reasoning": "high",
     "nodes": {
       "explore": { "effort": "medium" },
       "plan":    { "effort": "high" },
@@ -272,7 +325,7 @@ effort 映射 **MAY** 通过 `aemeath.json` 配置覆盖：
 }
 ```
 
-`enabled: false` 时回退到当前的静态 effort 行为（零行为变更保证）。effort 值支持 `off` / `low` / `medium` / `high` / `xhigh` / `max`，provider 不支持时自动 clamp。
+`enabled: false` 时 effort 固定为 `max_reasoning`（经 provider clamp）。effort 值支持 `off` / `low` / `medium` / `high` / `xhigh` / `max`，provider 不支持时自动 clamp。
 
 ### 2.5 LLM 对状态机的感知策略
 
@@ -510,7 +563,10 @@ graph 的所有 effort 调节依赖统一 `ReasoningLevel` 类型。**MUST** 先
 | 各 driver 映射实现（OpenAI/GLM/DeepSeek/MiniMax/Mimo/Anthropic/Ollama） | 各 `business/providers/*.rs` |
 | 旧 `set_reasoning` / `set_reasoning_effort` 标记 `#[deprecated]` | `provider.rs` |
 | bootstrap 改用 `set_reasoning_level` | `bootstrap/provider_client.rs` |
-| 现有测试回归验证 | provider 测试套件 |
+| Config 层简化：删除 `reasoning_effort` / `thinking_max_tokens` / `FlexReasoning::Effort` / `AgentRoleConfig.reasoning` | `types.rs` / `deserialize.rs` / `tools.rs` |
+| CLI/env 改名：`--reasoning-effort` → `--max-reasoning`，`AEMEATH_REASONING_EFFORT` → `AEMEATH_MAX_REASONING` | CLI args / env |
+| `ModelRuntimeSettings` 改用 `max_reasoning_level: ReasoningLevel` | `model_runtime.rs` |
+| 现有测试回归验证 | provider + config 测试套件 |
 
 ### 4.1 Phase 1：纯推断式 graph（MVP）
 
