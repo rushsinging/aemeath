@@ -14,9 +14,7 @@ use crate::core::port::ChatRuntimeContext;
 pub use concurrency::resolve_concurrency_limits;
 pub use logging_setup::{init_logging, set_current_turn, set_session_id};
 pub use mcp_loader::{load_mcp_manager, parse_mcp_servers_config, spawn_mcp_connect};
-pub use model_runtime::{
-    resolve_model_runtime_settings, ModelRuntimeSettings, ReasoningConfigInput,
-};
+pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
 pub use permissions::apply_config_permission_mode;
 pub use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 pub use runtime_support::{build_agent_runner, build_hook_runner, start_session};
@@ -64,7 +62,7 @@ pub struct LegacyChatBootstrapArgs {
     pub max_tool_concurrency: Option<usize>,
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
-    pub reasoning_effort: Option<String>,
+    pub max_reasoning: Option<String>,
 }
 
 pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;

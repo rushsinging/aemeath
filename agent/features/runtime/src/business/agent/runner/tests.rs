@@ -324,9 +324,9 @@ impl LlmProvider for ErrorProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }

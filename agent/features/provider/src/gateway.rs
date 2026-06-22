@@ -125,12 +125,6 @@ mod tests {
         fn provider_name(&self) -> &str {
             "dummy"
         }
-
-        fn set_reasoning(&self, _enabled: bool) {}
-
-        fn is_reasoning(&self) -> bool {
-            false
-        }
     }
 
     #[test]

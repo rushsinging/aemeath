@@ -1,7 +1,7 @@
 use super::model_runtime::ModelRuntimeSettings;
-use provider::api::openai_compatible::ReasoningConfig;
 use provider::api::ProviderDriverKind;
 use provider::api::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+use provider::contract::ReasoningLevel;
 use share::config::models::ResolvedModel;
 use std::env;
 
@@ -35,25 +35,53 @@ pub fn build_llm_client(
     model: String,
     resolved_model: &ResolvedModel,
     runtime_settings: &ModelRuntimeSettings,
+    max_reasoning: Option<&str>,
 ) -> LlmClient {
-    let reasoning_effort = runtime_settings.reasoning_effort.clone();
     let client = LlmClient::from_config(LlmConfigOptions {
         driver,
         api_key,
         base_url,
         model,
         max_tokens: runtime_settings.max_tokens,
-        thinking_max_tokens: runtime_settings.thinking_max_tokens,
         reasoning: runtime_settings.reasoning,
-        reasoning_config: reasoning_config(runtime_settings, resolved_model.model.reasoning),
+        reasoning_config: None,
         openai_config: openai_config(driver, &resolved_model.source_key),
     });
 
-    if let Some(effort) = reasoning_effort {
-        client.set_reasoning_effort(Some(effort));
-    }
+    // CLI / env 指定的上限（优先级 CLI > env），clamp 到 provider 能力上限。
+    let max_level = max_reasoning.and_then(parse_level).or_else(|| {
+        std::env::var("AEMEATH_MAX_REASONING")
+            .ok()
+            .and_then(|s| parse_level(&s))
+    });
+
+    // reasoning: bool → ReasoningLevel 映射：
+    // true  → Medium（用户未指定档位时的合理默认）
+    // false → Off
+    let desired = if runtime_settings.reasoning {
+        ReasoningLevel::Medium
+    } else {
+        ReasoningLevel::Off
+    };
+    let final_level = match max_level {
+        Some(cap) => desired.min(cap).min(client.max_reasoning_level()),
+        None => desired.min(client.max_reasoning_level()),
+    };
+    client.set_reasoning_level(final_level);
 
     client
+}
+
+fn parse_level(s: &str) -> Option<ReasoningLevel> {
+    match s.trim().to_lowercase().as_str() {
+        "off" => Some(ReasoningLevel::Off),
+        "low" => Some(ReasoningLevel::Low),
+        "medium" => Some(ReasoningLevel::Medium),
+        "high" => Some(ReasoningLevel::High),
+        "xhigh" => Some(ReasoningLevel::Xhigh),
+        "max" => Some(ReasoningLevel::Max),
+        _ => None,
+    }
 }
 
 fn provider_driver_api_key_from_env(
@@ -101,28 +129,6 @@ fn openai_config(driver: ProviderDriverKind, source_key: &str) -> Option<OpenAIP
     } else {
         Some(OpenAIProviderConfig::from_driver(driver, source_key))
     }
-}
-
-fn reasoning_config(
-    runtime_settings: &ModelRuntimeSettings,
-    model_reasoning: Option<bool>,
-) -> Option<ReasoningConfig> {
-    runtime_settings
-        .reasoning_effort
-        .as_ref()
-        .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })))
-        .or_else(|| {
-            // thinking_max_tokens > 0 仅当 reasoning 未显式关闭时才生效。
-            // 若 model_reasoning == Some(false)，说明用户明确关闭了 thinking，
-            // 此时 thinking_max_tokens 仅作为预算上限，不应强制开启 thinking。
-            if runtime_settings.thinking_max_tokens > 0 && model_reasoning != Some(false) {
-                Some(ReasoningConfig::ThinkingBudget(
-                    runtime_settings.thinking_max_tokens,
-                ))
-            } else {
-                model_reasoning.map(ReasoningConfig::Bool)
-            }
-        })
 }
 
 #[cfg(test)]

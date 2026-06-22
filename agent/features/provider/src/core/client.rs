@@ -109,7 +109,6 @@ pub struct LlmProviderOptions {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub max_tokens: u32,
-    pub thinking_max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
 }
@@ -120,7 +119,6 @@ pub struct LlmConfigOptions {
     pub base_url: Option<String>,
     pub model: String,
     pub max_tokens: u32,
-    pub thinking_max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
     pub openai_config: Option<OpenAIProviderConfig>,
@@ -144,7 +142,6 @@ impl LlmClient {
             base_url: None,
             model: None,
             max_tokens: 200000,
-            thinking_max_tokens: 0,
             reasoning: false,
             reasoning_config: None,
         })
@@ -158,7 +155,7 @@ impl LlmClient {
                     options.base_url,
                     options.model,
                     options.max_tokens,
-                    options.thinking_max_tokens,
+                    0,
                 ))
             }
             ProviderDriverKind::Ollama => {
@@ -236,7 +233,6 @@ impl LlmClient {
                 base_url: options.base_url,
                 model: Some(options.model),
                 max_tokens: options.max_tokens,
-                thinking_max_tokens: options.thinking_max_tokens,
                 reasoning: options.reasoning,
                 reasoning_config: options.reasoning_config,
             })
@@ -437,17 +433,17 @@ impl LlmClient {
     pub fn provider_name(&self) -> &str {
         self.provider.provider_name()
     }
-    pub fn set_reasoning(&self, enabled: bool) {
-        self.provider.set_reasoning(enabled);
+    pub fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
+        self.provider.set_reasoning_level(level);
+    }
+    pub fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        self.provider.current_reasoning_level()
+    }
+    pub fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        self.provider.max_reasoning_level()
     }
     pub fn is_reasoning(&self) -> bool {
         self.provider.is_reasoning()
-    }
-    pub fn set_reasoning_effort(&self, effort: Option<String>) {
-        self.provider.set_reasoning_effort(effort);
-    }
-    pub fn reasoning_effort(&self) -> Option<String> {
-        self.provider.reasoning_effort()
     }
     pub fn set_max_tokens(&self, max_tokens: u32) {
         self.provider.set_max_tokens(max_tokens);

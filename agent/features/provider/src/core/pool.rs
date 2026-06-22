@@ -169,7 +169,6 @@ impl LlmClientPool {
             );
         }
         let max_tokens = if max_tokens > 0 { max_tokens } else { 200000 };
-        let thinking_max_tokens = model_entry.thinking_max_tokens;
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
@@ -180,7 +179,6 @@ impl LlmClientPool {
                 base_url,
                 model: model_entry.id,
                 max_tokens,
-                thinking_max_tokens,
                 reasoning,
                 reasoning_config: None,
                 openai_config,

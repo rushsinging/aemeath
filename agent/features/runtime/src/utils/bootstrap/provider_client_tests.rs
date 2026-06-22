@@ -21,24 +21,16 @@ fn resolved_model(
             input: Vec::new(),
             context_window: 128_000,
             max_tokens: 16_000,
-            thinking_max_tokens: 0,
             reasoning: None,
-            reasoning_effort: None,
         },
         driver: driver.as_str().to_string(),
     }
 }
 
-fn runtime_settings(
-    thinking_max_tokens: u32,
-    reasoning: bool,
-    reasoning_effort: Option<&str>,
-) -> ModelRuntimeSettings {
+fn runtime_settings(reasoning: bool) -> ModelRuntimeSettings {
     ModelRuntimeSettings {
         max_tokens: 16_000,
-        thinking_max_tokens,
         reasoning,
-        reasoning_effort: reasoning_effort.map(str::to_string),
     }
 }
 
@@ -193,63 +185,7 @@ fn test_openai_config_uses_source_key_for_openai_compatible() {
 }
 
 #[test]
-fn test_reasoning_config_prefers_reasoning_effort() {
-    let settings = runtime_settings(4096, true, Some("high"));
-
-    let result = reasoning_config(&settings, Some(false));
-
-    assert!(matches!(result, Some(ReasoningConfig::Object(_))));
-}
-
-#[test]
-fn test_reasoning_config_uses_thinking_budget_before_model_reasoning() {
-    let settings = runtime_settings(4096, true, None);
-
-    let result = reasoning_config(&settings, Some(true));
-
-    assert!(matches!(
-        result,
-        Some(ReasoningConfig::ThinkingBudget(4096))
-    ));
-}
-
-#[test]
-fn test_reasoning_config_exact_filter_path_documents_stop_hook_command() {
-    let exact_path = "utils::bootstrap::provider_client::tests::test_reasoning_config_uses_thinking_budget_before_model_reasoning";
-
-    assert!(
-        exact_path.ends_with("::test_reasoning_config_uses_thinking_budget_before_model_reasoning")
-    );
-    assert_ne!(
-        exact_path,
-        "test_reasoning_config_uses_thinking_budget_before_model_reasoning"
-    );
-}
-
-#[test]
-fn test_reasoning_config_thinking_budget_respects_model_reasoning_false() {
-    // 当 model_reasoning == Some(false) 时，即使 thinking_max_tokens > 0
-    // 也不应强制开启 thinking，应返回 Bool(false)。
-    let settings = runtime_settings(8192, false, None);
-
-    let result = reasoning_config(&settings, Some(false));
-
-    assert!(matches!(result, Some(ReasoningConfig::Bool(false))));
-}
-
-#[test]
-fn test_reasoning_config_uses_model_reasoning_without_budget_or_effort() {
-    let settings = runtime_settings(0, true, None);
-
-    let result = reasoning_config(&settings, Some(false));
-
-    assert!(matches!(result, Some(ReasoningConfig::Bool(false))));
-}
-
-#[test]
 fn test_openai_config_skips_ollama() {
-    // 回归 #85：Ollama 有专用 OllamaProvider，不应生成 openai_config，
-    // 否则 from_config 会把它错误地路由到 OpenAI 兼容工厂分支。
     let result = openai_config(ProviderDriverKind::Ollama, "ollama");
 
     assert!(result.is_none());
@@ -257,10 +193,8 @@ fn test_openai_config_skips_ollama() {
 
 #[test]
 fn test_build_llm_client_ollama_constructs_ollama_provider() {
-    // 回归 #85：config 中 driver="ollama" 必须由工厂构造出 OllamaProvider，
-    // 修复前会回退到 ProviderDriverKind::OpenAI 并构造 OpenAICompatibleProvider。
     let resolved = resolved_model(ProviderDriverKind::Ollama, "", "", "ollama");
-    let settings = runtime_settings(0, false, None);
+    let settings = runtime_settings(false);
 
     let client = build_llm_client(
         ProviderDriverKind::Ollama,
@@ -269,6 +203,7 @@ fn test_build_llm_client_ollama_constructs_ollama_provider() {
         "llama3.2".to_string(),
         &resolved,
         &settings,
+        None,
     );
 
     assert_eq!(client.provider_name(), "ollama");
@@ -299,10 +234,10 @@ fn test_provider_driver_api_key_env_name_mimo() {
 }
 
 #[test]
-fn test_build_llm_client_sets_reasoning_effort() {
+fn test_build_llm_client_sets_reasoning_level() {
     let resolved = resolved_model(ProviderDriverKind::OpenAI, "", "", "OpenAI");
 
-    let settings = runtime_settings(0, true, Some("high"));
+    let settings = runtime_settings(true);
     let client = build_llm_client(
         ProviderDriverKind::OpenAI,
         "key".to_string(),
@@ -310,7 +245,32 @@ fn test_build_llm_client_sets_reasoning_effort() {
         "model-id".to_string(),
         &resolved,
         &settings,
+        None,
     );
 
-    assert_eq!(client.reasoning_effort(), Some("high".to_string()));
+    assert_eq!(
+        client.current_reasoning_level(),
+        provider::contract::ReasoningLevel::Medium
+    );
+}
+
+#[test]
+fn test_build_llm_client_reasoning_false_sets_off() {
+    let resolved = resolved_model(ProviderDriverKind::OpenAI, "", "", "OpenAI");
+
+    let settings = runtime_settings(false);
+    let client = build_llm_client(
+        ProviderDriverKind::OpenAI,
+        "key".to_string(),
+        None,
+        "model-id".to_string(),
+        &resolved,
+        &settings,
+        None,
+    );
+
+    assert_eq!(
+        client.current_reasoning_level(),
+        provider::contract::ReasoningLevel::Off
+    );
 }

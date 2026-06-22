@@ -21,5 +21,5 @@ pub struct ChatBootstrapArgs {
     pub max_tool_concurrency: Option<usize>,
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
-    pub reasoning_effort: Option<String>,
+    pub max_reasoning: Option<String>,
 }

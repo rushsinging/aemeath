@@ -342,34 +342,6 @@ impl LlmProvider for OpenAICompatibleProvider {
         &self.config.source_key
     }
 
-    fn set_reasoning(&self, enabled: bool) {
-        self.reasoning
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-        if let Ok(mut guard) = self.reasoning_config.lock() {
-            if matches!(*guard, Some(ReasoningConfig::Bool(_))) {
-                *guard = Some(ReasoningConfig::Bool(enabled));
-            }
-        }
-    }
-
-    fn is_reasoning(&self) -> bool {
-        self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn set_reasoning_effort(&self, effort: Option<String>) {
-        if let Ok(mut guard) = self.reasoning_config.lock() {
-            *guard = effort
-                .map(|effort| ReasoningConfig::Object(serde_json::json!({ "effort": effort })));
-        }
-    }
-
-    fn reasoning_effort(&self) -> Option<String> {
-        self.reasoning_config
-            .lock()
-            .ok()
-            .and_then(|guard| guard.as_ref().and_then(ReasoningConfig::as_effort))
-    }
-
     fn set_max_tokens(&self, max_tokens: u32) {
         if max_tokens > 0 {
             self.max_tokens.store(max_tokens, Ordering::Relaxed);
@@ -378,5 +350,57 @@ impl LlmProvider for OpenAICompatibleProvider {
 
     fn max_tokens(&self) -> u32 {
         self.current_max_tokens()
+    }
+
+    fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
+        use crate::core::provider::ReasoningLevel;
+
+        // 同步布尔标志：Off → false，其他 → true
+        let enabled = !matches!(level, ReasoningLevel::Off);
+        self.reasoning
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+
+        // 更新 reasoning_config
+        if let Ok(mut guard) = self.reasoning_config.lock() {
+            match level {
+                ReasoningLevel::Off => {
+                    *guard = Some(ReasoningConfig::Bool(false));
+                }
+                ReasoningLevel::Low => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "low"
+                    })));
+                }
+                ReasoningLevel::Medium => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "medium"
+                    })));
+                }
+                ReasoningLevel::High => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "high"
+                    })));
+                }
+                ReasoningLevel::Xhigh => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "xhigh"
+                    })));
+                }
+                ReasoningLevel::Max => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "max"
+                    })));
+                }
+            }
+        }
+        self.store_reasoning_level(level);
+    }
+
+    fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        self.load_reasoning_level()
+    }
+
+    fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        self.driver.max_reasoning_level()
     }
 }

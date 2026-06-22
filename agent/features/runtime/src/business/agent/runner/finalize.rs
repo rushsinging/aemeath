@@ -53,7 +53,7 @@ pub(crate) async fn finalize_sub_agent(
     model_spec: Option<&str>,
     output: &str,
     previous_max_tokens: u32,
-    previous_reasoning: bool,
+    previous_reasoning_level: provider::contract::ReasoningLevel,
     restore_max_tokens: bool,
     progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     workspace_root: &Path,
@@ -94,5 +94,5 @@ pub(crate) async fn finalize_sub_agent(
     if restore_max_tokens && previous_max_tokens > 0 {
         client.set_max_tokens(previous_max_tokens);
     }
-    client.set_reasoning(previous_reasoning);
+    client.set_reasoning_level(previous_reasoning_level);
 }

@@ -28,7 +28,6 @@ pub(super) async fn switch_model_impl(
         base_url: Some(params.base_url),
         model: params.model_id.clone(),
         max_tokens: params.max_tokens,
-        thinking_max_tokens: 0,
         reasoning,
         reasoning_config,
         openai_config,
@@ -53,16 +52,24 @@ pub(super) async fn switch_model_impl(
 pub(super) async fn set_thinking_impl(me: &AgentClientImpl, desired: Option<bool>) -> Result<bool> {
     let client = me.inner.current_client.read().unwrap().clone();
     let adapter = LlmClientAdapter::new(client);
-    let current = adapter.is_reasoning();
-    let new_state = desired.unwrap_or(!current);
-    adapter.set_reasoning(new_state);
+    let current = adapter.current_reasoning_level();
+    let new_state = desired.unwrap_or(matches!(current, provider::contract::ReasoningLevel::Off));
+    let level = if new_state {
+        provider::contract::ReasoningLevel::Medium
+    } else {
+        provider::contract::ReasoningLevel::Off
+    };
+    adapter.set_reasoning_level(level);
     Ok(new_state)
 }
 
 pub(super) async fn get_thinking_impl(me: &AgentClientImpl) -> Result<bool> {
     let client = me.inner.current_client.read().unwrap().clone();
     let adapter = LlmClientAdapter::new(client);
-    Ok(adapter.is_reasoning())
+    Ok(!matches!(
+        adapter.current_reasoning_level(),
+        provider::contract::ReasoningLevel::Off
+    ))
 }
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
