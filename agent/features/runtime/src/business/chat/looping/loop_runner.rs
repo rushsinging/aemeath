@@ -117,7 +117,9 @@ where
 
     // workspace service 跨 chat 轮次持有：恢复 session 时已 restore 到正确位置，
     // 这里直接读取当前 root 作为 hook/日志的工作目录基准（忽略 seed cwd）。
-    let cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
+    // 初始值用于 loop 前的 config_snapshot 注册；loop 内每 turn 头会重新读取，
+    // 使 hook env / ToolExecutionContext.cwd 跟随中途的 worktree 切换。
+    let mut cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
     log::info!(target: LOG_TARGET,
         "chat loop hook runner ready: workspace_root={} configured_events={}",
         cwd.display(),
@@ -228,6 +230,11 @@ where
         // 的 idle-resume / ContinueNextTurn gate（在 `continue` 之前）append 完成，或来自
         // 首回合 seed；先前已完成回合的消息均位于基线之内，cancel 不会触及。
         turn_rollback_baseline = messages.len();
+
+        // 每 turn 头重新读取 workspace_root，使本 turn 的 hook env
+        // （AEMEATH_PROJECT_DIR / CLAUDE_PROJECT_DIR）与 ToolExecutionContext.cwd
+        // 跟随本 turn 之前的 worktree 切换（EnterWorktree/ExitWorktree）。
+        cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
 
         // ── 新 USER 回合边界：重置 per-user-turn 局部状态（#390 A1 跨回合泄漏修复）──
         // A1 把 loop 改为常驻（一个 loop 跨多个用户回合），导致原本 per-`chat()`（≈
