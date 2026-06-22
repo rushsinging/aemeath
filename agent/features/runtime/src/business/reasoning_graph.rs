@@ -3,24 +3,15 @@
 //! 设计文档：`docs/design/agent-reasoning-graph.md` §3.2
 //!
 //! 核心原则：Graph 是 effort 调节器，不是流程约束器——只推断阶段调 effort，
-//! 不阻塞 tool、不改 agent loop 控制流、不依赖 LLM 配合。
+//! 不阻塞 tool、不改 agent loop 控制流。
+//!
+//! ## 阶段推断策略（Phase 2 已实现）
+//!
+//! LLM 在 tool call 的 input 中声明 `phase` 字段（`"explore"` / `"plan"` /
+//! `"execute"` / `"verify"`）。Graph 优先使用声明值（ground truth），
+//! `classify.rs` 关键词分类器作为 fallback（仅在 LLM 未声明 phase 时使用）。
 //!
 //! ## Workflow 演进路线
-//!
-//! 当前（Phase 1）是**被动观察模式**：根据上一个 tool 的类型和结果猜测当前
-//! 阶段，调 effort 档位。根本局限：意图 ≠ tool 类型——`git diff` 可能是
-//! Explore 也可能是 Verify，靠关键词猜不到 100% 准确。
-//!
-//! ### Phase 2: 轻量声明（计划中）
-//!
-//! 让 LLM 在 tool call 中带一个可选的 `phase` 字段声明当前意图。Graph 优先
-//! 使用 LLM 声明的 phase，关键词分类器（`classify.rs`）降级为兜底 fallback。
-//!
-//! - 成本：每次 tool call 多几个 token
-//! - 收益：准确率从 ~85% → 95%+，不再需要维护关键词列表
-//! - 风险：LLM 可能不配合或幻觉，但有 fallback 兜底
-//! - 对本模块的影响：`next_node()` 增加 phase 优先判断分支，
-//!   `classify.rs` 的 `classify_bash` / `infer_node_from_tool` 变成 fallback
 //!
 //! ### Phase 3: 完整 Workflow（远期，独立模块）
 //!
@@ -100,14 +91,14 @@ pub enum GraphSignal {
     /// 新 user message 到达。`text` 用于判断初始节点（EXPLORE vs PLAN），
     /// `turn_count` 用于识别首个 turn。
     UserMessage { text: String, turn_count: usize },
-    /// tool 执行完成。`tool_name` 用于判断 tool→node 映射，
-    /// `bash_command` 仅在 tool=Bash 时提供，用于细分类。
+    /// tool 执行完成。`tool_name` 用于 fallback 推断（classify.rs），
+    /// `bash_command` 仅在 tool=Bash 且未声明 phase 时用于细分类。
     ToolCompleted {
         tool_name: String,
         bash_command: Option<String>,
         is_error: bool,
-        /// LLM 在 tool call input 中声明的 phase（Phase 2 轻量声明协议）。
-        /// 有值时优先使用，跳过 classify 关键词推断。
+        /// LLM 在 tool call input 中声明的 phase（Phase 2）。
+        /// 有值时优先使用（ground truth），跳过 classify 关键词推断。
         declared_phase: Option<String>,
     },
     /// LLM 回复无 tool call（纯文本回复）。
