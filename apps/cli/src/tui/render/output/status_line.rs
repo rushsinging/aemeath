@@ -9,7 +9,9 @@ use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapM
 use crate::tui::render::output::selection_overlay::{apply_selection_overlay_with_fg, SelRange};
 use crate::tui::render::output_area::render::sel_range_for_bounds;
 use crate::tui::render::output_area::OutputArea;
-use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
+use crate::tui::view_model::LiveStatusViewModel;
+#[cfg(test)]
+use crate::tui::view_model::SpinnerLineView;
 use crate::tui::view_state::output::OutputViewState;
 
 impl OutputArea {

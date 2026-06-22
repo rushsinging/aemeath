@@ -70,6 +70,7 @@ where
     agent_results
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn execute_one_agent<S>(
     context: &RuntimeTurnContext,
     call: ToolCall,

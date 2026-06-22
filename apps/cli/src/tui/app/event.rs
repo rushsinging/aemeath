@@ -146,7 +146,6 @@ pub enum AppEvent {
     /// Reasoning Graph 阶段变化（Phase 2）。更新 status bar 的阶段展示。
     GraphPhaseChanged {
         node: String,
-        effort: String,
     },
 }
 pub type UiEvent = AppEvent;

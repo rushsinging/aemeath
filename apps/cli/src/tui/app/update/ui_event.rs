@@ -272,7 +272,7 @@ impl App {
                     );
                 }
             }
-            UiEvent::GraphPhaseChanged { node, effort: _ } => {
+            UiEvent::GraphPhaseChanged { node } => {
                 // Phase 2: graph 阶段变化 → 更新 status bar 的 "Ready" 区域
                 let notice = StatusNotice::normal(node);
                 self.model
