@@ -109,7 +109,6 @@ pub struct LlmProviderOptions {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub max_tokens: u32,
-    pub thinking_max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
 }
@@ -120,7 +119,6 @@ pub struct LlmConfigOptions {
     pub base_url: Option<String>,
     pub model: String,
     pub max_tokens: u32,
-    pub thinking_max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
     pub openai_config: Option<OpenAIProviderConfig>,
@@ -144,7 +142,6 @@ impl LlmClient {
             base_url: None,
             model: None,
             max_tokens: 200000,
-            thinking_max_tokens: 0,
             reasoning: false,
             reasoning_config: None,
         })
@@ -158,7 +155,7 @@ impl LlmClient {
                     options.base_url,
                     options.model,
                     options.max_tokens,
-                    options.thinking_max_tokens,
+                    0,
                 ))
             }
             ProviderDriverKind::Ollama => {
@@ -236,7 +233,6 @@ impl LlmClient {
                 base_url: options.base_url,
                 model: Some(options.model),
                 max_tokens: options.max_tokens,
-                thinking_max_tokens: options.thinking_max_tokens,
                 reasoning: options.reasoning,
                 reasoning_config: options.reasoning_config,
             })
