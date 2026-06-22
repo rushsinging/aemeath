@@ -91,6 +91,12 @@ pub(super) async fn chat_impl(
             language: inner.context.language.clone(),
             frozen_chats: inner.frozen_chats.clone(),
             active_summary: inner.active_summary.clone(),
+            reasoning_graph: inner
+                .context
+                .reasoning_graph_config
+                .as_ref()
+                .filter(|c| c.enabled)
+                .map(|c| crate::business::reasoning_graph::ReasoningGraph::new(c.clone())),
         })
         .await;
         // loop 退出（shutdown / clear）后把取消槽重置为干净 token，

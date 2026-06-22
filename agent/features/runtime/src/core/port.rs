@@ -30,6 +30,8 @@ pub struct ChatRuntimeContext {
     pub resume: Option<String>,
     /// Language code for prompt/reminder text selection (`"en"` / `"zh"`).
     pub language: String,
+    /// Reasoning Graph 配置。`enabled=false` 时不创建 graph 实例（None）。
+    pub reasoning_graph_config: Option<crate::business::reasoning_graph::GraphRuntimeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

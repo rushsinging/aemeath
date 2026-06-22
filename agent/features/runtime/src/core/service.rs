@@ -157,6 +157,7 @@ mod tests {
             verbose: false,
             resume: None,
             language: "en".to_string(),
+            reasoning_graph_config: None,
         }
     }
 
