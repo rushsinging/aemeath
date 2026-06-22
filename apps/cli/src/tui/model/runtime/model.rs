@@ -6,6 +6,7 @@ use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
 use super::usage::UsageSummary;
 use super::workspace::WorkspaceState;
+use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeModel {
@@ -19,6 +20,11 @@ pub struct RuntimeModel {
     pub spinner: SpinnerModel,
     pub status_notice: StatusNotice,
     pub thinking: bool,
+    /// Reasoning Graph 当前阶段（`None` = graph 不存在或 Idle），status notice 的持久真相。
+    pub graph_phase: Option<String>,
+    /// 临时 status notice 的过期时间戳；`None` 表示当前 notice 为持久态。
+    /// 到期后由 SpinnerTick 回退到 `graph_phase` 派生的 notice。
+    pub transient_notice_expiry: Option<Instant>,
 }
 
 impl Default for RuntimeModel {
@@ -34,6 +40,8 @@ impl Default for RuntimeModel {
             spinner: SpinnerModel::default(),
             status_notice: StatusNotice::default(),
             thinking: true,
+            graph_phase: None,
+            transient_notice_expiry: None,
         }
     }
 }
@@ -148,13 +156,46 @@ impl RuntimeModel {
             }
             RuntimeIntent::SetStatusNotice(notice) => {
                 self.status_notice = notice;
+                self.transient_notice_expiry = None;
+                vec![RuntimeChange::StatusNoticeChanged]
+            }
+            RuntimeIntent::SetTransientStatusNotice { notice, expires_at } => {
+                self.status_notice = notice;
+                self.transient_notice_expiry = Some(expires_at);
                 vec![RuntimeChange::StatusNoticeChanged]
             }
             RuntimeIntent::SetThinking(enabled) => {
                 self.thinking = enabled;
                 vec![RuntimeChange::ThinkingChanged]
             }
+            RuntimeIntent::SetGraphPhase(phase) => {
+                self.graph_phase = phase.clone();
+                // 非 transient 时同步更新 status_notice（持久真相单次写入）
+                if self.transient_notice_expiry.is_none() {
+                    self.status_notice = Self::notice_from_phase(phase.as_deref());
+                }
+                vec![RuntimeChange::GraphPhaseChanged]
+            }
         }
+    }
+
+    /// 由 graph_phase 派生持久 status notice。
+    fn notice_from_phase(phase: Option<&str>) -> StatusNotice {
+        match phase {
+            None | Some("idle") => StatusNotice::success("Ready"),
+            Some(p) => StatusNotice::normal(p.to_string()),
+        }
+    }
+
+    /// 检查临时 notice 是否过期；过期则回退到 graph_phase 派生的持久态。
+    /// 返回 `true` 表示发生了回退（调用方可据此标脏）。
+    pub fn expire_transient_notice(&mut self, now: Instant) -> bool {
+        if self.transient_notice_expiry.is_some_and(|exp| now >= exp) {
+            self.transient_notice_expiry = None;
+            self.status_notice = Self::notice_from_phase(self.graph_phase.as_deref());
+            return true;
+        }
+        false
     }
 }
 

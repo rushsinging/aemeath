@@ -38,4 +38,5 @@ pub enum RuntimeChange {
     TaskLinesChanged,
     StatusNoticeChanged,
     ThinkingChanged,
+    GraphPhaseChanged,
 }

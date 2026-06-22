@@ -1,6 +1,22 @@
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::runtime::status_notice::StatusNotice;
+use std::time::{Duration, Instant};
+
+/// 临时 status notice 存活时长。
+const TRANSIENT_NOTICE_TTL: Duration = Duration::from_secs(5);
 
 impl super::App {
+    /// 设置临时 status notice，`TRANSIENT_NOTICE_TTL` 后由 SpinnerTick 自动回退到
+    /// graph_phase 派生的持久态。
+    pub(crate) fn set_transient_notice(&mut self, notice: StatusNotice) {
+        self.model
+            .runtime
+            .apply(RuntimeIntent::SetTransientStatusNotice {
+                notice,
+                expires_at: Instant::now() + TRANSIENT_NOTICE_TTL,
+            });
+    }
     /// 描述「复制文本到剪贴板」副作用，返回 CopyToClipboard Effect（不在此处做 IO）。
     /// 实际的剪贴板写入与 status bar 反馈由 effect/executor 执行。
     pub fn copy_to_clipboard(&self, text: &str) -> Effect {
