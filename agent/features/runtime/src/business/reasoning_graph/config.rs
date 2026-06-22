@@ -17,7 +17,7 @@
 //! }
 //! ```
 
-use provider::contract::ReasoningLevel;
+use provider::api::ReasoningLevel;
 use serde::{Deserialize, Serialize};
 
 /// 单个节点的 effort 覆盖。

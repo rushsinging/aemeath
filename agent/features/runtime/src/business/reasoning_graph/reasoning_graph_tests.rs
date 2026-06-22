@@ -1,5 +1,5 @@
 use super::*;
-use provider::contract::ReasoningLevel;
+use provider::api::ReasoningLevel;
 
 fn enabled_config() -> ReasoningGraphConfig {
     ReasoningGraphConfig {
