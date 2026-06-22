@@ -262,7 +262,6 @@ impl App {
             UiEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
-            // TODO(#391 S3-4): 清全部占位 + texts.join("\n") 还原输入框
             UiEvent::UserMessagesWithdrawn(texts) => {
                 self.clear_all_queued_submission_echos();
                 if !texts.is_empty() {
