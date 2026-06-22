@@ -4,6 +4,7 @@ pub mod chat;
 pub mod compact;
 pub mod cost;
 pub mod prompt;
+pub mod reasoning_graph;
 pub mod reflection;
 pub mod scheduler;
 pub mod session;
