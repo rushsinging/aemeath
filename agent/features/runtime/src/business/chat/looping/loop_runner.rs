@@ -24,7 +24,7 @@ use crate::business::chat::looping::{
     InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeStreamHandler, RuntimeTurnContext,
 };
-use crate::business::reasoning_graph::{GraphRuntimeConfig, GraphSignal, ReasoningGraph};
+use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
@@ -801,14 +801,14 @@ where
                             (Option<&str>, Option<&str>),
                         > = tool_calls
                             .iter()
-                            .filter_map(|tc| {
+                            .map(|tc| {
                                 let bash_cmd = if tc.name == "Bash" {
                                     tc.input.get("command").and_then(|v| v.as_str())
                                 } else {
                                     None
                                 };
                                 let phase = tc.input.get("phase").and_then(|v| v.as_str());
-                                Some((tc.provider_id.as_str(), (bash_cmd, phase)))
+                                (tc.provider_id.as_str(), (bash_cmd, phase))
                             })
                             .collect();
                         for result in &all_results {
