@@ -60,6 +60,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
         UiEvent::SessionReset => "SessionReset",
         UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
+        UiEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged",
     }
 }
 

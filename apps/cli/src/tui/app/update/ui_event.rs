@@ -272,6 +272,13 @@ impl App {
                     );
                 }
             }
+            UiEvent::GraphPhaseChanged { node, effort: _ } => {
+                // Phase 2: graph 阶段变化 → 更新 status bar 的 "Ready" 区域
+                let notice = StatusNotice::normal(node);
+                self.model
+                    .runtime
+                    .apply(RuntimeIntent::SetStatusNotice(notice));
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

@@ -76,6 +76,26 @@ Never claim "done" without verification.
 <solution_depth>
 When fixing bugs or implementing features, if the same issue can be addressed with both a minimal patch and a thorough root-cause solution, you MUST present both options with their trade-offs, costs, and risks. For recurring, structural, or design-flaw issues, you SHOULD recommend and prioritize the thorough solution unless the user explicitly asks for the minimal patch only.
 </solution_depth>
+
+<phase_declaration>
+When making tool calls, include a `"phase"` field in the tool input JSON to declare your current intent. This optimizes reasoning effort allocation automatically.
+
+Valid values:
+- `"explore"` — gathering information, reading files, searching code
+- `"plan"` — deep reasoning, analyzing problems, designing solutions
+- `"execute"` — mechanical changes, edits, routine operations
+- `"verify"` — checking results, running tests, validating output
+
+Example:
+```json
+{"tool": "Bash", "input": {"command": "cargo test", "phase": "verify"}}
+```
+
+Rules:
+- Add `"phase"` to the input object of EVERY tool call.
+- Choose the value that best matches your actual intent for that specific call.
+- If unsure, omit `"phase"` — the system will infer it.
+</phase_declaration>
 "#;
 
 /// Universal execution discipline (Chinese) — injected for ALL models, not overridable.
@@ -151,6 +171,26 @@ pub const UNIVERSAL_EXECUTION_DISCIPLINE_ZH: &str = r#"# 执行纪律
 <solution_depth>
 修复 bug 或实现功能时，如果同一问题既可用最小补丁也可用根因级彻底方案解决，你必须同时给出两者的优劣、成本和风险。对于会复发、结构性或设计缺陷问题，你应该优先推荐彻底方案，除非用户明确要求只做最小修改。
 </solution_depth>
+
+<phase_declaration>
+调用工具时，在 tool input JSON 中加入 `"phase"` 字段声明当前意图。系统会据此自动优化推理深度分配。
+
+可选值：
+- `"explore"` — 收集信息、读文件、搜索代码
+- `"plan"` — 深度推理、分析问题、设计方案
+- `"execute"` — 机械变更、编辑、常规操作
+- `"verify"` — 检查结果、运行测试、验证输出
+
+示例：
+```json
+{"tool": "Bash", "input": {"command": "cargo test", "phase": "verify"}}
+```
+
+规则：
+- 在每次 tool call 的 input 对象中加入 `"phase"`。
+- 选择最匹配该次调用实际意图的值。
+- 不确定时省略 `"phase"`——系统会自动推断。
+</phase_declaration>
 "#;
 
 /// Select universal execution discipline by language code (`"en"` / `"zh"`).

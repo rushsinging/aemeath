@@ -169,8 +169,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         }
         sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
         sdk::ChatEvent::UserMessagesWithdrawn { texts } => UiEvent::UserMessagesWithdrawn(texts),
-        sdk::ChatEvent::GraphPhaseChanged { node, effort, prev } => {
-            UiEvent::SystemMessage(format!("phase: {prev} → {node} ({effort})"))
+        sdk::ChatEvent::GraphPhaseChanged { node, effort, .. } => {
+            UiEvent::GraphPhaseChanged { node, effort }
         }
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
