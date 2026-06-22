@@ -211,18 +211,76 @@ effort 映射 **MAY** 通过 `aemeath.json` 配置覆盖：
 
 `enabled: false` 时回退到当前的静态 effort 行为（零行为变更保证）。
 
-### 2.5 LLM 覆盖机制（可选，Phase 2）
+### 2.5 LLM 对状态机的感知策略
 
-runtime 推断是默认行为。当 LLM 发现需要覆盖时（比如 EXPLORE 阶段遇到复杂问题想 deep think），**MAY** 在 assistant 输出中带一个约定标记：
+graph 的状态机和 effort 调节是否应该让 LLM 知晓？这是一个关键设计抉择。三种模式对比：
+
+| 模式 | 机制 | 优点 | 风险 |
+|---|---|---|---|
+| **A. 完全隐藏**（Phase 1 默认） | runtime 后台静默调 effort，LLM 无感知 | 零行为干扰，LLM 保持自然模式 | effort 突降时 LLM 可能困惑；异常时无法主动升档 |
+| **B. 告知状态** | 每轮注入 `current_phase: EXPLORE` 到 context | LLM 理解为什么 effort 变了 | 消耗 token；LLM 可能"迎合"状态而改变自然行为 |
+| **C. LLM 驱动状态** | LLM 每轮显式声明 `<phase>PLAN</phase>` | 分类准确率 100% | 增加输出 token；LLM 可能忘记声明；与 runtime 推断冲突 |
+
+#### 决策：A + 最小覆盖通道
+
+**决定采用模式 A 为默认，加最小覆盖通道作为异常逃生口。**
+
+理由：
+
+1. **数据证明 LLM 自然行为已经正确**——0% 混合率意味着 LLM 已经在 turn 级别做对了阶段分离。告知状态是多余的——LLM 不需要被告知它已经在做的事。
+2. **告知反而可能有害**——如果 LLM 知道当前是 EXECUTE，可能"表演"阶段（跳过必要的思考）；知道是 EXPLORE 可能人为限制探索深度。effort 调节是**工程优化**，不该成为 LLM 的认知负担。
+3. **但 Bash 误分类是真实痛点**——15% 误分类率下，LLM 能自己感知到"我需要更深的推理"，而 runtime 推断错了节点。需要一条逃生通道。
+
+因此采用 **A + 最小覆盖通道**：
 
 ```
-<reasoning_override effort="high" />
-前面的修改导致了连锁编译错误，我需要重新评估整体架构...
+默认行为（Phase 1）：
+  runtime: 观察 tool → 更新 node → 调 effort
+  LLM:    完全无感知
+
+异常覆盖（Phase 2）：
+  runtime: 观察 tool → 更新 node → 调 effort
+  LLM:    正常输出；如需升档，输出 <reasoning_effort boost="high" />
+  runtime: 检测到标记 → 当前轮覆盖为 high → 下一轮回归 graph 默认
 ```
 
-runtime 解析此标记，覆盖当前节点的默认 effort。覆盖只影响当前轮次，下一轮回到 graph 默认。
+#### 覆盖通道的 provider 兼容性问题
 
-> **Phase 1 不实现覆盖机制**，先验证纯推断式 graph 的效果。数据画像显示 0% 混合率，推断式已经覆盖绝大多数场景。Phase 2 再评估是否需要。
+覆盖通道**放弃文本标记方案**（`<reasoning_effort boost="high" />`），原因：
+
+不同 provider 的 thinking 表达方式完全不兼容：
+
+| Provider | thinking 表达方式 | 文本标记是否可用 |
+|---|---|---|
+| Anthropic | 独立 `content_block`（`type: thinking`），thinking 已经表达了深度 | ❌ 多余——thinking block 本身就是"需要深度推理"的信号 |
+| OpenAI 兼容（DeepSeek/GLM/Mimo） | 独立 `reasoning_content` 字段 | ❌ 侵入——标记混入正常文本输出，且 reasoning_content 是 provider 私有字段 |
+| Ollama | 只有开/关，无格式概念 | ❌ 无意义——没有 reasoning 输出可供标记 |
+
+让 LLM 输出文本标记有三个根本问题：
+1. **对 Anthropic 多余**——thinking block 已经表达了"我需要深度推理"，再加标记是冗余
+2. **对 OpenAI 兼容侵入**——标记混入正常文本，需要从输出中解析剥离，增加 stream_handler 复杂度
+3. **对 Ollama 无意义**——没有 reasoning 能力，标记无的放矢
+
+#### 覆盖通道改为 runtime 侧信号检测（provider 无关）
+
+放弃 LLM 主动输出标记，改为 runtime **被动观察可检测信号**自动升级 effort。这些信号全部来自 runtime 已有的数据，不依赖任何 provider 的 thinking 格式：
+
+| 信号 | 检测方式 | 触发动作 | 适用 provider |
+|---|---|---|---|
+| 连续 tool_error ≥ 2 | 计数器（`tool_result.is_error`） | → PLAN（effort: high） | 全部 |
+| Bash exit code != 0（VERIFY 节点） | tool_result 输出解析 | → EXPLORE（effort: medium） | 全部 |
+| 连续 3+ 轮无 Edit / 无新文件读 | 状态比较 | → PLAN（effort: high） | 全部 |
+| reasoning_tokens 超过阈值但 effort 已是 high | usage 统计 | 保持 high（不降） | 支持 reasoning 的 |
+
+**关键区别**：这些信号由 runtime 从 tool 结果和 usage 统计中推断，**NEVER** 依赖 LLM 主动声明，**NEVER** 依赖 provider 的 thinking 格式。对不支持 reasoning 的 provider，信号检测仍然工作——只是升级到 high 后 provider 不响应（静默降级）。
+
+#### Phase 分期
+
+> **Phase 1**：纯模式 A（完全隐藏 + 推断式）。先验证推断式 graph 的效果。数据画像显示 0% 混合率，推断式已经覆盖绝大多数场景。
+>
+> **Phase 2**：runtime 侧偏差检测信号（上表前两条）。纯 runtime 实现，provider 无关。
+>
+> **Phase 3**：更复杂的偏差检测（上表后两条），根据 Phase 2 数据评估是否需要。
 
 ## 3. 架构
 
@@ -409,26 +467,22 @@ log::info!(
 - [ ] 长会话（≥50 tool call）的 reasoning token 占比对比静态 effort 下降 ≥20%
 - [ ] Bash 分类准确率 ≥85%（与数据画像基线一致）
 
-### 4.2 Phase 2：LLM 覆盖机制（可选）
+### 4.2 Phase 2：runtime 侧偏差检测信号（provider 无关）
 
-仅在 Phase 1 数据证明推断式 graph 存在明显盲区时启动：
+仅在 Phase 1 数据证明推断式 graph 存在明显盲区时启动。**放弃 LLM 文本标记方案**（provider thinking 格式不兼容，见 §2.5），改用 runtime 可检测信号：
 
-| 子任务 | 范围 |
-|---|---|
-| `<reasoning_override>` 标记解析 | `stream_handler.rs` |
-| 覆盖与 graph 默认的优先级 | `ReasoningGraph::apply_override()` |
-| Guidance 文档告知 LLM 可用此标记 | `guidance/_default.md` |
-
-### 4.3 Phase 3：偏差检测信号（可选）
-
-更智能的阶段转换信号：
-
-| 信号 | 检测方式 | 目标节点 |
+| 子任务 | 范围 | 信号 |
 |---|---|---|
-| 连续 3+ 次 tool_error | 计数器 | → PLAN |
-| 连续 3+ 轮无进展（无 Edit/无新文件读） | 状态比较 | → PLAN |
-| 验证失败 | Bash 输出解析（exit code != 0） | → EXPLORE |
-| 上下文接近 compact 阈值 | token_estimation | 保持当前，但降低 effort |
+| 连续 tool_error 计数器 | `reasoning_graph/deviation.rs` | 连续 ≥2 次 error → PLAN |
+| Bash exit code 解析 | `reasoning_graph/deviation.rs` | VERIFY 节点 exit != 0 → EXPLORE |
+
+### 4.3 Phase 3：高级偏差检测（可选）
+
+| 子任务 | 范围 | 信号 |
+|---|---|---|
+| 无进展检测 | `reasoning_graph/deviation.rs` | 连续 3+ 轮无 Edit/无新文件读 → PLAN |
+| reasoning_tokens 阈值 | `reasoning_graph/deviation.rs` | usage 统计超阈值但 effort 已 high → 保持 |
+| 上下文接近 compact 阈值 | `reasoning_graph/deviation.rs` + `token_estimation.rs` | 保持当前节点，但降低 effort |
 
 ## 5. 风险与缓解
 
@@ -502,5 +556,5 @@ Bash 分类器无法 100% 准确（复合命令、管道、自定义脚本）。
 | user message 意图分类（EXPLORE vs PLAN）用关键词还是 LLM 分类？ | 关键词（Phase 1 简单） | Phase 1 数据验证准确率 |
 | graph 状态是否持久化到 session？ | 不持久化（每 session 新建） | resume 场景的行为是否可接受 |
 | 是否对 reasoning-disabled 模型启用 graph？ | 启用（纯阶段跟踪 + 日志） | 日志价值是否足够 |
-| `<reasoning_override>` 标记是否侵入 LLM 输出？ | Phase 2 再定 | Phase 1 推断式是否够用 |
+| runtime 侧偏差检测信号的阈值（error 次数、无进展轮数） | 先用保守默认（error≥2、无进展≥3） | Phase 2 数据校准 |
 | 多模型 pool 故障转移时 graph 如何处理？ | 重置为 EXPLORE | 实际故障转移频率 |
