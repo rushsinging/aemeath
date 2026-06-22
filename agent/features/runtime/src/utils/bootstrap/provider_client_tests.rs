@@ -203,6 +203,7 @@ fn test_build_llm_client_ollama_constructs_ollama_provider() {
         "llama3.2".to_string(),
         &resolved,
         &settings,
+        None,
     );
 
     assert_eq!(client.provider_name(), "ollama");
@@ -244,6 +245,7 @@ fn test_build_llm_client_sets_reasoning_level() {
         "model-id".to_string(),
         &resolved,
         &settings,
+        None,
     );
 
     assert_eq!(
@@ -264,6 +266,7 @@ fn test_build_llm_client_reasoning_false_sets_off() {
         "model-id".to_string(),
         &resolved,
         &settings,
+        None,
     );
 
     assert_eq!(

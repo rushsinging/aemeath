@@ -134,7 +134,7 @@ mod tests {
             max_tool_concurrency: None,
             max_agent_concurrency: None,
             no_think: false,
-            reasoning_effort: None,
+            max_reasoning: None,
         };
 
         assert_eq!(initial_tui_resume_id(&args).as_deref(), Some("session-67"));

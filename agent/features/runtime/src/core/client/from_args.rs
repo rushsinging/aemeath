@@ -102,6 +102,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         model.clone(),
         &resolved_model,
         &runtime_settings,
+        args.max_reasoning.as_deref(),
     ));
 
     // 10. Tooling
