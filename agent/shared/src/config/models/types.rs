@@ -74,23 +74,12 @@ pub struct ModelEntryConfig {
     #[serde(default, rename = "max_tokens", alias = "maxTokens")]
     pub max_tokens: u32,
 
-    /// Maximum thinking tokens
-    #[serde(default, rename = "thinking_max_tokens", alias = "thinkingMaxTokens")]
-    pub thinking_max_tokens: u32,
-
     /// Reasoning / thinking mode for this model.
     /// - `None` (default) — use CLI flag / global default
     /// - `Some(true)` — force enable thinking
     /// - `Some(false)` — force disable thinking
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<bool>,
-
-    /// Reasoning effort level (only effective for models that support it,
-    /// e.g. OpenAI GPT-5.x / o-series).
-    /// - `None` (default) — use source default (usually "medium")
-    /// - Valid values: `"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
 }
 
 impl ModelEntryConfig {
