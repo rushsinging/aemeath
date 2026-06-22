@@ -201,8 +201,29 @@ impl ProcessingHandle {
     }
 }
 
-fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
+pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
     match event {
+        sdk::ChatEvent::Token { context, text } => crate::tui::log_trace!(
+            "{} token chat_id={} turn_id={} text_len={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            text.len()
+        ),
+        sdk::ChatEvent::Thinking { context, text } => crate::tui::log_trace!(
+            "{} thinking chat_id={} turn_id={} text_len={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            text.len()
+        ),
+        sdk::ChatEvent::BlockComplete { context, text } => crate::tui::log_trace!(
+            "{} block_complete chat_id={} turn_id={} text_len={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            text.len()
+        ),
         sdk::ChatEvent::ToolCallStart {
             context,
             id,
@@ -264,7 +285,126 @@ fn log_sdk_tool_event(event: &sdk::ChatEvent, stage: &'static str) {
             is_error,
             images.len()
         ),
-        _ => {}
+        sdk::ChatEvent::SystemMessage(message) => {
+            crate::tui::log_trace!("{} system_message len={}", stage, message.len())
+        }
+        sdk::ChatEvent::Error(message) => {
+            crate::tui::log_trace!("{} error len={}", stage, message.len())
+        }
+        sdk::ChatEvent::Usage {
+            input,
+            output,
+            last_input,
+            elapsed_secs,
+        } => crate::tui::log_trace!(
+            "{} usage input={} output={} last_input={} elapsed_secs={:.3}",
+            stage,
+            input,
+            output,
+            last_input,
+            elapsed_secs
+        ),
+        sdk::ChatEvent::MessagesSync(messages) => {
+            crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
+        }
+        sdk::ChatEvent::UserMessagesAdded { items } => {
+            crate::tui::log_trace!("{} user_messages_added count={}", stage, items.len())
+        }
+        sdk::ChatEvent::Done { context } => crate::tui::log_trace!(
+            "{} done chat_id={} turn_id={}",
+            stage,
+            context.chat_id,
+            context.turn_id
+        ),
+        sdk::ChatEvent::DoneWithDurationMs {
+            context,
+            duration_ms,
+        } => crate::tui::log_trace!(
+            "{} done_with_duration_ms chat_id={} turn_id={} duration_ms={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            duration_ms
+        ),
+        sdk::ChatEvent::Cancelled { context } => crate::tui::log_trace!(
+            "{} cancelled chat_id={} turn_id={}",
+            stage,
+            context.chat_id,
+            context.turn_id
+        ),
+        sdk::ChatEvent::LiveTps(tps) => crate::tui::log_trace!("{} live_tps={:.2}", stage, tps),
+        sdk::ChatEvent::TurnChanged(turn) => {
+            crate::tui::log_trace!("{} turn_changed turn={}", stage, turn)
+        }
+        sdk::ChatEvent::CurrentTurnChanged(turn) => {
+            crate::tui::log_trace!("{} current_turn_changed turn={}", stage, turn)
+        }
+        sdk::ChatEvent::HookEvent(event) => crate::tui::log_trace!(
+            "{} hook_event name={} status={:?}",
+            stage,
+            event.hook_name,
+            event.status
+        ),
+        sdk::ChatEvent::AskUserBatch { items, .. } => {
+            crate::tui::log_trace!("{} ask_user_batch count={}", stage, items.len())
+        }
+        sdk::ChatEvent::AgentProgress {
+            context,
+            tool_id,
+            event,
+        } => crate::tui::log_trace!(
+            "{} agent_progress chat_id={} turn_id={} tool_id={} seq={} kind={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            tool_id,
+            event.sequence,
+            event
+        ),
+        sdk::ChatEvent::WorkingDirectoryChanged {
+            path_base,
+            workspace_root,
+            workspace,
+        } => crate::tui::log_trace!(
+            "{} working_directory_changed path_base={} workspace_root={} context_stack_len={}",
+            stage,
+            path_base,
+            workspace_root,
+            workspace.context_stack.len()
+        ),
+        sdk::ChatEvent::TasksChanged => {
+            crate::tui::log_trace!("{} tasks_changed", stage)
+        }
+        sdk::ChatEvent::ConfigReloaded { changed_keys } => crate::tui::log_trace!(
+            "{} config_reloaded changed_keys={:?}",
+            stage,
+            changed_keys
+        ),
+        sdk::ChatEvent::GraphPhaseChanged {
+            node,
+            effort,
+            prev,
+        } => crate::tui::log_trace!(
+            "{} graph_phase_changed node={} effort={} prev={}",
+            stage,
+            node,
+            effort,
+            prev
+        ),
+        sdk::ChatEvent::SessionReset => {
+            crate::tui::log_trace!("{} session_reset", stage)
+        }
+        sdk::ChatEvent::UserMessagesWithdrawn { texts } => crate::tui::log_trace!(
+            "{} user_messages_withdrawn count={}",
+            stage,
+            texts.len()
+        ),
+        sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
+            "{} result text_len={} tokens_used={:?}",
+            stage,
+            result.text.len(),
+            result.tokens_used
+        ),
     }
 }
 
@@ -370,7 +510,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             }
         };
         while let Some(event) = stream.recv().await {
-            log_sdk_tool_event(&event, "sdk->ui.recv");
+            log_sdk_event(&event, "sdk->ui.recv");
             let ui_event = sdk_event_to_ui_event(event);
             log_ui_tool_event(&ui_event, "sdk->ui.mapped");
             if ctx.tx.send(ui_event).await.is_err() {

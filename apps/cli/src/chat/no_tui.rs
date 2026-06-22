@@ -75,6 +75,7 @@ async fn run_single_turn(
         })
         .await?;
     while let Some(event) = stream.recv().await {
+        crate::tui::effect::session::processing::log_sdk_event(&event, "no_tui.recv");
         render_event(event)?;
     }
     Ok(())
@@ -97,10 +98,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::ConfigReloaded { .. }
         | sdk::ChatEvent::SessionReset
         | sdk::ChatEvent::UserMessagesWithdrawn { .. }
-        | sdk::ChatEvent::GraphPhaseChanged { .. } => {}
-        sdk::ChatEvent::ToolCallUpdate { name, .. } => {
-            log::trace!(target: "aemeath:tui", "[tool:update] {name}");
-        }
+        | sdk::ChatEvent::GraphPhaseChanged { .. }
+        | sdk::ChatEvent::ToolCallUpdate { .. } => {}
         sdk::ChatEvent::ToolResult {
             tool_name,
             output,
