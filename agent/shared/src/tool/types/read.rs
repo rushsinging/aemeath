@@ -22,8 +22,8 @@ pub struct ReadResult {
 pub struct ReadInput {
     /// Absolute path to the file to read
     pub file_path: String,
-    /// Line number to start reading from (0-based)
+    /// Line number to start reading from (0-based, default: 0)
     pub offset: Option<u64>,
-    /// Maximum number of lines to read (default 2000)
+    /// Maximum number of lines to read (default: 2000)
     pub limit: Option<u64>,
 }
