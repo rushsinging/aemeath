@@ -185,7 +185,7 @@ Instructions:- Complete the task described in the user message
         TypedToolResult::success(
             "子代理执行完成",
             AgentResult {
-                agent_id: task_id.unwrap_or_default(),
+                task_id,
                 output: final_output,
             },
         )

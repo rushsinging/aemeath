@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 /// Typed result returned by the `agent` tool (sub-agent dispatch).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct AgentResult {
-    pub agent_id: String,
+    /// 关联的 Task ID（仅当 agent 调用时传入了 taskId 才有值）。
+    /// `#[serde(alias)]` 兼容旧字段名 `agent_id` 的反序列化。
+    #[serde(default, alias = "agent_id")]
+    pub task_id: Option<String>,
     pub output: String,
 }
 
