@@ -344,3 +344,64 @@ fn sub_agent_workspace_isolated() {
     assert_eq!(prev.path_base, main_dir.path());
     assert_eq!(parent.current_path_base(), main_dir.path());
 }
+
+// ── #479 回归：text 字段必须包含子代理实际产出 ──
+
+/// 子代理有产出时，text 必须等于产出（父 LLM 能看到）。
+#[tokio::test]
+async fn test_agent_tool_text_contains_subagent_output() {
+    let store = Arc::new(TaskStore::new());
+    let tool = AgentTool { store };
+    let ctx = test_ctx(); // StubRunner 返回 prompt 作为 output
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "这是子代理的实际产出内容",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(result.text, "这是子代理的实际产出内容");
+}
+
+/// 子代理产出为空时，text 降级为合理的 summary。
+#[tokio::test]
+async fn test_agent_tool_text_fallback_when_output_empty() {
+    // 用一个返回空串的 runner
+    struct EmptyRunner;
+    #[async_trait::async_trait]
+    impl AgentRunner for EmptyRunner {
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
+            String::new()
+        }
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _system: &str,
+            _ctx: &ToolExecutionContext,
+        ) -> String {
+            String::new()
+        }
+    }
+
+    let store = Arc::new(TaskStore::new());
+    let tool = AgentTool { store };
+    let ctx = test_ctx_with_runner(Arc::new(EmptyRunner));
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "anything",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(result.text, "子代理执行完成（无输出）");
+}

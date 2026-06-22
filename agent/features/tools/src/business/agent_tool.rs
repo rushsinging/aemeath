@@ -182,8 +182,15 @@ Instructions:- Complete the task described in the user message
                 .await;
         }
 
+        // text → 父 LLM：必须包含子代理实际产出，否则父 agent 无法基于结果决策。
+        // data → TUI：结构化展示（AgentResult.output 同步保留）。
+        let text = if final_output.trim().is_empty() {
+            "子代理执行完成（无输出）".to_string()
+        } else {
+            final_output.clone()
+        };
         TypedToolResult::success(
-            "子代理执行完成",
+            text,
             AgentResult {
                 task_id,
                 output: final_output,
