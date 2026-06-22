@@ -574,9 +574,12 @@ impl ToolDisplay for AgentDisplay {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let target = typed_data::<sdk::tool_result::AgentResult>(result_payload)
-            .map(|r| r.agent_id)
-            .unwrap_or_else(|| "?".to_string());
-        let arg = format!("{description} -> [{target}]");
+            .and_then(|r| r.task_id)
+            .filter(|id| !id.is_empty());
+        let arg = match target {
+            Some(id) => format!("{description} -> [{id}]"),
+            None => description.to_string(),
+        };
         build_header_line(self.display_name(), &arg, "")
     }
 }
@@ -818,5 +821,49 @@ mod tests {
             text.len() < long.len() + 10,
             "long path should be truncated: {text}"
         );
+    }
+
+    // ── AgentDisplay::format_header_line_with_result 回归测试 (#422) ──
+
+    use crate::tui::render::output::tool_display::ToolDisplay;
+    use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+    use serde_json::json;
+
+    fn agent_header_text(description: &str, result_content: Option<serde_json::Value>) -> String {
+        let display = super::AgentDisplay;
+        let input = json!({ "description": description });
+        let payload = result_content.map(|c| ToolResultPayload::new(String::new(), c, false, 0));
+        let line = display.format_header_line_with_result(&input, payload.as_ref(), None);
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// 有 task_id 时应显示 `-> [id]` 后缀
+    #[test]
+    fn agent_header_with_task_id_shows_suffix() {
+        let text = agent_header_text(
+            "do something",
+            Some(json!({ "task_id": "task-42", "output": "done" })),
+        );
+        assert_eq!(text, "Agent do something -> [task-42]");
+    }
+
+    /// task_id 为 None 时不应显示 `-> []` 后缀（#422 回归）
+    #[test]
+    fn agent_header_without_task_id_hides_suffix() {
+        let text = agent_header_text(
+            "do something",
+            Some(json!({ "task_id": null, "output": "done" })),
+        );
+        assert_eq!(text, "Agent do something");
+    }
+
+    /// task_id 为空字符串时也不应显示后缀
+    #[test]
+    fn agent_header_with_empty_task_id_hides_suffix() {
+        let text = agent_header_text(
+            "do something",
+            Some(json!({ "task_id": "", "output": "done" })),
+        );
+        assert_eq!(text, "Agent do something");
     }
 }
