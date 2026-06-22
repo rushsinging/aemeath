@@ -95,6 +95,7 @@ fn test_tool_read_goes_explore() {
         tool_name: "Read".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Explore);
 }
@@ -106,6 +107,7 @@ fn test_tool_grep_goes_explore() {
         tool_name: "Grep".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Explore);
 }
@@ -117,6 +119,7 @@ fn test_tool_edit_goes_execute() {
         tool_name: "Edit".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Execute);
 }
@@ -128,6 +131,7 @@ fn test_tool_write_goes_execute() {
         tool_name: "Write".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Execute);
 }
@@ -140,6 +144,7 @@ fn test_tool_error_always_goes_plan() {
         tool_name: "Edit".to_string(),
         bash_command: None,
         is_error: true,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Plan);
 }
@@ -153,6 +158,7 @@ fn test_bash_cargo_test_goes_verify() {
         tool_name: "Bash".to_string(),
         bash_command: Some("cargo test".to_string()),
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Verify);
 }
@@ -164,6 +170,7 @@ fn test_bash_clippy_goes_verify() {
         tool_name: "Bash".to_string(),
         bash_command: Some("cargo clippy --workspace".to_string()),
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Verify);
 }
@@ -175,6 +182,7 @@ fn test_bash_git_log_goes_explore() {
         tool_name: "Bash".to_string(),
         bash_command: Some("git log --oneline -5".to_string()),
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Explore);
 }
@@ -186,6 +194,7 @@ fn test_bash_git_diff_goes_explore() {
         tool_name: "Bash".to_string(),
         bash_command: Some("git diff HEAD".to_string()),
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Explore);
 }
@@ -197,6 +206,7 @@ fn test_bash_default_goes_execute() {
         tool_name: "Bash".to_string(),
         bash_command: Some("echo hello && rm tmp.txt".to_string()),
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Execute);
 }
@@ -240,6 +250,7 @@ fn test_transition_returns_false_on_no_change() {
         tool_name: "Read".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert!(!changed); // Explore → Explore
 }
@@ -318,6 +329,7 @@ fn test_typical_workflow_explore_then_execute_then_verify() {
         tool_name: "Read".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Explore);
 
@@ -326,6 +338,7 @@ fn test_typical_workflow_explore_then_execute_then_verify() {
         tool_name: "Edit".to_string(),
         bash_command: None,
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Execute);
 
@@ -334,6 +347,7 @@ fn test_typical_workflow_explore_then_execute_then_verify() {
         tool_name: "Bash".to_string(),
         bash_command: Some("cargo test".to_string()),
         is_error: false,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Verify);
 
@@ -342,6 +356,7 @@ fn test_typical_workflow_explore_then_execute_then_verify() {
         tool_name: "Bash".to_string(),
         bash_command: Some("cargo test".to_string()),
         is_error: true,
+        declared_phase: None,
     });
     assert_eq!(graph.current_node(), ReasoningNode::Plan);
 }
@@ -356,4 +371,116 @@ fn test_complex_intent_keywords() {
     assert!(has_complex_intent("refactor this module"));
     assert!(!has_complex_intent("fix the typo"));
     assert!(!has_complex_intent("run the tests"));
+}
+
+// === Phase 2: LLM 声明 phase ===
+
+#[test]
+fn test_declared_phase_overrides_classify() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    // LLM 声明 verify，即使 tool 是 Bash(git diff)（classify 会判为 Explore）
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Bash".to_string(),
+        bash_command: Some("git diff".to_string()),
+        is_error: false,
+        declared_phase: Some("verify".to_string()),
+    });
+    assert_eq!(graph.current_node(), ReasoningNode::Verify);
+}
+
+#[test]
+fn test_declared_phase_explore_overrides_execute_tool() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    // LLM 用 Edit 但声明 explore（在编辑前先理解）
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Edit".to_string(),
+        bash_command: None,
+        is_error: false,
+        declared_phase: Some("explore".to_string()),
+    });
+    assert_eq!(graph.current_node(), ReasoningNode::Explore);
+}
+
+#[test]
+fn test_declared_phase_plan_overrides_everything() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Read".to_string(),
+        bash_command: None,
+        is_error: false,
+        declared_phase: Some("plan".to_string()),
+    });
+    assert_eq!(graph.current_node(), ReasoningNode::Plan);
+}
+
+#[test]
+fn test_declared_phase_none_falls_back_to_classify() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Bash".to_string(),
+        bash_command: Some("git log".to_string()),
+        is_error: false,
+        declared_phase: None,
+    });
+    // 无声明 → fallback 到 classify → git log = Explore
+    assert_eq!(graph.current_node(), ReasoningNode::Explore);
+}
+
+#[test]
+fn test_declared_phase_invalid_falls_back_to_classify() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Edit".to_string(),
+        bash_command: None,
+        is_error: false,
+        declared_phase: Some("turbo".to_string()), // 无效值
+    });
+    // 无效声明 → fallback 到 classify → Edit = Execute
+    assert_eq!(graph.current_node(), ReasoningNode::Execute);
+}
+
+#[test]
+fn test_declared_phase_error_still_overrides() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    // tool_error 优先级最高，即使声明了 explore 也去 Plan
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Bash".to_string(),
+        bash_command: Some("cargo test".to_string()),
+        is_error: true,
+        declared_phase: Some("explore".to_string()),
+    });
+    assert_eq!(graph.current_node(), ReasoningNode::Plan);
+}
+
+#[test]
+fn test_declared_phase_case_insensitive() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Read".to_string(),
+        bash_command: None,
+        is_error: false,
+        declared_phase: Some("VERIFY".to_string()),
+    });
+    assert_eq!(graph.current_node(), ReasoningNode::Verify);
+}
+
+#[test]
+fn test_declared_phase_variant_forms() {
+    let mut graph = ReasoningGraph::new(enabled_config());
+
+    // -ing 形式也应识别
+    graph.transition(GraphSignal::ToolCompleted {
+        tool_name: "Read".to_string(),
+        bash_command: None,
+        is_error: false,
+        declared_phase: Some("exploring".to_string()),
+    });
+    assert_eq!(graph.current_node(), ReasoningNode::Explore);
 }

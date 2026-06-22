@@ -96,7 +96,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::TasksChanged
         | sdk::ChatEvent::ConfigReloaded { .. }
         | sdk::ChatEvent::SessionReset
-        | sdk::ChatEvent::UserMessagesWithdrawn { .. } => {}
+        | sdk::ChatEvent::UserMessagesWithdrawn { .. }
+        | sdk::ChatEvent::GraphPhaseChanged { .. } => {}
         sdk::ChatEvent::ToolCallUpdate { name, .. } => {
             log::trace!(target: "aemeath:tui", "[tool:update] {name}");
         }

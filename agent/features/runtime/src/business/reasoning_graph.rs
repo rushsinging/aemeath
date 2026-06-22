@@ -106,6 +106,9 @@ pub enum GraphSignal {
         tool_name: String,
         bash_command: Option<String>,
         is_error: bool,
+        /// LLM 在 tool call input 中声明的 phase（Phase 2 轻量声明协议）。
+        /// 有值时优先使用，跳过 classify 关键词推断。
+        declared_phase: Option<String>,
     },
     /// LLM 回复无 tool call（纯文本回复）。
     TextOnly,
@@ -179,13 +182,17 @@ impl ReasoningGraph {
                 tool_name,
                 bash_command,
                 is_error,
+                declared_phase,
             } => {
                 // tool_error 优先：任何节点都可能触发 PLAN
                 if *is_error {
                     return ReasoningNode::Plan;
                 }
-                // TODO(轻量声明 phase 2): 优先使用 LLM 通过 tool call `phase`
-                // 字段声明的意图。仅当 LLM 未声明 phase 时，才回退到关键词推断。
+                // Phase 2: 优先使用 LLM 声明的 phase（ground truth）。
+                // 仅当 LLM 未声明 phase 或声明无效时，才回退到关键词推断。
+                if let Some(node) = parse_declared_phase(declared_phase) {
+                    return node;
+                }
                 classify::infer_node_from_tool(tool_name, bash_command.as_deref(), self.current)
             }
             GraphSignal::TextOnly => ReasoningNode::Idle,
@@ -241,6 +248,19 @@ fn has_complex_intent(text: &str) -> bool {
     ];
     let lower = text.to_lowercase();
     keywords.iter().any(|kw| lower.contains(kw))
+}
+
+/// 解析 LLM 声明的 phase 字符串为 ReasoningNode。
+/// 无效值返回 None（由调用方走 fallback）。
+fn parse_declared_phase(phase: &Option<String>) -> Option<ReasoningNode> {
+    let p = phase.as_ref()?.trim().to_lowercase();
+    match p.as_str() {
+        "explore" | "exploring" => Some(ReasoningNode::Explore),
+        "plan" | "planning" => Some(ReasoningNode::Plan),
+        "execute" | "executing" => Some(ReasoningNode::Execute),
+        "verify" | "verifying" => Some(ReasoningNode::Verify),
+        _ => None,
+    }
 }
 
 /// 信号的简短名称（用于日志）。
