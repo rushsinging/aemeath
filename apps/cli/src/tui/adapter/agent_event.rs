@@ -223,7 +223,7 @@ fn session(intent: SessionIntent) -> AgentEventMapping {
 fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
     runtime(RuntimeIntent::WorkspaceSnapshotReceived {
         path_base: Some(update.path_base.clone()),
-        working_root: Some(update.working_root.clone()),
+        workspace_root: Some(update.workspace_root.clone()),
         branch: update.branch.clone(),
         kind: update.kind,
     })

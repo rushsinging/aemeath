@@ -47,15 +47,15 @@ pub(super) fn truncate_json(raw: &str) -> String {
     truncate_ellipsis(raw, 100)
 }
 
-/// 将路径相对于 `working_root` 显示：能 `strip_prefix` 成功时返回相对路径（无 `./` 前缀），
-/// 否则原样返回。`working_root` 为 `None` 时原样返回。
+/// 将路径相对于 `workspace_root` 显示：能 `strip_prefix` 成功时返回相对路径（无 `./` 前缀），
+/// 否则原样返回。`workspace_root` 为 `None` 时原样返回。
 ///
 /// **不 canonicalize**——路径不存在时 canonicalize 会失败，issue #342 要求「路径不存在不破坏展示」。
 /// 仅做纯字符串层面的前缀剥离，与 PolicyEngine 的 canonicalize 保证互补（执行链路已规整）。
 ///
-/// 路径等于 `working_root` 本身（strip 成功且为空）时返回 `.`。
-pub(super) fn display_path(raw: &str, working_root: Option<&Path>) -> String {
-    let Some(root) = working_root else {
+/// 路径等于 `workspace_root` 本身（strip 成功且为空）时返回 `.`。
+pub(super) fn display_path(raw: &str, workspace_root: Option<&Path>) -> String {
+    let Some(root) = workspace_root else {
         return raw.to_string();
     };
     if raw.is_empty() {
@@ -73,7 +73,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_display_path_relative_when_under_working_root() {
+    fn test_display_path_relative_when_under_workspace_root() {
         // 正常路径：能 strip_prefix 成功时返回相对路径（无 ./ 前缀）
         assert_eq!(
             display_path("/repo/src/lib.rs", Some(Path::new("/repo"))),
@@ -82,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn test_display_path_absolute_when_outside_working_root() {
+    fn test_display_path_absolute_when_outside_workspace_root() {
         // 外部路径：strip_prefix 失败时原样返回（不破坏展示）
         assert_eq!(
             display_path("/other/src/lib.rs", Some(Path::new("/repo"))),
@@ -91,8 +91,8 @@ mod tests {
     }
 
     #[test]
-    fn test_display_path_passthrough_when_working_root_none() {
-        // working_root 为 None 时原样返回（回归保护）
+    fn test_display_path_passthrough_when_workspace_root_none() {
+        // workspace_root 为 None 时原样返回（回归保护）
         assert_eq!(display_path("/repo/src/lib.rs", None), "/repo/src/lib.rs");
         assert_eq!(display_path("src/lib.rs", None), "src/lib.rs");
     }
@@ -116,8 +116,8 @@ mod tests {
     }
 
     #[test]
-    fn test_display_path_equals_working_root_returns_dot() {
-        // 路径等于 working_root 本身（strip 成功且为空）→ 返回 "."
+    fn test_display_path_equals_workspace_root_returns_dot() {
+        // 路径等于 workspace_root 本身（strip 成功且为空）→ 返回 "."
         assert_eq!(display_path("/repo", Some(Path::new("/repo"))), ".");
     }
 

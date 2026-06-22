@@ -33,17 +33,17 @@ pub(crate) async fn execute_tool_round<S>(
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
     language: &str,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
 {
     let path_base = agent.ctx.workspace_read().current_path_base();
-    let workspace_root = agent.ctx.workspace_read().current_root();
+    let current_ws_root = agent.ctx.workspace_read().current_workspace_root();
     let engine = PolicyEngine::new(
         &path_base,
-        &workspace_root,
+        &current_ws_root,
         allow_all,
         &agent.ctx.read_files,
     );
@@ -55,7 +55,7 @@ where
         context,
         hook_ui,
         hook_runner,
-        working_root,
+        workspace_root,
         in_worktree,
     )
     .await;
@@ -84,7 +84,7 @@ where
         hook_ui,
         hook_runner,
         &non_agent_approved,
-        working_root,
+        workspace_root,
         in_worktree,
     )
     .await;
@@ -96,7 +96,7 @@ where
         hook_runner,
         &non_agent_approved,
         language,
-        working_root,
+        workspace_root,
         in_worktree,
     )
     .await;
@@ -110,7 +110,7 @@ where
         hook_runner,
         max_agent_concurrency,
         cancel,
-        working_root,
+        workspace_root,
         in_worktree,
     )
     .await;
@@ -129,7 +129,7 @@ async fn deny_tool_calls<S>(
     context: &RuntimeTurnContext,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -151,7 +151,7 @@ where
                     tool_name: call.name.clone(),
                     permission_rule: "deny".to_string(),
                 }),
-                working_root,
+                workspace_root,
                 in_worktree,
             )
             .await;
@@ -199,7 +199,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
     call: &ToolCall,
     output: &str,
     is_error: bool,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) where
     S: ChatEventSink,
@@ -217,7 +217,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                     tool_output: Some(output.to_string()),
                     is_error: Some(is_error),
                 }),
-                working_root,
+                workspace_root,
                 in_worktree,
             )
             .await,
@@ -237,7 +237,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                         tool_output: Some(output.to_string()),
                         is_error: Some(is_error),
                     }),
-                    working_root,
+                    workspace_root,
                     in_worktree,
                 )
                 .await,

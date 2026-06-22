@@ -21,7 +21,7 @@ pub(crate) async fn execute_agent_calls<S>(
     hook_runner: &hook::api::HookRunner,
     max_agent_concurrency: usize,
     cancel: &CancellationToken,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -49,7 +49,7 @@ where
                 let hook_runner = hook_runner.clone();
                 let registry_ref = registry.clone();
                 let context = context.clone();
-                let working_root = working_root.to_path_buf();
+                let workspace_root = workspace_root.to_path_buf();
                 async move {
                     execute_one_agent(
                         &context,
@@ -59,7 +59,7 @@ where
                         hook_runner,
                         registry_ref,
                         &mut ag_ctx,
-                        &working_root,
+                        &workspace_root,
                         in_worktree,
                     )
                     .await
@@ -80,7 +80,7 @@ async fn execute_one_agent<S>(
     hook_runner: hook::api::HookRunner,
     registry: Arc<ToolRegistry>,
     ag_ctx: &mut ToolExecutionContext,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -97,7 +97,7 @@ where
                 tool_output: None,
                 is_error: None,
             }),
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -136,7 +136,7 @@ where
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),
-            working_root: workspace.working_root.clone(),
+            workspace_root: workspace.workspace_root.clone(),
             workspace,
         })
         .await;
@@ -151,7 +151,7 @@ where
         &call,
         &execution.outcome.text,
         execution.outcome.is_error,
-        working_root,
+        workspace_root,
         in_worktree,
     )
     .await;

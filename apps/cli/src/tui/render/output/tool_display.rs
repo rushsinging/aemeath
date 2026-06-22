@@ -83,8 +83,8 @@ pub trait ToolDisplay: Send + Sync {
 
     /// Format the header line as plain string.
     /// `input` 是解析后的 JSON。
-    /// `working_root` 用于路径相对化（issue #342），工具可选择消费或忽略。
-    fn format_header(&self, input: &serde_json::Value, _working_root: Option<&Path>) -> String;
+    /// `workspace_root` 用于路径相对化（issue #342），工具可选择消费或忽略。
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String;
 
     /// Format the header line as styled `Line`。默认实现将 `format_header` 的输出按
     /// `display_name` 前缀拆分：tool name 用 `ACCENT_BRIGHT`（Mauve）着色突出，
@@ -93,9 +93,9 @@ pub trait ToolDisplay: Send + Sync {
     fn format_header_line(
         &self,
         input: &serde_json::Value,
-        working_root: Option<&Path>,
+        workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let text = self.format_header(input, working_root);
+        let text = self.format_header(input, workspace_root);
         let name = self.display_name().to_string();
         // 用 display_name 作为 tool name 的锚点，不依赖 strip_prefix 匹配
         if let Some(rest) = text.strip_prefix(&name) {
@@ -121,9 +121,9 @@ pub trait ToolDisplay: Send + Sync {
         &self,
         input: &serde_json::Value,
         _result_payload: Option<&ToolResultPayload>,
-        working_root: Option<&Path>,
+        workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        self.format_header_line(input, working_root)
+        self.format_header_line(input, workspace_root)
     }
 
     /// Format detail lines shown below the header.
@@ -185,13 +185,14 @@ pub fn format_tool_call(
     name: &str,
     raw_json: &str,
     result_payload: Option<&ToolResultPayload>,
-    working_root: Option<&Path>,
+    workspace_root: Option<&Path>,
 ) -> (Line<'static>, Vec<String>) {
     let parsed: serde_json::Value =
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
-        let header = display.format_header_line_with_result(&parsed, result_payload, working_root);
+        let header =
+            display.format_header_line_with_result(&parsed, result_payload, workspace_root);
         let details = match display.render_policy().details {
             DetailsPolicy::Expanded => display.format_details(&parsed),
             DetailsPolicy::Hidden => vec![],
@@ -705,10 +706,10 @@ mod tests {
         );
     }
 
-    // ── Issue #342：working_root 路径相对化端到端 ──────────────────
+    // ── Issue #342：workspace_root 路径相对化端到端 ──────────────────
 
     #[test]
-    fn test_format_tool_call_read_path_relativized_with_working_root() {
+    fn test_format_tool_call_read_path_relativized_with_workspace_root() {
         let root = std::path::Path::new("/home/user/project");
         let raw = serde_json::json!({
             "file_path": "/home/user/project/src/main.rs",
@@ -729,8 +730,8 @@ mod tests {
     }
 
     #[test]
-    fn test_format_tool_call_read_path_no_working_root_shows_raw() {
-        // working_root 为 None 时应显示原始路径（不相对化）
+    fn test_format_tool_call_read_path_no_workspace_root_shows_raw() {
+        // workspace_root 为 None 时应显示原始路径（不相对化）
         let raw = serde_json::json!({
             "file_path": "/home/user/project/src/main.rs",
             "offset": 0,
@@ -741,7 +742,7 @@ mod tests {
         let text = line_to_string(&header);
         assert!(
             text.contains("/home/user/project/src/main.rs"),
-            "working_root=None 时应显示原始绝对路径: {text}"
+            "workspace_root=None 时应显示原始绝对路径: {text}"
         );
     }
 

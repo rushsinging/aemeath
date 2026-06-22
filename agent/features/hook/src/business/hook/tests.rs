@@ -279,7 +279,7 @@ mod hook_tests {
     }
 
     #[tokio::test]
-    async fn test_execute_hook_uses_passed_working_root_for_env_placeholder_and_cwd() {
+    async fn test_execute_hook_uses_passed_workspace_root_for_env_placeholder_and_cwd() {
         let initial_dir =
             std::env::temp_dir().join(format!("aemeath-hook-initial-{}", uuid::Uuid::new_v4()));
         let worktree_dir =

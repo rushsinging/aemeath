@@ -32,7 +32,7 @@ pub(crate) async fn finalize_main_loop<S>(
     context: &RuntimeTurnContext,
     _task_store: &TaskStore,
     language: &str,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Option<String>
 where
@@ -49,7 +49,7 @@ where
                 hook_runner,
                 session_id,
                 language,
-                working_root,
+                workspace_root,
                 in_worktree,
             )
             .await
@@ -71,7 +71,7 @@ where
                     HookData::Stop(StopHookData {
                         turns: outcome.turns,
                     }),
-                    working_root,
+                    workspace_root,
                     in_worktree,
                 )
                 .await;
@@ -97,7 +97,7 @@ pub(crate) async fn run_stop_hook_before_finish<S>(
     hook_runner: &HookRunner,
     session_id: &str,
     language: &str,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Option<String>
 where
@@ -111,7 +111,7 @@ where
             HookData::Stop(StopHookData {
                 turns: outcome.turns,
             }),
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;

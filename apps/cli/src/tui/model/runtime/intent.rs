@@ -14,7 +14,7 @@ pub enum RuntimeIntent {
     },
     WorkspaceSnapshotReceived {
         path_base: Option<String>,
-        working_root: Option<String>,
+        workspace_root: Option<String>,
         branch: Option<String>,
         kind: WorktreeKind,
     },

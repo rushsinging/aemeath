@@ -201,9 +201,9 @@
 
 | 编号 | 规则 | 守护目标 |
 |---|---|---|
-| R1 | `ToolExecutionContext` 定义不得含 `working_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
+| R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
 | R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
-| R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `working_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
+| R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
 | R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
 | R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
 | R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 R2 重叠的兜底 |

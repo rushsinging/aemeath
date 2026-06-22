@@ -51,7 +51,7 @@ impl OutputViewAssembler {
     pub fn assemble_from_conversation(
         conversation: &ConversationModel,
         version: u64,
-        working_root: Option<&std::path::Path>,
+        workspace_root: Option<&std::path::Path>,
     ) -> OutputViewModel {
         let mut roots: Vec<BlockNode> = Vec::new();
         let tool_index = ToolIndex::build(conversation);
@@ -94,7 +94,7 @@ impl OutputViewAssembler {
                         &reference.context.chat_id,
                         &reference.context.turn_id,
                         &reference.tool_call_id,
-                        working_root,
+                        workspace_root,
                     ) {
                         let mut parent =
                             leaf(tool.key.clone(), OutputBlockKind::ToolCall(tool.clone()));

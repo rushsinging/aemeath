@@ -298,7 +298,7 @@ pub(crate) fn runtime_event_to_sdk_event(
         },
         crate::business::chat::RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base,
-            working_root,
+            workspace_root,
             workspace,
         } => {
             // service 已是单一可变源，工具调用时已直接更新它；此处仅作 UI/SDK 通知，
@@ -307,7 +307,7 @@ pub(crate) fn runtime_event_to_sdk_event(
             let _ = change_tx.send(previous | ChangeSet::PROJECT);
             ChatEvent::WorkingDirectoryChanged {
                 path_base,
-                working_root,
+                workspace_root,
                 workspace: super::mapping::workspace_context_to_sdk(workspace),
             }
         }

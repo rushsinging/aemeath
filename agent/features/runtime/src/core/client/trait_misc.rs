@@ -14,7 +14,7 @@ pub(super) async fn notify_hook_impl(
     if let Some(ref runner) = me.inner.hook_runner {
         let adapter = HookRunnerAdapter::new(runner.clone());
         // notify_hook 是 SDK 边界方法，无 workspace 上下文；
-        // 使用 cwd 作为 working_root，in_worktree=false 作为近似值。
+        // 使用 cwd 作为 workspace_root，in_worktree=false 作为近似值。
         adapter
             .on_notification(message, kind, &me.inner.cwd, false)
             .await;

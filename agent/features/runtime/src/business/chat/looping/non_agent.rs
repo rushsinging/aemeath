@@ -20,7 +20,7 @@ pub(super) async fn execute_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
     language: &str,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -47,7 +47,7 @@ where
             hook_runner,
             other_calls[0],
             language,
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -61,7 +61,7 @@ where
         hook_runner,
         &other_calls,
         language,
-        working_root,
+        workspace_root,
         in_worktree,
     )
     .await
@@ -76,7 +76,7 @@ async fn execute_multiple_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     other_calls: &[&ToolCall],
     language: &str,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -97,7 +97,7 @@ where
                 let hook_runner = hook_runner.clone();
                 let sem = semaphore.clone();
                 let context = context.clone();
-                let working_root = working_root.to_path_buf();
+                let workspace_root = workspace_root.to_path_buf();
                 async move {
                     if agent.ctx.cancel.is_cancelled() {
                         return (pos, Vec::new());
@@ -111,7 +111,7 @@ where
                         &hook_runner,
                         call,
                         language,
-                        &working_root,
+                        &workspace_root,
                         in_worktree,
                     )
                     .await;
@@ -141,7 +141,7 @@ where
                 hook_runner,
                 call,
                 language,
-                working_root,
+                workspace_root,
                 in_worktree,
             )
             .await
@@ -199,7 +199,7 @@ async fn execute_one_non_agent<S>(
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
     language: &str,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -214,7 +214,7 @@ where
                 tool_name: call.name.clone(),
                 permission_rule: "auto".to_string(),
             }),
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -236,7 +236,7 @@ where
                 tool_output: None,
                 is_error: None,
             }),
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -306,7 +306,7 @@ where
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),
-            working_root: workspace.working_root.clone(),
+            workspace_root: workspace.workspace_root.clone(),
             workspace,
         })
         .await;
@@ -321,7 +321,7 @@ where
             &owned_call,
             &ex.outcome.text,
             is_error,
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -332,7 +332,7 @@ where
             &owned_call,
             &ex.outcome.text,
             is_error,
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -360,7 +360,7 @@ async fn run_task_hooks<S>(
     call: &ToolCall,
     output: &str,
     is_error: bool,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) where
     S: ChatEventSink,
@@ -379,7 +379,7 @@ async fn run_task_hooks<S>(
                         tool_output: Some(output.to_string()),
                         is_error: Some(false),
                     }),
-                    working_root,
+                    workspace_root,
                     in_worktree,
                 )
                 .await,
@@ -400,7 +400,7 @@ async fn run_task_hooks<S>(
                         tool_output: Some(output.to_string()),
                         is_error: Some(false),
                     }),
-                    working_root,
+                    workspace_root,
                     in_worktree,
                 )
                 .await,

@@ -308,14 +308,14 @@ fn sub_agent_workspace_isolated() {
     let main_dir = tempfile::tempdir().unwrap();
     let wt_dir = tempfile::tempdir().unwrap();
 
-    // 父：进入一个伪 worktree（path_base/working_root = wt，栈里压入 main 帧）。
+    // 父：进入一个伪 worktree（path_base/workspace_root = wt，栈里压入 main 帧）。
     let parent = project::api::WorkspaceService::new(main_dir.path().to_path_buf());
     let dto = PersistedWorkspaceContext {
         path_base: wt_dir.path().display().to_string(),
-        working_root: wt_dir.path().display().to_string(),
+        workspace_root: wt_dir.path().display().to_string(),
         context_stack: vec![PersistedWorkspaceFrame {
             path_base: main_dir.path().display().to_string(),
-            working_root: main_dir.path().display().to_string(),
+            workspace_root: main_dir.path().display().to_string(),
         }],
     };
     WorkspacePersist::restore(parent.as_ref(), &dto).expect("restore parent workspace");
@@ -331,7 +331,7 @@ fn sub_agent_workspace_isolated() {
 
     // 2) 子继承父当前位置。
     assert_eq!(child.current_path_base(), wt_dir.path());
-    assert_eq!(child.current_root(), wt_dir.path());
+    assert_eq!(child.current_workspace_root(), wt_dir.path());
 
     // 3) 子栈独立为空：exit 报 EmptyStack。
     assert_eq!(

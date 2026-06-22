@@ -8,7 +8,8 @@ use std::path::PathBuf;
 pub struct EnterWorktreeResult {
     pub branch: String,
     pub path_base: PathBuf,
-    pub working_root: PathBuf,
+    #[serde(alias = "working_root")]
+    pub workspace_root: PathBuf,
     pub guidance: String,
 }
 

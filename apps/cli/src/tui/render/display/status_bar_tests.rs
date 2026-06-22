@@ -16,7 +16,7 @@ fn status_view(status: &str) -> StatusViewModel {
     }
 }
 
-fn runtime_context_view(path_base: &str, working_root: &str, branch: &str) -> StatusViewModel {
+fn runtime_context_view(path_base: &str, workspace_root: &str, branch: &str) -> StatusViewModel {
     let kind = if branch == "main" {
         StatusWorktreeKind::Main
     } else {
@@ -26,7 +26,7 @@ fn runtime_context_view(path_base: &str, working_root: &str, branch: &str) -> St
         runtime: StatusRuntimeViewModel {
             context: StatusContextViewModel {
                 path_base: path_base.to_string(),
-                working_root: working_root.to_string(),
+                workspace_root: workspace_root.to_string(),
                 branch: Some(branch.to_string()),
                 kind,
             },

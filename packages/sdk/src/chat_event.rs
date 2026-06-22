@@ -129,7 +129,7 @@ pub enum ChatEvent {
     /// 工作目录变化。
     WorkingDirectoryChanged {
         path_base: String,
-        working_root: String,
+        workspace_root: String,
         workspace: WorkspaceContextView,
     },
     /// 任务列表状态发生变化，TUI 应重新拉取 task_status 快照。

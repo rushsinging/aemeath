@@ -138,7 +138,7 @@ pub enum RuntimeStreamEvent {
     },
     WorkingDirectoryChanged {
         path_base: String,
-        working_root: String,
+        workspace_root: String,
         workspace: PersistedWorkspaceContext,
     },
     TasksChanged,

@@ -18,7 +18,7 @@ impl WorktreeKind {
 #[derive(Clone, Debug)]
 pub(crate) struct StatusLineContext {
     pub(crate) path_base: String,
-    pub(crate) working_root: String,
+    pub(crate) workspace_root: String,
     pub(crate) worktree_kind: WorktreeKind,
     pub(crate) branch: Option<String>,
     pub(crate) permission_mode: String,
@@ -29,7 +29,7 @@ impl Default for StatusLineContext {
     fn default() -> Self {
         Self {
             path_base: String::new(),
-            working_root: String::new(),
+            workspace_root: String::new(),
             worktree_kind: WorktreeKind::Main,
             branch: None,
             permission_mode: "AskMe".to_string(),
@@ -118,7 +118,7 @@ fn context_row_fields(context: &StatusLineContext, width: usize) -> Vec<String> 
         .filter(|session| !session.is_empty())
         .map(|session| format!("session {session}"));
     let paths_differ =
-        normalized_path(&context.path_base) != normalized_path(&context.working_root);
+        normalized_path(&context.path_base) != normalized_path(&context.workspace_root);
     let separator_count = (if paths_differ { 3 } else { 2 }) + usize::from(session.is_some());
     let fixed_len = str_display_width(&git)
         + str_display_width(&permission)
@@ -133,7 +133,7 @@ fn context_row_fields(context: &StatusLineContext, width: usize) -> Vec<String> 
         fields.push(shorten_path(&context.path_base, path_width));
         fields.push(format!(
             "root {}",
-            shorten_path(&context.working_root, DEFAULT_ROOT_WIDTH)
+            shorten_path(&context.workspace_root, DEFAULT_ROOT_WIDTH)
         ));
     } else {
         fields.push(shorten_path(

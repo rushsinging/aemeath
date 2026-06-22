@@ -14,7 +14,7 @@ pub(crate) async fn ask_user<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     non_agent_calls: &[ToolCall],
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> Vec<ToolExecution>
 where
@@ -40,7 +40,7 @@ where
                     tool_name: call.name.clone(),
                     permission_rule: "manual".to_string(),
                 }),
-                working_root,
+                workspace_root,
                 in_worktree,
             )
             .await;

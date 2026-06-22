@@ -39,7 +39,7 @@ pub(crate) async fn auto_compact<S>(
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
     language: &str,
-    working_root: &std::path::Path,
+    workspace_root: &std::path::Path,
     in_worktree: bool,
 ) -> Option<CompactOutcome>
 where
@@ -65,7 +65,7 @@ where
                 messages_after: None,
                 was_compacted: false,
             }),
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;
@@ -163,7 +163,7 @@ where
                 messages_after: Some(new_len),
                 was_compacted: true,
             }),
-            working_root,
+            workspace_root,
             in_worktree,
         )
         .await;

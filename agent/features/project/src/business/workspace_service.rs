@@ -31,7 +31,7 @@ impl WorkspaceService {
         Arc::new(Self {
             state: Mutex::new(WorkspaceState {
                 initial_cwd: s.initial_cwd.clone(),
-                working_root: s.working_root.clone(),
+                workspace_root: s.workspace_root.clone(),
                 path_base: s.path_base.clone(),
                 stack: Vec::new(),
             }),
@@ -44,8 +44,8 @@ impl WorkspaceService {
 }
 
 impl WorkspaceRead for WorkspaceService {
-    fn current_root(&self) -> PathBuf {
-        self.lock().working_root.clone()
+    fn current_workspace_root(&self) -> PathBuf {
+        self.lock().workspace_root.clone()
     }
     fn current_path_base(&self) -> PathBuf {
         self.lock().path_base.clone()
@@ -54,8 +54,8 @@ impl WorkspaceRead for WorkspaceService {
         self.lock().resolve(rel)
     }
     fn in_worktree(&self) -> bool {
-        // 先克隆 working_root 释放状态锁，避免持锁期间 spawn git 子进程。
-        let root = self.lock().working_root.clone();
+        // 先克隆 workspace_root 释放状态锁，避免持锁期间 spawn git 子进程。
+        let root = self.lock().workspace_root.clone();
         self.git.in_worktree(&root)
     }
 }
@@ -65,8 +65,8 @@ impl WorkspaceControl for WorkspaceService {
         rules::set_path_base(&mut self.lock(), path)
     }
 
-    fn set_working_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError> {
-        rules::set_working_root(&mut self.lock(), root, path)
+    fn set_workspace_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError> {
+        rules::set_workspace_root(&mut self.lock(), root, path)
     }
     fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError> {
         rules::switch_to(&mut self.lock(), self.git.as_ref(), path)
@@ -105,10 +105,10 @@ mod tests {
         {
             let mut s = parent.lock();
             s.path_base = "/wt".into();
-            s.working_root = "/wt".into();
+            s.workspace_root = "/wt".into();
             s.stack.push(WorkspaceFrame {
                 path_base: "/repo".into(),
-                working_root: "/repo".into(),
+                workspace_root: "/repo".into(),
             });
         }
         let child = parent.seed_isolated();

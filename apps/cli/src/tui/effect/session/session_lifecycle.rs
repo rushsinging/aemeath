@@ -29,7 +29,7 @@ impl App {
                             self.model.runtime.apply(
                                 crate::tui::model::runtime::intent::RuntimeIntent::WorkspaceSnapshotReceived {
                                     path_base: Some(ctx.path_base),
-                                    working_root: Some(ctx.working_root),
+                                    workspace_root: Some(ctx.workspace_root),
                                     branch: ctx.branch,
                                     kind: ctx.kind,
                                 },

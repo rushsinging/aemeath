@@ -14,7 +14,7 @@ fn row_text(buf: &Buffer, y: u16, width: u16) -> String {
 
 fn status_view(
     path_base: &str,
-    working_root: &str,
+    workspace_root: &str,
     kind: StatusWorktreeKind,
     branch: &str,
     session_id: Option<&str>,
@@ -28,7 +28,7 @@ fn status_view(
             session_id: session_id.map(str::to_string),
             context: StatusContextViewModel {
                 path_base: path_base.to_string(),
-                working_root: working_root.to_string(),
+                workspace_root: workspace_root.to_string(),
                 branch: Some(branch.to_string()),
                 kind,
             },

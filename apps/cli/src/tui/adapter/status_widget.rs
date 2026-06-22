@@ -34,7 +34,7 @@ mod tests {
             .runtime
             .apply(RuntimeIntent::WorkspaceSnapshotReceived {
                 path_base: Some("~/repo".to_string()),
-                working_root: Some("~/repo".to_string()),
+                workspace_root: Some("~/repo".to_string()),
                 branch: Some("main".to_string()),
                 kind: WorktreeKind::MainCheckout,
             });

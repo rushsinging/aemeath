@@ -35,12 +35,12 @@ impl HookNotificationPort for HookRunnerAdapter<hook::api::HookRunner> {
         &self,
         message: &str,
         kind: &str,
-        working_root: &std::path::Path,
+        workspace_root: &std::path::Path,
         in_worktree: bool,
     ) {
         let _ = self
             .0
-            .on_notification(message, kind, working_root, in_worktree)
+            .on_notification(message, kind, workspace_root, in_worktree)
             .await;
     }
 }

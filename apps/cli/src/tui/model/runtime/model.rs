@@ -53,17 +53,17 @@ impl RuntimeModel {
             }
             RuntimeIntent::WorkspaceSnapshotReceived {
                 path_base,
-                working_root,
+                workspace_root,
                 branch,
                 kind,
             } => {
                 self.workspace.path_base = path_base.clone();
-                self.workspace.working_root = working_root.clone();
+                self.workspace.workspace_root = workspace_root.clone();
                 self.workspace.branch = branch.clone();
                 self.workspace.kind = kind;
                 vec![RuntimeChange::WorkspaceSnapshotChanged {
                     path_base,
-                    working_root,
+                    workspace_root,
                     branch,
                     kind,
                 }]

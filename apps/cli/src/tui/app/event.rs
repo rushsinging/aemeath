@@ -19,11 +19,11 @@ impl From<sdk::ChatEventContext> for UiTurnContext {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusContextUpdate {
     pub path_base: String,
-    pub working_root: String,
+    pub workspace_root: String,
     pub branch: Option<String>,
     pub kind: crate::tui::model::runtime::workspace::WorktreeKind,
     pub raw_path_base: PathBuf,
-    pub raw_working_root: PathBuf,
+    pub raw_workspace_root: PathBuf,
     pub workspace: sdk::WorkspaceContextView,
 }
 

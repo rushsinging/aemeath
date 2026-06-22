@@ -493,8 +493,8 @@ mod tests {
         assert!(!result.is_error);
         use project::api::WorkspaceRead;
         assert_eq!(ws.current_path_base(), worktree);
-        // working_root 应该保持为原来的 git 仓库根目录，不会因为 cd 到非 git 目录而改变
-        assert_eq!(ws.current_root(), workspace.path());
+        // workspace_root 应该保持为原来的 git 仓库根目录，不会因为 cd 到非 git 目录而改变
+        assert_eq!(ws.current_workspace_root(), workspace.path());
     }
 
     #[tokio::test]

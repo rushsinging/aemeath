@@ -10,7 +10,7 @@ const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 
 pub struct WorkspaceState {
     pub initial_cwd: PathBuf,
-    pub working_root: PathBuf,
+    pub workspace_root: PathBuf,
     pub path_base: PathBuf,
     pub stack: Vec<WorkspaceFrame>,
 }
@@ -19,7 +19,7 @@ impl WorkspaceState {
     pub fn new(cwd: PathBuf) -> Self {
         Self {
             initial_cwd: cwd.clone(),
-            working_root: cwd.clone(),
+            workspace_root: cwd.clone(),
             path_base: cwd,
             stack: Vec::new(),
         }
@@ -72,25 +72,25 @@ fn resolve_worktree_path(
 
 pub fn set_path_base(state: &mut WorkspaceState, path: PathBuf) -> Result<(), WorkspaceError> {
     // set_path_base 只更新 path_base（当前路径基准）
-    // working_root 只有在 enter/exit worktree 时才会改变
+    // workspace_root 只有在 enter/exit worktree 时才会改变
     state.path_base = path;
     Ok(())
 }
 
-pub fn set_working_root(
+pub fn set_workspace_root(
     state: &mut WorkspaceState,
     root: PathBuf,
     path: PathBuf,
 ) -> Result<(), WorkspaceError> {
-    // set_working_root 更新 working_root（当前工作根目录）
+    // set_workspace_root 更新 workspace_root（当前工作根目录）
     // 同时更新 path_base（当前路径基准）
     // 用于 enter/exit worktree 时更新工作根目录
-    state.working_root = root;
+    state.workspace_root = root;
     set_path_base(state, path)?;
     Ok(())
 }
 
-/// Canonicalize `target` and verify it lives in the same repo as `state.working_root`.
+/// Canonicalize `target` and verify it lives in the same repo as `state.workspace_root`.
 /// Returns `(canonical_path, worktree_root)` on success.
 fn validate_in_repo(
     state: &WorkspaceState,
@@ -101,12 +101,12 @@ fn validate_in_repo(
         .canonicalize()
         .map_err(|_| WorkspaceError::PathNotFound(target.to_path_buf()))?;
     let worktree_root = git.show_toplevel(&canonical).map_err(WorkspaceError::Git)?;
-    if let Ok(a) = git.git_common_dir(&state.working_root) {
+    if let Ok(a) = git.git_common_dir(&state.workspace_root) {
         if let Ok(b) = git.git_common_dir(&worktree_root) {
             if a != b {
                 return Err(WorkspaceError::RepoMismatch {
                     path: worktree_root,
-                    repo_root: state.working_root.clone(),
+                    repo_root: state.workspace_root.clone(),
                 });
             }
         }
@@ -125,7 +125,7 @@ pub fn enter(
             state.stack.clear(); // 残栈自愈（refs #96）
         } else {
             return Err(WorkspaceError::NestedWorktree {
-                current_working_root: state.working_root.clone(),
+                current_workspace_root: state.workspace_root.clone(),
                 current_path_base: state.path_base.clone(),
             });
         }
@@ -135,16 +135,16 @@ pub fn enter(
         let b = branch
             .filter(|v| !v.trim().is_empty())
             .ok_or(WorkspaceError::MissingPathAndBranch)?;
-        git.worktree_add(&state.working_root, &target, &b, DEFAULT_WORKTREE_BASE)
+        git.worktree_add(&state.workspace_root, &target, &b, DEFAULT_WORKTREE_BASE)
             .map_err(WorkspaceError::Git)?;
     }
     let (canonical, worktree_root) = validate_in_repo(state, git, &target)?;
     let frame = WorkspaceFrame {
         path_base: state.path_base.clone(),
-        working_root: state.working_root.clone(),
+        workspace_root: state.workspace_root.clone(),
     };
     state.stack.push(frame.clone());
-    state.working_root = worktree_root;
+    state.workspace_root = worktree_root;
     state.path_base = canonical;
     Ok(frame)
 }
@@ -157,7 +157,7 @@ pub fn switch_to(
     path: PathBuf,
 ) -> Result<(), WorkspaceError> {
     let (canonical, worktree_root) = validate_in_repo(state, git, &path)?;
-    state.working_root = worktree_root;
+    state.workspace_root = worktree_root;
     state.path_base = canonical;
     Ok(())
 }
@@ -165,7 +165,7 @@ pub fn switch_to(
 pub fn exit(state: &mut WorkspaceState) -> Result<WorkspaceFrame, WorkspaceError> {
     match state.stack.pop() {
         Some(prev) => {
-            state.working_root = prev.working_root.clone();
+            state.workspace_root = prev.workspace_root.clone();
             state.path_base = prev.path_base.clone();
             Ok(prev)
         }
@@ -176,13 +176,13 @@ pub fn exit(state: &mut WorkspaceState) -> Result<WorkspaceFrame, WorkspaceError
 pub fn snapshot(state: &WorkspaceState) -> PersistedWorkspaceContext {
     PersistedWorkspaceContext {
         path_base: state.path_base.display().to_string(),
-        working_root: state.working_root.display().to_string(),
+        workspace_root: state.workspace_root.display().to_string(),
         context_stack: state
             .stack
             .iter()
             .map(|f| PersistedWorkspaceFrame {
                 path_base: f.path_base.display().to_string(),
-                working_root: f.working_root.display().to_string(),
+                workspace_root: f.workspace_root.display().to_string(),
             })
             .collect(),
     }
@@ -193,23 +193,23 @@ pub fn restore(
     dto: &PersistedWorkspaceContext,
 ) -> Result<(), WorkspaceError> {
     let path_base = PathBuf::from(&dto.path_base);
-    let working_root = PathBuf::from(&dto.working_root);
+    let workspace_root = PathBuf::from(&dto.workspace_root);
     if !path_base.exists() {
         return Err(WorkspaceError::RestoreInvalidPath(path_base));
     }
-    if !working_root.exists() {
-        return Err(WorkspaceError::RestoreInvalidPath(working_root));
+    if !workspace_root.exists() {
+        return Err(WorkspaceError::RestoreInvalidPath(workspace_root));
     }
     let stack = dto
         .context_stack
         .iter()
         .map(|e| WorkspaceFrame {
             path_base: PathBuf::from(&e.path_base),
-            working_root: PathBuf::from(&e.working_root),
+            workspace_root: PathBuf::from(&e.workspace_root),
         })
         .collect();
     state.path_base = path_base;
-    state.working_root = working_root;
+    state.workspace_root = workspace_root;
     state.stack = stack;
     Ok(())
 }

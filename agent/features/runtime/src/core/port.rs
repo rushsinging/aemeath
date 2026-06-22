@@ -78,7 +78,7 @@ pub trait HookNotificationPort: Send + Sync {
         &self,
         message: &str,
         kind: &str,
-        working_root: &std::path::Path,
+        workspace_root: &std::path::Path,
         in_worktree: bool,
     );
 }

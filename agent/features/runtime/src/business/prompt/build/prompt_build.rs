@@ -176,7 +176,7 @@ fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
 pub async fn load_agents_md(
     cwd: &Path,
     hook_runner: &HookRunner,
-    working_root: &Path,
+    workspace_root: &Path,
     in_worktree: bool,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -191,7 +191,12 @@ pub async fn load_agents_md(
             if let Ok(content) = tokio::fs::read_to_string(global_path).await {
                 let file_path_str = global_path.to_string_lossy().to_string();
                 hook_runner
-                    .on_instructions_loaded(&file_path_str, "agents_md", working_root, in_worktree)
+                    .on_instructions_loaded(
+                        &file_path_str,
+                        "agents_md",
+                        workspace_root,
+                        in_worktree,
+                    )
                     .await;
                 parts.push(content);
             }
@@ -205,7 +210,12 @@ pub async fn load_agents_md(
             if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
                 let file_path_str = project_path.to_string_lossy().to_string();
                 hook_runner
-                    .on_instructions_loaded(&file_path_str, "agents_md", working_root, in_worktree)
+                    .on_instructions_loaded(
+                        &file_path_str,
+                        "agents_md",
+                        workspace_root,
+                        in_worktree,
+                    )
                     .await;
                 parts.push(content);
             }

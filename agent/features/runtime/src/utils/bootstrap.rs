@@ -71,7 +71,7 @@ pub type ChatBootstrapArgs = sdk::ChatBootstrapArgs;
 
 pub struct InstructionsLoadedHookRunner<'a> {
     pub hook_runner: &'a hook::api::HookRunner,
-    pub working_root: &'a std::path::Path,
+    pub workspace_root: &'a std::path::Path,
     pub in_worktree: bool,
 }
 
@@ -83,7 +83,7 @@ impl prompt::api::guidance::InstructionsLoadedHook for InstructionsLoadedHookRun
             .on_instructions_loaded(
                 file_path,
                 instruction_type,
-                self.working_root,
+                self.workspace_root,
                 self.in_worktree,
             )
             .await;
