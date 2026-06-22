@@ -19,6 +19,8 @@ pub struct RuntimeModel {
     pub spinner: SpinnerModel,
     pub status_notice: StatusNotice,
     pub thinking: bool,
+    /// Reasoning Graph 当前阶段（`None` = graph 不存在或 Idle）。
+    pub graph_phase: Option<String>,
 }
 
 impl Default for RuntimeModel {
@@ -34,6 +36,7 @@ impl Default for RuntimeModel {
             spinner: SpinnerModel::default(),
             status_notice: StatusNotice::default(),
             thinking: true,
+            graph_phase: None,
         }
     }
 }
@@ -153,6 +156,10 @@ impl RuntimeModel {
             RuntimeIntent::SetThinking(enabled) => {
                 self.thinking = enabled;
                 vec![RuntimeChange::ThinkingChanged]
+            }
+            RuntimeIntent::SetGraphPhase(phase) => {
+                self.graph_phase = phase;
+                vec![RuntimeChange::GraphPhaseChanged]
             }
         }
     }

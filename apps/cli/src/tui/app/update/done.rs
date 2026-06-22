@@ -58,11 +58,14 @@ impl App {
         }
         self.spinner_stop();
         self.chat.stop_processing();
+        // Status notice 由 graph_phase 驱动：Idle/None → Ready，非 Idle → 阶段名
+        let notice = match &self.model.runtime.graph_phase {
+            Some(phase) => StatusNotice::normal(phase.clone()),
+            None => StatusNotice::success("Ready"),
+        };
         self.model
             .runtime
-            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
-                "Ready",
-            )));
+            .apply(RuntimeIntent::SetStatusNotice(notice));
         let mut effects = Vec::new();
         // 自动 reflection 的 spawn 由 executor 执行，此处仅描述 Effect。
         if let Some(effect) = self.maybe_auto_reflect() {

@@ -273,11 +273,12 @@ impl App {
                 }
             }
             UiEvent::GraphPhaseChanged { node } => {
-                // Phase 2: graph 阶段变化 → 更新 status bar 的 "Ready" 区域
-                let notice = StatusNotice::normal(node);
+                // Graph 阶段变化 → 更新 RuntimeModel.graph_phase
+                // Done handler 会根据此字段决定 status notice
+                let phase = if node == "idle" { None } else { Some(node) };
                 self.model
                     .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(notice));
+                    .apply(RuntimeIntent::SetGraphPhase(phase));
             }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
