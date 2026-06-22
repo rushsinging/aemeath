@@ -9,6 +9,7 @@ use share::config::{
     memory::{MemoryConfig, ReflectionConfig},
     models::{ModelsConfig, ProviderModelsConfig},
     permissions::{PermissionConfig, PermissionModeConfig},
+    reasoning_graph::ReasoningGraphConfig,
     skills::SkillsConfig,
     storage::StorageConfig,
     tools::{AgentRoleConfig, AgentsConfig, ToolsConfig},
@@ -48,6 +49,8 @@ pub(crate) struct ConfigPatch {
     logging: Option<LoggingConfigPatch>,
     #[serde(default)]
     guidance: Option<GuidanceConfigPatch>,
+    #[serde(default)]
+    reasoning_graph: Option<ReasoningGraphConfig>,
 }
 
 impl ConfigPatch {
@@ -299,6 +302,9 @@ impl ConfigManager {
         }
         if let Some(guidance) = patch.guidance {
             base.guidance = Self::apply_guidance_patch(base.guidance, guidance);
+        }
+        if let Some(rg) = patch.reasoning_graph {
+            base.reasoning_graph = rg;
         }
         base
     }
