@@ -96,16 +96,22 @@ pub enum ChatEvent {
     /// runtime 同步当前 messages。
     MessagesSync(Vec<ChatMessage>),
     /// 批量用户输入归宿通知（每条含 InputId）。TUI 用 id 清占位并回显；A2 仅建立通道，消费留待 A3。
-    UserMessagesAdded { items: Vec<AddedInput> },
+    UserMessagesAdded {
+        items: Vec<AddedInput>,
+    },
     /// Chat 完成。
-    Done { context: ChatEventContext },
+    Done {
+        context: ChatEventContext,
+    },
     /// Chat 完成并附带耗时毫秒。
     DoneWithDurationMs {
         context: ChatEventContext,
         duration_ms: u64,
     },
     /// Chat 被取消。
-    Cancelled { context: ChatEventContext },
+    Cancelled {
+        context: ChatEventContext,
+    },
     /// 实时 TPS。
     LiveTps(f64),
     /// 当前 turn 变化。
@@ -135,11 +141,21 @@ pub enum ChatEvent {
     /// 任务列表状态发生变化，TUI 应重新拉取 task_status 快照。
     TasksChanged,
     /// 配置/指令/guidance 文件变更通知。
-    ConfigReloaded { changed_keys: Vec<String> },
+    ConfigReloaded {
+        changed_keys: Vec<String>,
+    },
     /// loop 完成 reset 清理后发出，TUI 据此同步清空镜像。
+    /// Reasoning Graph 阶段变化（Phase 2）。
+    GraphPhaseChanged {
+        node: String,
+        effort: String,
+        prev: String,
+    },
     SessionReset,
     /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
-    UserMessagesWithdrawn { texts: Vec<String> },
+    UserMessagesWithdrawn {
+        texts: Vec<String>,
+    },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
 }

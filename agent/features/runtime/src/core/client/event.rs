@@ -319,6 +319,13 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
             ChatEvent::ConfigReloaded { changed_keys }
         }
+        crate::business::chat::RuntimeStreamEvent::GraphPhaseChanged { node, effort, prev } => {
+            ChatEvent::GraphPhaseChanged {
+                node: format!("{node}"),
+                effort: format!("{effort:?}").to_lowercase(),
+                prev: format!("{prev}"),
+            }
+        }
         crate::business::chat::RuntimeStreamEvent::SessionReset => ChatEvent::SessionReset,
         crate::business::chat::RuntimeStreamEvent::UserMessagesWithdrawn { texts } => {
             ChatEvent::UserMessagesWithdrawn { texts }

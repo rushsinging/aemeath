@@ -1,4 +1,6 @@
+use crate::business::reasoning_graph::ReasoningNode;
 use crate::business::session::PersistedWorkspaceContext;
+use provider::api::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
 use share::tool::{AgentProgressEvent, ImageData};
@@ -145,6 +147,12 @@ pub enum RuntimeStreamEvent {
     /// 配置/指令/guidance 文件变更通知。
     ConfigReloaded {
         changed_keys: Vec<String>,
+    },
+    /// Reasoning Graph 阶段变化通知（Phase 2）。
+    GraphPhaseChanged {
+        node: ReasoningNode,
+        effort: ReasoningLevel,
+        prev: ReasoningNode,
     },
 }
 

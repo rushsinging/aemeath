@@ -264,7 +264,15 @@ where
                     .last()
                     .map(|m| m.text_content())
                     .unwrap_or_default();
-                graph.transition(GraphSignal::UserMessage { text, turn_count });
+                let prev = graph.current_node();
+                if graph.transition(GraphSignal::UserMessage { text, turn_count }) {
+                    sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                        node: graph.current_node(),
+                        effort: graph.current_effort(),
+                        prev,
+                    })
+                    .await;
+                }
             }
         }
 
@@ -635,7 +643,15 @@ where
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                     // ReasoningGraph: 无 tool call → 回 Idle
                     if let Some(graph) = reasoning_graph.as_mut() {
-                        graph.transition(GraphSignal::TextOnly);
+                        let prev = graph.current_node();
+                        if graph.transition(GraphSignal::TextOnly) {
+                            sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                                node: graph.current_node(),
+                                effort: graph.current_effort(),
+                                prev,
+                            })
+                            .await;
+                        }
                     }
                     loop_fsm.transition(ChatLoopTransition::TryStop);
                     let gate = drain_and_apply_gate(
@@ -779,24 +795,41 @@ where
 
                     // ReasoningGraph: tool 执行完成 → 按结果推断阶段
                     if let Some(graph) = reasoning_graph.as_mut() {
-                        // 构建 call_id → bash_command 映射（仅 Bash 需要）
-                        let bash_cmds: std::collections::HashMap<&str, &str> = tool_calls
+                        // 构建 provider_id → (bash_command, declared_phase) 映射
+                        let tool_meta: std::collections::HashMap<
+                            &str,
+                            (Option<&str>, Option<&str>),
+                        > = tool_calls
                             .iter()
-                            .filter(|tc| tc.name == "Bash")
                             .filter_map(|tc| {
-                                tc.input
-                                    .get("command")
-                                    .and_then(|v| v.as_str())
-                                    .map(|cmd| (tc.provider_id.as_str(), cmd))
+                                let bash_cmd = if tc.name == "Bash" {
+                                    tc.input.get("command").and_then(|v| v.as_str())
+                                } else {
+                                    None
+                                };
+                                let phase = tc.input.get("phase").and_then(|v| v.as_str());
+                                Some((tc.provider_id.as_str(), (bash_cmd, phase)))
                             })
                             .collect();
                         for result in &all_results {
-                            let bash_command = bash_cmds.get(result.provider_id.as_str()).copied();
-                            graph.transition(GraphSignal::ToolCompleted {
+                            let (bash_command, declared_phase) = tool_meta
+                                .get(result.provider_id.as_str())
+                                .copied()
+                                .unwrap_or((None, None));
+                            let prev = graph.current_node();
+                            if graph.transition(GraphSignal::ToolCompleted {
                                 tool_name: result.tool_name.clone(),
                                 bash_command: bash_command.map(|s| s.to_string()),
                                 is_error: result.outcome.is_error,
-                            });
+                                declared_phase: declared_phase.map(|s| s.to_string()),
+                            }) {
+                                sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                                    node: graph.current_node(),
+                                    effort: graph.current_effort(),
+                                    prev,
+                                })
+                                .await;
+                            }
                         }
                     }
                     // Build tool result message for API

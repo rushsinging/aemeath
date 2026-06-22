@@ -2,7 +2,7 @@
 //!
 //! 设计文档 §2.3 Bash 分类规则 + 转移信号表。
 //!
-//! ## TODO(轻量声明 phase 2): 用 LLM 声明的 phase 取代关键词分类
+//! ## [Phase 2] 本模块现为 fallback——LLM 声明 phase 时不会走到这里
 //!
 //! 当前方案是**被动观察**：tool 执行完后靠关键词猜测意图。根本局限在于
 //! 同一个 tool 在不同意图下属于不同阶段——`git diff` 可能是 Explore
@@ -33,7 +33,8 @@ pub enum BashCategory {
 /// 已知局限：复合命令、管道、自定义脚本可能误分类（约 15%），
 /// 但误分类仅影响 effort 一档差异，不阻塞执行。
 ///
-/// TODO(轻量声明 phase 2): 本函数将降级为兜底——当 LLM 通过 tool call
+/// [Phase 2] 本函数为 fallback——LLM 声明 phase 时不会走到这里。
+///
 /// 的 `phase` 字段声明了意图时，直接用声明值，跳过关键词匹配。
 /// 关键词分类仅在 LLM 未声明 phase 时作为 fallback。
 pub fn classify_bash(command: &str) -> BashCategory {
