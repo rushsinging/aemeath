@@ -1,19 +1,11 @@
-//! Bash 命令分类 + tool 类型到 node 的推断。
+//! [Phase 2 fallback] Bash 命令分类 + tool 类型到 node 的推断。
 //!
-//! 设计文档 §2.3 Bash 分类规则 + 转移信号表。
+//! **仅在 LLM 未声明 `phase` 时使用。** 当 LLM 在 tool call input 中
+//! 带了有效的 `phase` 字段时，`next_node()` 直接采用声明值，跳过本模块。
 //!
-//! ## [Phase 2] 本模块现为 fallback——LLM 声明 phase 时不会走到这里
-//!
-//! 当前方案是**被动观察**：tool 执行完后靠关键词猜测意图。根本局限在于
-//! 同一个 tool 在不同意图下属于不同阶段——`git diff` 可能是 Explore
-//! （理解现状）也可能是 Verify（确认编辑结果），关键词无法区分。
-//!
-//! 计划引入**轻量声明协议**：LLM 在 tool call 中带一个可选的 `phase`
-//! 字段（`"explore"` / `"plan"` / `"execute"` / `"verify"`），Graph 优
-//! 先使用 LLM 声明的 phase，`classify_bash` 降级为兜底（仅在 LLM 未
-//! 声明 phase 时使用）。
-//!
-//! 更远期的演进方向见 `mod.rs` 模块文档中的「Workflow 演进路线」。
+//! 根本局限：同一个 tool 在不同意图下属于不同阶段——`git diff` 可能是
+//! Explore（理解现状）也可能是 Verify（确认编辑结果），关键词无法区分。
+//! 准确率约 85%，仅影响 effort 一档差异，不阻塞执行。
 
 use super::ReasoningNode;
 
@@ -30,13 +22,12 @@ pub enum BashCategory {
 
 /// 对 Bash 命令做关键词分类。
 ///
+/// [Phase 2 fallback] 仅在 LLM 未声明 `phase` 时调用。
+/// 当 tool call input 中有有效的 `phase` 字段时，`next_node()` 直接用
+/// 声明值，跳过关键词匹配。
+///
 /// 已知局限：复合命令、管道、自定义脚本可能误分类（约 15%），
 /// 但误分类仅影响 effort 一档差异，不阻塞执行。
-///
-/// [Phase 2] 本函数为 fallback——LLM 声明 phase 时不会走到这里。
-///
-/// 的 `phase` 字段声明了意图时，直接用声明值，跳过关键词匹配。
-/// 关键词分类仅在 LLM 未声明 phase 时作为 fallback。
 pub fn classify_bash(command: &str) -> BashCategory {
     let cmd = command.to_lowercase();
 
@@ -89,8 +80,9 @@ pub fn classify_bash(command: &str) -> BashCategory {
 
 /// 根据上一个 tool 的类型推断当前阶段节点。
 ///
-/// `current` 用于 Agent 等需要保持当前节点的 tool（不改变阶段）。
+/// [Phase 2 fallback] 仅在 LLM 未声明 `phase` 时调用。
 ///
+/// `current` 用于 Agent 等需要保持当前节点的 tool（不改变阶段）。
 /// 设计文档 §2.3 转移信号表。
 pub fn infer_node_from_tool(
     tool_name: &str,
