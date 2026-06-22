@@ -1,6 +1,7 @@
 //! Chat Provider driver 抽象：不同供应商的推理字段差异化处理
 
 use crate::api::ProviderDriverKind;
+use crate::core::provider::ReasoningLevel;
 
 use super::ReasoningConfig;
 
@@ -25,6 +26,12 @@ pub trait ChatApiDriver: Send + Sync {
         reasoning_config: Option<&ReasoningConfig>,
         reasoning_enabled: bool,
     );
+
+    /// 此 driver 支持的最高 ReasoningLevel。
+    /// 默认 High，各 driver 按能力覆盖。
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::High
+    }
 }
 
 #[derive(Debug)]
@@ -75,6 +82,10 @@ impl ChatApiDriver for ZhipuDriver {
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({"type": thinking_type});
     }
+
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Max
+    }
 }
 
 impl ChatApiDriver for LiteLlmDriver {
@@ -90,6 +101,10 @@ impl ChatApiDriver for LiteLlmDriver {
         if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
             request_body["reasoning_effort"] = serde_json::Value::String(effort);
         }
+    }
+
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Max
     }
 }
 
@@ -120,6 +135,10 @@ impl ChatApiDriver for VolcengineDriver {
         };
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({"type": thinking_type});
+    }
+
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Medium
     }
 }
 
@@ -163,6 +182,10 @@ impl ChatApiDriver for MinimaxDriver {
         request_body["thinking"] = serde_json::json!({ "type": thinking_type });
         request_body["reasoning_split"] = serde_json::Value::Bool(true);
     }
+
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Medium
+    }
 }
 
 impl ChatApiDriver for MimoDriver {
@@ -183,6 +206,10 @@ impl ChatApiDriver for MimoDriver {
         };
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({ "type": thinking_type });
+    }
+
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Medium
     }
 }
 

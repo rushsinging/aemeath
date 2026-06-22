@@ -20,7 +20,7 @@ pub struct AnthropicProvider {
     base_url: String,
     model: String,
     max_tokens: Arc<AtomicU32>,
-    thinking_max_tokens: u32,
+    thinking_max_tokens: Arc<AtomicU32>,
     user_agent: String,
     http: reqwest::Client,
     /// Maximum retry attempts (default 3)
@@ -44,7 +44,7 @@ impl AnthropicProvider {
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
-            thinking_max_tokens,
+            thinking_max_tokens: Arc::new(AtomicU32::new(thinking_max_tokens)),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -131,7 +131,7 @@ impl LlmProvider for AnthropicProvider {
         let request = CreateMessageRequest::new(
             self.model.clone(),
             self.current_max_tokens(),
-            self.thinking_max_tokens,
+            self.thinking_max_tokens.load(Ordering::Relaxed),
             system.to_vec(),
             api_messages,
             cached_tools,
@@ -277,7 +277,7 @@ impl LlmProvider for AnthropicProvider {
                     let params = RequestParams {
                         model: self.model.clone(),
                         max_tokens: self.current_max_tokens(),
-                        thinking_max_tokens: self.thinking_max_tokens,
+                        thinking_max_tokens: self.thinking_max_tokens.load(Ordering::Relaxed),
                         base_url: self.base_url.clone(),
                         headers: self.build_headers()?,
                         http: &self.http,
@@ -306,14 +306,6 @@ impl LlmProvider for AnthropicProvider {
         "anthropic"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {
-        // Anthropic has its own extended thinking; not controlled here
-    }
-
-    fn is_reasoning(&self) -> bool {
-        self.thinking_max_tokens > 0
-    }
-
     fn set_max_tokens(&self, max_tokens: u32) {
         if max_tokens > 0 {
             self.max_tokens.store(max_tokens, Ordering::Relaxed);
@@ -322,6 +314,35 @@ impl LlmProvider for AnthropicProvider {
 
     fn max_tokens(&self) -> u32 {
         self.current_max_tokens()
+    }
+
+    fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
+        use crate::core::provider::ReasoningLevel;
+        let tokens: u32 = match level {
+            ReasoningLevel::Off => 0,
+            ReasoningLevel::Low => 1024,
+            ReasoningLevel::Medium => 4096,
+            ReasoningLevel::High => 16384,
+            ReasoningLevel::Xhigh => 32768,
+            ReasoningLevel::Max => 65536,
+        };
+        self.thinking_max_tokens.store(tokens, Ordering::Relaxed);
+    }
+
+    fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        use crate::core::provider::ReasoningLevel;
+        match self.thinking_max_tokens.load(Ordering::Relaxed) {
+            0 => ReasoningLevel::Off,
+            1..=1024 => ReasoningLevel::Low,
+            1025..=4096 => ReasoningLevel::Medium,
+            4097..=16384 => ReasoningLevel::High,
+            16385..=32768 => ReasoningLevel::Xhigh,
+            _ => ReasoningLevel::Max,
+        }
+    }
+
+    fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        crate::core::provider::ReasoningLevel::Max
     }
 }
 

@@ -183,10 +183,10 @@ impl LlmProvider for TwoTurnProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
@@ -246,10 +246,10 @@ impl LlmProvider for SequenceProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
@@ -992,10 +992,10 @@ impl LlmProvider for IdenticalReplyProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
@@ -1232,10 +1232,10 @@ impl LlmProvider for RecordingProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
@@ -1482,10 +1482,10 @@ impl LlmProvider for CancellableThenNormalProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
@@ -1710,10 +1710,10 @@ impl LlmProvider for CompleteThenCancellableProvider {
         "test-provider"
     }
 
-    fn set_reasoning(&self, _enabled: bool) {}
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-    fn is_reasoning(&self) -> bool {
-        false
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
@@ -1955,10 +1955,10 @@ async fn test_chat_impl_idle_until_first_input_event() {
             "test-provider"
         }
 
-        fn set_reasoning(&self, _enabled: bool) {}
+        fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
 
-        fn is_reasoning(&self) -> bool {
-            false
+        fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+            provider::contract::ReasoningLevel::Off
         }
     }
 

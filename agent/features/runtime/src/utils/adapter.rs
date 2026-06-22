@@ -20,12 +20,12 @@ impl ProviderInfoPort for LlmClientAdapter<provider::api::LlmClient> {
         self.0.model_name()
     }
 
-    fn is_reasoning(&self) -> bool {
-        self.0.is_reasoning()
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        self.0.current_reasoning_level()
     }
 
-    fn set_reasoning(&self, enabled: bool) {
-        self.0.set_reasoning(enabled)
+    fn set_reasoning_level(&self, level: provider::contract::ReasoningLevel) {
+        self.0.set_reasoning_level(level)
     }
 }
 

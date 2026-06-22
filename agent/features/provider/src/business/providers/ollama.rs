@@ -28,6 +28,7 @@ pub struct OllamaProvider {
     /// If false, send `think: false` to disable reasoning mode for models
     /// that support it (qwen3, deepseek-r1, gpt-oss, etc.)
     pub(crate) reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) reasoning_level: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub(crate) user_agent: String,
     pub(crate) http: reqwest::Client,
     pub(crate) max_retries: u32,
@@ -58,6 +59,9 @@ impl OllamaProvider {
             api_key,
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
+            reasoning_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+                if reasoning { 3 } else { 0 }, // High or Off
+            )),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
@@ -279,15 +283,6 @@ impl LlmProvider for OllamaProvider {
         "ollama"
     }
 
-    fn set_reasoning(&self, enabled: bool) {
-        self.reasoning
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    fn is_reasoning(&self) -> bool {
-        self.reasoning.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     fn set_max_tokens(&self, max_tokens: u32) {
         if max_tokens > 0 {
             self.max_tokens.store(max_tokens, Ordering::Relaxed);
@@ -296,5 +291,25 @@ impl LlmProvider for OllamaProvider {
 
     fn max_tokens(&self) -> u32 {
         self.current_max_tokens()
+    }
+
+    fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
+        // Ollama 仅支持 thinking 开关，无档位概念
+        let enabled = !matches!(level, crate::core::provider::ReasoningLevel::Off);
+        self.reasoning
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+        self.reasoning_level
+            .store(level.as_u8(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        crate::core::provider::ReasoningLevel::from_u8(
+            self.reasoning_level
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
+    fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
+        crate::core::provider::ReasoningLevel::Medium
     }
 }
