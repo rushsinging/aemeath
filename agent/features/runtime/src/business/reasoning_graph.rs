@@ -60,8 +60,8 @@ impl ReasoningNode {
         match self {
             Self::Idle => ReasoningLevel::Off,
             Self::Explore => ReasoningLevel::Medium,
-            Self::Plan => ReasoningLevel::High,
-            Self::Execute => ReasoningLevel::Low,
+            Self::Plan => ReasoningLevel::Max,
+            Self::Execute => ReasoningLevel::Off,
             Self::Verify => ReasoningLevel::Medium,
         }
     }

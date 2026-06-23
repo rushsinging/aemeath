@@ -143,7 +143,7 @@ mod tests {
             ReasoningLevel::High
         );
         // plan 未覆盖 → 用默认值
-        assert_eq!(config.effort_for(ReasoningNode::Plan), ReasoningLevel::High);
+        assert_eq!(config.effort_for(ReasoningNode::Plan), ReasoningLevel::Max);
     }
 
     #[test]
