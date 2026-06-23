@@ -6,22 +6,23 @@ fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext
     let mut read_files = HashSet::new();
     read_files.insert(read_file);
     ToolExecutionContext {
-        cwd: root.clone(),
         workspace: project::api::WorkspaceService::new(root),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(Mutex::new(read_files)),
-        agent_runner: None,
+        resources: crate::api::ToolResources {
+            agent_runner: None,
+            registry: None,
+            memory_config: share::config::MemoryConfig::default(),
+            lang: "en".to_string(),
+            allow_all: false,
+        },
         session_reminders: None,
-        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
-        lang: "en".to_string(),
-        allow_all: false,
         max_tool_concurrency: 4,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
-        registry: None,
     }
 }
 

@@ -4,7 +4,6 @@
 //! `AgentClientImpl` 暴露给 CLI 的访问集中到单一过渡结构，避免 CLI
 //! composition root 继续散落读取 runtime 内部字段。
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use hook::api::HookRunner;
@@ -16,7 +15,6 @@ use tools::api::{AgentRunner, ToolRegistry};
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {
     pub session_id: String,
-    pub cwd: PathBuf,
     pub model_display: String,
     pub client: Arc<LlmClient>,
     pub registry: Arc<ToolRegistry>,

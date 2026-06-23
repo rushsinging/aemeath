@@ -2,5 +2,6 @@
 pub mod client;
 pub mod command;
 pub mod port;
+pub mod resources;
 pub mod service;
 pub mod tui_launch;

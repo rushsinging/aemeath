@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::{AgentRunRequest, AgentRunner};
+use crate::api::{AgentRunRequest, AgentRunner, ToolResources};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -29,22 +29,23 @@ impl AgentRunner for StubRunner {
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
-        cwd: PathBuf::from("."),
         workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
-        agent_runner: Some(runner),
+        resources: ToolResources {
+            agent_runner: Some(runner),
+            registry: None,
+            memory_config: share::config::MemoryConfig::default(),
+            lang: "en".to_string(),
+            allow_all: false,
+        },
         session_reminders: None,
-        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
-        lang: "en".to_string(),
-        allow_all: false,
         max_tool_concurrency: 4,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
-        registry: None,
     }
 }
 

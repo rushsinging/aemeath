@@ -9,22 +9,23 @@ use tokio_util::sync::CancellationToken;
 
 fn test_ctx(cwd: PathBuf) -> ToolExecutionContext {
     ToolExecutionContext {
-        cwd: cwd.clone(),
         workspace: project::api::WorkspaceService::new(cwd.clone()),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
-        agent_runner: None,
+        resources: crate::api::ToolResources {
+            agent_runner: None,
+            registry: None,
+            memory_config: share::config::MemoryConfig::default(),
+            lang: "en".to_string(),
+            allow_all: false,
+        },
         session_reminders: Some(Arc::new(Mutex::new(share::tool::SessionReminders::new()))),
-        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
-        lang: "en".to_string(),
-        allow_all: false,
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: Some("test-session".to_string()),
-        registry: None,
     }
 }
 
@@ -91,8 +92,8 @@ async fn test_memory_tool_add_and_search() {
 fn test_open_store_with_base_uses_memory_config_happy_path() {
     let dir = tempdir().unwrap();
     let mut ctx = test_ctx(dir.path().join("project"));
-    ctx.memory_config.max_entries = 2;
-    ctx.memory_config.similarity_threshold = 0.6;
+    ctx.resources.memory_config.max_entries = 2;
+    ctx.resources.memory_config.similarity_threshold = 0.6;
     let store = open_store_with_base(&ctx, dir.path().to_path_buf()).unwrap();
 
     assert!(!store.needs_eviction(MemoryLayer::Project).unwrap());
@@ -102,7 +103,7 @@ fn test_open_store_with_base_uses_memory_config_happy_path() {
 fn test_open_store_with_base_rejects_zero_max_entries() {
     let dir = tempdir().unwrap();
     let mut ctx = test_ctx(dir.path().join("project"));
-    ctx.memory_config.max_entries = 0;
+    ctx.resources.memory_config.max_entries = 0;
 
     let result = open_store_with_base(&ctx, dir.path().to_path_buf());
 
@@ -116,7 +117,7 @@ fn test_open_store_with_base_rejects_zero_max_entries() {
 fn test_open_store_with_base_rejects_invalid_similarity_threshold() {
     let dir = tempdir().unwrap();
     let mut ctx = test_ctx(dir.path().join("project"));
-    ctx.memory_config.similarity_threshold = 1.1;
+    ctx.resources.memory_config.similarity_threshold = 1.1;
 
     let result = open_store_with_base(&ctx, dir.path().to_path_buf());
 

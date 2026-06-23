@@ -100,32 +100,32 @@ impl AgentClientImpl {
         let ctx = self.context().clone();
         crate::core::tui_launch::TuiLaunchContext {
             session_id: self.session_id().to_string(),
-            cwd: self.cwd().to_path_buf(),
             model_display: super::mapping::model_display(
                 &self.resolved_model().source_key,
                 &self.resolved_model().model.name,
                 &self.resolved_model().model.id,
             ),
             client: self.inner.current_client.read().unwrap().clone(),
-            registry: ctx.registry,
-            system_blocks: ctx.system_blocks,
-            system_prompt_text: ctx.system_prompt_text,
-            user_context: ctx.user_context,
-            context_size: ctx.context_size,
+            registry: ctx.resources.registry,
+            system_blocks: ctx.resources.system_blocks,
+            system_prompt_text: ctx.resources.system_prompt_text,
+            user_context: ctx.resources.user_context,
+            context_size: ctx.resources.context_size,
             verbose: ctx.verbose,
-            agent_runner: ctx.agent_runner,
-            allow_all: ctx.allow_all,
-            task_store: ctx.task_store,
+            agent_runner: ctx.resources.agent_runner,
+            allow_all: ctx.resources.allow_all,
+            task_store: ctx.resources.task_store,
             max_tool_concurrency: self.max_tool_concurrency(),
             max_agent_concurrency: self.max_agent_concurrency(),
-            agent_semaphore: ctx.agent_semaphore,
-            memory_config: super::mapping::memory_config_to_sdk(ctx.memory_config),
+            agent_semaphore: ctx.resources.agent_semaphore,
+            memory_config: super::mapping::memory_config_to_sdk(ctx.resources.memory_config),
             skills_map: ctx
+                .resources
                 .skills_map
                 .into_iter()
                 .map(|(name, skill)| (name, super::mapping::skill_to_sdk(skill)))
                 .collect(),
-            hook_runner: ctx.hook_runner,
+            hook_runner: ctx.resources.hook_runner,
             session_reminders: Arc::new(
                 std::sync::Mutex::new(share::tool::SessionReminders::new()),
             ),

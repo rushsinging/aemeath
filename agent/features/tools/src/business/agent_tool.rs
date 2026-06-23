@@ -80,7 +80,7 @@ impl TypedTool for AgentTool {
         // aggressive for expert users who know what they're doing.)
 
         let max_turns = args.max_turns.map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
-        let runner = match &ctx.agent_runner {
+        let runner = match &ctx.resources.agent_runner {
             Some(r) => r.clone(),
             None => return TypedToolResult::error("agent runner not available"),
         };

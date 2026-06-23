@@ -1,31 +1,28 @@
-use super::AgentRunner;
+use super::resources::ToolResources;
 use project::api::{WorkspaceControl, WorkspaceRead, WorkspaceService};
 use share::tool::{AgentProgressEvent, SessionReminders};
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
+/// 单次 tool call 的执行环境。
+///
+/// 由 runtime 的 `process_chat_loop` 每回合构造，按引用传入各 `Tool::call()`。
+/// 持有 [`ToolResources`](super::resources::ToolResources)（session 级不变共享件）
+/// + tool 执行专属的可变状态（cancel、read_files 等）。
 #[derive(Clone)]
 pub struct ToolExecutionContext {
-    /// Initial workspace root, kept for compatibility with existing callers.
-    pub cwd: PathBuf,
+    /// 共享资源（agent_runner / registry / memory_config / lang / allow_all）。
+    pub resources: ToolResources,
+
     /// 唯一 workspace 状态源句柄（project 拥有）。
     pub workspace: Arc<WorkspaceService>,
     pub cancel: CancellationToken,
     pub read_files: Arc<Mutex<HashSet<String>>>,
-    pub agent_runner: Option<Arc<dyn AgentRunner>>,
     /// Session-local reminders shared by MemoryTool and UI/REPL.
     pub session_reminders: Option<Arc<Mutex<SessionReminders>>>,
-    /// Memory system configuration used by MemoryTool.
-    pub memory_config: share::config::MemoryConfig,
     /// Whether we're in plan mode (simulated tool execution)
     pub plan_mode: Option<bool>,
-    /// Current language code (`"en"` / `"zh"`), used to select i18n text sent to the LLM.
-    /// Defaults to [`share::i18n::DEFAULT_LANG`] (`"en"`) when unknown.
-    pub lang: String,
-    /// Whether all tools are auto-approved (skip injection checks)
-    pub allow_all: bool,
     /// Maximum number of concurrent tool executions (from tools.maxConcurrency)
     pub max_tool_concurrency: usize,
     /// Maximum number of concurrent sub-agent executions (from agents.maxConcurrency)
@@ -39,9 +36,6 @@ pub struct ToolExecutionContext {
     /// Parent chat session id. Used by sub-agent/tool logs to correlate activity
     /// back to the user-visible session.
     pub parent_session_id: Option<String>,
-    /// Tool list provider (for ToolSearch dynamic queries).
-    /// Only set in the main chat loop; sub-agent contexts use `None`.
-    pub registry: Option<Arc<dyn super::ToolListProvider>>,
 }
 
 impl ToolExecutionContext {

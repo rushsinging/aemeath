@@ -199,34 +199,37 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .as_ref()
         .map(|c| c.memory.clone())
         .unwrap_or_default();
+    let reasoning_graph_config = config_file.as_ref().map(|c| {
+        crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(&c.reasoning_graph)
+    });
     let context = ChatRuntimeContext {
-        client,
-        registry,
-        system_blocks,
-        system_prompt_text,
-        user_context: prompt_parts.claude_md,
-        agent_runner,
-        task_store,
-        skills_map,
-        hook_runner,
-        memory_config,
-        agent_semaphore,
-        allow_all: args.allow_all,
-        context_size,
+        resources: crate::core::resources::RuntimeResources {
+            client,
+            registry,
+            system_blocks,
+            system_prompt_text,
+            user_context: prompt_parts.claude_md,
+            agent_runner,
+            task_store,
+            skills_map,
+            hook_runner,
+            memory_config,
+            agent_semaphore,
+            allow_all: args.allow_all,
+            context_size,
+            language: config_file
+                .as_ref()
+                .map(|c| c.language.clone())
+                .unwrap_or_else(|| "en".to_string()),
+            reasoning_graph_config,
+        },
         verbose: args.verbose,
         resume: args.resume,
-        language: config_file
-            .as_ref()
-            .map(|c| c.language.clone())
-            .unwrap_or_else(|| "en".to_string()),
-        reasoning_graph_config: config_file.as_ref().map(|c| {
-            crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(&c.reasoning_graph)
-        }),
     };
 
     // 19. 构建 handle
     let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
-    let current_client = context.client.clone();
+    let current_client = context.resources.client.clone();
     let workspace = project::api::WorkspaceService::new(cwd.clone());
     let handle = RuntimeHandle {
         context,

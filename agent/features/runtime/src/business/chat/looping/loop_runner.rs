@@ -30,11 +30,14 @@ use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
 use share::message::Role;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
 
+/// 单次 chat loop 的完整执行状态。
+///
+/// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
+/// 函数内解构消费。持有 session 级不变配置 + loop 专属可变状态（messages、cancel 等）。
 pub struct ChatLoopContext<S, Q, I>
 where
     S: ChatEventSink,
@@ -51,7 +54,6 @@ where
     pub user_context: String,
     pub messages: Vec<Message>,
     pub context_size: usize,
-    pub cwd: PathBuf,
     pub workspace: Arc<project::api::WorkspaceService>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
@@ -99,7 +101,6 @@ where
         user_context,
         mut messages,
         context_size,
-        cwd: _seed_cwd,
         workspace,
         session_id,
         read_files,
@@ -124,7 +125,7 @@ where
     // workspace service 跨 chat 轮次持有：恢复 session 时已 restore 到正确位置，
     // 这里直接读取当前 root 作为 hook/日志的工作目录基准（忽略 seed cwd）。
     // 初始值用于 loop 前的 config_snapshot 注册；loop 内每 turn 头会重新读取，
-    // 使 hook env / ToolExecutionContext.cwd 跟随中途的 worktree 切换。
+    // 使 hook env 跟随中途的 worktree 切换。
     let mut cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
     log::info!(target: LOG_TARGET,
         "chat loop hook runner ready: workspace_root={} configured_events={}",
@@ -238,7 +239,7 @@ where
         turn_rollback_baseline = messages.len();
 
         // 每 turn 头重新读取 workspace_root，使本 turn 的 hook env
-        // （AEMEATH_PROJECT_DIR / CLAUDE_PROJECT_DIR）与 ToolExecutionContext.cwd
+        // （AEMEATH_PROJECT_DIR / CLAUDE_PROJECT_DIR）跟随中途的 worktree 切换。
         // 跟随本 turn 之前的 worktree 切换（EnterWorktree/ExitWorktree）。
         cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
 
@@ -284,22 +285,25 @@ where
         let agent = Agent {
             registry: &registry,
             ctx: tools::api::ToolExecutionContext {
-                cwd: cwd.clone(),
+                resources: tools::api::ToolResources {
+                    agent_runner: agent_runner.clone(),
+                    registry: Some(
+                        registry.clone() as std::sync::Arc<dyn tools::api::ToolListProvider>
+                    ),
+                    memory_config: memory_config.clone(),
+                    lang: language.clone(),
+                    allow_all,
+                },
                 workspace: workspace.clone(),
                 cancel: cancel.clone(),
                 read_files: read_files.clone(),
-                agent_runner: agent_runner.clone(),
                 session_reminders: Some(session_reminders.clone()),
-                memory_config: memory_config.clone(),
                 plan_mode: None,
-                lang: language.clone(),
-                allow_all,
                 max_tool_concurrency,
                 max_agent_concurrency,
                 agent_semaphore: agent_semaphore.clone(),
                 progress_tx: None,
                 parent_session_id: Some(session_id.clone()),
-                registry: Some(registry.clone() as std::sync::Arc<dyn tools::api::ToolListProvider>),
             },
         };
 
