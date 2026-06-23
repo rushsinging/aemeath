@@ -159,6 +159,7 @@ impl TypedTool for TaskUpdateTool {
                     TaskUpdateResult {
                         task_id: display_id,
                         status,
+                        subject: task.subject.clone(),
                     },
                 )
             }

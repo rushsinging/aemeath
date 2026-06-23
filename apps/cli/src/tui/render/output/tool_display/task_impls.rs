@@ -1,8 +1,13 @@
-use super::common::{bool_arg, str_arg, truncate_ellipsis};
+use super::common::{bool_arg, str_arg, truncate_ellipsis, typed_data};
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
+use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use sdk::tool_result::TaskUpdateResult;
 use std::path::Path;
 
 // ── TaskCreate ───────────────────────────────────────────────────
@@ -56,43 +61,10 @@ impl ToolDisplay for TaskUpdateDisplay {
         if id.is_empty() {
             return self.display_name().to_string();
         }
-        let status = str_arg(input, "status", "");
-        let blocked_by = input
-            .get("addBlockedBy")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-            .unwrap_or_default();
-        let subject = str_arg(input, "subject", "");
-        let priority = str_arg(input, "priority", "");
-        let progress = input.get("progress").and_then(|v| v.as_u64());
-
-        // 构建摘要片段（按重要性排序）
-        let mut parts = Vec::new();
-        if !status.is_empty() {
-            parts.push(format!("→ {status}"));
-        }
-        if !blocked_by.is_empty() {
-            parts.push(format!("blocked by [{blocked_by}]"));
-        }
-        if !subject.is_empty() {
-            parts.push(truncate_ellipsis(subject, 40));
-        }
-        if !priority.is_empty() {
-            parts.push(format!("p={priority}"));
-        }
-        if let Some(pct) = progress {
-            parts.push(format!("{pct}%"));
-        }
-
-        if parts.is_empty() {
-            format!("{} {id}", self.display_name())
-        } else {
-            format!("{} {id} — {}", self.display_name(), parts.join(", "))
+        let summary = self.header_summary(input, None);
+        match summary.is_empty() {
+            false => format!("{} {id} — {}", self.display_name(), summary),
+            true => format!("{} {id}", self.display_name()),
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -104,6 +76,80 @@ impl ToolDisplay for TaskUpdateDisplay {
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Hidden,
         }
+    }
+    /// result 到达后从 typed payload 取 subject 回填 header（issue #486）。
+    /// LLM 调用 TaskUpdate 时通常只传 taskId + status，subject 在 TaskCreate
+    /// 时设定，只有 store 回填的 result 才有 → 故必须覆写此方法。
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+        workspace_root: Option<&Path>,
+    ) -> Line<'static> {
+        let id = str_arg(input, "taskId", "");
+        if id.is_empty() {
+            return self.format_header_line(input, workspace_root);
+        }
+        let summary = self.header_summary(input, result_payload);
+        let name = self.display_name().to_string();
+        let mut spans = vec![
+            Span::styled(name, Style::default().fg(theme::ACCENT_BRIGHT)),
+            Span::raw(format!(" {id}")),
+        ];
+        if !summary.is_empty() {
+            spans.push(Span::raw(format!(" — {summary}")));
+        }
+        Line::from(spans)
+    }
+}
+impl TaskUpdateDisplay {
+    /// 构建 header 摘要片段（subject 紧跟 id，其余按重要性排序）。
+    /// `result_payload` 非空时优先从 typed result 取 subject（store 回填），
+    /// 回退到 input.subject。
+    fn header_summary(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+    ) -> String {
+        let status = str_arg(input, "status", "");
+        let blocked_by = input
+            .get("addBlockedBy")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        // subject 优先从 typed result 取（store 回填），回退 input.subject
+        let typed: Option<TaskUpdateResult> = typed_data(result_payload);
+        let subject = typed
+            .as_ref()
+            .map(|r| r.subject.as_str())
+            .filter(|s: &&str| !s.is_empty())
+            .unwrap_or_else(|| str_arg(input, "subject", ""));
+        let priority = str_arg(input, "priority", "");
+        let progress = input.get("progress").and_then(|v| v.as_u64());
+
+        // subject 紧跟 id，便于识别是哪个任务（issue #486）
+        let mut parts = Vec::new();
+        if !subject.is_empty() {
+            parts.push(truncate_ellipsis(subject, 40));
+        }
+        if !status.is_empty() {
+            parts.push(format!("→ {status}"));
+        }
+        if !blocked_by.is_empty() {
+            parts.push(format!("blocked by [{blocked_by}]"));
+        }
+        if !priority.is_empty() {
+            parts.push(format!("p={priority}"));
+        }
+        if let Some(pct) = progress {
+            parts.push(format!("{pct}%"));
+        }
+        parts.join(", ")
     }
 }
 inventory::submit!(ToolDisplayEntry {

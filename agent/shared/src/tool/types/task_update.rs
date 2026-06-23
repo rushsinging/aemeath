@@ -3,10 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 /// Typed result returned by the `task_update` tool.
+///
+/// `subject` 由工具从 store 回填（LLM 调用时通常不传 subject），供 TUI 渲染
+/// header 使用（issue #486）：`Task N — <subject> → <status>`。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct TaskUpdateResult {
     pub task_id: String,
     pub status: String,
+    #[serde(default)]
+    pub subject: String,
 }
 
 /// Typed input for the `task_update` tool.
