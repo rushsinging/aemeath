@@ -175,6 +175,14 @@ impl App {
                 self.view_state.animation.version =
                     self.view_state.animation.version.wrapping_add(1);
                 self.view_state.spinner.advance();
+                // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
+                if self
+                    .model
+                    .runtime
+                    .expire_transient_notice(std::time::Instant::now())
+                {
+                    self.mark_output_dirty();
+                }
                 // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
                 // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
                 if self.model.runtime.spinner.active {

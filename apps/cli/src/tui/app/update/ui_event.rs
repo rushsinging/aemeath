@@ -273,15 +273,12 @@ impl App {
                 }
             }
             UiEvent::GraphPhaseChanged { node } => {
-                // Graph 阶段变化 → 直接驱动 status notice（idle → Ready）
-                let notice = if node == "idle" {
-                    StatusNotice::success("Ready")
-                } else {
-                    StatusNotice::normal(node)
-                };
+                // Graph 阶段变化 → 更新 graph_phase（model.apply 会同步 status_notice，
+                // 除非当前是临时 notice）
+                let phase = if node == "idle" { None } else { Some(node) };
                 self.model
                     .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(notice));
+                    .apply(RuntimeIntent::SetGraphPhase(phase));
             }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
