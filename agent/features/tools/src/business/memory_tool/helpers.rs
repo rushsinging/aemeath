@@ -18,9 +18,9 @@ pub(super) fn open_store_with_base(
 ) -> Result<MemoryStore, String> {
     MemoryStore::new(
         base_dir,
-        project_file_name_from_path(&ctx.cwd),
-        ctx.memory_config.max_entries,
-        ctx.memory_config.similarity_threshold,
+        project_file_name_from_path(&ctx.workspace_read().current_workspace_root()),
+        ctx.resources.memory_config.max_entries,
+        ctx.resources.memory_config.similarity_threshold,
     )
     .map_err(|error| error.to_string())
 }

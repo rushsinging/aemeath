@@ -63,24 +63,25 @@ mod tests {
 
     fn test_ctx() -> ToolExecutionContext {
         ToolExecutionContext {
-            cwd: std::path::PathBuf::from("."),
             workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
             ),
-            agent_runner: None,
+            resources: crate::api::ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: false,
+            },
             session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
-            lang: "en".to_string(),
-            allow_all: false,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,
             agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            registry: None,
         }
     }
 

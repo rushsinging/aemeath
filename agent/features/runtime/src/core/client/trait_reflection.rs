@@ -8,7 +8,7 @@ pub(super) async fn run_reflection_impl(
     me: &AgentClientImpl,
     messages: Vec<sdk::ChatMessage>,
 ) -> Result<ReflectionOutputView> {
-    validate_reflection_config(&me.inner.context.memory_config)?;
+    validate_reflection_config(&me.inner.context.resources.memory_config)?;
 
     let runtime_messages = messages
         .into_iter()
@@ -17,12 +17,12 @@ pub(super) async fn run_reflection_impl(
     let client = me.inner.current_client.read().unwrap().clone();
     let result = crate::business::reflection::run_complete_reflection(
         crate::business::reflection::ReflectionRunMode::Forced,
-        &me.inner.context.memory_config,
+        &me.inner.context.resources.memory_config,
         &runtime_messages,
         &me.inner.cwd,
         client.as_ref(),
-        &me.inner.context.system_prompt_text,
-        &me.inner.context.language,
+        &me.inner.context.resources.system_prompt_text,
+        &me.inner.context.resources.language,
     )
     .await
     .map_err(|e| {
@@ -80,7 +80,7 @@ pub(super) async fn apply_reflection_impl(
     output: ReflectionOutputView,
 ) -> Result<String> {
     apply_reflection_with_base_dir(
-        &me.inner.context.memory_config,
+        &me.inner.context.resources.memory_config,
         &me.inner.cwd,
         storage::api::memory_base_dir(),
         output,
@@ -267,23 +267,25 @@ mod tests {
             },
         )));
         let context = crate::core::port::ChatRuntimeContext {
-            client: client.clone(),
-            registry: Arc::new(tools::api::ToolRegistry::new()),
-            system_blocks: Vec::new(),
-            system_prompt_text: "真实 system prompt".to_string(),
-            user_context: String::new(),
-            agent_runner: Arc::new(NoopAgentRunner),
-            task_store: Arc::new(storage::api::TaskStore::new()),
-            skills_map: std::collections::HashMap::new(),
-            hook_runner: hook::api::HookRunner::empty(),
-            memory_config,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-            allow_all: false,
-            context_size: 200_000,
+            resources: crate::core::resources::RuntimeResources {
+                client: client.clone(),
+                registry: Arc::new(tools::api::ToolRegistry::new()),
+                system_blocks: Vec::new(),
+                system_prompt_text: "真实 system prompt".to_string(),
+                user_context: String::new(),
+                agent_runner: Arc::new(NoopAgentRunner),
+                task_store: Arc::new(storage::api::TaskStore::new()),
+                skills_map: std::collections::HashMap::new(),
+                hook_runner: hook::api::HookRunner::empty(),
+                memory_config,
+                agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+                allow_all: false,
+                context_size: 200_000,
+                language: "en".to_string(),
+                reasoning_graph_config: None,
+            },
             verbose: false,
             resume: None,
-            language: "en".to_string(),
-            reasoning_graph_config: None,
         };
         let (change_tx, change_rx) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
         let handle = super::super::accessors::RuntimeHandle {

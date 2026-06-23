@@ -141,23 +141,25 @@ mod tests {
 
     fn runtime_context() -> ChatRuntimeContext {
         ChatRuntimeContext {
-            client: Arc::new(LlmClient::new(String::new())),
-            registry: Arc::new(ToolRegistry::new()),
-            system_blocks: Vec::new(),
-            system_prompt_text: String::new(),
-            user_context: String::new(),
-            agent_runner: Arc::new(NoopAgentRunner),
-            task_store: Arc::new(TaskStore::new()),
-            skills_map: HashMap::new(),
-            hook_runner: HookRunner::empty(),
-            memory_config: MemoryConfig::default(),
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            allow_all: false,
-            context_size: 200_000,
+            resources: crate::core::resources::RuntimeResources {
+                client: Arc::new(LlmClient::new(String::new())),
+                registry: Arc::new(ToolRegistry::new()),
+                system_blocks: Vec::new(),
+                system_prompt_text: String::new(),
+                user_context: String::new(),
+                agent_runner: Arc::new(NoopAgentRunner),
+                task_store: Arc::new(TaskStore::new()),
+                skills_map: HashMap::new(),
+                hook_runner: HookRunner::empty(),
+                memory_config: MemoryConfig::default(),
+                agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+                allow_all: false,
+                context_size: 200_000,
+                language: "en".to_string(),
+                reasoning_graph_config: None,
+            },
             verbose: false,
             resume: None,
-            language: "en".to_string(),
-            reasoning_graph_config: None,
         }
     }
 

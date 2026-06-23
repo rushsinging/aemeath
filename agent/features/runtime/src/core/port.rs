@@ -1,37 +1,17 @@
 use crate::business::chat::request::{NoTuiChatLaunch, TuiChatLaunch};
 use async_trait::async_trait;
-use hook::api::HookRunner;
-use prompt::api::skill::Skill;
-use provider::api::LlmClient;
-use provider::api::SystemBlock;
-use share::config::MemoryConfig;
 use std::collections::HashMap;
-use std::sync::Arc;
-use storage::api::TaskStore;
 use storage::api::{Task, TaskSnapshot};
-use tools::api::{AgentRunner, ToolRegistry};
 
+/// `ChatRuntimePort` 方法的入参——runtime 启动时的一次性配置包。
+///
+/// 持有 [`RuntimeResources`](crate::core::resources::RuntimeResources)（不变共享件）
+/// + 启动期专有参数（`verbose` / `resume`）。构造完 `ChatLoopContext` 后不再存活。
 #[derive(Clone)]
 pub struct ChatRuntimeContext {
-    pub client: Arc<LlmClient>,
-    pub registry: Arc<ToolRegistry>,
-    pub system_blocks: Vec<SystemBlock>,
-    pub system_prompt_text: String,
-    pub user_context: String,
-    pub agent_runner: Arc<dyn AgentRunner>,
-    pub task_store: Arc<TaskStore>,
-    pub skills_map: HashMap<String, Skill>,
-    pub hook_runner: HookRunner,
-    pub memory_config: MemoryConfig,
-    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub allow_all: bool,
-    pub context_size: usize,
+    pub resources: crate::core::resources::RuntimeResources,
     pub verbose: bool,
     pub resume: Option<String>,
-    /// Language code for prompt/reminder text selection (`"en"` / `"zh"`).
-    pub language: String,
-    /// Reasoning Graph 配置。`enabled=false` 时不创建 graph 实例（None）。
-    pub reasoning_graph_config: Option<crate::business::reasoning_graph::GraphRuntimeConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -27,7 +27,7 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
         .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))?
         .clone();
     let task_snapshot = {
-        let snap = me.inner.context.task_store.snapshot().await;
+        let snap = me.inner.context.resources.task_store.snapshot().await;
         if snap.tasks.is_empty() {
             None
         } else {

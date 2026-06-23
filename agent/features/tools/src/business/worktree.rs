@@ -69,7 +69,9 @@ impl TypedTool for EnterWorktreeTool {
     ) -> TypedToolResult<EnterWorktreeResult> {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return TypedToolResult::error(t::invalid_input_error(&ctx.lang, e)),
+            Err(e) => {
+                return TypedToolResult::error(t::invalid_input_error(&ctx.resources.lang, e))
+            }
         };
 
         let display_target = args.path.clone().unwrap_or_else(|| {
@@ -77,7 +79,7 @@ impl TypedTool for EnterWorktreeTool {
                 .clone()
                 .map(|branch| format!("branch {branch}"))
                 .unwrap_or_else(|| {
-                    if ctx.lang == "zh" {
+                    if ctx.resources.lang == "zh" {
                         "未指定目标".to_string()
                     } else {
                         "(unspecified)".to_string()
@@ -93,7 +95,7 @@ impl TypedTool for EnterWorktreeTool {
                 let path_base = ctx.workspace_read().current_path_base();
                 let workspace_root = ctx.workspace_read().current_workspace_root();
                 let branch = get_current_branch(&workspace_root);
-                let headline = if ctx.lang == "zh" {
+                let headline = if ctx.resources.lang == "zh" {
                     format!("已进入 worktree：{}", display_target)
                 } else {
                     format!("Entered worktree: {}", display_target)
@@ -105,11 +107,11 @@ impl TypedTool for EnterWorktreeTool {
                         &branch,
                         &path_base,
                         &workspace_root,
-                        &ctx.lang,
+                        &ctx.resources.lang,
                     ),
                 )
             }
-            Err(e) => TypedToolResult::error(t::enter_error(&ctx.lang, e)),
+            Err(e) => TypedToolResult::error(t::enter_error(&ctx.resources.lang, e)),
         }
     }
 
@@ -153,7 +155,9 @@ impl TypedTool for ExitWorktreeTool {
     ) -> TypedToolResult<ExitWorktreeResult> {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
-            Err(e) => return TypedToolResult::error(t::invalid_input_error(&ctx.lang, e)),
+            Err(e) => {
+                return TypedToolResult::error(t::invalid_input_error(&ctx.resources.lang, e))
+            }
         };
 
         if let Some(path) = args.path {
@@ -163,7 +167,7 @@ impl TypedTool for ExitWorktreeTool {
                     let path_base = ctx.workspace_read().current_path_base();
                     let workspace_root = ctx.workspace_read().current_workspace_root();
                     let branch = get_current_branch(&workspace_root);
-                    let headline = if ctx.lang == "zh" {
+                    let headline = if ctx.resources.lang == "zh" {
                         format!("已切换到：{}", path)
                     } else {
                         format!("Switched to: {}", path)
@@ -174,11 +178,11 @@ impl TypedTool for ExitWorktreeTool {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
                             workspace_root: workspace_root.clone(),
-                            guidance: t::switch_guidance(&ctx.lang, &path),
+                            guidance: t::switch_guidance(&ctx.resources.lang, &path),
                         },
                     )
                 }
-                Err(e) => TypedToolResult::error(t::switch_error(&ctx.lang, e)),
+                Err(e) => TypedToolResult::error(t::switch_error(&ctx.resources.lang, e)),
             }
         } else {
             // 恢复上一上下文
@@ -187,7 +191,7 @@ impl TypedTool for ExitWorktreeTool {
                     let path_base = ctx.workspace_read().current_path_base();
                     let workspace_root = ctx.workspace_read().current_workspace_root();
                     let branch = get_current_branch(&workspace_root);
-                    let headline = if ctx.lang == "zh" {
+                    let headline = if ctx.resources.lang == "zh" {
                         format!("已退出 worktree，恢复到：{}", prev.path_base.display())
                     } else {
                         format!("Exited worktree, restored to: {}", prev.path_base.display())
@@ -198,11 +202,11 @@ impl TypedTool for ExitWorktreeTool {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
                             workspace_root: workspace_root.clone(),
-                            guidance: t::exit_guidance(&ctx.lang, &prev.path_base),
+                            guidance: t::exit_guidance(&ctx.resources.lang, &prev.path_base),
                         },
                     )
                 }
-                Err(e) => TypedToolResult::error(t::exit_error(&ctx.lang, e)),
+                Err(e) => TypedToolResult::error(t::exit_error(&ctx.resources.lang, e)),
             }
         }
     }

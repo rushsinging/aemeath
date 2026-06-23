@@ -30,7 +30,13 @@ pub(super) fn task_list_impl(_me: &AgentClientImpl) -> Vec<sdk::TaskSummary> {
 }
 
 pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusView> {
-    let tasks = me.inner.context.task_store.list_current_batch().await;
+    let tasks = me
+        .inner
+        .context
+        .resources
+        .task_store
+        .list_current_batch()
+        .await;
     let active: Vec<_> = tasks
         .iter()
         .filter(|t| t.status != TaskStatus::Deleted)
@@ -40,7 +46,13 @@ pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusV
         return Ok(TaskStatusView::default());
     }
 
-    let display_map = me.inner.context.task_store.get_batch_display_map().await;
+    let display_map = me
+        .inner
+        .context
+        .resources
+        .task_store
+        .get_batch_display_map()
+        .await;
     let max_lines = share::config::TaskListConfig::default().max_lines;
     let lines = super::mapping::task_status_lines(&active, &display_map, max_lines);
     Ok(TaskStatusView { lines })

@@ -5,10 +5,12 @@
 
 pub mod agent_port;
 pub mod context;
+pub mod resources;
 pub mod tool;
 
 pub use agent_port::{AgentRunRequest, AgentRunner};
 pub use context::ToolExecutionContext;
+pub use resources::ToolResources;
 pub use share::tool::{AgentToolCallProgress, ImageData, ToolResult};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 

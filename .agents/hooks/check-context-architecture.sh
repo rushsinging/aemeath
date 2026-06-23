@@ -6,13 +6,14 @@ set -euo pipefail
 #       的「架构 Guard」——workspace 真相单一所有者在 project，tools 只用读/控能力，
 #       持久化 DTO 留 session 边界，git 收敛在 GitCli。
 # 规则：
-#   R1 ToolExecutionContext 定义不得含 working_root / path_base / context_stack 字段。
+#   R1 ToolExecutionContext 定义不得含 working_root / path_base / context_stack / cwd 字段。
 #   R2 tools 不得引用 PersistedWorkspaceContext / WorkspacePersist（持久化是 session 边界）。
 #   R3 仅 project 可定义 struct WorkspaceState；agent/features 内（project 除外）任何 struct
 #      不得同时打包 working_root + path_base + (context_stack|stack)（防 WorktreeWorkingContext 复活）。
 #   R4 生产代码调 .workspace_control() 仅限 tools 的 bash.rs / worktree.rs。
 #   R5 project 内非测试 Command::new("git") 仅限 business/git_ops.rs。
 #   R6 WorkspacePersist 仅可出现在 project（def/impl）与 runtime；tools 禁用（与 R2 重叠）。
+#   R7 ToolExecutionContext / ChatLoopContext 定义不得含 cwd 字段（从 workspace 读取）。
 # 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
 # 说明（narrowing）：R3 的 triple-bundle 检测限定 agent/features（project 除外），不扫
 #   agent/shared（持久化 DTO PersistedWorkspaceContext）与 packages/sdk（WorkspaceContextView 视图），
@@ -158,11 +159,33 @@ def check_r1(violations: list[str]) -> None:
         if name != "ToolExecutionContext":
             continue
         fields = struct_field_names(body)
-        for forbidden in ("working_root", "path_base", "context_stack"):
+        for forbidden in ("working_root", "path_base", "context_stack", "cwd"):
             if forbidden in fields:
                 violations.append(
                     f"{TOOL_CTX_FILE}: [R1] ToolExecutionContext must not carry workspace field "
                     f"`{forbidden}`; hold Arc<WorkspaceService> and read via workspace_read()/workspace_control()."
+                )
+
+
+def check_r7(violations: list[str]) -> None:
+    """R7: ToolExecutionContext / ChatLoopContext must not carry `cwd` field."""
+    targets = {
+        Path("agent/features/tools/src/contract/context.rs"): "ToolExecutionContext",
+        Path("agent/features/runtime/src/business/chat/looping/loop_runner.rs"): "ChatLoopContext",
+    }
+    for path, target_name in targets.items():
+        full = root / path
+        if not full.exists():
+            continue
+        text = full.read_text()
+        for name, body in iter_struct_blocks(text):
+            if name != target_name:
+                continue
+            fields = struct_field_names(body)
+            if "cwd" in fields:
+                violations.append(
+                    f"{path}: [R7] {target_name} must not carry `cwd` field; "
+                    f"read from workspace_read().current_workspace_root() instead."
                 )
 
 
@@ -273,6 +296,7 @@ run_sanity()
 
 violations: list[str] = []
 check_r1(violations)
+check_r7(violations)
 
 for path in sorted((root / "agent" / "features").rglob("*.rs")):
     if is_generated(path):

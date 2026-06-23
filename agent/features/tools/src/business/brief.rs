@@ -59,7 +59,10 @@ impl TypedTool for BriefTool {
         match format {
             "markdown" => {
                 brief_content.push_str(&format!("# {}\n\n", title));
-                brief_content.push_str(&format!("**Working Directory**: {}\n", ctx.cwd.display()));
+                brief_content.push_str(&format!(
+                    "**Working Directory**: {}\n",
+                    ctx.workspace_read().current_workspace_root().display()
+                ));
                 brief_content.push_str(&format!(
                     "**Generated**: {}\n\n",
                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
@@ -94,7 +97,10 @@ impl TypedTool for BriefTool {
             }
             "text" => {
                 brief_content.push_str(&format!("{}\n\n", title));
-                brief_content.push_str(&format!("Working Directory: {}\n", ctx.cwd.display()));
+                brief_content.push_str(&format!(
+                    "Working Directory: {}\n",
+                    ctx.workspace_read().current_workspace_root().display()
+                ));
                 brief_content.push_str(&format!(
                     "Generated: {}\n\n",
                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
@@ -113,7 +119,7 @@ impl TypedTool for BriefTool {
             "json" => {
                 let json_brief = serde_json::json!({
                     "title": title,
-                    "working_directory": ctx.cwd.display().to_string(),
+                    "working_directory": ctx.workspace_read().current_workspace_root().display().to_string(),
                     "generated_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
                     "includes": include,
                     "note": "This is a brief template. Populate with actual session data from conversation history."

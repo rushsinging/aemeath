@@ -104,7 +104,8 @@ impl AgentRunner for CliAgentRunner {
             .parent_session_id
             .clone()
             .or_else(|| {
-                ctx.cwd
+                ctx.workspace_read()
+                    .current_workspace_root()
                     .file_name()
                     .and_then(|name| name.to_str())
                     .map(ToString::to_string)
@@ -136,7 +137,7 @@ impl AgentRunner for CliAgentRunner {
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
         tools::api::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
-        let sub_schemas = sub_registry.schemas_for(&ctx.lang);
+        let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
         let messages = vec![Message::user(prompt)];
         let handler = SilentHandler;
         // For sub-agents, use the system prompt as a single cached block
@@ -172,7 +173,13 @@ impl AgentRunner for CliAgentRunner {
             );
         };
         let sub_ctx = ToolExecutionContext {
-            cwd: ctx.cwd.clone(),
+            resources: tools::api::ToolResources {
+                agent_runner: None, // No nested agents
+                registry: ctx.resources.registry.clone(),
+                memory_config: ctx.resources.memory_config.clone(),
+                lang: ctx.resources.lang.clone(),
+                allow_all: ctx.resources.allow_all,
+            },
             // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
             // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
             workspace: ctx.workspace.seed_isolated(),
@@ -180,18 +187,13 @@ impl AgentRunner for CliAgentRunner {
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
             ),
-            agent_runner: None, // No nested agents
             session_reminders: ctx.session_reminders.clone(),
-            memory_config: ctx.memory_config.clone(),
             plan_mode: ctx.plan_mode,
-            lang: ctx.lang.clone(),
-            allow_all: ctx.allow_all,
             max_tool_concurrency: ctx.max_tool_concurrency,
             max_agent_concurrency: ctx.max_agent_concurrency,
             agent_semaphore: ctx.agent_semaphore.clone(), // 全局限流共享
             progress_tx: None,                            // sub-agents don't stream progress (yet)
             parent_session_id: ctx.parent_session_id.clone(),
-            registry: ctx.registry.clone(),
         };
         let agent = Agent {
             registry: &sub_registry,

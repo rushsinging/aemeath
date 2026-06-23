@@ -73,12 +73,12 @@ impl TypedTool for BashTool {
         };
         let command = args.command.as_str();
         if let Some(reason) = check_command_safety(command) {
-            if !ctx.allow_all {
+            if !ctx.resources.allow_all {
                 return TypedToolResult::error(format!("Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."));
             }
         }
         // Check for shell injection patterns (skip when allow_all is set)
-        if !ctx.allow_all {
+        if !ctx.resources.allow_all {
             if let Some(reason) = check_shell_injection(command) {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
@@ -451,6 +451,7 @@ fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::ToolResources;
     use serde_json::json;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
@@ -465,22 +466,23 @@ mod tests {
         std::fs::create_dir_all(&worktree).unwrap();
         let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
         let ctx = ToolExecutionContext {
-            cwd: workspace.path().to_path_buf(),
             workspace: ws.clone(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
-            agent_runner: None,
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
             session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
-            lang: "en".to_string(),
-            allow_all: true,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            registry: None,
         };
 
         let result = BashTool
@@ -504,22 +506,23 @@ mod tests {
         let workspace = tempdir().unwrap();
         let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
         let ctx = ToolExecutionContext {
-            cwd: workspace.path().to_path_buf(),
             workspace: ws.clone(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
-            agent_runner: None,
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
             session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
-            lang: "en".to_string(),
-            allow_all: true,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            registry: None,
         };
 
         let result = BashTool
@@ -551,22 +554,23 @@ mod tests {
         let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
         let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
         let ctx = ToolExecutionContext {
-            cwd: workspace.path().to_path_buf(),
             workspace: ws.clone(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
-            agent_runner: None,
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
             session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
-            lang: "en".to_string(),
-            allow_all: true,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: Some(tx),
             parent_session_id: None,
-            registry: None,
         };
 
         let result = BashTool
@@ -635,22 +639,23 @@ mod tests {
         let workspace = tempdir().unwrap();
         let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
         let ctx = ToolExecutionContext {
-            cwd: workspace.path().to_path_buf(),
             workspace: ws.clone(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
-            agent_runner: None,
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
             session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
-            lang: "en".to_string(),
-            allow_all: true,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            registry: None,
         };
 
         let result = BashTool
@@ -779,22 +784,23 @@ mod tests {
         let workspace = tempdir().unwrap();
         let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
         let ctx = ToolExecutionContext {
-            cwd: workspace.path().to_path_buf(),
             workspace: ws.clone(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
-            agent_runner: None,
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
             session_reminders: None,
-            memory_config: share::config::MemoryConfig::default(),
             plan_mode: None,
-            lang: "en".to_string(),
-            allow_all: true,
             max_tool_concurrency: 4,
             max_agent_concurrency: 4,
             agent_semaphore: Arc::new(Semaphore::new(4)),
             progress_tx: None,
             parent_session_id: None,
-            registry: None,
         };
 
         let result = BashTool

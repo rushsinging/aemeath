@@ -18,7 +18,7 @@ pub(super) async fn execute_command_impl(
     use crate::core::command::CommandContext as RtCmdCtx;
     use share::config::Config;
 
-    let lang = &me.inner.context.language;
+    let lang = &me.inner.context.resources.language;
 
     // Build runtime command context
     let state = Arc::new(AppState::default());
@@ -77,7 +77,7 @@ pub(super) async fn estimate_context_impl(
         .collect();
     let estimated = crate::business::compact::estimate_messages_tokens(&runtime_messages)
         + crate::business::compact::estimate_tokens(system_prompt);
-    let context_size = me.inner.context.context_size;
+    let context_size = me.inner.context.resources.context_size;
     let pct = if context_size > 0 {
         estimated as f64 * 100.0 / context_size as f64
     } else {

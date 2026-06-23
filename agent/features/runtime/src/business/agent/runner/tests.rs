@@ -251,22 +251,23 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
 fn test_ctx() -> ToolExecutionContext {
     let cwd = std::env::current_dir().unwrap();
     ToolExecutionContext {
-        cwd: cwd.clone(),
+        resources: tools::api::ToolResources {
+            agent_runner: None,
+            registry: None,
+            memory_config: share::config::MemoryConfig::default(),
+            lang: "en".to_string(),
+            allow_all: true,
+        },
         workspace: project::api::WorkspaceService::new(cwd),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
-        agent_runner: None,
         session_reminders: None,
-        memory_config: share::config::MemoryConfig::default(),
         plan_mode: None,
-        lang: "en".to_string(),
-        allow_all: true,
         max_tool_concurrency: 10,
         max_agent_concurrency: 4,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
-        registry: None,
     }
 }
 
