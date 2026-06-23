@@ -1,5 +1,19 @@
 use crate::tui::render::display::safe_text;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use serde::de::DeserializeOwned;
 use std::path::Path;
+
+/// 从 `payload.content` 反序列化到 typed struct。
+///
+/// 返回 `None` 当 payload 缺失、content 为 Null、或反序列化失败。
+/// 由 tool_impls / task_impls 共享（issue #486：TaskUpdate 从 result 取 subject）。
+pub(super) fn typed_data<T: DeserializeOwned>(payload: Option<&ToolResultPayload>) -> Option<T> {
+    let payload = payload?;
+    if payload.content.is_null() {
+        return None;
+    }
+    serde_json::from_value(payload.content.clone()).ok()
+}
 
 pub(super) fn str_arg<'a>(input: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
     input

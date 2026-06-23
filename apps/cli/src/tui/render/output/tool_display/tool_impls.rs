@@ -2,27 +2,16 @@ use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::common::{display_path, file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail};
+use super::common::{
+    display_path, file_path, str_arg, truncate_ellipsis, truncate_ellipsis_tail, typed_data,
+};
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use serde::de::DeserializeOwned;
 use std::path::Path;
-
-/// 从 `payload.content` 反序列化到 typed struct。
-///
-/// 返回 `None` 当 payload 缺失、content 为 Null、或反序列化失败。
-fn typed_data<T: DeserializeOwned>(payload: Option<&ToolResultPayload>) -> Option<T> {
-    let payload = payload?;
-    if payload.content.is_null() {
-        return None;
-    }
-    serde_json::from_value(payload.content.clone()).ok()
-}
-
 // ── Bash ─────────────────────────────────────────────────────────
 
 struct BashDisplay;
