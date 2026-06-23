@@ -1,6 +1,6 @@
 use super::driver::{
-    ChatApiDriver, LiteLlmDriver, MimoDriver, MinimaxDriver, OpenAiDriver, VolcengineDriver,
-    ZhipuDriver,
+    ChatApiDriver, DeepSeekDriver, LiteLlmDriver, MimoDriver, MinimaxDriver, OpenAiDriver,
+    VolcengineDriver, ZhipuDriver,
 };
 use super::*;
 use crate::core::client::OpenAIProviderConfig;
@@ -294,6 +294,85 @@ fn test_mimo_config_uses_chat_completions_suffix() {
 
     assert_eq!(config.chat_api_suffix, "/chat/completions");
     assert_eq!(config.driver, ProviderDriverKind::Mimo);
+}
+
+// === Zhipu effort ===
+
+#[test]
+fn zhipu_object_effort_sends_thinking_and_reasoning_effort() {
+    let config = ReasoningConfig::Object(json!({"effort": "high"}));
+    let mut body = base_body();
+
+    ZhipuDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type": "enabled"})));
+    assert_eq!(body.get("reasoning_effort"), Some(&json!("high")));
+}
+
+#[test]
+fn zhipu_disabled_omits_reasoning_effort() {
+    let config = ReasoningConfig::Bool(false);
+    let mut body = base_body();
+
+    ZhipuDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type": "disabled"})));
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
+fn zhipu_bool_true_without_effort_omits_reasoning_effort() {
+    let config = ReasoningConfig::Bool(true);
+    let mut body = base_body();
+
+    ZhipuDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type": "enabled"})));
+    // Bool(true) 没有 effort 信息，不发 reasoning_effort
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+// === DeepSeek ===
+
+#[test]
+fn deepseek_object_effort_sends_thinking_and_reasoning_effort() {
+    let config = ReasoningConfig::Object(json!({"effort": "max"}));
+    let mut body = base_body();
+
+    DeepSeekDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type": "enabled"})));
+    assert_eq!(body.get("reasoning_effort"), Some(&json!("max")));
+}
+
+#[test]
+fn deepseek_disabled_sends_disabled_thinking() {
+    let config = ReasoningConfig::Bool(false);
+    let mut body = base_body();
+
+    DeepSeekDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type": "disabled"})));
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
+fn deepseek_enabled_without_effort_sends_no_reasoning_effort() {
+    let mut body = base_body();
+
+    DeepSeekDriver.apply_reasoning_fields(&mut body, None, true);
+
+    assert_eq!(body.get("thinking"), Some(&json!({"type": "enabled"})));
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+#[test]
+fn test_deepseek_config_uses_chat_completions_suffix() {
+    use crate::api::ProviderDriverKind;
+    let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::DeepSeek, "deepseek");
+
+    assert_eq!(config.chat_api_suffix, "/chat/completions");
+    assert_eq!(config.driver, ProviderDriverKind::DeepSeek);
 }
 
 #[test]

@@ -32,6 +32,7 @@ pub enum ProviderDriverKind {
     Volcengine,
     Minimax,
     Mimo,
+    DeepSeek,
     Ollama,
 }
 
@@ -46,6 +47,7 @@ impl ProviderDriverKind {
             "volcengine" => Some(ProviderDriverKind::Volcengine),
             "minimax" => Some(ProviderDriverKind::Minimax),
             "mimo" => Some(ProviderDriverKind::Mimo),
+            "deepseek" => Some(ProviderDriverKind::DeepSeek),
             "ollama" => Some(ProviderDriverKind::Ollama),
             _ => None,
         }
@@ -60,6 +62,7 @@ impl ProviderDriverKind {
             ProviderDriverKind::Volcengine => "volcengine",
             ProviderDriverKind::Minimax => "minimax",
             ProviderDriverKind::Mimo => "mimo",
+            ProviderDriverKind::DeepSeek => "deepseek",
             ProviderDriverKind::Ollama => "ollama",
         }
     }
@@ -173,5 +176,18 @@ mod tests {
     #[test]
     fn test_as_str_volcengine() {
         assert_eq!(ProviderDriverKind::Volcengine.as_str(), "volcengine");
+    }
+
+    #[test]
+    fn test_from_str_deepseek() {
+        assert_eq!(
+            ProviderDriverKind::parse("deepseek"),
+            Some(ProviderDriverKind::DeepSeek)
+        );
+    }
+
+    #[test]
+    fn test_as_str_deepseek() {
+        assert_eq!(ProviderDriverKind::DeepSeek.as_str(), "deepseek");
     }
 }
