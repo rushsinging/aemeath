@@ -170,6 +170,15 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::SessionReset => UiEvent::SessionReset,
         sdk::ChatEvent::UserMessagesWithdrawn { texts } => UiEvent::UserMessagesWithdrawn(texts),
         sdk::ChatEvent::GraphPhaseChanged { node, .. } => UiEvent::GraphPhaseChanged { node },
+        sdk::ChatEvent::CompactProgress {
+            stage,
+            current,
+            total,
+        } => UiEvent::CompactProgress {
+            stage,
+            current,
+            total,
+        },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }
@@ -398,6 +407,16 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             "{} user_messages_withdrawn count={}",
             stage,
             texts.len()
+        ),
+        sdk::ChatEvent::CompactProgress {
+            stage: _,
+            current,
+            total,
+        } => crate::tui::log_trace!(
+            "{} compact_progress current={:?} total={:?}",
+            stage,
+            current,
+            total,
         ),
         sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
             "{} result text_len={} tokens_used={:?}",

@@ -25,6 +25,7 @@ pub(super) async fn compact_messages_impl(
         system_prompt,
         context_size,
         client.as_ref().map(|c| c.as_ref()),
+        None,
     )
     .await;
     match result {

@@ -59,6 +59,10 @@ pub enum ChatInputEvent {
     ///
     /// 由 busy 态 Up 键触发（#391 S3）。
     WithdrawAll,
+    /// 用户请求手动 compact：idle 时立即执行，busy 时排队等回合结束后执行。
+    ///
+    /// 由 `/compact` 触发，走 runtime 事件流（#497），不再调 `compact_messages()` trait。
+    Compact,
 }
 
 impl ChatInputEvent {

@@ -1,7 +1,7 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::business::agent::Agent;
 use crate::business::chat::looping::apply_gate;
-use crate::business::chat::looping::compact::auto_compact;
+use crate::business::chat::looping::compact::{auto_compact, manual_compact, CompactOutcome};
 use crate::business::chat::looping::finalize::{
     finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
     stop_hook_block_limit_reached,
@@ -214,6 +214,36 @@ where
                     // pending_input 已清空。继续进入下方回合头：turn_count 推进、
                     // turn_rollback_baseline 在用户消息已入、assistant 未产生处捕获。
                 }
+                IdleResult::CompactRequested => {
+                    if let Some(outcome) = manual_compact(
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        turn_count,
+                        &messages,
+                        &system_prompt_text,
+                        context_size,
+                        &memory_config,
+                        &cwd,
+                        &ctx.client,
+                        &language,
+                        &cwd,
+                    )
+                    .await
+                    {
+                        apply_compact_outcome(
+                            &sink,
+                            outcome,
+                            &mut messages,
+                            &frozen_chats,
+                            &mut active_summary,
+                            &active_summary_arc,
+                        )
+                        .await;
+                    }
+                    // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
+                    continue;
+                }
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -352,6 +382,35 @@ where
             .await
             {
                 IdleResult::Resumed => continue,
+                IdleResult::CompactRequested => {
+                    if let Some(outcome) = manual_compact(
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        turn_count,
+                        &messages,
+                        &system_prompt_text,
+                        context_size,
+                        &memory_config,
+                        &cwd,
+                        &ctx.client,
+                        &language,
+                        &cwd,
+                    )
+                    .await
+                    {
+                        apply_compact_outcome(
+                            &sink,
+                            outcome,
+                            &mut messages,
+                            &frozen_chats,
+                            &mut active_summary,
+                            &active_summary_arc,
+                        )
+                        .await;
+                    }
+                    continue;
+                }
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     loop_fsm.assert_state(
@@ -387,28 +446,15 @@ where
         )
         .await
         {
-            // 1. 冻结旧链（compact 前的完整 messages）到 frozen_chats，
-            //    保证 session 真相源完整（resume 不加载，但落盘保留）。
-            let old_segment = {
-                use crate::business::session::ChatSegment;
-                let mut seg = ChatSegment::normal(None);
-                seg.messages = std::mem::take(&mut messages);
-                seg
-            };
-            if let Ok(mut guard) = frozen_chats.lock() {
-                guard.push(old_segment);
-            }
-
-            // 2. 替换为 recent tail
-            messages = outcome.messages;
-
-            // 3. 设 summary（走 system 通道）
-            active_summary = Some(outcome.summary);
-            if let Ok(mut guard) = active_summary_arc.lock() {
-                *guard = active_summary.clone();
-            }
-            sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                .await;
+            apply_compact_outcome(
+                &sink,
+                outcome,
+                &mut messages,
+                &frozen_chats,
+                &mut active_summary,
+                &active_summary_arc,
+            )
+            .await;
         }
         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
@@ -440,6 +486,35 @@ where
                 .await
                 {
                     IdleResult::Resumed => continue,
+                    IdleResult::CompactRequested => {
+                        if let Some(outcome) = manual_compact(
+                            &sink,
+                            &hook_ui,
+                            &hook_runner,
+                            turn_count,
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &memory_config,
+                            &cwd,
+                            &ctx.client,
+                            &language,
+                            &cwd,
+                        )
+                        .await
+                        {
+                            apply_compact_outcome(
+                                &sink,
+                                outcome,
+                                &mut messages,
+                                &frozen_chats,
+                                &mut active_summary,
+                                &active_summary_arc,
+                            )
+                            .await;
+                        }
+                        continue;
+                    }
                     IdleResult::Shutdown => {
                         loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                         loop_fsm.assert_state(
@@ -777,6 +852,36 @@ where
                             loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                             continue;
                         }
+                        IdleResult::CompactRequested => {
+                            if let Some(outcome) = manual_compact(
+                                &sink,
+                                &hook_ui,
+                                &hook_runner,
+                                turn_count,
+                                &messages,
+                                &system_prompt_text,
+                                context_size,
+                                &memory_config,
+                                &cwd,
+                                &ctx.client,
+                                &language,
+                                &cwd,
+                            )
+                            .await
+                            {
+                                apply_compact_outcome(
+                                    &sink,
+                                    outcome,
+                                    &mut messages,
+                                    &frozen_chats,
+                                    &mut active_summary,
+                                    &active_summary_arc,
+                                )
+                                .await;
+                            }
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                            continue;
+                        }
                     }
                 }
                 {
@@ -869,6 +974,35 @@ where
                         .await
                         {
                             IdleResult::Resumed => continue,
+                            IdleResult::CompactRequested => {
+                                if let Some(outcome) = manual_compact(
+                                    &sink,
+                                    &hook_ui,
+                                    &hook_runner,
+                                    turn_count,
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &memory_config,
+                                    &cwd,
+                                    &ctx.client,
+                                    &language,
+                                    &cwd,
+                                )
+                                .await
+                                {
+                                    apply_compact_outcome(
+                                        &sink,
+                                        outcome,
+                                        &mut messages,
+                                        &frozen_chats,
+                                        &mut active_summary,
+                                        &active_summary_arc,
+                                    )
+                                    .await;
+                                }
+                                continue;
+                            }
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                                 loop_fsm.assert_state(
@@ -913,6 +1047,35 @@ where
                     .await
                     {
                         IdleResult::Resumed => continue,
+                        IdleResult::CompactRequested => {
+                            if let Some(outcome) = manual_compact(
+                                &sink,
+                                &hook_ui,
+                                &hook_runner,
+                                turn_count,
+                                &messages,
+                                &system_prompt_text,
+                                context_size,
+                                &memory_config,
+                                &cwd,
+                                &ctx.client,
+                                &language,
+                                &cwd,
+                            )
+                            .await
+                            {
+                                apply_compact_outcome(
+                                    &sink,
+                                    outcome,
+                                    &mut messages,
+                                    &frozen_chats,
+                                    &mut active_summary,
+                                    &active_summary_arc,
+                                )
+                                .await;
+                            }
+                            continue;
+                        }
                         IdleResult::Shutdown => {
                             loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                             loop_fsm.assert_state(
@@ -990,10 +1153,11 @@ where
     }
 }
 
-/// 空闲等待结果：收到下一条输入（恢复运行）或通道关闭（shutdown）。
+/// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或 compact 请求。
 enum IdleResult {
     Resumed,
     Shutdown,
+    CompactRequested,
 }
 
 /// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
@@ -1099,6 +1263,9 @@ where
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
                 let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages, true).await;
+                if gate.compact_requested {
+                    return IdleResult::CompactRequested;
+                }
                 if gate.appended_user_messages > 0 {
                     // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
                     // 并发兜底：空闲期间外部可能对槽里的 token 直接调过 cancel()
@@ -1125,6 +1292,8 @@ where
                 continue;
             }
             IdleResult::Shutdown => return IdleResult::Shutdown,
+            // `await_idle_input` 只返回 Resumed/Shutdown，CompactRequested 不可能到达。
+            IdleResult::CompactRequested => return IdleResult::CompactRequested,
         }
     }
 }
@@ -1176,4 +1345,38 @@ where
         Some(cancel_slot),
     )
     .await
+}
+
+/// 应用 compact 结果到 loop 状态：冻结旧链 → 替换 messages → 设 summary → 发 MessagesSync。
+async fn apply_compact_outcome<S>(
+    sink: &S,
+    outcome: CompactOutcome,
+    messages: &mut Vec<Message>,
+    frozen_chats: &Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
+    active_summary: &mut Option<String>,
+    active_summary_arc: &Arc<std::sync::Mutex<Option<String>>>,
+) where
+    S: ChatEventSink,
+{
+    // 1. 冻结旧链
+    let old_segment = {
+        use crate::business::session::ChatSegment;
+        let mut seg = ChatSegment::normal(None);
+        seg.messages = std::mem::take(messages);
+        seg
+    };
+    if let Ok(mut guard) = frozen_chats.lock() {
+        guard.push(old_segment);
+    }
+
+    // 2. 替换为 recent tail
+    *messages = outcome.messages;
+
+    // 3. 设 summary
+    *active_summary = Some(outcome.summary);
+    if let Ok(mut guard) = active_summary_arc.lock() {
+        *guard = active_summary.clone();
+    }
+    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+        .await;
 }
