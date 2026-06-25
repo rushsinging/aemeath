@@ -22,6 +22,16 @@ pub struct SpinnerLineView {
     pub phase_text: Option<String>,
 }
 
+/// Compact 进度视图（Gauge 渲染用）。
+///
+/// `ratio_millis` 为 ratio * 1000（0–1000），避免 f64 破坏 `Eq` 约束。
+/// `label` 为 Gauge 显示文案。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactProgressView {
+    pub ratio_millis: u32,
+    pub label: String,
+}
+
 /// 实时状态行整体视图：spinner（可缺省）+ 排队输入预览行 + 预格式化 task 行。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LiveStatusViewModel {
@@ -31,6 +41,8 @@ pub struct LiveStatusViewModel {
     pub queued_lines: Vec<String>,
     /// task 状态预格式化显示行（透传自 Model 快照）。
     pub task_lines: Vec<String>,
+    /// compact 进度（Gauge）；None 表示未在 compact 中。
+    pub compact_progress: Option<CompactProgressView>,
 }
 
 #[cfg(test)]
@@ -71,6 +83,7 @@ mod tests {
             }),
             queued_lines: vec!["> hello".to_string()],
             task_lines: vec!["□ #1".to_string()],
+            compact_progress: None,
         };
         let b = a.clone();
         assert_eq!(a, b);

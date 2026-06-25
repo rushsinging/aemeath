@@ -93,6 +93,7 @@ impl<'a> SubAgentRun<'a> {
             &self.system,
             self.ctx_context_size,
             Some(&self.client),
+            None,
         )
         .await;
 

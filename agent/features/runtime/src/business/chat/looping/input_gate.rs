@@ -51,6 +51,7 @@ pub struct GateOutcome {
     pub commands: Vec<ControlCommand>,
     pub appended_user_messages: usize,
     pub dropped_events: usize,
+    pub compact_requested: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -131,6 +132,7 @@ where
     let mut appended_user_messages = 0usize;
     let mut dropped_events = 0usize;
     let mut decision = GateDecision::Proceed;
+    let mut compact_requested = false;
     let mut added: Vec<sdk::AddedInput> = Vec::new();
 
     let events = buffer.drain_all();
@@ -205,6 +207,17 @@ where
                 decision = GateDecision::Proceed;
                 break;
             }
+            ChatInputEvent::Compact => {
+                if is_idle {
+                    compact_requested = true;
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    buffer.push(ChatInputEvent::Compact);
+                }
+            }
         }
     }
 
@@ -227,6 +240,7 @@ where
         commands,
         appended_user_messages,
         dropped_events,
+        compact_requested,
     }
 }
 

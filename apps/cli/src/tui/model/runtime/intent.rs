@@ -54,4 +54,10 @@ pub enum RuntimeIntent {
     SetThinking(bool),
     /// Reasoning Graph 阶段变化。`None` 表示 graph 不存在或回 Idle。
     SetGraphPhase(Option<String>),
+    /// Compact 进度更新。`None` 清除进度。
+    SetCompactProgress {
+        stage: String,
+        current: Option<u32>,
+        total: Option<u32>,
+    },
 }

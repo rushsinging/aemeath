@@ -158,4 +158,10 @@ pub enum ChatEvent {
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
+    /// Compact 进度通知。
+    CompactProgress {
+        stage: String,
+        current: Option<u32>,
+        total: Option<u32>,
+    },
 }

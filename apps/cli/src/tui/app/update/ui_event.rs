@@ -107,6 +107,11 @@ impl App {
                 // A3：MessagesSync 退出 display，仅作镜像 + 落盘；
                 // 用户回显改由 UserMessagesAdded 归宿事件驱动。
                 self.chat.messages = msgs;
+                // MessagesSync 意味着消息列表整体替换（compact/session reset），
+                // compact 进度已无意义，清理 Gauge。
+                if self.model.runtime.compact_progress.is_some() {
+                    self.model.runtime.compact_progress = None;
+                }
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
@@ -279,6 +284,17 @@ impl App {
                 self.model
                     .runtime
                     .apply(RuntimeIntent::SetGraphPhase(phase));
+            }
+            UiEvent::CompactProgress {
+                stage,
+                current,
+                total,
+            } => {
+                self.model.runtime.apply(RuntimeIntent::SetCompactProgress {
+                    stage,
+                    current,
+                    total,
+                });
             }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));

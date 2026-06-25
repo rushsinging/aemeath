@@ -3,6 +3,7 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
+use crate::business::chat::looping::CompactStage;
 use crate::business::compact::restore::sanitize_tool_pairs;
 use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
@@ -10,6 +11,42 @@ use tokio_util::sync::CancellationToken;
 
 // 向后兼容的 re-export
 pub use crate::business::compact::needs_compaction;
+
+/// Compact 进度回调 trait。
+///
+/// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
+/// 调用此回调通知调用方。map-reduce 模式下，每个 chunk 处理前也会调用，
+/// 携带 `(current, total)` chunk 计数。
+pub trait CompactProgressFn: Send + Sync {
+    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>);
+}
+
+impl<F> CompactProgressFn for F
+where
+    F: Fn(CompactStage, Option<usize>, Option<usize>) + Send + Sync,
+{
+    fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
+        self(stage, current, total)
+    }
+}
+
+/// 发出进度回调的辅助函数（`progress` 为 `None` 时 no-op）。
+fn emit_progress(progress: Option<&dyn CompactProgressFn>, stage: CompactStage) {
+    if let Some(p) = progress {
+        p.emit(stage, None, None);
+    }
+}
+
+fn emit_progress_chunk(
+    progress: Option<&dyn CompactProgressFn>,
+    stage: CompactStage,
+    current: usize,
+    total: usize,
+) {
+    if let Some(p) = progress {
+        p.emit(stage, Some(current), Some(total));
+    }
+}
 
 /// compact 结果：summary 走 system 通道，recent_messages 作为新链的消息。
 #[derive(Debug, Clone)]
@@ -227,6 +264,7 @@ pub async fn compact_messages_with_llm(
     system_prompt: &str,
     context_size: usize,
     client: Option<&provider::api::LlmClient>,
+    progress: Option<&dyn CompactProgressFn>,
 ) -> Option<CompactResult> {
     if !needs_compaction(messages, system_prompt, context_size) {
         return None;
@@ -237,6 +275,8 @@ pub async fn compact_messages_with_llm(
         return None;
     }
 
+    emit_progress(progress, CompactStage::Preparing);
+
     let window = compact_window(total)?;
 
     let early_messages = &messages[window.head_protect..window.split_point];
@@ -246,11 +286,12 @@ pub async fn compact_messages_with_llm(
     let summary = match client {
         Some(client) => {
             if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
-                match compact_messages_map_reduce(client, early_messages).await {
+                match compact_messages_map_reduce(client, early_messages, progress).await {
                     Ok(text) => text,
                     Err(_) => build_summary_text(early_messages),
                 }
             } else {
+                emit_progress(progress, CompactStage::Summarizing);
                 match llm_compact(client, early_messages).await {
                     Ok(text) => text,
                     Err(_) => build_summary_text(early_messages),
@@ -259,6 +300,8 @@ pub async fn compact_messages_with_llm(
         }
         None => build_summary_text(early_messages),
     };
+
+    emit_progress(progress, CompactStage::Finalizing);
 
     // recent tail：split_point 到末尾的原始消息
     let mut recent = messages[window.split_point..].to_vec();
@@ -344,14 +387,16 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
 async fn compact_messages_map_reduce(
     client: &provider::api::LlmClient,
     early_messages: &[Message],
+    progress: Option<&dyn CompactProgressFn>,
 ) -> Result<String, String> {
     use super::token_estimation::estimate_messages_tokens;
 
     let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
+    let total_chunks = chunks.len();
     log::info!(
         target: crate::LOG_TARGET,
         "map-reduce compact: {} chunks from {} messages ({} tokens)",
-        chunks.len(),
+        total_chunks,
         early_messages.len(),
         estimate_messages_tokens(early_messages),
     );
@@ -359,13 +404,14 @@ async fn compact_messages_map_reduce(
     // map: 每个 chunk 独立摘要
     let mut sub_summaries = Vec::with_capacity(chunks.len());
     for (i, chunk) in chunks.iter().enumerate() {
+        emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
         let summary = llm_compact(client, chunk).await?;
         sub_summaries.push(summary);
         log::info!(
             target: crate::LOG_TARGET,
             "map-reduce compact: chunk {}/{} done",
             i + 1,
-            chunks.len(),
+            total_chunks,
         );
     }
 

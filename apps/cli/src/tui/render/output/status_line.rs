@@ -161,6 +161,7 @@ pub(crate) fn live_status_spinner_fixture(
         }),
         queued_lines: Vec::new(),
         task_lines: Vec::new(),
+        compact_progress: None,
     }
 }
 
@@ -183,6 +184,7 @@ mod tests {
             }),
             queued_lines: Vec::new(),
             task_lines: task_lines.into_iter().map(str::to_string).collect(),
+            compact_progress: None,
         }
     }
 
@@ -191,6 +193,7 @@ mod tests {
             spinner: None,
             queued_lines: queued_lines.into_iter().map(str::to_string).collect(),
             task_lines: Vec::new(),
+            compact_progress: None,
         }
     }
 

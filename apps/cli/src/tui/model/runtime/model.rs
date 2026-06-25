@@ -1,4 +1,5 @@
 use super::change::RuntimeChange;
+use super::compact_progress::CompactProgressModel;
 use super::intent::RuntimeIntent;
 use super::processing_job::{ProcessingJob, ProcessingStatus};
 use super::spinner::SpinnerModel;
@@ -25,6 +26,8 @@ pub struct RuntimeModel {
     /// 临时 status notice 的过期时间戳；`None` 表示当前 notice 为持久态。
     /// 到期后由 SpinnerTick 回退到 `graph_phase` 派生的 notice。
     pub transient_notice_expiry: Option<Instant>,
+    /// Compact 进度（`None` = 未在 compact 中），用于渲染 Gauge 进度条。
+    pub compact_progress: Option<CompactProgressModel>,
 }
 
 impl Default for RuntimeModel {
@@ -42,6 +45,7 @@ impl Default for RuntimeModel {
             thinking: true,
             graph_phase: None,
             transient_notice_expiry: None,
+            compact_progress: None,
         }
     }
 }
@@ -148,6 +152,7 @@ impl RuntimeModel {
             RuntimeIntent::StopSpinner => {
                 self.spinner.active = false;
                 self.spinner.phase = None;
+                self.compact_progress = None;
                 vec![RuntimeChange::SpinnerStopped]
             }
             RuntimeIntent::UpdateTaskLines(lines) => {
@@ -175,6 +180,18 @@ impl RuntimeModel {
                     self.status_notice = Self::notice_from_phase(phase.as_deref());
                 }
                 vec![RuntimeChange::GraphPhaseChanged]
+            }
+            RuntimeIntent::SetCompactProgress {
+                stage,
+                current,
+                total,
+            } => {
+                self.compact_progress = Some(CompactProgressModel {
+                    stage,
+                    current,
+                    total,
+                });
+                vec![RuntimeChange::SpinnerPhaseChanged]
             }
         }
     }

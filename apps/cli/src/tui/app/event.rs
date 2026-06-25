@@ -147,5 +147,11 @@ pub enum AppEvent {
     GraphPhaseChanged {
         node: String,
     },
+    /// Compact 进度更新。TUI 渲染 Gauge 进度条。
+    CompactProgress {
+        stage: String,
+        current: Option<u32>,
+        total: Option<u32>,
+    },
 }
 pub type UiEvent = AppEvent;

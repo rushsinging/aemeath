@@ -1,4 +1,5 @@
 pub mod change;
+pub mod compact_progress;
 pub mod intent;
 pub mod model;
 pub mod processing_job;
