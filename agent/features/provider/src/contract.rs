@@ -33,6 +33,7 @@ pub enum ProviderDriverKind {
     Minimax,
     Mimo,
     DeepSeek,
+    Agnes,
     Ollama,
 }
 
@@ -48,6 +49,7 @@ impl ProviderDriverKind {
             "minimax" => Some(ProviderDriverKind::Minimax),
             "mimo" => Some(ProviderDriverKind::Mimo),
             "deepseek" => Some(ProviderDriverKind::DeepSeek),
+            "agnes" => Some(ProviderDriverKind::Agnes),
             "ollama" => Some(ProviderDriverKind::Ollama),
             _ => None,
         }
@@ -63,6 +65,7 @@ impl ProviderDriverKind {
             ProviderDriverKind::Minimax => "minimax",
             ProviderDriverKind::Mimo => "mimo",
             ProviderDriverKind::DeepSeek => "deepseek",
+            ProviderDriverKind::Agnes => "agnes",
             ProviderDriverKind::Ollama => "ollama",
         }
     }

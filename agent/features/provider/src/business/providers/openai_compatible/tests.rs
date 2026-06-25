@@ -1,6 +1,6 @@
 use super::driver::{
-    ChatApiDriver, DeepSeekDriver, LiteLlmDriver, MimoDriver, MinimaxDriver, OpenAiDriver,
-    VolcengineDriver, ZhipuDriver,
+    AgnesDriver, ChatApiDriver, DeepSeekDriver, LiteLlmDriver, MimoDriver, MinimaxDriver,
+    OpenAiDriver, VolcengineDriver, ZhipuDriver,
 };
 use super::*;
 use crate::core::client::OpenAIProviderConfig;
@@ -373,6 +373,106 @@ fn test_deepseek_config_uses_chat_completions_suffix() {
 
     assert_eq!(config.chat_api_suffix, "/chat/completions");
     assert_eq!(config.driver, ProviderDriverKind::DeepSeek);
+}
+
+// === Agnes ===
+
+#[test]
+fn agnes_bool_true_sends_enable_thinking_true() {
+    let config = ReasoningConfig::Bool(true);
+    let mut body = base_body();
+
+    AgnesDriver.apply_reasoning_fields(&mut body, Some(&config), true);
+
+    assert_eq!(
+        body.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": true}))
+    );
+    assert!(body.get("thinking").is_none());
+    assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn agnes_bool_false_sends_enable_thinking_false() {
+    let config = ReasoningConfig::Bool(false);
+    let mut body = base_body();
+
+    AgnesDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    assert_eq!(
+        body.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": false}))
+    );
+}
+
+#[test]
+fn agnes_none_uses_reasoning_enabled_flag() {
+    let mut body = base_body();
+
+    AgnesDriver.apply_reasoning_fields(&mut body, None, true);
+
+    assert_eq!(
+        body.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": true}))
+    );
+
+    let mut body2 = base_body();
+    AgnesDriver.apply_reasoning_fields(&mut body2, None, false);
+    assert_eq!(
+        body2.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": false}))
+    );
+}
+
+#[test]
+fn agnes_object_config_enables_thinking() {
+    let config = ReasoningConfig::Object(json!({"effort": "high"}));
+    let mut body = base_body();
+
+    AgnesDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    // Object 配置视为启用 thinking（Agnes 不支持 effort 分级，忽略 effort 值）
+    assert_eq!(
+        body.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": true}))
+    );
+}
+
+#[test]
+fn agnes_thinking_budget_enables_thinking() {
+    let config = ReasoningConfig::ThinkingBudget(4096);
+    let mut body = base_body();
+
+    AgnesDriver.apply_reasoning_fields(&mut body, Some(&config), false);
+
+    assert_eq!(
+        body.get("chat_template_kwargs"),
+        Some(&json!({"enable_thinking": true}))
+    );
+}
+
+#[test]
+fn test_agnes_config_uses_chat_completions_suffix() {
+    use crate::api::ProviderDriverKind;
+    let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::Agnes, "agnes");
+
+    assert_eq!(config.chat_api_suffix, "/chat/completions");
+    assert_eq!(config.driver, ProviderDriverKind::Agnes);
+}
+
+#[test]
+fn test_from_str_agnes() {
+    use crate::api::ProviderDriverKind;
+    assert_eq!(
+        ProviderDriverKind::parse("agnes"),
+        Some(ProviderDriverKind::Agnes)
+    );
+}
+
+#[test]
+fn test_as_str_agnes() {
+    use crate::api::ProviderDriverKind;
+    assert_eq!(ProviderDriverKind::Agnes.as_str(), "agnes");
 }
 
 #[test]
