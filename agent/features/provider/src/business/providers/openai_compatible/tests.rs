@@ -461,6 +461,25 @@ fn test_agnes_config_uses_chat_completions_suffix() {
 }
 
 #[test]
+fn agnes_provider_keeps_v1_base_url_suffix() {
+    let config = OpenAIProviderConfig::from_driver(crate::api::ProviderDriverKind::Agnes, "agnes");
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        Some("https://apihub.agnes-ai.com/v1".to_string()),
+        Some("agnes-2.0-flash".to_string()),
+        4096,
+        true,
+        None,
+    );
+
+    assert_eq!(
+        provider.chat_url(),
+        "https://apihub.agnes-ai.com/v1/chat/completions"
+    );
+}
+
+#[test]
 fn test_from_str_agnes() {
     use crate::api::ProviderDriverKind;
     assert_eq!(
