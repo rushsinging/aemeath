@@ -143,7 +143,8 @@ impl<'a> SubAgentRun<'a> {
                         }
                     }
                     append_tool_results(&mut self.messages, results, &self.session_id);
-                    self.compact_if_needed(api_input, turn_number);
+                    self.compact_if_needed(api_input, resp.usage.output_tokens as u64, turn_number)
+                        .await;
                 }
                 Err(e) => {
                     if e.is_cancelled() || self.ctx.cancel.is_cancelled() {
