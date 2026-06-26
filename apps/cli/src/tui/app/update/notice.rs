@@ -36,14 +36,26 @@ impl App {
         input_id: sdk::InputId,
         text: impl Into<String>,
     ) {
+        let text_str = text.into();
+        let preview: String = text_str.chars().take(60).collect();
+        let before_count = self.model.conversation.queued_submissions.len();
         self.model
             .conversation
             .apply(ConversationIntent::QueueSubmission {
-                input_id,
-                text: text.into(),
+                input_id: input_id.clone(),
+                text: text_str,
             });
+        let after_count = self.model.conversation.queued_submissions.len();
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
+        crate::tui::log_debug!(
+            "enqueue_submission_echo input_id={} preview={:?} queued_count {}->{} output_dirty={}",
+            input_id,
+            preview,
+            before_count,
+            after_count,
+            self.view_state.dirty.output
+        );
     }
 
     /// 按 InputId 精确清除单条「排队中」用户提交，并刷新 live-status 投影。

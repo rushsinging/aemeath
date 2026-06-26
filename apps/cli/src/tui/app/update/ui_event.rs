@@ -96,10 +96,24 @@ impl App {
                 self.chat.clear_processing_handle();
             }
             UiEvent::UserMessagesAdded(items) => {
+                let before_queued = self.model.conversation.queued_submissions.len();
+                crate::tui::log_debug!(
+                    "UserMessagesAdded items={} is_processing={} before_queued={}",
+                    items.len(),
+                    self.chat.is_processing,
+                    before_queued
+                );
                 for item in items {
+                    crate::tui::log_debug!(
+                        "UserMessagesAdded item id={} text_preview={:?}",
+                        item.id,
+                        item.text.chars().take(60).collect::<String>()
+                    );
                     self.clear_queued_submission_echo_by_id(&item.id);
                     self.append_user_echo(item.text);
                 }
+                let after_queued = self.model.conversation.queued_submissions.len();
+                crate::tui::log_debug!("UserMessagesAdded done after_queued={}", after_queued);
                 self.mark_output_dirty();
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
