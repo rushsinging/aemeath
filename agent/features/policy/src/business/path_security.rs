@@ -4,6 +4,7 @@
 //! the workspace boundary. This module centralises that logic so fixes only
 //! need to happen in one place.
 
+use crate::LOG_TARGET;
 use std::path::{Path, PathBuf};
 
 /// Maximum number of path components to prevent abuse.
@@ -102,9 +103,27 @@ pub fn validate_and_normalize_path_from_base(
 
     // Path-aware containment check
     if !allow_outside && !normalized.starts_with(&workspace_abs) {
+        log::debug!(
+            target: LOG_TARGET,
+            "path deny: file_path=\"{}\" joined=\"{}\" abs_path=\"{}\" normalized=\"{}\" workspace_abs=\"{}\" path_base=\"{}\"",
+            file_path,
+            joined.display(),
+            abs_path.display(),
+            normalized.display(),
+            workspace_abs.display(),
+            path_base.display(),
+        );
         return Err(outside_workspace_error("Path", &normalized, &workspace_abs));
     }
 
+    log::debug!(
+        target: LOG_TARGET,
+        "path allow: file_path=\"{}\" normalized=\"{}\" workspace_abs=\"{}\" path_base=\"{}\"",
+        file_path,
+        normalized.display(),
+        workspace_abs.display(),
+        path_base.display(),
+    );
     Ok(normalized)
 }
 
@@ -146,6 +165,15 @@ pub fn validate_search_path_from_base(
         .map_err(|e| format!("Cannot resolve search path '{}': {}", path_str, e))?;
 
     if !allow_outside && !resolved.starts_with(&workspace_abs) {
+        log::debug!(
+            target: LOG_TARGET,
+            "search_path deny: path_str=\"{}\" abs_path=\"{}\" resolved=\"{}\" workspace_abs=\"{}\" path_base=\"{}\"",
+            path_str,
+            abs_path.display(),
+            resolved.display(),
+            workspace_abs.display(),
+            path_base.display(),
+        );
         return Err(outside_workspace_error(
             "Search path",
             &resolved,
@@ -153,6 +181,14 @@ pub fn validate_search_path_from_base(
         ));
     }
 
+    log::debug!(
+        target: LOG_TARGET,
+        "search_path allow: path_str=\"{}\" resolved=\"{}\" workspace_abs=\"{}\" path_base=\"{}\"",
+        path_str,
+        resolved.display(),
+        workspace_abs.display(),
+        path_base.display(),
+    );
     Ok(resolved)
 }
 
