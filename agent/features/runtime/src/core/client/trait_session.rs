@@ -107,6 +107,10 @@ pub(super) async fn load_session_impl(
             if let Ok(mut guard) = me.inner.frozen_chats.lock() {
                 *guard = frozen;
             }
+            // 标记 resume：首次 chat() 时 loop-top idle 门据此跳过 pending user turn（#503）
+            me.inner
+                .skip_first_pending_turn
+                .store(true, std::sync::atomic::Ordering::Relaxed);
 
             let mut messages = chain.messages();
             let trimmed = {

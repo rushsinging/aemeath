@@ -334,6 +334,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -413,6 +414,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -493,6 +495,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -549,6 +552,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -675,6 +679,7 @@ async fn test_continue_false_json_treated_as_block() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -760,6 +765,7 @@ async fn test_stall_triggers_stop_hook_check() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -907,6 +913,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -1085,6 +1092,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -1344,6 +1352,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -1405,6 +1414,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     })
     .await;
@@ -1594,6 +1604,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -1833,6 +1844,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -2063,6 +2075,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -2178,6 +2191,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
+        skip_first_pending_turn: false,
         language: "en".to_string(),
     };
 
@@ -2202,5 +2216,152 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         provider.calls(),
         vec!["hello".to_string()],
         "全程应恰好被首条真实用户消息触发一次 LLM 调用: {events:?}"
+    );
+}
+
+/// #503：resume 后 messages 末尾为 User 消息（纯文本）时，skip_first_pending_turn=true
+/// 使 loop-top idle 门强制等待，而非自动发起 LLM 请求恢复被中断的对话。
+#[tokio::test]
+async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // messages 模拟 resume 加载的历史：末条是 User（等待 assistant 回复）
+    let messages = vec![Message::user("unfinished question")];
+
+    // driver：先确认 loop 在 idle（无 LLM 调用），再投递新消息触发回合
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // yield 若干轮，确认 loop 没自动发起 LLM 请求
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        // 投递新用户消息 → loop idle 门恢复，进入回合
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("new input", Vec::new()))
+            .unwrap();
+        // 等回合完成
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let provider = SequenceProvider::new(vec!["response to new input"]);
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages, // 末条为 User，模拟 resume
+        context_size: 200_000,
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-resume-skip-pending".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        reasoning_graph: None,
+        skip_first_pending_turn: true, // #503 核心：resume 标志
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    // 验证：收到新输入后产生回合（DoneWithDuration），证明 loop idle 等待了
+    let events = sink.events();
+    assert!(
+        events.iter().any(|e| e == "DoneWithDuration"),
+        "resume 后应 idle 等待新输入，收到新输入后才完成回合: {events:?}"
+    );
+    // 验证：LLM 响应文本出现（说明新消息触发后正常处理）
+    assert!(
+        events.iter().any(|e| e.contains("response to new input")),
+        "新输入应触发 LLM 响应: {events:?}"
+    );
+}
+
+/// #503 回归：正常场景（非 resume）末条消息为 User 时，skip_first_pending_turn=false，
+/// loop-top idle 门不阻断，正常进入回合。
+#[tokio::test]
+async fn test_normal_pending_user_turn_proceeds_without_skip() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    let messages = vec![Message::user("hello")];
+
+    // driver：等回合完成后关闭通道触发 shutdown
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let provider = SequenceProvider::new(vec!["hi there"]);
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![None]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages,
+        context_size: 200_000,
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-normal-no-skip".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        reasoning_graph: None,
+        skip_first_pending_turn: false, // 正常场景
+        language: "en".to_string(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回");
+    driver.await.unwrap();
+
+    let events = sink.events();
+    // 正常场景：末条 User 消息直接触发 LLM 调用，产出文本
+    assert!(
+        events.iter().any(|e| e.contains("hi there")),
+        "正常场景（非 resume）末条 User 消息应直接触发 LLM 响应: {events:?}"
     );
 }

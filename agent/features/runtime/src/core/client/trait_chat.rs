@@ -90,6 +90,9 @@ pub(super) async fn chat_impl(
             language: inner.context.resources.language.clone(),
             frozen_chats: inner.frozen_chats.clone(),
             active_summary: inner.active_summary.clone(),
+            skip_first_pending_turn: inner
+                .skip_first_pending_turn
+                .swap(false, std::sync::atomic::Ordering::Relaxed),
             reasoning_graph: inner
                 .context
                 .resources

@@ -81,6 +81,8 @@ where
     pub frozen_chats: Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
     pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
+    /// Resume 后首次 loop-top idle 门跳过 pending user turn（#503）。
+    pub skip_first_pending_turn: bool,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -118,6 +120,7 @@ where
         frozen_chats,
         active_summary: active_summary_arc,
         reasoning_graph,
+        skip_first_pending_turn,
     } = ctx;
     let mut reasoning_graph = reasoning_graph;
     let hook_ui = HookUi::new(sink.clone());
@@ -173,6 +176,9 @@ where
     // 初始化配置变更快照注册表（turn 边界轮询用）
     let mut config_snapshot =
         crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
+    // #503：resume 后首次遇到 pending user turn 时跳过，改为 idle 等待新输入。
+    // 消费一次后置 false，后续正常行为不受影响。
+    let mut skip_pending = skip_first_pending_turn;
     loop {
         // ── loop 顶部空闲门（Task 4，位于回合头之前）──
         // 若没有「待 assistant 响应的用户回合」（末条消息非 User），且 pending_input
@@ -199,7 +205,15 @@ where
         //
         // `None` cancel_slot：前置等待不重置 cancel 槽——此时 loop 体的 `cancel` clone
         // 尚未读取（在本门之后才 `current_cancel_token`），重置会破坏首回合的外部 cancel。
-        if !has_pending_user_turn(&messages) && pending_input.is_empty() {
+        //
+        // #503：resume 后末条消息可能是等待 assistant 回复的 User 消息（纯文本或
+        // tool_result）。此时 has_pending_user_turn 为 true，正常路径会自动发起 LLM
+        // 请求恢复中断的对话。skip_pending 标志使首次遇到此情况时改为 idle 等待，
+        // 让用户决定是否继续。idle 门内收到新 UserMessage 后 append 到 messages，
+        // skip_pending 被消费为 false。
+        let should_idle = (!has_pending_user_turn(&messages) && pending_input.is_empty())
+            || (skip_pending && has_pending_user_turn(&messages));
+        if should_idle {
             match idle_until_resume_or_shutdown(
                 &input_events,
                 &sink,
@@ -213,6 +227,8 @@ where
                     // messages 已含新 UserMessage（由 idle 门内的 BeforeLlm gate 附加），
                     // pending_input 已清空。继续进入下方回合头：turn_count 推进、
                     // turn_rollback_baseline 在用户消息已入、assistant 未产生处捕获。
+                    // #503：消费 skip 标志，后续回合恢复正常行为。
+                    skip_pending = false;
                 }
                 IdleResult::CompactRequested => {
                     if let Some(outcome) = manual_compact(
