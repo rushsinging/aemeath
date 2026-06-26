@@ -225,9 +225,6 @@ impl StatusBar {
             return self.spans_with_selection(text, base, selection);
         }
         let parts: Vec<&str> = text.split(" │ ").collect();
-        let has_root = parts.get(1).is_some_and(|part| part.starts_with("root "));
-        let git_index = 1 + usize::from(has_root);
-        let permission_index = git_index + 1;
         let mut spans = Vec::new();
         for (index, part) in parts.iter().enumerate() {
             if index > 0 {
@@ -237,11 +234,9 @@ impl StatusBar {
                 Style::default()
                     .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD)
-            } else if has_root && index == 1 {
-                Style::default().fg(theme::TEXT_MUTED)
-            } else if index == git_index {
+            } else if index == 1 {
                 Style::default().fg(theme::SUCCESS)
-            } else if index == permission_index {
+            } else if index == 2 {
                 Style::default().fg(theme::WARNING)
             } else {
                 Style::default().fg(theme::TEXT_MUTED)

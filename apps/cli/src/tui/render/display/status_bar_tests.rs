@@ -173,7 +173,7 @@ fn test_status_line_context_defaults_to_balanced_row() {
 
     assert!(!row.contains("ctx "));
     assert!(row.starts_with('/'));
-    assert!(row.contains("root /"));
+    assert!(!row.contains("root "));
     assert!(row.contains("topic-46-status-line"));
     assert!(row.contains("worktree:feature/46-status-line"));
     assert!(row.contains("AskMe"));

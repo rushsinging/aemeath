@@ -157,14 +157,14 @@ fn parse_history_user_blocks(
                 HistoryDisplayParseError::UnsupportedUserBlock("tool_use".to_string()),
             ),
             sdk::ContentBlock::Image { placeholder, .. } => {
-                    // #fix-tui-image-input-output：image block 渲染为占位符（[Image #N]），
-                    // 保留 round-trip 时原占位符；如果 placeholder 为 None（旧 history），
-                    // 用 `[Image]` 作为兜底。`placeholder` 是 `&Option<String>`，
-                    // `clone()` 避免移动后无法在其它分支复用。
-                    Ok(HistoryUserBlock::Image(
-                        placeholder.clone().unwrap_or_else(|| "[Image]".to_string()),
-                    ))
-                }
+                // #fix-tui-image-input-output：image block 渲染为占位符（[Image #N]），
+                // 保留 round-trip 时原占位符；如果 placeholder 为 None（旧 history），
+                // 用 `[Image]` 作为兜底。`placeholder` 是 `&Option<String>`，
+                // `clone()` 避免移动后无法在其它分支复用。
+                Ok(HistoryUserBlock::Image(
+                    placeholder.clone().unwrap_or_else(|| "[Image]".to_string()),
+                ))
+            }
         })
         .collect()
 }

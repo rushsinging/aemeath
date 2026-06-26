@@ -47,7 +47,10 @@ impl Message {
     ///
     /// **不发给 LLM 时** provider adapter 拿 `Vec<ContentBlock>` 已经正确交替，
     /// 无需再做拆分；`placeholder` 字段 round-trip 用，adapter 端丢弃。
-    pub fn user_with_images(text: impl Into<String>, images: Vec<(String, String, String)>) -> Self {
+    pub fn user_with_images(
+        text: impl Into<String>,
+        images: Vec<(String, String, String)>,
+    ) -> Self {
         let text = text.into();
         if images.is_empty() {
             return Self::user(text);
