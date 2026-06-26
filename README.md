@@ -4,13 +4,13 @@
 
 ## 关键设计
 
-**[设计总纲](docs/design/outline.md)** — DDD 六边形架构、统一语言、Bounded Context、COLA 分层、依赖铁律。
+**[设计总纲](docs/design/01-outline.md)** — DDD 六边形架构、统一语言、Bounded Context、COLA 分层、依赖铁律。
 
 | 模块 | 设计文档 | 六边形角色 |
 |---|---|---|
-| Runtime | [runtime-design.md](docs/design/runtime-design.md) | 核心域应用服务 |
-| TUI | [tui-design.md](docs/design/tui-design.md) | 入站适配器（终端） |
-| Server | [server-design.md](docs/design/server-design.md) | 入站适配器（远端） |
+| Runtime | [03-runtime-design.md](docs/design/03-runtime-design.md) | 核心域应用服务 |
+| TUI | [04-tui-design.md](docs/design/04-tui-design.md) | 入站适配器（终端） |
+| Server | [07-server-design.md](docs/design/07-server-design.md) | 入站适配器（远端） |
 
 ## 项目结构
 

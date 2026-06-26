@@ -193,5 +193,5 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 - **Yao et al., 2022**, *ReAct: Synergizing Reasoning and Acting in Language Models*（agent loop 的理论根基）。
 - **LangGraph** 文档：node / edge / state / checkpoint 原语。
 - Issue #358：本方向的原始动机与四个探索方向。
-- `docs/design/outline.md` §核心域 / §Bounded Context：aemeath 的领域划分，编排层的落点 **MUST** 遵循。
-- `docs/design/runtime-design.md`：现有 Agent Looping 的设计真相源，任何 loop 改造 **MUST** 先核对此文档。
+- `docs/design/01-outline.md` §核心域 / §Bounded Context：aemeath 的领域划分，编排层的落点 **MUST** 遵循。
+- `docs/design/03-runtime-design.md`：现有 Agent Looping 的设计真相源，任何 loop 改造 **MUST** 先核对此文档。

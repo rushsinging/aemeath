@@ -22,7 +22,7 @@
 
 ## 2. 架构铁律（DDD 六边形 / clean）
 
-来源：`docs/design/architecture-guards.md` §依赖铁律 + `docs/design/outline.md`。
+来源：`docs/design/02-architecture-guards.md` §依赖铁律 + `docs/design/01-outline.md`。
 
 | 层级 | 角色 | 允许 dep | 关键约束 |
 |---|---|---|---|
@@ -218,8 +218,8 @@ cli/view_assembler/output.rs:495   ── content.get("data").get("diff")… ─
 ## 10. 参考资料
 
 - plan：`docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`（Phase 0a 已撤销）
-- 守卫规则：`docs/design/architecture-guards.md` §2/3/4/6
-- 依赖铁律：`docs/design/outline.md` §依赖铁律
+- 守卫规则：`docs/design/02-architecture-guards.md` §2/3/4/6
+- 依赖铁律：`docs/design/01-outline.md` §依赖铁律
 - issue：#273 (TUI tool call detail 优化) / #325 (ToolResult 扁平化重构)
 - 相关设计：`docs/superpowers/specs/2026-05-27-tui-model-view-architecture.md`
 - 已撤销 commit：`bed64636`（plan）保留；`f2686be8` / `19cadee3` / `363aaa83` / `c097186c` 已 `git reset --soft HEAD~4` 撤销

@@ -901,7 +901,7 @@ git commit -m "feat(guard): 新增 check-log-target-prefix.sh shell 守卫"
 ### Task 5.3: 更新架构守卫注册表文档
 
 **Files:**
-- Modify: `docs/design/architecture-guards.md`
+- Modify: `docs/design/02-architecture-guards.md`
 
 - [ ] **Step 1: 在守卫注册表中补一行**
 
@@ -910,7 +910,7 @@ git commit -m "feat(guard): 新增 check-log-target-prefix.sh shell 守卫"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/design/architecture-guards.md
+git add docs/design/02-architecture-guards.md
 git commit -m "docs(guard): 注册表补充 check-log-target-prefix 守卫"
 ```
 

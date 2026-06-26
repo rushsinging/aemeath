@@ -1,6 +1,6 @@
 //! Reasoning Graph——阶段驱动的 reasoning effort 动态调节状态机。
 //!
-//! 设计文档：`docs/design/agent-reasoning-graph.md` §3.2
+//! 设计文档：`docs/design/06-agent-reasoning-graph.md` §3.2
 //!
 //! 核心原则：Graph 是 effort 调节器，不是流程约束器——只推断阶段调 effort，
 //! 不阻塞 tool、不改 agent loop 控制流。
