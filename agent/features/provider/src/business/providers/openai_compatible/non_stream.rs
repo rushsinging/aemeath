@@ -53,6 +53,7 @@ impl OpenAICompatibleProvider {
         let mut content_blocks = Vec::new();
         let mut input_tokens = 0u32;
         let mut output_tokens = 0u32;
+        let mut total_tokens: Option<u32> = None;
         let mut stop_reason = crate::business::types::StopReason::EndTurn;
 
         // 提取 usage
@@ -65,6 +66,10 @@ impl OpenAICompatibleProvider {
                 .get("completion_tokens")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u32;
+            total_tokens = usage
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
         }
 
         // 从 choices 中提取内容
@@ -151,6 +156,7 @@ impl OpenAICompatibleProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens,
             },
             stop_reason,
         })

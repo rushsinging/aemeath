@@ -188,6 +188,7 @@ pub(crate) async fn send_message_non_stream(
             .and_then(|v| v.as_u64())
             .map(|v| v as u32),
         reasoning_tokens: None, // Anthropic 不返回 reasoning_tokens
+        total_tokens: None,     // Anthropic 不返回 total_tokens，由消费侧回退 input+output
     };
 
     let stop_reason_str = body

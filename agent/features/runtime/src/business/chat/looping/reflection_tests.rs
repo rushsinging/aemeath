@@ -64,6 +64,7 @@ fn build_client_with_usage(
             cached_tokens: None,
             cache_creation_tokens: None,
             reasoning_tokens: None,
+            total_tokens: None,
         },
     }))
 }
