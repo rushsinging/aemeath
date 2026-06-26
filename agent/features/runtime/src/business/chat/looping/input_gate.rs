@@ -133,7 +133,7 @@ where
     let mut dropped_events = 0usize;
     let mut decision = GateDecision::Proceed;
     let mut compact_requested = false;
-    let mut added: Vec<sdk::AddedInput> = Vec::new();
+    let mut added: Vec<(sdk::InputId, Message)> = Vec::new();
 
     let events = buffer.drain_all();
     let event_count = events.len();
@@ -206,19 +206,23 @@ where
                     })
                     .collect();
                 // 回滚本批已 append 的 UserMessage（与 added 顺序一致）。
-                if appended_this_gate > 0 || !texts.is_empty() {
-                    // added 逆序 = append 逆序，拼到 texts 前面保持原始提交顺序。
-                    let mut all_texts: Vec<String> = added.iter().map(|a| a.text.clone()).collect();
-                    all_texts.append(&mut texts);
-                    // 回滚已 append 的 messages。
-                    for _ in 0..appended_this_gate {
-                        messages.pop();
-                    }
-                    appended_user_messages = 0;
-                    added.clear();
-                    sink.send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts: all_texts })
-                        .await;
-                }
+                                  if appended_this_gate > 0 || !texts.is_empty() {
+                                      // added 逆序 = append 逆序，拼到 texts 前面保持原始提交顺序。
+                                      // 用 message.text_content() 还原用户视角文本（含 image placeholder）。
+                                      let mut all_texts: Vec<String> = added
+                                          .iter()
+                                          .map(|(_, m)| m.text_content())
+                                          .collect();
+                                      all_texts.append(&mut texts);
+                                      // 回滚已 append 的 messages。
+                                      for _ in 0..appended_this_gate {
+                                          messages.pop();
+                                      }
+                                      appended_user_messages = 0;
+                                      added.clear();
+                                      sink.send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts: all_texts })
+                                          .await;
+                                  }
                 dropped_events = 0;
                 decision = GateDecision::Proceed;
                 break;
@@ -271,7 +275,7 @@ fn append_user_message(
     id: sdk::InputId,
     text: String,
     images: Vec<sdk::ChatInputImage>,
-) -> sdk::AddedInput {
+) -> (sdk::InputId, Message) {
     log::info!(target: LOG_TARGET, "{}",
         serde_json::to_string(&serde_json::json!({
             "event_type": "user_input",
@@ -279,8 +283,9 @@ fn append_user_message(
             "image_count": images.len(),
         })).unwrap_or_default()
     );
-    messages.push(user_message_with_images(text.clone(), images));
-    sdk::AddedInput { id, text }
+    let message = user_message_with_images(text, images);
+    messages.push(message.clone());
+    (id, message)
 }
 
 fn classify_control_command(raw: &str) -> ControlCommandKind {
@@ -744,9 +749,9 @@ mod tests {
         });
         let items = added.expect("应发出一个 UserMessagesAdded 批事件");
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].text, "same");
-        assert_eq!(items[1].text, "same");
-        assert_ne!(items[0].id, items[1].id, "每条提交一个独立 id");
+                  assert_eq!(items[0].1.text_content(), "same");
+                  assert_eq!(items[1].1.text_content(), "same");
+                  assert_ne!(items[0].0, items[1].0, "每条提交一个独立 id");
     }
 
     #[tokio::test]

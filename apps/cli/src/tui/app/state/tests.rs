@@ -228,13 +228,15 @@ mod tests {
         let input_id = sdk::InputId::new_v7();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::AddedInput {
-                id: input_id,
-                text: "search bug 76".to_string(),
-            }])),
-            &ui_tx,
-            &spawn_refs,
-        );
+                      TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::ChatMessage {
+                          role: "user".to_string(),
+                          content: vec![sdk::ContentBlock::text("search bug 76")],
+                          metadata: None,
+                          input_id: Some(input_id),
+                      }])),
+                      &ui_tx,
+                      &spawn_refs,
+                  );
 
         let has_user_echo = app.model.conversation.timeline.items().iter().any(|item| {
             matches!(
@@ -308,13 +310,15 @@ mod tests {
         let input_id = sdk::InputId::new_v7();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::AddedInput {
-                id: input_id,
-                text: "search bug 76".to_string(),
-            }])),
-            &ui_tx,
-            &spawn_refs,
-        );
+                      TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::ChatMessage {
+                          role: "user".to_string(),
+                          content: vec![sdk::ContentBlock::text("search bug 76")],
+                          metadata: None,
+                          input_id: Some(input_id),
+                      }])),
+                      &ui_tx,
+                      &spawn_refs,
+                  );
         for event in grep_after_thinking_events() {
             let _ = app.update(TuiMsg::Ui(event), &ui_tx, &spawn_refs);
         }

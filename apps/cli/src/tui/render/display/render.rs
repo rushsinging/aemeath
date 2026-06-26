@@ -157,12 +157,13 @@ mod tests {
     }
 
     fn message(role: &str, content: Vec<sdk::ContentBlock>) -> sdk::ChatMessage {
-        sdk::ChatMessage {
-            role: role.to_string(),
-            content,
-            metadata: None,
-        }
-    }
+              sdk::ChatMessage {
+                  role: role.to_string(),
+                  content,
+                  metadata: None,
+                  input_id: None,
+              }
+          }
 
     fn user_text(text: &str) -> sdk::ChatMessage {
         message(

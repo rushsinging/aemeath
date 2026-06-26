@@ -126,9 +126,10 @@ pub enum RuntimeStreamEvent {
         elapsed_secs: f64,
     },
     MessagesSync(Vec<Message>),
-    /// 批量用户输入归宿通知（每条含 InputId）。A2 仅建立通道，emit 由 Task 4 完成。
+    /// 批量用户输入归宿通知（每条含 InputId + 派生 Message，用于 #507 修复后 TUI 回显含占位符）。
+    /// A2 仅建立通道，emit 由 Task 4 完成；#507 修复后 payload 改为 (InputId, Message) 元组。
     UserMessagesAdded {
-        items: Vec<sdk::AddedInput>,
+        items: Vec<(sdk::InputId, Message)>,
     },
     /// loop 执行 reset 清理（messages + pending）后发出，通知 TUI 同步清镜像。
     SessionReset,

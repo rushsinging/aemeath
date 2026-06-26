@@ -101,7 +101,8 @@ mod tests {
                 sdk::ContentBlock::text("world"),
             ],
             metadata: None,
-        }];
+                          input_id: None,
+                      }];
 
         let history = extract_user_input_history(&messages);
 

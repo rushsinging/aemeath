@@ -263,7 +263,18 @@ pub(crate) fn runtime_event_to_sdk_event(
             )
         }
         crate::business::chat::RuntimeStreamEvent::UserMessagesAdded { items } => {
-            ChatEvent::UserMessagesAdded { items }
+            // #507 修复：把 (InputId, Message) 元组映射为带 input_id 的 ChatMessage，
+            // 让 TUI 端 handler 按 input_id 清占位 + 用 text_content() 还原回显。
+            ChatEvent::UserMessagesAdded {
+                items: items
+                    .into_iter()
+                    .map(|(id, message)| {
+                        let mut sdk_msg = super::mapping::message_to_sdk(message);
+                        sdk_msg.input_id = Some(id);
+                        sdk_msg
+                    })
+                    .collect(),
+            }
         }
         crate::business::chat::RuntimeStreamEvent::Done { context } => ChatEvent::Done {
             context: ChatEventContext::new(context.chat_id, context.turn_id),
