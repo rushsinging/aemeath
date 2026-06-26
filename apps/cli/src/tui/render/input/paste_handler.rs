@@ -15,14 +15,9 @@ impl crate::tui::app::App {
             crate::tui::effect::spawn_guard::spawn_guarded("clipboard_image", async move {
                 match agent_client.read_clipboard_image().await {
                     Ok(img) => {
-                        let size = img.final_size;
+                        // #fix-tui-image-input-output：图片直接作为 span 插入输入区（带 [Image #N]
+                        // 占位符），不再发「添加成功」banner，由插入的占位 span 提示用户
                         let _ = output_tx.send(UiEvent::ClipboardImage(img)).await;
-                        let _ = output_tx
-                            .send(UiEvent::SystemMessage(format!(
-                                "[clipboard image added ({} bytes). Type message to send.]",
-                                size
-                            )))
-                            .await;
                     }
                     Err(e) => {
                         let _ = output_tx
@@ -31,9 +26,9 @@ impl crate::tui::app::App {
                     }
                 }
             });
-            self.append_system_notice("[reading clipboard image...]");
+            // 删：[reading clipboard image...] —— 进程提示已无意义（#fix-tui-image-input-output）
         } else if is_image_path(text.trim()) {
-            self.append_system_notice(format!("[loading image: {}...]", text.trim()));
+            // 删：[loading image: ...] —— 同上（#fix-tui-image-input-output）
             // We can't await here directly since this is a sync method,
             // so we'll handle image file loading via spawn
             let path = text.trim().to_string();
@@ -45,14 +40,8 @@ impl crate::tui::app::App {
             crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
                 match agent_client.process_image_file(path).await {
                     Ok(img) => {
-                        let size = img.final_size;
+                        // #fix-tui-image-input-output：图片作为 span 插入输入区
                         let _ = tx.send(UiEvent::ClipboardImage(img)).await;
-                        let _ = tx
-                            .send(UiEvent::SystemMessage(format!(
-                                "[image loaded ({} bytes). Type message to send.]",
-                                size
-                            )))
-                            .await;
                     }
                     Err(e) => {
                         let _ = tx

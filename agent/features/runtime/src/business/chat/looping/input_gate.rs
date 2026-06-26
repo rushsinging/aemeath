@@ -270,7 +270,7 @@ fn append_user_message(
     messages: &mut Vec<Message>,
     id: sdk::InputId,
     text: String,
-    images: Vec<sdk::ToolResultImage>,
+    images: Vec<sdk::ChatInputImage>,
 ) -> sdk::AddedInput {
     log::info!(target: LOG_TARGET, "{}",
         serde_json::to_string(&serde_json::json!({
@@ -292,16 +292,19 @@ fn classify_control_command(raw: &str) -> ControlCommandKind {
     }
 }
 
-fn user_message_with_images(text: String, images: Vec<sdk::ToolResultImage>) -> Message {
+fn user_message_with_images(text: String, images: Vec<sdk::ChatInputImage>) -> Message {
     if images.is_empty() {
         return Message::user(text);
     }
-    // 事件携带的 base64 图片组装为 image content block 送达 LLM（#402）。
+    // 事件携带的 (placeholder, base64, media_type) 三元组：
+    // - placeholder 为 TUI 端 ImageSpan::placeholder() 生成的 `[Image #N]`
+    // - Message::user_with_images 按 text 中 `[Image #N]` 出现顺序穿插拆块
+    // - provider adapter 拿拆好的 Vec<ContentBlock>，无需再做拆分（#fix-tui-image-input-output）
     Message::user_with_images(
         text,
         images
             .into_iter()
-            .map(|img| (img.base64, img.media_type))
+            .map(|img| (img.id, img.base64, img.media_type))
             .collect(),
     )
 }
@@ -482,18 +485,24 @@ mod tests {
         assert_eq!(sink.events.lock().unwrap().len(), 2);
     }
 
-    /// #402 回归：带图 UserMessage 事件必须组装出 base64 image block 送达 LLM，
-    /// 而非只发文本（A1 持久化模型曾把图片丢弃）。
+    /// #402 回归 + #fix-tui-image-input-output 拆块回归：
+    /// 带图 UserMessage 事件必须按 text 中 `[Image #N]` 占位符穿插组装，
+    /// 而非把所有 image 堆到 content 头部、text 堆到末尾。
     #[tokio::test]
     async fn test_user_message_with_images_assembles_image_block() {
         use share::message::{ContentBlock, ImageSource};
-        let img = sdk::ToolResultImage {
+        let img = sdk::ChatInputImage {
+            id: "[Image #1]".to_string(),
             base64: "Zm9vYmFy".to_string(),
             media_type: "image/png".to_string(),
         };
+        // text 含 `[Image #1]` 占位符，期望 image 穿插到 text 中占位位置
+        let text_with_marker = "看[Image #1]这张图".to_string();
         let mut buffer = PendingInputBuffer::default();
-        let input =
-            TestInputEventPort::new(vec![ChatInputEvent::user_message("看这张图", vec![img])]);
+        let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
+            text_with_marker.clone(),
+            vec![img],
+        )]);
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
@@ -510,18 +519,79 @@ mod tests {
 
         assert_eq!(outcome.appended_user_messages, 1);
         let last = messages.last().expect("应追加一条消息");
-        assert_eq!(last.text_content(), "看这张图");
+        // text_content 拼回完整文本（拆块后还原）
+        assert_eq!(last.text_content(), text_with_marker);
+        // 期望 content 是 [Text("看"), Image, Text("这张图")] 三块
+        assert_eq!(last.content.len(), 3, "期望拆成 3 块，实际={:?}", last.content);
+        assert!(matches!(&last.content[0], ContentBlock::Text { text } if text == "看"));
         let has_image = last.content.iter().any(|block| {
             matches!(
                 block,
                 ContentBlock::Image {
                     source: ImageSource::Base64 { data, media_type },
-                } if data == "Zm9vYmFy" && media_type == "image/png"
+                    placeholder: Some(ph),
+                } if data == "Zm9vYmFy" && media_type == "image/png" && ph == "[Image #1]"
             )
         });
         assert!(
             has_image,
-            "带图 UserMessage 应组装出 base64 image block，实际 content={:?}",
+            "带图 UserMessage 应组装出 base64 image block（带 placeholder），实际 content={:?}",
+            last.content
+        );
+        assert!(matches!(&last.content[2], ContentBlock::Text { text } if text == "这张图"));
+    }
+
+    /// #fix-tui-image-input-output：多图按 text 中 `[Image #N]` 出现顺序穿插。
+    #[tokio::test]
+    async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
+        use share::message::ContentBlock;
+        let imgs = vec![
+            sdk::ChatInputImage {
+                id: "[Image #1]".to_string(),
+                base64: "a".to_string(),
+                media_type: "image/png".to_string(),
+            },
+            sdk::ChatInputImage {
+                id: "[Image #2]".to_string(),
+                base64: "b".to_string(),
+                media_type: "image/jpeg".to_string(),
+            },
+        ];
+        // text 中 [Image #2] 在 [Image #1] 前面，期望穿插顺序: [Image #2], [Image #1]
+        let text = "B: [Image #2], A: [Image #1]".to_string();
+        let mut buffer = PendingInputBuffer::default();
+        let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
+            text.clone(),
+            imgs,
+        )]);
+        let sink = TestSink::default();
+        let mut messages = Vec::new();
+
+        let _ = run_loop_gate(
+            GateKind::BeforeLlm,
+            &mut buffer,
+            &EmptyQueueDrainPort,
+            &input,
+            &sink,
+            &mut messages,
+            false,
+        )
+        .await;
+
+        let last = messages.last().expect("应追加一条消息");
+        assert_eq!(last.text_content(), text);
+        let placeholders: Vec<String> = last
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Image { placeholder: Some(p), .. } => Some(p.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            placeholders,
+            vec!["[Image #2]".to_string(), "[Image #1]".to_string()],
+            "image 应按 text 中 `[Image #N]` 出现顺序穿插，实际 blocks={:?}",
             last.content
         );
     }

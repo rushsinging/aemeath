@@ -1,10 +1,27 @@
-//! Chat 完成结果 / 事件流 / 工具结果图片。
+//! Chat 完成结果 / 事件流 / 工具结果图片 / 用户输入图片。
 
 use crate::chat_event::ChatEvent;
 
 /// 工具结果中的图片载荷。
+///
+/// 命名语义：**工具执行结果返回**的图片（runtime → TUI），承载 base64 + media_type。
+/// 与 `ChatInputImage`（用户输入图片，TUI → Runtime）严格区分。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ToolResultImage {
+    pub base64: String,
+    pub media_type: String,
+}
+
+/// TUI → Runtime 通道的用户输入图片（#fix-tui-image-input-output）。
+///
+/// `id` 为占位符字符串（形如 `"[Image #1]"`），由 TUI 端 `ImageSpan::placeholder()`
+/// 生成，用于 runtime 在拆分 text 与 image 时一一配对：
+/// `text` 中出现的 `[Image #N]` ↔ `images` 中 `id == "[Image #N]"`。
+///
+/// **不发给 LLM**——provider adapter 拿 runtime 拆好的 `Vec<ContentBlock>` 后丢弃 `id`。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ChatInputImage {
+    pub id: String,
     pub base64: String,
     pub media_type: String,
 }
@@ -82,6 +99,19 @@ mod tests {
             media_type: "image/png".to_string(),
         };
 
+        assert_eq!(image.base64, "abc");
+        assert_eq!(image.media_type, "image/png");
+    }
+
+    #[test]
+    fn test_chat_input_image_keeps_id_and_payload() {
+        let image = ChatInputImage {
+            id: "[Image #1]".to_string(),
+            base64: "abc".to_string(),
+            media_type: "image/png".to_string(),
+        };
+
+        assert_eq!(image.id, "[Image #1]");
         assert_eq!(image.base64, "abc");
         assert_eq!(image.media_type, "image/png");
     }

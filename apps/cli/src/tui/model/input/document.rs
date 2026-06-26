@@ -213,10 +213,22 @@ impl InputDocument {
     }
 
     /// 按文档中出现顺序取出全部图片数据。
-    pub fn drain_images(&mut self) -> Vec<sdk::ClipboardImageView> {
+    /// 按文档中出现顺序取出全部图片，附带 placeholder id（#fix-tui-image-input-output）。
+    ///
+    /// 返回 `(placeholder, image)` 配对，placeholder 为 TUI 端
+    /// `ImageSpan::placeholder()` 生成的字符串（如 `"[Image #1]"`），与 `text` 中
+    /// 占位符一一对应——runtime 端按 text 中 `[Image #N]` 出现顺序穿插拆块。
+    pub fn drain_images(&mut self) -> Vec<(String, sdk::ChatInputImage)> {
         let mut spans = std::mem::take(&mut self.image_spans);
         spans.sort_by_key(|span| span.start);
-        spans.into_iter().map(|span| span.image).collect()
+        spans
+            .into_iter()
+            .map(|span| {
+                let placeholder = span.placeholder();
+                let image: sdk::ChatInputImage = span.image.into();
+                (placeholder, image)
+            })
+            .collect()
     }
 
     /// 移除所有图片占位符，保留其余文本。

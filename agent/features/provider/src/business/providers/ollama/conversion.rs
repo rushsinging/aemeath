@@ -85,7 +85,7 @@ impl OllamaProviderConversion for OllamaProvider {
                     ContentBlock::Text { text } => {
                         text_parts.push(text.clone());
                     }
-                    ContentBlock::Image { source } => match source {
+                    ContentBlock::Image { source, .. } => match source {
                         share::message::ImageSource::Base64 {
                             media_type: _,
                             data,
