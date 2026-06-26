@@ -226,11 +226,10 @@ trait Provider {
 
 > 每个节点的 effort 可通过 `aemeath.json` 的 `reasoning_graph.nodes.<node>.effort` 覆盖；未配置时用上表默认值。最终生效值受 `max_reasoning`（用户允许上限）约束取 min，再经 driver `clamp_effort()` 自适应降级。
 
-| Provider | `max_level` | Off | Low | Medium | High | Xhigh | Max | 实际可区分档位 |
+| Provider | `max_level` | Off<br>(Idle/Execute) | Low | Medium<br>(Explore/Verify) | High | Xhigh | Max<br>(Plan) | 实际可区分档位 |
 |---|---|---|---|---|---|---|---|---|
 | **Anthropic** | Max | `budget=0` | `budget=1024` | `budget=4096` | `budget=16384` | `budget=32768` | `budget=65536` | 6 档（⚠️ budget_tokens 已废弃，见下方说明） |
-| **OpenAI** | High | 不发 | `reasoning.effort=low` | `reasoning.effort=medium` | `reasoning.effort=high` | ⚠️ 越界 | ⚠️ 越界 | 4 档（off/low/medium/high） |
-| **OpenAI** | High | `reasoning` 不发 | `effort=low` | `effort=medium` | `effort=high` | →**high** | →**high** | 3 档（off/low/medium/high，driver clamp） |
+| **OpenAI** | High | `reasoning` 不发 | `effort=low` | `effort=medium` | `effort=high` | →**high** | →**high** | 4 档（off/low/medium/high，driver clamp） |
 | **Zhipu (GLM)** | Max | `thinking=disabled` | `effort=low`→**high** | `effort=medium`→**high** | `effort=high` | `effort=xhigh`→**max** | `effort=max` | 3 档（off/high/max，服务端折叠） |
 | **DeepSeek** | Max | `thinking=disabled` | `effort=low`→**high** | `effort=medium`→**high** | `effort=high` | `effort=xhigh`→**max** | `effort=max` | 3 档（off/high/max，服务端折叠） |
 | **LiteLLM** | Max | 不发 | `reasoning_effort=low` | `=medium` | `=high` | `=xhigh` | `=max` | 6 档（透传，上游可能再折） |
