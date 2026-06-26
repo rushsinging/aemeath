@@ -290,11 +290,11 @@ agent 业务模块（runtime/compact/storage）可走 `use composition::XxxResul
 相关 issue: #273, #325
 ```
 
-### 任务 0a.5 — `docs/design/architecture-guards.md` §6 登记 29 个 R struct + runtime 适配层
+### 任务 0a.5 — `docs/design/02-architecture-guards.md` §6 登记 29 个 R struct + runtime 适配层
 
 **目标**：架构守卫 §6 `ROOT_REEXPORT_ALLOW` 追加 29 条 R struct + 1 条 runtime adapter 登记。
 
-- 修改 `docs/design/architecture-guards.md` §6（具体格式按守卫规则）：
+- 修改 `docs/design/02-architecture-guards.md` §6（具体格式按守卫规则）：
   ```yaml
   # SDK 29 个 typed tool result
   sdk: [AgentResult, AskUserResult, BashResult, BriefResult, ConfigToolResult, EditResult, EnterWorktreeResult, ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult, LspResult, McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult, ReadResult, SkillResult, SleepResult, TaskCreateResult, TaskGetResult, TaskListResult, TaskListCompleteResult, TaskListCreateResult, TaskStopResult, TaskUpdateResult, ToolSearchResult, WebFetchResult, WebSearchResult, WriteResult]

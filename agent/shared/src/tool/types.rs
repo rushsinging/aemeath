@@ -2,7 +2,7 @@
 //! reference. Defined here in `share` so all feature crates
 //! (`tools`, `runtime`, `compact`, …) can refer to them without depending on
 //! `sdk` (which is a thin re-export / protocol facade — see
-//! `docs/design/outline.md` §依赖铁律 and
+//! `docs/design/01-outline.md` §依赖铁律 and
 //! `docs/snapshot/specs/047-ddd-redesign.md` §6.4.7 for the boundary).
 //!
 //! The same structs are `pub use`-re-exported by `packages/sdk::tool_result`

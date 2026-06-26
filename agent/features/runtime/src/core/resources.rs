@@ -1,6 +1,6 @@
 //! Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。
 //!
-//! 详见 `docs/design/context-boundaries.md`。
+//! 详见 `docs/design/03-runtime-design.md` §"Runtime Context 职责边界"。
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -4,7 +4,7 @@
 >
 > 本文档是 **架构设计** 类设计文档：基于真实 session 数据画像，设计一套以阶段节点驱动 reasoning effort 的推断式状态机。文档 **MUST** 作为实现依据，**SHOULD** 配套 umbrella issue + 子 issue 使用。
 >
-> 关联文档：`docs/design/agent-orchestration.md`（Agent 编排范式知识地图，本文是其 Workflow / Graph 维度的具体落地之一）
+> 关联文档：`docs/design/05-05-agent-orchestration.md`（Agent 编排范式知识地图，本文是其 Workflow / Graph 维度的具体落地之一）
 
 ## 1. 动机
 
@@ -665,9 +665,9 @@ Bash 分类器无法 100% 准确（复合命令、管道、自定义脚本）。
 - `aemeath.json` 的 `reasoning_graph` 配置段
 - `aemeath:agent:runtime` 的 graph 转换日志
 
-### 6.3 与 `agent-orchestration.md` 的关系
+### 6.3 与 `05-agent-orchestration.md` 的关系
 
-`agent-orchestration.md` 在 Workflow / Graph 维度标注 aemeath 当前为空，并列举了四个探索方向。本文档是其中 **"动态 reasoning 参数"** 方向的具体落地，属于最小侵入的 graph 引入方式：
+`05-agent-orchestration.md` 在 Workflow / Graph 维度标注 aemeath 当前为空，并列举了四个探索方向。本文档是其中 **"动态 reasoning 参数"** 方向的具体落地，属于最小侵入的 graph 引入方式：
 
 - **不引入完整 workflow engine**——没有 DAG 调度、没有节点持久化、没有分支恢复
 - **不改 agent loop 控制流**——边是推断式的观察，不是强制的转移

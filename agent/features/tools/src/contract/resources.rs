@@ -1,7 +1,7 @@
 //! Tool 执行所需的共享资源（tools crate 自包含）。
 //!
 //! 由 runtime 的 `RuntimeResources` 构造时映射填充。
-//! 详见 `docs/design/context-boundaries.md`。
+//! 详见 `docs/design/03-runtime-design.md` §"Runtime Context 职责边界"。
 
 use std::sync::Arc;
 
