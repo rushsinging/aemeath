@@ -53,8 +53,10 @@ impl OpenAICompatibleProvider {
     pub(crate) fn apply_reasoning_fields(&self, request_body: &mut serde_json::Value) {
         let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
         if let Ok(guard) = self.reasoning_config.lock() {
+            // driver 自适应：clamp effort 到 provider 支持的档位
+            let clamped = guard.as_ref().map(|c| c.clamped(self.driver.as_ref()));
             self.driver
-                .apply_reasoning_fields(request_body, guard.as_ref(), reasoning_enabled);
+                .apply_reasoning_fields(request_body, clamped.as_ref(), reasoning_enabled);
         }
     }
 }

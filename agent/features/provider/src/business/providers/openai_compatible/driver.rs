@@ -27,6 +27,14 @@ pub trait ChatApiDriver: Send + Sync {
         reasoning_enabled: bool,
     );
 
+    /// 将 effort 字符串映射到本 driver 支持的档位。
+    ///
+    /// 默认实现原样返回；各 driver 按自身能力覆盖，
+    /// 将不支持的档位降级到最接近的可用值。
+    fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
+        effort
+    }
+
     /// 此 driver 支持的最高 ReasoningLevel。
     /// 默认 High，各 driver 按能力覆盖。
     fn max_reasoning_level(&self) -> ReasoningLevel {
@@ -70,6 +78,14 @@ impl ChatApiDriver for OpenAiDriver {
         } else if let Some(ReasoningConfig::ThinkingBudget(tokens)) = reasoning_config {
             request_body["reasoning"] =
                 serde_json::json!({"effort": effort_from_thinking_tokens(*tokens)});
+        }
+    }
+
+    /// OpenAI API 最高支持 high，xhigh/max 降级到 high。
+    fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
+        match effort {
+            "xhigh" | "max" => "high",
+            _ => effort,
         }
     }
 }
@@ -149,6 +165,14 @@ impl ChatApiDriver for VolcengineDriver {
         };
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({"type": thinking_type});
+    }
+
+    /// Volcengine 最高支持 medium，high 以上降级到 medium。
+    fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
+        match effort {
+            "high" | "xhigh" | "max" => "medium",
+            _ => effort,
+        }
     }
 
     fn max_reasoning_level(&self) -> ReasoningLevel {
