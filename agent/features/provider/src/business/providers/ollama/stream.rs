@@ -33,6 +33,7 @@ pub(crate) async fn parse_ollama_stream(
         cached_tokens: None,
         cache_creation_tokens: None,
         reasoning_tokens: None,
+        total_tokens: None,
     };
     let mut stop_reason = crate::business::types::StopReason::EndTurn;
 

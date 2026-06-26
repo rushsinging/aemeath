@@ -611,7 +611,13 @@ where
                 let cached = cached_tokens.unwrap_or(0);
                 let cache_write = cache_creation.unwrap_or(0);
                 let reasoning = reasoning_tokens.unwrap_or(0);
-                let total_tokens = last_api_input_tokens + last_api_output_tokens + reasoning;
+                // output_tokens 已包含 reasoning_tokens，无需额外累加。
+                // 优先使用 provider 返回的 total_tokens；缺失时回退到 input + output。
+                let total_tokens = resp
+                    .usage
+                    .total_tokens
+                    .map(|v| v as u64)
+                    .unwrap_or(last_api_input_tokens + last_api_output_tokens);
                 let effective_window =
                     crate::business::compact::effective_context_window(context_size, 8192) as u64;
                 let threshold =

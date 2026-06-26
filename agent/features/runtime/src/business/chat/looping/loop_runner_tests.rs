@@ -172,6 +172,7 @@ impl LlmProvider for TwoTurnProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -235,6 +236,7 @@ impl LlmProvider for SequenceProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -981,6 +983,7 @@ impl LlmProvider for IdenticalReplyProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -1221,6 +1224,7 @@ impl LlmProvider for RecordingProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -1471,6 +1475,7 @@ impl LlmProvider for CancellableThenNormalProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -1699,6 +1704,7 @@ impl LlmProvider for CompleteThenCancellableProvider {
                 cached_tokens: None,
                 cache_creation_tokens: None,
                 reasoning_tokens: None,
+                total_tokens: None,
             },
             stop_reason: StopReason::EndTurn,
         })
@@ -1944,6 +1950,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
                     cached_tokens: None,
                     cache_creation_tokens: None,
                     reasoning_tokens: None,
+                    total_tokens: None,
                 },
                 stop_reason: StopReason::EndTurn,
             })

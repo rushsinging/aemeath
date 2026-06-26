@@ -117,6 +117,11 @@ pub struct Usage {
     /// or `usage.reasoning_tokens` (if provider supports it).
     #[serde(default)]
     pub reasoning_tokens: Option<u32>,
+    /// Total tokens for this request (`prompt_tokens + completion_tokens`).
+    /// Parsed from `usage.total_tokens` (OpenAI-compatible / Anthropic).
+    /// Falls back to `input_tokens + output_tokens` when the provider omits this field.
+    #[serde(default)]
+    pub total_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
