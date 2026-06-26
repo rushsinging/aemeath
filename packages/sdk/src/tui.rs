@@ -58,9 +58,14 @@ pub struct ClipboardImageView {
     pub height: Option<u32>,
 }
 
-impl From<ClipboardImageView> for crate::ToolResultImage {
+/// `ClipboardImageView` → `ChatInputImage`（TUI→Runtime 通道）。
+///
+/// 默认 `id` 为空字符串（无占位上下文），实际提交时由 `ImageSpan::placeholder()`
+/// 覆写。`From<ClipboardImageView>` 在 clipboard 即时插入路径不参与运行时配对。
+impl From<ClipboardImageView> for crate::ChatInputImage {
     fn from(value: ClipboardImageView) -> Self {
         Self {
+            id: String::new(),
             base64: value.base64,
             media_type: value.media_type,
         }

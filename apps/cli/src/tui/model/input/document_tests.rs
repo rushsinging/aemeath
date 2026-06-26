@@ -460,8 +460,10 @@ fn test_drain_images_returns_in_order() {
     doc.insert_image(make_test_image(20));
     let images = doc.drain_images();
     assert_eq!(images.len(), 2);
-    assert_eq!(images[0].final_size, 10);
-    assert_eq!(images[1].final_size, 20);
+    // 按文档中插入顺序返回 (placeholder, image) 配对
+    assert_eq!(images[0].0, "[Image #1]");
+    assert_eq!(images[0].1.media_type, "image/png"); // make_test_image 固定 png
+    assert_eq!(images[1].0, "[Image #2]");
     assert!(doc.image_spans.is_empty());
 }
 

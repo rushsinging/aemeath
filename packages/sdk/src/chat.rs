@@ -3,7 +3,7 @@
 use crate::{ChatInputEventPort, ChatMessage, QueueDrainPort};
 
 pub use crate::chat_event::{AddedInput, ChatEvent, ChatEventContext, ToolCallStatusView};
-pub use crate::chat_result::{ChatResult, ChatStream, ToolResultImage};
+pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
     HookEventView, HookExecutionResultView, OptionItem, WorkspaceContextView,
@@ -39,12 +39,13 @@ pub enum ChatInputEvent {
     /// 普通用户消息，延展当前 Chat 为新的 Turn。
     ///
     /// `id` 是唯一标识本次输入的 UUIDv7（#390 A2）。
-    /// `images` 携带图片数据（base64 + media_type），使内联/粘贴/文件图片均能
-    /// 经事件通道存活到达 LLM（#402：A1 之前只带 display_path，内联图被丢）。
+    /// `images` 携带图片数据（`ChatInputImage` 含 `id` 占位符），使内联/粘贴/文件
+    /// 图片均能经事件通道存活到达 LLM（#402 + #fix-tui-image-input-output）：
+    /// `text` 中出现的 `[Image #N]` ↔ `images[i].id == "[Image #N]"`（1-based ↔ 0-based）。
     UserMessage {
         id: crate::InputId,
         text: String,
-        images: Vec<crate::ToolResultImage>,
+        images: Vec<crate::ChatInputImage>,
     },
     /// 忙碌期间输入的 slash/control command，永不作为 user message 发给 LLM。
     ControlCommand { raw: String },
@@ -66,7 +67,7 @@ pub enum ChatInputEvent {
 }
 
 impl ChatInputEvent {
-    pub fn user_message(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
+    pub fn user_message(text: impl Into<String>, images: Vec<crate::ChatInputImage>) -> Self {
         Self::UserMessage {
             id: crate::InputId::new_v7(),
             text: text.into(),
@@ -74,7 +75,7 @@ impl ChatInputEvent {
         }
     }
 
-    pub fn classify_text(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
+    pub fn classify_text(text: impl Into<String>, images: Vec<crate::ChatInputImage>) -> Self {
         let text = text.into();
         if text.trim_start().starts_with('/') {
             Self::ControlCommand { raw: text }
@@ -119,7 +120,8 @@ mod tests {
 
     #[test]
     fn test_chat_input_event_classify_text_user_message() {
-        let img = crate::ToolResultImage {
+        let img = crate::ChatInputImage {
+            id: "[Image #1]".to_string(),
             base64: "AAAA".to_string(),
             media_type: "image/png".to_string(),
         };
@@ -135,7 +137,8 @@ mod tests {
 
     #[test]
     fn test_chat_input_event_classify_text_control_command() {
-        let img = crate::ToolResultImage {
+        let img = crate::ChatInputImage {
+            id: "[Image #1]".to_string(),
             base64: "x".to_string(),
             media_type: "image/png".to_string(),
         };

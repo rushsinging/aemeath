@@ -51,7 +51,7 @@ impl OpenAICompatibleProvider {
                             "text": text
                         }));
                     }
-                    ContentBlock::Image { source } => match source {
+                    ContentBlock::Image { source, .. } => match source {
                         share::message::ImageSource::Base64 { media_type, data } => {
                             content_parts.push(serde_json::json!({
                                 "type": "image_url",

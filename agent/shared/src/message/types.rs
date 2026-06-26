@@ -78,6 +78,12 @@ pub enum ContentBlock {
     },
     Image {
         source: ImageSource,
+        /// TUI 端输入时的占位符（形如 `"[Image #1]"`），用于 session resume 时把
+        /// image block 重新插入到 text 中正确位置（#fix-tui-image-input-output）。
+        /// round-trip 字段，**不发给 LLM**——provider adapter 组装时丢弃。
+        /// 旧 history 没有此字段，`#[serde(default)]` 兼容。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placeholder: Option<String>,
     },
     ToolUse {
         id: String,
@@ -142,6 +148,7 @@ impl ContentBlock {
     pub fn base64_image(data: String, media_type: String) -> Self {
         ContentBlock::Image {
             source: ImageSource::Base64 { media_type, data },
+            placeholder: None,
         }
     }
 

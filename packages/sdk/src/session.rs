@@ -53,13 +53,14 @@ impl ChatMessage {
         }
     }
 
-    pub fn user_with_images(text: impl Into<String>, images: Vec<crate::ToolResultImage>) -> Self {
+    pub fn user_with_images(text: impl Into<String>, images: Vec<crate::ChatInputImage>) -> Self {
         let mut blocks = vec![ContentBlock::text(text)];
         blocks.extend(images.into_iter().map(|image| ContentBlock::Image {
             source: crate::content::ImageSource::Base64 {
                 media_type: image.media_type,
                 data: image.base64,
             },
+            placeholder: Some(image.id),
         }));
         Self {
             role: "user".to_string(),

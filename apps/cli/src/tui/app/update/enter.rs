@@ -42,9 +42,18 @@ impl App {
     /// 单一真相驱动（A1 不动回显机制），此处只入队「排队中」占位并发送事件。
     pub(super) fn submit_user_input_event(&mut self, submission: InputSubmission) -> UpdateResult {
         // 图片携带 base64 数据（含内联/粘贴图，display_path 可能为 None）经事件通道送达
-        // runtime，由 runtime 组装 image block（#402）。
-        let images: Vec<sdk::ToolResultImage> =
-            submission.images.into_iter().map(Into::into).collect();
+        // runtime；submission.images 保留 placeholder id（#fix-tui-image-input-output）
+        // — runtime 按 text 中 `[Image #N]` 出现顺序穿插拆 image block，image 仍按
+        // TUI 端出现顺序（drain_images 已按 span.start 排好）。
+        let images: Vec<sdk::ChatInputImage> = submission
+            .images
+            .into_iter()
+            .map(|(placeholder, image)| sdk::ChatInputImage {
+                id: placeholder,
+                base64: image.base64,
+                media_type: image.media_type,
+            })
+            .collect();
         // 生成一次 InputId，同时用于事件 id 与占位块 input_id——两者必须相同（#390 A3）。
         let input_id = sdk::InputId::new_v7();
         let event = sdk::ChatInputEvent::UserMessage {
@@ -84,7 +93,7 @@ mod tests {
     }
 
     /// 提取本次提交产生的 `SendChatInputEvent` 的 `UserMessage` 图片（断言辅助）。
-    fn sent_user_message_images(result: &UpdateResult) -> Option<&Vec<sdk::ToolResultImage>> {
+    fn sent_user_message_images(result: &UpdateResult) -> Option<&Vec<sdk::ChatInputImage>> {
         result.effects.iter().find_map(|effect| match effect {
             Effect::SendChatInputEvent {
                 event: sdk::ChatInputEvent::UserMessage { images, .. },
@@ -188,26 +197,28 @@ mod tests {
 
     /// #402 回归：内联/粘贴图片（`display_path: None` 但有 base64）必须经事件通道
     /// 携带 base64，而非被 `display_path` filter 丢弃。
+    /// #fix-tui-image-input-output：placeholder 由 `ImageSpan::placeholder()` 提供。
     #[test]
     fn test_submit_carries_inline_image_base64() {
         let mut app = test_app();
         let submission = InputSubmission {
             text: "看图".to_string(),
             display_text: "看图".to_string(),
-            images: vec![sdk::ClipboardImageView {
-                base64: "aW1nZGF0YQ==".to_string(),
-                media_type: "image/png".to_string(),
-                final_size: 7,
-                display_path: None,
-                width: None,
-                height: None,
-            }],
+            images: vec![(
+                "[Image #1]".to_string(),
+                sdk::ChatInputImage {
+                    id: String::new(),
+                    base64: "aW1nZGF0YQ==".to_string(),
+                    media_type: "image/png".to_string(),
+                },
+            )],
         };
 
         let result = app.submit_user_input_event(submission);
 
         let images = sent_user_message_images(&result).expect("应发出带 images 的 UserMessage");
         assert_eq!(images.len(), 1, "内联图片不应被丢弃");
+        assert_eq!(images[0].id, "[Image #1]", "应保留 ImageSpan 占位符");
         assert_eq!(images[0].base64, "aW1nZGF0YQ==");
         assert_eq!(images[0].media_type, "image/png");
     }

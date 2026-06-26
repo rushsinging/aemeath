@@ -241,7 +241,7 @@ impl App {
                 if !self.chat.is_processing && !self.input.just_pasted =>
             {
                 self.input.just_pasted = true;
-                self.append_system_notice("[reading clipboard image...]");
+                // 删：[reading clipboard image...] —— 同 paste_handler.rs 路径（#fix-tui-image-input-output）
                 return UpdateResult::one(Effect::ReadClipboardImage);
             }
             (KeyModifiers::NONE, KeyCode::End) => {

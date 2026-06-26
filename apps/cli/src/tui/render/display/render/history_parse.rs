@@ -60,6 +60,8 @@ fn parse_history_user(
     for block in parsed_blocks {
         match block {
             HistoryUserBlock::Text(block_text) => text.push_str(block_text),
+            // #fix-tui-image-input-output：image 占位符拼入 text
+            HistoryUserBlock::Image(placeholder) => text.push_str(&placeholder),
             HistoryUserBlock::ToolResult { .. } => has_tool_result = true,
         }
     }
@@ -119,6 +121,11 @@ pub(super) struct HistoryToolResult<'a> {
 #[derive(Debug, Eq, PartialEq)]
 enum HistoryUserBlock<'a> {
     Text(&'a str),
+    /// #fix-tui-image-input-output：image block 渲染时还原为占位符
+    /// `[Image #N]`（由 SDK ContentBlock::Image.placeholder 携带）。
+    /// 拼接时直接推入 `text`，让 resume 后的用户消息文本含占位符。
+    /// String owned（不用 `&'a str`）以承载 `placeholder.unwrap_or_else` 的临时值。
+    Image(String),
     ToolResult {
         tool_use_id: &'a str,
         content: &'a serde_json::Value,
@@ -149,9 +156,15 @@ fn parse_history_user_blocks(
             sdk::ContentBlock::ToolUse { .. } => Err(
                 HistoryDisplayParseError::UnsupportedUserBlock("tool_use".to_string()),
             ),
-            sdk::ContentBlock::Image { .. } => Err(HistoryDisplayParseError::UnsupportedUserBlock(
-                "image".to_string(),
-            )),
+            sdk::ContentBlock::Image { placeholder, .. } => {
+                    // #fix-tui-image-input-output：image block 渲染为占位符（[Image #N]），
+                    // 保留 round-trip 时原占位符；如果 placeholder 为 None（旧 history），
+                    // 用 `[Image]` 作为兜底。`placeholder` 是 `&Option<String>`，
+                    // `clone()` 避免移动后无法在其它分支复用。
+                    Ok(HistoryUserBlock::Image(
+                        placeholder.clone().unwrap_or_else(|| "[Image]".to_string()),
+                    ))
+                }
         })
         .collect()
 }
@@ -169,6 +182,8 @@ pub(super) fn collect_following_tool_results(
         .into_iter()
         .filter_map(|block| match block {
             HistoryUserBlock::Text(_) => None,
+            // #fix-tui-image-input-output：image 块不带 tool_use_id，跳过
+            HistoryUserBlock::Image(_) => None,
             HistoryUserBlock::ToolResult {
                 tool_use_id,
                 content,
@@ -261,6 +276,7 @@ mod tests {
                 media_type: "image/png".to_string(),
                 data: "iVBOR".to_string(),
             },
+            placeholder: Some("[Image #1]".to_string()),
         }
     }
 
@@ -337,14 +353,16 @@ mod tests {
         );
     }
 
+    /// #fix-tui-image-input-output：image block 现在按占位符 `[Image #N]` 渲染
+    /// （保留 round-trip 位置），而非报错。
     #[test]
-    fn test_parse_user_image_unsupported() {
+    fn test_parse_user_image_renders_placeholder() {
         let m = msg("user", vec![image_block()]);
         assert_eq!(
             HistoryDisplayMessage::parse(&m),
-            Err(HistoryDisplayParseError::UnsupportedUserBlock(
-                "image".to_string()
-            ))
+            Ok(HistoryDisplayMessage::User {
+                text: "[Image #1]".to_string()
+            })
         );
     }
 

@@ -11,14 +11,19 @@ impl Message {
     }
 
     pub fn text_content(&self) -> String {
+        // 拼接时还原 image block 的 placeholder（`[Image #N]`）到原位
+        //（#fix-tui-image-input-output），让上层只读 text 也能看到完整输入。
         self.content
             .iter()
-            .filter_map(|block| match block {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                _ => None,
+            .map(|block| match block {
+                ContentBlock::Text { text } => text.as_str(),
+                ContentBlock::Image {
+                    placeholder: Some(ph),
+                    ..
+                } => ph.as_str(),
+                _ => "",
             })
-            .collect::<Vec<_>>()
-            .join("")
+            .collect::<String>()
     }
 
     pub fn source(&self) -> MessageSource {

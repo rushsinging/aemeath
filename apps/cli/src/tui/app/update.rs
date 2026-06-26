@@ -143,11 +143,11 @@ impl App {
                 match sdk::classify_paste(&text) {
                     sdk::PasteKind::Empty => {
                         self.input.just_pasted = true;
-                        self.append_system_notice("[reading clipboard image...]");
+                        // 删：[reading clipboard image...] —— 同 paste_handler.rs 路径（#fix-tui-image-input-output）
                         return UpdateResult::one(Effect::ReadClipboardImage);
                     }
                     sdk::PasteKind::ImageFile => {
-                        self.append_system_notice(format!("[loading image: {}...]", text.trim()));
+                        // 删：[loading image: ...] —— 同上（#fix-tui-image-input-output）
                         self.input.just_pasted = true;
                         return UpdateResult::one(Effect::ProcessImageFile {
                             path: text.trim().to_string(),
