@@ -102,6 +102,8 @@ aemeath/                    # workspace root
 > **废弃文件**：`input.log` / `output.log` / `tool.log` / `audit.log` / `agent.log` 已废弃，NEVER 再使用。详见 `specs/logging.md`。
 >
 > **终端测试**：`echo '{prompt}' | AEMEATH_VERSION= RUST_LOG= cargo run -- -qv`（`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试；`AEMEATH_VERSION=` 覆盖版本号、`RUST_LOG=` 覆盖日志级别，方便测试）。
+>
+> **日志级别**：全局配置 `logging.level` 默认 `info`，debug 级别日志仅在文件和 stderr 中可见（文件已路由到对应 target 文件）。调试时用 `RUST_LOG` 环境变量按 target 单独拉高：`RUST_LOG=aemeath:tui=debug,aemeath:agent:runtime=debug cargo run`。
 ├── memory/                  # 持久化记忆存储
 ├── sessions/                # 会话持久化
 ├── skills/                  # 全局 Skills
