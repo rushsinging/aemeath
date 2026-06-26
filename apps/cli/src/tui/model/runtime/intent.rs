@@ -1,6 +1,7 @@
 use super::spinner::SpinnerPhase;
 use super::status_notice::StatusNotice;
 use super::workspace::WorktreeKind;
+use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeIntent {
@@ -45,5 +46,18 @@ pub enum RuntimeIntent {
     StopSpinner,
     UpdateTaskLines(Vec<String>),
     SetStatusNotice(StatusNotice),
+    /// 临时 status notice，到 `expires_at` 后由 SpinnerTick 回退到 graph_phase 派生态。
+    SetTransientStatusNotice {
+        notice: StatusNotice,
+        expires_at: Instant,
+    },
     SetThinking(bool),
+    /// Reasoning Graph 阶段变化。`None` 表示 graph 不存在或回 Idle。
+    SetGraphPhase(Option<String>),
+    /// Compact 进度更新。`None` 清除进度。
+    SetCompactProgress {
+        stage: String,
+        current: Option<u32>,
+        total: Option<u32>,
+    },
 }

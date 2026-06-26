@@ -30,7 +30,7 @@ mod tool_identity;
 mod tools;
 
 pub use events::{
-    ChatEventSink, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
+    ChatEventSink, CompactStage, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
     RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 pub use input_gate::{

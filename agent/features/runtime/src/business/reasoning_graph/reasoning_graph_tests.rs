@@ -17,8 +17,8 @@ fn test_node_default_effort() {
         ReasoningNode::Explore.default_effort(),
         ReasoningLevel::Medium
     );
-    assert_eq!(ReasoningNode::Plan.default_effort(), ReasoningLevel::High);
-    assert_eq!(ReasoningNode::Execute.default_effort(), ReasoningLevel::Low);
+    assert_eq!(ReasoningNode::Plan.default_effort(), ReasoningLevel::Max);
+    assert_eq!(ReasoningNode::Execute.default_effort(), ReasoningLevel::Off);
     assert_eq!(
         ReasoningNode::Verify.default_effort(),
         ReasoningLevel::Medium
@@ -265,10 +265,10 @@ fn test_current_effort_reflects_node() {
     assert_eq!(graph.current_effort(), ReasoningLevel::Medium);
 
     graph.current = ReasoningNode::Plan;
-    assert_eq!(graph.current_effort(), ReasoningLevel::High);
+    assert_eq!(graph.current_effort(), ReasoningLevel::Max);
 
     graph.current = ReasoningNode::Execute;
-    assert_eq!(graph.current_effort(), ReasoningLevel::Low);
+    assert_eq!(graph.current_effort(), ReasoningLevel::Off);
 
     graph.current = ReasoningNode::Verify;
     assert_eq!(graph.current_effort(), ReasoningLevel::Medium);

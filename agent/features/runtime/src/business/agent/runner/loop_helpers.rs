@@ -4,7 +4,9 @@ use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
+use crate::business::compact::needs_compaction_actual;
 use crate::LOG_TARGET;
+use provider::api::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
     pub(super) fn progress_tools_done(&self, turn_number: usize, result_count: usize) {
@@ -69,33 +71,43 @@ impl<'a> SubAgentRun<'a> {
         logging::context::set_current_turn(turn_number);
     }
 
-    pub(super) fn compact_if_needed(&mut self, api_input: u64, turn_number: usize) {
-        let ctx_pct = api_input * 100 / self.ctx_context_size as u64;
-        let urgency = if ctx_pct >= 50 {
-            2
-        } else if ctx_pct >= 35 {
-            1
-        } else {
-            0
-        };
+    pub(super) async fn compact_if_needed(
+        &mut self,
+        api_input: u64,
+        last_output_tokens: u64,
+        turn_number: usize,
+    ) {
+        if !needs_compaction_actual(
+            api_input,
+            last_output_tokens,
+            None,
+            None,
+            self.ctx_context_size,
+        ) {
+            return;
+        }
 
-        if urgency >= 2 {
-            let old_len = self.messages.len();
-            if let Some(result) = crate::business::compact::compact_messages(
-                &self.messages,
-                &self.system,
-                self.ctx_context_size,
-            ) {
-                self.messages = result.recent_messages;
-                (self.progress)(
-                    Some(turn_number),
-                    &format!(
-                        "Agent compacted: {} → {} messages",
-                        old_len,
-                        self.messages.len()
-                    ),
-                );
-            }
+        let old_len = self.messages.len();
+        let result = crate::business::compact::compact_messages_with_llm(
+            &self.messages,
+            &self.system,
+            self.ctx_context_size,
+            Some(&self.client),
+            None,
+        )
+        .await;
+
+        if let Some(result) = result {
+            self.messages = result.recent_messages;
+            inject_summary_into_system_blocks(&mut self.system_blocks, result.summary);
+            (self.progress)(
+                Some(turn_number),
+                &format!(
+                    "Agent compacted: {} → {} messages",
+                    old_len,
+                    self.messages.len()
+                ),
+            );
         }
     }
 
@@ -112,6 +124,30 @@ impl<'a> SubAgentRun<'a> {
                 )
             })
             .unwrap_or_else(|| format!("Sub-agent reached max turns ({})", self.max_turns))
+    }
+}
+
+/// Sub-agent compact summary 在 system_blocks 中的标识，用于查找和替换。
+const COMPACT_SUMMARY_TAG: &str = "<compact-summary>";
+
+/// 将 compact summary 注入 system_blocks（与主循环行为一致）。
+///
+/// - 若已有 compact summary block（含 `COMPACT_SUMMARY_TAG` 标记），**替换**之（不累积）。
+/// - 否则追加一个新 block（`SystemBlock::dynamic`，不缓存）。
+pub(super) fn inject_summary_into_system_blocks(
+    system_blocks: &mut Vec<SystemBlock>,
+    summary: String,
+) {
+    let block_text = format!("{COMPACT_SUMMARY_TAG}\n{summary}\n</compact-summary>");
+
+    // 查找已有的 compact summary block 并替换
+    if let Some(existing) = system_blocks
+        .iter_mut()
+        .find(|b| b.text.starts_with(COMPACT_SUMMARY_TAG))
+    {
+        existing.text = block_text;
+    } else {
+        system_blocks.push(SystemBlock::dynamic(block_text));
     }
 }
 
@@ -192,5 +228,53 @@ mod tests {
         assert!(text.contains("<persisted-output>"));
         assert!(text.len() < MAX_TOOL_RESULT_CHARS);
         assert!(text.contains(&session_id));
+    }
+
+    // ── inject_summary_into_system_blocks ───────────────────────
+
+    #[test]
+    fn test_inject_summary_appends_new_block_when_absent() {
+        let mut blocks = vec![SystemBlock::cached("system prompt".to_string())];
+
+        inject_summary_into_system_blocks(&mut blocks, "first summary".to_string());
+
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[1].text.contains("<compact-summary>"));
+        assert!(blocks[1].text.contains("first summary"));
+        assert!(
+            blocks[1].cache_control.is_none(),
+            "summary block should not be cached"
+        );
+    }
+
+    #[test]
+    fn test_inject_summary_replaces_existing_block_on_second_compact() {
+        let mut blocks = vec![SystemBlock::cached("system prompt".to_string())];
+
+        inject_summary_into_system_blocks(&mut blocks, "first summary".to_string());
+        inject_summary_into_system_blocks(&mut blocks, "second summary".to_string());
+
+        assert_eq!(
+            blocks.len(),
+            2,
+            "should not accumulate summary blocks across compactions"
+        );
+        assert!(blocks[1].text.contains("second summary"));
+        assert!(!blocks[1].text.contains("first summary"));
+    }
+
+    #[test]
+    fn test_inject_summary_preserves_original_system_block() {
+        let mut blocks = vec![
+            SystemBlock::cached("original system".to_string()),
+            SystemBlock::cached("guidance".to_string()),
+        ];
+
+        inject_summary_into_system_blocks(&mut blocks, "summary text".to_string());
+
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].text, "original system");
+        assert_eq!(blocks[1].text, "guidance");
+        assert!(blocks[2].text.contains("summary text"));
     }
 }

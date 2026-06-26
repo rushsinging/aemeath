@@ -14,6 +14,25 @@
 
 use serde_json::Value;
 
+/// 运行时元字段：由系统提示要求 LLM 注入到 tool call input，用于 reasoning
+/// graph 分类等运行时用途，**不属于任何工具的业务 schema**。校验与派发前
+/// 必须剥离，否则严格 schema（无 `additionalProperties`）的工具会被误判为
+/// "多余字段"（issue #491）。
+pub const RUNTIME_META_KEYS: &[&str] = &["phase"];
+
+/// 从 tool input 中就地移除运行时元字段（见 [`RUNTIME_META_KEYS`]）。
+///
+/// 仅对 object 类型 input 生效；非 object（字符串/数组等）原样返回。
+pub fn strip_runtime_meta(input: &mut Value) {
+    let obj = match input.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+    for key in RUNTIME_META_KEYS {
+        obj.remove(*key);
+    }
+}
+
 /// 类型不匹配记录。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeMismatch {
@@ -560,5 +579,68 @@ mod tests {
         let msg = format_tool_input_error(&mismatch);
         assert!(msg.contains("a"));
         assert!(!msg.contains("多余"), "无多余字段时不应出现「多余」段落");
+    }
+
+    // === issue #491：剥离 phase 等运行时元字段 ===
+
+    #[test]
+    fn test_strip_runtime_meta_removes_phase() {
+        let mut input = serde_json::json!({ "skill": "commit", "phase": "execute" });
+        strip_runtime_meta(&mut input);
+        assert_eq!(input, serde_json::json!({ "skill": "commit" }));
+    }
+
+    #[test]
+    fn test_strip_runtime_meta_preserves_business_fields() {
+        let mut input = serde_json::json!({
+            "file_path": "/tmp/a",
+            "content": "hi",
+            "phase": "plan"
+        });
+        strip_runtime_meta(&mut input);
+        assert_eq!(
+            input,
+            serde_json::json!({ "file_path": "/tmp/a", "content": "hi" })
+        );
+    }
+
+    #[test]
+    fn test_strip_runtime_meta_non_object_is_noop() {
+        let mut input = serde_json::json!("not an object");
+        strip_runtime_meta(&mut input);
+        assert_eq!(input, serde_json::json!("not an object"));
+    }
+
+    #[test]
+    fn test_validate_passes_after_stripping_phase() {
+        // 模拟 issue #491 场景：严格 schema（无 additionalProperties）的工具
+        // 收到含 phase 的 input，剥离后应校验通过。
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "skill": { "type": "string" },
+                "args": { "type": "string" }
+            },
+            "required": ["skill"]
+        });
+        let mut input = serde_json::json!({ "skill": "commit", "phase": "execute" });
+        strip_runtime_meta(&mut input);
+        assert!(validate_tool_input("Skill", &schema, &input).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_phase_when_not_stripped() {
+        // 对照组：不剥离时严格 schema 会把 phase 判为多余字段（复现 #491）。
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "skill": { "type": "string" },
+                "args": { "type": "string" }
+            },
+            "required": ["skill"]
+        });
+        let input = serde_json::json!({ "skill": "commit", "phase": "execute" });
+        let err = validate_tool_input("Skill", &schema, &input).unwrap_err();
+        assert_eq!(err.unexpected, vec!["phase".to_string()]);
     }
 }

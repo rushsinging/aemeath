@@ -52,6 +52,12 @@ pub struct MinimaxDriver;
 #[derive(Debug)]
 pub struct MimoDriver;
 
+#[derive(Debug)]
+pub struct DeepSeekDriver;
+
+#[derive(Debug)]
+pub struct AgnesDriver;
+
 impl ChatApiDriver for OpenAiDriver {
     fn apply_reasoning_fields(
         &self,
@@ -81,6 +87,14 @@ impl ChatApiDriver for ZhipuDriver {
         };
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({"type": thinking_type});
+
+        // thinking 开启时附带 reasoning_effort 字段（仅 GLM-5.2 生效）。
+        // 服务端兼容映射：low/medium → high, xhigh → max。
+        if enabled {
+            if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
+                request_body["reasoning_effort"] = serde_json::Value::String(effort);
+            }
+        }
     }
 
     fn max_reasoning_level(&self) -> ReasoningLevel {
@@ -213,6 +227,53 @@ impl ChatApiDriver for MimoDriver {
     }
 }
 
+impl ChatApiDriver for DeepSeekDriver {
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        reasoning_enabled: bool,
+    ) {
+        let enabled = match reasoning_config {
+            Some(ReasoningConfig::Bool(value)) => *value,
+            _ => reasoning_enabled,
+        };
+        let thinking_type = if enabled { "enabled" } else { "disabled" };
+        request_body["thinking"] = serde_json::json!({"type": thinking_type});
+
+        // thinking 开启时附带 reasoning_effort 顶层字段。
+        // DeepSeek 仅认 high/max，服务端做兼容映射：
+        // low/medium → high, xhigh → max。
+        if enabled {
+            if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
+                request_body["reasoning_effort"] = serde_json::Value::String(effort);
+            }
+        }
+    }
+
+    fn max_reasoning_level(&self) -> ReasoningLevel {
+        ReasoningLevel::Max
+    }
+}
+
+impl ChatApiDriver for AgnesDriver {
+    fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        reasoning_config: Option<&ReasoningConfig>,
+        reasoning_enabled: bool,
+    ) {
+        // Agnes 使用 vLLM chat_template_kwargs.enable_thinking 控制思考开关。
+        // 仅支持开/关，不支持 effort 分级。
+        let enabled = match reasoning_config {
+            Some(ReasoningConfig::Bool(value)) => *value,
+            Some(ReasoningConfig::ThinkingBudget(_)) | Some(ReasoningConfig::Object(_)) => true,
+            None => reasoning_enabled,
+        };
+        request_body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": enabled });
+    }
+}
+
 pub(crate) fn driver_for_provider_driver(
     driver: ProviderDriverKind,
 ) -> Box<dyn ChatApiDriver + Send + Sync> {
@@ -223,6 +284,8 @@ pub(crate) fn driver_for_provider_driver(
         ProviderDriverKind::Volcengine => Box::new(VolcengineDriver),
         ProviderDriverKind::Minimax => Box::new(MinimaxDriver),
         ProviderDriverKind::Mimo => Box::new(MimoDriver),
+        ProviderDriverKind::DeepSeek => Box::new(DeepSeekDriver),
+        ProviderDriverKind::Agnes => Box::new(AgnesDriver),
         // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容驱动；兜底走 OpenAI 驱动。
         ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama => Box::new(OpenAiDriver),
     }

@@ -98,6 +98,8 @@ fn provider_driver_api_key_env_name(driver: ProviderDriverKind) -> Option<&'stat
         ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
         ProviderDriverKind::Minimax => Some("MINIMAX_API_KEY"),
         ProviderDriverKind::Mimo => Some("MIMO_API_KEY"),
+        ProviderDriverKind::DeepSeek => Some("DEEPSEEK_API_KEY"),
+        ProviderDriverKind::Agnes => Some("AGNES_API_KEY"),
         ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
         ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
     }

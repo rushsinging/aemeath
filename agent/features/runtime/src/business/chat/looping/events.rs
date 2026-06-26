@@ -55,6 +55,27 @@ pub enum RuntimeToolCallStatus {
     Running,
 }
 
+/// Compact 进度阶段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompactStage {
+    /// 正在分析/切分消息窗口
+    Preparing,
+    /// 正在执行 LLM 摘要（单次或 map-reduce 的某个 chunk）
+    Summarizing,
+    /// 正在清理 tool pairs / 组装结果
+    Finalizing,
+}
+
+impl CompactStage {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Preparing => "preparing",
+            Self::Summarizing => "summarizing",
+            Self::Finalizing => "finalizing",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
     Text {
@@ -153,6 +174,12 @@ pub enum RuntimeStreamEvent {
         node: ReasoningNode,
         effort: ReasoningLevel,
         prev: ReasoningNode,
+    },
+    /// Compact 进度通知。`current`/`total` 为 map-reduce chunk 计数（单次摘要时为 None）。
+    CompactProgress {
+        stage: CompactStage,
+        current: Option<usize>,
+        total: Option<usize>,
     },
 }
 

@@ -67,7 +67,7 @@ fn tool_call_cancelled_message(name: &str) -> String {
 async fn call_tool_with_timeout(
     tool: std::sync::Arc<dyn Tool>,
     name: &str,
-    input: serde_json::Value,
+    mut input: serde_json::Value,
     ctx: &ToolExecutionContext,
 ) -> Result<ToolResult, String> {
     if ctx.cancel.is_cancelled() {
@@ -77,6 +77,11 @@ async fn call_tool_with_timeout(
     // 预校验 input 是否符合 schema（issue #430）：一次性收集全部参数错误
     // （缺失/多余/类型/enum），返回结构化中文消息，加速模型纠正参数污染。
     // 失败时不占用 Err 通道（保留给 timeout/cancel 等运行时故障）。
+    //
+    // 先剥离运行时元字段（phase 等，issue #491）：这些由系统提示要求 LLM
+    // 注入，供 reasoning graph 使用，不属于任何工具业务 schema，必须在
+    // 校验与派发前移除，否则严格 schema 工具会被误判为"多余字段"。
+    super::input_validation::strip_runtime_meta(&mut input);
     if let Err(mismatch) =
         super::input_validation::validate_tool_input(name, &tool.input_schema(), &input)
     {

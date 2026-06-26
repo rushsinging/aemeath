@@ -119,6 +119,7 @@ impl RecordingSink {
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),
+            RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }

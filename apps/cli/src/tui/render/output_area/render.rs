@@ -2,7 +2,9 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::Line,
-    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
+    widgets::{
+        Gauge, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget,
+    },
 };
 
 use sdk::CharIdx;
@@ -154,6 +156,11 @@ impl OutputArea {
             view.auto_scroll,
             view.scroll_offset,
         );
+
+        // Compact 进度 Gauge：compact 期间叠加在输出区底部最后一行。
+        if let Some(cp) = live_status.compact_progress.as_ref() {
+            render_compact_gauge(content_area, buf, cp);
+        }
     }
 }
 
@@ -309,6 +316,32 @@ fn render_scrollbar(
     let mut scrollbar_state = ScrollbarState::new(max_scroll).position(current_position);
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
     StatefulWidget::render(scrollbar, scrollbar_area, buf, &mut scrollbar_state);
+}
+
+/// 渲染 compact 进度 Gauge，叠加在 content_area 最后一行。
+fn render_compact_gauge(
+    content_area: Rect,
+    buf: &mut ratatui::buffer::Buffer,
+    cp: &crate::tui::view_model::live_status::CompactProgressView,
+) {
+    if content_area.height == 0 {
+        return;
+    }
+    let gauge_area = Rect {
+        x: content_area.x,
+        y: content_area.bottom().saturating_sub(1),
+        width: content_area.width,
+        height: 1,
+    };
+    let ratio = (cp.ratio_millis as f64) / 1000.0;
+    let gauge = Gauge::default()
+        .block(ratatui::widgets::Block::default())
+        .gauge_style(
+            ratatui::style::Style::default().fg(crate::tui::render::theme::SPINNER_HIGHLIGHT),
+        )
+        .percent((ratio * 100.0).round().clamp(0.0, 100.0) as u16)
+        .label(cp.label.as_str());
+    Widget::render(gauge, gauge_area, buf);
 }
 
 #[cfg(test)]

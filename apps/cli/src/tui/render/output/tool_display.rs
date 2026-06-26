@@ -526,6 +526,76 @@ mod tests {
         assert!(text.contains("blocked by [1]"), "应包含 blockedBy: {text}");
     }
 
+    // ── Issue #486：TaskUpdate result 到达后 header 应带 task 标题 ──────
+
+    #[test]
+    fn test_format_tool_call_task_update_with_result_subject_shows_title() {
+        use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+        // LLM 只传 taskId + status（典型场景），subject 由 store 回填到 typed result
+        let payload = ToolResultPayload::new(
+            String::new(),
+            serde_json::json!({ "task_id": "2", "status": "Completed", "subject": "修复渲染 bug" }),
+            false,
+            0,
+        );
+        let (header, _) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"2","status":"completed"}"#,
+            Some(&payload),
+            None,
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("2"), "应包含 taskId: {text}");
+        assert!(
+            text.contains("修复渲染 bug"),
+            "result 到达后 header 应包含 subject: {text}"
+        );
+        assert!(text.contains("→ completed"), "应包含 status: {text}");
+    }
+
+    #[test]
+    fn test_format_tool_call_task_update_result_falls_back_to_input_subject() {
+        // result 无 typed subject 时回退到 input.subject
+        let payload = ToolResultPayload::new(
+            String::new(),
+            serde_json::json!({ "task_id": "3", "status": "InProgress" }),
+            false,
+            0,
+        );
+        let (header, _) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"3","subject":"重构模块"}"#,
+            Some(&payload),
+            None,
+        );
+        let text = line_to_string(&header);
+        assert!(
+            text.contains("重构模块"),
+            "typed subject 缺失时应回退 input.subject: {text}"
+        );
+    }
+
+    #[test]
+    fn test_format_tool_call_task_update_no_subject_anywhere_omits_title() {
+        // 既无 typed subject 也无 input.subject → 不显示标题占位（向后兼容）
+        let payload = ToolResultPayload::new(
+            String::new(),
+            serde_json::json!({ "task_id": "4", "status": "Completed" }),
+            false,
+            0,
+        );
+        let (header, _) = format_tool_call(
+            "TaskUpdate",
+            r#"{"taskId":"4","status":"completed"}"#,
+            Some(&payload),
+            None,
+        );
+        let text = line_to_string(&header);
+        assert!(text.contains("→ completed"), "应包含 status: {text}");
+        // 无标题时仍是合法格式 `Task 4 — → completed`，不 crash
+        assert!(!text.contains("— ,"), "不应出现空 parts 分隔符: {text}");
+    }
+
     #[test]
     fn test_format_tool_call_task_get_empty_id_no_question_mark() {
         let (header, _details) = format_tool_call("TaskGet", "{}", None, None);

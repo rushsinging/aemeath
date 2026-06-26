@@ -43,7 +43,7 @@ pub struct ProviderModelsConfig {
     #[serde(default, rename = "apiKey")]
     pub api_key: String,
 
-    /// Provider driver: "openai", "anthropic", "zhipu", "litellm", "volcengine", "minimax", "mimo", or "ollama".
+    /// Provider driver: "openai", "anthropic", "zhipu", "litellm", "volcengine", "minimax", "mimo", "deepseek", "agnes", or "ollama".
     #[serde(default)]
     pub driver: String,
 

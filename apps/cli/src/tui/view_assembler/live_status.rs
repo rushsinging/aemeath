@@ -36,10 +36,19 @@ impl LiveStatusAssembler {
             .iter()
             .flat_map(|text| queued_preview_lines(text))
             .collect();
+        let compact_progress = runtime.compact_progress.as_ref().map(|p| {
+            use crate::tui::view_model::live_status::CompactProgressView;
+            let ratio = p.ratio().clamp(0.0, 1.0);
+            CompactProgressView {
+                ratio_millis: (ratio * 1000.0).round() as u32,
+                label: p.label(),
+            }
+        });
         LiveStatusViewModel {
             spinner,
             queued_lines,
             task_lines: runtime.task_status.lines.clone(),
+            compact_progress,
         }
     }
 }

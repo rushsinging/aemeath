@@ -93,6 +93,8 @@ impl OpenAIProviderConfig {
                 ProviderDriverKind::Volcengine => "/chat/completions".to_string(),
                 ProviderDriverKind::Minimax => "/chat/completions".to_string(),
                 ProviderDriverKind::Mimo => "/chat/completions".to_string(),
+                ProviderDriverKind::DeepSeek => "/chat/completions".to_string(),
+                ProviderDriverKind::Agnes => "/chat/completions".to_string(),
                 // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容路径；
                 // 兜底归入 OpenAI 风格 suffix。
                 ProviderDriverKind::OpenAI
@@ -172,7 +174,9 @@ impl LlmClient {
             | ProviderDriverKind::LiteLLM
             | ProviderDriverKind::Volcengine
             | ProviderDriverKind::Minimax
-            | ProviderDriverKind::Mimo => {
+            | ProviderDriverKind::Mimo
+            | ProviderDriverKind::DeepSeek
+            | ProviderDriverKind::Agnes => {
                 let config =
                     OpenAIProviderConfig::from_driver(options.driver, options.driver.as_str());
                 Arc::new(crate::business::providers::OpenAICompatibleProvider::new(

@@ -6,7 +6,6 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::input::change::submitted_submission_from_changes;
 use crate::tui::model::input::intent::InputIntent;
-use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
@@ -109,8 +108,8 @@ impl App {
                     }
                     CtrlCAction::ClearInput => {
                         self.handle_input_intent(InputIntent::Clear);
-                        self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                            StatusNotice::warning("Input cleared (Ctrl+C again to exit)"),
+                        self.set_transient_notice(StatusNotice::warning(
+                            "Input cleared (Ctrl+C again to exit)",
                         ));
                         self.layout.mark_ctrlc_now();
                     }
@@ -122,8 +121,8 @@ impl App {
                             });
                         } else {
                             self.layout.mark_ctrlc_now();
-                            self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                                StatusNotice::warning("Press Ctrl+C again to exit"),
+                            self.set_transient_notice(StatusNotice::warning(
+                                "Press Ctrl+C again to exit",
                             ));
                         }
                     }
@@ -152,11 +151,7 @@ impl App {
                 if let Some(agent_client) = &spawn_refs.agent_client {
                     agent_client.cancel();
                 }
-                self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
-                        "Interrupted",
-                    )));
+                self.set_transient_notice(StatusNotice::warning("Interrupted"));
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 if !self.model.input.document.is_empty() {
@@ -172,15 +167,11 @@ impl App {
                         let event = sdk::ChatInputEvent::ControlCommand {
                             raw: submission.text.clone(),
                         };
-                        self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                            StatusNotice::warning("message event queued"),
-                        ));
+                        self.set_transient_notice(StatusNotice::warning("message event queued"));
                         return UpdateResult::one(Effect::SendChatInputEvent { event });
                     }
                     // 忙时普通消息：与首条提交统一经事件通道发 UserMessage。
-                    self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                        StatusNotice::warning("message event queued"),
-                    ));
+                    self.set_transient_notice(StatusNotice::warning("message event queued"));
                     return self.submit_user_input_event(submission);
                 }
             }

@@ -156,21 +156,15 @@ impl App {
         ));
     }
 
-    /// 将文本复制到系统剪贴板，并据结果在 status bar 给出反馈。
+    /// 将文本复制到系统剪贴板，并据结果在 status bar 给出临时反馈。
     fn copy_to_clipboard_effect(&mut self, text: &str) {
         match crate::tui::render::input::clipboard::copy_text(text) {
             Ok(()) => {
-                self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
-                        "已复制选中内容",
-                    )));
+                self.set_transient_notice(StatusNotice::success("已复制选中内容"));
             }
             Err(err) => {
                 crate::tui::log_warn!("复制选中内容失败: {err}");
-                self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(err)));
+                self.set_transient_notice(StatusNotice::warning(err));
             }
         }
     }

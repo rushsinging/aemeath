@@ -58,7 +58,7 @@ impl fmt::Display for ModelResolveError {
             ),
             Self::UnknownDriver { source, driver } => write!(
                 f,
-                "来源 '{}' 的 driver '{}' 不受支持。支持的 driver：anthropic, openai, zhipu, litellm, volcengine, minimax, mimo, ollama",
+                "来源 '{}' 的 driver '{}' 不受支持。支持的 driver：anthropic, openai, zhipu, litellm, volcengine, minimax, mimo, deepseek, agnes, ollama",
                 source, driver
             ),
         }

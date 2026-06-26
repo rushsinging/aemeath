@@ -330,6 +330,15 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::UserMessagesWithdrawn { texts } => {
             ChatEvent::UserMessagesWithdrawn { texts }
         }
+        crate::business::chat::RuntimeStreamEvent::CompactProgress {
+            stage,
+            current,
+            total,
+        } => ChatEvent::CompactProgress {
+            stage: stage.as_str().to_string(),
+            current: current.map(|n| n as u32),
+            total: total.map(|n| n as u32),
+        },
     }
 }
 
