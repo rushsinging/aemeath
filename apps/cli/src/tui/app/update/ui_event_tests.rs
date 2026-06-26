@@ -144,15 +144,19 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
 
     // 触发 handler
     let items = vec![
-        sdk::AddedInput {
-            id: id_a.clone(),
-            text: "hi".to_string(),
-        },
-        sdk::AddedInput {
-            id: id_b.clone(),
-            text: "yo".to_string(),
-        },
-    ];
+              sdk::ChatMessage {
+                  role: "user".to_string(),
+                  content: vec![sdk::ContentBlock::text("hi")],
+                  metadata: None,
+                  input_id: Some(id_a.clone()),
+              },
+              sdk::ChatMessage {
+                  role: "user".to_string(),
+                  content: vec![sdk::ContentBlock::text("yo")],
+                  metadata: None,
+                  input_id: Some(id_b.clone()),
+              },
+          ];
     app.update_ui(UiEvent::UserMessagesAdded(items), &ui_tx, &spawn_refs);
 
     // 占位全清
@@ -198,5 +202,72 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
         user_echo_texts,
         vec!["hi", "yo"],
         "应按序追加两条正式 UserMessage 回显"
+    );
+}
+
+/// #507 回归：UserMessagesAdded 携带 ChatMessage（typed blocks 含 Image.placeholder）
+/// 时，回显文本应经 message.text_content() 还原出用户视角完整文本（含占位符）。
+///
+/// 场景：用户输入"看图[Image #1]"（TUI 端 enqueue_submission_echo 用 display_text
+/// 写入排队块）；runtime 端构造 ChatMessage（content 含 Image { placeholder } + 对应
+/// input_id），通过 UserMessagesAdded 携带。
+/// handler 收到后：
+/// - 按 message.input_id 清除对应占位块
+/// - 用 message.text_content() 还原 "看图[Image #1]"，写入 UserMessage 回显
+#[test]
+fn test_user_messages_added_echoes_image_placeholder_from_message() {
+    use sdk::{ChatInputImage, ChatMessage};
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+
+    // 用户提交"看图[Image #1]"——TUI 端 enqueue 占位（display_text 含占位符）
+    let input_id = sdk::InputId::new_v7();
+    app.enqueue_submission_echo(input_id.clone(), "看图[Image #1]");
+    assert_eq!(app.model.conversation.queued_submissions.len(), 1);
+
+    // runtime 端构造的 ChatMessage：image block 携带 placeholder（用于 text_content 还原位置）
+    let mut message = ChatMessage::user_with_images(
+        "看图[Image #1]",
+        vec![ChatInputImage {
+            id: "[Image #1]".to_string(),
+            base64: "aW1nZGF0YQ==".to_string(),
+            media_type: "image/png".to_string(),
+        }],
+    );
+    message.input_id = Some(input_id.clone());
+    let items = vec![message];
+
+    app.update_ui(UiEvent::UserMessagesAdded(items), &ui_tx, &spawn_refs);
+
+    // 占位被清除
+    assert!(
+        app.model.conversation.queued_submissions.is_empty(),
+        "handler 应按 input_id 清占位"
+    );
+
+    // 回显文本应含占位符（"看图[Image #1]"）——这是 #507 修复目标
+    let user_echo_texts: Vec<&str> = app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|b| {
+            if let crate::tui::model::output_timeline::OutputTimelineItem::UserMessage {
+                text,
+                ..
+            } = b
+            {
+                Some(text.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        user_echo_texts,
+        vec!["看图[Image #1]"],
+        "回显应经 message.text_content() 还原含占位符（#507 修复目标）"
     );
 }

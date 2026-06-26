@@ -104,13 +104,18 @@ impl App {
                     before_queued
                 );
                 for item in items {
+                    // #507 修复：用 item.input_id 按 id 清占位（不依赖 text 匹配），
+                    // 用 item.text_content() 还原回显（含 Image placeholder）。
+                    let preview = item.text_content().chars().take(60).collect::<String>();
                     crate::tui::log_debug!(
-                        "UserMessagesAdded item id={} text_preview={:?}",
-                        item.id,
-                        item.text.chars().take(60).collect::<String>()
+                        "UserMessagesAdded item input_id={:?} text_preview={:?}",
+                        item.input_id.as_ref().map(|id| id.as_str().to_string()),
+                        preview
                     );
-                    self.clear_queued_submission_echo_by_id(&item.id);
-                    self.append_user_echo(item.text);
+                    if let Some(id) = item.input_id.as_ref() {
+                        self.clear_queued_submission_echo_by_id(id);
+                    }
+                    self.append_user_echo(item.text_content());
                 }
                 let after_queued = self.model.conversation.queued_submissions.len();
                 crate::tui::log_debug!("UserMessagesAdded done after_queued={}", after_queued);

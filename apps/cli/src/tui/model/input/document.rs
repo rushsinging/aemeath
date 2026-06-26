@@ -177,14 +177,20 @@ impl InputDocument {
         expanded
     }
 
-    /// 提交文本：展开 copied text 原文、剔除 image 占位。
+    /// 提交输入框文本。把所有 span（copied text + image placeholder）按原始 buffer 位置
+    /// 还原成完整文本，结果含 image placeholder（`[Image #N]`），与 TUI 端
+    /// `enqueue_submission_echo` 用的 `display_text` 一致。
+    ///
+    /// #507 修复：**保留** image placeholder（而非剔除为空），让 runtime 端
+    /// `Message::user_with_images` 能按 text 中 `[Image #N]` 占位符穿插拆块，
+    /// 最终 `text_content()` 还原出 "看图[Image #1]" 而非 "[Image #1]看图"。
     ///
     /// 基于**原始 buffer** 的位置统一遍历两类 span，避免先 expand 再定位导致错位。
     pub fn submit_text(&self) -> String {
         if self.copied_text_spans.is_empty() && self.image_spans.is_empty() {
             return self.buffer.trim().to_string();
         }
-        // 收集所有替换区间：copied text → 原文；image → 空
+        // 收集所有替换区间：copied text → 原文；image → 占位符 `[Image #N]`（保留）
         let mut replacements: Vec<(usize, usize, String)> = self
             .copied_text_spans
             .iter()
@@ -193,7 +199,7 @@ impl InputDocument {
         replacements.extend(
             self.image_spans
                 .iter()
-                .map(|span| (span.start, span.end, String::new())),
+                .map(|span| (span.start, span.end, span.placeholder())),
         );
         // 按 start 排序，正向构建结果，位置始终基于原始 buffer
         replacements.sort_by_key(|(start, _, _)| *start);

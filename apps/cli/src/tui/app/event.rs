@@ -80,8 +80,10 @@ pub enum AppEvent {
         context: UiTurnContext,
     },
     MessagesSync(Vec<sdk::ChatMessage>),
-    /// 批量用户输入归宿通知（每条含 InputId）。A2 仅建立通道，TUI 消费留待 A3。
-    UserMessagesAdded(Vec<sdk::AddedInput>),
+    /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
+    /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
+    /// 清占位、ChatMessage.text_content() 还原回显（含 Image placeholder）。
+    UserMessagesAdded(Vec<sdk::ChatMessage>),
     Done {
         context: UiTurnContext,
     },
