@@ -61,7 +61,9 @@ pub struct ClipboardImageView {
 /// `ClipboardImageView` → `ChatInputImage`（TUI→Runtime 通道）。
 ///
 /// 默认 `id` 为空字符串（无占位上下文），实际提交时由 `ImageSpan::placeholder()`
-/// 覆写。`From<ClipboardImageView>` 在 clipboard 即时插入路径不参与运行时配对。
+/// 覆写。`TUI 内部` `ImageSpan` 仍持有完整 6 字段（`final_size/display_path/
+/// width/height` 是 TUI UI 元数据），`ChatInputImage` 是 3 字段窄接口——
+/// runtime 不需要 TUI 渲染元数据。
 impl From<ClipboardImageView> for crate::ChatInputImage {
     fn from(value: ClipboardImageView) -> Self {
         Self {
