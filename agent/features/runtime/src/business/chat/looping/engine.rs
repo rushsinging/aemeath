@@ -14,6 +14,8 @@ use tools::api::Tool;
 
 use policy::api::{validate_and_normalize_path_from_base, validate_search_path_from_base};
 
+use crate::LOG_TARGET;
+
 /// The unified permission gate.
 ///
 /// Holds the context needed to evaluate tool calls: the active `path_base`
@@ -47,6 +49,13 @@ impl<'a> PolicyEngine<'a> {
         allow_all: bool,
         read_files: &'a Mutex<HashSet<String>>,
     ) -> Self {
+        log::debug!(
+            target: LOG_TARGET,
+            "PolicyEngine::new path_base={} workspace_root={} allow_all={}",
+            path_base.display(),
+            workspace_root.display(),
+            allow_all,
+        );
         Self {
             path_base,
             workspace_root,
@@ -124,6 +133,16 @@ impl<'a> PolicyEngine<'a> {
 
             match result {
                 Ok(path) => {
+                    log::debug!(
+                        target: LOG_TARGET,
+                        "policy path allow: field={} raw_input=\"{}\" resolved=\"{}\" path_base=\"{}\" workspace_root=\"{}\" allow_all={}",
+                        access.field,
+                        raw,
+                        path.display(),
+                        self.path_base.display(),
+                        self.workspace_root.display(),
+                        self.allow_all,
+                    );
                     // Step 3: read-before-write check (only for file accesses on
                     // tools that declare the requirement). New (non-existent)
                     // files are always allowed; only existing files require a
@@ -154,6 +173,15 @@ impl<'a> PolicyEngine<'a> {
                     normalized[access.field] = Value::String(path.to_string_lossy().into_owned());
                 }
                 Err(reason) => {
+                    log::debug!(
+                        target: LOG_TARGET,
+                        "policy path deny: field={} raw_input=\"{}\" path_base=\"{}\" workspace_root=\"{}\" reason={}",
+                        access.field,
+                        raw,
+                        self.path_base.display(),
+                        self.workspace_root.display(),
+                        reason,
+                    );
                     return PolicyDecision::Deny { reason };
                 }
             }
