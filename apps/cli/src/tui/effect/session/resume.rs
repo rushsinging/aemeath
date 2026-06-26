@@ -92,12 +92,12 @@ mod tests {
             content: vec![
                 sdk::ContentBlock::text("hello "),
                 sdk::ContentBlock::Image {
-                                      source: sdk::ImageSource::Base64 {
-                                          media_type: "image/png".to_string(),
-                                          data: "abc".to_string(),
-                                      },
-                                      placeholder: None,
-                                  },
+                    source: sdk::ImageSource::Base64 {
+                        media_type: "image/png".to_string(),
+                        data: "abc".to_string(),
+                    },
+                    placeholder: None,
+                },
                 sdk::ContentBlock::text("world"),
             ],
             metadata: None,

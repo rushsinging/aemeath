@@ -41,7 +41,6 @@ impl Default for StatusLineContext {
 const FIELD_SEPARATOR: &str = " │ ";
 const MIN_PATH_WIDTH: usize = 12;
 const DEFAULT_PATH_WIDTH: usize = 54;
-const DEFAULT_ROOT_WIDTH: usize = 36;
 const ELLIPSIS_WIDTH: usize = 1;
 
 pub(crate) fn shorten_path(path: &str, max_cols: usize) -> String {
@@ -117,40 +116,23 @@ fn context_row_fields(context: &StatusLineContext, width: usize) -> Vec<String> 
         .as_ref()
         .filter(|session| !session.is_empty())
         .map(|session| format!("session {session}"));
-    let paths_differ =
-        normalized_path(&context.path_base) != normalized_path(&context.workspace_root);
-    let separator_count = (if paths_differ { 3 } else { 2 }) + usize::from(session.is_some());
+    let separator_count = 2 + usize::from(session.is_some());
     let fixed_len = str_display_width(&git)
         + str_display_width(&permission)
         + session.as_ref().map(|s| str_display_width(s)).unwrap_or(0)
         + str_display_width(FIELD_SEPARATOR) * separator_count;
     let available_for_paths = width.saturating_sub(fixed_len).max(MIN_PATH_WIDTH);
     let mut fields = Vec::new();
-    if paths_differ {
-        let path_width = available_for_paths
-            .saturating_sub(DEFAULT_ROOT_WIDTH)
-            .max(MIN_PATH_WIDTH);
-        fields.push(shorten_path(&context.path_base, path_width));
-        fields.push(format!(
-            "root {}",
-            shorten_path(&context.workspace_root, DEFAULT_ROOT_WIDTH)
-        ));
-    } else {
-        fields.push(shorten_path(
-            &context.path_base,
-            available_for_paths.min(DEFAULT_PATH_WIDTH),
-        ));
-    }
+    fields.push(shorten_path(
+        &context.path_base,
+        available_for_paths.min(DEFAULT_PATH_WIDTH),
+    ));
     fields.push(git);
     fields.push(permission);
     if let Some(session) = session {
         fields.push(session);
     }
     fields
-}
-
-fn normalized_path(path: &str) -> String {
-    path.trim_end_matches('/').replace('\\', "/")
 }
 
 fn tail_by_display_width(text: &str, max_cols: usize) -> String {

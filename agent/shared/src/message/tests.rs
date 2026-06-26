@@ -32,88 +32,91 @@ fn test_user_constructor() {
 }
 
 #[test]
-    fn test_user_with_image() {
-        // 单图 + 无占位符 → 头尾拆块（向后兼容）
-        let msg = Message::user_with_image("caption", "base64data".into(), "image/png".into());
-        assert_eq!(msg.role, Role::User);
-        assert_eq!(msg.content.len(), 2);
-        // First block should be Image
-        assert!(matches!(
-            &msg.content[0],
+fn test_user_with_image() {
+    // 单图 + 无占位符 → 头尾拆块（向后兼容）
+    let msg = Message::user_with_image("caption", "base64data".into(), "image/png".into());
+    assert_eq!(msg.role, Role::User);
+    assert_eq!(msg.content.len(), 2);
+    // First block should be Image
+    assert!(matches!(
+        &msg.content[0],
+        ContentBlock::Image {
+            source: ImageSource::Base64 { media_type, data },
+            ..
+        } if media_type == "image/png" && data == "base64data"
+    ));
+    // Second block should be Text
+    assert!(matches!(
+        &msg.content[1],
+        ContentBlock::Text { text } if text == "caption"
+    ));
+}
+
+#[test]
+fn test_user_with_images_multiple() {
+    // 占位符插入文本中，期望按出现顺序穿插
+    let images = vec![
+        (
+            "[Image #1]".to_string(),
+            "img1".to_string(),
+            "image/png".to_string(),
+        ),
+        (
+            "[Image #2]".to_string(),
+            "img2".to_string(),
+            "image/jpeg".to_string(),
+        ),
+    ];
+    let msg = Message::user_with_images("multi caption", images);
+    assert_eq!(msg.role, Role::User);
+    // 占位符在文本中不存在时，所有 image 堆到尾部、text 在最末
+    assert_eq!(msg.content.len(), 3);
+    assert!(matches!(&msg.content[0], ContentBlock::Image { .. }));
+    assert!(matches!(&msg.content[1], ContentBlock::Image { .. }));
+    assert!(matches!(
+        &msg.content[2],
+        ContentBlock::Text { text } if text == "multi caption"
+    ));
+}
+
+/// #fix-tui-image-input-output：text 含占位符时，image 按出现顺序穿插拆块。
+#[test]
+fn test_user_with_images_interleaves_by_placeholder() {
+    let images = vec![
+        (
+            "[Image #1]".to_string(),
+            "a".to_string(),
+            "image/png".to_string(),
+        ),
+        (
+            "[Image #2]".to_string(),
+            "b".to_string(),
+            "image/jpeg".to_string(),
+        ),
+    ];
+    // text 中 [Image #2] 在 [Image #1] 前
+    let msg = Message::user_with_images("B: [Image #2], A: [Image #1]", images);
+    assert_eq!(msg.role, Role::User);
+    let placeholders: Vec<String> = msg
+        .content
+        .iter()
+        .filter_map(|b| match b {
             ContentBlock::Image {
-                source: ImageSource::Base64 { media_type, data },
+                placeholder: Some(p),
                 ..
-            } if media_type == "image/png" && data == "base64data"
-        ));
-        // Second block should be Text
-        assert!(matches!(
-            &msg.content[1],
-            ContentBlock::Text { text } if text == "caption"
-        ));
-    }
-
-    #[test]
-    fn test_user_with_images_multiple() {
-        // 占位符插入文本中，期望按出现顺序穿插
-        let images = vec![
-            (
-                "[Image #1]".to_string(),
-                "img1".to_string(),
-                "image/png".to_string(),
-            ),
-            (
-                "[Image #2]".to_string(),
-                "img2".to_string(),
-                "image/jpeg".to_string(),
-            ),
-        ];
-        let msg = Message::user_with_images("multi caption", images);
-        assert_eq!(msg.role, Role::User);
-        // 占位符在文本中不存在时，所有 image 堆到尾部、text 在最末
-        assert_eq!(msg.content.len(), 3);
-        assert!(matches!(&msg.content[0], ContentBlock::Image { .. }));
-        assert!(matches!(&msg.content[1], ContentBlock::Image { .. }));
-        assert!(matches!(
-            &msg.content[2],
-            ContentBlock::Text { text } if text == "multi caption"
-        ));
-    }
-
-    /// #fix-tui-image-input-output：text 含占位符时，image 按出现顺序穿插拆块。
-    #[test]
-    fn test_user_with_images_interleaves_by_placeholder() {
-        let images = vec![
-            (
-                "[Image #1]".to_string(),
-                "a".to_string(),
-                "image/png".to_string(),
-            ),
-            (
-                "[Image #2]".to_string(),
-                "b".to_string(),
-                "image/jpeg".to_string(),
-            ),
-        ];
-        // text 中 [Image #2] 在 [Image #1] 前
-        let msg = Message::user_with_images("B: [Image #2], A: [Image #1]", images);
-        assert_eq!(msg.role, Role::User);
-        let placeholders: Vec<String> = msg
-            .content
-            .iter()
-            .filter_map(|b| match b {
-                ContentBlock::Image { placeholder: Some(p), .. } => Some(p.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            placeholders,
-            vec!["[Image #2]".to_string(), "[Image #1]".to_string()],
-            "image 应按 text 中 `[Image #N]` 出现顺序穿插，实际 blocks={:?}",
-            msg.content
-        );
-        // text_content 拼回完整文本
-        assert_eq!(msg.text_content(), "B: [Image #2], A: [Image #1]");
-    }
+            } => Some(p.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        placeholders,
+        vec!["[Image #2]".to_string(), "[Image #1]".to_string()],
+        "image 应按 text 中 `[Image #N]` 出现顺序穿插，实际 blocks={:?}",
+        msg.content
+    );
+    // text_content 拼回完整文本
+    assert_eq!(msg.text_content(), "B: [Image #2], A: [Image #1]");
+}
 
 #[test]
 fn test_tool_results_constructor() {

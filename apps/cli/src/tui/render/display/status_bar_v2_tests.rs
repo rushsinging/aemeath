@@ -99,7 +99,7 @@ fn test_context_row_uses_real_path_not_ctx_label_when_paths_match() {
 }
 
 #[test]
-fn test_context_row_shows_root_only_when_different() {
+fn test_context_row_no_root_field_when_paths_differ() {
     let mut bar = StatusBar::new();
     let view = status_view(
         "~/Nextcloud/work/claudecode/aemeath/cli",
@@ -113,7 +113,7 @@ fn test_context_row_shows_root_only_when_different() {
     let row = bar.context_row_text_for_view(140, &view);
 
     assert!(row.contains("~/Nextcloud/work/claudecode/aemeath/cli"));
-    assert!(row.contains("root ~/Nextcloud/work/claudecode/aemeath"));
+    assert!(!row.contains("root "));
     assert!(row.contains(" │ main │ AskMe"));
     assert!(row.contains("session 019-session-full"));
 }
@@ -248,7 +248,7 @@ fn test_context_row_without_session_uses_correct_semantic_colors() {
 }
 
 #[test]
-fn test_context_row_without_session_with_root_uses_correct_semantic_colors() {
+fn test_context_row_without_session_paths_differ_uses_correct_semantic_colors() {
     let mut bar = StatusBar::new();
     let view = status_view(
         "~/aemeath/cli",
@@ -264,12 +264,8 @@ fn test_context_row_without_session_with_root_uses_correct_semantic_colors() {
     bar.render(area, &mut buf, &StatusSelectionViewState::default(), &view);
 
     assert_eq!(buf.cell((0, 1)).unwrap().style().fg, Some(theme::ACCENT));
-    assert_eq!(
-        buf.cell((17, 1)).unwrap().style().fg,
-        Some(theme::TEXT_MUTED)
-    );
-    assert_eq!(buf.cell((34, 1)).unwrap().style().fg, Some(theme::SUCCESS));
-    assert_eq!(buf.cell((41, 1)).unwrap().style().fg, Some(theme::WARNING));
+    assert_eq!(buf.cell((17, 1)).unwrap().style().fg, Some(theme::SUCCESS));
+    assert_eq!(buf.cell((26, 1)).unwrap().style().fg, Some(theme::WARNING));
 }
 
 #[test]

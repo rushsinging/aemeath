@@ -522,7 +522,12 @@ mod tests {
         // text_content 拼回完整文本（拆块后还原）
         assert_eq!(last.text_content(), text_with_marker);
         // 期望 content 是 [Text("看"), Image, Text("这张图")] 三块
-        assert_eq!(last.content.len(), 3, "期望拆成 3 块，实际={:?}", last.content);
+        assert_eq!(
+            last.content.len(),
+            3,
+            "期望拆成 3 块，实际={:?}",
+            last.content
+        );
         assert!(matches!(&last.content[0], ContentBlock::Text { text } if text == "看"));
         let has_image = last.content.iter().any(|block| {
             matches!(
@@ -560,10 +565,7 @@ mod tests {
         // text 中 [Image #2] 在 [Image #1] 前面，期望穿插顺序: [Image #2], [Image #1]
         let text = "B: [Image #2], A: [Image #1]".to_string();
         let mut buffer = PendingInputBuffer::default();
-        let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(
-            text.clone(),
-            imgs,
-        )]);
+        let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(text.clone(), imgs)]);
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
@@ -584,7 +586,10 @@ mod tests {
             .content
             .iter()
             .filter_map(|b| match b {
-                ContentBlock::Image { placeholder: Some(p), .. } => Some(p.clone()),
+                ContentBlock::Image {
+                    placeholder: Some(p),
+                    ..
+                } => Some(p.clone()),
                 _ => None,
             })
             .collect();
