@@ -154,11 +154,26 @@ impl App {
                 self.set_transient_notice(StatusNotice::warning("Interrupted"));
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
-                if !self.model.input.document.is_empty() {
+                let doc_empty = self.model.input.document.is_empty();
+                crate::tui::log_debug!(
+                    "mid_turn.enter is_processing=true doc_empty={} tx_available={}",
+                    doc_empty,
+                    self.chat.input_event_tx.is_some()
+                );
+                if !doc_empty {
                     let changes = self.model.input.apply(InputIntent::Submit);
                     let Some(submission) = submitted_submission_from_changes(&changes) else {
+                        crate::tui::log_debug!(
+                            "mid_turn.enter submission=None (no changes from Submit)"
+                        );
                         return UpdateResult::none();
                     };
+                    let is_slash = submission.text.starts_with('/');
+                    crate::tui::log_debug!(
+                        "mid_turn.enter is_slash={} text_preview={:?}",
+                        is_slash,
+                        &submission.text[..submission.text.len().min(60)]
+                    );
                     // 忙时 slash/control command 保持现有 mid-turn 行为：作为
                     // ControlCommand 事件入通道，永不作为 user message 发给 LLM（A3/#391）。
                     // slash 命令是控制命令、无 UserMessagesAdded 归宿，剥离 MessagesSync

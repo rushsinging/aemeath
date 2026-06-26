@@ -59,9 +59,17 @@ impl App {
 
     fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
         if self.chat.input_event_tx.is_none() {
+            crate::tui::log_debug!(
+                "send_chat_input_event DROPPED tx=None event={:?}",
+                std::mem::discriminant(&event)
+            );
             self.append_error_notice("当前 Chat 输入通道不可用，已保留在队列中等待兜底 drain");
             return;
         }
+        crate::tui::log_debug!(
+            "send_chat_input_event sending event={:?}",
+            std::mem::discriminant(&event)
+        );
         self.chat.push_input_event(event);
     }
 

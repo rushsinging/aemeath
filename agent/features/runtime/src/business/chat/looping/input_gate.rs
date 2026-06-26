@@ -136,6 +136,14 @@ where
     let mut added: Vec<sdk::AddedInput> = Vec::new();
 
     let events = buffer.drain_all();
+    let event_count = events.len();
+    log::debug!(
+        target: LOG_TARGET,
+        "apply_gate kind={:?} is_idle={} drained_events={}",
+        kind,
+        is_idle,
+        event_count
+    );
     let mut appended_this_gate = 0usize;
     let mut iter = events.into_iter().peekable();
     while let Some(event) = iter.next() {
@@ -162,6 +170,14 @@ where
                 }
             }
             ChatInputEvent::UserMessage { id, text, images } => {
+                let text_preview: String = text.chars().take(60).collect();
+                log::debug!(
+                    target: LOG_TARGET,
+                    "apply_gate UserMessage id={} text_preview={:?} image_count={}",
+                    id,
+                    text_preview,
+                    images.len()
+                );
                 added.push(append_user_message(messages, id, text, images));
                 appended_this_gate += 1;
                 appended_user_messages += 1;
@@ -222,6 +238,12 @@ where
     }
 
     if appended_user_messages > 0 {
+        log::debug!(
+            target: LOG_TARGET,
+            "apply_gate sending MessagesSync + UserMessagesAdded count={} kind={:?}",
+            appended_user_messages,
+            kind
+        );
         sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
             .await;
         sink.send_event(RuntimeStreamEvent::UserMessagesAdded { items: added })

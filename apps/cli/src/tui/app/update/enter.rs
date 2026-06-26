@@ -47,6 +47,15 @@ impl App {
             submission.images.into_iter().map(Into::into).collect();
         // 生成一次 InputId，同时用于事件 id 与占位块 input_id——两者必须相同（#390 A3）。
         let input_id = sdk::InputId::new_v7();
+        let text_preview: String = submission.text.chars().take(60).collect();
+        let image_count = images.len();
+        crate::tui::log_debug!(
+            "submit_user_input_event input_id={} text_preview={:?} image_count={} is_processing={}",
+            input_id,
+            text_preview,
+            image_count,
+            self.chat.is_processing
+        );
         let event = sdk::ChatInputEvent::UserMessage {
             id: input_id.clone(),
             text: submission.text.clone(),
