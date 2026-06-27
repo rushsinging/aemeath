@@ -338,11 +338,11 @@ mod tests {
         let view = run_reflection_impl(
             &client,
             vec![sdk::ChatMessage {
-                              role: "user".to_string(),
-                              content: vec![sdk::ContentBlock::text("请反思当前会话")],
-                              metadata: None,
-                              input_id: None,
-                          }],
+                role: "user".to_string(),
+                content: vec![sdk::ContentBlock::text("请反思当前会话")],
+                metadata: None,
+                input_id: None,
+            }],
         )
         .await
         .unwrap();
@@ -375,11 +375,11 @@ mod tests {
         run_reflection_impl(
             &client,
             vec![sdk::ChatMessage {
-                              role: "user".to_string(),
-                              content: vec![sdk::ContentBlock::text("只有一轮也要强制反思")],
-                              metadata: None,
-                              input_id: None,
-                          }],
+                role: "user".to_string(),
+                content: vec![sdk::ContentBlock::text("只有一轮也要强制反思")],
+                metadata: None,
+                input_id: None,
+            }],
         )
         .await
         .unwrap();
