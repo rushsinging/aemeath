@@ -96,6 +96,18 @@ impl OutputArea {
             if idx == start && plain.contains('│') {
                 plain = normalize_rendered_table_plain(&plain);
             }
+            // #520 诊断日志：对表格行（含 │）记录显示宽度与渲染区域宽度的对比
+            if plain.contains('│') {
+                let line_disp_w = str_display_width(&plain);
+                crate::tui::log_trace!(
+                    "tui.output.table_line idx={} line_display_width={} content_area_width={} overflow={} plain={:?}",
+                    idx,
+                    line_disp_w,
+                    content_area.width,
+                    line_disp_w > content_area.width as usize,
+                    &plain,
+                );
+            }
             let char_end = CharIdx::new(plain.chars().count());
             screen_map.push((idx, CharIdx::ZERO, char_end));
             rendered_content.insert(idx, plain);

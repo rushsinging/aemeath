@@ -100,6 +100,26 @@ pub fn render_table_block(
         }
     }
 
+    // #520 诊断日志：记录表格渲染输入与每行产出宽度，用于排查 CJK 表格错位
+    crate::tui::log_debug!(
+        "tui.table.render available_width={} num_cols={} col_widths={:?} natural_widths={:?} num_rows={}",
+        available_width,
+        num_cols,
+        col_widths,
+        natural_widths,
+        lines.len(),
+    );
+    for (ri, row) in result.iter().enumerate() {
+        let plain: String = row.iter().map(|s| s.content.as_ref()).collect();
+        let disp_w = plain.width();
+        crate::tui::log_debug!(
+            "tui.table.row idx={} display_width={} plain={:?}",
+            ri,
+            disp_w,
+            plain,
+        );
+    }
+
     result
 }
 

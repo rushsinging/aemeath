@@ -444,38 +444,38 @@ fn test_delete_image_preserves_index_hole() {
 }
 
 /// #507 修复：`submit_text()` 现**保留** image placeholder（而非剔除为空），
-    /// 以便 runtime 端 `Message::user_with_images` 能按占位符穿插拆块。
-    #[test]
-    fn test_submit_text_preserves_image_placeholders() {
-        let mut doc = InputDocument::default();
-        doc.insert_text("look at ");
-        doc.insert_image(make_test_image(10));
-        doc.insert_text(" this");
-        assert_eq!(doc.submit_text(), "look at [Image #1] this");
-    }
+/// 以便 runtime 端 `Message::user_with_images` 能按占位符穿插拆块。
+#[test]
+fn test_submit_text_preserves_image_placeholders() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("look at ");
+    doc.insert_image(make_test_image(10));
+    doc.insert_text(" this");
+    assert_eq!(doc.submit_text(), "look at [Image #1] this");
+}
 
-    /// #507 修复：copied text 还原 + image placeholder 保留的组合行为。
-    #[test]
-    fn test_submit_text_combined_copied_text_and_image_placeholder() {
-        let mut doc = InputDocument::default();
-        doc.insert_text("see ");
-        doc.insert_pasted_text("a\nb\nc\nd"); // 变成 [Copied 4 lines]
-        doc.insert_text(" and ");
-        doc.insert_image(make_test_image(10));
-        let text = doc.submit_text();
-        assert!(
-            text.contains("see a\nb\nc\nd and"),
-            "copied text 应展开为原文：got={text:?}"
-        );
-        assert!(
-            text.contains("[Image #1]"),
-            "image placeholder 应保留：got={text:?}"
-        );
-        assert!(
-            !text.contains("[Copied"),
-            "copied text 不应在 submit 输出：got={text:?}"
-        );
-    }
+/// #507 修复：copied text 还原 + image placeholder 保留的组合行为。
+#[test]
+fn test_submit_text_combined_copied_text_and_image_placeholder() {
+    let mut doc = InputDocument::default();
+    doc.insert_text("see ");
+    doc.insert_pasted_text("a\nb\nc\nd"); // 变成 [Copied 4 lines]
+    doc.insert_text(" and ");
+    doc.insert_image(make_test_image(10));
+    let text = doc.submit_text();
+    assert!(
+        text.contains("see a\nb\nc\nd and"),
+        "copied text 应展开为原文：got={text:?}"
+    );
+    assert!(
+        text.contains("[Image #1]"),
+        "image placeholder 应保留：got={text:?}"
+    );
+    assert!(
+        !text.contains("[Copied"),
+        "copied text 不应在 submit 输出：got={text:?}"
+    );
+}
 
 #[test]
 fn test_drain_images_returns_in_order() {

@@ -144,19 +144,19 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
 
     // 触发 handler
     let items = vec![
-              sdk::ChatMessage {
-                  role: "user".to_string(),
-                  content: vec![sdk::ContentBlock::text("hi")],
-                  metadata: None,
-                  input_id: Some(id_a.clone()),
-              },
-              sdk::ChatMessage {
-                  role: "user".to_string(),
-                  content: vec![sdk::ContentBlock::text("yo")],
-                  metadata: None,
-                  input_id: Some(id_b.clone()),
-              },
-          ];
+        sdk::ChatMessage {
+            role: "user".to_string(),
+            content: vec![sdk::ContentBlock::text("hi")],
+            metadata: None,
+            input_id: Some(id_a.clone()),
+        },
+        sdk::ChatMessage {
+            role: "user".to_string(),
+            content: vec![sdk::ContentBlock::text("yo")],
+            metadata: None,
+            input_id: Some(id_b.clone()),
+        },
+    ];
     app.update_ui(UiEvent::UserMessagesAdded(items), &ui_tx, &spawn_refs);
 
     // 占位全清

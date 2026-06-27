@@ -268,27 +268,27 @@ pub(super) fn workspace_context_to_sdk(
 }
 
 pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessage {
-      sdk::ChatMessage {
-          role: match message.role {
-              share::message::Role::User => "user".to_string(),
-              share::message::Role::Assistant => "assistant".to_string(),
-          },
-          // share::ContentBlock 与 sdk::ContentBlock 同形（serde 成同一 JSON），经 round-trip 映射。
-          content: serde_json::from_value(serde_json::to_value(&message.content).unwrap_or_default())
-              .unwrap_or_default(),
-          metadata: message.metadata.map(|metadata| sdk::ChatMessageMetadata {
-              source: match metadata.source {
-                  share::message::MessageSource::User => sdk::ChatMessageSource::User,
-                  share::message::MessageSource::SystemGenerated => {
-                      sdk::ChatMessageSource::SystemGenerated
-                  }
-              },
-          }),
-          // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
-          // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。
-          input_id: None,
-      }
-  }
+    sdk::ChatMessage {
+        role: match message.role {
+            share::message::Role::User => "user".to_string(),
+            share::message::Role::Assistant => "assistant".to_string(),
+        },
+        // share::ContentBlock 与 sdk::ContentBlock 同形（serde 成同一 JSON），经 round-trip 映射。
+        content: serde_json::from_value(serde_json::to_value(&message.content).unwrap_or_default())
+            .unwrap_or_default(),
+        metadata: message.metadata.map(|metadata| sdk::ChatMessageMetadata {
+            source: match metadata.source {
+                share::message::MessageSource::User => sdk::ChatMessageSource::User,
+                share::message::MessageSource::SystemGenerated => {
+                    sdk::ChatMessageSource::SystemGenerated
+                }
+            },
+        }),
+        // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
+        // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。
+        input_id: None,
+    }
+}
 
 pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Message {
     let role = match message.role.as_str() {
