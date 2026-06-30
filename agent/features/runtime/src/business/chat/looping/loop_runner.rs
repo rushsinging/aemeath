@@ -594,7 +594,10 @@ where
         // ReasoningGraph: 按 graph 当前阶段调 effort（仅对支持 reasoning 的模型）
         if let Some(ref graph) = reasoning_graph {
             if graph.enabled() && client.is_reasoning() {
-                client.set_reasoning_level(graph.current_effort());
+                let effort = graph
+                    .current_effort()
+                    .clamped_to(client.max_reasoning_level());
+                client.set_reasoning_level(effort);
             }
         }
 

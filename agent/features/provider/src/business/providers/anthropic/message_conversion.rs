@@ -64,7 +64,7 @@ impl<'a> StreamHandler for TrackingHandler<'a> {
 pub(crate) struct RequestParams<'a> {
     pub model: String,
     pub max_tokens: u32,
-    pub thinking_max_tokens: u32,
+    pub effort: Option<String>,
     pub base_url: String,
     pub headers: HeaderMap,
     pub http: &'a reqwest::Client,
@@ -86,7 +86,7 @@ pub(crate) async fn send_message_non_stream(
     let request = CreateMessageRequest::new(
         params.model,
         params.max_tokens,
-        params.thinking_max_tokens,
+        params.effort,
         system.to_vec(),
         api_messages,
         tool_schemas.to_vec(),

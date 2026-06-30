@@ -157,7 +157,7 @@ impl LlmClient {
                     options.base_url,
                     options.model,
                     options.max_tokens,
-                    0,
+                    crate::core::provider::ReasoningLevel::Off,
                 ))
             }
             ProviderDriverKind::Ollama => {
