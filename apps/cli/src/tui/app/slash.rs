@@ -63,6 +63,22 @@ impl super::App {
                             if was_compacted {
                                 let old_len = self.chat.messages.len();
                                 self.chat.messages = compacted;
+                                // 重新估算 context，更新 status bar 的 ctx%
+                                if let Some(ref ac) = self.agent_client {
+                                    if let Ok(est) = ac
+                                        .estimate_context(
+                                            &self.chat.messages,
+                                            &self.chat.system_prompt_text,
+                                        )
+                                        .await
+                                    {
+                                        self.model.runtime.apply(
+                                            RuntimeIntent::UpdateLastInputTokens(
+                                                est.estimated_tokens as u64,
+                                            ),
+                                        );
+                                    }
+                                }
                                 self.append_system_notice(format!(
                                     "[compacted: {} → {} messages]",
                                     old_len,
@@ -283,6 +299,22 @@ impl super::App {
                         Ok((compacted, was_compacted)) => {
                             if was_compacted {
                                 self.chat.messages = compacted;
+                                // 重新估算 context，更新 status bar 的 ctx%
+                                if let Some(ref ac) = self.agent_client {
+                                    if let Ok(est) = ac
+                                        .estimate_context(
+                                            &self.chat.messages,
+                                            &self.chat.system_prompt_text,
+                                        )
+                                        .await
+                                    {
+                                        self.model.runtime.apply(
+                                            RuntimeIntent::UpdateLastInputTokens(
+                                                est.estimated_tokens as u64,
+                                            ),
+                                        );
+                                    }
+                                }
                                 self.append_system_notice("[compacted]");
                             } else {
                                 self.append_system_notice("[no compaction needed]");
