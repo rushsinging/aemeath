@@ -1,6 +1,6 @@
 /// Compact 进度模型。
 ///
-/// 由 runtime 的 `CompactProgress` 事件驱动，TUI 据此渲染 Gauge 进度条。
+/// 由 runtime 的 `CompactProgress` 事件驱动，TUI 据此渲染 spinner 行内嵌进度条。
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompactProgressModel {
     pub stage: String,
@@ -9,7 +9,7 @@ pub struct CompactProgressModel {
 }
 
 impl CompactProgressModel {
-    /// 计算 Gauge ratio（0.0–1.0）。
+    /// 计算进度 ratio（0.0–1.0）。
     ///
     /// | 阶段 | ratio |
     /// |---|---|
@@ -28,21 +28,6 @@ impl CompactProgressModel {
             _ => 0.0,
         }
     }
-
-    /// 计算 Gauge label。
-    pub fn label(&self) -> String {
-        match self.stage.as_str() {
-            "preparing" => "Compacting — preparing...".to_string(),
-            "summarizing" => match (self.current, self.total) {
-                (Some(i), Some(n)) if n > 0 => {
-                    format!("Compacting — summarizing (chunk {i}/{n})")
-                }
-                _ => "Compacting — summarizing...".to_string(),
-            },
-            "finalizing" => "Compacting — finalizing...".to_string(),
-            _ => "Compacting...".to_string(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -57,7 +42,6 @@ mod tests {
             total: None,
         };
         assert!((m.ratio() - 0.05).abs() < 1e-9);
-        assert_eq!(m.label(), "Compacting — preparing...");
     }
 
     #[test]
@@ -68,7 +52,6 @@ mod tests {
             total: None,
         };
         assert!((m.ratio() - 0.50).abs() < 1e-9);
-        assert_eq!(m.label(), "Compacting — summarizing...");
     }
 
     #[test]
@@ -79,7 +62,6 @@ mod tests {
             total: Some(4),
         };
         assert!((m.ratio() - 0.50).abs() < 1e-9);
-        assert_eq!(m.label(), "Compacting — summarizing (chunk 2/4)");
     }
 
     #[test]
@@ -90,7 +72,6 @@ mod tests {
             total: None,
         };
         assert!((m.ratio() - 0.90).abs() < 1e-9);
-        assert_eq!(m.label(), "Compacting — finalizing...");
     }
 
     #[test]

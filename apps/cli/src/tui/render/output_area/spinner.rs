@@ -4,6 +4,7 @@ use ratatui::{
 };
 
 use crate::tui::render::theme;
+use crate::tui::view_model::live_status::CompactProgressView;
 use crate::tui::view_model::SpinnerLineView;
 
 /// Spinner glyph frames — forward then reverse for a breathing effect
@@ -32,7 +33,11 @@ impl super::OutputArea {
     /// 真相边界：spinner active/phase 来自 RuntimeModel，frame/verb/elapsed 来自
     /// view_state.spinner，经 LiveStatusViewModel 投影到渲染层；OutputArea 不再自持
     /// spinner widget mirror。
-    pub fn build_spinner_line(&self, s: &SpinnerLineView) -> Line<'static> {
+    pub fn build_spinner_line(
+        &self,
+        s: &SpinnerLineView,
+        compact_progress: Option<&CompactProgressView>,
+    ) -> Line<'static> {
         let mut spans = Vec::new();
 
         let glyph = SPINNER_FRAMES[(s.frame / 3) as usize % SPINNER_FRAMES.len()];
@@ -84,6 +89,46 @@ impl super::OutputArea {
             spans.push(Span::styled(")", Style::default().fg(theme::TEXT_DIM)));
         }
 
+        if let Some(cp) = compact_progress {
+            spans.extend(compact_progress_spans(cp));
+        }
+
         Line::from(spans)
     }
+}
+
+/// Compact 进度条的最大宽度（字符）。
+const COMPACT_BAR_MAX_WIDTH: usize = 30;
+
+/// 由 `CompactProgressView` 构造手绘 Span 进度条片段。
+///
+/// 格式：`  ████████░░░░░░░░░░░░░░░░░░ 25%`
+/// 填充 `█` 用 `YELLOW`，未填充 `░` 用 `TEXT_DIM`，百分比用 `YELLOW`。
+fn compact_progress_spans(cp: &CompactProgressView) -> Vec<Span<'static>> {
+    let ratio = (cp.ratio_millis as f64) / 1000.0;
+    let pct = (ratio * 100.0).round().clamp(0.0, 100.0) as u16;
+    let bar_width = COMPACT_BAR_MAX_WIDTH;
+    let filled = (ratio * bar_width as f64)
+        .round()
+        .clamp(0.0, bar_width as f64) as usize;
+    let empty = bar_width - filled;
+
+    let mut spans = vec![Span::raw("  ")]; // 与前一个片段隔开
+    if filled > 0 {
+        spans.push(Span::styled(
+            "█".repeat(filled),
+            Style::default().fg(theme::YELLOW),
+        ));
+    }
+    if empty > 0 {
+        spans.push(Span::styled(
+            "░".repeat(empty),
+            Style::default().fg(theme::TEXT_DIM),
+        ));
+    }
+    spans.push(Span::styled(
+        format!(" {pct}%"),
+        Style::default().fg(theme::YELLOW),
+    ));
+    spans
 }
