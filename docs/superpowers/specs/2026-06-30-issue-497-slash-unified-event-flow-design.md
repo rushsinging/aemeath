@@ -169,7 +169,119 @@ cmd if cmd == format!("/{}", cmd::COMPACT) => {
 
 TUI 事件回流处理（`processing.rs:39` `sdk_event_to_ui_event` + `agent_event.rs:30` `map_agent_event`）：每个新 `RuntimeStreamEvent` 变体补一处映射 → `RuntimeIntent` 或直接 `UiEvent`。
 
-### 3.5 半流式 Effect 改造
+### 3.5 回显机制（关键：文案位置迁移）
+
+#### 现状：同步回显
+
+当前 slash 命令执行完，TUI **同步直接调用** `append_system_notice` / `append_error_notice` 写入 `ConversationModel`：
+
+```
+slash.rs: ac.xxx().await → Ok(result) → append_system_notice("[xxx done]")
+```
+
+命令执行与回显在同一次 `.await` 调用里串行完成，回显即时、同步。所有回显文案散落在 `slash.rs`（TUI 层）。
+
+#### 改造后：事件驱动回显
+
+命令走 runtime 事件流异步执行，TUI 不再原地拿到结果，**回显必须改为由事件回流触发**。现成通道已存在，无需新建：
+
+```
+runtime 执行完 → sink.send_event(SystemMessage("[xxx done]"))
+              → ChatEvent::SystemMessage         (chat_event.rs 映射)
+              → UiEvent::SystemMessage           (processing.rs:105)
+              → map_agent_event                  (agent_event.rs:69)
+              → ConversationIntent::AppendSystemMessage  (写入 ConversationModel)
+```
+
+错误同理：`RuntimeStreamEvent::Error` → `UiEvent::Error` → `ConversationIntent::AppendError`（`agent_event.rs:55`，还附带 `DiagnosticIntent::RecordNotice` + `Effect::RunHook("error")`）。
+
+#### 三类回显的处理策略
+
+| 回显类型 | 现状（同步） | 改造后（事件流） | 用的事件 |
+|---|---|---|---|
+| **成功通知**（`[compacted]`、`[switched to gpt-5]`） | `append_system_notice` | runtime 发 `SystemMessage` → 自动渲染 | `RuntimeStreamEvent::SystemMessage` |
+| **错误通知**（`compact failed: ...`） | `append_error_notice` | runtime 发 `Error` → 自动渲染 | `RuntimeStreamEvent::Error` |
+| **进度反馈**（compact Gauge、model "connecting"） | 无 | runtime 发专用 progress 事件 → intent | `RuntimeStreamEvent::CompactProgress` 等 |
+
+#### 执行前 vs 执行后的回显
+
+- **执行前**（命令已接收、即将执行）：仍可在 `slash.rs` 同步回显，如设 spinner phase——因为这些不依赖执行结果，TUI 发完事件就知道要做。
+- **执行后**（结果/进度）：**必须**由 runtime 事件回流驱动，TUI 不再原地知道结果。
+
+#### 文案位置迁移（重要）
+
+当前所有 `append_system_notice("[xxx done]")` 文案散落在 `slash.rs`（TUI 层）。改造后这些文案要**迁移到 runtime 层**——因为 TUI 不再知道命令执行结果，只有 runtime 知道：
+
+```rust
+// 改造前（slash.rs，TUI 层持有结果文案）
+match ac.compact_messages(...).await {
+    Ok((compacted, was_compacted)) => {
+        self.append_system_notice("[compacted]");  // ← 文案在 TUI
+    }
+    Err(e) => self.append_error_notice(format!("compact failed: {}", e)),
+}
+
+// 改造后（slash.rs 只发事件 + 设 spinner，无文案）
+self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+self.model.runtime.apply(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Compacting));
+
+// 文案迁移到 runtime（loop_runner.rs idle 分支，compact 完成后）
+sink.send_event(RuntimeStreamEvent::SystemMessage(
+    format!("[compacted: {} → {} messages]", old_len, new_len)
+)).await;
+```
+
+净效果：`slash.rs` 大幅瘦身（每个命令分支从 ~30 行 match 缩为 2-3 行），回显文案逻辑集中到 runtime idle 分支。
+
+> **注**：`RunSkill` / `InjectMessage` 这类返回 prompt 的 action 仍是"输入注入"——`slash.rs` 侧 `return Some(content)` 把内容作为下一轮用户输入提交，不走结果事件回显，保持现状。
+
+### 3.6 Spinner / 进度态接通（以 compact 为原型）
+
+#### 两条路径的 spinner 现状对比
+
+compact 有两个入口，spinner 接通方式截然不同：
+
+| 入口 | spinner 启动 | 进度（Gauge） | spinner 停止 | 是否经过 hook 事件链 |
+|---|---|---|---|---|
+| **auto_compact**（主循环内，✅ 正确） | runtime 发 `HookEvent(PreCompact)` → TUI `hook_spinner_phase` → `SpinnerPhase::Compacting` | runtime 发 `CompactProgress` → `SetCompactProgress` | runtime 发 `HookEvent(PostCompact)` → TUI `StopSpinner` | **是**，全链路接通 |
+| **手动 `/compact`**（slash 旧路径，❌ 问题） | `slash.rs:49` TUI 自己手动 `SetSpinnerPhase(Compacting)` | **无**（走请求-响应，拿不到 `CompactProgress`） | `slash.rs:62/77` 手动 `StopSpinner` | **否**，绕过 hook 链 |
+
+即手动 `/compact` 的 spinner 是 TUI「自管自启自停」的孤岛，与 runtime 的 `CompactProgress` 事件流完全脱节——这正是 #493 的 Gauge 对手动 `/compact` 无效的根因。
+
+#### 改造目标：手动 `/compact` 复用 auto_compact 的 spinner 事件链
+
+手动 `/compact` 走事件流（子 issue 0）后，应复用 auto_compact 已接通的事件链，而非 TUI 自管 spinner：
+
+```
+slash.rs: push_input_event(Compact)  // 只发事件，不设 spinner
+        ↓
+runtime idle 分支执行 manual_compact:
+  - 发 HookEvent(PreCompact)  → TUI 自动设 Compacting spinner   ← 启动
+  - 发 CompactProgress{...}   → TUI 渲染 Gauge                   ← 进度
+  - 发 HookEvent(PostCompact) → TUI 自动 StopSpinner + 清 Gauge  ← 停止
+  - 发 SystemMessage("[compacted: ...]")  → TUI 回显结果
+```
+
+关键变化：**`slash.rs` 不再手动设/停 spinner**，完全由 runtime 的 hook + progress 事件驱动。
+
+#### 实现要点
+
+1. **runtime `manual_compact`**（`compact.rs`）需发 `PreCompact` / `PostCompact` hook 事件（当前 `auto_compact` 发了，但需确认 `manual_compact` 是否也发——见子 issue 0 验证）。
+2. **`slash.rs` 删除手动 spinner 代码**：移除 `slash.rs:49-51`（`SetSpinnerPhase(Compacting)`）、`slash.rs:62`（`StopSpinner`）、`slash.rs:77`（`StopSpinner`）。
+3. **错误路径 spinner 停止**：compact 失败时，runtime 须发 `PostCompact`（或 `Error` 事件触发 TUI 停 spinner）——确保失败时 spinner 不卡死。当前 `agent_event.rs:55` 的 `Error` 映射只写 error notice + RunHook，**没有 StopSpinner**，需补。
+4. **`MessagesSync` 双重保险**：`compact_progress.rs` 的清理机制（`MessagesSync` handler 清 `compact_progress`）对两条路径都生效——runtime compact 后发 `MessagesSync` 替换 TUI 镜像，同时清掉 Gauge 态。
+
+#### 其他命令的 spinner 策略
+
+| 命令 | spinner 需要？ | 接通方式 |
+|---|---|---|
+| `/model`（switch_model） | 是（provider 握手耗时） | runtime 发专用 `ModelSwitchProgress` → `SetSpinnerPhase(CallingTool("model"))` 或复用进度模型 |
+| `/resume`（load_session） | 是（磁盘 IO） | runtime 发 `ResumeProgress` → spinner phase |
+| `/context`（estimate_context） | 否（快） | 无 spinner，仅结果 `SystemMessage` 回显 |
+| `/think`（set_thinking） | 否（快） | 无 spinner，仅结果 `SystemMessage` 回显 |
+| `execute_command` | 按命令而定 | 复用 `SystemMessage`/`Error` 回显，长命令可加 spinner |
+
+### 3.7 半流式 Effect 改造
 
 `/save`、`/memory`、`/paste`、`RunHook`（`executor.rs`）内部 `.await` 改为 `spawn_guarded` 后台执行，结果经 `UiEvent` 回流。这 4 个不涉及 runtime 主循环协调，独立于上述主流程，可并行实施。
 
