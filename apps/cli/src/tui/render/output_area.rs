@@ -34,7 +34,6 @@ pub struct OutputArea {
     /// 用于检测结构性变化、触发强制全屏重绘以清除宽字符尾随 cell 残影。
     last_repaint_total: usize,
     last_repaint_blocks: usize,
-    last_repaint_scroll: usize,
 }
 
 impl Default for OutputArea {
@@ -59,7 +58,6 @@ impl OutputArea {
             // usize::MAX 哨兵：保证首帧一定触发一次全屏重绘（清掉进入 alt screen 时的残留）。
             last_repaint_total: usize::MAX,
             last_repaint_blocks: 0,
-            last_repaint_scroll: 0,
         }
     }
 
@@ -68,22 +66,17 @@ impl OutputArea {
     /// 上遗留的样式残影（手动 resize 能清掉残影即此原理）。
     ///
     /// 触发：首帧、**块数变化**（工具结果 / 新消息等结构块出现或移除）、行数减少
-    /// （块内折叠 / 替换）、滚动。
+    /// （块内折叠 / 替换）。
     /// **NEVER** 在流式追加（同一块内行数仅增长、块数不变）时触发，避免逐 token 闪屏。
+    /// **滚动不触发**：滚动时可见区每行内容都变、ratatui 整屏重绘、不产生残影，
+    /// 若触发只会带来明显的滚动闪屏。
     /// 终端 resize 不在此处理——ratatui 的 autoresize 会重置 buffer 自行全量重绘。
     /// ratatui 升级到 0.30（已修 trailing-cell diff，PR #2587）后，本 workaround 可整体移除。
-    pub fn should_force_repaint(
-        &mut self,
-        total_lines: usize,
-        block_count: usize,
-        scroll_pos: usize,
-    ) -> bool {
-        let changed = total_lines < self.last_repaint_total
-            || block_count != self.last_repaint_blocks
-            || scroll_pos != self.last_repaint_scroll;
+    pub fn should_force_repaint(&mut self, total_lines: usize, block_count: usize) -> bool {
+        let changed =
+            total_lines < self.last_repaint_total || block_count != self.last_repaint_blocks;
         self.last_repaint_total = total_lines;
         self.last_repaint_blocks = block_count;
-        self.last_repaint_scroll = scroll_pos;
         changed
     }
 
@@ -123,21 +116,22 @@ mod tests {
 
     #[test]
     fn test_should_force_repaint_triggers_on_structural_change_not_streaming() {
-        // 参数：(total_lines, block_count, scroll_offset)
+        // 参数：(total_lines, block_count)
         let mut area = OutputArea::new();
         // 首帧（哨兵 MAX）：触发，清掉进入 alt screen 的残留。
-        assert!(area.should_force_repaint(50, 2, 0), "首帧应触发");
+        assert!(area.should_force_repaint(50, 2), "首帧应触发");
         // 流式追加（同一块内行数增长、块数不变）：不触发，避免逐 token 闪屏。
-        assert!(!area.should_force_repaint(60, 2, 0), "块内行数增长不触发");
-        assert!(!area.should_force_repaint(80, 2, 0), "继续流式不触发");
+        assert!(!area.should_force_repaint(60, 2), "块内行数增长不触发");
+        assert!(!area.should_force_repaint(80, 2), "继续流式不触发");
         // 工具结果 / 新块出现（块数变化）：触发——即便行数是增长的。
-        assert!(area.should_force_repaint(95, 3, 0), "新块出现应触发");
+        assert!(area.should_force_repaint(95, 3), "新块出现应触发");
         // 折叠 / 替换（行数减少）：触发。
-        assert!(area.should_force_repaint(40, 3, 0), "行数减少应触发");
-        // 滚动位置变化：触发。
-        assert!(area.should_force_repaint(40, 3, 5), "滚动应触发");
-        // 无任何变化：不触发。
-        assert!(!area.should_force_repaint(40, 3, 5), "无变化不触发");
+        assert!(area.should_force_repaint(40, 3), "行数减少应触发");
+        // 行数 / 块数都不变：不触发——滚动只改 scroll_offset（不入参），故不触发、不闪。
+        assert!(
+            !area.should_force_repaint(40, 3),
+            "无结构变化不触发（滚动不闪）"
+        );
     }
 
     #[test]
