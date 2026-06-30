@@ -5,7 +5,7 @@ mod message_conversion;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use share::message::Message;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -20,7 +20,7 @@ pub struct AnthropicProvider {
     base_url: String,
     model: String,
     max_tokens: Arc<AtomicU32>,
-    thinking_max_tokens: Arc<AtomicU32>,
+    reasoning_level: Arc<AtomicU8>,
     user_agent: String,
     http: reqwest::Client,
     /// Maximum retry attempts (default 3)
@@ -37,14 +37,14 @@ impl AnthropicProvider {
         base_url: Option<String>,
         model: Option<String>,
         max_tokens: u32,
-        thinking_max_tokens: u32,
+        reasoning_level: crate::core::provider::ReasoningLevel,
     ) -> Self {
         Self {
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
-            thinking_max_tokens: Arc::new(AtomicU32::new(thinking_max_tokens)),
+            reasoning_level: Arc::new(AtomicU8::new(reasoning_level.as_u8())),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(120))
@@ -128,10 +128,17 @@ impl LlmProvider for AnthropicProvider {
                 );
             }
         }
+        let level = crate::core::provider::ReasoningLevel::from_u8(
+            self.reasoning_level.load(Ordering::Relaxed),
+        );
+        let effort = match level {
+            crate::core::provider::ReasoningLevel::Off => None,
+            l => Some(l.as_str().to_string()),
+        };
         let request = CreateMessageRequest::new(
             self.model.clone(),
             self.current_max_tokens(),
-            self.thinking_max_tokens.load(Ordering::Relaxed),
+            effort,
             system.to_vec(),
             api_messages,
             cached_tools,
@@ -274,10 +281,17 @@ impl LlmProvider for AnthropicProvider {
                             "stream interrupted after partial output: {msg}"
                         )));
                     }
+                    let level = crate::core::provider::ReasoningLevel::from_u8(
+                        self.reasoning_level.load(Ordering::Relaxed),
+                    );
+                    let effort = match level {
+                        crate::core::provider::ReasoningLevel::Off => None,
+                        l => Some(l.as_str().to_string()),
+                    };
                     let params = RequestParams {
                         model: self.model.clone(),
                         max_tokens: self.current_max_tokens(),
-                        thinking_max_tokens: self.thinking_max_tokens.load(Ordering::Relaxed),
+                        effort,
                         base_url: self.base_url.clone(),
                         headers: self.build_headers()?,
                         http: &self.http,
@@ -317,28 +331,11 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn set_reasoning_level(&self, level: crate::core::provider::ReasoningLevel) {
-        use crate::core::provider::ReasoningLevel;
-        let tokens: u32 = match level {
-            ReasoningLevel::Off => 0,
-            ReasoningLevel::Low => 1024,
-            ReasoningLevel::Medium => 4096,
-            ReasoningLevel::High => 16384,
-            ReasoningLevel::Xhigh => 32768,
-            ReasoningLevel::Max => 65536,
-        };
-        self.thinking_max_tokens.store(tokens, Ordering::Relaxed);
+        self.reasoning_level.store(level.as_u8(), Ordering::Relaxed);
     }
 
     fn current_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
-        use crate::core::provider::ReasoningLevel;
-        match self.thinking_max_tokens.load(Ordering::Relaxed) {
-            0 => ReasoningLevel::Off,
-            1..=1024 => ReasoningLevel::Low,
-            1025..=4096 => ReasoningLevel::Medium,
-            4097..=16384 => ReasoningLevel::High,
-            16385..=32768 => ReasoningLevel::Xhigh,
-            _ => ReasoningLevel::Max,
-        }
+        crate::core::provider::ReasoningLevel::from_u8(self.reasoning_level.load(Ordering::Relaxed))
     }
 
     fn max_reasoning_level(&self) -> crate::core::provider::ReasoningLevel {
@@ -351,11 +348,11 @@ mod tests {
     use crate::business::types::CreateMessageRequest;
 
     #[test]
-    fn anthropic_request_serializes_thinking_budget() {
+    fn anthropic_request_serializes_adaptive_thinking_with_effort() {
         let request = CreateMessageRequest::new(
             "claude-sonnet-4-6".to_string(),
             8192,
-            4096,
+            Some("medium".to_string()),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -365,20 +362,20 @@ mod tests {
         let value = request.into_json();
         assert_eq!(
             value.get("thinking").unwrap().get("type"),
-            Some(&serde_json::json!("enabled"))
+            Some(&serde_json::json!("adaptive"))
         );
         assert_eq!(
-            value.get("thinking").unwrap().get("budget_tokens"),
-            Some(&serde_json::json!(4096))
+            value.get("output_config").unwrap().get("effort"),
+            Some(&serde_json::json!("medium"))
         );
     }
 
     #[test]
-    fn anthropic_request_omits_thinking_when_budget_zero() {
+    fn anthropic_request_off_thinking_disabled() {
         let request = CreateMessageRequest::new(
             "claude-sonnet-4-6".to_string(),
             8192,
-            0,
+            None,
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -386,6 +383,10 @@ mod tests {
         );
 
         let value = request.into_json();
-        assert!(value.get("thinking").is_none());
+        assert_eq!(
+            value.get("thinking").unwrap().get("type"),
+            Some(&serde_json::json!("disabled"))
+        );
+        assert!(value.get("output_config").is_none());
     }
 }

@@ -42,8 +42,8 @@ impl SystemBlock {
 pub struct CreateMessageRequest {
     pub model: String,
     pub max_tokens: u32,
-    #[serde(skip_serializing_if = "is_zero")]
-    pub thinking_max_tokens: u32,
+    #[serde(skip_serializing)]
+    pub effort: Option<String>,
     system: Vec<SystemBlock>,
     messages: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -51,15 +51,11 @@ pub struct CreateMessageRequest {
     stream: bool,
 }
 
-fn is_zero(value: &u32) -> bool {
-    *value == 0
-}
-
 impl CreateMessageRequest {
     pub fn new(
         model: String,
         max_tokens: u32,
-        thinking_max_tokens: u32,
+        effort: Option<String>,
         system: Vec<SystemBlock>,
         messages: Vec<serde_json::Value>,
         tools: Vec<serde_json::Value>,
@@ -68,7 +64,7 @@ impl CreateMessageRequest {
         Self {
             model,
             max_tokens,
-            thinking_max_tokens,
+            effort,
             system,
             messages,
             tools,
@@ -77,18 +73,29 @@ impl CreateMessageRequest {
     }
 
     pub fn into_json(self) -> serde_json::Value {
-        let mut value = serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({}));
-        if let Some(tokens) = value
-            .get("thinking_max_tokens")
-            .and_then(|v| v.as_u64())
-            .filter(|tokens| *tokens > 0)
-        {
-            if let Some(obj) = value.as_object_mut() {
-                obj.remove("thinking_max_tokens");
-                obj.insert(
-                    "thinking".to_string(),
-                    serde_json::json!({"type": "enabled", "budget_tokens": tokens}),
-                );
+        let mut value = serde_json::to_value(&self).unwrap_or_else(|_| serde_json::json!({}));
+        match self.effort.as_deref() {
+            None => {
+                // No reasoning → thinking disabled
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert(
+                        "thinking".to_string(),
+                        serde_json::json!({"type": "disabled"}),
+                    );
+                }
+            }
+            Some(effort) => {
+                // Has effort → thinking adaptive + output_config.effort
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert(
+                        "thinking".to_string(),
+                        serde_json::json!({"type": "adaptive"}),
+                    );
+                    obj.insert(
+                        "output_config".to_string(),
+                        serde_json::json!({"effort": effort}),
+                    );
+                }
             }
         }
         value
