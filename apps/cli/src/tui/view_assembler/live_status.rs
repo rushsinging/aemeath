@@ -41,7 +41,9 @@ impl LiveStatusAssembler {
             let ratio = p.ratio().clamp(0.0, 1.0);
             CompactProgressView {
                 ratio_millis: (ratio * 1000.0).round() as u32,
-                label: p.label(),
+                stage: p.stage.clone(),
+                current: p.current,
+                total: p.total,
             }
         });
         LiveStatusViewModel {

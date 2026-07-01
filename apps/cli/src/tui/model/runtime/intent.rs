@@ -26,6 +26,8 @@ pub enum RuntimeIntent {
         cost_usd: f64,
     },
     SetContextSize(u64),
+    /// 更新 last_input_tokens（compact 后重新估算上下文用）。
+    UpdateLastInputTokens(u64),
     RecordLiveTps {
         tps: f64,
     },

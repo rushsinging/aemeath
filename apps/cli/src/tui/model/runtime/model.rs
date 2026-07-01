@@ -105,6 +105,14 @@ impl RuntimeModel {
                     cost_usd: self.usage.cost_usd,
                 }]
             }
+            RuntimeIntent::UpdateLastInputTokens(tokens) => {
+                self.usage.last_input_tokens = tokens;
+                vec![RuntimeChange::UsageChanged {
+                    input_tokens: self.usage.input_tokens,
+                    output_tokens: self.usage.output_tokens,
+                    cost_usd: self.usage.cost_usd,
+                }]
+            }
             RuntimeIntent::RecordLiveTps { tps } => {
                 self.live_tps = Some(tps);
                 vec![RuntimeChange::LiveTpsChanged { tps }]
