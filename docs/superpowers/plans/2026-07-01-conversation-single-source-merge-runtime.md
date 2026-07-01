@@ -19,6 +19,8 @@
 
 **搬迁的类型**：
 - `SpinnerModel` / `SpinnerPhase` / `HookOutcome`（`runtime/spinner.rs`）
+  - `SpinnerModel` 新增 `running_tool_count: usize` 字段
+  - `SpinnerPhase` 新增 `text()` 方法，从 `live_status.rs::phase_text()` 搬入
 - `WorkspaceState` / `WorktreeKind`（`runtime/workspace.rs`）
 - `UsageSummary`（`runtime/usage.rs`）
 - `TaskStatusSnapshot`（`runtime/task_status.rs`）
@@ -140,7 +142,7 @@ spinner 状态已由 Phase 2 中各 intent 的 `update()` 内部附带维护，`
 
 ### Step 5.1: LiveStatusAssembler 改读 ConversationModel
 
-`LiveStatusAssembler::assemble` 入参从 `runtime: &RuntimeModel` 改为从 `ConversationModel` 读 spinner / compact_progress / task_status。
+`LiveStatusAssembler::assemble` 入参从 `runtime: &RuntimeModel` 改为从 `ConversationModel` 读 spinner / compact_progress / task_status。删除自由函数 `phase_text()`，改为调 `phase.text()`。
 
 ### Step 5.2: StatusViewAssembler 改读 ConversationModel
 

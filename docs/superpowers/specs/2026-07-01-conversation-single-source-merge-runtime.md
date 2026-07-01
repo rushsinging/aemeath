@@ -144,6 +144,24 @@ pub struct SpinnerModel {
 - `ObserveToolResult.update()`：`running_tool_count -= 1`（saturating）
 - `CompleteChat` / `AppendError` / `Stop` 等停止 intent：`running_tool_count = 0`
 
+`SpinnerPhase` 新增 `text()` 方法，格式化逻辑从 `live_status.rs` 的自由函数 `phase_text()` 收进 enum 自身（DRY）：
+
+```rust
+impl SpinnerPhase {
+    pub fn text(&self) -> String {
+        match self {
+            Self::Thinking => "Thinking...".to_string(),
+            Self::Generating => "Generating...".to_string(),
+            Self::CallingTool(name) => format!("Calling {name}..."),
+            Self::CallingTools { remaining } => format!("Calling tools... ({remaining} running)"),
+            // ...
+        }
+    }
+}
+```
+
+`LiveStatusAssembler` 直接调 `phase.text()` 取代当前 `phase_text(phase)` 自由函数。
+
 ### Spinner 写入：intent update 内部附带维护
 
 **不存在 `SetSpinnerPhase` / `StopSpinner` 独立 intent。** Spinner phase 是 ConversationModel 的内部状态，由其他 intent 的 `update()` 方法自然维护——就像 `active_text_block_id` 由 `ObserveAssistantText.update()` 内部设置一样。
