@@ -22,26 +22,22 @@ impl App {
                 if self.chat.tool_call_active {
                     self.chat.clear_tool_activity();
                 }
-                self.spinner_phase(SpinnerPhase::Generating);
             }
             UiEvent::Thinking { .. } => {
                 if self.chat.tool_call_active {
                     self.chat.clear_tool_activity();
                 }
-                self.spinner_phase(SpinnerPhase::Thinking);
             }
             UiEvent::BlockComplete { context, text } => {
                 let _ = (context, text);
             }
-            UiEvent::ToolCallStart { name, index: _, .. } => {
-                self.chat.start_tool_activity(); // AskUserQuestion 等待用户回复期间不应显示 spinner
-                if name != "AskUserQuestion" {
-                    self.spinner_phase(SpinnerPhase::CallingTool(name));
-                }
+            UiEvent::ToolCallStart {
+                name: _, index: _, ..
+            } => {
+                self.chat.start_tool_activity();
             }
-            UiEvent::ToolCallUpdate { name, id, .. } => {
+            UiEvent::ToolCallUpdate { name: _, id, .. } => {
                 self.chat.register_tool_call(id.clone());
-                self.spinner_phase(SpinnerPhase::CallingTool(name));
             }
             UiEvent::ToolResult {
                 id,
@@ -52,14 +48,7 @@ impl App {
                 ..
             } => {
                 let _had_active_id = self.chat.has_active_tool_call(&id);
-                let remaining = self.chat.finish_tool_call(&id);
-                if remaining == 0 {
-                    // All tool results received — agent loop will continue with next API call.
-                    // Restart spinner to show "waiting for next response" state.
-                    self.spinner_phase(SpinnerPhase::Thinking);
-                } else {
-                    self.spinner_phase(SpinnerPhase::CallingTools { remaining });
-                }
+                let _remaining = self.chat.finish_tool_call(&id);
             }
             UiEvent::Usage { .. } => {
                 // token/api/tps 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
@@ -71,7 +60,6 @@ impl App {
             UiEvent::AgentProgress { .. } => {
                 // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
                 // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
-                self.spinner_phase(SpinnerPhase::AgentWorking);
             }
             UiEvent::HookEvent(event) => {
                 // Hook notice 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel，

@@ -230,10 +230,9 @@ impl App {
     ) -> UpdateResult {
         let mapping = map_agent_event(&ev);
         crate::tui::log_trace!(
-            "tui.agent_event mapped event={} conversation_intents={} runtime_intents={} diagnostic_intents={} session_intents={} effects={}",
+            "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={} effects={}",
             ui_event_name(&ev),
             mapping.conversation.len(),
-            mapping.runtime.len(),
             mapping.diagnostic.len(),
             mapping.session.len(),
             mapping.effects.len()

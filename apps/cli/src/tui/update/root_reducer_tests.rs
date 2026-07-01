@@ -128,7 +128,7 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
 }
 
 #[test]
-fn test_reduce_agent_event_applies_tool_patch_and_spinner_atomically_with_single_render_request() {
+fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_request() {
     let mut model = TuiModel::default();
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("chat-atomic");
     let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-atomic");
@@ -148,18 +148,12 @@ fn test_reduce_agent_event_applies_tool_patch_and_spinner_atomically_with_single
                     status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
                 },
             )],
-            runtime: vec![
-                crate::tui::model::runtime::intent::RuntimeIntent::SetSpinnerPhase(
-                    crate::tui::model::runtime::spinner::SpinnerPhase::Generating,
-                ),
-            ],
             effects: vec![Effect::RequestRender],
             ..Default::default()
         },
     );
 
     assert!(result.dirty.output);
-    assert!(result.dirty.status);
     assert_eq!(
         result
             .effects

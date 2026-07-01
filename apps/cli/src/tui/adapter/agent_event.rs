@@ -1,13 +1,11 @@
-use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
+use crate::tui::adapter::hook_notice::hook_event_notice;
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
-use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
 
@@ -15,7 +13,6 @@ use serde_json::{Map, Value};
 pub struct AgentEventMapping {
     pub conversation: Vec<ConversationIntent>,
     pub diagnostic: Vec<DiagnosticIntent>,
-    pub runtime: Vec<RuntimeIntent>,
     pub session: Vec<SessionIntent>,
     pub effects: Vec<Effect>,
 }
@@ -31,32 +28,20 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
-        UiEvent::Text { context, text } => {
-            let mut mapping = conversation(ConversationIntent::ObserveAssistantText(
-                ObserveAssistantText {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    text: text.clone(),
-                },
-            ));
-            mapping
-                .runtime
-                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
-            mapping
-        }
-        UiEvent::Thinking { context, text } => {
-            let mut mapping = conversation(ConversationIntent::ObserveThinkingText(
-                ObserveThinkingText {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    text: text.clone(),
-                },
-            ));
-            mapping
-                .runtime
-                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
-            mapping
-        }
+        UiEvent::Text { context, text } => conversation(ConversationIntent::ObserveAssistantText(
+            ObserveAssistantText {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                text: text.clone(),
+            },
+        )),
+        UiEvent::Thinking { context, text } => conversation(
+            ConversationIntent::ObserveThinkingText(ObserveThinkingText {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                text: text.clone(),
+            }),
+        ),
         UiEvent::BlockComplete { context, .. } => {
             conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                 chat_id: context.chat_id.clone(),
@@ -235,13 +220,12 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         }),
         UiEvent::AskUserBatch { .. } => AgentEventMapping::default(),
 
-        // ── HookEvent → spinner via runtime, notice via conversation ──
+        // ── HookEvent → notice via conversation ──
         UiEvent::HookEvent(event) => {
-            // PostCompact 事件停止 spinner
             if event.hook_name == "PostCompact" {
-                return runtime(RuntimeIntent::StopSpinner);
+                return AgentEventMapping::default();
             }
-            let mut mapping = runtime(RuntimeIntent::SetSpinnerPhase(hook_spinner_phase(event)));
+            let mut mapping = AgentEventMapping::default();
             if let Some(notice) = hook_event_notice(event) {
                 mapping
                     .conversation
@@ -281,13 +265,6 @@ fn conversation(intent: ConversationIntent) -> AgentEventMapping {
 fn _diagnostic(intent: DiagnosticIntent) -> AgentEventMapping {
     AgentEventMapping {
         diagnostic: vec![intent],
-        ..AgentEventMapping::default()
-    }
-}
-
-fn runtime(intent: RuntimeIntent) -> AgentEventMapping {
-    AgentEventMapping {
-        runtime: vec![intent],
         ..AgentEventMapping::default()
     }
 }
@@ -523,10 +500,6 @@ mod tests {
             first_observation(&mapping),
             Some(ConversationIntent::ObserveAssistantText(ObserveAssistantText { text, .. })) if text == "hello"
         ));
-        assert_eq!(
-            mapping.runtime,
-            vec![RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating)]
-        );
     }
 
     #[test]
@@ -540,10 +513,6 @@ mod tests {
             first_observation(&mapping),
             Some(ConversationIntent::ObserveThinkingText(ObserveThinkingText { text, .. })) if text == "reason"
         ));
-        assert_eq!(
-            mapping.runtime,
-            vec![RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking)]
-        );
     }
 
     #[test]
@@ -568,7 +537,6 @@ mod tests {
             mapping.conversation.get(1),
             Some(ConversationIntent::RecordLiveTps(RecordLiveTps { tps })) if *tps == 2.0
         ));
-        assert!(mapping.runtime.is_empty());
     }
 
     #[test]
