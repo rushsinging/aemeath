@@ -129,29 +129,50 @@ pub struct AgentEventMapping {
 
 `root_reducer::reduce_agent_event` 中删除 `for intent in mapping.runtime` 循环，全部走 `model.conversation.apply(intent)`。
 
+### Spinner 结构：内部计数器自治
+
+SpinnerModel 维护一个 `running_tool_count` 计数器，由 intent update 增减，不依赖外部查询：
+
+```rust
+pub struct SpinnerModel {
+    pub phase: Option<SpinnerPhase>,
+    pub running_tool_count: usize,
+}
+```
+
+- `ObserveToolCallStart.update()`：`running_tool_count += 1`
+- `ObserveToolResult.update()`：`running_tool_count -= 1`（saturating）
+- `CompleteChat` / `AppendError` / `Stop` 等停止 intent：`running_tool_count = 0`
+
 ### Spinner 写入：intent update 内部附带维护
 
 **不存在 `SetSpinnerPhase` / `StopSpinner` 独立 intent。** Spinner phase 是 ConversationModel 的内部状态，由其他 intent 的 `update()` 方法自然维护——就像 `active_text_block_id` 由 `ObserveAssistantText.update()` 内部设置一样。
 
-每个 intent 的 `update()` 在完成自身逻辑后，附带设置正确的 spinner phase：
+每个 intent 的 `update()` 在完成自身逻辑后，附带维护 spinner：
 
 ```rust
-impl ConversationUpdate for ObserveAssistantText {
+impl ConversationUpdate for ObserveToolCallStart {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        // 1. 追加 assistant 文本（现有逻辑）
-        let changes = model.append_assistant_text(...);
-        // 2. 附带更新 spinner
-        model.spinner.set_phase(SpinnerPhase::Generating);
+        let changes = model.observe_tool_call_start(...);
+        // 附带维护 spinner 计数器和 phase
+        model.spinner.running_tool_count += 1;
+        model.spinner.phase = Some(SpinnerPhase::CallingTool(self.name));
         changes
     }
 }
 
-impl ConversationUpdate for ObserveToolCallStart {
+impl ConversationUpdate for ObserveToolResult {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        // 1. 注册 tool call（现有逻辑）
-        let changes = model.observe_tool_call_start(...);
-        // 2. 附带更新 spinner
-        model.spinner.set_phase(SpinnerPhase::CallingTool(self.name));
+        let changes = model.observe_tool_result(...);
+        // 附带维护 spinner 计数器和 phase
+        model.spinner.running_tool_count = model.spinner.running_tool_count.saturating_sub(1);
+        if model.spinner.running_tool_count == 0 {
+            model.spinner.phase = Some(SpinnerPhase::Thinking);
+        } else {
+            model.spinner.phase = Some(SpinnerPhase::CallingTools {
+                remaining: model.spinner.running_tool_count,
+            });
+        }
         changes
     }
 }
@@ -161,22 +182,20 @@ impl ConversationUpdate for ObserveToolCallStart {
 
 | Intent struct | spinner 附带行为（在 update 内部） |
 |---|---|
-| `ObserveAssistantText` | `Generating` |
-| `ObserveThinkingText` | `Thinking` |
-| `ObserveToolCallStart` | `CallingTool(name)` |
-| `ObserveToolResult` | 数 running tool_calls：0 → `Thinking`；>0 → `CallingTools { remaining }` |
-| `RecordAgentProgress` | `AgentWorking` |
-| `AppendHookNotice` | `Hook { .. }`（Phase 由 hook event 决定） |
-| `SetCompactProgress` | `Compacting`；PostCompact hook 事件 → 停止 |
-| `CompleteChat` | 停止 |
-| `AppendError` | 停止 |
-| `ShowAskUserBatch` | 停止 |
-| `SetReflectionActive(true)` | `Reflecting` |
-| `SetReflectionActive(false)` | 停止 |
+| `ObserveAssistantText` | `phase = Generating` |
+| `ObserveThinkingText` | `phase = Thinking` |
+| `ObserveToolCallStart` | `running_tool_count += 1`；`phase = CallingTool(name)` |
+| `ObserveToolResult` | `running_tool_count -= 1`；==0 → `Thinking`；>0 → `CallingTools { remaining }` |
+| `RecordAgentProgress` | `phase = AgentWorking` |
+| `AppendHookNotice` | `phase = Hook { .. }`（Phase 由 hook event 决定） |
+| `SetCompactProgress` | `phase = Compacting` |
+| `CompleteChat` | `running_tool_count = 0`；`phase = None` |
+| `AppendError` | `running_tool_count = 0`；`phase = None` |
+| `ShowAskUserBatch` | `phase = None` |
+| `SetReflectionActive(true)` | `phase = Reflecting` |
+| `SetReflectionActive(false)` | `phase = None` |
 
-**ToolResult remaining**：`ObserveToolResult.update()` 先更新 `tool_calls[].status`，随后直接从 model 数 running 数量并设置 spinner——全在同一个 `update()` 调用内，无时序问题。
-
-**特殊事件（无对应对话内容 intent 的）**：取消、MessagesSync 等需要停止 spinner 的事件，它们本身就有对应 intent（`CancelChat`、`MessagesSynced` 等），在这些 intent 的 update 中停止 spinner。
+**特殊事件（无对应对话内容 intent 的）**：取消、MessagesSync 等需要停止 spinner 的事件，它们本身就有对应 intent（`CancelChat`、`MessagesSynced` 等），在这些 intent 的 update 中 `phase = None`。
 
 ### 渲染层适配
 

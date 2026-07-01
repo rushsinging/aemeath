@@ -52,13 +52,14 @@ pub trait ConversationUpdate {
 
 把 `ConversationIntent` enum 的每个 variant 拆成独立 struct。每个 struct `impl ConversationUpdate`，逻辑从 `ConversationModel` 的私有方法搬入。
 
-**关键：spinner phase 在各 intent 的 `update()` 内部附带设置**，不产出独立 spinner intent。示例：
+**关键：spinner phase 在各 intent 的 `update()` 内部附带设置**，不产出独立 spinner intent。SpinnerModel 内部维护 `running_tool_count` 计数器，tool start +1 / tool result -1，不依赖外部查询。示例：
 
 ```rust
-impl ConversationUpdate for ObserveAssistantText {
+impl ConversationUpdate for ObserveToolCallStart {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.append_assistant_text(...);
-        model.spinner.set_phase(SpinnerPhase::Generating); // 附带
+        let changes = model.observe_tool_call_start(...);
+        model.spinner.running_tool_count += 1;
+        model.spinner.phase = Some(SpinnerPhase::CallingTool(self.name));
         changes
     }
 }
@@ -66,12 +67,13 @@ impl ConversationUpdate for ObserveAssistantText {
 impl ConversationUpdate for ObserveToolResult {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         let changes = model.observe_tool_result(...);
-        // 数 running tool_calls，设置 spinner
-        let remaining = model.count_running_tools();
-        if remaining == 0 {
-            model.spinner.set_phase(SpinnerPhase::Thinking);
+        model.spinner.running_tool_count = model.spinner.running_tool_count.saturating_sub(1);
+        if model.spinner.running_tool_count == 0 {
+            model.spinner.phase = Some(SpinnerPhase::Thinking);
         } else {
-            model.spinner.set_phase(SpinnerPhase::CallingTools { remaining });
+            model.spinner.phase = Some(SpinnerPhase::CallingTools {
+                remaining: model.spinner.running_tool_count,
+            });
         }
         changes
     }
