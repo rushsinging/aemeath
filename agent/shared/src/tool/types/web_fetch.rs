@@ -9,6 +9,7 @@ pub struct WebFetchResult {
     pub title: String,
     pub content: String,
     pub truncated: bool,
+    pub links: Vec<String>,
 }
 
 /// Typed input for the `web_fetch` tool.
