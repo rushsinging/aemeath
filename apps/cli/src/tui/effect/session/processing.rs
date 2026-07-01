@@ -179,6 +179,7 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             current,
             total,
         },
+        sdk::ChatEvent::ModelSwitched { result } => UiEvent::ModelSwitched { result },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }
@@ -417,6 +418,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             current,
             total,
+        ),
+        sdk::ChatEvent::ModelSwitched { result } => crate::tui::log_trace!(
+            "{} model_switched display={} context_window={} reasoning={:?}",
+            stage,
+            result.display_name,
+            result.context_window,
+            result.reasoning_active
         ),
         sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
             "{} result text_len={} tokens_used={:?}",

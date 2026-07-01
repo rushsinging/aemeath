@@ -62,6 +62,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::UserMessagesWithdrawn(_) => "UserMessagesWithdrawn",
         UiEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged",
         UiEvent::CompactProgress { .. } => "CompactProgress",
+        UiEvent::ModelSwitched { .. } => "ModelSwitched",
     }
 }
 

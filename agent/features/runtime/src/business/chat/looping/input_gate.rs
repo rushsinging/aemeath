@@ -52,6 +52,8 @@ pub struct GateOutcome {
     pub appended_user_messages: usize,
     pub dropped_events: usize,
     pub compact_requested: bool,
+    /// pending 的模型切换请求（由 `/model` 触发，#497）。
+    pub model_switch_requested: Option<sdk::ModelSwitchParams>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -133,6 +135,7 @@ where
     let mut dropped_events = 0usize;
     let mut decision = GateDecision::Proceed;
     let mut compact_requested = false;
+    let mut model_switch_requested: Option<sdk::ModelSwitchParams> = None;
     let mut added: Vec<(sdk::InputId, Message)> = Vec::new();
 
     let events = buffer.drain_all();
@@ -236,6 +239,17 @@ where
                     buffer.push(ChatInputEvent::Compact);
                 }
             }
+            ChatInputEvent::SwitchModel { params } => {
+                if is_idle {
+                    model_switch_requested = Some(params);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    buffer.push(ChatInputEvent::SwitchModel { params });
+                }
+            }
         }
     }
 
@@ -265,6 +279,7 @@ where
         appended_user_messages,
         dropped_events,
         compact_requested,
+        model_switch_requested,
     }
 }
 
