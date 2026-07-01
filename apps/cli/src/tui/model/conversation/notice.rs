@@ -2,7 +2,6 @@ use super::block::HookNoticeContent;
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
-use crate::tui::model::conversation::intent::*;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// 启动横幅文本，作为对话起始的 System block 注入单一真相源。

@@ -1,5 +1,4 @@
 use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
-use crate::tui::adapter::tool_flow_projector::ToolFlowProjector;
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
@@ -8,7 +7,9 @@ use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
-use crate::tui::model::runtime_observation::{RuntimeObservation, RuntimeTurnContext};
+use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::text::safe_str_slice_by_char;
+use serde_json::{Map, Value};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AgentEventMapping {
@@ -28,30 +29,188 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
 }
 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
-    if let Some(observation) = runtime_observation_from_ui_event(event) {
-        return map_runtime_observation(&observation);
-    }
     match event {
+        // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
+        UiEvent::Text { context, text } => {
+            let mut mapping = conversation(ConversationIntent::ObserveAssistantText(
+                ObserveAssistantText {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    text: text.clone(),
+                },
+            ));
+            mapping
+                .runtime
+                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
+            mapping
+        }
+        UiEvent::Thinking { context, text } => {
+            let mut mapping = conversation(ConversationIntent::ObserveThinkingText(
+                ObserveThinkingText {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    text: text.clone(),
+                },
+            ));
+            mapping
+                .runtime
+                .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
+            mapping
+        }
+        UiEvent::BlockComplete { context, .. } => {
+            conversation(ConversationIntent::CompleteBlock(CompleteBlock {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            }))
+        }
+        UiEvent::ToolCallStart {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+        } => {
+            crate::tui::log_debug!(
+                "map tool_call_start chat_id={} turn_id={} id={} provider_id={:?} name={} index={}",
+                context.chat_id,
+                context.turn_id,
+                id,
+                provider_id,
+                name,
+                index,
+            );
+            conversation(ConversationIntent::ObserveToolCallStart(
+                ObserveToolCallStart {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    id: id.clone(),
+                    provider_id: provider_id.clone(),
+                    name: name.clone(),
+                    index: *index,
+                },
+            ))
+        }
+        UiEvent::ToolCallUpdate {
+            context,
+            id,
+            provider_id,
+            name,
+            index,
+            arguments_delta,
+            arguments,
+            status,
+        } => {
+            let args = arguments_delta
+                .clone()
+                .or_else(|| arguments.as_ref().map(|value| value.to_string()));
+            crate::tui::log_debug!(
+                "map tool_call_update chat_id={} turn_id={} id={} provider_id={:?} name={} index={} args_len={}",
+                context.chat_id,
+                context.turn_id,
+                id,
+                provider_id,
+                name,
+                index,
+                args.as_ref().map(|s| s.len()).unwrap_or(0),
+            );
+            conversation(ConversationIntent::ObserveToolCallUpdate(
+                ObserveToolCallUpdate {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    id: id.clone(),
+                    provider_id: provider_id.clone(),
+                    name: name.clone(),
+                    index: *index,
+                    arguments: args
+                        .as_ref()
+                        .map(|value| sanitize_tool_arguments_delta(name, value)),
+                    status: tool_call_status_from_sdk(*status),
+                },
+            ))
+        }
+        UiEvent::ToolResult {
+            context,
+            id,
+            provider_id,
+            tool_name,
+            output,
+            content,
+            is_error,
+            images,
+        } => {
+            crate::tui::log_debug!(
+                "map tool_result chat_id={} turn_id={} id={} provider_id={} tool_name={} output_len={} content_kind={} is_error={} image_count={}",
+                context.chat_id,
+                context.turn_id,
+                id,
+                provider_id,
+                tool_name,
+                output.len(),
+                json_value_kind(content),
+                is_error,
+                images.len(),
+            );
+            conversation(ConversationIntent::ObserveToolResult(ObserveToolResult {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                tool_name: tool_name.clone(),
+                output: sanitize_tool_output(tool_name, output),
+                content: sanitize_tool_result_content(tool_name, content.clone()),
+                is_error: *is_error,
+                image_count: images.len(),
+            }))
+        }
+        UiEvent::AgentProgress {
+            context,
+            tool_id,
+            event,
+        } => conversation(ConversationIntent::RecordAgentProgress(
+            RecordAgentProgress {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                tool_id: tool_id.clone(),
+                message: format!("{event}"),
+            },
+        )),
+        UiEvent::Done { context }
+        | UiEvent::DoneWithDuration { context, .. }
+        | UiEvent::Cancelled { context } => {
+            conversation(ConversationIntent::CompleteChat(CompleteChat {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+            }))
+        }
+
+        // ── Usage / LiveTps → ConversationIntent ──
         UiEvent::Usage {
             input,
             output,
             last_input,
             elapsed_secs,
         } => {
-            let mut mapping = runtime(RuntimeIntent::RecordUsage {
+            let mut intents = vec![ConversationIntent::RecordUsage(RecordUsage {
                 input_tokens: u64::from(*input),
                 output_tokens: u64::from(*output),
                 last_input_tokens: u64::from(*last_input),
                 cost_usd: 0.0,
-            });
+            })];
             if *elapsed_secs > 0.0 {
-                mapping.runtime.push(RuntimeIntent::RecordLiveTps {
+                intents.push(ConversationIntent::RecordLiveTps(RecordLiveTps {
                     tps: f64::from(*output) / elapsed_secs,
-                });
+                }));
             }
-            mapping
+            AgentEventMapping {
+                conversation: intents,
+                ..AgentEventMapping::default()
+            }
         }
-        UiEvent::LiveTps(tps) => runtime(RuntimeIntent::RecordLiveTps { tps: *tps }),
+        UiEvent::LiveTps(tps) => conversation(ConversationIntent::RecordLiveTps(RecordLiveTps {
+            tps: *tps,
+        })),
+
+        // ── Error ──
         UiEvent::Error(message) => {
             let mut mapping = conversation(ConversationIntent::AppendError(AppendError {
                 text: message.clone(),
@@ -66,6 +225,8 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             });
             mapping
         }
+
+        // ── System messages ──
         UiEvent::SystemMessage(text) | UiEvent::ReminderRecap(text) => conversation(
             ConversationIntent::AppendSystemMessage(AppendSystemMessage { text: text.clone() }),
         ),
@@ -73,18 +234,8 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             message_count: messages.len(),
         }),
         UiEvent::AskUserBatch { .. } => AgentEventMapping::default(),
-        UiEvent::AgentProgress {
-            context,
-            tool_id,
-            event,
-        } => conversation(ConversationIntent::RecordAgentProgress(
-            RecordAgentProgress {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                tool_id: tool_id.clone(),
-                message: format!("{event}"),
-            },
-        )),
+
+        // ── HookEvent → spinner via runtime, notice via conversation ──
         UiEvent::HookEvent(event) => {
             // PostCompact 事件停止 spinner
             if event.hook_name == "PostCompact" {
@@ -105,96 +256,20 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     }
 }
 
-fn runtime_context(context: &crate::tui::app::UiTurnContext) -> RuntimeTurnContext {
-    RuntimeTurnContext::new(context.chat_id.clone(), context.turn_id.clone())
+fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
+    conversation(ConversationIntent::WorkspaceSnapshotReceived(
+        WorkspaceSnapshotReceived {
+            path_base: Some(update.path_base.clone()),
+            workspace_root: Some(update.workspace_root.clone()),
+            branch: update.branch.clone(),
+            kind: update.kind,
+        },
+    ))
 }
 
-fn runtime_observation_from_ui_event(event: &UiEvent) -> Option<RuntimeObservation> {
-    match event {
-        UiEvent::Text { context, text } => Some(RuntimeObservation::AssistantText {
-            context: runtime_context(context),
-            text: text.clone(),
-        }),
-        UiEvent::Thinking { context, text } => Some(RuntimeObservation::ThinkingText {
-            context: runtime_context(context),
-            text: text.clone(),
-        }),
-        UiEvent::BlockComplete { context, .. } => Some(RuntimeObservation::BlockComplete {
-            context: runtime_context(context),
-        }),
-        UiEvent::ToolCallStart {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-        } => Some(RuntimeObservation::ToolCallStart {
-            context: runtime_context(context),
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            name: name.clone(),
-            index: *index,
-        }),
-        UiEvent::ToolCallUpdate {
-            context,
-            id,
-            provider_id,
-            name,
-            index,
-            arguments_delta,
-            arguments,
-            status,
-        } => Some(RuntimeObservation::ToolCallUpdate {
-            context: runtime_context(context),
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            name: name.clone(),
-            index: *index,
-            arguments: arguments_delta
-                .clone()
-                .or_else(|| arguments.as_ref().map(ToString::to_string)),
-            status: tool_call_status_from_sdk(*status),
-        }),
-        UiEvent::ToolResult {
-            context,
-            id,
-            provider_id,
-            tool_name,
-            output,
-            content,
-            is_error,
-            images,
-        } => Some(RuntimeObservation::ToolResult {
-            context: runtime_context(context),
-            id: id.clone(),
-            provider_id: provider_id.clone(),
-            tool_name: tool_name.clone(),
-            output: output.clone(),
-            content: content.clone(),
-            is_error: *is_error,
-            image_count: images.len(),
-        }),
-        UiEvent::AgentProgress {
-            context,
-            tool_id,
-            event,
-        } => Some(RuntimeObservation::AgentProgress {
-            context: runtime_context(context),
-            tool_id: tool_id.clone(),
-            message: format!("{event}"),
-        }),
-        UiEvent::Done { context }
-        | UiEvent::DoneWithDuration { context, .. }
-        | UiEvent::Cancelled { context } => Some(RuntimeObservation::Complete {
-            context: runtime_context(context),
-        }),
-        _ => None,
-    }
-}
-
-fn map_runtime_observation(observation: &RuntimeObservation) -> AgentEventMapping {
-    ToolFlowProjector::project(observation)
-}
+// ════════════════════════════════════════════════════════════════════
+//  Helpers — AgentEventMapping constructors
+// ════════════════════════════════════════════════════════════════════
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {
@@ -224,13 +299,122 @@ fn session(intent: SessionIntent) -> AgentEventMapping {
     }
 }
 
-fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
-    runtime(RuntimeIntent::WorkspaceSnapshotReceived {
-        path_base: Some(update.path_base.clone()),
-        workspace_root: Some(update.workspace_root.clone()),
-        branch: update.branch.clone(),
-        kind: update.kind,
-    })
+// ════════════════════════════════════════════════════════════════════
+//  Helpers — tool output sanitization (inlined from tool_flow_projector)
+// ════════════════════════════════════════════════════════════════════
+
+const TOOL_TEXT_PREVIEW_LIMIT: usize = 16 * 1024;
+const TOOL_STREAM_PREVIEW_LIMIT: usize = 512;
+const TOOL_LARGE_FIELD_PREVIEW_LIMIT: usize = 256;
+
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
+    match serde_json::from_str::<Value>(partial_args) {
+        Ok(value) => {
+            // 对大字段做摘要后重新序列化，保持 JSON 有效性。
+            // 不再做字节截断：大字段已被 summarize_object_string_field 控制在 256 字节以内，
+            // 其余字段通常很短，整体 JSON 不会过大。
+            sanitize_tool_value(tool_name, value).to_string()
+        }
+        Err(_) => truncate_tool_text(partial_args, TOOL_STREAM_PREVIEW_LIMIT, Some(tool_name)),
+    }
+}
+
+fn sanitize_tool_output(tool_name: &str, output: &str) -> String {
+    truncate_large_tool_text(output, Some(tool_name))
+}
+
+fn sanitize_tool_result_content(tool_name: &str, content: Value) -> Value {
+    match content {
+        Value::Object(object) => sanitize_tool_value(tool_name, Value::Object(object)),
+        value => truncate_json_value(value, tool_name, "content"),
+    }
+}
+
+fn sanitize_tool_value(tool_name: &str, value: Value) -> Value {
+    let Value::Object(mut object) = value else {
+        return truncate_json_value(value, tool_name, "value");
+    };
+    for field in large_fields_for_tool(tool_name) {
+        summarize_object_string_field(&mut object, tool_name, field);
+    }
+    Value::Object(object)
+}
+
+fn large_fields_for_tool(tool_name: &str) -> &'static [&'static str] {
+    match tool_name {
+        "Write" => &["content"],
+        "Edit" => &["old_string", "new_string"],
+        "Agent" => &["prompt"],
+        "Bash" => &["command"],
+        "AskUserQuestion" => &["question"],
+        _ => &[],
+    }
+}
+
+fn summarize_object_string_field(object: &mut Map<String, Value>, tool_name: &str, field: &str) {
+    let Some(value) = object.get_mut(field) else {
+        return;
+    };
+    let Some(text) = value.as_str() else {
+        return;
+    };
+    if text.len() <= TOOL_LARGE_FIELD_PREVIEW_LIMIT {
+        return;
+    }
+    *value = Value::String(format!(
+        "{} ... ({} bytes omitted from TUI {tool_name}.{field} preview)",
+        utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT),
+        text.len()
+            .saturating_sub(utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT).len())
+    ));
+}
+
+fn truncate_json_value(value: Value, tool_name: &str, field: &str) -> Value {
+    let text = value.to_string();
+    Value::String(truncate_tool_text(
+        &text,
+        TOOL_TEXT_PREVIEW_LIMIT,
+        Some(&format!("{tool_name}.{field}")),
+    ))
+}
+
+fn truncate_large_tool_text(text: &str, context: Option<&str>) -> String {
+    truncate_tool_text(text, TOOL_TEXT_PREVIEW_LIMIT, context)
+}
+
+fn truncate_tool_text(text: &str, limit: usize, context: Option<&str>) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let prefix = utf8_prefix(text, limit);
+    let omitted = text.len().saturating_sub(prefix.len());
+    let suffix = match context {
+        Some(context) => format!("... ({omitted} bytes omitted from TUI preview for {context})"),
+        None => format!("... ({omitted} bytes omitted from TUI preview)"),
+    };
+    format!("{prefix}\n{suffix}")
+}
+
+fn utf8_prefix(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let char_end = text
+        .char_indices()
+        .take_while(|(idx, ch)| idx + ch.len_utf8() <= limit)
+        .count();
+    safe_str_slice_by_char(text, 0, char_end)
 }
 
 #[cfg(test)]
@@ -238,7 +422,6 @@ mod tests {
     use super::*;
     use crate::tui::app::event::UiTurnContext;
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId};
-    use crate::tui::model::runtime::spinner::SpinnerPhase;
 
     fn ctx() -> UiTurnContext {
         UiTurnContext {
@@ -289,24 +472,30 @@ mod tests {
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
-                arguments_delta: Some(r#"{"file_path":"Cargo.toml"}"#.to_string()),
+                arguments_delta: Some("{}".to_string()),
                 arguments: None,
                 status: sdk::ToolCallStatusView::Ready,
             },
             UiEvent::ToolResult {
-                context,
+                context: context.clone(),
                 id: sdk::ids::ToolCallId::new("tool-1"),
                 provider_id: "provider-1".to_string(),
                 tool_name: "Read".to_string(),
                 output: "ok".to_string(),
-                content: serde_json::json!({ "text": "ok" }),
+                content: serde_json::json!(null),
                 is_error: false,
-                images: Vec::new(),
+                images: vec![],
+            },
+            UiEvent::Done {
+                context: context.clone(),
+            },
+            UiEvent::Cancelled {
+                context: context.clone(),
             },
         ];
 
-        for event in events {
-            let mapping = map_agent_event(&event);
+        for event in &events {
+            let mapping = map_agent_event(event);
             assert_no_runtime_bind_prelude(&mapping);
         }
     }
@@ -358,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn test_map_agent_event_usage_to_runtime_intent() {
+    fn test_map_agent_event_usage_to_conversation_intent() {
         let mapping = map_agent_event(&UiEvent::Usage {
             input: 1,
             output: 2,
@@ -366,14 +555,20 @@ mod tests {
             elapsed_secs: 1.0,
         });
         assert!(matches!(
-            mapping.runtime.first(),
-            Some(RuntimeIntent::RecordUsage {
+            mapping.conversation.first(),
+            Some(ConversationIntent::RecordUsage(RecordUsage {
                 input_tokens: 1,
                 output_tokens: 2,
                 last_input_tokens: 1,
                 ..
-            })
+            }))
         ));
+        // RecordLiveTps should also be present since elapsed_secs > 0
+        assert!(matches!(
+            mapping.conversation.get(1),
+            Some(ConversationIntent::RecordLiveTps(RecordLiveTps { tps })) if *tps == 2.0
+        ));
+        assert!(mapping.runtime.is_empty());
     }
 
     #[test]
@@ -411,5 +606,58 @@ mod tests {
             mapping.effects.first(),
             Some(Effect::RunHook { .. })
         ));
+    }
+
+    #[test]
+    fn test_sanitize_edit_arguments_delta_preserves_valid_json() {
+        // Edit 参数含超长 old_string/new_string，原始 JSON 远超 512 字节
+        let long_old = "x".repeat(400);
+        let long_new = "y".repeat(400);
+        let raw = format!(
+            r#"{{"file_path":"src/main.rs","old_string":"{long_old}","new_string":"{long_new}"}}"#
+        );
+        assert!(
+            raw.len() > TOOL_STREAM_PREVIEW_LIMIT,
+            "test precondition: raw JSON should exceed limit"
+        );
+
+        let sanitized = sanitize_tool_arguments_delta("Edit", &raw);
+
+        // 核心断言：摘要后仍是合法 JSON
+        let parsed: Value =
+            serde_json::from_str(&sanitized).expect("sanitized args must be valid JSON");
+
+        // file_path 正确保留
+        assert_eq!(
+            parsed.get("file_path").and_then(|v| v.as_str()),
+            Some("src/main.rs"),
+            "file_path must survive sanitization"
+        );
+
+        // old_string/new_string 被截断摘要（不再保持原长）
+        let old_val = parsed
+            .get("old_string")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            old_val.len() < long_old.len(),
+            "old_string should be summarized, got {} bytes",
+            old_val.len()
+        );
+        assert!(
+            old_val.contains("omitted"),
+            "old_string summary should contain 'omitted'"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_partial_json_truncates() {
+        let partial = r#"{"file_path":"src/main.rs","old_string":"x"#;
+        let sanitized = sanitize_tool_arguments_delta("Edit", partial);
+        // 回退模式：不是合法 JSON 但被截断
+        assert!(
+            sanitized.contains("omitted") || sanitized == partial,
+            "partial JSON should be truncated, got: {sanitized}"
+        );
     }
 }

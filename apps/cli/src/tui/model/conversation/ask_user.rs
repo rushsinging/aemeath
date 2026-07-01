@@ -6,7 +6,6 @@
 use super::block::{AskUserPhase, AskUserSlot};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
-use crate::tui::model::conversation::intent::*;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// AskUser 交互块的固定 id（同一时刻至多一个）。
