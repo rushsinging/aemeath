@@ -368,7 +368,6 @@ fn map_command_action(action: crate::core::command::CommandAction) -> sdk::Comma
             context_window,
             reasoning,
         },
-        Rt::InjectMessage(msg) => sdk::CommandAction::InjectMessage(msg),
         Rt::RunSkill(content) => sdk::CommandAction::RunSkill(content),
         Rt::SetThinking(desired) => sdk::CommandAction::SetThinking(desired),
     }

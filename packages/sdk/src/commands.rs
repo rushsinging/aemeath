@@ -87,8 +87,6 @@ pub enum CommandAction {
         context_window: usize,
         reasoning: Option<bool>,
     },
-    /// Inject a user message into the conversation
-    InjectMessage(String),
     /// Run a skill (content injected as user message)
     RunSkill(String),
     /// Toggle / set reasoning mode (None = toggle)
