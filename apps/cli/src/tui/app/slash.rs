@@ -44,8 +44,14 @@ impl super::App {
                 self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                if let Some(ref ac) = self.agent_client {
-                    // 设置 spinner phase 为 Compacting
+                // #497 子 issue 0：走 runtime 事件流（ChatInputEvent::Compact →
+                // manual_compact），不再直接调 compact_messages().await。
+                // spinner / 进度 Gauge / 结果回显全部由 runtime 的
+                // PreCompact → CompactProgress → PostCompact → SystemMessage 事件驱动。
+                if self.chat.input_event_tx.is_some() {
+                    self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+                } else if let Some(ref ac) = self.agent_client {
+                    // loop 未运行（如启动前）→ fallback 到直接调用
                     self.model.runtime.apply(RuntimeIntent::SetSpinnerPhase(
                         crate::tui::model::runtime::spinner::SpinnerPhase::Compacting,
                     ));
@@ -58,27 +64,10 @@ impl super::App {
                         .await
                     {
                         Ok((compacted, was_compacted)) => {
-                            // 停止 spinner
                             self.model.runtime.apply(RuntimeIntent::StopSpinner);
                             if was_compacted {
                                 let old_len = self.chat.messages.len();
                                 self.chat.messages = compacted;
-                                // 重新估算 context，更新 status bar 的 ctx%
-                                if let Some(ref ac) = self.agent_client {
-                                    if let Ok(est) = ac
-                                        .estimate_context(
-                                            &self.chat.messages,
-                                            &self.chat.system_prompt_text,
-                                        )
-                                        .await
-                                    {
-                                        self.model.runtime.apply(
-                                            RuntimeIntent::UpdateLastInputTokens(
-                                                est.estimated_tokens as u64,
-                                            ),
-                                        );
-                                    }
-                                }
                                 self.append_system_notice(format!(
                                     "[compacted: {} → {} messages]",
                                     old_len,
@@ -89,7 +78,6 @@ impl super::App {
                             }
                         }
                         Err(e) => {
-                            // 停止 spinner
                             self.model.runtime.apply(RuntimeIntent::StopSpinner);
                             self.append_error_notice(format!("compact failed: {}", e));
                         }
@@ -287,7 +275,11 @@ impl super::App {
                 None
             }
             sdk::CommandAction::Compact => {
-                if let Some(ref ac) = self.agent_client {
+                // #497 子 issue 0：走 runtime 事件流，与 /compact 直接命令一致。
+                if self.chat.input_event_tx.is_some() {
+                    self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+                } else if let Some(ref ac) = self.agent_client {
+                    // loop 未运行 → fallback
                     match ac
                         .compact_messages(
                             self.chat.messages.clone(),
@@ -299,22 +291,6 @@ impl super::App {
                         Ok((compacted, was_compacted)) => {
                             if was_compacted {
                                 self.chat.messages = compacted;
-                                // 重新估算 context，更新 status bar 的 ctx%
-                                if let Some(ref ac) = self.agent_client {
-                                    if let Ok(est) = ac
-                                        .estimate_context(
-                                            &self.chat.messages,
-                                            &self.chat.system_prompt_text,
-                                        )
-                                        .await
-                                    {
-                                        self.model.runtime.apply(
-                                            RuntimeIntent::UpdateLastInputTokens(
-                                                est.estimated_tokens as u64,
-                                            ),
-                                        );
-                                    }
-                                }
                                 self.append_system_notice("[compacted]");
                             } else {
                                 self.append_system_notice("[no compaction needed]");
