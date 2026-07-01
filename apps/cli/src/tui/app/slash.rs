@@ -383,10 +383,6 @@ impl super::App {
                 }
                 None
             }
-            sdk::CommandAction::InjectMessage(prompt) => {
-                self.append_system_notice("[reviewing code changes...]");
-                Some(prompt)
-            }
             sdk::CommandAction::RunSkill(content) => {
                 self.append_system_notice("[running skill...]");
                 Some(content)
