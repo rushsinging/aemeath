@@ -4,13 +4,12 @@ use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
 use super::compact_progress::CompactProgressModel;
 use super::ids::{ChatId, ChatTurnId};
-use super::intent::ConversationIntent;
 use super::processing_job::ProcessingJob;
 use super::queued_submission::QueuedSubmission;
 use super::spinner::SpinnerModel;
 use super::status_notice::StatusNotice;
 use super::task_status::TaskStatusSnapshot;
-use super::tool_observe::ToolCallUpdateObservation;
+use super::update::ConversationUpdate;
 use super::usage::UsageSummary;
 use super::workspace::WorkspaceState;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
@@ -91,114 +90,20 @@ impl ConversationModel {
         *self = Self::default();
     }
 
-    pub fn apply(&mut self, intent: ConversationIntent) -> Vec<ConversationChange> {
-        let changes = match intent {
-            ConversationIntent::StartChat { submission } => self.start_chat(submission),
-            ConversationIntent::AppendUserMessage { text } => self.append_user_message(text),
-            ConversationIntent::ObserveToolCallStart {
-                chat_id,
-                turn_id,
-                id,
-                provider_id,
-                name,
-                index,
-            } => self.observe_tool_call_start(chat_id, turn_id, id, provider_id, name, index),
-            ConversationIntent::ObserveToolCallUpdate {
-                chat_id,
-                turn_id,
-                id,
-                provider_id,
-                name,
-                index,
-                arguments,
-                status,
-            } => self.observe_tool_call_update(ToolCallUpdateObservation {
-                chat_id,
-                turn_id,
-                id,
-                provider_id,
-                name,
-                index,
-                arguments,
-                status,
-            }),
-            ConversationIntent::ObserveToolResult {
-                chat_id,
-                turn_id,
-                id,
-                provider_id,
-                tool_name,
-                output,
-                content,
-                is_error,
-                image_count,
-            } => self.observe_tool_result(
-                chat_id,
-                turn_id,
-                id,
-                provider_id,
-                tool_name,
-                output,
-                content,
-                is_error,
-                image_count,
-            ),
-            ConversationIntent::CompleteChat { chat_id, turn_id } => {
-                self.complete_chat(chat_id, turn_id)
-            }
-            ConversationIntent::ObserveAssistantText {
-                chat_id,
-                turn_id,
-                text,
-            } => self.append_assistant_text(chat_id, turn_id, text),
-            ConversationIntent::ObserveThinkingText {
-                chat_id,
-                turn_id,
-                text,
-            } => self.append_thinking_text(chat_id, turn_id, text),
-            ConversationIntent::CompleteBlock { chat_id, turn_id } => {
-                self.complete_block(chat_id, turn_id)
-            }
-            ConversationIntent::AppendSystemMessage { text } => self.append_system_message(text),
-            ConversationIntent::AppendHookNotice { content } => self.append_hook_notice(content),
-            ConversationIntent::AppendError { text } => self.append_error(text),
-            ConversationIntent::QueueSubmission { input_id, text } => {
-                self.queue_submission(input_id, text)
-            }
-            ConversationIntent::ClearQueuedSubmissionById { input_id } => {
-                self.clear_queued_submission_by_id(&input_id)
-            }
-            ConversationIntent::ClearAllQueuedSubmissions => self.clear_all_queued_submissions(),
-            ConversationIntent::RecordAgentProgress {
-                chat_id,
-                turn_id,
-                tool_id,
-                message,
-            } => self.record_agent_progress(chat_id, turn_id, tool_id, message),
-            ConversationIntent::ShowAskUserBatch { slots } => self.show_ask_user_batch(slots),
-            ConversationIntent::SetAskUserCursor { cursor } => self.set_ask_user_cursor(cursor),
-            ConversationIntent::ToggleAskUserSelected { index } => {
-                self.toggle_ask_user_selected(index)
-            }
-            ConversationIntent::SetAskUserChatInput { active } => {
-                self.set_ask_user_chat_input(active)
-            }
-            ConversationIntent::AppendAskUserChatChar { ch } => self.append_ask_user_chat_char(ch),
-            ConversationIntent::DeleteAskUserChatChar => self.delete_ask_user_chat_char(),
-            ConversationIntent::AnswerCurrentAskUser { answer } => {
-                self.answer_current_ask_user(answer)
-            }
-            ConversationIntent::NavigateAskUserTo { index } => self.navigate_ask_user_to(index),
-            ConversationIntent::SetAskUserConfirmCursor { cursor } => {
-                self.set_ask_user_confirm_cursor(cursor)
-            }
-            ConversationIntent::ConfirmAskUserBatch => self.confirm_ask_user_batch(),
-            ConversationIntent::DismissAskUserBatch => self.dismiss_ask_user_batch(),
-        };
+    pub fn apply<U: ConversationUpdate>(&mut self, update: U) -> Vec<ConversationChange> {
+        let changes = update.update(self);
         if !changes.is_empty() {
             self.revision = self.revision.wrapping_add(1);
         }
         changes
+    }
+
+    /// 由 graph_phase 派生持久 status notice。
+    pub(super) fn notice_from_phase(phase: Option<&str>) -> StatusNotice {
+        match phase {
+            None | Some("idle") => StatusNotice::success("Ready"),
+            Some(p) => StatusNotice::normal(p.to_string()),
+        }
     }
 
     /// 当前内容版本号，供渲染层 memo。
@@ -206,7 +111,7 @@ impl ConversationModel {
         self.revision
     }
 
-    fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
+    pub(super) fn start_chat(&mut self, submission: String) -> Vec<ConversationChange> {
         self.next_chat_sequence += 1;
         let chat_id = ChatId::new_v7();
         let chat = Chat::new(chat_id.clone(), submission.clone());
@@ -230,7 +135,7 @@ impl ConversationModel {
         ]
     }
 
-    fn append_user_message(&mut self, text: String) -> Vec<ConversationChange> {
+    pub(super) fn append_user_message(&mut self, text: String) -> Vec<ConversationChange> {
         let block_id = self.next_block_id("user");
         self.timeline.push(OutputTimelineItem::UserMessage {
             id: block_id.clone(),
@@ -273,7 +178,11 @@ impl ConversationModel {
             .and_then(|chat| chat.turns.iter_mut().find(|turn| &turn.id == turn_id))
     }
 
-    fn complete_chat(&mut self, chat_id: ChatId, turn_id: ChatTurnId) -> Vec<ConversationChange> {
+    pub(super) fn complete_chat(
+        &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+    ) -> Vec<ConversationChange> {
         self.active_text_block_id = None;
         self.active_text_context = None;
         self.active_thinking_block_id = None;
@@ -289,7 +198,7 @@ impl ConversationModel {
         vec![ConversationChange::ChatCompleting { chat_id }]
     }
 
-    fn queue_submission(
+    pub(super) fn queue_submission(
         &mut self,
         input_id: sdk::InputId,
         text: String,
@@ -311,7 +220,7 @@ impl ConversationModel {
         ]
     }
 
-    fn clear_queued_submission_by_id(
+    pub(super) fn clear_queued_submission_by_id(
         &mut self,
         input_id: &sdk::InputId,
     ) -> Vec<ConversationChange> {
@@ -329,7 +238,7 @@ impl ConversationModel {
     }
 
     /// 批量清空所有排队中的提交占位（#391 S3）。
-    fn clear_all_queued_submissions(&mut self) -> Vec<ConversationChange> {
+    pub(super) fn clear_all_queued_submissions(&mut self) -> Vec<ConversationChange> {
         let removed = self.queued_submissions.len();
         self.queued_submissions.clear();
         self.timeline
@@ -353,6 +262,7 @@ impl ConversationModel {
 
 #[cfg(test)]
 mod tests {
+    use super::super::intent::*;
     use super::*;
 
     #[test]
@@ -365,7 +275,7 @@ mod tests {
     fn test_revision_bumps_on_mutating_apply() {
         let mut model = ConversationModel::default();
         let before = model.revision();
-        let changes = model.apply(ConversationIntent::AppendUserMessage {
+        let changes = model.apply(AppendUserMessage {
             text: "你好".to_string(),
         });
         assert!(!changes.is_empty(), "AppendUserMessage 应产生 change");
@@ -381,7 +291,7 @@ mod tests {
         let mut model = ConversationModel::default();
         let before = model.revision();
         // 空文本的 ObserveAssistantText 返回空 change（no-op）。
-        let changes = model.apply(ConversationIntent::ObserveAssistantText {
+        let changes = model.apply(ObserveAssistantText {
             chat_id: ChatId::new("c1"),
             turn_id: ChatTurnId::new("t1"),
             text: String::new(),

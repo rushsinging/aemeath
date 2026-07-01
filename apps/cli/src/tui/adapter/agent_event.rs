@@ -2,7 +2,7 @@ use crate::tui::adapter::hook_notice::{hook_event_notice, hook_spinner_phase};
 use crate::tui::adapter::tool_flow_projector::ToolFlowProjector;
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
-use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
@@ -53,9 +53,9 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         }
         UiEvent::LiveTps(tps) => runtime(RuntimeIntent::RecordLiveTps { tps: *tps }),
         UiEvent::Error(message) => {
-            let mut mapping = conversation(ConversationIntent::AppendError {
+            let mut mapping = conversation(ConversationIntent::AppendError(AppendError {
                 text: message.clone(),
-            });
+            }));
             mapping.diagnostic.push(DiagnosticIntent::RecordNotice {
                 severity: DiagnosticSeverity::Error,
                 message: message.clone(),
@@ -66,9 +66,9 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             });
             mapping
         }
-        UiEvent::SystemMessage(text) | UiEvent::ReminderRecap(text) => {
-            conversation(ConversationIntent::AppendSystemMessage { text: text.clone() })
-        }
+        UiEvent::SystemMessage(text) | UiEvent::ReminderRecap(text) => conversation(
+            ConversationIntent::AppendSystemMessage(AppendSystemMessage { text: text.clone() }),
+        ),
         UiEvent::MessagesSync(messages) => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
@@ -77,12 +77,14 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             context,
             tool_id,
             event,
-        } => conversation(ConversationIntent::RecordAgentProgress {
-            chat_id: context.chat_id.clone(),
-            turn_id: context.turn_id.clone(),
-            tool_id: tool_id.clone(),
-            message: format!("{event}"),
-        }),
+        } => conversation(ConversationIntent::RecordAgentProgress(
+            RecordAgentProgress {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                tool_id: tool_id.clone(),
+                message: format!("{event}"),
+            },
+        )),
         UiEvent::HookEvent(event) => {
             // PostCompact 事件停止 spinner
             if event.hook_name == "PostCompact" {
@@ -92,7 +94,9 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             if let Some(notice) = hook_event_notice(event) {
                 mapping
                     .conversation
-                    .push(ConversationIntent::AppendHookNotice { content: notice });
+                    .push(ConversationIntent::AppendHookNotice(AppendHookNotice {
+                        content: notice,
+                    }));
             }
             mapping
         }
@@ -315,7 +319,7 @@ mod tests {
         });
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveAssistantText { text, .. }) if text == "hello"
+            Some(ConversationIntent::ObserveAssistantText(ObserveAssistantText { text, .. })) if text == "hello"
         ));
     }
 
@@ -328,7 +332,7 @@ mod tests {
 
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveAssistantText { text, .. }) if text == "hello"
+            Some(ConversationIntent::ObserveAssistantText(ObserveAssistantText { text, .. })) if text == "hello"
         ));
         assert_eq!(
             mapping.runtime,
@@ -345,7 +349,7 @@ mod tests {
 
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveThinkingText { text, .. }) if text == "reason"
+            Some(ConversationIntent::ObserveThinkingText(ObserveThinkingText { text, .. })) if text == "reason"
         ));
         assert_eq!(
             mapping.runtime,
@@ -387,7 +391,10 @@ mod tests {
         let mapping = map_agent_event(&event);
 
         match first_observation(&mapping) {
-            Some(ConversationIntent::ObserveToolCallUpdate { arguments, .. }) => {
+            Some(ConversationIntent::ObserveToolCallUpdate(ObserveToolCallUpdate {
+                arguments,
+                ..
+            })) => {
                 // arguments_delta 为 None 时，fallback 到 arguments JSON 字符串
                 assert!(arguments.is_some());
             }

@@ -6,6 +6,7 @@
 use super::block::{AskUserPhase, AskUserSlot};
 use super::change::ConversationChange;
 use super::model::ConversationModel;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// AskUser 交互块的固定 id（同一时刻至多一个）。
@@ -364,7 +365,7 @@ mod tests {
     }
 
     fn show_batch(model: &mut ConversationModel, slots: Vec<AskUserSlot>) {
-        model.apply(ConversationIntent::ShowAskUserBatch { slots });
+        model.apply(ShowAskUserBatch { slots });
     }
 
     fn timeline_item(model: &ConversationModel) -> &OutputTimelineItem {
@@ -401,7 +402,7 @@ mod tests {
                 make_slot("q2", "问题2", &["B"]),
             ],
         );
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
         if let OutputTimelineItem::AskUserBatch {
@@ -427,10 +428,10 @@ mod tests {
                 make_slot("q2", "问题2", &["B"]),
             ],
         );
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "B".to_string(),
         });
         if let OutputTimelineItem::AskUserBatch {
@@ -451,10 +452,10 @@ mod tests {
     fn test_confirm_sets_confirmed_flag() {
         let mut model = ConversationModel::default();
         show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        model.apply(ConversationIntent::ConfirmAskUserBatch);
+        model.apply(ConfirmAskUserBatch);
         if let OutputTimelineItem::AskUserBatch { confirmed, .. } = timeline_item(&model) {
             assert!(*confirmed);
         }
@@ -464,7 +465,7 @@ mod tests {
     fn test_single_question_batch_answer_confirmed_immediately() {
         let mut model = ConversationModel::default();
         show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
         if let OutputTimelineItem::AskUserBatch {
@@ -480,7 +481,7 @@ mod tests {
     fn test_single_question_batch_answer_no_options_confirmed_immediately() {
         let mut model = ConversationModel::default();
         show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "自由输入".to_string(),
         });
         if let OutputTimelineItem::AskUserBatch { confirmed, .. } = timeline_item(&model) {
@@ -499,14 +500,14 @@ mod tests {
             ],
         );
         // 先答完两题进入确认页
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "A".to_string(),
         });
-        model.apply(ConversationIntent::AnswerCurrentAskUser {
+        model.apply(AnswerCurrentAskUser {
             answer: "C".to_string(),
         });
         // 导航回第 0 题重新作答
-        model.apply(ConversationIntent::NavigateAskUserTo { index: 0 });
+        model.apply(NavigateAskUserTo { index: 0 });
         if let OutputTimelineItem::AskUserBatch {
             active_index,
             phase,
@@ -525,7 +526,7 @@ mod tests {
     #[test]
     fn test_set_cursor_without_batch_is_noop() {
         let mut model = ConversationModel::default();
-        let changes = model.apply(ConversationIntent::SetAskUserCursor { cursor: 0 });
+        let changes = model.apply(SetAskUserCursor { cursor: 0 });
         assert!(changes.is_empty());
     }
 
@@ -533,7 +534,7 @@ mod tests {
     fn test_dismiss_ask_user_batch_removes_block() {
         let mut model = ConversationModel::default();
         show_batch(&mut model, vec![make_slot("q1", "问题1", &["A"])]);
-        let changes = model.apply(ConversationIntent::DismissAskUserBatch);
+        let changes = model.apply(DismissAskUserBatch);
         assert!(changes
             .iter()
             .any(|c| matches!(c, ConversationChange::AskUserDismissed)));

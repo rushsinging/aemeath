@@ -1,7 +1,7 @@
 use super::UpdateResult;
 use crate::tui::app::App;
 use crate::tui::model::conversation::block::AskUserPhase;
-use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -41,9 +41,9 @@ impl App {
                     if !text.is_empty() {
                         if let Some(reply_tx) = self.input.ask_user_reply_tx.take() {
                             self.model.conversation.apply(
-                                ConversationIntent::AnswerCurrentAskUser {
+                                ConversationIntent::AnswerCurrentAskUser(AnswerCurrentAskUser {
                                     answer: text.clone(),
-                                },
+                                }),
                             );
                             self.mark_output_dirty();
                             self.handle_input_intent(
@@ -172,9 +172,11 @@ impl App {
 
                 self.model
                     .conversation
-                    .apply(ConversationIntent::AnswerCurrentAskUser {
-                        answer: final_answer,
-                    });
+                    .apply(ConversationIntent::AnswerCurrentAskUser(
+                        AnswerCurrentAskUser {
+                            answer: final_answer,
+                        },
+                    ));
                 self.mark_output_dirty();
                 self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                 self.maybe_auto_submit_ask_user();
@@ -211,14 +213,18 @@ impl App {
                 };
                 self.model
                     .conversation
-                    .apply(ConversationIntent::SetAskUserConfirmCursor { cursor: next });
+                    .apply(ConversationIntent::SetAskUserConfirmCursor(
+                        SetAskUserConfirmCursor { cursor: next },
+                    ));
                 self.mark_output_dirty();
             }
             KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
                 let next = (confirm_cursor + 1) % (n + 2);
                 self.model
                     .conversation
-                    .apply(ConversationIntent::SetAskUserConfirmCursor { cursor: next });
+                    .apply(ConversationIntent::SetAskUserConfirmCursor(
+                        SetAskUserConfirmCursor { cursor: next },
+                    ));
                 self.mark_output_dirty();
             }
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
@@ -226,9 +232,9 @@ impl App {
                     // 导航回某题重新作答
                     self.model
                         .conversation
-                        .apply(ConversationIntent::NavigateAskUserTo {
+                        .apply(ConversationIntent::NavigateAskUserTo(NavigateAskUserTo {
                             index: confirm_cursor,
-                        });
+                        }));
                     self.mark_output_dirty();
                 } else if confirm_cursor == n {
                     // 全部确认提交
@@ -281,7 +287,7 @@ impl App {
             .collect();
         self.model
             .conversation
-            .apply(ConversationIntent::ConfirmAskUserBatch);
+            .apply(ConversationIntent::ConfirmAskUserBatch(ConfirmAskUserBatch));
         self.mark_output_dirty();
         let _ = state.reply_tx.send(answers);
         self.spinner_phase(SpinnerPhase::Generating);
@@ -314,7 +320,9 @@ impl App {
                     self.set_ask_user_chat_input(false);
                     self.model
                         .conversation
-                        .apply(ConversationIntent::AnswerCurrentAskUser { answer: text });
+                        .apply(ConversationIntent::AnswerCurrentAskUser(
+                            AnswerCurrentAskUser { answer: text },
+                        ));
                     self.mark_output_dirty();
                     self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
                     self.maybe_auto_submit_ask_user();
@@ -326,13 +334,17 @@ impl App {
             KeyCode::Backspace => {
                 self.model
                     .conversation
-                    .apply(ConversationIntent::DeleteAskUserChatChar);
+                    .apply(ConversationIntent::DeleteAskUserChatChar(
+                        DeleteAskUserChatChar,
+                    ));
                 self.mark_output_dirty();
             }
             KeyCode::Char(c) => {
                 self.model
                     .conversation
-                    .apply(ConversationIntent::AppendAskUserChatChar { ch: c });
+                    .apply(ConversationIntent::AppendAskUserChatChar(
+                        AppendAskUserChatChar { ch: c },
+                    ));
                 self.mark_output_dirty();
             }
             KeyCode::Up => {

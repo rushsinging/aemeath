@@ -2,6 +2,7 @@ use super::block::HookNoticeContent;
 use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 /// 启动横幅文本，作为对话起始的 System block 注入单一真相源。
@@ -106,18 +107,18 @@ mod tests {
     #[test]
     fn test_append_system_message_resets_active_text_block() {
         let mut model = ConversationModel::default();
-        model.apply(ConversationIntent::StartChat {
+        model.apply(StartChat {
             submission: "hi".to_string(),
         });
-        model.apply(ConversationIntent::ObserveAssistantText {
+        model.apply(ObserveAssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "streaming".to_string(),
         });
-        model.apply(ConversationIntent::AppendSystemMessage {
+        model.apply(AppendSystemMessage {
             text: "notice".to_string(),
         });
-        model.apply(ConversationIntent::ObserveAssistantText {
+        model.apply(ObserveAssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "after".to_string(),

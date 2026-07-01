@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::model::conversation::intent::*;
 use std::path::PathBuf;
 
 fn make_app() -> App {
@@ -63,11 +64,11 @@ fn test_append_system_notice_renders_into_document() {
 #[test]
 fn test_append_user_echo_pushes_user_block_without_new_chat() {
     let mut app = make_app();
-    app.model.conversation.apply(
-        crate::tui::model::conversation::intent::ConversationIntent::StartChat {
+    app.model
+        .conversation
+        .apply(crate::tui::model::conversation::intent::StartChat {
             submission: "原始提问".to_string(),
-        },
-    );
+        });
     let chats_before = app.model.conversation.chats.len();
 
     app.append_user_echo("我的答复");
@@ -198,13 +199,11 @@ fn test_assistant_after_system_notice_uses_assistant_color() {
     // 模拟 reflection 输出（System block）
     app.append_system_notice("reflection 输出内容");
     // 模拟后续 LLM 回复（Assistant block）
-    app.model
-        .conversation
-        .apply(ConversationIntent::ObserveAssistantText {
-            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-            text: "后续回复".to_string(),
-        });
+    app.model.conversation.apply(ObserveAssistantText {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        text: "后续回复".to_string(),
+    });
     app.refresh_output_document_from_model();
 
     // 在 document 中找到包含"后续回复"的行
@@ -240,29 +239,25 @@ fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
 
     let mut app = make_app();
     // 模拟用户提问
-    app.model.conversation.apply(ConversationIntent::StartChat {
+    app.model.conversation.apply(StartChat {
         submission: "hello".to_string(),
     });
     // 模拟 LLM streaming
-    app.model
-        .conversation
-        .apply(ConversationIntent::ObserveAssistantText {
-            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-            text: "你好".to_string(),
-        });
+    app.model.conversation.apply(ObserveAssistantText {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        text: "你好".to_string(),
+    });
     app.refresh_output_document_from_model();
     // 模拟 System notice 中断（如自动 reflection）
     app.append_system_notice("[reflection: ...]");
     app.flush_dirty_view_models();
     // 模拟 LLM streaming 继续
-    app.model
-        .conversation
-        .apply(ConversationIntent::ObserveAssistantText {
-            chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
-            turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
-            text: "世界".to_string(),
-        });
+    app.model.conversation.apply(ObserveAssistantText {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        text: "世界".to_string(),
+    });
     app.refresh_output_document_from_model();
 
     // 验证"你好"和"世界"都在 document 中且使用 ASSISTANT 色

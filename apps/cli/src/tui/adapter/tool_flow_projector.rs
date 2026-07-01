@@ -1,5 +1,5 @@
 use crate::tui::adapter::agent_event::AgentEventMapping;
-use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::model::runtime_observation::RuntimeObservation;
@@ -17,32 +17,36 @@ impl ToolFlowProjector {
     pub fn project(observation: &RuntimeObservation) -> AgentEventMapping {
         match observation {
             RuntimeObservation::AssistantText { context, text } => {
-                let mut mapping = conversation(ConversationIntent::ObserveAssistantText {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    text: text.clone(),
-                });
+                let mut mapping = conversation(ConversationIntent::ObserveAssistantText(
+                    ObserveAssistantText {
+                        chat_id: context.chat_id.clone(),
+                        turn_id: context.turn_id.clone(),
+                        text: text.clone(),
+                    },
+                ));
                 mapping
                     .runtime
                     .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Generating));
                 mapping
             }
             RuntimeObservation::ThinkingText { context, text } => {
-                let mut mapping = conversation(ConversationIntent::ObserveThinkingText {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    text: text.clone(),
-                });
+                let mut mapping = conversation(ConversationIntent::ObserveThinkingText(
+                    ObserveThinkingText {
+                        chat_id: context.chat_id.clone(),
+                        turn_id: context.turn_id.clone(),
+                        text: text.clone(),
+                    },
+                ));
                 mapping
                     .runtime
                     .push(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
                 mapping
             }
             RuntimeObservation::BlockComplete { context } => {
-                conversation(ConversationIntent::CompleteBlock {
+                conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                     chat_id: context.chat_id.clone(),
                     turn_id: context.turn_id.clone(),
-                })
+                }))
             }
             RuntimeObservation::ToolCallStart {
                 context,
@@ -60,14 +64,16 @@ impl ToolFlowProjector {
                     name,
                     index,
                 );
-                conversation(ConversationIntent::ObserveToolCallStart {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: *index,
-                })
+                conversation(ConversationIntent::ObserveToolCallStart(
+                    ObserveToolCallStart {
+                        chat_id: context.chat_id.clone(),
+                        turn_id: context.turn_id.clone(),
+                        id: id.clone(),
+                        provider_id: provider_id.clone(),
+                        name: name.clone(),
+                        index: *index,
+                    },
+                ))
             }
             RuntimeObservation::ToolCallUpdate {
                 context,
@@ -89,18 +95,20 @@ impl ToolFlowProjector {
                     status,
                     arguments.as_ref().map(|value| value.len()).unwrap_or(0),
                 );
-                conversation(ConversationIntent::ObserveToolCallUpdate {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: *index,
-                    arguments: arguments
-                        .as_ref()
-                        .map(|value| sanitize_tool_arguments_delta(name, value)),
-                    status: *status,
-                })
+                conversation(ConversationIntent::ObserveToolCallUpdate(
+                    ObserveToolCallUpdate {
+                        chat_id: context.chat_id.clone(),
+                        turn_id: context.turn_id.clone(),
+                        id: id.clone(),
+                        provider_id: provider_id.clone(),
+                        name: name.clone(),
+                        index: *index,
+                        arguments: arguments
+                            .as_ref()
+                            .map(|value| sanitize_tool_arguments_delta(name, value)),
+                        status: *status,
+                    },
+                ))
             }
             RuntimeObservation::ToolResult {
                 context,
@@ -124,7 +132,7 @@ impl ToolFlowProjector {
                     is_error,
                     image_count,
                 );
-                conversation(ConversationIntent::ObserveToolResult {
+                conversation(ConversationIntent::ObserveToolResult(ObserveToolResult {
                     chat_id: context.chat_id.clone(),
                     turn_id: context.turn_id.clone(),
                     id: id.clone(),
@@ -134,23 +142,25 @@ impl ToolFlowProjector {
                     content: sanitize_tool_result_content(tool_name, content.clone()),
                     is_error: *is_error,
                     image_count: *image_count,
-                })
+                }))
             }
             RuntimeObservation::AgentProgress {
                 context,
                 tool_id,
                 message,
-            } => conversation(ConversationIntent::RecordAgentProgress {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                tool_id: tool_id.clone(),
-                message: message.clone(),
-            }),
-            RuntimeObservation::Complete { context } => {
-                conversation(ConversationIntent::CompleteChat {
+            } => conversation(ConversationIntent::RecordAgentProgress(
+                RecordAgentProgress {
                     chat_id: context.chat_id.clone(),
                     turn_id: context.turn_id.clone(),
-                })
+                    tool_id: tool_id.clone(),
+                    message: message.clone(),
+                },
+            )),
+            RuntimeObservation::Complete { context } => {
+                conversation(ConversationIntent::CompleteChat(CompleteChat {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                }))
             }
         }
     }
@@ -355,7 +365,7 @@ mod tests {
         let expected_context = ctx();
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveToolResult { chat_id, turn_id, id, .. })
+            Some(ConversationIntent::ObserveToolResult(ObserveToolResult { chat_id, turn_id, id, .. }))
                 if chat_id == &expected_context.chat_id && turn_id == &expected_context.turn_id && id == &expected_id
         ));
     }

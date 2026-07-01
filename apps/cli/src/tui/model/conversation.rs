@@ -7,6 +7,7 @@ pub mod chat_turn;
 pub mod compact_progress;
 pub mod ids;
 pub mod intent;
+mod intent_impls;
 pub mod model;
 #[cfg(test)]
 mod model_extra_tests;
