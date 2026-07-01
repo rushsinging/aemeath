@@ -2,14 +2,23 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
+use super::compact_progress::CompactProgressModel;
 use super::ids::{ChatId, ChatTurnId};
 use super::intent::ConversationIntent;
+use super::processing_job::ProcessingJob;
 use super::queued_submission::QueuedSubmission;
+use super::spinner::SpinnerModel;
+use super::status_notice::StatusNotice;
+use super::task_status::TaskStatusSnapshot;
 use super::tool_observe::ToolCallUpdateObservation;
+use super::usage::UsageSummary;
+use super::workspace::WorkspaceState;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
+use std::time::Instant;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConversationModel {
+    // ── 对话内容 ──
     pub chats: Vec<Chat>,
     pub active_chat_id: Option<ChatId>,
     pub timeline: OutputTimelineModel,
@@ -24,6 +33,56 @@ pub struct ConversationModel {
     pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
     pub(super) active_thinking_block_id: Option<String>,
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
+
+    // ── 运行态（从 RuntimeModel 搬入）──
+    pub provider: Option<String>,
+    pub model_id: Option<String>,
+    pub workspace: WorkspaceState,
+    pub usage: UsageSummary,
+    pub live_tps: Option<f64>,
+    pub task_status: TaskStatusSnapshot,
+    pub processing_jobs: Vec<ProcessingJob>,
+    pub spinner: SpinnerModel,
+    pub status_notice: StatusNotice,
+    pub thinking: bool,
+    /// Reasoning Graph 当前阶段（`None` = graph 不存在或 Idle），status notice 的持久真相。
+    pub graph_phase: Option<String>,
+    /// 临时 status notice 的过期时间戳；`None` 表示当前 notice 为持久态。
+    pub transient_notice_expiry: Option<Instant>,
+    /// Compact 进度（`None` = 未在 compact 中），用于渲染 Gauge 进度条。
+    pub compact_progress: Option<CompactProgressModel>,
+}
+
+impl Default for ConversationModel {
+    fn default() -> Self {
+        Self {
+            chats: Vec::new(),
+            active_chat_id: None,
+            timeline: OutputTimelineModel::default(),
+            queued_submissions: Vec::new(),
+            agent_progress: Vec::new(),
+            next_chat_sequence: 0,
+            next_block_sequence: 0,
+            revision: 0,
+            active_text_block_id: None,
+            active_text_context: None,
+            active_thinking_block_id: None,
+            active_thinking_context: None,
+            provider: None,
+            model_id: None,
+            workspace: WorkspaceState::default(),
+            usage: UsageSummary::default(),
+            live_tps: None,
+            task_status: TaskStatusSnapshot::default(),
+            processing_jobs: Vec::new(),
+            spinner: SpinnerModel::default(),
+            status_notice: StatusNotice::default(),
+            thinking: true,
+            graph_phase: None,
+            transient_notice_expiry: None,
+            compact_progress: None,
+        }
+    }
 }
 
 impl ConversationModel {
