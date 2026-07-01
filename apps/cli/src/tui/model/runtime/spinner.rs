@@ -1,77 +1,12 @@
-//! Spinner 业务态（是否活跃 + 当前 phase）。动画细节 frame/verb 归 view_state（见 spec）。
+//! 过渡层：SpinnerPhase / HookOutcome 从 conversation 模块 re-export。
+//! SpinnerModel 保留旧版本（含 active 字段），直到 RuntimeModel 删除。
 
+pub use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
+
+/// 旧版 SpinnerModel，保留 `active` 字段供 RuntimeModel 过渡使用。
+/// Phase 3 删除 RuntimeModel 后，此类型一并删除，统一用 conversation::spinner::SpinnerModel。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SpinnerModel {
     pub active: bool,
     pub phase: Option<SpinnerPhase>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SpinnerPhase {
-    Thinking,
-    Generating,
-    AgentWorking,
-    Reflecting,
-    Compacting,
-    CallingTool(String),
-    CallingTools {
-        remaining: usize,
-    },
-    Hook {
-        event: String,
-        detail: String,
-        outcome: HookOutcome,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HookOutcome {
-    Running,
-    Blocked,
-    Done,
-    Failed,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_spinner_model_default_is_inactive() {
-        let model = SpinnerModel::default();
-        assert!(!model.active);
-        assert_eq!(model.phase, None);
-    }
-
-    #[test]
-    fn test_spinner_phase_simple_variants() {
-        assert_eq!(SpinnerPhase::Thinking, SpinnerPhase::Thinking);
-        assert_ne!(SpinnerPhase::Thinking, SpinnerPhase::Generating);
-        assert_eq!(
-            SpinnerPhase::CallingTool("read".to_string()),
-            SpinnerPhase::CallingTool("read".to_string())
-        );
-        assert_eq!(
-            SpinnerPhase::CallingTools { remaining: 2 },
-            SpinnerPhase::CallingTools { remaining: 2 }
-        );
-    }
-
-    #[test]
-    fn test_spinner_phase_hook_variant() {
-        let phase = SpinnerPhase::Hook {
-            event: "PreToolUse".to_string(),
-            detail: "lint".to_string(),
-            outcome: HookOutcome::Running,
-        };
-        assert_eq!(
-            phase,
-            SpinnerPhase::Hook {
-                event: "PreToolUse".to_string(),
-                detail: "lint".to_string(),
-                outcome: HookOutcome::Running,
-            }
-        );
-        assert_ne!(HookOutcome::Running, HookOutcome::Blocked);
-    }
 }
