@@ -26,5 +26,6 @@ mod tool_flow;
 mod tool_observe;
 mod tool_order;
 pub mod tool_result_payload;
+pub mod update;
 pub mod usage;
 pub mod workspace;
