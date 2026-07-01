@@ -160,8 +160,18 @@ pub(crate) fn reduce_agent_event(
         result.dirty.mark_dialog();
     }
     for intent in mapping.runtime {
-        model.runtime.apply(intent);
-        result.dirty.mark_status();
+        match intent {
+            crate::tui::model::runtime::intent::RuntimeIntent::SetSpinnerPhase(phase) => {
+                model.conversation.spinner.phase = Some(phase);
+                result.dirty.mark_status();
+            }
+            crate::tui::model::runtime::intent::RuntimeIntent::StopSpinner => {
+                model.conversation.spinner.phase = None;
+                model.conversation.spinner.running_tool_count = 0;
+                result.dirty.mark_status();
+            }
+            _ => {} // 其他 RuntimeIntent 已迁移到 conversation
+        }
     }
     for intent in mapping.session {
         model.session.apply(intent);

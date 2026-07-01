@@ -72,7 +72,7 @@ impl ConversationModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::intent::*;
 
     #[test]
     fn test_seed_banner_pushes_system_blocks() {

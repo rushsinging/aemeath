@@ -2,7 +2,7 @@ use crate::tui::app::event::UiEvent;
 use crate::tui::app::App;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing;
-use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
@@ -51,8 +51,8 @@ impl App {
             ac.cancel();
         }
         self.model
-            .runtime
-            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
+            .conversation
+            .apply(SetStatusNotice(StatusNotice::warning(
                 "Cancelling current response… Press Ctrl+C again to exit",
             )));
     }

@@ -1,5 +1,5 @@
 use super::App;
-use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::model::runtime::workspace::WorktreeKind;
 
@@ -21,8 +21,8 @@ impl App {
         self.view_state.status_sel.clear_selection();
         self.view_state.input_sel.clear_selection();
         self.model
-            .runtime
-            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::ready()));
+            .conversation
+            .apply(SetStatusNotice(StatusNotice::ready()));
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
         if let Some(agent_client) = &self.agent_client {
@@ -33,9 +33,7 @@ impl App {
                 crate::tui::log_warn!("failed to clear SDK task store: {e}");
             }
         }
-        self.model
-            .runtime
-            .apply(crate::tui::model::runtime::intent::RuntimeIntent::UpdateTaskLines(Vec::new()));
+        self.model.conversation.apply(UpdateTaskLines(Vec::new()));
     }
     /// Set loaded skills for slash command alias lookup
     pub fn set_skills(&mut self, skills: std::collections::HashMap<String, sdk::SkillView>) {
@@ -65,9 +63,7 @@ impl App {
                 }
             },
         };
-        self.model
-            .runtime
-            .apply(RuntimeIntent::UpdateTaskLines(lines));
+        self.model.conversation.apply(UpdateTaskLines(lines));
     }
 
     pub(crate) async fn update_project_context(&mut self) {
@@ -84,18 +80,16 @@ impl App {
             Some(_) => WorktreeKind::MainCheckout,
             None => WorktreeKind::Unknown,
         };
-        self.model.runtime.apply(RuntimeIntent::UpdateWorkspace {
+        self.model.conversation.apply(UpdateWorkspace {
             cwd: project.cwd,
             worktree: None,
         });
-        self.model
-            .runtime
-            .apply(RuntimeIntent::WorkspaceSnapshotReceived {
-                path_base,
-                workspace_root,
-                branch: project.git_branch,
-                kind,
-            });
+        self.model.conversation.apply(WorkspaceSnapshotReceived {
+            path_base,
+            workspace_root,
+            branch: project.git_branch,
+            kind,
+        });
     }
 
     /// Refresh the cached session list for /resume autocomplete

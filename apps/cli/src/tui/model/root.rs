@@ -1,7 +1,6 @@
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::diagnostic::model::DiagnosticModel;
 use crate::tui::model::input::model::InputModel;
-use crate::tui::model::runtime::model::RuntimeModel;
 use crate::tui::model::runtime::session_model::SessionModel;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -9,7 +8,6 @@ pub struct TuiModel {
     pub conversation: ConversationModel,
     pub diagnostic: DiagnosticModel,
     pub input: InputModel,
-    pub runtime: RuntimeModel,
     pub session: SessionModel,
 }
 

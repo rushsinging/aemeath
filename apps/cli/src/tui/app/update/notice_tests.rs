@@ -288,7 +288,7 @@ fn test_spinner_tick_idle_does_not_mark_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
-    app.model.runtime.spinner.active = false; // idle / 已完成
+    app.model.conversation.spinner.phase = None; // idle / 已完成
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -305,7 +305,8 @@ fn test_spinner_tick_active_marks_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
-    app.model.runtime.spinner.active = true; // 处理中，需要 gutter 动画
+    app.model.conversation.spinner.phase =
+        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking); // 处理中，需要 gutter 动画
     app.view_state.dirty.clear_output();
     let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel::<UiEvent>(8);
     let spawn_refs = SpawnContextRefs { agent_client: None };
@@ -355,7 +356,7 @@ fn test_refresh_assembles_again_when_workspace_root_changes() {
     let after_first = app.assemble_count;
 
     // conversation 不变（revision 不推进），只改 workspace_root。
-    app.model.runtime.workspace.workspace_root = Some("/new/root".to_string());
+    app.model.conversation.workspace.workspace_root = Some("/new/root".to_string());
     app.refresh_output_document_from_model();
 
     assert_eq!(

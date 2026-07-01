@@ -5,8 +5,8 @@ mod runtime;
 pub mod state;
 
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::root::TuiModel;
-use crate::tui::model::runtime::intent::RuntimeIntent;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::input::input_area::suggestions::SuggestionViewState;
@@ -159,11 +159,11 @@ impl App {
         model_state.session.apply(SessionIntent::SetCurrentSession {
             id: session_id.clone(),
         });
-        model_state.runtime.apply(RuntimeIntent::SetProviderModel {
+        model_state.conversation.apply(SetProviderModel {
             provider: None,
             model_id: Some(model.clone()),
         });
-        model_state.runtime.apply(RuntimeIntent::UpdateWorkspace {
+        model_state.conversation.apply(UpdateWorkspace {
             cwd: cwd.display().to_string(),
             worktree: None,
         });
@@ -205,10 +205,8 @@ impl App {
             {
                 self.layout.clear_ctrlc();
                 self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
-                        "Ready",
-                    )));
+                    .conversation
+                    .apply(SetStatusNotice(StatusNotice::success("Ready")));
             }
         }
     }
@@ -274,8 +272,8 @@ impl App {
             .is_err()
             {
                 self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
+                    .conversation
+                    .apply(SetStatusNotice(StatusNotice::warning(
                         "Render error, try resizing",
                     )));
                 status_view = self.status_view_model();
@@ -316,8 +314,8 @@ impl App {
             output_rect,
             input_rect,
             status_rect,
-            self.model.runtime.spinner.active,
-            self.model.runtime.spinner.phase,
+            self.model.conversation.spinner.phase.is_some(),
+            self.model.conversation.spinner.phase,
             self.view_state.animation.spinner_frame,
             self.output_area.document().total_lines()
         );

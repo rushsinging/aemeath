@@ -26,8 +26,8 @@ impl App {
                         let ev = crate::tui::app::status_context_for_workspace(ws.clone());
                         if let crate::tui::app::event::UiEvent::WorkingDirectoryChanged(ctx) = ev {
                             // 工作目录上下文真相归 RuntimeModel，StatusBar 渲染时直接消费 StatusViewModel。
-                            self.model.runtime.apply(
-                                crate::tui::model::runtime::intent::RuntimeIntent::WorkspaceSnapshotReceived {
+                            self.model.conversation.apply(
+                                crate::tui::model::conversation::intent::WorkspaceSnapshotReceived {
                                     path_base: Some(ctx.path_base),
                                     workspace_root: Some(ctx.workspace_root),
                                     branch: ctx.branch,

@@ -6,45 +6,46 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::tui::model::conversation::intent::{
+        RecordUsage, SetContextSize, SetProviderModel, SetStatusNotice, SetThinking,
+        WorkspaceSnapshotReceived,
+    };
+    use crate::tui::model::conversation::status_notice::{StatusNotice, StatusNoticeKind};
+    use crate::tui::model::conversation::workspace::WorktreeKind;
     use crate::tui::model::diagnostic::intent::DiagnosticIntent;
     use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
     use crate::tui::model::root::TuiModel;
-    use crate::tui::model::runtime::intent::RuntimeIntent;
     use crate::tui::model::runtime::session_intent::SessionIntent;
-    use crate::tui::model::runtime::status_notice::{StatusNotice, StatusNoticeKind};
-    use crate::tui::model::runtime::workspace::WorktreeKind;
     use crate::tui::view_assembler::status::StatusViewAssembler;
     use crate::tui::view_model::{StatusNoticeViewKind, StatusSeverity};
 
     #[test]
     fn test_status_view_projects_runtime_usage_and_context() {
         let mut model = TuiModel::default();
-        model.runtime.apply(RuntimeIntent::SetProviderModel {
+        model.conversation.apply(SetProviderModel {
             provider: None,
             model_id: Some("glm-5.1".to_string()),
         });
-        model.runtime.apply(RuntimeIntent::RecordUsage {
+        model.conversation.apply(RecordUsage {
             input_tokens: 12_400,
             output_tokens: 1_800,
             last_input_tokens: 74_000,
             cost_usd: 0.0,
         });
-        model.runtime.apply(RuntimeIntent::SetContextSize(200_000));
-        model
-            .runtime
-            .apply(RuntimeIntent::WorkspaceSnapshotReceived {
-                path_base: Some("~/repo".to_string()),
-                workspace_root: Some("~/repo".to_string()),
-                branch: Some("main".to_string()),
-                kind: WorktreeKind::MainCheckout,
-            });
+        model.conversation.apply(SetContextSize(200_000));
+        model.conversation.apply(WorkspaceSnapshotReceived {
+            path_base: Some("~/repo".to_string()),
+            workspace_root: Some("~/repo".to_string()),
+            branch: Some("main".to_string()),
+            kind: WorktreeKind::MainCheckout,
+        });
         model.session.apply(SessionIntent::SetCurrentSession {
             id: "s-1".to_string(),
         });
-        model.runtime.apply(RuntimeIntent::SetThinking(true));
+        model.conversation.apply(SetThinking(true));
 
         let view = StatusViewAssembler::assemble_status_view(
-            &model.runtime,
+            &model.conversation,
             Some(&model.session),
             &model.diagnostic,
         );
@@ -65,14 +66,12 @@ mod tests {
     fn test_status_view_projects_status_notice() {
         let mut model = TuiModel::default();
         model
-            .runtime
-            .apply(RuntimeIntent::SetStatusNotice(StatusNotice::warning(
-                "Interrupted",
-            )));
-        model.runtime.apply(RuntimeIntent::SetThinking(false));
+            .conversation
+            .apply(SetStatusNotice(StatusNotice::warning("Interrupted")));
+        model.conversation.apply(SetThinking(false));
 
         let view =
-            StatusViewAssembler::assemble_status_view(&model.runtime, None, &model.diagnostic);
+            StatusViewAssembler::assemble_status_view(&model.conversation, None, &model.diagnostic);
 
         assert_eq!(view.notice.text, "Interrupted");
         assert_eq!(view.notice.kind, StatusNoticeViewKind::Warning);
@@ -108,7 +107,7 @@ mod tests {
         });
 
         let view =
-            StatusViewAssembler::assemble_status_view(&model.runtime, None, &model.diagnostic);
+            StatusViewAssembler::assemble_status_view(&model.conversation, None, &model.diagnostic);
 
         assert_eq!(view.line.severity, StatusSeverity::Error);
     }

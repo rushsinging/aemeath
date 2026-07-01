@@ -341,7 +341,7 @@ impl ConversationModel {
 mod tests {
     use super::*;
     use crate::tui::model::conversation::block::AskUserSlot;
-    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::intent::*;
 
     fn make_slot(id: &str, question: &str, options: &[&str]) -> AskUserSlot {
         let llm_count = options.len();

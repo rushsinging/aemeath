@@ -6,7 +6,7 @@ mod suggestions;
 
 use crate::tui::app::UiEvent;
 use crate::tui::effect::effect::Effect;
-use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::conversation::intent::*;
 
 /// 内置命令名常量（不再依赖 runtime::api）
 mod cmd {
@@ -52,9 +52,8 @@ impl super::App {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
                 } else if let Some(ref ac) = self.agent_client {
                     // loop 未运行（如启动前）→ fallback 到直接调用
-                    self.model.runtime.apply(RuntimeIntent::SetSpinnerPhase(
-                        crate::tui::model::runtime::spinner::SpinnerPhase::Compacting,
-                    ));
+                    self.model.conversation.spinner.phase =
+                        Some(crate::tui::model::runtime::spinner::SpinnerPhase::Compacting);
                     match ac
                         .compact_messages(
                             self.chat.messages.clone(),
@@ -64,7 +63,8 @@ impl super::App {
                         .await
                     {
                         Ok((compacted, was_compacted)) => {
-                            self.model.runtime.apply(RuntimeIntent::StopSpinner);
+                            self.model.conversation.spinner.phase = None;
+                            self.model.conversation.spinner.running_tool_count = 0;
                             if was_compacted {
                                 let old_len = self.chat.messages.len();
                                 self.chat.messages = compacted;
@@ -78,7 +78,8 @@ impl super::App {
                             }
                         }
                         Err(e) => {
-                            self.model.runtime.apply(RuntimeIntent::StopSpinner);
+                            self.model.conversation.spinner.phase = None;
+                            self.model.conversation.spinner.running_tool_count = 0;
                             self.append_error_notice(format!("compact failed: {}", e));
                         }
                     }
@@ -88,7 +89,7 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
-                let usage = &self.model.runtime.usage;
+                let usage = &self.model.conversation.usage;
                 let total = usage.input_tokens + usage.output_tokens;
                 self.append_system_notice(format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
@@ -330,22 +331,18 @@ impl super::App {
                         Ok(result) => {
                             if result.context_window > 0 {
                                 self.chat.context_size = result.context_window;
-                                self.model.runtime.apply(
-                                    crate::tui::model::runtime::intent::RuntimeIntent::SetContextSize(
-                                        result.context_window as u64,
-                                    ),
-                                );
+                                self.model
+                                    .conversation
+                                    .apply(SetContextSize(result.context_window as u64));
                             }
                             self.session.current_model_display = result.display_name.clone();
-                            // model 真相归 RuntimeModel，StatusBar 渲染时直接消费 StatusViewModel。
-                            self.model.runtime.apply(
-                                crate::tui::model::runtime::intent::RuntimeIntent::SetProviderModel {
-                                    provider: self.model.runtime.provider.clone(),
-                                    model_id: Some(result.display_name.clone()),
-                                },
-                            );
+                            // model 真相归 ConversationModel，StatusBar 渲染时直接消费 StatusViewModel。
+                            self.model.conversation.apply(SetProviderModel {
+                                provider: self.model.conversation.provider.clone(),
+                                model_id: Some(result.display_name.clone()),
+                            });
                             if let Some(ra) = result.reasoning_active {
-                                self.model.runtime.apply(RuntimeIntent::SetThinking(ra));
+                                self.model.conversation.apply(SetThinking(ra));
                             }
                             self.append_system_notice(format!(
                                 "[switched to {}]",
@@ -369,9 +366,7 @@ impl super::App {
                         Ok(new_state) => {
                             let label = if new_state { "ON" } else { "OFF" };
                             self.append_system_notice(format!("[thinking mode: {}]", label));
-                            self.model
-                                .runtime
-                                .apply(RuntimeIntent::SetThinking(new_state));
+                            self.model.conversation.apply(SetThinking(new_state));
                         }
                         Err(e) => {
                             self.append_error_notice(format!("set thinking failed: {}", e));

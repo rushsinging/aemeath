@@ -3,7 +3,7 @@ use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
@@ -130,7 +130,8 @@ impl App {
                 // compact 已完成，停止 spinner 并清理 Gauge。
                 // #497：走事件流的手动 /compact 不再有 TUI 侧手动 spinner 设停，
                 // 且 PostCompact hook 可能未配置，因此在此兜底停止。
-                self.model.runtime.apply(RuntimeIntent::StopSpinner);
+                self.model.conversation.spinner.phase = None;
+                self.model.conversation.spinner.running_tool_count = 0;
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
@@ -185,10 +186,8 @@ impl App {
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
                 self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
-                        "Ready",
-                    )));
+                    .conversation
+                    .apply(SetStatusNotice(StatusNotice::success("Ready")));
             }
             UiEvent::ReflectionApplyDone { output, result } => match result {
                 Ok(message) => {
@@ -300,16 +299,14 @@ impl App {
                 // Graph 阶段变化 → 更新 graph_phase（model.apply 会同步 status_notice，
                 // 除非当前是临时 notice）
                 let phase = if node == "idle" { None } else { Some(node) };
-                self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetGraphPhase(phase));
+                self.model.conversation.apply(SetGraphPhase(phase));
             }
             UiEvent::CompactProgress {
                 stage,
                 current,
                 total,
             } => {
-                self.model.runtime.apply(RuntimeIntent::SetCompactProgress {
+                self.model.conversation.apply(SetCompactProgress {
                     stage,
                     current,
                     total,

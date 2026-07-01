@@ -106,6 +106,17 @@ impl ConversationModel {
         }
     }
 
+    /// 检查临时 notice 是否过期；过期则回退到 graph_phase 派生的持久态。
+    /// 返回 `true` 表示发生了回退（调用方可据此标脏）。
+    pub fn expire_transient_notice(&mut self, now: Instant) -> bool {
+        if self.transient_notice_expiry.is_some_and(|exp| now >= exp) {
+            self.transient_notice_expiry = None;
+            self.status_notice = Self::notice_from_phase(self.graph_phase.as_deref());
+            return true;
+        }
+        false
+    }
+
     /// 当前内容版本号，供渲染层 memo。
     pub fn revision(&self) -> u64 {
         self.revision
