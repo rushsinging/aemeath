@@ -1,5 +1,6 @@
 {
   "cli": ["apps/cli/**"],
+  "tui": ["apps/cli/src/tui/**"],
   "runtime": ["agent/features/runtime/**"],
   "tools": ["agent/features/tools/**"],
   "provider": ["agent/features/provider/**"],
