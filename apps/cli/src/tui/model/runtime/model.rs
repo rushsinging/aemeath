@@ -199,6 +199,15 @@ impl RuntimeModel {
                     current,
                     total,
                 });
+                // #497：CompactProgress 是 compact 运行的原生信号。
+                // spinner 启动不应依赖可选的 PreCompact hook（用户可能未配置），
+                // 因此收到首个 CompactProgress 时自动启动 Compacting spinner，
+                // 确保 Gauge 进度条可见。
+                if !self.spinner.active {
+                    self.spinner.active = true;
+                    self.spinner.phase =
+                        Some(crate::tui::model::runtime::spinner::SpinnerPhase::Compacting);
+                }
                 vec![RuntimeChange::SpinnerPhaseChanged]
             }
         }

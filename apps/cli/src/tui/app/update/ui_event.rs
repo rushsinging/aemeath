@@ -127,10 +127,10 @@ impl App {
                 // 用户回显改由 UserMessagesAdded 归宿事件驱动。
                 self.chat.messages = msgs;
                 // MessagesSync 意味着消息列表整体替换（compact/session reset），
-                // compact 进度已无意义，清理 Gauge。
-                if self.model.runtime.compact_progress.is_some() {
-                    self.model.runtime.compact_progress = None;
-                }
+                // compact 已完成，停止 spinner 并清理 Gauge。
+                // #497：走事件流的手动 /compact 不再有 TUI 侧手动 spinner 设停，
+                // 且 PostCompact hook 可能未配置，因此在此兜底停止。
+                self.model.runtime.apply(RuntimeIntent::StopSpinner);
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
