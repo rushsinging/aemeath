@@ -15,6 +15,21 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+/// 测试用模型切换构建器（#497）。返回 dummy LlmClient + result，
+/// 测试中模型切换不会被真正触发，此处仅满足 ChatLoopContext 字段约束。
+fn test_build_switched_client(
+    params: sdk::ModelSwitchParams,
+) -> (provider::api::LlmClient, sdk::ModelSwitchResult) {
+    let client =
+        provider::api::LlmClient::from_provider(Arc::new(SequenceProvider::new(vec!["dummy"])));
+    let result = sdk::ModelSwitchResult {
+        display_name: params.model_name,
+        context_window: params.context_window,
+        reasoning_active: params.reasoning,
+    };
+    (client, result)
+}
+
 #[test]
 fn provider_cancelled_error_maps_to_cancelled_outcome() {
     let error = provider::api::LlmError::Cancelled;
@@ -120,6 +135,7 @@ impl RecordingSink {
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
+            RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }
@@ -335,6 +351,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -415,6 +432,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -496,6 +514,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -553,6 +572,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -680,6 +700,7 @@ async fn test_continue_false_json_treated_as_block() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -766,6 +787,7 @@ async fn test_stall_triggers_stop_hook_check() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -914,6 +936,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -1093,6 +1116,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -1353,6 +1377,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -1415,6 +1440,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     })
     .await;
@@ -1605,6 +1631,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -1845,6 +1872,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -2076,6 +2104,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -2192,6 +2221,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -2279,6 +2309,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: true, // #503 核心：resume 标志
+        build_switched_client: Arc::new(test_build_switched_client),
         language: "en".to_string(),
     };
 
@@ -2349,7 +2380,8 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false, // 正常场景
+        skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client), // 正常场景
         language: "en".to_string(),
     };
 

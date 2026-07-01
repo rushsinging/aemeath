@@ -159,4 +159,8 @@ pub enum ChatEvent {
         current: Option<u32>,
         total: Option<u32>,
     },
+    /// 模型切换完成通知（#497）。TUI 据此更新 5 个本地状态 + 回显。
+    ModelSwitched {
+        result: crate::ModelSwitchResult,
+    },
 }

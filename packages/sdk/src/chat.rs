@@ -64,6 +64,11 @@ pub enum ChatInputEvent {
     ///
     /// 由 `/compact` 触发，走 runtime 事件流（#497），不再调 `compact_messages()` trait。
     Compact,
+    /// 用户请求切换模型：idle 时立即执行，busy 时排队等回合结束后执行。
+    ///
+    /// 由 `/model` 触发，走 runtime 事件流（#497），不再调 `switch_model()` trait。
+    /// runtime idle 分支执行 switch_model_impl，结果通过 `ModelSwitched` 事件回传 TUI。
+    SwitchModel { params: crate::ModelSwitchParams },
 }
 
 impl ChatInputEvent {
