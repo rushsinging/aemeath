@@ -53,7 +53,7 @@ impl super::App {
                 } else if let Some(ref ac) = self.agent_client {
                     // loop 未运行（如启动前）→ fallback 到直接调用
                     self.model.conversation.spinner.phase =
-                        Some(crate::tui::model::runtime::spinner::SpinnerPhase::Compacting);
+                        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Compacting);
                     match ac
                         .compact_messages(
                             self.chat.messages.clone(),

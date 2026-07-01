@@ -1,7 +1,7 @@
 use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;

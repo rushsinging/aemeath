@@ -2,8 +2,8 @@ use super::UpdateResult;
 use crate::tui::app::App;
 use crate::tui::model::conversation::block::AskUserPhase;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::output_timeline::OutputTimelineItem;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl App {

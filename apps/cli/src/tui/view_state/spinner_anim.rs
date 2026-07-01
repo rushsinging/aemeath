@@ -4,7 +4,7 @@
 //! SpinnerTick 推进的 `frame`，以及 spinner 由 inactive→active 时一次性随机选定
 //! 的 `verb`。`elapsed` 由 `frame * 90ms` 推算，无需 `Instant`（见 spec 真相边界）。
 
-use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use rand::prelude::IndexedRandom;
 
 /// 装饰性动词池。verb 选定移入 view_state 后，此处为该池的唯一真相来源
@@ -186,7 +186,7 @@ mod tests {
             verb: "Forging".to_string(),
         };
         anim.sync_phase(Some(
-            crate::tui::model::runtime::spinner::SpinnerPhase::Thinking,
+            crate::tui::model::conversation::spinner::SpinnerPhase::Thinking,
         ));
         assert_eq!(anim.frame, 30);
         assert_eq!(anim.phase_frame, 0);
@@ -199,12 +199,14 @@ mod tests {
             frame: 30,
             phase_frame: 20,
             phase: Some(
-                crate::tui::model::runtime::spinner::SpinnerPhase::CallingTools { remaining: 3 },
+                crate::tui::model::conversation::spinner::SpinnerPhase::CallingTools {
+                    remaining: 3,
+                },
             ),
             verb: "Forging".to_string(),
         };
         anim.sync_phase(Some(
-            crate::tui::model::runtime::spinner::SpinnerPhase::CallingTools { remaining: 2 },
+            crate::tui::model::conversation::spinner::SpinnerPhase::CallingTools { remaining: 2 },
         ));
         assert_eq!(anim.frame, 30);
         assert_eq!(anim.phase_frame, 20);
@@ -217,12 +219,14 @@ mod tests {
             frame: 30,
             phase_frame: 20,
             phase: Some(
-                crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Read".to_string()),
+                crate::tui::model::conversation::spinner::SpinnerPhase::CallingTool(
+                    "Read".to_string(),
+                ),
             ),
             verb: "Forging".to_string(),
         };
         anim.sync_phase(Some(
-            crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Edit".to_string()),
+            crate::tui::model::conversation::spinner::SpinnerPhase::CallingTool("Edit".to_string()),
         ));
         assert_eq!(anim.frame, 30);
         assert_eq!(anim.phase_frame, 0);
@@ -235,12 +239,14 @@ mod tests {
             frame: 30,
             phase_frame: 20,
             phase: Some(
-                crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Read".to_string()),
+                crate::tui::model::conversation::spinner::SpinnerPhase::CallingTool(
+                    "Read".to_string(),
+                ),
             ),
             verb: "Forging".to_string(),
         };
         anim.sync_phase(Some(
-            crate::tui::model::runtime::spinner::SpinnerPhase::CallingTool("Read".to_string()),
+            crate::tui::model::conversation::spinner::SpinnerPhase::CallingTool("Read".to_string()),
         ));
         assert_eq!(anim.frame, 30);
         assert_eq!(anim.phase_frame, 20);

@@ -1,5 +1,5 @@
 use crate::tui::app::App;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 
 impl App {
     /// 设置 spinner phase（自动置 active）。

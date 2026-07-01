@@ -4,7 +4,7 @@ use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
