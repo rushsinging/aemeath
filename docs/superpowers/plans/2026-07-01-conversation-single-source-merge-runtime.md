@@ -36,7 +36,7 @@
 
 ---
 
-## Phase 2: Intent trait 分发体系
+## Phase 2: Intent trait 分发体系（含 spinner 附带维护）
 
 ### Step 2.1: 定义 ConversationUpdate trait
 
@@ -48,13 +48,41 @@ pub trait ConversationUpdate {
 }
 ```
 
-### Step 2.2: 现有 ConversationIntent variant 拆 struct
+### Step 2.2: 现有 ConversationIntent variant 拆 struct + spinner 附带
 
 把 `ConversationIntent` enum 的每个 variant 拆成独立 struct。每个 struct `impl ConversationUpdate`，逻辑从 `ConversationModel` 的私有方法搬入。
 
+**关键：spinner phase 在各 intent 的 `update()` 内部附带设置**，不产出独立 spinner intent。示例：
+
+```rust
+impl ConversationUpdate for ObserveAssistantText {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        let changes = model.append_assistant_text(...);
+        model.spinner.set_phase(SpinnerPhase::Generating); // 附带
+        changes
+    }
+}
+
+impl ConversationUpdate for ObserveToolResult {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        let changes = model.observe_tool_result(...);
+        // 数 running tool_calls，设置 spinner
+        let remaining = model.count_running_tools();
+        if remaining == 0 {
+            model.spinner.set_phase(SpinnerPhase::Thinking);
+        } else {
+            model.spinner.set_phase(SpinnerPhase::CallingTools { remaining });
+        }
+        changes
+    }
+}
+```
+
+spinner 附带行为对照表见 spec。
+
 ### Step 2.3: RuntimeIntent variant 拆 struct
 
-把 `RuntimeIntent` enum 的每个 variant 也拆成独立 struct，`impl ConversationUpdate`，逻辑从 `RuntimeModel::apply` 搬入。这些 struct 也放进 conversation 模块。
+把 `RuntimeIntent` enum 的每个 variant 也拆成独立 struct，`impl ConversationUpdate`，逻辑从 `RuntimeModel::apply` 搬入。这些 struct 也放进 conversation 模块。其中 `SetCompactProgress` 的 update 内部附带 `Compacting` spinner。
 
 ### Step 2.4: ConversationIntent enum 改为传输容器
 
@@ -90,21 +118,17 @@ pub trait ConversationUpdate {
 
 ---
 
-## Phase 4: Spinner 写入收敛
+## Phase 4: 删除命令式 spinner 调用
 
-### Step 4.1: map_agent_event 集中产出 spinner intent
-
-在 `map_agent_event` 中，为每个 UiEvent 产出对应的 `SetSpinnerPhase` / `StopSpinner` intent（见 spec 表格）。
-
-ToolResult 的 remaining：在 `map_agent_event` 产出 intent 批次时，ObserveToolResult 排在 SetSpinnerPhase 之前，apply 顺序执行后 model 已更新，SetSpinnerPhase 的 update 方法从 model 数 running tool_calls。
-
-### Step 4.2: 删除 update_ui 命令式 spinner 调用
+### Step 4.1: 删除 update_ui 中所有 spinner 命令式调用
 
 删除 `app/update/spinner.rs`（`spinner_phase()` / `spinner_stop()` 方法）。删除 `update_ui` 中所有 `self.spinner_phase()` / `self.spinner_stop()` 调用（约 20 处）。
 
-### Step 4.3: 删除 SetCompactProgress 自动 spinner
+spinner 状态已由 Phase 2 中各 intent 的 `update()` 内部附带维护，`update_ui` 不再需要参与。
 
-当前 `RuntimeModel::SetCompactProgress` 中自动启动 spinner 的逻辑搬到 `map_agent_event`：收到 CompactProgress 时产出 `SetSpinnerPhase(Compacting)` + `SetCompactProgress`。
+### Step 4.2: 删除 tool_flow_projector 中的 spinner intent
+
+`ToolFlowProjector` 中 `ThinkingText → SetSpinnerPhase(Thinking)` 等产出已不需要——spinner 由 `ObserveThinkingText.update()` 内部附带。
 
 **验证**: `cargo check -p cli` + `cargo test -p cli`
 
@@ -161,4 +185,4 @@ cargo test -p cli
 1. **改动面大**：~100+ 文件引用 RuntimeModel/RuntimeIntent。需要严格按 phase 推进，每步编译通过。
 2. **测试适配量大**：大量测试直接构造 RuntimeModel / RuntimeIntent，需要逐个改为 ConversationModel / ConversationIntent。
 3. **Intent trait 分发是范式变更**：所有现有 intent 测试需要适配新 struct 结构。
-4. **ToolResult remaining 时序**：依赖同批次 intent 顺序 apply，需确保 root_reducer 中 `for intent in mapping.conversation` 循环保持顺序。
+4. **spinner 附带维护的完整性**：需确保每个会影响 spinner 的 intent 都正确附带更新，遗漏会导致 spinner 卡在错误 phase。
