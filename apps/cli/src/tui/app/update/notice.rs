@@ -1,5 +1,5 @@
 use crate::tui::app::App;
-use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 
 impl App {
     /// 将一条系统提示消息写入单一真相源 `ConversationModel`，并刷新输出文档。
@@ -10,7 +10,9 @@ impl App {
     pub(crate) fn append_system_notice(&mut self, text: impl Into<String>) {
         self.model
             .conversation
-            .apply(ConversationIntent::AppendSystemMessage { text: text.into() });
+            .apply(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage { text: text.into() },
+            ));
         self.mark_output_dirty();
     }
 
@@ -22,7 +24,9 @@ impl App {
     pub(crate) fn append_user_echo(&mut self, text: impl Into<String>) {
         self.model
             .conversation
-            .apply(ConversationIntent::AppendUserMessage { text: text.into() });
+            .apply(ConversationIntent::AppendUserMessage(AppendUserMessage {
+                text: text.into(),
+            }));
         self.mark_output_dirty();
     }
 
@@ -41,10 +45,10 @@ impl App {
         let before_count = self.model.conversation.queued_submissions.len();
         self.model
             .conversation
-            .apply(ConversationIntent::QueueSubmission {
+            .apply(ConversationIntent::QueueSubmission(QueueSubmission {
                 input_id: input_id.clone(),
                 text: text_str,
-            });
+            }));
         let after_count = self.model.conversation.queued_submissions.len();
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
@@ -66,9 +70,11 @@ impl App {
     pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &sdk::InputId) {
         self.model
             .conversation
-            .apply(ConversationIntent::ClearQueuedSubmissionById {
-                input_id: input_id.clone(),
-            });
+            .apply(ConversationIntent::ClearQueuedSubmissionById(
+                ClearQueuedSubmissionById {
+                    input_id: input_id.clone(),
+                },
+            ));
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
@@ -77,7 +83,9 @@ impl App {
     pub(crate) fn clear_all_queued_submission_echos(&mut self) {
         self.model
             .conversation
-            .apply(ConversationIntent::ClearAllQueuedSubmissions);
+            .apply(ConversationIntent::ClearAllQueuedSubmissions(
+                ClearAllQueuedSubmissions,
+            ));
         self.mark_output_dirty();
         self.refresh_live_status_from_model();
     }
@@ -89,7 +97,9 @@ impl App {
     pub(crate) fn append_error_notice(&mut self, text: impl Into<String>) {
         self.model
             .conversation
-            .apply(ConversationIntent::AppendError { text: text.into() });
+            .apply(ConversationIntent::AppendError(AppendError {
+                text: text.into(),
+            }));
         self.mark_output_dirty();
     }
 
@@ -100,7 +110,9 @@ impl App {
     ) {
         self.model
             .conversation
-            .apply(ConversationIntent::ShowAskUserBatch { slots });
+            .apply(ConversationIntent::ShowAskUserBatch(ShowAskUserBatch {
+                slots,
+            }));
         self.mark_output_dirty();
     }
 
@@ -108,7 +120,9 @@ impl App {
     pub(crate) fn set_ask_user_cursor(&mut self, cursor: usize) {
         self.model
             .conversation
-            .apply(ConversationIntent::SetAskUserCursor { cursor });
+            .apply(ConversationIntent::SetAskUserCursor(SetAskUserCursor {
+                cursor,
+            }));
         self.mark_output_dirty();
     }
 
@@ -116,7 +130,9 @@ impl App {
     pub(crate) fn toggle_ask_user_selected(&mut self, index: usize) {
         self.model
             .conversation
-            .apply(ConversationIntent::ToggleAskUserSelected { index });
+            .apply(ConversationIntent::ToggleAskUserSelected(
+                ToggleAskUserSelected { index },
+            ));
         self.mark_output_dirty();
     }
 
@@ -124,7 +140,9 @@ impl App {
     pub(crate) fn set_ask_user_chat_input(&mut self, active: bool) {
         self.model
             .conversation
-            .apply(ConversationIntent::SetAskUserChatInput { active });
+            .apply(ConversationIntent::SetAskUserChatInput(
+                SetAskUserChatInput { active },
+            ));
         self.mark_output_dirty();
     }
 
@@ -132,7 +150,7 @@ impl App {
     pub(crate) fn dismiss_ask_user_block(&mut self) {
         self.model
             .conversation
-            .apply(ConversationIntent::DismissAskUserBatch);
+            .apply(ConversationIntent::DismissAskUserBatch(DismissAskUserBatch));
         self.mark_output_dirty();
     }
 }

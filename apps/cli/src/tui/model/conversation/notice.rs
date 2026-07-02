@@ -72,7 +72,7 @@ impl ConversationModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::conversation::intent::ConversationIntent;
+    use crate::tui::model::conversation::intent::*;
 
     #[test]
     fn test_seed_banner_pushes_system_blocks() {
@@ -106,18 +106,18 @@ mod tests {
     #[test]
     fn test_append_system_message_resets_active_text_block() {
         let mut model = ConversationModel::default();
-        model.apply(ConversationIntent::StartChat {
+        model.apply(StartChat {
             submission: "hi".to_string(),
         });
-        model.apply(ConversationIntent::ObserveAssistantText {
+        model.apply(ObserveAssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "streaming".to_string(),
         });
-        model.apply(ConversationIntent::AppendSystemMessage {
+        model.apply(AppendSystemMessage {
             text: "notice".to_string(),
         });
-        model.apply(ConversationIntent::ObserveAssistantText {
+        model.apply(ObserveAssistantText {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
             text: "after".to_string(),

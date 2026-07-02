@@ -1,7 +1,7 @@
 use super::App;
 use crate::tui::app::event::UiEvent;
 use crate::tui::effect::session::processing;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
@@ -111,8 +111,8 @@ impl App {
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
                 self.view_state.dirty.dialog,
-                self.model.runtime.spinner.active,
-                self.model.runtime.spinner.phase,
+                self.model.conversation.spinner.phase.is_some(),
+                self.model.conversation.spinner.phase,
                 self.view_state.animation.spinner_frame,
                 self.output_area.document().total_lines()
             );
@@ -172,8 +172,8 @@ impl App {
             crate::tui::log_trace!(
                 "tui.loop.event msg={} spinner_active={} spinner_phase={:?} spinner_frame={}",
                 tui_msg_name(&msg),
-                self.model.runtime.spinner.active,
-                self.model.runtime.spinner.phase,
+                self.model.conversation.spinner.phase.is_some(),
+                self.model.conversation.spinner.phase,
                 self.view_state.animation.spinner_frame
             );
 
@@ -190,8 +190,8 @@ impl App {
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
                 self.view_state.dirty.dialog,
-                self.model.runtime.spinner.active,
-                self.model.runtime.spinner.phase,
+                self.model.conversation.spinner.phase.is_some(),
+                self.model.conversation.spinner.phase,
                 self.view_state.animation.spinner_frame
             );
 

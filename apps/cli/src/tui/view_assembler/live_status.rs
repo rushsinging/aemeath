@@ -4,8 +4,8 @@
 //!
 //! 本层可依赖 model（边界守卫只禁渲染库/副作用），但 ViewModel 输出仅含基本类型。
 
-use crate::tui::model::runtime::model::RuntimeModel;
-use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
+use crate::tui::model::conversation::model::ConversationModel;
+use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
 use crate::tui::view_model::{LiveStatusViewModel, SpinnerLineView};
 use crate::tui::view_state::SpinnerAnim;
 
@@ -17,17 +17,17 @@ impl LiveStatusAssembler {
     /// 排队输入真相目前归 `ConversationModel::queued_submissions`；调用方只传入文本切片，
     /// 本层负责统一格式化为 live-status 预览行，避免 OutputArea 自持排队状态。
     pub fn assemble(
-        runtime: &RuntimeModel,
+        conversation: &ConversationModel,
         anim: &SpinnerAnim,
         queued_texts: &[String],
     ) -> LiveStatusViewModel {
-        let spinner = if runtime.spinner.active {
+        let spinner = if conversation.spinner.phase.is_some() {
             Some(SpinnerLineView {
                 frame: anim.frame,
                 verb: anim.verb.clone(),
                 elapsed_secs: anim.elapsed_secs(),
                 phase_elapsed_secs: anim.phase_elapsed_secs(),
-                phase_text: runtime.spinner.phase.as_ref().map(phase_text),
+                phase_text: conversation.spinner.phase.as_ref().map(phase_text),
             })
         } else {
             None
@@ -36,7 +36,7 @@ impl LiveStatusAssembler {
             .iter()
             .flat_map(|text| queued_preview_lines(text))
             .collect();
-        let compact_progress = runtime.compact_progress.as_ref().map(|p| {
+        let compact_progress = conversation.compact_progress.as_ref().map(|p| {
             use crate::tui::view_model::live_status::CompactProgressView;
             let ratio = p.ratio().clamp(0.0, 1.0);
             CompactProgressView {
@@ -49,7 +49,7 @@ impl LiveStatusAssembler {
         LiveStatusViewModel {
             spinner,
             queued_lines,
-            task_lines: runtime.task_status.lines.clone(),
+            task_lines: conversation.task_status.lines.clone(),
             compact_progress,
         }
     }
@@ -95,56 +95,56 @@ fn phase_text(phase: &SpinnerPhase) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::model::runtime::intent::RuntimeIntent;
+    use crate::tui::model::conversation::intent::UpdateTaskLines;
+    use crate::tui::model::conversation::spinner::SpinnerPhase;
 
-    fn runtime_with_spinner(active: bool, phase: Option<SpinnerPhase>) -> RuntimeModel {
-        let mut runtime = RuntimeModel::default();
-        runtime.spinner.active = active;
-        runtime.spinner.phase = phase;
-        runtime
+    fn conversation_with_spinner(phase: Option<SpinnerPhase>) -> ConversationModel {
+        let mut conversation = ConversationModel::default();
+        conversation.spinner.phase = phase;
+        conversation
     }
 
     #[test]
     fn test_assemble_inactive_yields_no_spinner() {
-        let runtime = runtime_with_spinner(false, Some(SpinnerPhase::Thinking));
+        let conversation = conversation_with_spinner(None);
         let anim = SpinnerAnim {
             frame: 5,
             phase_frame: 5,
             phase: Some(SpinnerPhase::Thinking),
             verb: "Brewing".to_string(),
         };
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
+        let vm = LiveStatusAssembler::assemble(&conversation, &anim, &[]);
         assert!(vm.spinner.is_none());
     }
 
     #[test]
     fn test_assemble_active_transfers_frame_verb() {
-        let runtime = runtime_with_spinner(true, None);
+        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
         let anim = SpinnerAnim {
             frame: 12,
             phase_frame: 3,
-            phase: None,
+            phase: Some(SpinnerPhase::Thinking),
             verb: "Forging".to_string(),
         };
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
+        let vm = LiveStatusAssembler::assemble(&conversation, &anim, &[]);
         let view = vm.spinner.expect("spinner present");
         assert_eq!(view.frame, 12);
         assert_eq!(view.verb, "Forging");
         assert_eq!(view.elapsed_secs, 1);
         assert_eq!(view.phase_elapsed_secs, 0);
-        assert_eq!(view.phase_text, None);
+        assert_eq!(view.phase_text.as_deref(), Some("Thinking..."));
     }
 
     #[test]
     fn test_assemble_uses_independent_phase_elapsed() {
-        let runtime = runtime_with_spinner(true, Some(SpinnerPhase::Generating));
+        let conversation = conversation_with_spinner(Some(SpinnerPhase::Generating));
         let anim = SpinnerAnim {
             frame: 30,
             phase_frame: 5,
             phase: Some(SpinnerPhase::Generating),
             verb: "Forging".to_string(),
         };
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &[]);
+        let vm = LiveStatusAssembler::assemble(&conversation, &anim, &[]);
         let view = vm.spinner.expect("spinner present");
         assert_eq!(view.elapsed_secs, 2);
         assert_eq!(view.phase_elapsed_secs, 0);
@@ -153,12 +153,12 @@ mod tests {
 
     #[test]
     fn test_assemble_task_lines_pass_through() {
-        let mut runtime = runtime_with_spinner(false, None);
-        runtime.apply(RuntimeIntent::UpdateTaskLines(vec![
+        let mut conversation = conversation_with_spinner(None);
+        conversation.apply(UpdateTaskLines(vec![
             "━━ Tasks: 0/1 ━━".to_string(),
             "□ #1 修复 bug".to_string(),
         ]));
-        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
+        let vm = LiveStatusAssembler::assemble(&conversation, &SpinnerAnim::default(), &[]);
         assert_eq!(vm.task_lines, vec!["━━ Tasks: 0/1 ━━", "□ #1 修复 bug"]);
     }
 
@@ -206,8 +206,8 @@ mod tests {
 
     #[test]
     fn test_assemble_active_with_phase_converts_text() {
-        let runtime = runtime_with_spinner(true, Some(SpinnerPhase::Generating));
-        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
+        let conversation = conversation_with_spinner(Some(SpinnerPhase::Generating));
+        let vm = LiveStatusAssembler::assemble(&conversation, &SpinnerAnim::default(), &[]);
         assert_eq!(
             vm.spinner.unwrap().phase_text.as_deref(),
             Some("Generating...")
@@ -216,9 +216,9 @@ mod tests {
 
     #[test]
     fn test_assemble_queued_lines_format() {
-        let runtime = runtime_with_spinner(true, None);
+        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
         let vm = LiveStatusAssembler::assemble(
-            &runtime,
+            &conversation,
             &SpinnerAnim::default(),
             &["hello".to_string(), "world".to_string()],
         );
@@ -227,9 +227,9 @@ mod tests {
 
     #[test]
     fn test_assemble_queued_lines_preserves_hard_newlines() {
-        let runtime = runtime_with_spinner(true, None);
+        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
         let vm = LiveStatusAssembler::assemble(
-            &runtime,
+            &conversation,
             &SpinnerAnim::default(),
             &["alpha\nbeta".to_string()],
         );
@@ -238,8 +238,8 @@ mod tests {
 
     #[test]
     fn test_assemble_empty_queued_yields_no_lines() {
-        let runtime = runtime_with_spinner(true, None);
-        let vm = LiveStatusAssembler::assemble(&runtime, &SpinnerAnim::default(), &[]);
+        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
+        let vm = LiveStatusAssembler::assemble(&conversation, &SpinnerAnim::default(), &[]);
         assert!(vm.queued_lines.is_empty());
     }
 }

@@ -21,8 +21,8 @@ pub fn hook_event_notice(event: &sdk::HookEventView) -> Option<HookNoticeContent
 
 pub fn hook_spinner_phase(
     event: &sdk::HookEventView,
-) -> crate::tui::model::runtime::spinner::SpinnerPhase {
-    use crate::tui::model::runtime::spinner::{HookOutcome, SpinnerPhase};
+) -> crate::tui::model::conversation::spinner::SpinnerPhase {
+    use crate::tui::model::conversation::spinner::{HookOutcome, SpinnerPhase};
 
     // PreCompact 事件使用专门的 Compacting phase
     if event.hook_name == "PreCompact" {
@@ -180,10 +180,10 @@ mod tests {
 
         assert_eq!(
             phase,
-            crate::tui::model::runtime::spinner::SpinnerPhase::Hook {
+            crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
                 event: "Stop".to_string(),
                 detail: "build_cli.sh".to_string(),
-                outcome: crate::tui::model::runtime::spinner::HookOutcome::Running,
+                outcome: crate::tui::model::conversation::spinner::HookOutcome::Running,
             }
         );
     }
@@ -202,10 +202,10 @@ mod tests {
 
         assert_eq!(
             phase,
-            crate::tui::model::runtime::spinner::SpinnerPhase::Hook {
+            crate::tui::model::conversation::spinner::SpinnerPhase::Hook {
                 event: "Stop".to_string(),
                 detail: "stop-verify.sh".to_string(),
-                outcome: crate::tui::model::runtime::spinner::HookOutcome::Running,
+                outcome: crate::tui::model::conversation::spinner::HookOutcome::Running,
             }
         );
     }

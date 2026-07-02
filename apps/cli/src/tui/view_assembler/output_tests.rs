@@ -1,6 +1,7 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::render::output::rendered::RenderCtx;
@@ -97,7 +98,7 @@ fn test_output_assembler_embedded_result_carries_output_for_preview() {
 #[test]
 fn test_output_assembler_keeps_assistant_text_outside_read_result() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "查看 active bug".to_string(),
     });
     add_completed_tool(
@@ -108,7 +109,7 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
         "## 活跃 Bug（21 个）\n\n # │ 标题 │ 优先级 │ 状态\n|---|------|--------|------|",
         false,
     );
-    conversation.apply(ConversationIntent::ObserveAssistantText {
+    conversation.apply(ObserveAssistantText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         text: "我看到 active bug 列表，下面是分析。".to_string(),
@@ -146,10 +147,10 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
 #[test]
 fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "edit docs".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -157,7 +158,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         name: "Edit".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolResult {
+    conversation.apply(ObserveToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -169,7 +170,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         is_error: false,
         image_count: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -284,10 +285,10 @@ fn test_output_assembler_attaches_tool_result_as_child_of_tool_call() {
 #[test]
 fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "read file".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -295,7 +296,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -339,10 +340,10 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
 fn test_output_assembler_pending_tool_has_no_result_child() {
     // 边界：未产出结果（仅 ToolCallStart，无 ObserveToolResult）的工具不附结果子块。
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "search".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -350,7 +351,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -379,10 +380,10 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
     // 回归：Agent 工具完成后，子代理最终输出同时出现在 activity_summary（ToolCall 内）
     // 和 ToolResult 子块中，造成重复。完成后应隐藏 activity_summary，让位给结果子块。
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -390,7 +391,7 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         name: "Agent".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -401,14 +402,14 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         status: ToolCallStatus::Ready,
     });
     // 子代理运行中发送 progress（写入 activities）
-    conversation.apply(ConversationIntent::RecordAgentProgress {
+    conversation.apply(RecordAgentProgress {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
         message: "子代理最终输出文本".to_string(),
     });
     // 工具完成
-    conversation.apply(ConversationIntent::ObserveToolResult {
+    conversation.apply(ObserveToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -446,10 +447,10 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
 fn test_output_assembler_shows_activity_summary_while_tool_running() {
     // 运行中（未完成）的工具仍应显示 activity_summary 作为实时进度。
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -457,7 +458,7 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
         name: "Agent".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -467,7 +468,7 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
         arguments: Some(r#"{"description":"sub-task","prompt":"do stuff"}"#.to_string()),
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(ConversationIntent::RecordAgentProgress {
+    conversation.apply(RecordAgentProgress {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         tool_id: ToolCallId::new("tool-1"),
@@ -508,15 +509,15 @@ fn add_tool_after_thinking(
     output: &str,
     is_error: bool,
 ) {
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "search".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveThinkingText {
+    conversation.apply(ObserveThinkingText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         text: "thinking".to_string(),
     });
-    conversation.apply(ConversationIntent::CompleteBlock {
+    conversation.apply(CompleteBlock {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
     });
@@ -538,7 +539,7 @@ fn add_completed_tool(
     output: &str,
     is_error: bool,
 ) {
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new(id),
@@ -546,7 +547,7 @@ fn add_completed_tool(
         name: name.to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
@@ -556,7 +557,7 @@ fn add_completed_tool(
         arguments: None,
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(ConversationIntent::ObserveToolResult {
+    conversation.apply(ObserveToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: format!("provider-{id}"),
@@ -581,17 +582,17 @@ fn bench_refresh_cost_by_conversation_size() {
         let mut conv = ConversationModel::default();
         let chat_id = ChatId::new("chat-main");
         for i in 0..n_turns {
-            conv.apply(ConversationIntent::AppendUserMessage {
+            conv.apply(AppendUserMessage {
                 text: format!("用户第 {i} 问，带一些上下文细节。"),
             });
             let turn_id = ChatTurnId::new(format!("turn-{i}"));
-            conv.apply(ConversationIntent::ObserveAssistantText {
+            conv.apply(ObserveAssistantText {
                 chat_id: chat_id.clone(),
                 turn_id: turn_id.clone(),
                 text: format!("助手第 {i} 段回复。\n第二行内容稍长触发换行处理。\n第三行结束。"),
             });
             let tool_id = ToolCallId::new(format!("tool-{i}"));
-            conv.apply(ConversationIntent::ObserveToolCallStart {
+            conv.apply(ObserveToolCallStart {
                 chat_id: chat_id.clone(),
                 turn_id: turn_id.clone(),
                 id: tool_id.clone(),
@@ -599,7 +600,7 @@ fn bench_refresh_cost_by_conversation_size() {
                 name: "Read".to_string(),
                 index: 0,
             });
-            conv.apply(ConversationIntent::ObserveToolResult {
+            conv.apply(ObserveToolResult {
                 chat_id: chat_id.clone(),
                 turn_id: turn_id.clone(),
                 id: tool_id.clone(),

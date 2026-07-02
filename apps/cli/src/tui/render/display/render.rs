@@ -1,5 +1,5 @@
 use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
-use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 
 mod history_parse;
@@ -35,9 +35,9 @@ impl crate::tui::app::App {
     fn load_history_user_message(&mut self, user_text: String) {
         self.model
             .conversation
-            .apply(ConversationIntent::StartChat {
+            .apply(ConversationIntent::StartChat(StartChat {
                 submission: user_text,
-            });
+            }));
     }
 
     fn load_history_assistant_message(
@@ -61,62 +61,70 @@ impl crate::tui::app::App {
                 HistoryAssistantBlock::Text(text) => {
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveAssistantText {
-                            chat_id: chat_id.clone(),
-                            turn_id: turn_id.clone(),
-                            text,
-                        });
+                        .apply(ConversationIntent::ObserveAssistantText(
+                            ObserveAssistantText {
+                                chat_id: chat_id.clone(),
+                                turn_id: turn_id.clone(),
+                                text,
+                            },
+                        ));
                     self.model
                         .conversation
-                        .apply(ConversationIntent::CompleteBlock {
+                        .apply(ConversationIntent::CompleteBlock(CompleteBlock {
                             chat_id: chat_id.clone(),
                             turn_id: turn_id.clone(),
-                        });
+                        }));
                 }
                 HistoryAssistantBlock::Thinking(text) => {
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveThinkingText {
-                            chat_id: chat_id.clone(),
-                            turn_id: turn_id.clone(),
-                            text,
-                        });
+                        .apply(ConversationIntent::ObserveThinkingText(
+                            ObserveThinkingText {
+                                chat_id: chat_id.clone(),
+                                turn_id: turn_id.clone(),
+                                text,
+                            },
+                        ));
                     self.model
                         .conversation
-                        .apply(ConversationIntent::CompleteBlock {
+                        .apply(ConversationIntent::CompleteBlock(CompleteBlock {
                             chat_id: chat_id.clone(),
                             turn_id: turn_id.clone(),
-                        });
+                        }));
                 }
                 HistoryAssistantBlock::ToolUse { id, name, input } => {
                     let input_json = input.to_string();
                     let tool_call_id = ToolCallId::from_legacy_or_new(&id);
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveToolCallStart {
-                            chat_id: chat_id.clone(),
-                            turn_id: turn_id.clone(),
-                            id: tool_call_id.clone(),
-                            provider_id: None,
-                            name: name.clone(),
-                            index,
-                        });
+                        .apply(ConversationIntent::ObserveToolCallStart(
+                            ObserveToolCallStart {
+                                chat_id: chat_id.clone(),
+                                turn_id: turn_id.clone(),
+                                id: tool_call_id.clone(),
+                                provider_id: None,
+                                name: name.clone(),
+                                index,
+                            },
+                        ));
                     self.model
                         .conversation
-                        .apply(ConversationIntent::ObserveToolCallUpdate {
-                            chat_id: chat_id.clone(),
-                            turn_id: turn_id.clone(),
-                            id: tool_call_id.clone(),
-                            provider_id: Some(id.clone()),
-                            name: name.clone(),
-                            index,
-                            arguments: Some(input_json.clone()),
-                            status: ToolCallStatus::Ready,
-                        });
+                        .apply(ConversationIntent::ObserveToolCallUpdate(
+                            ObserveToolCallUpdate {
+                                chat_id: chat_id.clone(),
+                                turn_id: turn_id.clone(),
+                                id: tool_call_id.clone(),
+                                provider_id: Some(id.clone()),
+                                name: name.clone(),
+                                index,
+                                arguments: Some(input_json.clone()),
+                                status: ToolCallStatus::Ready,
+                            },
+                        ));
                     if let Some(result) = tool_results.get(id.as_str()) {
                         self.model
                             .conversation
-                            .apply(ConversationIntent::ObserveToolResult {
+                            .apply(ConversationIntent::ObserveToolResult(ObserveToolResult {
                                 chat_id: chat_id.clone(),
                                 turn_id: turn_id.clone(),
                                 id: tool_call_id.clone(),
@@ -126,7 +134,7 @@ impl crate::tui::app::App {
                                 content: normalize_tool_result_content(result.content),
                                 is_error: result.is_error,
                                 image_count: tool_result_image_count(result.content),
-                            });
+                            }));
                     }
                 }
             }
@@ -137,9 +145,9 @@ impl crate::tui::app::App {
         crate::tui::log_warn!("skip invalid history message during resume: {error}");
         self.model
             .conversation
-            .apply(ConversationIntent::AppendError {
+            .apply(ConversationIntent::AppendError(AppendError {
                 text: HISTORY_RESTORE_ERROR.to_string(),
-            });
+            }));
     }
 }
 

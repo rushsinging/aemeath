@@ -3,8 +3,8 @@ use crate::tui::adapter::hook_notice::hook_spinner_phase;
 use crate::tui::app::{App, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::runtime::intent::RuntimeIntent;
-use crate::tui::model::runtime::spinner::SpinnerPhase;
+use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use tokio::sync::mpsc;
 
@@ -22,26 +22,22 @@ impl App {
                 if self.chat.tool_call_active {
                     self.chat.clear_tool_activity();
                 }
-                self.spinner_phase(SpinnerPhase::Generating);
             }
             UiEvent::Thinking { .. } => {
                 if self.chat.tool_call_active {
                     self.chat.clear_tool_activity();
                 }
-                self.spinner_phase(SpinnerPhase::Thinking);
             }
             UiEvent::BlockComplete { context, text } => {
                 let _ = (context, text);
             }
-            UiEvent::ToolCallStart { name, index: _, .. } => {
-                self.chat.start_tool_activity(); // AskUserQuestion 等待用户回复期间不应显示 spinner
-                if name != "AskUserQuestion" {
-                    self.spinner_phase(SpinnerPhase::CallingTool(name));
-                }
+            UiEvent::ToolCallStart {
+                name: _, index: _, ..
+            } => {
+                self.chat.start_tool_activity();
             }
-            UiEvent::ToolCallUpdate { name, id, .. } => {
+            UiEvent::ToolCallUpdate { name: _, id, .. } => {
                 self.chat.register_tool_call(id.clone());
-                self.spinner_phase(SpinnerPhase::CallingTool(name));
             }
             UiEvent::ToolResult {
                 id,
@@ -52,14 +48,7 @@ impl App {
                 ..
             } => {
                 let _had_active_id = self.chat.has_active_tool_call(&id);
-                let remaining = self.chat.finish_tool_call(&id);
-                if remaining == 0 {
-                    // All tool results received — agent loop will continue with next API call.
-                    // Restart spinner to show "waiting for next response" state.
-                    self.spinner_phase(SpinnerPhase::Thinking);
-                } else {
-                    self.spinner_phase(SpinnerPhase::CallingTools { remaining });
-                }
+                let _remaining = self.chat.finish_tool_call(&id);
             }
             UiEvent::Usage { .. } => {
                 // token/api/tps 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
@@ -71,7 +60,6 @@ impl App {
             UiEvent::AgentProgress { .. } => {
                 // AgentProgress 已由 map_agent_event -> RecordAgentProgress 注入
                 // ConversationModel，经 document 渲染（消除命令式写 output_area.lines）。
-                self.spinner_phase(SpinnerPhase::AgentWorking);
             }
             UiEvent::HookEvent(event) => {
                 // Hook notice 已由 map_agent_event -> AppendHookNotice 注入 ConversationModel，
@@ -130,7 +118,8 @@ impl App {
                 // compact 已完成，停止 spinner 并清理 Gauge。
                 // #497：走事件流的手动 /compact 不再有 TUI 侧手动 spinner 设停，
                 // 且 PostCompact hook 可能未配置，因此在此兜底停止。
-                self.model.runtime.apply(RuntimeIntent::StopSpinner);
+                self.model.conversation.spinner.phase = None;
+                self.model.conversation.spinner.running_tool_count = 0;
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
@@ -185,10 +174,8 @@ impl App {
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
                 self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetStatusNotice(StatusNotice::success(
-                        "Ready",
-                    )));
+                    .conversation
+                    .apply(SetStatusNotice(StatusNotice::success("Ready")));
             }
             UiEvent::ReflectionApplyDone { output, result } => match result {
                 Ok(message) => {
@@ -300,16 +287,14 @@ impl App {
                 // Graph 阶段变化 → 更新 graph_phase（model.apply 会同步 status_notice，
                 // 除非当前是临时 notice）
                 let phase = if node == "idle" { None } else { Some(node) };
-                self.model
-                    .runtime
-                    .apply(RuntimeIntent::SetGraphPhase(phase));
+                self.model.conversation.apply(SetGraphPhase(phase));
             }
             UiEvent::CompactProgress {
                 stage,
                 current,
                 total,
             } => {
-                self.model.runtime.apply(RuntimeIntent::SetCompactProgress {
+                self.model.conversation.apply(SetCompactProgress {
                     stage,
                     current,
                     total,
@@ -320,16 +305,16 @@ impl App {
                 if result.context_window > 0 {
                     self.chat.context_size = result.context_window;
                     self.model
-                        .runtime
-                        .apply(RuntimeIntent::SetContextSize(result.context_window as u64));
+                        .conversation
+                        .apply(SetContextSize(result.context_window as u64));
                 }
                 self.session.current_model_display = result.display_name.clone();
-                self.model.runtime.apply(RuntimeIntent::SetProviderModel {
-                    provider: self.model.runtime.provider.clone(),
+                self.model.conversation.apply(SetProviderModel {
+                    provider: self.model.conversation.provider.clone(),
                     model_id: Some(result.display_name.clone()),
                 });
                 if let Some(ra) = result.reasoning_active {
-                    self.model.runtime.apply(RuntimeIntent::SetThinking(ra));
+                    self.model.conversation.apply(SetThinking(ra));
                 }
                 self.append_system_notice(format!("[switched to {}]", result.display_name));
             }

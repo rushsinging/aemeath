@@ -6,17 +6,17 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::tui::model::runtime::intent::RuntimeIntent;
-    use crate::tui::model::runtime::model::RuntimeModel;
-    use crate::tui::model::runtime::spinner::SpinnerPhase;
+    use crate::tui::model::conversation::intent::*;
+    use crate::tui::model::conversation::model::ConversationModel;
+    use crate::tui::model::conversation::spinner::SpinnerPhase;
     use crate::tui::view_assembler::live_status::LiveStatusAssembler;
     use crate::tui::view_state::SpinnerAnim;
 
     #[test]
     fn live_status_projection_includes_spinner_task_and_queued_lines() {
-        let mut runtime = RuntimeModel::default();
-        runtime.apply(RuntimeIntent::SetSpinnerPhase(SpinnerPhase::Thinking));
-        runtime.apply(RuntimeIntent::UpdateTaskLines(vec![
+        let mut model = ConversationModel::default();
+        model.spinner.phase = Some(SpinnerPhase::Thinking);
+        model.apply(UpdateTaskLines(vec![
             "━━ Tasks: 1/2 ━━".to_string(),
             "✓ #1 done".to_string(),
         ]));
@@ -28,7 +28,7 @@ mod tests {
         };
         let queued = vec!["queued input".to_string()];
 
-        let vm = LiveStatusAssembler::assemble(&runtime, &anim, &queued);
+        let vm = LiveStatusAssembler::assemble(&model, &anim, &queued);
 
         let spinner = vm.spinner.expect("spinner projected");
         assert_eq!(spinner.frame, 12);

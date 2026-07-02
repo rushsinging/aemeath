@@ -5,7 +5,7 @@ use crate::tui::adapter::key_event::map_key_event;
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::change::{dirty_from_model_changes, ModelChange};
 use crate::tui::model::conversation::change::ConversationChange;
-use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::input::change::InputChange;
 use crate::tui::model::input::intent::InputIntent;
 use crate::tui::model::root::TuiModel;
@@ -105,9 +105,12 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
                 model.diagnostic.active_prompt.is_some(),
             ) {
                 SubmissionRoute::StartChat { submission } => {
-                    let changes = model.conversation.apply(ConversationIntent::StartChat {
-                        submission: submission.text.clone(),
-                    });
+                    let changes =
+                        model
+                            .conversation
+                            .apply(ConversationIntent::StartChat(StartChat {
+                                submission: submission.text.clone(),
+                            }));
                     apply_conversation_changes(&mut result, &changes);
                     result.effects.push(Effect::SpawnAgentChat {
                         chat_id: model
@@ -122,10 +125,10 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
                 SubmissionRoute::QueueSubmission { submission } => {
                     let changes = model
                         .conversation
-                        .apply(ConversationIntent::QueueSubmission {
+                        .apply(ConversationIntent::QueueSubmission(QueueSubmission {
                             input_id: sdk::InputId::new_v7(),
                             text: submission.text,
-                        });
+                        }));
                     apply_conversation_changes(&mut result, &changes);
                 }
                 SubmissionRoute::AnswerPrompt { text } => {
@@ -155,10 +158,6 @@ pub(crate) fn reduce_agent_event(
         model.diagnostic.apply(intent);
         result.dirty.mark_status();
         result.dirty.mark_dialog();
-    }
-    for intent in mapping.runtime {
-        model.runtime.apply(intent);
-        result.dirty.mark_status();
     }
     for intent in mapping.session {
         model.session.apply(intent);
@@ -246,7 +245,20 @@ impl From<&ConversationChange> for ModelChange {
             ConversationChange::ChatStarted { .. }
             | ConversationChange::ChatTurnStarted { .. }
             | ConversationChange::ChatCompleting { .. }
-            | ConversationChange::ChatCompleted { .. } => ModelChange::status_dirty(),
+            | ConversationChange::ChatCompleted { .. }
+            | ConversationChange::ProviderModelChanged { .. }
+            | ConversationChange::WorkspaceChanged { .. }
+            | ConversationChange::WorkspaceSnapshotChanged { .. }
+            | ConversationChange::UsageChanged { .. }
+            | ConversationChange::LiveTpsChanged { .. }
+            | ConversationChange::TaskStatusChanged { .. }
+            | ConversationChange::ProcessingJobChanged { .. }
+            | ConversationChange::SpinnerPhaseChanged
+            | ConversationChange::SpinnerStopped
+            | ConversationChange::TaskLinesChanged
+            | ConversationChange::StatusNoticeChanged
+            | ConversationChange::ThinkingChanged
+            | ConversationChange::GraphPhaseChanged => ModelChange::status_dirty(),
         }
     }
 }

@@ -3,6 +3,7 @@
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::ConversationIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::view_model::{OutputBlockKind, SemanticStyle};
@@ -13,10 +14,10 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
     // 不应把完整带行号文件内容刷出（看起来像 LLM 正文），应显示工具摘要，
     // 且颜色为 Success（绿）而非 Warning（橙）。
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "x".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolResult {
+    conversation.apply(ObserveToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -59,10 +60,10 @@ fn test_non_embedded_tool_result_uses_summary() {
     // 非嵌入路径防御性测试：正常流程中 tool result 总是被嵌入，
     // 此处验证 assembler 不会将嵌入式结果泄漏为 DiagnosticNotice。
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "search".to_string(),
     });
-    conversation.apply(ConversationIntent::ObserveToolCallStart {
+    conversation.apply(ObserveToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -70,7 +71,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ConversationIntent::ObserveToolCallUpdate {
+    conversation.apply(ObserveToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -80,7 +81,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         arguments: None,
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(ConversationIntent::ObserveToolResult {
+    conversation.apply(ObserveToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -108,14 +109,14 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
     // OrphanToolResult 路径：tool result 在 tool call 之前到达。
     // 验证完整 output 不被原样透传/截断刷出，而是走工具摘要（#87）。
     let mut conversation = ConversationModel::default();
-    conversation.apply(ConversationIntent::StartChat {
+    conversation.apply(StartChat {
         submission: "search".to_string(),
     });
     let output = (1..=100)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    conversation.apply(ConversationIntent::ObserveToolResult {
+    conversation.apply(ObserveToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -234,7 +235,7 @@ fn test_tool_index_call_matches_linear_scan() {
     let chat = ChatId::new("c1");
     let turn = ChatTurnId::new("t1");
     let tool = ToolCallId::new("tool-1");
-    conv.apply(ConversationIntent::ObserveToolCallStart {
+    conv.apply(ObserveToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -269,7 +270,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
     let turn = ChatTurnId::new("t1");
     let tool = ToolCallId::new("tool-r1");
 
-    conv.apply(ConversationIntent::ObserveToolCallStart {
+    conv.apply(ObserveToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -277,7 +278,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
         name: "Bash".to_string(),
         index: 0,
     });
-    conv.apply(ConversationIntent::ObserveToolCallUpdate {
+    conv.apply(ObserveToolCallUpdate {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -291,7 +292,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
     let expected_content = serde_json::json!({ "text": "cmd output line" });
     let expected_is_error = false;
     let expected_image_count: usize = 2;
-    conv.apply(ConversationIntent::ObserveToolResult {
+    conv.apply(ObserveToolResult {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         provider_id: "prov-1".to_string(),
@@ -344,7 +345,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
     let tool = ToolCallId::new("tool-img");
 
     // 注册 tool call，使 find_tool_call 能命中（tool_result_is_embedded 需要）。
-    conv.apply(ConversationIntent::ObserveToolCallStart {
+    conv.apply(ObserveToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -352,7 +353,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
         name: "Bash".to_string(),
         index: 0,
     });
-    conv.apply(ConversationIntent::ObserveToolCallUpdate {
+    conv.apply(ObserveToolCallUpdate {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -364,7 +365,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
     });
     // output 为空 → tool_result_is_embedded=false → 触发非嵌入渲染分支。
     // is_error=true、image_count=2 → style=Error、文本含 "[图片: 2]"。
-    conv.apply(ConversationIntent::ObserveToolResult {
+    conv.apply(ObserveToolResult {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         provider_id: "prov-1".to_string(),

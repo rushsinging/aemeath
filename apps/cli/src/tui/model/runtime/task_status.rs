@@ -1,7 +1,1 @@
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TaskStatusSnapshot {
-    pub total: usize,
-    pub completed: usize,
-    pub in_progress: usize,
-    pub lines: Vec<String>,
-}
+pub use crate::tui::model::conversation::task_status::TaskStatusSnapshot;

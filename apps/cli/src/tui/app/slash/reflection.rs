@@ -37,7 +37,7 @@ impl super::super::App {
 
         if foreground {
             self.append_system_notice("[reflection: calling LLM...]");
-            self.spinner_phase(crate::tui::model::runtime::spinner::SpinnerPhase::Reflecting);
+            self.spinner_phase(crate::tui::model::conversation::spinner::SpinnerPhase::Reflecting);
             self.chat.is_processing = true;
         }
 

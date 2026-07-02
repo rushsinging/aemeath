@@ -6,18 +6,19 @@ use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 use super::tool_result_payload::ToolResultPayload;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 #[test]
 fn test_append_user_message_pushes_block_without_new_chat() {
     let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::StartChat {
+    model.apply(StartChat {
         submission: "ask".to_string(),
     });
     let chats_before = model.chats.len();
     let active_before = model.active_chat_id.clone();
 
-    let changes = model.apply(ConversationIntent::AppendUserMessage {
+    let changes = model.apply(AppendUserMessage {
         text: "我的答复".to_string(),
     });
 
@@ -40,7 +41,7 @@ fn test_append_user_message_pushes_block_without_new_chat() {
 fn test_append_user_message_on_empty_model_creates_block() {
     // 边界：尚无任何 chat 时也能回显（不依赖 active_chat）。
     let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::AppendUserMessage {
+    model.apply(AppendUserMessage {
         text: "孤立回显".to_string(),
     });
     assert!(model.chats.is_empty(), "回显不应创建 chat");
@@ -55,7 +56,7 @@ fn test_append_user_message_on_empty_model_creates_block() {
 fn test_append_user_message_empty_text_still_creates_block() {
     // 错误/边界：空文本仍创建一个 UserMessage 块（渲染层负责显示 "> "）。
     let mut model = ConversationModel::default();
-    let changes = model.apply(ConversationIntent::AppendUserMessage {
+    let changes = model.apply(AppendUserMessage {
         text: String::new(),
     });
     assert_eq!(model.timeline.items().len(), 1);
@@ -67,10 +68,10 @@ fn test_append_user_message_empty_text_still_creates_block() {
 #[test]
 fn test_conversation_reset_clears_all_blocks() {
     let mut model = ConversationModel::default();
-    model.apply(ConversationIntent::StartChat {
+    model.apply(StartChat {
         submission: "hello".to_string(),
     });
-    model.apply(ConversationIntent::AppendSystemMessage {
+    model.apply(AppendSystemMessage {
         text: "note".to_string(),
     });
     assert!(!model.timeline.items().is_empty());
@@ -102,7 +103,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     let expected_turn_id = runtime_turn_id.clone();
     let expected_tool_id = ToolCallId::new("tool-1");
     model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_turn_id.clone());
-    let changes = model.apply(ConversationIntent::ObserveToolCallStart {
+    let changes = model.apply(ObserveToolCallStart {
         chat_id: runtime_chat_id.clone(),
         turn_id: runtime_turn_id.clone(),
         id: ToolCallId::new("tool-1"),
@@ -110,7 +111,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         name: "Bash".to_string(),
         index: 0,
     });
-    model.apply(ConversationIntent::ObserveToolCallUpdate {
+    model.apply(ObserveToolCallUpdate {
         chat_id: runtime_chat_id,
         turn_id: runtime_turn_id,
         id: ToolCallId::new("tool-1"),
@@ -159,7 +160,7 @@ fn test_tool_result_payload_stored_in_turn() {
     model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
 
     // 登记 ToolCallStart
-    model.apply(ConversationIntent::ObserveToolCallStart {
+    model.apply(ObserveToolCallStart {
         chat_id: chat_id.clone(),
         turn_id: turn_id.clone(),
         id: tool_id.clone(),
@@ -174,7 +175,7 @@ fn test_tool_result_payload_stored_in_turn() {
     let expected_image_count = 0usize;
 
     // 登记 ToolResult
-    model.apply(ConversationIntent::ObserveToolResult {
+    model.apply(ObserveToolResult {
         chat_id: chat_id.clone(),
         turn_id: turn_id.clone(),
         provider_id: "prov-a41".to_string(),

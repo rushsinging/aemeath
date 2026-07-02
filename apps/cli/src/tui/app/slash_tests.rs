@@ -506,12 +506,11 @@ async fn test_apply_reflection_success_keeps_new_pending_created_while_in_flight
 #[tokio::test]
 async fn test_clear_command_clears_task_store_and_task_window() {
     let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
-    app.model.runtime.apply(
-        crate::tui::model::runtime::intent::RuntimeIntent::UpdateTaskLines(vec![
-            "━━ Tasks: 1/1 ━━".to_string(),
-            "□ #1 existing".to_string(),
-        ]),
-    );
+    app.model
+        .conversation
+        .apply(crate::tui::model::conversation::intent::UpdateTaskLines(
+            vec!["━━ Tasks: 1/1 ━━".to_string(), "□ #1 existing".to_string()],
+        ));
     app.refresh_live_status_from_model();
     assert!(!app.live_status_view_model().task_lines.is_empty());
 
@@ -519,7 +518,7 @@ async fn test_clear_command_clears_task_store_and_task_window() {
     app.refresh_live_status_from_model();
 
     assert_eq!(client.clear_tasks_calls.load(Ordering::SeqCst), 1);
-    assert!(app.model.runtime.task_status.lines.is_empty());
+    assert!(app.model.conversation.task_status.lines.is_empty());
     assert!(app.live_status_view_model().task_lines.is_empty());
     let _ = finish_tx.send(());
 }
@@ -542,7 +541,7 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
     assert!(app.chat.is_processing, "/reflect 后应进入后台处理中状态");
     // spinner 业务真相在 Model；渲染直接消费 LiveStatusViewModel。
     assert!(
-        app.model.runtime.spinner.active,
+        app.model.conversation.spinner.phase.is_some(),
         "/reflect 后 Model spinner 应 active"
     );
     app.refresh_live_status_from_model();
@@ -601,7 +600,7 @@ async fn test_auto_reflection_triggers_on_configured_interval() {
         .expect("第二轮应触发后台 reflection");
     assert!(!app.chat.is_processing, "自动 reflection 不应阻塞 UI 输入");
     assert!(
-        !app.model.runtime.spinner.active,
+        app.model.conversation.spinner.phase.is_none(),
         "自动 reflection 不应启动 spinner（Model 真相）"
     );
     app.refresh_live_status_from_model();

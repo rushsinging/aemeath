@@ -16,7 +16,7 @@ use super::event::UiEvent;
 use crate::tui::adapter::agent_event::map_agent_event;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
-use crate::tui::model::runtime::intent::RuntimeIntent;
+use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::msg::TuiMsg;
@@ -180,14 +180,14 @@ impl App {
                 // 临时 status notice 过期检查：到期回退到 graph_phase 派生态。
                 if self
                     .model
-                    .runtime
+                    .conversation
                     .expire_transient_notice(std::time::Instant::now())
                 {
                     self.mark_output_dirty();
                 }
                 // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
                 // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
-                if self.model.runtime.spinner.active {
+                if self.model.conversation.spinner.phase.is_some() {
                     self.mark_output_dirty();
                 }
                 crate::tui::log_trace!(
@@ -197,8 +197,8 @@ impl App {
                     before_version,
                     self.view_state.animation.version,
                     self.view_state.spinner.frame,
-                    self.model.runtime.spinner.active,
-                    self.model.runtime.spinner.phase,
+                    self.model.conversation.spinner.phase.is_some(),
+                    self.model.conversation.spinner.phase,
                     self.view_state.spinner.verb,
                     self.view_state.dirty.output
                 );
@@ -231,10 +231,9 @@ impl App {
     ) -> UpdateResult {
         let mapping = map_agent_event(&ev);
         crate::tui::log_trace!(
-            "tui.agent_event mapped event={} conversation_intents={} runtime_intents={} diagnostic_intents={} session_intents={} effects={}",
+            "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={} effects={}",
             ui_event_name(&ev),
             mapping.conversation.len(),
-            mapping.runtime.len(),
             mapping.diagnostic.len(),
             mapping.session.len(),
             mapping.effects.len()
@@ -274,7 +273,7 @@ impl App {
         let revision = self.model.conversation.revision();
         let current_workspace_root: Option<String> = self
             .model
-            .runtime
+            .conversation
             .workspace
             .workspace_root
             .as_deref()
@@ -333,19 +332,20 @@ impl App {
             workspace_root: cached_workspace_root,
             view_model,
         });
-        let document =
-            match render_result {
-                Ok(document) => document,
-                Err(_) => {
-                    crate::tui::log_warn!(
-                        "tui.output.refresh_document panicked; keeping previous document"
-                    );
-                    self.model.runtime.apply(RuntimeIntent::SetStatusNotice(
-                        StatusNotice::warning("渲染失败，已记录 panic.log"),
-                    ));
-                    return;
-                }
-            };
+        let document = match render_result {
+            Ok(document) => document,
+            Err(_) => {
+                crate::tui::log_warn!(
+                    "tui.output.refresh_document panicked; keeping previous document"
+                );
+                self.model
+                    .conversation
+                    .apply(SetStatusNotice(StatusNotice::warning(
+                        "渲染失败，已记录 panic.log",
+                    )));
+                return;
+            }
+        };
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
@@ -377,7 +377,7 @@ impl App {
 
     pub(crate) fn status_view_model(&self) -> crate::tui::view_model::StatusViewModel {
         crate::tui::view_assembler::status::StatusViewAssembler::assemble_status_view(
-            &self.model.runtime,
+            &self.model.conversation,
             Some(&self.model.session),
             &self.model.diagnostic,
         )
@@ -400,7 +400,7 @@ impl App {
             .map(|q| q.text.clone())
             .collect();
         crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
-            &self.model.runtime,
+            &self.model.conversation,
             &self.view_state.spinner,
             &queued_texts,
         )
@@ -416,7 +416,7 @@ impl App {
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
-        let active = self.model.runtime.spinner.active;
+        let active = self.model.conversation.spinner.phase.is_some();
         let before_anim = self.view_state.spinner.clone();
         if active {
             if self.view_state.spinner.verb.is_empty() {
@@ -424,14 +424,14 @@ impl App {
             }
             self.view_state
                 .spinner
-                .sync_phase(self.model.runtime.spinner.phase.clone());
+                .sync_phase(self.model.conversation.spinner.phase.clone());
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
         crate::tui::log_trace!(
             "tui.spinner.refresh active={} phase={:?} before_frame={} after_frame={} before_phase_frame={} after_phase_frame={} before_phase={:?} after_phase={:?} before_verb={} after_verb={}",
             active,
-            self.model.runtime.spinner.phase,
+            self.model.conversation.spinner.phase,
             before_anim.frame,
             self.view_state.spinner.frame,
             before_anim.phase_frame,

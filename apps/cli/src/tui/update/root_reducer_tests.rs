@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::model::conversation::intent::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
 fn key(code: KeyCode) -> TuiMsg {
@@ -25,7 +26,7 @@ fn test_update_key_enter_idle_spawns_chat() {
 #[test]
 fn test_update_key_enter_running_queues_submission() {
     let mut model = TuiModel::default();
-    model.conversation.apply(ConversationIntent::StartChat {
+    model.conversation.apply(StartChat {
         submission: "old".to_string(),
     });
     let mut view_state = AppViewState::default();
@@ -76,7 +77,7 @@ fn test_update_agent_text_persists_output_dirty_until_render_pipeline_refreshes(
 #[test]
 fn test_reduce_agent_event_tool_call_updates_conversation() {
     let mut model = TuiModel::default();
-    model.conversation.apply(ConversationIntent::StartChat {
+    model.conversation.apply(StartChat {
         submission: "read".to_string(),
     });
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("session-1");
@@ -87,30 +88,34 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
     reduce_agent_event(
         &mut model,
         AgentEventMapping {
-            conversation: vec![ConversationIntent::ObserveToolCallStart {
-                chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
-                id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
-                provider_id: Some("provider-1".to_string()),
-                name: "Read".to_string(),
-                index: 0,
-            }],
+            conversation: vec![ConversationIntent::ObserveToolCallStart(
+                ObserveToolCallStart {
+                    chat_id: chat_id.clone(),
+                    turn_id: turn_id.clone(),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
+                    provider_id: Some("provider-1".to_string()),
+                    name: "Read".to_string(),
+                    index: 0,
+                },
+            )],
             ..Default::default()
         },
     );
     reduce_agent_event(
         &mut model,
         AgentEventMapping {
-            conversation: vec![ConversationIntent::ObserveToolCallUpdate {
-                chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
-                id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
-                provider_id: Some("provider-1".to_string()),
-                name: "Read".to_string(),
-                index: 0,
-                arguments: None,
-                status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
-            }],
+            conversation: vec![ConversationIntent::ObserveToolCallUpdate(
+                ObserveToolCallUpdate {
+                    chat_id: chat_id.clone(),
+                    turn_id: turn_id.clone(),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
+                    provider_id: Some("provider-1".to_string()),
+                    name: "Read".to_string(),
+                    index: 0,
+                    arguments: None,
+                    status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
+                },
+            )],
             ..Default::default()
         },
     );
@@ -123,7 +128,7 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
 }
 
 #[test]
-fn test_reduce_agent_event_applies_tool_patch_and_spinner_atomically_with_single_render_request() {
+fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_request() {
     let mut model = TuiModel::default();
     let chat_id = crate::tui::model::conversation::ids::ChatId::new("chat-atomic");
     let turn_id = crate::tui::model::conversation::ids::ChatTurnId::new("turn-atomic");
@@ -131,28 +136,24 @@ fn test_reduce_agent_event_applies_tool_patch_and_spinner_atomically_with_single
     let result = reduce_agent_event(
         &mut model,
         AgentEventMapping {
-            conversation: vec![ConversationIntent::ObserveToolCallUpdate {
-                chat_id: chat_id.clone(),
-                turn_id: turn_id.clone(),
-                id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic"),
-                provider_id: Some("provider-atomic".to_string()),
-                name: "Read".to_string(),
-                index: 0,
-                arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
-                status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
-            }],
-            runtime: vec![
-                crate::tui::model::runtime::intent::RuntimeIntent::SetSpinnerPhase(
-                    crate::tui::model::runtime::spinner::SpinnerPhase::Generating,
-                ),
-            ],
+            conversation: vec![ConversationIntent::ObserveToolCallUpdate(
+                ObserveToolCallUpdate {
+                    chat_id: chat_id.clone(),
+                    turn_id: turn_id.clone(),
+                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic"),
+                    provider_id: Some("provider-atomic".to_string()),
+                    name: "Read".to_string(),
+                    index: 0,
+                    arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
+                    status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
+                },
+            )],
             effects: vec![Effect::RequestRender],
             ..Default::default()
         },
     );
 
     assert!(result.dirty.output);
-    assert!(result.dirty.status);
     assert_eq!(
         result
             .effects
