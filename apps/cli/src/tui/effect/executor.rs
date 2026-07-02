@@ -28,13 +28,13 @@ impl App {
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
             Effect::CancelAgentChat => self.cancel_agent_chat(),
-            Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx).await,
-            Effect::RunHook { message, name } => self.run_hook_effect(message, name).await,
-            Effect::ReadClipboardImage => self.read_clipboard_image_effect().await,
-            Effect::ProcessImageFile { path } => self.process_image_file_effect(path).await,
+            Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
+            Effect::RunHook { message, name } => self.run_hook_effect(message, name),
+            Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
+            Effect::ProcessImageFile { path } => self.process_image_file_effect(path, ui_tx),
             Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
-            Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx).await,
-            Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx).await,
+            Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
+            Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::RunReflection { foreground } => self.run_reflection_effect(foreground, ui_tx),
             Effect::ApplyReflection { output } => self.apply_reflection_effect(output, ui_tx),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
@@ -75,93 +75,110 @@ impl App {
 
     /// 保存当前会话（/save 与 MessagesSync 共用）。当 `notify=true`（来自 /save）时，    /// 经 UiEvent 回灌成功/失败反馈行，保持原 `[session saved: id]` / `Failed` 体验；
     /// 后台自动保存（MessagesSync）静默。
-    async fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
+    fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
         // 后台自动保存（notify=false）在无消息时静默跳过，避免空会话写盘与噪声。
         if !notify && self.chat.messages.is_empty() {
             return;
         }
         let Some(ac) = self.agent_client.clone() else {
             if notify {
-                let _ = ui_tx
-                    .send(UiEvent::SlashCommandFailed {
-                        message: "Failed to save session: SDK agent client is unavailable"
-                            .to_string(),
-                    })
-                    .await;
+                let tx = ui_tx.clone();
+                crate::tui::effect::spawn_guard::spawn_guarded("save_session", async move {
+                    let _ = tx
+                        .send(UiEvent::SlashCommandFailed {
+                            message: "Failed to save session: SDK agent client is unavailable"
+                                .to_string(),
+                        })
+                        .await;
+                });
             }
             return;
         };
-        if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
-            crate::tui::log_warn!("sync failed: {e}");
-        }
-        match ac.save_current_session().await {
-            Ok(()) => {
-                if notify {
-                    let _ = ui_tx
-                        .send(UiEvent::SessionSaved {
-                            id: self.session.session_id().to_string(),
-                        })
-                        .await;
-                }
+        let messages = self.chat.messages.clone();
+        let session_id = self.session.session_id().to_string();
+        let tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("save_session", async move {
+            if let Err(e) = ac.sync_current_messages(messages).await {
+                crate::tui::log_warn!("sync failed: {e}");
             }
-            Err(e) => {
-                crate::tui::log_warn!("save failed: {e}");
-                if notify {
-                    let _ = ui_tx
-                        .send(UiEvent::SlashCommandFailed {
-                            message: format!("Failed to save session: {e}"),
-                        })
-                        .await;
-                }
-            }
-        }
-    }
-
-    async fn fetch_memory_list_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
-        if let Some(ref ac) = self.agent_client {
-            match ac.list_reminders().await {
-                Ok(reminders) => {
-                    let _ = ui_tx.send(UiEvent::MemoryList(reminders)).await;
+            match ac.save_current_session().await {
+                Ok(()) => {
+                    if notify {
+                        let _ = tx.send(UiEvent::SessionSaved { id: session_id }).await;
+                    }
                 }
                 Err(e) => {
-                    let _ = ui_tx
+                    crate::tui::log_warn!("save failed: {e}");
+                    if notify {
+                        let _ = tx
+                            .send(UiEvent::SlashCommandFailed {
+                                message: format!("Failed to save session: {e}"),
+                            })
+                            .await;
+                    }
+                }
+            }
+        });
+    }
+
+    fn fetch_memory_list_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        let Some(ac) = self.agent_client.clone() else {
+            return;
+        };
+        let tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("fetch_memory_list", async move {
+            match ac.list_reminders().await {
+                Ok(reminders) => {
+                    let _ = tx.send(UiEvent::MemoryList(reminders)).await;
+                }
+                Err(e) => {
+                    let _ = tx
                         .send(UiEvent::SlashCommandFailed {
                             message: format!("获取 reminders 失败: {e}"),
                         })
                         .await;
                 }
             }
-        }
+        });
     }
 
-    async fn run_hook_effect(&mut self, message: String, name: String) {
-        if let Some(ref ac) = self.agent_client {
+    fn run_hook_effect(&mut self, message: String, name: String) {
+        let Some(ac) = self.agent_client.clone() else {
+            return;
+        };
+        crate::tui::effect::spawn_guard::spawn_guarded("run_hook", async move {
             let _ = ac.notify_hook(&message, &name).await;
-        }
+        });
     }
 
-    async fn read_clipboard_image_effect(&mut self) {
-        if let Some(ref ac) = self.agent_client {
+    fn read_clipboard_image_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        let Some(ac) = self.agent_client.clone() else {
+            return;
+        };
+        let tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("clipboard_image", async move {
             match ac.read_clipboard_image().await {
-                Ok(img) => self.accept_pending_clipboard_image(img),
+                Ok(img) => {
+                    let _ = tx.send(UiEvent::ClipboardImage(img)).await;
+                }
                 Err(e) => crate::tui::log_warn!("clipboard read failed: {e}"),
             }
-        }
+        });
     }
 
-    async fn process_image_file_effect(&mut self, path: String) {
-        if let Some(ref ac) = self.agent_client {
+    fn process_image_file_effect(&mut self, path: String, ui_tx: &mpsc::Sender<UiEvent>) {
+        let Some(ac) = self.agent_client.clone() else {
+            return;
+        };
+        let tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
             match ac.process_image_file(path).await {
-                Ok(img) => self.accept_pending_clipboard_image(img),
+                Ok(img) => {
+                    let _ = tx.send(UiEvent::ClipboardImage(img)).await;
+                }
                 Err(e) => crate::tui::log_warn!("image process failed: {e}"),
             }
-        }
-    }
-
-    fn accept_pending_clipboard_image(&mut self, img: sdk::ClipboardImageView) {
-        self.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertImage(
-            img,
-        ));
+        });
     }
 
     /// 将文本复制到系统剪贴板，并据结果在 status bar 给出临时反馈。
@@ -290,19 +307,23 @@ impl App {
         });
     }
 
-    async fn fetch_reminder_recap_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
-        if let Some(ref ac) = self.agent_client {
+    fn fetch_reminder_recap_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
+        let Some(ac) = self.agent_client.clone() else {
+            return;
+        };
+        let tx = ui_tx.clone();
+        crate::tui::effect::spawn_guard::spawn_guarded("fetch_reminder_recap", async move {
             match ac.list_reminders().await {
                 Ok(reminders) => {
                     if let Some(line) = sdk::ReminderView::recap_line(&reminders) {
-                        let _ = ui_tx.send(UiEvent::ReminderRecap(line)).await;
+                        let _ = tx.send(UiEvent::ReminderRecap(line)).await;
                     }
                 }
                 Err(e) => {
                     crate::tui::log_warn!("fetch reminder recap failed: {e}")
                 }
             }
-        }
+        });
     }
 }
 
@@ -338,14 +359,18 @@ mod tests {
             std::path::PathBuf::from("/tmp"),
             "m".to_string(),
         );
-        app.accept_pending_clipboard_image(sdk::ClipboardImageView {
-            base64: "abc".to_string(),
-            media_type: "image/png".to_string(),
-            final_size: 3,
-            display_path: None,
-            width: None,
-            height: None,
-        });
+        // accept_pending_clipboard_image 已移除（#497 spawn_guarded 化），
+        // 图片经 UiEvent::ClipboardImage → InsertImage intent 注入。
+        app.handle_input_intent(crate::tui::model::input::intent::InputIntent::InsertImage(
+            sdk::ClipboardImageView {
+                base64: "abc".to_string(),
+                media_type: "image/png".to_string(),
+                final_size: 3,
+                display_path: None,
+                width: None,
+                height: None,
+            },
+        ));
         assert_eq!(app.model.input.document.image_spans.len(), 1);
     }
 }
