@@ -45,15 +45,26 @@ pub struct ControlCommand {
     pub kind: ControlCommandKind,
 }
 
+/// idle gate 收到的待执行命令（由 slash 命令触发，#497）。
+///
+/// 泛化载体：新增命令只需加一个变体 + apply_gate idle 分支 + loop_runner 执行分支，
+/// 不再散弹式修改多处 match 臂。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingCommand {
+    Compact,
+    SwitchModel { params: sdk::ModelSwitchParams },
+    SetThinking { desired: Option<bool> },
+    EstimateContext,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateOutcome {
     pub decision: GateDecision,
     pub commands: Vec<ControlCommand>,
     pub appended_user_messages: usize,
     pub dropped_events: usize,
-    pub compact_requested: bool,
-    /// pending 的模型切换请求（由 `/model` 触发，#497）。
-    pub model_switch_requested: Option<sdk::ModelSwitchParams>,
+    /// idle 时收到的待执行命令（替代 compact_requested + model_switch_requested）。
+    pub pending_command: Option<PendingCommand>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -134,8 +145,7 @@ where
     let mut appended_user_messages = 0usize;
     let mut dropped_events = 0usize;
     let mut decision = GateDecision::Proceed;
-    let mut compact_requested = false;
-    let mut model_switch_requested: Option<sdk::ModelSwitchParams> = None;
+    let mut pending_command: Option<PendingCommand> = None;
     let mut added: Vec<(sdk::InputId, Message)> = Vec::new();
 
     let events = buffer.drain_all();
@@ -230,7 +240,7 @@ where
             }
             ChatInputEvent::Compact => {
                 if is_idle {
-                    compact_requested = true;
+                    pending_command = Some(PendingCommand::Compact);
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
                     break;
@@ -241,13 +251,35 @@ where
             }
             ChatInputEvent::SwitchModel { params } => {
                 if is_idle {
-                    model_switch_requested = Some(params);
+                    pending_command = Some(PendingCommand::SwitchModel { params });
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
                     break;
                 } else {
                     // busy：放回 buffer，等回合结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::SwitchModel { params });
+                }
+            }
+            ChatInputEvent::SetThinking { desired } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::SetThinking { desired });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    buffer.push(ChatInputEvent::SetThinking { desired });
+                }
+            }
+            ChatInputEvent::EstimateContext => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::EstimateContext);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    // busy：放回 buffer，等回合结束回到 idle 再处理。
+                    buffer.push(ChatInputEvent::EstimateContext);
                 }
             }
         }
@@ -278,8 +310,7 @@ where
         commands,
         appended_user_messages,
         dropped_events,
-        compact_requested,
-        model_switch_requested,
+        pending_command,
     }
 }
 

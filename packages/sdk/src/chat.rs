@@ -69,6 +69,16 @@ pub enum ChatInputEvent {
     /// 由 `/model` 触发，走 runtime 事件流（#497），不再调 `switch_model()` trait。
     /// runtime idle 分支执行 switch_model_impl，结果通过 `ModelSwitched` 事件回传 TUI。
     SwitchModel { params: crate::ModelSwitchParams },
+    /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
+    ///
+    /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
+    /// runtime idle 分支执行 set_reasoning_level，结果通过 `ThinkingChanged` 事件回传 TUI。
+    SetThinking { desired: Option<bool> },
+    /// 用户请求估算上下文占用：idle 时立即执行，busy 时排队等回合结束后执行。
+    ///
+    /// 由 `/context` 触发，走 runtime 事件流（#497）。runtime idle 分支用 loop 内部
+    /// messages + system_prompt 估算，结果通过 `ContextEstimated` 事件回传 TUI。
+    EstimateContext,
 }
 
 impl ChatInputEvent {

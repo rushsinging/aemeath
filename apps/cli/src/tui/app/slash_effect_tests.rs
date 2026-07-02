@@ -16,6 +16,9 @@ async fn test_save_session_effect_notify_emits_session_saved() {
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
         .await;
 
+    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
     let event = rx.try_recv().expect("/save 应回灌 SessionSaved 事件");
     assert!(
         matches!(event, UiEvent::SessionSaved { ref id } if id == "test-session"),
@@ -52,6 +55,9 @@ async fn test_save_session_effect_no_client_emits_failure() {
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
         .await;
 
+    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
     let event = rx.try_recv().expect("/save 无 client 应回灌失败事件");
     assert!(
         matches!(event, UiEvent::SlashCommandFailed { ref message } if message.contains("Failed to save session")),
@@ -67,6 +73,9 @@ async fn test_fetch_memory_list_effect_emits_memory_list() {
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     app.execute_effect(Effect::FetchMemoryList, &tx).await;
+
+    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     let event = rx.try_recv().expect("/memory 应回灌 MemoryList 事件");
     assert!(

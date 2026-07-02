@@ -180,6 +180,14 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             total,
         },
         sdk::ChatEvent::ModelSwitched { result } => UiEvent::ModelSwitched { result },
+        sdk::ChatEvent::ThinkingChanged { enabled } => UiEvent::ThinkingChanged { enabled },
+        sdk::ChatEvent::ContextEstimated {
+            estimate,
+            message_count,
+        } => UiEvent::ContextEstimated {
+            estimate,
+            message_count,
+        },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }
@@ -425,6 +433,21 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             result.display_name,
             result.context_window,
             result.reasoning_active
+        ),
+        sdk::ChatEvent::ThinkingChanged { enabled } => {
+            crate::tui::log_trace!("{} thinking_changed enabled={}", stage, enabled)
+        }
+        sdk::ChatEvent::ContextEstimated {
+            estimate,
+            message_count,
+        } => crate::tui::log_trace!(
+            "{} context_estimated tokens={} system={} size={} pct={} msgs={}",
+            stage,
+            estimate.estimated_tokens,
+            estimate.system_tokens,
+            estimate.context_size,
+            estimate.usage_percentage,
+            message_count
         ),
         sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
             "{} result text_len={} tokens_used={:?}",
