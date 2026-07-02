@@ -16,7 +16,7 @@ pub(super) struct ToolCallUpdateObservation {
 }
 
 impl ConversationModel {
-    pub(super) fn observe_tool_call_start(
+    pub(super) fn start_tool_call(
         &mut self,
         chat_id: ChatId,
         turn_id: ChatTurnId,
@@ -45,7 +45,7 @@ impl ConversationModel {
             ConversationChange::OutputDirty,
         ]
     }
-    pub(super) fn observe_tool_call_update(
+    pub(super) fn update_tool_call(
         &mut self,
         update: ToolCallUpdateObservation,
     ) -> Vec<ConversationChange> {

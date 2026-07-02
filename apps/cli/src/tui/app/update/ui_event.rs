@@ -118,8 +118,8 @@ impl App {
                 // compact 已完成，停止 spinner 并清理 Gauge。
                 // #497：走事件流的手动 /compact 不再有 TUI 侧手动 spinner 设停，
                 // 且 PostCompact hook 可能未配置，因此在此兜底停止。
-                self.model.conversation.spinner.phase = None;
-                self.model.conversation.spinner.running_tool_count = 0;
+                self.model.conversation.runtime.spinner.phase = None;
+                self.model.conversation.runtime.spinner.running_tool_count = 0;
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
@@ -310,7 +310,7 @@ impl App {
                 }
                 self.session.current_model_display = result.display_name.clone();
                 self.model.conversation.apply(SetProviderModel {
-                    provider: self.model.conversation.provider.clone(),
+                    provider: self.model.conversation.runtime.provider.clone(),
                     model_id: Some(result.display_name.clone()),
                 });
                 if let Some(ra) = result.reasoning_active {

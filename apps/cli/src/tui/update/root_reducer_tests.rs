@@ -87,34 +87,30 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
     reduce_agent_event(
         &mut model,
         AgentEventMapping {
-            conversation: vec![ConversationIntent::ObserveToolCallStart(
-                ObserveToolCallStart {
-                    chat_id: chat_id.clone(),
-                    turn_id: turn_id.clone(),
-                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
-                    provider_id: Some("provider-1".to_string()),
-                    name: "Read".to_string(),
-                    index: 0,
-                },
-            )],
+            conversation: vec![ConversationIntent::ToolCallStart(ToolCallStart {
+                chat_id: chat_id.clone(),
+                turn_id: turn_id.clone(),
+                id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
+                provider_id: Some("provider-1".to_string()),
+                name: "Read".to_string(),
+                index: 0,
+            })],
             ..Default::default()
         },
     );
     reduce_agent_event(
         &mut model,
         AgentEventMapping {
-            conversation: vec![ConversationIntent::ObserveToolCallUpdate(
-                ObserveToolCallUpdate {
-                    chat_id: chat_id.clone(),
-                    turn_id: turn_id.clone(),
-                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
-                    provider_id: Some("provider-1".to_string()),
-                    name: "Read".to_string(),
-                    index: 0,
-                    arguments: None,
-                    status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
-                },
-            )],
+            conversation: vec![ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+                chat_id: chat_id.clone(),
+                turn_id: turn_id.clone(),
+                id: crate::tui::model::conversation::ids::ToolCallId::new("tool-1"),
+                provider_id: Some("provider-1".to_string()),
+                name: "Read".to_string(),
+                index: 0,
+                arguments: None,
+                status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
+            })],
             ..Default::default()
         },
     );
@@ -135,18 +131,16 @@ fn test_reduce_agent_event_applies_tool_patch_atomically_with_single_render_requ
     let result = reduce_agent_event(
         &mut model,
         AgentEventMapping {
-            conversation: vec![ConversationIntent::ObserveToolCallUpdate(
-                ObserveToolCallUpdate {
-                    chat_id: chat_id.clone(),
-                    turn_id: turn_id.clone(),
-                    id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic"),
-                    provider_id: Some("provider-atomic".to_string()),
-                    name: "Read".to_string(),
-                    index: 0,
-                    arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
-                    status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
-                },
-            )],
+            conversation: vec![ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+                chat_id: chat_id.clone(),
+                turn_id: turn_id.clone(),
+                id: crate::tui::model::conversation::ids::ToolCallId::new("tool-atomic"),
+                provider_id: Some("provider-atomic".to_string()),
+                name: "Read".to_string(),
+                index: 0,
+                arguments: Some(r#"{"file_path":"src/lib.rs"}"#.to_string()),
+                status: crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
+            })],
             effects: vec![Effect::RequestRender],
             ..Default::default()
         },

@@ -106,7 +106,7 @@ fn add_task_tool(
     _summary: &str,
     output: &str,
 ) {
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new(id),
@@ -114,7 +114,7 @@ fn add_task_tool(
         name: name.to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
@@ -124,7 +124,7 @@ fn add_task_tool(
         arguments: None,
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: format!("provider-{id}"),

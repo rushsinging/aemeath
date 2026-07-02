@@ -108,7 +108,7 @@ fn test_output_assembler_keeps_assistant_text_outside_read_result() {
         "## 活跃 Bug（21 个）\n\n # │ 标题 │ 优先级 │ 状态\n|---|------|--------|------|",
         false,
     );
-    conversation.apply(ObserveAssistantText {
+    conversation.apply(AssistantText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         text: "我看到 active bug 列表，下面是分析。".to_string(),
@@ -149,7 +149,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
     conversation.apply(StartChat {
         submission: "edit docs".to_string(),
     });
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -157,7 +157,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         name: "Edit".to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -169,7 +169,7 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         is_error: false,
         image_count: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -287,7 +287,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
     conversation.apply(StartChat {
         submission: "read file".to_string(),
     });
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -295,7 +295,7 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -337,12 +337,12 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
 
 #[test]
 fn test_output_assembler_pending_tool_has_no_result_child() {
-    // 边界：未产出结果（仅 ToolCallStart，无 ObserveToolResult）的工具不附结果子块。
+    // 边界：未产出结果（仅 ToolCallStart，无 ToolResult）的工具不附结果子块。
     let mut conversation = ConversationModel::default();
     conversation.apply(StartChat {
         submission: "search".to_string(),
     });
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -350,7 +350,7 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -382,7 +382,7 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
     conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
     });
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -390,7 +390,7 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         name: "Agent".to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -408,7 +408,7 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         message: "子代理最终输出文本".to_string(),
     });
     // 工具完成
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -449,7 +449,7 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
     conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
     });
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -457,7 +457,7 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
         name: "Agent".to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -511,7 +511,7 @@ fn add_tool_after_thinking(
     conversation.apply(StartChat {
         submission: "search".to_string(),
     });
-    conversation.apply(ObserveThinkingText {
+    conversation.apply(ThinkingText {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         text: "thinking".to_string(),
@@ -538,7 +538,7 @@ fn add_completed_tool(
     output: &str,
     is_error: bool,
 ) {
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new(id),
@@ -546,7 +546,7 @@ fn add_completed_tool(
         name: name.to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some(format!("provider-{id}")),
@@ -556,7 +556,7 @@ fn add_completed_tool(
         arguments: None,
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: format!("provider-{id}"),
@@ -585,13 +585,13 @@ fn bench_refresh_cost_by_conversation_size() {
                 text: format!("用户第 {i} 问，带一些上下文细节。"),
             });
             let turn_id = ChatTurnId::new(format!("turn-{i}"));
-            conv.apply(ObserveAssistantText {
+            conv.apply(AssistantText {
                 chat_id: chat_id.clone(),
                 turn_id: turn_id.clone(),
                 text: format!("助手第 {i} 段回复。\n第二行内容稍长触发换行处理。\n第三行结束。"),
             });
             let tool_id = ToolCallId::new(format!("tool-{i}"));
-            conv.apply(ObserveToolCallStart {
+            conv.apply(ToolCallStart {
                 chat_id: chat_id.clone(),
                 turn_id: turn_id.clone(),
                 id: tool_id.clone(),
@@ -599,7 +599,7 @@ fn bench_refresh_cost_by_conversation_size() {
                 name: "Read".to_string(),
                 index: 0,
             });
-            conv.apply(ObserveToolResult {
+            conv.apply(ToolResult {
                 chat_id: chat_id.clone(),
                 turn_id: turn_id.clone(),
                 id: tool_id.clone(),

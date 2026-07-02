@@ -52,7 +52,7 @@ impl ConversationModel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn observe_tool_result(
+    pub(super) fn complete_tool_call(
         &mut self,
         chat_id: ChatId,
         turn_id: ChatTurnId,

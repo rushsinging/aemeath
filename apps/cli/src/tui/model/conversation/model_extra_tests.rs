@@ -102,7 +102,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     let expected_turn_id = runtime_turn_id.clone();
     let expected_tool_id = ToolCallId::new("tool-1");
     model.ensure_runtime_turn(runtime_chat_id.clone(), runtime_turn_id.clone());
-    let changes = model.apply(ObserveToolCallStart {
+    let changes = model.apply(ToolCallStart {
         chat_id: runtime_chat_id.clone(),
         turn_id: runtime_turn_id.clone(),
         id: ToolCallId::new("tool-1"),
@@ -110,7 +110,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         name: "Bash".to_string(),
         index: 0,
     });
-    model.apply(ObserveToolCallUpdate {
+    model.apply(ToolCallUpdate {
         chat_id: runtime_chat_id,
         turn_id: runtime_turn_id,
         id: ToolCallId::new("tool-1"),
@@ -147,7 +147,7 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
     )));
 }
 
-/// A4.1 TDD：observe_tool_result 后对应 ChatTurn.tool_calls[i].result 应为 Some(ToolResultPayload)
+/// A4.1 TDD：complete_tool_call 后对应 ChatTurn.tool_calls[i].result 应为 Some(ToolResultPayload)
 /// 且字段值正确（output / content / is_error / image_count 全部匹配）。
 #[test]
 fn test_tool_result_payload_stored_in_turn() {
@@ -159,7 +159,7 @@ fn test_tool_result_payload_stored_in_turn() {
     model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
 
     // 登记 ToolCallStart
-    model.apply(ObserveToolCallStart {
+    model.apply(ToolCallStart {
         chat_id: chat_id.clone(),
         turn_id: turn_id.clone(),
         id: tool_id.clone(),
@@ -174,7 +174,7 @@ fn test_tool_result_payload_stored_in_turn() {
     let expected_image_count = 0usize;
 
     // 登记 ToolResult
-    model.apply(ObserveToolResult {
+    model.apply(ToolResult {
         chat_id: chat_id.clone(),
         turn_id: turn_id.clone(),
         provider_id: "prov-a41".to_string(),
@@ -197,7 +197,7 @@ fn test_tool_result_payload_stored_in_turn() {
                 .iter()
                 .find(|c| c.id.as_ref() == Some(&tool_id))
         })
-        .expect("tool call should exist after observe_tool_result");
+        .expect("tool call should exist after complete_tool_call");
 
     let expected_payload = ToolResultPayload::new(
         expected_output,
