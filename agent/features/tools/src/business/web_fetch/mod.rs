@@ -7,6 +7,10 @@ use std::time::Duration;
 use tokio::process::Command;
 use url::Url;
 
+mod extract;
+#[cfg(test)]
+mod tests;
+
 pub struct WebFetchTool;
 
 /// Validate a URL against SSRF attacks.
@@ -219,6 +223,7 @@ impl TypedTool for WebFetchTool {
                                 title: String::new(),
                                 content: truncated_content,
                                 truncated: true,
+                                links: Vec::new(),
                             },
                         )
                     } else {
@@ -229,6 +234,7 @@ impl TypedTool for WebFetchTool {
                                 title: String::new(),
                                 content: body.to_string(),
                                 truncated: false,
+                                links: Vec::new(),
                             },
                         )
                     }
