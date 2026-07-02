@@ -301,13 +301,13 @@ mod tests {
     fn test_revision_unchanged_on_noop_apply() {
         let mut model = ConversationModel::default();
         let before = model.revision();
-        // 空文本的 ObserveAssistantText 返回空 change（no-op）。
-        let changes = model.apply(ObserveAssistantText {
+        // 空文本的 AssistantText 返回空 change（no-op）。
+        let changes = model.apply(AssistantText {
             chat_id: ChatId::new("c1"),
             turn_id: ChatTurnId::new("t1"),
             text: String::new(),
         });
-        assert!(changes.is_empty(), "空文本 ObserveAssistantText 应为 no-op");
+        assert!(changes.is_empty(), "空文本 AssistantText 应为 no-op");
         assert_eq!(model.revision(), before, "no-op apply 不应改 revision");
     }
 }

@@ -16,7 +16,7 @@ fn test_orphan_read_result_shows_summary_not_full_content() {
     conversation.apply(StartChat {
         submission: "x".to_string(),
     });
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -62,7 +62,7 @@ fn test_non_embedded_tool_result_uses_summary() {
     conversation.apply(StartChat {
         submission: "search".to_string(),
     });
-    conversation.apply(ObserveToolCallStart {
+    conversation.apply(ToolCallStart {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         id: ToolCallId::new("tool-1"),
@@ -70,7 +70,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         name: "Read".to_string(),
         index: 0,
     });
-    conversation.apply(ObserveToolCallUpdate {
+    conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: Some("provider-1".to_string()),
@@ -80,7 +80,7 @@ fn test_non_embedded_tool_result_uses_summary() {
         arguments: None,
         status: ToolCallStatus::Ready,
     });
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -115,7 +115,7 @@ fn test_orphan_tool_result_shows_summary_not_raw_output() {
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    conversation.apply(ObserveToolResult {
+    conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
         turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
         provider_id: "provider-1".to_string(),
@@ -234,7 +234,7 @@ fn test_tool_index_call_matches_linear_scan() {
     let chat = ChatId::new("c1");
     let turn = ChatTurnId::new("t1");
     let tool = ToolCallId::new("tool-1");
-    conv.apply(ObserveToolCallStart {
+    conv.apply(ToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -269,7 +269,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
     let turn = ChatTurnId::new("t1");
     let tool = ToolCallId::new("tool-r1");
 
-    conv.apply(ObserveToolCallStart {
+    conv.apply(ToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -277,7 +277,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
         name: "Bash".to_string(),
         index: 0,
     });
-    conv.apply(ObserveToolCallUpdate {
+    conv.apply(ToolCallUpdate {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -291,7 +291,7 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
     let expected_content = serde_json::json!({ "text": "cmd output line" });
     let expected_is_error = false;
     let expected_image_count: usize = 2;
-    conv.apply(ObserveToolResult {
+    conv.apply(ToolResult {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         provider_id: "prov-1".to_string(),
@@ -344,7 +344,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
     let tool = ToolCallId::new("tool-img");
 
     // 注册 tool call，使 find_tool_call 能命中（tool_result_is_embedded 需要）。
-    conv.apply(ObserveToolCallStart {
+    conv.apply(ToolCallStart {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -352,7 +352,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
         name: "Bash".to_string(),
         index: 0,
     });
-    conv.apply(ObserveToolCallUpdate {
+    conv.apply(ToolCallUpdate {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         id: tool.clone(),
@@ -364,7 +364,7 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
     });
     // output 为空 → tool_result_is_embedded=false → 触发非嵌入渲染分支。
     // is_error=true、image_count=2 → style=Error、文本含 "[图片: 2]"。
-    conv.apply(ObserveToolResult {
+    conv.apply(ToolResult {
         chat_id: chat.clone(),
         turn_id: turn.clone(),
         provider_id: "prov-1".to_string(),

@@ -59,7 +59,7 @@ impl ConversationUpdate for ResumeConversation {
                     for (block_index, block) in blocks.into_iter().enumerate() {
                         match block {
                             HistoryAssistantBlock::Text(text) => {
-                                all_changes.extend(model.apply(ObserveAssistantText {
+                                all_changes.extend(model.apply(AssistantText {
                                     chat_id: chat_id.clone(),
                                     turn_id: turn_id.clone(),
                                     text,
@@ -70,7 +70,7 @@ impl ConversationUpdate for ResumeConversation {
                                 }));
                             }
                             HistoryAssistantBlock::Thinking(text) => {
-                                all_changes.extend(model.apply(ObserveThinkingText {
+                                all_changes.extend(model.apply(ThinkingText {
                                     chat_id: chat_id.clone(),
                                     turn_id: turn_id.clone(),
                                     text,
@@ -83,7 +83,7 @@ impl ConversationUpdate for ResumeConversation {
                             HistoryAssistantBlock::ToolUse { id, name, input } => {
                                 let input_json = input.to_string();
                                 let tool_call_id = ToolCallId::from_legacy_or_new(&id);
-                                all_changes.extend(model.apply(ObserveToolCallStart {
+                                all_changes.extend(model.apply(ToolCallStart {
                                     chat_id: chat_id.clone(),
                                     turn_id: turn_id.clone(),
                                     id: tool_call_id.clone(),
@@ -91,7 +91,7 @@ impl ConversationUpdate for ResumeConversation {
                                     name: name.clone(),
                                     index: block_index,
                                 }));
-                                all_changes.extend(model.apply(ObserveToolCallUpdate {
+                                all_changes.extend(model.apply(ToolCallUpdate {
                                     chat_id: chat_id.clone(),
                                     turn_id: turn_id.clone(),
                                     id: tool_call_id.clone(),
@@ -102,7 +102,7 @@ impl ConversationUpdate for ResumeConversation {
                                     status: ToolCallStatus::Ready,
                                 }));
                                 if let Some(result) = tool_results.get(id.as_str()) {
-                                    all_changes.extend(model.apply(ObserveToolResult {
+                                    all_changes.extend(model.apply(ToolResult {
                                         chat_id: chat_id.clone(),
                                         turn_id: turn_id.clone(),
                                         id: tool_call_id.clone(),
@@ -140,7 +140,7 @@ impl ConversationUpdate for AppendUserMessage {
     }
 }
 
-impl ConversationUpdate for ObserveAssistantText {
+impl ConversationUpdate for AssistantText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         let changes = model.append_assistant_text(self.chat_id, self.turn_id, self.text);
         if !changes.is_empty() {
@@ -150,7 +150,7 @@ impl ConversationUpdate for ObserveAssistantText {
     }
 }
 
-impl ConversationUpdate for ObserveThinkingText {
+impl ConversationUpdate for ThinkingText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         let changes = model.append_thinking_text(self.chat_id, self.turn_id, self.text);
         if !changes.is_empty() {
@@ -166,9 +166,9 @@ impl ConversationUpdate for CompleteBlock {
     }
 }
 
-impl ConversationUpdate for ObserveToolCallStart {
+impl ConversationUpdate for ToolCallStart {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.observe_tool_call_start(
+        let changes = model.start_tool_call(
             self.chat_id,
             self.turn_id,
             self.id,
@@ -184,9 +184,9 @@ impl ConversationUpdate for ObserveToolCallStart {
     }
 }
 
-impl ConversationUpdate for ObserveToolCallUpdate {
+impl ConversationUpdate for ToolCallUpdate {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.observe_tool_call_update(ToolCallUpdateObservation {
+        model.update_tool_call(ToolCallUpdateObservation {
             chat_id: self.chat_id,
             turn_id: self.turn_id,
             id: self.id,
@@ -199,9 +199,9 @@ impl ConversationUpdate for ObserveToolCallUpdate {
     }
 }
 
-impl ConversationUpdate for ObserveToolResult {
+impl ConversationUpdate for ToolResult {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.observe_tool_result(
+        let changes = model.complete_tool_call(
             self.chat_id,
             self.turn_id,
             self.id,
@@ -575,12 +575,12 @@ impl ConversationUpdate for ConversationIntent {
             Self::StartChat(s) => s.update(model),
             Self::ResumeConversation(s) => s.update(model),
             Self::AppendUserMessage(s) => s.update(model),
-            Self::ObserveAssistantText(s) => s.update(model),
-            Self::ObserveThinkingText(s) => s.update(model),
+            Self::AssistantText(s) => s.update(model),
+            Self::ThinkingText(s) => s.update(model),
             Self::CompleteBlock(s) => s.update(model),
-            Self::ObserveToolCallStart(s) => s.update(model),
-            Self::ObserveToolCallUpdate(s) => s.update(model),
-            Self::ObserveToolResult(s) => s.update(model),
+            Self::ToolCallStart(s) => s.update(model),
+            Self::ToolCallUpdate(s) => s.update(model),
+            Self::ToolResult(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
             Self::AppendHookNotice(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
