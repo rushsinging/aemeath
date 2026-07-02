@@ -15,8 +15,8 @@ mod tests {
     #[test]
     fn live_status_projection_includes_spinner_task_and_queued_lines() {
         let mut model = ConversationModel::default();
-        model.spinner.chat_active = true;
-        model.spinner.phase = Some(SpinnerPhase::Thinking);
+        model.runtime.spinner.chat_active = true;
+        model.runtime.spinner.phase = Some(SpinnerPhase::Thinking);
         model.apply(UpdateTaskLines(vec![
             "━━ Tasks: 1/2 ━━".to_string(),
             "✓ #1 done".to_string(),

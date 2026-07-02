@@ -52,7 +52,7 @@ impl super::App {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
                 } else if let Some(ref ac) = self.agent_client {
                     // loop 未运行（如启动前）→ fallback 到直接调用
-                    self.model.conversation.spinner.phase =
+                    self.model.conversation.runtime.spinner.phase =
                         Some(crate::tui::model::conversation::spinner::SpinnerPhase::Compacting);
                     match ac
                         .compact_messages(
@@ -63,8 +63,8 @@ impl super::App {
                         .await
                     {
                         Ok((compacted, was_compacted)) => {
-                            self.model.conversation.spinner.phase = None;
-                            self.model.conversation.spinner.running_tool_count = 0;
+                            self.model.conversation.runtime.spinner.phase = None;
+                            self.model.conversation.runtime.spinner.running_tool_count = 0;
                             if was_compacted {
                                 let old_len = self.chat.messages.len();
                                 self.chat.messages = compacted;
@@ -78,8 +78,8 @@ impl super::App {
                             }
                         }
                         Err(e) => {
-                            self.model.conversation.spinner.phase = None;
-                            self.model.conversation.spinner.running_tool_count = 0;
+                            self.model.conversation.runtime.spinner.phase = None;
+                            self.model.conversation.runtime.spinner.running_tool_count = 0;
                             self.append_error_notice(format!("compact failed: {}", e));
                         }
                     }
@@ -89,7 +89,7 @@ impl super::App {
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
             cmd if cmd == format!("/{}", cmd::USAGE) => {
-                let usage = &self.model.conversation.usage;
+                let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
                 self.append_system_notice(format!(
                     "API calls: {} | Tokens: {} in / {} out / {} total",
@@ -345,7 +345,7 @@ impl super::App {
                             self.session.current_model_display = result.display_name.clone();
                             // model 真相归 ConversationModel，StatusBar 渲染时直接消费 StatusViewModel。
                             self.model.conversation.apply(SetProviderModel {
-                                provider: self.model.conversation.provider.clone(),
+                                provider: self.model.conversation.runtime.provider.clone(),
                                 model_id: Some(result.display_name.clone()),
                             });
                             if let Some(ra) = result.reasoning_active {

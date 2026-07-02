@@ -161,9 +161,12 @@ mod tests {
             app.model.session.current_session_id.as_deref(),
             Some("sess-1")
         );
-        assert_eq!(app.model.conversation.model_id.as_deref(), Some("gpt-test"));
         assert_eq!(
-            app.model.conversation.workspace.cwd,
+            app.model.conversation.runtime.model_id.as_deref(),
+            Some("gpt-test")
+        );
+        assert_eq!(
+            app.model.conversation.runtime.workspace.cwd,
             Some(cwd.display().to_string())
         );
         assert!(app.model.input.document.buffer.is_empty());
@@ -178,8 +181,8 @@ mod tests {
         );
 
         assert_eq!(app.model.session.message_count, 0);
-        assert_eq!(app.model.conversation.usage.input_tokens, 0);
-        assert_eq!(app.model.conversation.usage.output_tokens, 0);
+        assert_eq!(app.model.conversation.runtime.usage.input_tokens, 0);
+        assert_eq!(app.model.conversation.runtime.usage.output_tokens, 0);
     }
 
     #[test]

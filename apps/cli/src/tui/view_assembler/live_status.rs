@@ -25,8 +25,9 @@ impl LiveStatusAssembler {
         queued_texts: &[String],
     ) -> LiveStatusViewModel {
         // #536: 可见性由 chat_active 驱动；phase=None 时文案兜底 Thinking。
-        let spinner = if conversation.spinner.chat_active {
+        let spinner = if conversation.runtime.spinner.chat_active {
             let text = conversation
+                .runtime
                 .spinner
                 .phase
                 .as_ref()
@@ -46,7 +47,7 @@ impl LiveStatusAssembler {
             .iter()
             .flat_map(|text| queued_preview_lines(text))
             .collect();
-        let compact_progress = conversation.compact_progress.as_ref().map(|p| {
+        let compact_progress = conversation.runtime.compact_progress.as_ref().map(|p| {
             use crate::tui::view_model::live_status::CompactProgressView;
             let ratio = p.ratio().clamp(0.0, 1.0);
             CompactProgressView {
@@ -59,7 +60,7 @@ impl LiveStatusAssembler {
         LiveStatusViewModel {
             spinner,
             queued_lines,
-            task_lines: conversation.task_status.lines.clone(),
+            task_lines: conversation.runtime.task_status.lines.clone(),
             compact_progress,
         }
     }
@@ -113,8 +114,8 @@ mod tests {
         phase: Option<SpinnerPhase>,
     ) -> ConversationModel {
         let mut conversation = ConversationModel::default();
-        conversation.spinner.chat_active = chat_active;
-        conversation.spinner.phase = phase;
+        conversation.runtime.spinner.chat_active = chat_active;
+        conversation.runtime.spinner.phase = phase;
         conversation
     }
 

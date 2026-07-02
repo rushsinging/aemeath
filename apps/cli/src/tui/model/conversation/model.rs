@@ -2,16 +2,10 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::chat::{Chat, ChatStatus};
 use super::chat_turn::ChatTurn;
-use super::compact_progress::CompactProgressModel;
 use super::ids::{ChatId, ChatTurnId};
-use super::processing_job::ProcessingJob;
 use super::queued_submission::QueuedSubmission;
-use super::spinner::SpinnerModel;
-use super::status_notice::StatusNotice;
-use super::task_status::TaskStatusSnapshot;
+use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
-use super::usage::UsageSummary;
-use super::workspace::WorkspaceState;
 use crate::tui::model::output_timeline::{OutputTimelineItem, OutputTimelineModel};
 use std::time::Instant;
 
@@ -33,25 +27,11 @@ pub struct ConversationModel {
     pub(super) active_thinking_block_id: Option<String>,
     pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
 
-    // ── 运行态（从 RuntimeModel 搬入）──
-    pub provider: Option<String>,
-    pub model_id: Option<String>,
-    pub workspace: WorkspaceState,
-    pub usage: UsageSummary,
-    pub live_tps: Option<f64>,
-    pub task_status: TaskStatusSnapshot,
-    pub processing_jobs: Vec<ProcessingJob>,
-    pub spinner: SpinnerModel,
-    pub status_notice: StatusNotice,
-    pub thinking: bool,
-    /// Reasoning Graph 当前阶段（`None` = graph 不存在或 Idle），status notice 的持久真相。
-    pub graph_phase: Option<String>,
-    /// 临时 status notice 的过期时间戳；`None` 表示当前 notice 为持久态。
-    pub transient_notice_expiry: Option<Instant>,
-    /// Compact 进度（`None` = 未在 compact 中），用于渲染 Gauge 进度条。
-    pub compact_progress: Option<CompactProgressModel>,
+    // ── 运行态 ──
+    pub runtime: RuntimeState,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ConversationModel {
     fn default() -> Self {
         Self {
@@ -67,19 +47,7 @@ impl Default for ConversationModel {
             active_text_context: None,
             active_thinking_block_id: None,
             active_thinking_context: None,
-            provider: None,
-            model_id: None,
-            workspace: WorkspaceState::default(),
-            usage: UsageSummary::default(),
-            live_tps: None,
-            task_status: TaskStatusSnapshot::default(),
-            processing_jobs: Vec::new(),
-            spinner: SpinnerModel::default(),
-            status_notice: StatusNotice::default(),
-            thinking: true,
-            graph_phase: None,
-            transient_notice_expiry: None,
-            compact_progress: None,
+            runtime: RuntimeState::default(),
         }
     }
 }
@@ -98,23 +66,10 @@ impl ConversationModel {
         changes
     }
 
-    /// 由 graph_phase 派生持久 status notice。
-    pub(super) fn notice_from_phase(phase: Option<&str>) -> StatusNotice {
-        match phase {
-            None | Some("idle") => StatusNotice::success("Ready"),
-            Some(p) => StatusNotice::normal(p.to_string()),
-        }
-    }
-
     /// 检查临时 notice 是否过期；过期则回退到 graph_phase 派生的持久态。
     /// 返回 `true` 表示发生了回退（调用方可据此标脏）。
     pub fn expire_transient_notice(&mut self, now: Instant) -> bool {
-        if self.transient_notice_expiry.is_some_and(|exp| now >= exp) {
-            self.transient_notice_expiry = None;
-            self.status_notice = Self::notice_from_phase(self.graph_phase.as_deref());
-            return true;
-        }
-        false
+        self.runtime.expire_transient_notice(now)
     }
 
     /// 当前内容版本号，供渲染层 memo。
