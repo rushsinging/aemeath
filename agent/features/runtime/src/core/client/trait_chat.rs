@@ -100,6 +100,9 @@ pub(super) async fn chat_impl(
                 .as_ref()
                 .filter(|c| c.enabled)
                 .map(|c| crate::business::reasoning_graph::ReasoningGraph::new(c.clone())),
+            build_switched_client: std::sync::Arc::new(
+                super::trait_model::build_llm_client_for_switch,
+            ),
         })
         .await;
         // loop 退出（shutdown / clear）后把取消槽重置为干净 token，

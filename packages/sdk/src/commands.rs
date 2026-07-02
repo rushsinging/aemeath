@@ -119,7 +119,7 @@ pub struct ContextEstimate {
 // ─── Model switch params / result ───
 
 /// Parameters for switching the active model.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelSwitchParams {
     pub provider_name: String,
     pub model_id: String,

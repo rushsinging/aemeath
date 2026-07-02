@@ -350,6 +350,9 @@ pub(crate) fn runtime_event_to_sdk_event(
             current: current.map(|n| n as u32),
             total: total.map(|n| n as u32),
         },
+        crate::business::chat::RuntimeStreamEvent::ModelSwitched { result } => {
+            ChatEvent::ModelSwitched { result }
+        }
     }
 }
 

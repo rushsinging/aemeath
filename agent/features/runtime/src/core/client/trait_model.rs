@@ -13,6 +13,18 @@ pub(super) async fn switch_model_impl(
     me: &AgentClientImpl,
     params: sdk::ModelSwitchParams,
 ) -> Result<sdk::ModelSwitchResult> {
+    let (new_client, result) = build_llm_client_for_switch(params);
+    *me.inner.current_client.write().unwrap() = Arc::new(new_client);
+    Ok(result)
+}
+
+/// 由 `ModelSwitchParams` 构建新 `LlmClient` + `ModelSwitchResult`。
+///
+/// 提取为独立函数供 `switch_model_impl`（RPC 路径）和 loop_runner idle 分支
+/// （事件流路径，#497）共用，DRY。
+pub(crate) fn build_llm_client_for_switch(
+    params: sdk::ModelSwitchParams,
+) -> (provider::api::LlmClient, sdk::ModelSwitchResult) {
     use provider::api::openai_compatible::ReasoningConfig;
     use provider::api::ProviderDriverKind;
 
@@ -40,13 +52,13 @@ pub(super) async fn switch_model_impl(
     };
     let display = format!("{}/{}", params.provider_name, display_name);
 
-    *me.inner.current_client.write().unwrap() = Arc::new(new_client);
-
-    Ok(sdk::ModelSwitchResult {
+    let result = sdk::ModelSwitchResult {
         display_name: display,
         context_window: params.context_window,
         reasoning_active: Some(reasoning),
-    })
+    };
+
+    (new_client, result)
 }
 
 pub(super) async fn set_thinking_impl(me: &AgentClientImpl, desired: Option<bool>) -> Result<bool> {
