@@ -332,14 +332,22 @@ impl TypedTool for BashTool {
                     }
                     parts.join("\n")
                 };
+                // #500: 从 workspace 读取当前 path_base（cd 后已更新），追加到 output 末尾
+                let current_cwd = ctx.workspace_read().current_path_base();
                 let output = if display.is_empty() {
                     if status.success() {
-                        "Command executed successfully".to_string()
+                        format!(
+                            "Command executed successfully\n[cwd: {}]",
+                            current_cwd.display()
+                        )
                     } else {
-                        format!("Command failed: {failure_detail}")
+                        format!(
+                            "Command failed: {failure_detail}\n[cwd: {}]",
+                            current_cwd.display()
+                        )
                     }
                 } else {
-                    display
+                    format!("{}\n[cwd: {}]", display, current_cwd.display())
                 };
                 if status.success() {
                     TypedToolResult::success(output, bash_result)
@@ -544,6 +552,129 @@ mod tests {
         // data 中应有 stdout 字段
         let data = result.data.expect("应有 data");
         assert_eq!(data.stdout, "hello_world_12345", "data.stdout 应为命令输出");
+        // #500: result text 末尾应附带 [cwd: {path}]
+        assert!(
+            result.text.contains("[cwd: "),
+            "output 应包含 [cwd: ...]，实际: {}",
+            result.text
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bash_result_cwd_reflects_cd() {
+        // AC2: cd 后 result 中的 cwd 应反映新目录
+        let workspace = tempdir().unwrap();
+        let subdir = workspace.path().join("subdir");
+        std::fs::create_dir_all(&subdir).unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
+            session_reminders: None,
+            plan_mode: None,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool
+            .call(
+                json!({ "command": format!("cd {}", subdir.display()) }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!result.is_error);
+        assert!(
+            result.text.contains(&subdir.display().to_string()),
+            "cd 后 result 应包含新目录路径，实际: {}",
+            result.text
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bash_result_cwd_on_failed_command() {
+        // AC6: 命令失败（非零 exit code）时 result 也带 cwd
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
+            session_reminders: None,
+            plan_mode: None,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool.call(json!({ "command": "false" }), &ctx).await;
+
+        assert!(result.is_error);
+        assert!(
+            result.text.contains("[cwd: "),
+            "失败命令 result 也应包含 [cwd: ...]，实际: {}",
+            result.text
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bash_result_cwd_on_empty_output() {
+        // AC5: stdout + stderr 均为空时的 "Command executed successfully" 也带 cwd
+        let workspace = tempdir().unwrap();
+        let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
+        let ctx = ToolExecutionContext {
+            workspace: ws.clone(),
+            cancel: CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            resources: ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
+            session_reminders: None,
+            plan_mode: None,
+            max_tool_concurrency: 4,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        };
+
+        let result = BashTool.call(json!({ "command": "true" }), &ctx).await;
+
+        assert!(!result.is_error);
+        assert!(
+            result.text.contains("Command executed successfully"),
+            "空输出应有 success 消息，实际: {}",
+            result.text
+        );
+        assert!(
+            result.text.contains("[cwd: "),
+            "空输出 result 也应包含 [cwd: ...]，实际: {}",
+            result.text
+        );
     }
 
     #[tokio::test]
