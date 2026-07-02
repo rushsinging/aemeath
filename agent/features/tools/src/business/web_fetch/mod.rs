@@ -7,6 +7,10 @@ use std::time::Duration;
 use tokio::process::Command;
 use url::Url;
 
+mod extract;
+#[cfg(test)]
+mod tests;
+
 pub struct WebFetchTool;
 
 /// Validate a URL against SSRF attacks.
@@ -93,6 +97,12 @@ fn validate_url(raw_url: &str) -> Result<Url, String> {
     }
 
     Ok(url)
+}
+
+/// Heuristic to decide whether a response body should be parsed as HTML.
+fn looks_like_html(body: &str) -> bool {
+    let trimmed = body.trim_start();
+    trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with('<')
 }
 
 #[async_trait]
@@ -202,36 +212,62 @@ impl TypedTool for WebFetchTool {
             Ok(Ok(output)) => {
                 if output.status.success() {
                     let body = String::from_utf8_lossy(&output.stdout);
+
+                    let extracted = if looks_like_html(&body) {
+                        match extract::extract_page(
+                            &body,
+                            extract::ExtractOptions {
+                                base_url: url.as_str(),
+                                max_content_bytes: 2 * 1024 * 1024, // 2 MiB
+                                max_links: 50,
+                            },
+                        ) {
+                            Ok(e) => e,
+                            Err(err) => {
+                                return TypedToolResult::error(
+                                    serde_json::json!({
+                                        "status": "error",
+                                        "message": format!("HTML extraction failed: {err}"),
+                                        "data": { "url": url.as_str() }
+                                    })
+                                    .to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        extract::ExtractedPage {
+                            title: String::new(),
+                            markdown: body.to_string(),
+                            links: Vec::new(),
+                        }
+                    };
+
                     // Truncate very large responses safely
                     let max_chars = 50_000;
-                    if body.len() > max_chars {
-                        let truncated = share::string_idx::slice_head(&body, max_chars);
+                    let (content, truncated) = if extracted.markdown.len() > max_chars {
+                        let truncated =
+                            share::string_idx::slice_head(&extracted.markdown, max_chars);
                         let truncated_content = format!(
                             "{}...\n\n[truncated, showing first {} chars of {} total]",
                             truncated,
                             truncated.chars().count(),
-                            body.chars().count()
+                            extracted.markdown.chars().count()
                         );
-                        TypedToolResult::success(
-                            truncated_content.clone(),
-                            WebFetchResult {
-                                url: url.to_string(),
-                                title: String::new(),
-                                content: truncated_content,
-                                truncated: true,
-                            },
-                        )
+                        (truncated_content, true)
                     } else {
-                        TypedToolResult::success(
-                            body.to_string(),
-                            WebFetchResult {
-                                url: url.to_string(),
-                                title: String::new(),
-                                content: body.to_string(),
-                                truncated: false,
-                            },
-                        )
-                    }
+                        (extracted.markdown.clone(), false)
+                    };
+
+                    TypedToolResult::success(
+                        content.clone(),
+                        WebFetchResult {
+                            url: url.to_string(),
+                            title: extracted.title,
+                            content,
+                            truncated,
+                            links: extracted.links,
+                        },
+                    )
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     TypedToolResult::error(

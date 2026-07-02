@@ -25,8 +25,8 @@ Usage:
 /// WebFetch description。
 pub fn web_fetch(lang: &str) -> &'static str {
     match lang {
-        "zh" => "通过 HTTP GET 获取 URL 内容。只读。大内容可能被截断。GitHub URL 优先用 `gh` CLI。",
-        _ => "Fetches content from a URL via HTTP GET. Read-only. Results may be truncated for large content. For GitHub URLs, prefer `gh` CLI.",
+        "zh" => "通过 HTTP GET 获取 URL 内容。只读。对于 HTML 页面，会提取标题、将正文转换为 Markdown 并列出页面链接；大内容可能被截断。GitHub URL 优先用 `gh` CLI。",
+        _ => "Fetches content from a URL via HTTP GET. Read-only. For HTML pages, extracts the title, converts the body to Markdown, and lists page links. Large content may be truncated. For GitHub URLs, prefer `gh` CLI.",
     }
 }
 
