@@ -2,7 +2,6 @@
 
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
-use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 use super::tool_result_payload::ToolResultPayload;

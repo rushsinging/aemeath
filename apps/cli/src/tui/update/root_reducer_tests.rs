@@ -1,5 +1,4 @@
 use super::*;
-use crate::tui::model::conversation::intent::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
 fn key(code: KeyCode) -> TuiMsg {

@@ -18,12 +18,17 @@ impl App {
         });
         self.chat.messages.clear();
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
-        for (i, message) in messages.iter().enumerate() {
-            let subsequent = messages.get(i + 1);
-            self.render_history_message(message, subsequent);
-        }
-        self.chat.messages = messages;
-        apply_resume_input_history(self, &self.chat.messages.clone());
+        // 走 ResumeConversation intent，不触发 spinner 副作用
+        self.model.conversation.apply(
+            crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+                crate::tui::model::conversation::intent::ResumeConversation {
+                    messages: messages.clone(),
+                },
+            ),
+        );
+        self.chat.messages = messages.clone();
+        self.mark_output_dirty();
+        apply_resume_input_history(self, &messages);
         self.append_system_notice(format!(
             "[resumed session {} ({} messages)]",
             session_id, msg_count

@@ -40,14 +40,18 @@ impl App {
                     if let Some(tasks) = &s.tasks {
                         let _ = agent_client.restore_tasks(tasks.clone()).await;
                     }
-                    // 渲染已恢复的消息（已由 runtime 完成清洗）
+                    // 渲染已恢复的消息（走 ResumeConversation intent，不触发 spinner）
                     let msgs = s.messages;
-                    for (i, message) in msgs.iter().enumerate() {
-                        let subsequent = msgs.get(i + 1);
-                        self.render_history_message(message, subsequent);
-                    }
-                    self.chat.messages = msgs;
-                    apply_resume_input_history(self, &self.chat.messages.clone());
+                    self.model.conversation.apply(
+                        crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+                            crate::tui::model::conversation::intent::ResumeConversation {
+                                messages: msgs.clone(),
+                            },
+                        ),
+                    );
+                    self.chat.messages = msgs.clone();
+                    self.mark_output_dirty();
+                    apply_resume_input_history(self, &msgs);
                     self.append_system_notice(format!(
                         "[resumed session {} ({} messages)]",
                         id, msg_count

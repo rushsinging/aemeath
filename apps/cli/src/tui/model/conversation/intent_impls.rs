@@ -26,6 +26,114 @@ impl ConversationUpdate for StartChat {
     }
 }
 
+impl ConversationUpdate for ResumeConversation {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        use super::history_parse::{
+            collect_following_tool_results, normalize_tool_result_content,
+            tool_result_content_to_string, tool_result_image_count, HistoryAssistantBlock,
+            HistoryDisplayMessage,
+        };
+        use super::ids::{ChatId, ChatTurnId, ToolCallId};
+        use super::tool_call::ToolCallStatus;
+
+        let mut all_changes = Vec::new();
+        const HISTORY_RESTORE_ERROR: &str =
+            "无法恢复一条历史消息：消息格式不符合当前会话 schema，已跳过。";
+
+        for (index, msg) in self.messages.iter().enumerate() {
+            let subsequent = self.messages.get(index + 1);
+            match HistoryDisplayMessage::parse(msg) {
+                Ok(HistoryDisplayMessage::User { text }) => {
+                    // 直接调 model.start_chat（不走 StartChat intent），避免 spinner 副作用。
+                    all_changes.extend(model.start_chat(text));
+                }
+                Ok(HistoryDisplayMessage::ToolResults) => {}
+                Ok(HistoryDisplayMessage::Assistant { blocks }) => {
+                    let chat_id = model
+                        .active_chat_id
+                        .clone()
+                        .unwrap_or_else(|| ChatId::from_legacy_or_new("history-chat"));
+                    let turn_id = ChatTurnId::from_legacy_or_new("turn-1");
+                    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+                    let tool_results = collect_following_tool_results(subsequent);
+                    for (block_index, block) in blocks.into_iter().enumerate() {
+                        match block {
+                            HistoryAssistantBlock::Text(text) => {
+                                all_changes.extend(model.apply(ObserveAssistantText {
+                                    chat_id: chat_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                    text,
+                                }));
+                                all_changes.extend(model.apply(CompleteBlock {
+                                    chat_id: chat_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                }));
+                            }
+                            HistoryAssistantBlock::Thinking(text) => {
+                                all_changes.extend(model.apply(ObserveThinkingText {
+                                    chat_id: chat_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                    text,
+                                }));
+                                all_changes.extend(model.apply(CompleteBlock {
+                                    chat_id: chat_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                }));
+                            }
+                            HistoryAssistantBlock::ToolUse { id, name, input } => {
+                                let input_json = input.to_string();
+                                let tool_call_id = ToolCallId::from_legacy_or_new(&id);
+                                all_changes.extend(model.apply(ObserveToolCallStart {
+                                    chat_id: chat_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                    id: tool_call_id.clone(),
+                                    provider_id: None,
+                                    name: name.clone(),
+                                    index: block_index,
+                                }));
+                                all_changes.extend(model.apply(ObserveToolCallUpdate {
+                                    chat_id: chat_id.clone(),
+                                    turn_id: turn_id.clone(),
+                                    id: tool_call_id.clone(),
+                                    provider_id: Some(id.clone()),
+                                    name: name.clone(),
+                                    index: block_index,
+                                    arguments: Some(input_json),
+                                    status: ToolCallStatus::Ready,
+                                }));
+                                if let Some(result) = tool_results.get(id.as_str()) {
+                                    all_changes.extend(model.apply(ObserveToolResult {
+                                        chat_id: chat_id.clone(),
+                                        turn_id: turn_id.clone(),
+                                        id: tool_call_id.clone(),
+                                        provider_id: id.clone(),
+                                        tool_name: name,
+                                        output: tool_result_content_to_string(result.content),
+                                        content: normalize_tool_result_content(result.content),
+                                        is_error: result.is_error,
+                                        image_count: tool_result_image_count(result.content),
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    crate::tui::log_warn!("skip invalid history message during resume: {error}");
+                    all_changes.extend(model.apply(AppendError {
+                        text: HISTORY_RESTORE_ERROR.to_string(),
+                    }));
+                }
+            }
+        }
+        // resume 不激活 spinner：强制归零，覆盖上面 Observe* intent 的 spinner 副作用。
+        model.spinner.chat_active = false;
+        model.spinner.phase = None;
+        model.spinner.running_tool_count = 0;
+        all_changes
+    }
+}
+
 impl ConversationUpdate for AppendUserMessage {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_user_message(self.text)
@@ -465,6 +573,7 @@ impl ConversationUpdate for ConversationIntent {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         match self {
             Self::StartChat(s) => s.update(model),
+            Self::ResumeConversation(s) => s.update(model),
             Self::AppendUserMessage(s) => s.update(model),
             Self::ObserveAssistantText(s) => s.update(model),
             Self::ObserveThinkingText(s) => s.update(model),

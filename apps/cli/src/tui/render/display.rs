@@ -1,4 +1,3 @@
-mod render;
 pub mod safe_text;
 
 #[cfg(test)]
