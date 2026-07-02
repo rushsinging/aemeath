@@ -283,6 +283,16 @@ where
                         execute_set_thinking(&client, &sink, desired).await;
                         continue;
                     }
+                    PendingCommand::EstimateContext => {
+                        execute_estimate_context(
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &sink,
+                        )
+                        .await;
+                        continue;
+                    }
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
@@ -465,6 +475,16 @@ where
                         execute_set_thinking(&client, &sink, desired).await;
                         continue;
                     }
+                    PendingCommand::EstimateContext => {
+                        execute_estimate_context(
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &sink,
+                        )
+                        .await;
+                        continue;
+                    }
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -582,6 +602,16 @@ where
                         }
                         PendingCommand::SetThinking { desired } => {
                             execute_set_thinking(&client, &sink, desired).await;
+                            continue;
+                        }
+                        PendingCommand::EstimateContext => {
+                            execute_estimate_context(
+                                &messages,
+                                &system_prompt_text,
+                                context_size,
+                                &sink,
+                            )
+                            .await;
                             continue;
                         }
                     },
@@ -977,6 +1007,17 @@ where
                                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                                 continue;
                             }
+                            PendingCommand::EstimateContext => {
+                                execute_estimate_context(
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &sink,
+                                )
+                                .await;
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
+                            }
                         },
                     }
                 }
@@ -1113,6 +1154,16 @@ where
                                     execute_set_thinking(&client, &sink, desired).await;
                                     continue;
                                 }
+                                PendingCommand::EstimateContext => {
+                                    execute_estimate_context(
+                                        &messages,
+                                        &system_prompt_text,
+                                        context_size,
+                                        &sink,
+                                    )
+                                    .await;
+                                    continue;
+                                }
                             },
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1199,6 +1250,16 @@ where
                             }
                             PendingCommand::SetThinking { desired } => {
                                 execute_set_thinking(&client, &sink, desired).await;
+                                continue;
+                            }
+                            PendingCommand::EstimateContext => {
+                                execute_estimate_context(
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &sink,
+                                )
+                                .await;
                                 continue;
                             }
                         },
@@ -1303,6 +1364,38 @@ where
             "[thinking mode: {}]",
             label
         )))
+        .await;
+}
+
+/// idle 分支执行 `/context`：用 loop 内部 messages + system_prompt 估算 token 占用，
+/// 发 `ContextEstimated` 事件（TUI 据此显示）。
+async fn execute_estimate_context<S>(
+    messages: &[share::message::Message],
+    system_prompt_text: &str,
+    context_size: usize,
+    sink: &S,
+) where
+    S: ChatEventSink,
+{
+    let estimated_tokens = crate::business::compact::estimate_messages_tokens(messages)
+        + crate::business::compact::estimate_tokens(system_prompt_text);
+    let system_tokens = crate::business::compact::estimate_tokens(system_prompt_text);
+    let usage_percentage = if context_size > 0 {
+        estimated_tokens as f64 * 100.0 / context_size as f64
+    } else {
+        0.0
+    };
+    let estimate = sdk::ContextEstimate {
+        estimated_tokens,
+        system_tokens,
+        context_size,
+        usage_percentage,
+    };
+    let _ = sink
+        .send_event(RuntimeStreamEvent::ContextEstimated {
+            estimate,
+            message_count: messages.len(),
+        })
         .await;
 }
 

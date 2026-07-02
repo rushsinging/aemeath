@@ -137,6 +137,7 @@ impl RecordingSink {
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
+            RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }

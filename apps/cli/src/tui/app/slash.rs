@@ -106,7 +106,14 @@ impl super::App {
                 }
             }
             "/context" => {
-                if let Some(ref ac) = self.agent_client {
+                if self.chat.input_event_tx.is_some() {
+                    // #497 子任务 3：走 runtime 事件流
+                    //（ChatInputEvent::EstimateContext → idle 分支 → ContextEstimated 事件），
+                    // 不再直接调 estimate_context().await。显示由 UiEvent::ContextEstimated 驱动。
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::EstimateContext);
+                } else if let Some(ref ac) = self.agent_client {
+                    // loop 未运行（如启动前）→ fallback 到直接调用
                     match ac
                         .estimate_context(&self.chat.messages, &self.chat.system_prompt_text)
                         .await

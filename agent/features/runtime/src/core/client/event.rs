@@ -356,6 +356,13 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::ThinkingChanged { enabled } => {
             ChatEvent::ThinkingChanged { enabled }
         }
+        crate::business::chat::RuntimeStreamEvent::ContextEstimated {
+            estimate,
+            message_count,
+        } => ChatEvent::ContextEstimated {
+            estimate,
+            message_count,
+        },
     }
 }
 

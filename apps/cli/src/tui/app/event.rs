@@ -163,5 +163,10 @@ pub enum AppEvent {
     ThinkingChanged {
         enabled: bool,
     },
+    /// 上下文估算完成（#497）。TUI 据此显示 token 占用信息。
+    ContextEstimated {
+        estimate: sdk::ContextEstimate,
+        message_count: usize,
+    },
 }
 pub type UiEvent = AppEvent;

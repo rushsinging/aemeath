@@ -323,6 +323,20 @@ impl App {
                 // 已由 runtime 发回，TUI 只需更新 thinking 状态。
                 self.model.conversation.apply(SetThinking(enabled));
             }
+            UiEvent::ContextEstimated {
+                estimate,
+                message_count,
+            } => {
+                // #497：上下文估算走事件流。显示格式与旧 slash.rs RPC 路径一致。
+                self.append_system_notice(format!(
+                    "Context window: ~{} / {} tokens ({:.0}%)",
+                    estimate.estimated_tokens, estimate.context_size, estimate.usage_percentage
+                ));
+                self.append_system_notice(format!("Messages: {}", message_count));
+                if estimate.usage_percentage > 80.0 {
+                    self.append_system_notice("[auto-compaction will trigger at 80%]");
+                }
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

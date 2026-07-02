@@ -167,4 +167,9 @@ pub enum ChatEvent {
     ThinkingChanged {
         enabled: bool,
     },
+    /// 上下文估算完成通知（#497）。TUI 据此显示 token 占用信息。
+    ContextEstimated {
+        estimate: crate::ContextEstimate,
+        message_count: usize,
+    },
 }

@@ -190,6 +190,11 @@ pub enum RuntimeStreamEvent {
     ThinkingChanged {
         enabled: bool,
     },
+    /// 上下文估算完成通知（#497）。runtime idle 分支执行 estimate 后回传结果。
+    ContextEstimated {
+        estimate: sdk::ContextEstimate,
+        message_count: usize,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {
