@@ -36,7 +36,7 @@ pub use events::{
 pub use input_gate::{
     apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,
     EmptyInputEventDrainPort, EmptyQueueDrainPort, GateDecision, GateKind, GateOutcome,
-    InputEventDrainPort, InputEventFuture, InputEventOptFuture, PendingInputBuffer,
+    InputEventDrainPort, InputEventFuture, InputEventOptFuture, PendingCommand, PendingInputBuffer,
 };
 pub use input_log::logged_input_messages;
 pub use loop_runner::{process_chat_loop, ChatLoopContext};

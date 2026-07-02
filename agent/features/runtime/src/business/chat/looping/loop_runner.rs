@@ -21,7 +21,7 @@ use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
     ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, GateDecision, GateKind,
-    InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
+    InputEventDrainPort, PendingCommand, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeStreamHandler, RuntimeTurnContext,
 };
 use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
@@ -239,45 +239,47 @@ where
                     // #503：消费 skip 标志，后续回合恢复正常行为。
                     skip_pending = false;
                 }
-                IdleResult::CompactRequested => {
-                    if let Some(outcome) = manual_compact(
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        turn_count,
-                        &messages,
-                        &system_prompt_text,
-                        context_size,
-                        &memory_config,
-                        &cwd,
-                        &client,
-                        &language,
-                        &cwd,
-                    )
-                    .await
-                    {
-                        apply_compact_outcome(
+                IdleResult::CommandRequested(cmd) => match cmd {
+                    PendingCommand::Compact => {
+                        if let Some(outcome) = manual_compact(
                             &sink,
-                            outcome,
-                            &mut messages,
-                            &frozen_chats,
-                            &mut active_summary,
-                            &active_summary_arc,
+                            &hook_ui,
+                            &hook_runner,
+                            turn_count,
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &memory_config,
+                            &cwd,
+                            &client,
+                            &language,
+                            &cwd,
                         )
-                        .await;
+                        .await
+                        {
+                            apply_compact_outcome(
+                                &sink,
+                                outcome,
+                                &mut messages,
+                                &frozen_chats,
+                                &mut active_summary,
+                                &active_summary_arc,
+                            )
+                            .await;
+                        }
+                        // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
+                        continue;
                     }
-                    // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
-                    continue;
-                }
-                IdleResult::ModelSwitchRequested(params) => {
-                    let (new_client, result) = (build_switched_client)(params);
-                    client = Arc::new(new_client);
-                    context_size = result.context_window;
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                        .await;
-                    continue;
-                }
+                    PendingCommand::SwitchModel { params } => {
+                        let (new_client, result) = (build_switched_client)(params);
+                        client = Arc::new(new_client);
+                        context_size = result.context_window;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            .await;
+                        continue;
+                    }
+                },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -416,44 +418,46 @@ where
             .await
             {
                 IdleResult::Resumed => continue,
-                IdleResult::CompactRequested => {
-                    if let Some(outcome) = manual_compact(
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        turn_count,
-                        &messages,
-                        &system_prompt_text,
-                        context_size,
-                        &memory_config,
-                        &cwd,
-                        &client,
-                        &language,
-                        &cwd,
-                    )
-                    .await
-                    {
-                        apply_compact_outcome(
+                IdleResult::CommandRequested(cmd) => match cmd {
+                    PendingCommand::Compact => {
+                        if let Some(outcome) = manual_compact(
                             &sink,
-                            outcome,
-                            &mut messages,
-                            &frozen_chats,
-                            &mut active_summary,
-                            &active_summary_arc,
+                            &hook_ui,
+                            &hook_runner,
+                            turn_count,
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &memory_config,
+                            &cwd,
+                            &client,
+                            &language,
+                            &cwd,
                         )
-                        .await;
+                        .await
+                        {
+                            apply_compact_outcome(
+                                &sink,
+                                outcome,
+                                &mut messages,
+                                &frozen_chats,
+                                &mut active_summary,
+                                &active_summary_arc,
+                            )
+                            .await;
+                        }
+                        continue;
                     }
-                    continue;
-                }
-                IdleResult::ModelSwitchRequested(params) => {
-                    let (new_client, result) = (build_switched_client)(params);
-                    client = Arc::new(new_client);
-                    context_size = result.context_window;
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                        .await;
-                    continue;
-                }
+                    PendingCommand::SwitchModel { params } => {
+                        let (new_client, result) = (build_switched_client)(params);
+                        client = Arc::new(new_client);
+                        context_size = result.context_window;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            .await;
+                        continue;
+                    }
+                },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     loop_fsm.assert_state(
@@ -529,44 +533,46 @@ where
                 .await
                 {
                     IdleResult::Resumed => continue,
-                    IdleResult::CompactRequested => {
-                        if let Some(outcome) = manual_compact(
-                            &sink,
-                            &hook_ui,
-                            &hook_runner,
-                            turn_count,
-                            &messages,
-                            &system_prompt_text,
-                            context_size,
-                            &memory_config,
-                            &cwd,
-                            &client,
-                            &language,
-                            &cwd,
-                        )
-                        .await
-                        {
-                            apply_compact_outcome(
+                    IdleResult::CommandRequested(cmd) => match cmd {
+                        PendingCommand::Compact => {
+                            if let Some(outcome) = manual_compact(
                                 &sink,
-                                outcome,
-                                &mut messages,
-                                &frozen_chats,
-                                &mut active_summary,
-                                &active_summary_arc,
+                                &hook_ui,
+                                &hook_runner,
+                                turn_count,
+                                &messages,
+                                &system_prompt_text,
+                                context_size,
+                                &memory_config,
+                                &cwd,
+                                &client,
+                                &language,
+                                &cwd,
                             )
-                            .await;
+                            .await
+                            {
+                                apply_compact_outcome(
+                                    &sink,
+                                    outcome,
+                                    &mut messages,
+                                    &frozen_chats,
+                                    &mut active_summary,
+                                    &active_summary_arc,
+                                )
+                                .await;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    IdleResult::ModelSwitchRequested(params) => {
-                        let (new_client, result) = (build_switched_client)(params);
-                        client = Arc::new(new_client);
-                        context_size = result.context_window;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                            .await;
-                        continue;
-                    }
+                        PendingCommand::SwitchModel { params } => {
+                            let (new_client, result) = (build_switched_client)(params);
+                            client = Arc::new(new_client);
+                            context_size = result.context_window;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                .await;
+                            continue;
+                        }
+                    },
                     IdleResult::Shutdown => {
                         loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                         loop_fsm.assert_state(
@@ -913,46 +919,48 @@ where
                             loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                             continue;
                         }
-                        IdleResult::CompactRequested => {
-                            if let Some(outcome) = manual_compact(
-                                &sink,
-                                &hook_ui,
-                                &hook_runner,
-                                turn_count,
-                                &messages,
-                                &system_prompt_text,
-                                context_size,
-                                &memory_config,
-                                &cwd,
-                                &client,
-                                &language,
-                                &cwd,
-                            )
-                            .await
-                            {
-                                apply_compact_outcome(
+                        IdleResult::CommandRequested(cmd) => match cmd {
+                            PendingCommand::Compact => {
+                                if let Some(outcome) = manual_compact(
                                     &sink,
-                                    outcome,
-                                    &mut messages,
-                                    &frozen_chats,
-                                    &mut active_summary,
-                                    &active_summary_arc,
+                                    &hook_ui,
+                                    &hook_runner,
+                                    turn_count,
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &memory_config,
+                                    &cwd,
+                                    &client,
+                                    &language,
+                                    &cwd,
                                 )
-                                .await;
+                                .await
+                                {
+                                    apply_compact_outcome(
+                                        &sink,
+                                        outcome,
+                                        &mut messages,
+                                        &frozen_chats,
+                                        &mut active_summary,
+                                        &active_summary_arc,
+                                    )
+                                    .await;
+                                }
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
                             }
-                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                            continue;
-                        }
-                        IdleResult::ModelSwitchRequested(params) => {
-                            let (new_client, result) = (build_switched_client)(params);
-                            client = Arc::new(new_client);
-                            context_size = result.context_window;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                .await;
-                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                            continue;
-                        }
+                            PendingCommand::SwitchModel { params } => {
+                                let (new_client, result) = (build_switched_client)(params);
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
+                            }
+                        },
                     }
                 }
                 {
@@ -1045,44 +1053,46 @@ where
                         .await
                         {
                             IdleResult::Resumed => continue,
-                            IdleResult::CompactRequested => {
-                                if let Some(outcome) = manual_compact(
-                                    &sink,
-                                    &hook_ui,
-                                    &hook_runner,
-                                    turn_count,
-                                    &messages,
-                                    &system_prompt_text,
-                                    context_size,
-                                    &memory_config,
-                                    &cwd,
-                                    &client,
-                                    &language,
-                                    &cwd,
-                                )
-                                .await
-                                {
-                                    apply_compact_outcome(
+                            IdleResult::CommandRequested(cmd) => match cmd {
+                                PendingCommand::Compact => {
+                                    if let Some(outcome) = manual_compact(
                                         &sink,
-                                        outcome,
-                                        &mut messages,
-                                        &frozen_chats,
-                                        &mut active_summary,
-                                        &active_summary_arc,
+                                        &hook_ui,
+                                        &hook_runner,
+                                        turn_count,
+                                        &messages,
+                                        &system_prompt_text,
+                                        context_size,
+                                        &memory_config,
+                                        &cwd,
+                                        &client,
+                                        &language,
+                                        &cwd,
                                     )
-                                    .await;
+                                    .await
+                                    {
+                                        apply_compact_outcome(
+                                            &sink,
+                                            outcome,
+                                            &mut messages,
+                                            &frozen_chats,
+                                            &mut active_summary,
+                                            &active_summary_arc,
+                                        )
+                                        .await;
+                                    }
+                                    continue;
                                 }
-                                continue;
-                            }
-                            IdleResult::ModelSwitchRequested(params) => {
-                                let (new_client, result) = (build_switched_client)(params);
-                                client = Arc::new(new_client);
-                                context_size = result.context_window;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                    .await;
-                                continue;
-                            }
+                                PendingCommand::SwitchModel { params } => {
+                                    let (new_client, result) = (build_switched_client)(params);
+                                    client = Arc::new(new_client);
+                                    context_size = result.context_window;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                        .await;
+                                    continue;
+                                }
+                            },
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                                 loop_fsm.assert_state(
@@ -1127,44 +1137,46 @@ where
                     .await
                     {
                         IdleResult::Resumed => continue,
-                        IdleResult::CompactRequested => {
-                            if let Some(outcome) = manual_compact(
-                                &sink,
-                                &hook_ui,
-                                &hook_runner,
-                                turn_count,
-                                &messages,
-                                &system_prompt_text,
-                                context_size,
-                                &memory_config,
-                                &cwd,
-                                &client,
-                                &language,
-                                &cwd,
-                            )
-                            .await
-                            {
-                                apply_compact_outcome(
+                        IdleResult::CommandRequested(cmd) => match cmd {
+                            PendingCommand::Compact => {
+                                if let Some(outcome) = manual_compact(
                                     &sink,
-                                    outcome,
-                                    &mut messages,
-                                    &frozen_chats,
-                                    &mut active_summary,
-                                    &active_summary_arc,
+                                    &hook_ui,
+                                    &hook_runner,
+                                    turn_count,
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &memory_config,
+                                    &cwd,
+                                    &client,
+                                    &language,
+                                    &cwd,
                                 )
-                                .await;
+                                .await
+                                {
+                                    apply_compact_outcome(
+                                        &sink,
+                                        outcome,
+                                        &mut messages,
+                                        &frozen_chats,
+                                        &mut active_summary,
+                                        &active_summary_arc,
+                                    )
+                                    .await;
+                                }
+                                continue;
                             }
-                            continue;
-                        }
-                        IdleResult::ModelSwitchRequested(params) => {
-                            let (new_client, result) = (build_switched_client)(params);
-                            client = Arc::new(new_client);
-                            context_size = result.context_window;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                .await;
-                            continue;
-                        }
+                            PendingCommand::SwitchModel { params } => {
+                                let (new_client, result) = (build_switched_client)(params);
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
+                                continue;
+                            }
+                        },
                         IdleResult::Shutdown => {
                             loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                             loop_fsm.assert_state(
@@ -1242,12 +1254,12 @@ where
     }
 }
 
-/// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或 compact 请求。
+/// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或待执行命令。
 enum IdleResult {
     Resumed,
     Shutdown,
-    CompactRequested,
-    ModelSwitchRequested(sdk::ModelSwitchParams),
+    /// idle gate 收到待执行命令（Compact / SwitchModel / …，#497 泛化载体）。
+    CommandRequested(PendingCommand),
 }
 
 /// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
@@ -1353,11 +1365,8 @@ where
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
                 let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages, true).await;
-                if gate.compact_requested {
-                    return IdleResult::CompactRequested;
-                }
-                if let Some(params) = gate.model_switch_requested {
-                    return IdleResult::ModelSwitchRequested(params);
+                if let Some(cmd) = gate.pending_command {
+                    return IdleResult::CommandRequested(cmd);
                 }
                 if gate.appended_user_messages > 0 {
                     // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
@@ -1385,11 +1394,8 @@ where
                 continue;
             }
             IdleResult::Shutdown => return IdleResult::Shutdown,
-            // `await_idle_input` 只返回 Resumed/Shutdown，CompactRequested/ModelSwitchRequested 不可能到达。
-            IdleResult::CompactRequested => return IdleResult::CompactRequested,
-            IdleResult::ModelSwitchRequested(params) => {
-                return IdleResult::ModelSwitchRequested(params)
-            }
+            // `await_idle_input` 只返回 Resumed/Shutdown，CommandRequested 不可能到达。
+            IdleResult::CommandRequested(cmd) => return IdleResult::CommandRequested(cmd),
         }
     }
 }
