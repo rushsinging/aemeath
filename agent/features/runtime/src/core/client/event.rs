@@ -353,6 +353,9 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }
+        crate::business::chat::RuntimeStreamEvent::ThinkingChanged { enabled } => {
+            ChatEvent::ThinkingChanged { enabled }
+        }
     }
 }
 

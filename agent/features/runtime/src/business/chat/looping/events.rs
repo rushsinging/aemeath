@@ -186,6 +186,10 @@ pub enum RuntimeStreamEvent {
     ModelSwitched {
         result: sdk::ModelSwitchResult,
     },
+    /// Reasoning 模式切换完成通知（#497）。runtime idle 分支执行 set_thinking 后回传结果。
+    ThinkingChanged {
+        enabled: bool,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

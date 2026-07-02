@@ -136,6 +136,7 @@ impl RecordingSink {
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
+            RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }

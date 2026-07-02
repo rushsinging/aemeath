@@ -279,6 +279,10 @@ where
                             .await;
                         continue;
                     }
+                    PendingCommand::SetThinking { desired } => {
+                        execute_set_thinking(&client, &sink, desired).await;
+                        continue;
+                    }
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
@@ -457,6 +461,10 @@ where
                             .await;
                         continue;
                     }
+                    PendingCommand::SetThinking { desired } => {
+                        execute_set_thinking(&client, &sink, desired).await;
+                        continue;
+                    }
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -570,6 +578,10 @@ where
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ModelSwitched { result })
                                 .await;
+                            continue;
+                        }
+                        PendingCommand::SetThinking { desired } => {
+                            execute_set_thinking(&client, &sink, desired).await;
                             continue;
                         }
                     },
@@ -960,6 +972,11 @@ where
                                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                                 continue;
                             }
+                            PendingCommand::SetThinking { desired } => {
+                                execute_set_thinking(&client, &sink, desired).await;
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
+                            }
                         },
                     }
                 }
@@ -1092,6 +1109,10 @@ where
                                         .await;
                                     continue;
                                 }
+                                PendingCommand::SetThinking { desired } => {
+                                    execute_set_thinking(&client, &sink, desired).await;
+                                    continue;
+                                }
                             },
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1176,6 +1197,10 @@ where
                                     .await;
                                 continue;
                             }
+                            PendingCommand::SetThinking { desired } => {
+                                execute_set_thinking(&client, &sink, desired).await;
+                                continue;
+                            }
                         },
                         IdleResult::Shutdown => {
                             loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1252,6 +1277,33 @@ where
             }
         }
     }
+}
+
+/// idle 分支执行 `/think`：读当前 reasoning level，按 desired 设置新 level，
+/// 发 `ThinkingChanged` + `SystemMessage`。
+async fn execute_set_thinking<S>(client: &provider::api::LlmClient, sink: &S, desired: Option<bool>)
+where
+    S: ChatEventSink,
+{
+    use provider::api::ReasoningLevel;
+    let current = client.current_reasoning_level();
+    let new_state = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
+    let level = if new_state {
+        ReasoningLevel::Medium
+    } else {
+        ReasoningLevel::Off
+    };
+    client.set_reasoning_level(level);
+    let label = if new_state { "ON" } else { "OFF" };
+    let _ = sink
+        .send_event(RuntimeStreamEvent::ThinkingChanged { enabled: new_state })
+        .await;
+    let _ = sink
+        .send_event(RuntimeStreamEvent::SystemMessage(format!(
+            "[thinking mode: {}]",
+            label
+        )))
+        .await;
 }
 
 /// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或待执行命令。

@@ -368,7 +368,14 @@ impl super::App {
                 Some(content)
             }
             sdk::CommandAction::SetThinking(desired) => {
-                if let Some(ref ac) = self.agent_client {
+                // #497 子任务 4：走 runtime 事件流
+                //（ChatInputEvent::SetThinking → idle 分支 → ThinkingChanged 事件），
+                // 不再直接调 set_thinking().await。TUI 状态更新由 UiEvent::ThinkingChanged 驱动。
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::SetThinking { desired });
+                } else if let Some(ref ac) = self.agent_client {
+                    // loop 未运行（如启动前）→ fallback 到直接调用
                     match ac.set_thinking(desired).await {
                         Ok(new_state) => {
                             let label = if new_state { "ON" } else { "OFF" };

@@ -101,6 +101,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::GraphPhaseChanged { .. }
         | sdk::ChatEvent::CompactProgress { .. }
         | sdk::ChatEvent::ModelSwitched { .. }
+        | sdk::ChatEvent::ThinkingChanged { .. }
         | sdk::ChatEvent::ToolCallUpdate { .. } => {}
         sdk::ChatEvent::ToolResult {
             tool_name,

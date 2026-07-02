@@ -318,6 +318,11 @@ impl App {
                 }
                 self.append_system_notice(format!("[switched to {}]", result.display_name));
             }
+            UiEvent::ThinkingChanged { enabled } => {
+                // #497：reasoning 模式切换走事件流。SystemMessage("[thinking mode: ON/OFF]")
+                // 已由 runtime 发回，TUI 只需更新 thinking 状态。
+                self.model.conversation.apply(SetThinking(enabled));
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();
