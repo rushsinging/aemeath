@@ -111,7 +111,7 @@ impl App {
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
                 self.view_state.dirty.dialog,
-                self.model.conversation.spinner.phase.is_some(),
+                self.model.conversation.spinner.chat_active,
                 self.model.conversation.spinner.phase,
                 self.view_state.animation.spinner_frame,
                 self.output_area.document().total_lines()
@@ -172,7 +172,7 @@ impl App {
             crate::tui::log_trace!(
                 "tui.loop.event msg={} spinner_active={} spinner_phase={:?} spinner_frame={}",
                 tui_msg_name(&msg),
-                self.model.conversation.spinner.phase.is_some(),
+                self.model.conversation.spinner.chat_active,
                 self.model.conversation.spinner.phase,
                 self.view_state.animation.spinner_frame
             );
@@ -190,7 +190,7 @@ impl App {
                 self.view_state.dirty.status,
                 self.view_state.dirty.input,
                 self.view_state.dirty.dialog,
-                self.model.conversation.spinner.phase.is_some(),
+                self.model.conversation.spinner.chat_active,
                 self.model.conversation.spinner.phase,
                 self.view_state.animation.spinner_frame
             );

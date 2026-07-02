@@ -18,7 +18,11 @@ use super::update::ConversationUpdate;
 
 impl ConversationUpdate for StartChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.start_chat(self.submission)
+        let changes = model.start_chat(self.submission);
+        // #536: spinner 可见性跟随 chat 生命周期，StartChat 时立即激活。
+        model.spinner.chat_active = true;
+        model.spinner.phase = Some(SpinnerPhase::Thinking);
+        changes
     }
 }
 
@@ -130,6 +134,7 @@ impl ConversationUpdate for AppendError {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         let changes = model.append_error(self.text);
         if !changes.is_empty() {
+            model.spinner.chat_active = false;
             model.spinner.running_tool_count = 0;
             model.spinner.phase = None;
         }
@@ -169,6 +174,8 @@ impl ConversationUpdate for ShowAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         let changes = model.show_ask_user_batch(self.slots);
         if !changes.is_empty() {
+            // #536: AskUser 暂停 spinner（chat_active=false），用户回答后恢复。
+            model.spinner.chat_active = false;
             model.spinner.phase = None;
         }
         changes
@@ -177,7 +184,13 @@ impl ConversationUpdate for ShowAskUserBatch {
 
 impl ConversationUpdate for AnswerCurrentAskUser {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.answer_current_ask_user(self.answer)
+        let changes = model.answer_current_ask_user(self.answer);
+        // #536: AskUser 应答后恢复 spinner，继续等待 LLM 回复。
+        if !changes.is_empty() {
+            model.spinner.chat_active = true;
+            model.spinner.phase = Some(SpinnerPhase::Thinking);
+        }
+        changes
     }
 }
 
@@ -225,13 +238,25 @@ impl ConversationUpdate for SetAskUserConfirmCursor {
 
 impl ConversationUpdate for ConfirmAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.confirm_ask_user_batch()
+        let changes = model.confirm_ask_user_batch();
+        // #536: AskUser 确认后恢复 spinner，继续等待 LLM 回复。
+        if !changes.is_empty() {
+            model.spinner.chat_active = true;
+            model.spinner.phase = Some(SpinnerPhase::Thinking);
+        }
+        changes
     }
 }
 
 impl ConversationUpdate for DismissAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        model.dismiss_ask_user_batch()
+        let changes = model.dismiss_ask_user_batch();
+        // #536: AskUser 取消后恢复 spinner，继续等待 LLM 回复。
+        if !changes.is_empty() {
+            model.spinner.chat_active = true;
+            model.spinner.phase = Some(SpinnerPhase::Thinking);
+        }
+        changes
     }
 }
 
@@ -239,6 +264,7 @@ impl ConversationUpdate for CompleteChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         let changes = model.complete_chat(self.chat_id, self.turn_id);
         if !changes.is_empty() {
+            model.spinner.chat_active = false;
             model.spinner.running_tool_count = 0;
             model.spinner.phase = None;
         }
@@ -424,7 +450,8 @@ impl ConversationUpdate for SetCompactProgress {
             current: self.current,
             total: self.total,
         });
-        // 附带 spinner 维护
+        // 附带 spinner 维护：compact 期间 spinner 可见
+        model.spinner.chat_active = true;
         model.spinner.phase = Some(SpinnerPhase::Compacting);
         vec![ConversationChange::SpinnerPhaseChanged]
     }

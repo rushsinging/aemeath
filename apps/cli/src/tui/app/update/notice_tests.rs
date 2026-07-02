@@ -305,6 +305,7 @@ fn test_spinner_tick_active_marks_output_dirty() {
     use crate::tui::effect::session::processing::SpawnContextRefs;
     use crate::tui::update::msg::TuiMsg;
     let mut app = make_app();
+    app.model.conversation.spinner.chat_active = true;
     app.model.conversation.spinner.phase =
         Some(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking); // 处理中，需要 gutter 动画
     app.view_state.dirty.clear_output();
