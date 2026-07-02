@@ -1,4 +1,6 @@
 use super::extract::{extract_page, ExtractOptions};
+use super::WebFetchTool;
+use crate::api::TypedTool;
 
 #[test]
 fn test_extract_title_and_markdown() {
@@ -81,4 +83,12 @@ fn test_non_html_content_not_parsed() {
     let result = extract_page(text, opts).unwrap();
     assert!(result.markdown.contains("plain text content"));
     assert!(result.links.is_empty());
+}
+
+#[test]
+fn test_web_fetch_result_schema_includes_links() {
+    let tool = WebFetchTool;
+    let schema = tool.data_schema();
+    let properties = schema.get("properties").unwrap();
+    assert!(properties.get("links").is_some());
 }
