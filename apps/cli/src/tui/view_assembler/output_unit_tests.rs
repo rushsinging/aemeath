@@ -2,7 +2,6 @@
 
 use super::OutputViewAssembler;
 use crate::tui::model::conversation::ids::ToolCallId;
-use crate::tui::model::conversation::intent::ConversationIntent;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
@@ -228,7 +227,7 @@ fn test_timeline_tool_result_with_unknown_id_is_silently_skipped() {
 fn test_tool_index_call_matches_linear_scan() {
     use super::ToolIndex;
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
-    use crate::tui::model::conversation::intent::ConversationIntent;
+
     use crate::tui::model::conversation::model::ConversationModel;
 
     let mut conv = ConversationModel::default();
@@ -261,7 +260,7 @@ fn test_tool_index_call_matches_linear_scan() {
 fn test_tool_index_call_result_payload_matches_observed_values() {
     use super::ToolIndex;
     use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
-    use crate::tui::model::conversation::intent::ConversationIntent;
+
     use crate::tui::model::conversation::model::ConversationModel;
     use crate::tui::model::conversation::tool_call::ToolCallStatus;
 

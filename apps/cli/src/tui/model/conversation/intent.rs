@@ -18,6 +18,21 @@ pub struct StartChat {
     pub submission: String,
 }
 
+/// 恢复历史会话消息，不触发 spinner 副作用。
+///
+/// 与 `StartChat` 的区别：resume 场景下 chat 已结束，不需要 spinner。
+/// 传入完整消息列表，内部逐条 apply 已有 intent 灌入 ConversationModel。
+#[derive(Clone, Debug)]
+pub struct ResumeConversation {
+    pub messages: Vec<sdk::ChatMessage>,
+}
+
+impl PartialEq for ResumeConversation {
+    fn eq(&self, other: &Self) -> bool {
+        self.messages.len() == other.messages.len()
+    }
+}
+
 /// 仅追加一条用户消息回显块，不创建新的 chat/turn。
 ///
 /// 用于 ask_user 应答、队列输入冲刷等「在已激活的对话回合内回显用户输入」的场景。
@@ -269,6 +284,7 @@ pub struct SetCompactProgress {
 pub enum ConversationIntent {
     // ── 原 conversation variants ──
     StartChat(StartChat),
+    ResumeConversation(ResumeConversation),
     AppendUserMessage(AppendUserMessage),
     ObserveAssistantText(ObserveAssistantText),
     ObserveThinkingText(ObserveThinkingText),

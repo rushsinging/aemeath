@@ -1,12 +1,12 @@
 #[derive(Debug, Eq, PartialEq)]
-pub(super) enum HistoryDisplayMessage {
+pub(crate) enum HistoryDisplayMessage {
     User { text: String },
     ToolResults,
     Assistant { blocks: Vec<HistoryAssistantBlock> },
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(super) enum HistoryAssistantBlock {
+pub(crate) enum HistoryAssistantBlock {
     Text(String),
     Thinking(String),
     ToolUse {
@@ -17,7 +17,7 @@ pub(super) enum HistoryAssistantBlock {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(super) enum HistoryDisplayParseError {
+pub(crate) enum HistoryDisplayParseError {
     UnsupportedRole(String),
     ContentNotArray,
     BlockNotObject,
@@ -41,7 +41,7 @@ impl std::fmt::Display for HistoryDisplayParseError {
 }
 
 impl HistoryDisplayMessage {
-    pub(super) fn parse(msg: &sdk::ChatMessage) -> Result<Self, HistoryDisplayParseError> {
+    pub(crate) fn parse(msg: &sdk::ChatMessage) -> Result<Self, HistoryDisplayParseError> {
         let blocks = msg.content.as_slice();
         match msg.role.as_str() {
             "user" => parse_history_user(blocks),
@@ -113,7 +113,7 @@ fn parse_history_assistant(
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct HistoryToolResult<'a> {
+pub(crate) struct HistoryToolResult<'a> {
     pub content: &'a serde_json::Value,
     pub is_error: bool,
 }
@@ -169,7 +169,7 @@ fn parse_history_user_blocks(
         .collect()
 }
 
-pub(super) fn collect_following_tool_results(
+pub(crate) fn collect_following_tool_results(
     subsequent_msg: Option<&sdk::ChatMessage>,
 ) -> std::collections::HashMap<&str, HistoryToolResult<'_>> {
     let Some(user_msg) = subsequent_msg else {
@@ -193,7 +193,7 @@ pub(super) fn collect_following_tool_results(
         .collect()
 }
 
-pub(super) fn tool_result_content_to_string(content: &serde_json::Value) -> String {
+pub(crate) fn tool_result_content_to_string(content: &serde_json::Value) -> String {
     match content {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Array(arr) => arr
@@ -205,7 +205,7 @@ pub(super) fn tool_result_content_to_string(content: &serde_json::Value) -> Stri
     }
 }
 
-pub(super) fn normalize_tool_result_content(content: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn normalize_tool_result_content(content: &serde_json::Value) -> serde_json::Value {
     match content {
         serde_json::Value::String(text) => serde_json::json!({ "text": text }),
         serde_json::Value::Array(arr) => {
@@ -220,7 +220,7 @@ pub(super) fn normalize_tool_result_content(content: &serde_json::Value) -> serd
     }
 }
 
-pub(super) fn tool_result_image_count(content: &serde_json::Value) -> usize {
+pub(crate) fn tool_result_image_count(content: &serde_json::Value) -> usize {
     content
         .as_array()
         .into_iter()

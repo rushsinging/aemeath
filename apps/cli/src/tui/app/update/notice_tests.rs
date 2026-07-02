@@ -1,5 +1,4 @@
 use super::*;
-use crate::tui::model::conversation::intent::*;
 use std::path::PathBuf;
 
 fn make_app() -> App {
@@ -192,7 +191,7 @@ fn test_enqueue_submission_echo_uses_display_text_for_copied_text() {
 fn test_assistant_after_system_notice_uses_assistant_color() {
     // #74 回归端到端测试：System block（Muted 暗色）后追加 AssistantText block，
     // 验证 document 渲染中 assistant 行使用 ASSISTANT 色而非继承 System 的 Muted 色。
-    use crate::tui::model::conversation::intent::ConversationIntent;
+
     use crate::tui::render::theme;
 
     let mut app = make_app();
@@ -234,7 +233,7 @@ fn test_assistant_after_system_notice_uses_assistant_color() {
 fn test_streaming_assistant_interrupted_by_system_uses_assistant_color() {
     // #74 场景：streaming assistant text 被 System notice 中断后，
     // 后续 streaming text 仍应使用 ASSISTANT 色。
-    use crate::tui::model::conversation::intent::ConversationIntent;
+
     use crate::tui::render::theme;
 
     let mut app = make_app();

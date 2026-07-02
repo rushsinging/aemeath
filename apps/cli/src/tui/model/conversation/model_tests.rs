@@ -1,5 +1,4 @@
 use super::change::ConversationChange;
-use super::intent::ConversationIntent;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 use crate::tui::model::conversation::intent::*;
