@@ -17,10 +17,7 @@ use super::update::ConversationUpdate;
 
 impl ConversationUpdate for StartChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.start_chat(self.submission);
-        // #536: spinner 可见性跟随 chat 生命周期，StartChat 时立即激活。
-        model.runtime.start_chat();
-        changes
+        model.start_chat(self.submission)
     }
 }
 
@@ -124,8 +121,6 @@ impl ConversationUpdate for ResumeConversation {
                 }
             }
         }
-        // resume 不激活 spinner：强制归零，覆盖上面 Observe* intent 的 spinner 副作用。
-        model.runtime.force_idle();
         all_changes
     }
 }
@@ -138,21 +133,13 @@ impl ConversationUpdate for AppendUserMessage {
 
 impl ConversationUpdate for AssistantText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.append_assistant_text(self.chat_id, self.turn_id, self.text);
-        if !changes.is_empty() {
-            model.runtime.generate();
-        }
-        changes
+        model.append_assistant_text(self.chat_id, self.turn_id, self.text)
     }
 }
 
 impl ConversationUpdate for ThinkingText {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.append_thinking_text(self.chat_id, self.turn_id, self.text);
-        if !changes.is_empty() {
-            model.runtime.think();
-        }
-        changes
+        model.append_thinking_text(self.chat_id, self.turn_id, self.text)
     }
 }
 
@@ -164,18 +151,14 @@ impl ConversationUpdate for CompleteBlock {
 
 impl ConversationUpdate for ToolCallStart {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.start_tool_call(
+        model.start_tool_call(
             self.chat_id,
             self.turn_id,
             self.id,
             self.provider_id,
             self.name.clone(),
             self.index,
-        );
-        if !changes.is_empty() {
-            model.runtime.start_tool_call(&self.name);
-        }
-        changes
+        )
     }
 }
 
@@ -196,7 +179,7 @@ impl ConversationUpdate for ToolCallUpdate {
 
 impl ConversationUpdate for ToolResult {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.complete_tool_call(
+        model.complete_tool_call(
             self.chat_id,
             self.turn_id,
             self.id,
@@ -206,11 +189,7 @@ impl ConversationUpdate for ToolResult {
             self.content,
             self.is_error,
             self.image_count,
-        );
-        if !changes.is_empty() {
-            model.runtime.complete_tool_call();
-        }
-        changes
+        )
     }
 }
 
@@ -228,11 +207,7 @@ impl ConversationUpdate for AppendHookNotice {
 
 impl ConversationUpdate for AppendError {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.append_error(self.text);
-        if !changes.is_empty() {
-            model.runtime.abort_chat();
-        }
-        changes
+        model.append_error(self.text)
     }
 }
 impl ConversationUpdate for QueueSubmission {
@@ -255,34 +230,19 @@ impl ConversationUpdate for ClearAllQueuedSubmissions {
 
 impl ConversationUpdate for RecordAgentProgress {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes =
-            model.record_agent_progress(self.chat_id, self.turn_id, self.tool_id, self.message);
-        if !changes.is_empty() {
-            model.runtime.report_agent_progress();
-        }
-        changes
+        model.record_agent_progress(self.chat_id, self.turn_id, self.tool_id, self.message)
     }
 }
 
 impl ConversationUpdate for ShowAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.show_ask_user_batch(self.slots);
-        if !changes.is_empty() {
-            // #536: AskUser 暂停 spinner（chat_active=false），用户回答后恢复。
-            model.runtime.pause_chat();
-        }
-        changes
+        model.show_ask_user_batch(self.slots)
     }
 }
 
 impl ConversationUpdate for AnswerCurrentAskUser {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.answer_current_ask_user(self.answer);
-        // #536: AskUser 应答后恢复 spinner，继续等待 LLM 回复。
-        if !changes.is_empty() {
-            model.runtime.resume_chat();
-        }
-        changes
+        model.answer_current_ask_user(self.answer)
     }
 }
 
@@ -330,33 +290,19 @@ impl ConversationUpdate for SetAskUserConfirmCursor {
 
 impl ConversationUpdate for ConfirmAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.confirm_ask_user_batch();
-        // #536: AskUser 确认后恢复 spinner，继续等待 LLM 回复。
-        if !changes.is_empty() {
-            model.runtime.resume_chat();
-        }
-        changes
+        model.confirm_ask_user_batch()
     }
 }
 
 impl ConversationUpdate for DismissAskUserBatch {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.dismiss_ask_user_batch();
-        // #536: AskUser 取消后恢复 spinner，继续等待 LLM 回复。
-        if !changes.is_empty() {
-            model.runtime.resume_chat();
-        }
-        changes
+        model.dismiss_ask_user_batch()
     }
 }
 
 impl ConversationUpdate for CompleteChat {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
-        let changes = model.complete_chat(self.chat_id, self.turn_id);
-        if !changes.is_empty() {
-            model.runtime.complete_chat();
-        }
-        changes
+        model.complete_chat(self.chat_id, self.turn_id)
     }
 }
 

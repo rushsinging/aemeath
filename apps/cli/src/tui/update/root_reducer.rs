@@ -111,7 +111,11 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
                             .apply(ConversationIntent::StartChat(StartChat {
                                 submission: submission.text.clone(),
                             }));
-                    apply_conversation_changes(&mut result, &changes);
+                    apply_conversation_changes(
+                        &mut result,
+                        &changes,
+                        &mut model.conversation.runtime,
+                    );
                     result.effects.push(Effect::SpawnAgentChat {
                         chat_id: model
                             .conversation
@@ -129,7 +133,11 @@ fn reduce_key(model: &mut TuiModel, key: crossterm::event::KeyEvent) -> TuiUpdat
                             input_id: sdk::InputId::new_v7(),
                             text: submission.text,
                         }));
-                    apply_conversation_changes(&mut result, &changes);
+                    apply_conversation_changes(
+                        &mut result,
+                        &changes,
+                        &mut model.conversation.runtime,
+                    );
                 }
                 SubmissionRoute::AnswerPrompt { text } => {
                     model.diagnostic.apply(
@@ -152,7 +160,7 @@ pub(crate) fn reduce_agent_event(
     let mut result = TuiUpdateResult::default();
     for intent in mapping.conversation {
         let changes = model.conversation.apply(intent);
-        apply_conversation_changes(&mut result, &changes);
+        apply_conversation_changes(&mut result, &changes, &mut model.conversation.runtime);
     }
     for intent in mapping.diagnostic {
         model.diagnostic.apply(intent);
@@ -212,7 +220,31 @@ fn apply_input_changes(result: &mut TuiUpdateResult, changes: &[InputChange]) {
     result.push_render_request_once();
 }
 
-fn apply_conversation_changes(result: &mut TuiUpdateResult, changes: &[ConversationChange]) {
+fn apply_conversation_changes(
+    result: &mut TuiUpdateResult,
+    changes: &[ConversationChange],
+    runtime: &mut crate::tui::model::conversation::runtime_state::RuntimeState,
+) {
+    // change→RuntimeState 映射层：对话域 change 驱动运行态转换。
+    // intent_impls 不再直接操作 runtime，spinner 等副作用由此层统一处理。
+    for change in changes {
+        match change {
+            ConversationChange::ChatStarted { .. } => runtime.start_chat(),
+            ConversationChange::ChatCompleted { .. }
+            | ConversationChange::ChatCompleting { .. } => runtime.complete_chat(),
+            ConversationChange::AssistantTextAppended { .. } => runtime.generate(),
+            ConversationChange::ThinkingTextAppended { .. } => runtime.think(),
+            ConversationChange::ToolCallObserved { name, .. } => runtime.start_tool_call(name),
+            ConversationChange::ToolCallCompleted { .. } => runtime.complete_tool_call(),
+            ConversationChange::ErrorAppended { .. } => runtime.abort_chat(),
+            ConversationChange::AgentProgressRecorded { .. } => runtime.report_agent_progress(),
+            ConversationChange::AskUserShown { .. } => runtime.pause_chat(),
+            ConversationChange::AskUserUpdated { .. } | ConversationChange::AskUserDismissed => {
+                runtime.resume_chat()
+            }
+            _ => {}
+        }
+    }
     let model_changes: Vec<ModelChange> = changes.iter().map(ModelChange::from).collect();
     let dirty = dirty_from_model_changes(&model_changes);
     result.dirty.merge(&dirty);
