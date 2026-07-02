@@ -315,18 +315,25 @@ impl super::App {
                 context_window,
                 reasoning,
             } => {
-                if let Some(ref ac) = self.agent_client {
-                    let params = sdk::ModelSwitchParams {
-                        provider_name,
-                        model_id,
-                        model_name,
-                        base_url,
-                        api_key,
-                        driver,
-                        max_tokens,
-                        context_window,
-                        reasoning,
-                    };
+                let params = sdk::ModelSwitchParams {
+                    provider_name,
+                    model_id,
+                    model_name,
+                    base_url,
+                    api_key,
+                    driver,
+                    max_tokens,
+                    context_window,
+                    reasoning,
+                };
+                if self.chat.input_event_tx.is_some() {
+                    // #497 子 issue 1：走 runtime 事件流
+                    // （ChatInputEvent::SwitchModel → idle 分支 → ModelSwitched 事件），
+                    // 不再直接调 switch_model().await。TUI 状态更新由 UiEvent::ModelSwitched 驱动。
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::SwitchModel { params });
+                } else if let Some(ref ac) = self.agent_client {
+                    // loop 未运行（如启动前）→ fallback 到直接调用
                     match ac.switch_model(params).await {
                         Ok(result) => {
                             if result.context_window > 0 {

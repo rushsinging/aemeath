@@ -83,6 +83,13 @@ where
     pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
     /// Resume 后首次 loop-top idle 门跳过 pending user turn（#503）。
     pub skip_first_pending_turn: bool,
+    /// 模型切换构建器（#497）。由 core 层注入，避免 business 层反向依赖 core。
+    /// idle 分支收到 `SwitchModel` 事件时调用，返回新 `LlmClient` + `ModelSwitchResult`。
+    pub build_switched_client: Arc<
+        dyn Fn(sdk::ModelSwitchParams) -> (provider::api::LlmClient, sdk::ModelSwitchResult)
+            + Send
+            + Sync,
+    >,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -96,13 +103,13 @@ where
         sink,
         queue,
         input_events,
-        ref client,
+        client,
         registry,
         system_blocks,
         system_prompt_text,
         user_context,
         mut messages,
-        context_size,
+        mut context_size,
         workspace,
         session_id,
         read_files,
@@ -121,7 +128,9 @@ where
         active_summary: active_summary_arc,
         reasoning_graph,
         skip_first_pending_turn,
+        build_switched_client,
     } = ctx;
+    let mut client = client;
     let mut reasoning_graph = reasoning_graph;
     let hook_ui = HookUi::new(sink.clone());
 
@@ -241,7 +250,7 @@ where
                         context_size,
                         &memory_config,
                         &cwd,
-                        &ctx.client,
+                        &client,
                         &language,
                         &cwd,
                     )
@@ -258,6 +267,15 @@ where
                         .await;
                     }
                     // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
+                    continue;
+                }
+                IdleResult::ModelSwitchRequested(params) => {
+                    let (new_client, result) = (build_switched_client)(params);
+                    client = Arc::new(new_client);
+                    context_size = result.context_window;
+                    let _ = sink
+                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                        .await;
                     continue;
                 }
                 IdleResult::Shutdown => {
@@ -409,7 +427,7 @@ where
                         context_size,
                         &memory_config,
                         &cwd,
-                        &ctx.client,
+                        &client,
                         &language,
                         &cwd,
                     )
@@ -425,6 +443,15 @@ where
                         )
                         .await;
                     }
+                    continue;
+                }
+                IdleResult::ModelSwitchRequested(params) => {
+                    let (new_client, result) = (build_switched_client)(params);
+                    client = Arc::new(new_client);
+                    context_size = result.context_window;
+                    let _ = sink
+                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                        .await;
                     continue;
                 }
                 IdleResult::Shutdown => {
@@ -456,7 +483,7 @@ where
             reasoning_tokens,
             &memory_config,
             &cwd,
-            &ctx.client,
+            &client,
             &language,
             &cwd,
         )
@@ -513,7 +540,7 @@ where
                             context_size,
                             &memory_config,
                             &cwd,
-                            &ctx.client,
+                            &client,
                             &language,
                             &cwd,
                         )
@@ -529,6 +556,15 @@ where
                             )
                             .await;
                         }
+                        continue;
+                    }
+                    IdleResult::ModelSwitchRequested(params) => {
+                        let (new_client, result) = (build_switched_client)(params);
+                        client = Arc::new(new_client);
+                        context_size = result.context_window;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            .await;
                         continue;
                     }
                     IdleResult::Shutdown => {
@@ -785,7 +821,7 @@ where
                             turn_count,
                             &messages,
                             &cwd,
-                            client,
+                            &client,
                             &system_prompt_text,
                             &language,
                         )
@@ -888,7 +924,7 @@ where
                                 context_size,
                                 &memory_config,
                                 &cwd,
-                                &ctx.client,
+                                &client,
                                 &language,
                                 &cwd,
                             )
@@ -904,6 +940,16 @@ where
                                 )
                                 .await;
                             }
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                            continue;
+                        }
+                        IdleResult::ModelSwitchRequested(params) => {
+                            let (new_client, result) = (build_switched_client)(params);
+                            client = Arc::new(new_client);
+                            context_size = result.context_window;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                .await;
                             loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                             continue;
                         }
@@ -1010,7 +1056,7 @@ where
                                     context_size,
                                     &memory_config,
                                     &cwd,
-                                    &ctx.client,
+                                    &client,
                                     &language,
                                     &cwd,
                                 )
@@ -1026,6 +1072,15 @@ where
                                     )
                                     .await;
                                 }
+                                continue;
+                            }
+                            IdleResult::ModelSwitchRequested(params) => {
+                                let (new_client, result) = (build_switched_client)(params);
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
                                 continue;
                             }
                             IdleResult::Shutdown => {
@@ -1083,7 +1138,7 @@ where
                                 context_size,
                                 &memory_config,
                                 &cwd,
-                                &ctx.client,
+                                &client,
                                 &language,
                                 &cwd,
                             )
@@ -1099,6 +1154,15 @@ where
                                 )
                                 .await;
                             }
+                            continue;
+                        }
+                        IdleResult::ModelSwitchRequested(params) => {
+                            let (new_client, result) = (build_switched_client)(params);
+                            client = Arc::new(new_client);
+                            context_size = result.context_window;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                .await;
                             continue;
                         }
                         IdleResult::Shutdown => {
@@ -1183,6 +1247,7 @@ enum IdleResult {
     Resumed,
     Shutdown,
     CompactRequested,
+    ModelSwitchRequested(sdk::ModelSwitchParams),
 }
 
 /// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
@@ -1291,6 +1356,9 @@ where
                 if gate.compact_requested {
                     return IdleResult::CompactRequested;
                 }
+                if let Some(params) = gate.model_switch_requested {
+                    return IdleResult::ModelSwitchRequested(params);
+                }
                 if gate.appended_user_messages > 0 {
                     // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
                     // 并发兜底：空闲期间外部可能对槽里的 token 直接调过 cancel()
@@ -1317,8 +1385,11 @@ where
                 continue;
             }
             IdleResult::Shutdown => return IdleResult::Shutdown,
-            // `await_idle_input` 只返回 Resumed/Shutdown，CompactRequested 不可能到达。
+            // `await_idle_input` 只返回 Resumed/Shutdown，CompactRequested/ModelSwitchRequested 不可能到达。
             IdleResult::CompactRequested => return IdleResult::CompactRequested,
+            IdleResult::ModelSwitchRequested(params) => {
+                return IdleResult::ModelSwitchRequested(params)
+            }
         }
     }
 }

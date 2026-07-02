@@ -300,6 +300,24 @@ impl App {
                     total,
                 });
             }
+            UiEvent::ModelSwitched { result } => {
+                // #497：模型切换走事件流，TUI 在此更新本地状态（与原 slash.rs RPC 路径对齐）。
+                if result.context_window > 0 {
+                    self.chat.context_size = result.context_window;
+                    self.model
+                        .conversation
+                        .apply(SetContextSize(result.context_window as u64));
+                }
+                self.session.current_model_display = result.display_name.clone();
+                self.model.conversation.apply(SetProviderModel {
+                    provider: self.model.conversation.provider.clone(),
+                    model_id: Some(result.display_name.clone()),
+                });
+                if let Some(ra) = result.reasoning_active {
+                    self.model.conversation.apply(SetThinking(ra));
+                }
+                self.append_system_notice(format!("[switched to {}]", result.display_name));
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();
