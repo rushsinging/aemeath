@@ -540,8 +540,9 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
     );
     assert!(app.chat.is_processing, "/reflect 后应进入后台处理中状态");
     // spinner 业务真相在 Model；渲染直接消费 LiveStatusViewModel。
+    // #536: /reflect 经 run_loop 兜底设 Thinking（spinner_phase → chat_active=true）。
     assert!(
-        app.model.conversation.spinner.phase.is_some(),
+        app.model.conversation.spinner.chat_active,
         "/reflect 后 Model spinner 应 active"
     );
     app.refresh_live_status_from_model();
@@ -600,7 +601,7 @@ async fn test_auto_reflection_triggers_on_configured_interval() {
         .expect("第二轮应触发后台 reflection");
     assert!(!app.chat.is_processing, "自动 reflection 不应阻塞 UI 输入");
     assert!(
-        app.model.conversation.spinner.phase.is_none(),
+        !app.model.conversation.spinner.chat_active,
         "自动 reflection 不应启动 spinner（Model 真相）"
     );
     app.refresh_live_status_from_model();

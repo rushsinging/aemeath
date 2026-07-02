@@ -187,7 +187,8 @@ impl App {
                 }
                 // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
                 // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
-                if self.model.conversation.spinner.phase.is_some() {
+                // #536: 可见性由 chat_active 驱动。
+                if self.model.conversation.spinner.chat_active {
                     self.mark_output_dirty();
                 }
                 crate::tui::log_trace!(
@@ -197,7 +198,7 @@ impl App {
                     before_version,
                     self.view_state.animation.version,
                     self.view_state.spinner.frame,
-                    self.model.conversation.spinner.phase.is_some(),
+                    self.model.conversation.spinner.chat_active,
                     self.model.conversation.spinner.phase,
                     self.view_state.spinner.verb,
                     self.view_state.dirty.output
@@ -389,7 +390,7 @@ impl App {
         )
     }
 
-    /// 据 Model 业务态（spinner.active + phase / task lines / queued submissions）
+    /// 据 Model 业务态（spinner.chat_active + phase / task lines / queued submissions）
     /// + view_state 动画态（frame/verb）派生实时状态行 ViewModel。
     pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
         let queued_texts: Vec<String> = self
@@ -416,7 +417,8 @@ impl App {
     /// verb/active 检测属 effectful 边界（rng/激活检测），故放在此渲染前的副作用处，
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
-        let active = self.model.conversation.spinner.phase.is_some();
+        // #536: 可见性由 chat_active 驱动。
+        let active = self.model.conversation.spinner.chat_active;
         let before_anim = self.view_state.spinner.clone();
         if active {
             if self.view_state.spinner.verb.is_empty() {

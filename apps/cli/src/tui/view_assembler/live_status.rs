@@ -1,6 +1,9 @@
-//! 由 `RuntimeModel.spinner`（active + phase）+ view_state 动画（frame/verb）
+//! 由 `SpinnerModel`（chat_active + phase）+ view_state 动画（frame/verb）
 //! 派生 `LiveStatusViewModel`。phase 语义→文案集中在此（DRY），文案与既有
 //! `app/update/ui_event.rs` 字面量对齐。
+//!
+//! #536: spinner 可见性由 `chat_active` 驱动（跟 StartChat/CompleteChat 生命周期），
+//! phase 仅控制显示文案。`chat_active=true` 但 `phase=None` 时文案兜底 `Thinking`。
 //!
 //! 本层可依赖 model（边界守卫只禁渲染库/副作用），但 ViewModel 输出仅含基本类型。
 
@@ -21,13 +24,20 @@ impl LiveStatusAssembler {
         anim: &SpinnerAnim,
         queued_texts: &[String],
     ) -> LiveStatusViewModel {
-        let spinner = if conversation.spinner.phase.is_some() {
+        // #536: 可见性由 chat_active 驱动；phase=None 时文案兜底 Thinking。
+        let spinner = if conversation.spinner.chat_active {
+            let text = conversation
+                .spinner
+                .phase
+                .as_ref()
+                .map(phase_text)
+                .unwrap_or_else(|| SpinnerPhase::Thinking.text());
             Some(SpinnerLineView {
                 frame: anim.frame,
                 verb: anim.verb.clone(),
                 elapsed_secs: anim.elapsed_secs(),
                 phase_elapsed_secs: anim.phase_elapsed_secs(),
-                phase_text: conversation.spinner.phase.as_ref().map(phase_text),
+                phase_text: Some(text),
             })
         } else {
             None
@@ -98,15 +108,19 @@ mod tests {
     use crate::tui::model::conversation::intent::UpdateTaskLines;
     use crate::tui::model::conversation::spinner::SpinnerPhase;
 
-    fn conversation_with_spinner(phase: Option<SpinnerPhase>) -> ConversationModel {
+    fn conversation_with_spinner(
+        chat_active: bool,
+        phase: Option<SpinnerPhase>,
+    ) -> ConversationModel {
         let mut conversation = ConversationModel::default();
+        conversation.spinner.chat_active = chat_active;
         conversation.spinner.phase = phase;
         conversation
     }
 
     #[test]
     fn test_assemble_inactive_yields_no_spinner() {
-        let conversation = conversation_with_spinner(None);
+        let conversation = conversation_with_spinner(false, None);
         let anim = SpinnerAnim {
             frame: 5,
             phase_frame: 5,
@@ -119,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_assemble_active_transfers_frame_verb() {
-        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
+        let conversation = conversation_with_spinner(true, Some(SpinnerPhase::Thinking));
         let anim = SpinnerAnim {
             frame: 12,
             phase_frame: 3,
@@ -137,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_assemble_uses_independent_phase_elapsed() {
-        let conversation = conversation_with_spinner(Some(SpinnerPhase::Generating));
+        let conversation = conversation_with_spinner(true, Some(SpinnerPhase::Generating));
         let anim = SpinnerAnim {
             frame: 30,
             phase_frame: 5,
@@ -153,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_assemble_task_lines_pass_through() {
-        let mut conversation = conversation_with_spinner(None);
+        let mut conversation = conversation_with_spinner(false, None);
         conversation.apply(UpdateTaskLines(vec![
             "━━ Tasks: 0/1 ━━".to_string(),
             "□ #1 修复 bug".to_string(),
@@ -206,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_assemble_active_with_phase_converts_text() {
-        let conversation = conversation_with_spinner(Some(SpinnerPhase::Generating));
+        let conversation = conversation_with_spinner(true, Some(SpinnerPhase::Generating));
         let vm = LiveStatusAssembler::assemble(&conversation, &SpinnerAnim::default(), &[]);
         assert_eq!(
             vm.spinner.unwrap().phase_text.as_deref(),
@@ -215,8 +229,17 @@ mod tests {
     }
 
     #[test]
+    fn test_assemble_chat_active_with_none_phase_falls_back_to_thinking() {
+        // #536: chat_active=true 但 phase=None 时文案应兜底 Thinking
+        let conversation = conversation_with_spinner(true, None);
+        let vm = LiveStatusAssembler::assemble(&conversation, &SpinnerAnim::default(), &[]);
+        let spinner = vm.spinner.expect("spinner present when chat_active");
+        assert_eq!(spinner.phase_text.as_deref(), Some("Thinking..."));
+    }
+
+    #[test]
     fn test_assemble_queued_lines_format() {
-        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
+        let conversation = conversation_with_spinner(true, Some(SpinnerPhase::Thinking));
         let vm = LiveStatusAssembler::assemble(
             &conversation,
             &SpinnerAnim::default(),
@@ -227,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_assemble_queued_lines_preserves_hard_newlines() {
-        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
+        let conversation = conversation_with_spinner(true, Some(SpinnerPhase::Thinking));
         let vm = LiveStatusAssembler::assemble(
             &conversation,
             &SpinnerAnim::default(),
@@ -238,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_assemble_empty_queued_yields_no_lines() {
-        let conversation = conversation_with_spinner(Some(SpinnerPhase::Thinking));
+        let conversation = conversation_with_spinner(true, Some(SpinnerPhase::Thinking));
         let vm = LiveStatusAssembler::assemble(&conversation, &SpinnerAnim::default(), &[]);
         assert!(vm.queued_lines.is_empty());
     }
