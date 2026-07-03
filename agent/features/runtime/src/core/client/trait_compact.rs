@@ -50,3 +50,28 @@ pub(super) async fn compact_messages_impl(
 pub(super) async fn compact_impl(_me: &AgentClientImpl) -> Result<()> {
     Ok(())
 }
+
+pub(super) async fn estimate_context_impl(
+    me: &AgentClientImpl,
+    messages: &[sdk::ChatMessage],
+    system_prompt: &str,
+) -> Result<sdk::ContextEstimate> {
+    let runtime_messages: Vec<share::message::Message> = messages
+        .iter()
+        .map(|msg| super::mapping::message_from_sdk(msg.clone()))
+        .collect();
+    let estimated = crate::business::compact::estimate_messages_tokens(&runtime_messages)
+        + crate::business::compact::estimate_tokens(system_prompt);
+    let context_size = me.inner.context.resources.context_size;
+    let pct = if context_size > 0 {
+        estimated as f64 * 100.0 / context_size as f64
+    } else {
+        0.0
+    };
+    Ok(sdk::ContextEstimate {
+        estimated_tokens: estimated,
+        system_tokens: crate::business::compact::estimate_tokens(system_prompt),
+        context_size,
+        usage_percentage: pct,
+    })
+}

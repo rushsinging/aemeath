@@ -186,6 +186,26 @@ pub enum RuntimeStreamEvent {
     ModelSwitched {
         result: sdk::ModelSwitchResult,
     },
+    /// Reasoning 模式切换完成通知（#497）。runtime idle 分支执行 set_thinking 后回传结果。
+    ThinkingChanged {
+        enabled: bool,
+    },
+    /// 上下文估算完成通知（#497）。runtime idle 分支执行 estimate 后回传结果。
+    ContextEstimated {
+        estimate: sdk::ContextEstimate,
+        message_count: usize,
+    },
+    /// 查询命令执行完成，返回纯文本结果（#497）。
+    CommandResultText {
+        text: String,
+        is_error: bool,
+    },
+    /// 会话恢复完成通知（#497）。
+    SessionResumed {
+        messages: Vec<share::message::Message>,
+        session_id: String,
+        created_at: u64,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

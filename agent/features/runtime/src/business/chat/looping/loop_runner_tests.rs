@@ -136,6 +136,10 @@ impl RecordingSink {
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),
             RuntimeStreamEvent::CompactProgress { .. } => "CompactProgress".to_string(),
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
+            RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
+            RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
+            RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
+            RuntimeStreamEvent::SessionResumed { .. } => "SessionResumed".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }

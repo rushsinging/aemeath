@@ -166,8 +166,6 @@
 | `agent/features/provider/src/business/providers/openai_compatible/request_body.rs` | `core` | OpenAI 兼容请求体 |
 | `agent/features/provider/src/business/providers/openai_compatible/stream.rs` | `core` | OpenAI 兼容流式 |
 | `agent/features/provider/src/business/stream.rs` | `core` | Provider 通用 stream |
-| `agent/features/runtime/src/business/prompt/skill_command.rs` | `core` | 技能命令编排 |
-| `agent/features/runtime/src/business/prompt/skill_command_impl.rs` | `core` | 技能命令实现 |
 | `agent/features/runtime/src/utils/adapter.rs` | `core` | runtime 临时 wiring |
 | `agent/features/runtime/src/utils/bootstrap.rs` | `core` | runtime bootstrap |
 | `agent/features/runtime/src/utils/bootstrap/runtime_support.rs` | `business` | bootstrap 临时 wiring |

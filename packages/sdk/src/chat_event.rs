@@ -163,4 +163,25 @@ pub enum ChatEvent {
     ModelSwitched {
         result: crate::ModelSwitchResult,
     },
+    /// Reasoning 模式切换完成通知（#497）。TUI 据此更新 thinking 状态 + 回显。
+    ThinkingChanged {
+        enabled: bool,
+    },
+    /// 上下文估算完成通知（#497）。TUI 据此显示 token 占用信息。
+    ContextEstimated {
+        estimate: crate::ContextEstimate,
+        message_count: usize,
+    },
+    /// 查询命令执行完成，返回纯文本结果（#497）。
+    /// TUI 据此 append_system_notice 或 append_error_notice。
+    CommandResultText {
+        text: String,
+        is_error: bool,
+    },
+    /// 会话恢复完成通知（#497）。TUI 据此更新 messages 和状态。
+    SessionResumed {
+        messages: Vec<ChatMessage>,
+        session_id: String,
+        created_at: u64,
+    },
 }

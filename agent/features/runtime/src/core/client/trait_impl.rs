@@ -34,20 +34,12 @@ impl AgentClient for AgentClientImpl {
     }
 
     // command
-    async fn execute_command(
-        &self,
-        name: &str,
-        args: &str,
-        sdk_ctx: sdk::CommandContext,
-    ) -> Result<sdk::CommandResult, SdkError> {
-        super::trait_command::execute_command_impl(self, name, args, sdk_ctx).await
-    }
     async fn estimate_context(
         &self,
         messages: &[sdk::ChatMessage],
         system_prompt: &str,
     ) -> Result<sdk::ContextEstimate, SdkError> {
-        super::trait_command::estimate_context_impl(self, messages, system_prompt).await
+        super::trait_compact::estimate_context_impl(self, messages, system_prompt).await
     }
     async fn switch_model(
         &self,

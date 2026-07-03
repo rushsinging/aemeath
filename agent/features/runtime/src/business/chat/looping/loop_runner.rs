@@ -21,7 +21,7 @@ use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
     ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, GateDecision, GateKind,
-    InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
+    InputEventDrainPort, PendingCommand, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeStreamHandler, RuntimeTurnContext,
 };
 use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
@@ -239,45 +239,140 @@ where
                     // #503：消费 skip 标志，后续回合恢复正常行为。
                     skip_pending = false;
                 }
-                IdleResult::CompactRequested => {
-                    if let Some(outcome) = manual_compact(
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        turn_count,
-                        &messages,
-                        &system_prompt_text,
-                        context_size,
-                        &memory_config,
-                        &cwd,
-                        &client,
-                        &language,
-                        &cwd,
-                    )
-                    .await
-                    {
-                        apply_compact_outcome(
+                IdleResult::CommandRequested(cmd) => match cmd {
+                    PendingCommand::Compact => {
+                        if let Some(outcome) = manual_compact(
                             &sink,
-                            outcome,
-                            &mut messages,
-                            &frozen_chats,
-                            &mut active_summary,
-                            &active_summary_arc,
+                            &hook_ui,
+                            &hook_runner,
+                            turn_count,
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &memory_config,
+                            &cwd,
+                            &client,
+                            &language,
+                            &cwd,
+                        )
+                        .await
+                        {
+                            apply_compact_outcome(
+                                &sink,
+                                outcome,
+                                &mut messages,
+                                &frozen_chats,
+                                &mut active_summary,
+                                &active_summary_arc,
+                            )
+                            .await;
+                        }
+                        // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
+                        continue;
+                    }
+                    PendingCommand::SwitchModel { params } => {
+                        let (new_client, result) = (build_switched_client)(params);
+                        client = Arc::new(new_client);
+                        context_size = result.context_window;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            .await;
+                        continue;
+                    }
+                    PendingCommand::SetThinking { desired } => {
+                        execute_set_thinking(&client, &sink, desired).await;
+                        continue;
+                    }
+                    PendingCommand::EstimateContext => {
+                        execute_estimate_context(
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &sink,
                         )
                         .await;
+                        continue;
                     }
-                    // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
-                    continue;
-                }
-                IdleResult::ModelSwitchRequested(params) => {
-                    let (new_client, result) = (build_switched_client)(params);
-                    client = Arc::new(new_client);
-                    context_size = result.context_window;
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                        .await;
-                    continue;
-                }
+                    PendingCommand::QueryCost { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_cost(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStatus => {
+                        let config = share::config::Config::default();
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_status(
+                            &config,
+                            &session_id,
+                            &cwd_str,
+                            client.model_name(),
+                        );
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryConfig { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) = super::idle_commands::execute_config(&args, &config);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStats { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) =
+                            super::idle_commands::execute_stats(&args, &session_id, &config).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::InitProject { force } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageSession { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_session(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageMemory { args } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) =
+                            super::idle_commands::execute_memory(&args, &cwd_str).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ResumeSession { id } => {
+                        match crate::business::session::load_session(&id).await {
+                            Ok(snapshot) => {
+                                messages = snapshot.messages;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::SessionResumed {
+                                        messages: messages.clone(),
+                                        session_id: id.clone(),
+                                        created_at: 0u64,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Failed to resume session {}: {}", id, e),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -416,44 +511,139 @@ where
             .await
             {
                 IdleResult::Resumed => continue,
-                IdleResult::CompactRequested => {
-                    if let Some(outcome) = manual_compact(
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        turn_count,
-                        &messages,
-                        &system_prompt_text,
-                        context_size,
-                        &memory_config,
-                        &cwd,
-                        &client,
-                        &language,
-                        &cwd,
-                    )
-                    .await
-                    {
-                        apply_compact_outcome(
+                IdleResult::CommandRequested(cmd) => match cmd {
+                    PendingCommand::Compact => {
+                        if let Some(outcome) = manual_compact(
                             &sink,
-                            outcome,
-                            &mut messages,
-                            &frozen_chats,
-                            &mut active_summary,
-                            &active_summary_arc,
+                            &hook_ui,
+                            &hook_runner,
+                            turn_count,
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &memory_config,
+                            &cwd,
+                            &client,
+                            &language,
+                            &cwd,
+                        )
+                        .await
+                        {
+                            apply_compact_outcome(
+                                &sink,
+                                outcome,
+                                &mut messages,
+                                &frozen_chats,
+                                &mut active_summary,
+                                &active_summary_arc,
+                            )
+                            .await;
+                        }
+                        continue;
+                    }
+                    PendingCommand::SwitchModel { params } => {
+                        let (new_client, result) = (build_switched_client)(params);
+                        client = Arc::new(new_client);
+                        context_size = result.context_window;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            .await;
+                        continue;
+                    }
+                    PendingCommand::SetThinking { desired } => {
+                        execute_set_thinking(&client, &sink, desired).await;
+                        continue;
+                    }
+                    PendingCommand::EstimateContext => {
+                        execute_estimate_context(
+                            &messages,
+                            &system_prompt_text,
+                            context_size,
+                            &sink,
                         )
                         .await;
+                        continue;
                     }
-                    continue;
-                }
-                IdleResult::ModelSwitchRequested(params) => {
-                    let (new_client, result) = (build_switched_client)(params);
-                    client = Arc::new(new_client);
-                    context_size = result.context_window;
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                        .await;
-                    continue;
-                }
+                    PendingCommand::QueryCost { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_cost(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStatus => {
+                        let config = share::config::Config::default();
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_status(
+                            &config,
+                            &session_id,
+                            &cwd_str,
+                            client.model_name(),
+                        );
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryConfig { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) = super::idle_commands::execute_config(&args, &config);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStats { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) =
+                            super::idle_commands::execute_stats(&args, &session_id, &config).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::InitProject { force } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageSession { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_session(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageMemory { args } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) =
+                            super::idle_commands::execute_memory(&args, &cwd_str).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ResumeSession { id } => {
+                        match crate::business::session::load_session(&id).await {
+                            Ok(snapshot) => {
+                                messages = snapshot.messages;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::SessionResumed {
+                                        messages: messages.clone(),
+                                        session_id: id.clone(),
+                                        created_at: 0u64,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Failed to resume session {}: {}", id, e),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     loop_fsm.assert_state(
@@ -529,44 +719,163 @@ where
                 .await
                 {
                     IdleResult::Resumed => continue,
-                    IdleResult::CompactRequested => {
-                        if let Some(outcome) = manual_compact(
-                            &sink,
-                            &hook_ui,
-                            &hook_runner,
-                            turn_count,
-                            &messages,
-                            &system_prompt_text,
-                            context_size,
-                            &memory_config,
-                            &cwd,
-                            &client,
-                            &language,
-                            &cwd,
-                        )
-                        .await
-                        {
-                            apply_compact_outcome(
+                    IdleResult::CommandRequested(cmd) => match cmd {
+                        PendingCommand::Compact => {
+                            if let Some(outcome) = manual_compact(
                                 &sink,
-                                outcome,
-                                &mut messages,
-                                &frozen_chats,
-                                &mut active_summary,
-                                &active_summary_arc,
+                                &hook_ui,
+                                &hook_runner,
+                                turn_count,
+                                &messages,
+                                &system_prompt_text,
+                                context_size,
+                                &memory_config,
+                                &cwd,
+                                &client,
+                                &language,
+                                &cwd,
+                            )
+                            .await
+                            {
+                                apply_compact_outcome(
+                                    &sink,
+                                    outcome,
+                                    &mut messages,
+                                    &frozen_chats,
+                                    &mut active_summary,
+                                    &active_summary_arc,
+                                )
+                                .await;
+                            }
+                            continue;
+                        }
+                        PendingCommand::SwitchModel { params } => {
+                            let (new_client, result) = (build_switched_client)(params);
+                            client = Arc::new(new_client);
+                            context_size = result.context_window;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                .await;
+                            continue;
+                        }
+                        PendingCommand::SetThinking { desired } => {
+                            execute_set_thinking(&client, &sink, desired).await;
+                            continue;
+                        }
+                        PendingCommand::EstimateContext => {
+                            execute_estimate_context(
+                                &messages,
+                                &system_prompt_text,
+                                context_size,
+                                &sink,
                             )
                             .await;
+                            continue;
                         }
-                        continue;
-                    }
-                    IdleResult::ModelSwitchRequested(params) => {
-                        let (new_client, result) = (build_switched_client)(params);
-                        client = Arc::new(new_client);
-                        context_size = result.context_window;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                            .await;
-                        continue;
-                    }
+                        PendingCommand::QueryCost { args } => {
+                            let (text, is_error) =
+                                super::idle_commands::execute_cost(&args, &session_id).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::QueryStatus => {
+                            let config = share::config::Config::default();
+                            let cwd_str = cwd.display().to_string();
+                            let (text, is_error) = super::idle_commands::execute_status(
+                                &config,
+                                &session_id,
+                                &cwd_str,
+                                client.model_name(),
+                            );
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::QueryConfig { args } => {
+                            let config = share::config::Config::default();
+                            let (text, is_error) =
+                                super::idle_commands::execute_config(&args, &config);
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::QueryStats { args } => {
+                            let config = share::config::Config::default();
+                            let (text, is_error) =
+                                super::idle_commands::execute_stats(&args, &session_id, &config)
+                                    .await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::InitProject { force } => {
+                            let cwd_str = cwd.display().to_string();
+                            let (text, is_error) =
+                                super::idle_commands::execute_init(&cwd_str, force);
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::ManageSession { args } => {
+                            let (text, is_error) =
+                                super::idle_commands::execute_session(&args, &session_id).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::ManageMemory { args } => {
+                            let cwd_str = cwd.display().to_string();
+                            let (text, is_error) =
+                                super::idle_commands::execute_memory(&args, &cwd_str).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::ResumeSession { id } => {
+                            match crate::business::session::load_session(&id).await {
+                                Ok(snapshot) => {
+                                    messages = snapshot.messages;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::SessionResumed {
+                                            messages: messages.clone(),
+                                            session_id: id.clone(),
+                                            created_at: 0u64,
+                                        })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Failed to resume session {}: {}", id, e),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
+                    },
                     IdleResult::Shutdown => {
                         loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                         loop_fsm.assert_state(
@@ -913,46 +1222,173 @@ where
                             loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                             continue;
                         }
-                        IdleResult::CompactRequested => {
-                            if let Some(outcome) = manual_compact(
-                                &sink,
-                                &hook_ui,
-                                &hook_runner,
-                                turn_count,
-                                &messages,
-                                &system_prompt_text,
-                                context_size,
-                                &memory_config,
-                                &cwd,
-                                &client,
-                                &language,
-                                &cwd,
-                            )
-                            .await
-                            {
-                                apply_compact_outcome(
+                        IdleResult::CommandRequested(cmd) => match cmd {
+                            PendingCommand::Compact => {
+                                if let Some(outcome) = manual_compact(
                                     &sink,
-                                    outcome,
-                                    &mut messages,
-                                    &frozen_chats,
-                                    &mut active_summary,
-                                    &active_summary_arc,
+                                    &hook_ui,
+                                    &hook_runner,
+                                    turn_count,
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &memory_config,
+                                    &cwd,
+                                    &client,
+                                    &language,
+                                    &cwd,
+                                )
+                                .await
+                                {
+                                    apply_compact_outcome(
+                                        &sink,
+                                        outcome,
+                                        &mut messages,
+                                        &frozen_chats,
+                                        &mut active_summary,
+                                        &active_summary_arc,
+                                    )
+                                    .await;
+                                }
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
+                            }
+                            PendingCommand::SwitchModel { params } => {
+                                let (new_client, result) = (build_switched_client)(params);
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
+                            }
+                            PendingCommand::SetThinking { desired } => {
+                                execute_set_thinking(&client, &sink, desired).await;
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
+                            }
+                            PendingCommand::EstimateContext => {
+                                execute_estimate_context(
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &sink,
                                 )
                                 .await;
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                                continue;
                             }
-                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                            continue;
-                        }
-                        IdleResult::ModelSwitchRequested(params) => {
-                            let (new_client, result) = (build_switched_client)(params);
-                            client = Arc::new(new_client);
-                            context_size = result.context_window;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            PendingCommand::QueryCost { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_cost(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStatus => {
+                                let config = share::config::Config::default();
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) = super::idle_commands::execute_status(
+                                    &config,
+                                    &session_id,
+                                    &cwd_str,
+                                    client.model_name(),
+                                );
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryConfig { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_config(&args, &config);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStats { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) = super::idle_commands::execute_stats(
+                                    &args,
+                                    &session_id,
+                                    &config,
+                                )
                                 .await;
-                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                            continue;
-                        }
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::InitProject { force } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_init(&cwd_str, force);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageSession { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_session(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageMemory { args } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ResumeSession { id } => {
+                                match crate::business::session::load_session(&id).await {
+                                    Ok(snapshot) => {
+                                        messages = snapshot.messages;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::SessionResumed {
+                                                messages: messages.clone(),
+                                                session_id: id.clone(),
+                                                created_at: 0u64,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!(
+                                                    "Failed to resume session {}: {}",
+                                                    id, e
+                                                ),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                        },
                     }
                 }
                 {
@@ -1045,44 +1481,171 @@ where
                         .await
                         {
                             IdleResult::Resumed => continue,
-                            IdleResult::CompactRequested => {
-                                if let Some(outcome) = manual_compact(
-                                    &sink,
-                                    &hook_ui,
-                                    &hook_runner,
-                                    turn_count,
-                                    &messages,
-                                    &system_prompt_text,
-                                    context_size,
-                                    &memory_config,
-                                    &cwd,
-                                    &client,
-                                    &language,
-                                    &cwd,
-                                )
-                                .await
-                                {
-                                    apply_compact_outcome(
+                            IdleResult::CommandRequested(cmd) => match cmd {
+                                PendingCommand::Compact => {
+                                    if let Some(outcome) = manual_compact(
                                         &sink,
-                                        outcome,
-                                        &mut messages,
-                                        &frozen_chats,
-                                        &mut active_summary,
-                                        &active_summary_arc,
+                                        &hook_ui,
+                                        &hook_runner,
+                                        turn_count,
+                                        &messages,
+                                        &system_prompt_text,
+                                        context_size,
+                                        &memory_config,
+                                        &cwd,
+                                        &client,
+                                        &language,
+                                        &cwd,
+                                    )
+                                    .await
+                                    {
+                                        apply_compact_outcome(
+                                            &sink,
+                                            outcome,
+                                            &mut messages,
+                                            &frozen_chats,
+                                            &mut active_summary,
+                                            &active_summary_arc,
+                                        )
+                                        .await;
+                                    }
+                                    continue;
+                                }
+                                PendingCommand::SwitchModel { params } => {
+                                    let (new_client, result) = (build_switched_client)(params);
+                                    client = Arc::new(new_client);
+                                    context_size = result.context_window;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                        .await;
+                                    continue;
+                                }
+                                PendingCommand::SetThinking { desired } => {
+                                    execute_set_thinking(&client, &sink, desired).await;
+                                    continue;
+                                }
+                                PendingCommand::EstimateContext => {
+                                    execute_estimate_context(
+                                        &messages,
+                                        &system_prompt_text,
+                                        context_size,
+                                        &sink,
                                     )
                                     .await;
+                                    continue;
                                 }
-                                continue;
-                            }
-                            IdleResult::ModelSwitchRequested(params) => {
-                                let (new_client, result) = (build_switched_client)(params);
-                                client = Arc::new(new_client);
-                                context_size = result.context_window;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                PendingCommand::QueryCost { args } => {
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_cost(&args, &session_id)
+                                            .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::QueryStatus => {
+                                    let config = share::config::Config::default();
+                                    let cwd_str = cwd.display().to_string();
+                                    let (text, is_error) = super::idle_commands::execute_status(
+                                        &config,
+                                        &session_id,
+                                        &cwd_str,
+                                        client.model_name(),
+                                    );
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::QueryConfig { args } => {
+                                    let config = share::config::Config::default();
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_config(&args, &config);
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::QueryStats { args } => {
+                                    let config = share::config::Config::default();
+                                    let (text, is_error) = super::idle_commands::execute_stats(
+                                        &args,
+                                        &session_id,
+                                        &config,
+                                    )
                                     .await;
-                                continue;
-                            }
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::InitProject { force } => {
+                                    let cwd_str = cwd.display().to_string();
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_init(&cwd_str, force);
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::ManageSession { args } => {
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_session(&args, &session_id)
+                                            .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::ManageMemory { args } => {
+                                    let cwd_str = cwd.display().to_string();
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::ResumeSession { id } => {
+                                    match crate::business::session::load_session(&id).await {
+                                        Ok(snapshot) => {
+                                            messages = snapshot.messages;
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::SessionResumed {
+                                                    messages: messages.clone(),
+                                                    session_id: id.clone(),
+                                                    created_at: 0u64,
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: format!(
+                                                        "Failed to resume session {}: {}",
+                                                        id, e
+                                                    ),
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
+                                }
+                            },
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                                 loop_fsm.assert_state(
@@ -1127,44 +1690,169 @@ where
                     .await
                     {
                         IdleResult::Resumed => continue,
-                        IdleResult::CompactRequested => {
-                            if let Some(outcome) = manual_compact(
-                                &sink,
-                                &hook_ui,
-                                &hook_runner,
-                                turn_count,
-                                &messages,
-                                &system_prompt_text,
-                                context_size,
-                                &memory_config,
-                                &cwd,
-                                &client,
-                                &language,
-                                &cwd,
-                            )
-                            .await
-                            {
-                                apply_compact_outcome(
+                        IdleResult::CommandRequested(cmd) => match cmd {
+                            PendingCommand::Compact => {
+                                if let Some(outcome) = manual_compact(
                                     &sink,
-                                    outcome,
-                                    &mut messages,
-                                    &frozen_chats,
-                                    &mut active_summary,
-                                    &active_summary_arc,
+                                    &hook_ui,
+                                    &hook_runner,
+                                    turn_count,
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &memory_config,
+                                    &cwd,
+                                    &client,
+                                    &language,
+                                    &cwd,
+                                )
+                                .await
+                                {
+                                    apply_compact_outcome(
+                                        &sink,
+                                        outcome,
+                                        &mut messages,
+                                        &frozen_chats,
+                                        &mut active_summary,
+                                        &active_summary_arc,
+                                    )
+                                    .await;
+                                }
+                                continue;
+                            }
+                            PendingCommand::SwitchModel { params } => {
+                                let (new_client, result) = (build_switched_client)(params);
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
+                                continue;
+                            }
+                            PendingCommand::SetThinking { desired } => {
+                                execute_set_thinking(&client, &sink, desired).await;
+                                continue;
+                            }
+                            PendingCommand::EstimateContext => {
+                                execute_estimate_context(
+                                    &messages,
+                                    &system_prompt_text,
+                                    context_size,
+                                    &sink,
                                 )
                                 .await;
+                                continue;
                             }
-                            continue;
-                        }
-                        IdleResult::ModelSwitchRequested(params) => {
-                            let (new_client, result) = (build_switched_client)(params);
-                            client = Arc::new(new_client);
-                            context_size = result.context_window;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                            PendingCommand::QueryCost { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_cost(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStatus => {
+                                let config = share::config::Config::default();
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) = super::idle_commands::execute_status(
+                                    &config,
+                                    &session_id,
+                                    &cwd_str,
+                                    client.model_name(),
+                                );
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryConfig { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_config(&args, &config);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStats { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) = super::idle_commands::execute_stats(
+                                    &args,
+                                    &session_id,
+                                    &config,
+                                )
                                 .await;
-                            continue;
-                        }
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::InitProject { force } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_init(&cwd_str, force);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageSession { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_session(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageMemory { args } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ResumeSession { id } => {
+                                match crate::business::session::load_session(&id).await {
+                                    Ok(snapshot) => {
+                                        messages = snapshot.messages;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::SessionResumed {
+                                                messages: messages.clone(),
+                                                session_id: id.clone(),
+                                                created_at: 0u64,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!(
+                                                    "Failed to resume session {}: {}",
+                                                    id, e
+                                                ),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                        },
                         IdleResult::Shutdown => {
                             loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                             loop_fsm.assert_state(
@@ -1242,12 +1930,71 @@ where
     }
 }
 
-/// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或 compact 请求。
+/// idle 分支执行 `/think`：读当前 reasoning level，按 desired 设置新 level，
+/// 发 `ThinkingChanged` + `SystemMessage`。
+async fn execute_set_thinking<S>(client: &provider::api::LlmClient, sink: &S, desired: Option<bool>)
+where
+    S: ChatEventSink,
+{
+    use provider::api::ReasoningLevel;
+    let current = client.current_reasoning_level();
+    let new_state = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
+    let level = if new_state {
+        ReasoningLevel::Medium
+    } else {
+        ReasoningLevel::Off
+    };
+    client.set_reasoning_level(level);
+    let label = if new_state { "ON" } else { "OFF" };
+    let _ = sink
+        .send_event(RuntimeStreamEvent::ThinkingChanged { enabled: new_state })
+        .await;
+    let _ = sink
+        .send_event(RuntimeStreamEvent::SystemMessage(format!(
+            "[thinking mode: {}]",
+            label
+        )))
+        .await;
+}
+
+/// idle 分支执行 `/context`：用 loop 内部 messages + system_prompt 估算 token 占用，
+/// 发 `ContextEstimated` 事件（TUI 据此显示）。
+async fn execute_estimate_context<S>(
+    messages: &[share::message::Message],
+    system_prompt_text: &str,
+    context_size: usize,
+    sink: &S,
+) where
+    S: ChatEventSink,
+{
+    let estimated_tokens = crate::business::compact::estimate_messages_tokens(messages)
+        + crate::business::compact::estimate_tokens(system_prompt_text);
+    let system_tokens = crate::business::compact::estimate_tokens(system_prompt_text);
+    let usage_percentage = if context_size > 0 {
+        estimated_tokens as f64 * 100.0 / context_size as f64
+    } else {
+        0.0
+    };
+    let estimate = sdk::ContextEstimate {
+        estimated_tokens,
+        system_tokens,
+        context_size,
+        usage_percentage,
+    };
+    let _ = sink
+        .send_event(RuntimeStreamEvent::ContextEstimated {
+            estimate,
+            message_count: messages.len(),
+        })
+        .await;
+}
+
+/// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或待执行命令。
 enum IdleResult {
     Resumed,
     Shutdown,
-    CompactRequested,
-    ModelSwitchRequested(sdk::ModelSwitchParams),
+    /// idle gate 收到待执行命令（Compact / SwitchModel / …，#497 泛化载体）。
+    CommandRequested(PendingCommand),
 }
 
 /// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
@@ -1353,11 +2100,8 @@ where
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
                 let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages, true).await;
-                if gate.compact_requested {
-                    return IdleResult::CompactRequested;
-                }
-                if let Some(params) = gate.model_switch_requested {
-                    return IdleResult::ModelSwitchRequested(params);
+                if let Some(cmd) = gate.pending_command {
+                    return IdleResult::CommandRequested(cmd);
                 }
                 if gate.appended_user_messages > 0 {
                     // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
@@ -1385,11 +2129,8 @@ where
                 continue;
             }
             IdleResult::Shutdown => return IdleResult::Shutdown,
-            // `await_idle_input` 只返回 Resumed/Shutdown，CompactRequested/ModelSwitchRequested 不可能到达。
-            IdleResult::CompactRequested => return IdleResult::CompactRequested,
-            IdleResult::ModelSwitchRequested(params) => {
-                return IdleResult::ModelSwitchRequested(params)
-            }
+            // `await_idle_input` 只返回 Resumed/Shutdown，CommandRequested 不可能到达。
+            IdleResult::CommandRequested(cmd) => return IdleResult::CommandRequested(cmd),
         }
     }
 }

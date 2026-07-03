@@ -318,6 +318,41 @@ impl App {
                 }
                 self.append_system_notice(format!("[switched to {}]", result.display_name));
             }
+            UiEvent::ThinkingChanged { enabled } => {
+                // #497：reasoning 模式切换走事件流。SystemMessage("[thinking mode: ON/OFF]")
+                // 已由 runtime 发回，TUI 只需更新 thinking 状态。
+                self.model.conversation.apply(SetThinking(enabled));
+            }
+            UiEvent::ContextEstimated {
+                estimate,
+                message_count,
+            } => {
+                // #497：上下文估算走事件流。显示格式与旧 slash.rs RPC 路径一致。
+                self.append_system_notice(format!(
+                    "Context window: ~{} / {} tokens ({:.0}%)",
+                    estimate.estimated_tokens, estimate.context_size, estimate.usage_percentage
+                ));
+                self.append_system_notice(format!("Messages: {}", message_count));
+                if estimate.usage_percentage > 80.0 {
+                    self.append_system_notice("[auto-compaction will trigger at 80%]");
+                }
+            }
+            UiEvent::CommandResultText { text, is_error } => {
+                if is_error {
+                    self.append_error_notice(&text);
+                } else {
+                    self.append_system_notice(&text);
+                }
+            }
+            UiEvent::SessionResumed {
+                messages,
+                session_id,
+                ..
+            } => {
+                self.chat.messages = messages;
+                self.session.rename_session(&session_id);
+                self.append_system_notice(format!("[resumed session: {}]", session_id));
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

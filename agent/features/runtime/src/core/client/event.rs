@@ -353,6 +353,34 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }
+        crate::business::chat::RuntimeStreamEvent::ThinkingChanged { enabled } => {
+            ChatEvent::ThinkingChanged { enabled }
+        }
+        crate::business::chat::RuntimeStreamEvent::ContextEstimated {
+            estimate,
+            message_count,
+        } => ChatEvent::ContextEstimated {
+            estimate,
+            message_count,
+        },
+        crate::business::chat::RuntimeStreamEvent::CommandResultText { text, is_error } => {
+            ChatEvent::CommandResultText { text, is_error }
+        }
+        crate::business::chat::RuntimeStreamEvent::SessionResumed {
+            messages,
+            session_id,
+            created_at,
+        } => {
+            let sdk_messages = messages
+                .into_iter()
+                .map(super::mapping::message_to_sdk)
+                .collect();
+            ChatEvent::SessionResumed {
+                messages: sdk_messages,
+                session_id,
+                created_at,
+            }
+        }
     }
 }
 

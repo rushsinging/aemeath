@@ -180,6 +180,26 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             total,
         },
         sdk::ChatEvent::ModelSwitched { result } => UiEvent::ModelSwitched { result },
+        sdk::ChatEvent::ThinkingChanged { enabled } => UiEvent::ThinkingChanged { enabled },
+        sdk::ChatEvent::ContextEstimated {
+            estimate,
+            message_count,
+        } => UiEvent::ContextEstimated {
+            estimate,
+            message_count,
+        },
+        sdk::ChatEvent::CommandResultText { text, is_error } => {
+            UiEvent::CommandResultText { text, is_error }
+        }
+        sdk::ChatEvent::SessionResumed {
+            messages,
+            session_id,
+            created_at,
+        } => UiEvent::SessionResumed {
+            messages,
+            session_id,
+            created_at,
+        },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
     }
 }
@@ -425,6 +445,33 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             result.display_name,
             result.context_window,
             result.reasoning_active
+        ),
+        sdk::ChatEvent::ThinkingChanged { enabled } => {
+            crate::tui::log_trace!("{} thinking_changed enabled={}", stage, enabled)
+        }
+        sdk::ChatEvent::ContextEstimated {
+            estimate,
+            message_count,
+        } => crate::tui::log_trace!(
+            "{} context_estimated tokens={} system={} size={} pct={} msgs={}",
+            stage,
+            estimate.estimated_tokens,
+            estimate.system_tokens,
+            estimate.context_size,
+            estimate.usage_percentage,
+            message_count
+        ),
+        sdk::ChatEvent::CommandResultText { text, is_error } => crate::tui::log_trace!(
+            "{} command_result_text len={} is_error={}",
+            stage,
+            text.len(),
+            is_error
+        ),
+        sdk::ChatEvent::SessionResumed { messages, session_id, .. } => crate::tui::log_trace!(
+            "{} session_resumed id={} msg_count={}",
+            stage,
+            session_id,
+            messages.len()
         ),
         sdk::ChatEvent::Result(result) => crate::tui::log_trace!(
             "{} result text_len={} tokens_used={:?}",
@@ -805,15 +852,6 @@ mod tests {
             _output: sdk::ReflectionOutputView,
         ) -> Result<String, sdk::SdkError> {
             Ok("applied".to_string())
-        }
-
-        async fn execute_command(
-            &self,
-            _name: &str,
-            _args: &str,
-            _ctx: sdk::CommandContext,
-        ) -> Result<sdk::CommandResult, sdk::SdkError> {
-            Ok(sdk::CommandResult::Success("ok".to_string()))
         }
 
         async fn estimate_context(
