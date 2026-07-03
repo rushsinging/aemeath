@@ -1,12 +1,11 @@
 //! 工具结果截断 — 单条结果和消息级别的长度限制
 //!
 //! 超长工具输出会在加入对话历史之前被截断为预览头 + 尾部。
+//! 落盘逻辑在 `storage::tool_result_storage` 中实现（`persist_oversized_results`），
+//! 本模块仅提供截断兜底（当落盘失败或未被调用时的纯截断）。
 
 use share::message::{ContentBlock, Message};
 use share::string_idx::{slice_head, slice_tail};
-
-/// 单条工具结果在截断前的最大字符数。
-pub const MAX_TOOL_RESULT_CHARS: usize = 50_000;
 
 /// 截断后保留的头部预览字符数。
 pub const TRUNCATION_PREVIEW_HEAD: usize = 2_000;
@@ -18,20 +17,9 @@ pub const TRUNCATION_PREVIEW_TAIL: usize = 500;
 /// 超过时优先截断最大的结果。
 pub const MAX_TOOL_RESULTS_PER_MESSAGE_CHARS: usize = 200_000;
 
-// ── offload（存指针）参数 ──────────────────────────────────
-
-/// 超过此字符数时，工具结果落盘到文件，消息里只放预览 + 文件指针。
-pub const OFFLOAD_THRESHOLD_CHARS: usize = 2_000;
-
-/// 落盘后保留的头部预览字符数。
-pub const OFFLOAD_PREVIEW_HEAD: usize = 1_500;
-
-/// 落盘后保留的尾部字符数。
-pub const OFFLOAD_PREVIEW_TAIL: usize = 300;
-
-/// 对单条工具结果进行截断。如果未超过 `MAX_TOOL_RESULT_CHARS` 则原样返回。
+/// 对单条工具结果进行截断。如果未超过 `storage::MAX_TOOL_RESULT_CHARS` 则原样返回。
 pub fn truncate_tool_result(output: &str) -> String {
-    if output.len() <= MAX_TOOL_RESULT_CHARS {
+    if output.len() <= storage::api::MAX_TOOL_RESULT_CHARS {
         return output.to_string();
     }
 
@@ -43,39 +31,6 @@ pub fn truncate_tool_result(output: &str) -> String {
         output.len(),
         head.len(),
         tail.len(),
-    )
-}
-
-/// 将超长工具结果落盘到 `~/.agents/tool_outputs/{session_id}/{tool_call_id}.txt`，
-/// 消息里只保留预览 + 文件指针。
-///
-/// - `output` ≤ `OFFLOAD_THRESHOLD_CHARS` 时原样返回。
-/// - 写盘失败退化为 `truncate_tool_result`（纯截断兜底）。
-///
-/// agent 需要完整内容时可用 Read 工具读取文件指针指向的路径。
-pub fn offload_tool_result(output: &str, tool_call_id: &str, session_id: &str) -> String {
-    if output.len() <= OFFLOAD_THRESHOLD_CHARS {
-        return output.to_string();
-    }
-
-    let dir = share::config::paths::session_tool_outputs_dir(session_id);
-    let path = dir.join(format!("{tool_call_id}.txt"));
-
-    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, output)) {
-        log::warn!(
-            target: crate::LOG_TARGET,
-            "offload_tool_result: 写盘失败 {path:?}: {e}, 退化为截断"
-        );
-        return truncate_tool_result(output);
-    }
-
-    let head = slice_head(output, OFFLOAD_PREVIEW_HEAD);
-    let tail = slice_tail(output, OFFLOAD_PREVIEW_TAIL);
-
-    format!(
-        "{head}\n\n[Full output ({} chars) saved to {}]\nUse the Read tool to view the complete output.\n\n{tail}",
-        output.len(),
-        path.display()
     )
 }
 
@@ -115,7 +70,7 @@ pub fn apply_tool_result_budget(message: &mut Message) {
                 serde_json::Value::String(s) => s.clone(),
                 _ => content.to_string(),
             };
-            if old_text.len() > MAX_TOOL_RESULT_CHARS {
+            if old_text.len() > storage::api::MAX_TOOL_RESULT_CHARS {
                 let truncated = truncate_tool_result(&old_text);
                 total_chars -= old_text.len();
                 total_chars += truncated.len();
@@ -128,7 +83,7 @@ pub fn apply_tool_result_budget(message: &mut Message) {
 /// 对 (id, output, is_error, images) 元组列表中的工具结果进行截断。
 pub fn truncate_tool_results(results: &mut [(String, String, bool, Vec<share::tool::ImageData>)]) {
     for (_id, output, _is_error, _images) in results.iter_mut() {
-        if output.len() > MAX_TOOL_RESULT_CHARS {
+        if output.len() > storage::api::MAX_TOOL_RESULT_CHARS {
             *output = truncate_tool_result(output);
         }
     }
@@ -149,7 +104,7 @@ mod tests {
 
     #[test]
     fn truncate_tool_result_long_text_truncated() {
-        let long = "a".repeat(MAX_TOOL_RESULT_CHARS + 10);
+        let long = "a".repeat(storage::api::MAX_TOOL_RESULT_CHARS + 10);
         let result = truncate_tool_result(&long);
         assert!(result.contains("[... truncated"));
         // should contain head portion

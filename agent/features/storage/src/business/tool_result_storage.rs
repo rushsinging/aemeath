@@ -1,23 +1,23 @@
 //! Tool result persistence — saves large tool outputs to disk instead of keeping them in context.
 //!
 //! When a tool result exceeds `MAX_TOOL_RESULT_CHARS`, the full output is written to
-//! `~/.aemeath/tool-results/{session_id}/{tool_use_id}.txt` and replaced in-context with
-//! a compact `<persisted-output>` reference containing a preview.
+//! `~/.agents/tool-results/{session_id}/{tool_use_id}.txt` and replaced in-context with
+//! a compact `<persisted-output>` reference containing a head + tail preview.
 
 use crate::LOG_TARGET;
 
+use share::config::paths::session_tool_results_dir;
+use share::string_idx::{slice_head, slice_tail};
 use std::path::PathBuf;
 
-const MAX_TOOL_RESULT_CHARS: usize = 50_000;
+/// 单条工具结果在落盘前的最大字符数。超过此值时写盘，消息里只放预览 + 文件指针。
+pub const MAX_TOOL_RESULT_CHARS: usize = 30_000;
 
-/// Preview: how many bytes to keep from the beginning.
-const PREVIEW_SIZE_BYTES: usize = 2_000;
+/// 落盘后保留的头部预览字符数。
+const PREVIEW_HEAD: usize = 2_000;
 
-/// Get the tool-results directory for a session.
-fn tool_results_dir(session_id: &str) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".aemeath").join("tool-results").join(session_id)
-}
+/// 落盘后保留的尾部字符数。
+const PREVIEW_TAIL: usize = 500;
 
 /// Result of persisting a tool output to disk.
 pub struct PersistedResult {
@@ -25,32 +25,10 @@ pub struct PersistedResult {
     pub filepath: PathBuf,
     /// Original size in bytes.
     pub original_size: usize,
-    /// Preview text (first N bytes, cut at newline boundary).
-    pub preview: String,
-}
-
-/// Generate a newline-aware preview of content.
-/// Prefers cutting at a newline if one exists in the last 50% of the window.
-fn generate_preview(content: &str, max_bytes: usize) -> (String, bool) {
-    if content.len() <= max_bytes {
-        return (content.to_string(), false);
-    }
-
-    // Find a safe UTF-8 boundary
-    let mut end = max_bytes;
-    while end > 0 && !content.is_char_boundary(end) {
-        end -= 1;
-    }
-    let truncated = &content[..end];
-
-    // Prefer cutting at a newline in the last 50%
-    if let Some(last_nl) = truncated.rfind('\n') {
-        if last_nl > max_bytes / 2 {
-            return (content[..last_nl].to_string(), true);
-        }
-    }
-
-    (truncated.to_string(), true)
+    /// Head preview text.
+    pub head: String,
+    /// Tail preview text.
+    pub tail: String,
 }
 
 /// Persist a large tool result to disk and return the replacement message.
@@ -75,7 +53,7 @@ pub fn persist_tool_result(
         return None;
     }
 
-    let dir = tool_results_dir(session_id);
+    let dir = session_tool_results_dir(session_id);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         log::warn!(target: LOG_TARGET, "failed to create tool-results dir: {e}");
         return None;
@@ -91,12 +69,11 @@ pub fn persist_tool_result(
         }
     }
 
-    let (preview, _has_more) = generate_preview(output, PREVIEW_SIZE_BYTES);
-
     Some(PersistedResult {
         filepath,
         original_size: output.len(),
-        preview,
+        head: slice_head(output, PREVIEW_HEAD).to_string(),
+        tail: slice_tail(output, PREVIEW_TAIL).to_string(),
     })
 }
 
@@ -112,10 +89,13 @@ pub fn format_persisted_reference(result: &PersistedResult) -> String {
     };
 
     format!(
-        "<persisted-output>\nOutput too large ({size_display}). Full output saved to: {path}\n\nPreview (first {preview_size} bytes):\n{preview}\n...\n</persisted-output>",
+        "<persisted-output>\nOutput too large ({size_display}). Full output saved to: {path}\n\n--- head ({head_len} chars) ---\n{head}\n\n[... {omitted} chars omitted ...]\n\n--- tail ({tail_len} chars) ---\n{tail}\n</persisted-output>",
         path = result.filepath.display(),
-        preview_size = result.preview.len(),
-        preview = result.preview,
+        head_len = result.head.len(),
+        head = result.head,
+        omitted = result.original_size - result.head.len() - result.tail.len(),
+        tail_len = result.tail.len(),
+        tail = result.tail,
     )
 }
 
@@ -141,7 +121,6 @@ pub fn persist_oversized_results(
                 "persisted": {
                     "path": persisted.filepath,
                     "original_size": persisted.original_size,
-                    "preview": persisted.preview,
                 }
             });
             count += 1;
@@ -155,25 +134,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_preview_short() {
-        let (preview, has_more) = generate_preview("hello world", 100);
-        assert_eq!(preview, "hello world");
-        assert!(!has_more);
-    }
-
-    #[test]
-    fn test_generate_preview_long() {
-        let content = "line1\nline2\nline3\nline4\nline5\n".repeat(100);
-        let (preview, has_more) = generate_preview(&content, 50);
-        assert!(has_more);
-        assert!(preview.len() <= 50);
-        // Should be a proper substring of the original content
-        assert!(content.starts_with(&preview));
-    }
-
-    #[test]
     fn test_small_result_not_persisted() {
         assert!(persist_tool_result("test", "id1", "small output").is_none());
+    }
+
+    #[test]
+    fn test_oversized_result_persisted() {
+        let session_id = format!("test-persist-{}", std::process::id());
+        let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
+        let result = persist_tool_result(&session_id, "id-oversized", &oversized);
+        assert!(result.is_some());
+        let persisted = result.unwrap();
+        assert!(persisted.original_size > MAX_TOOL_RESULT_CHARS);
+        assert!(!persisted.head.is_empty());
+        assert!(!persisted.tail.is_empty());
+        assert!(persisted.head.len() <= PREVIEW_HEAD);
+        assert!(persisted.tail.len() <= PREVIEW_TAIL);
+        // 清理
+        let _ = std::fs::remove_dir_all(session_tool_results_dir(&session_id));
     }
 
     #[test]
@@ -181,12 +159,15 @@ mod tests {
         let result = PersistedResult {
             filepath: PathBuf::from("/tmp/test.txt"),
             original_size: 100_000,
-            preview: "first line\nsecond line".to_string(),
+            head: "first line\nsecond line".to_string(),
+            tail: "last line".to_string(),
         };
         let formatted = format_persisted_reference(&result);
         assert!(formatted.contains("<persisted-output>"));
         assert!(formatted.contains("100.0 KB"));
         assert!(formatted.contains("/tmp/test.txt"));
         assert!(formatted.contains("first line"));
+        assert!(formatted.contains("last line"));
+        assert!(formatted.contains("chars omitted"));
     }
 }

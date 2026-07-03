@@ -16,7 +16,7 @@ pub const GUIDANCE_DIR_NAME: &str = "guidance";
 pub const MEMORY_DIR_NAME: &str = "memory";
 pub const SESSIONS_DIR_NAME: &str = "sessions";
 pub const HOOKS_DIR_NAME: &str = "hooks";
-pub const TOOL_OUTPUTS_DIR_NAME: &str = "tool_outputs";
+pub const TOOL_RESULTS_DIR_NAME: &str = "tool-results";
 pub const MCP_CONFIG_FILE: &str = "mcp.json";
 pub const HISTORY_FILE: &str = "history.json";
 pub const COST_HISTORY_FILE: &str = "cost_history.json";
@@ -144,16 +144,16 @@ pub fn global_sessions_dir() -> PathBuf {
     global_agents_dir().join(SESSIONS_DIR_NAME)
 }
 
-/// `~/.agents/tool_outputs/` — 超长工具结果的落盘根目录。
-pub fn global_tool_outputs_dir() -> PathBuf {
-    global_agents_dir().join(TOOL_OUTPUTS_DIR_NAME)
+/// `~/.agents/tool-results/` — 超长工具结果的落盘根目录。
+pub fn global_tool_results_dir() -> PathBuf {
+    global_agents_dir().join(TOOL_RESULTS_DIR_NAME)
 }
 
-/// `~/.agents/tool_outputs/{session_id}/` — 某个 session 的工具结果子目录。
+/// `~/.agents/tool-results/{session_id}/` — 某个 session 的工具结果子目录。
 ///
 /// 生命周期与 session 绑定：session 删除时一并清理。
-pub fn session_tool_outputs_dir(session_id: &str) -> PathBuf {
-    global_tool_outputs_dir().join(session_id)
+pub fn session_tool_results_dir(session_id: &str) -> PathBuf {
+    global_tool_results_dir().join(session_id)
 }
 
 pub fn global_hooks_dir() -> PathBuf {
