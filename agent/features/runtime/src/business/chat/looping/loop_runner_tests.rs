@@ -138,6 +138,8 @@ impl RecordingSink {
             RuntimeStreamEvent::ModelSwitched { .. } => "ModelSwitched".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
+            RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
+            RuntimeStreamEvent::SessionResumed { .. } => "SessionResumed".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }

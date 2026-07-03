@@ -7,9 +7,7 @@ use crate::{
     ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView, TaskSummary,
 };
 
-use crate::commands::{
-    CommandContext, CommandResult, ContextEstimate, ModelSwitchParams, ModelSwitchResult,
-};
+use crate::commands::{ContextEstimate, ModelSwitchParams, ModelSwitchResult};
 
 /// Agent Runtime 的统一客户端 trait。
 ///
@@ -108,17 +106,6 @@ pub trait AgentClient: Send + Sync + 'static {
         &self,
         output: ReflectionOutputView,
     ) -> Result<String, super::SdkError>;
-
-    // ─── 命令系统 ───
-
-    /// 执行斜杠命令。Runtime 查找 CommandRegistry 并返回结果。
-    /// CLI 根据返回的 CommandAction 执行 TUI 副作用（Exit/Clear 等）。
-    async fn execute_command(
-        &self,
-        name: &str,
-        args: &str,
-        ctx: CommandContext,
-    ) -> Result<CommandResult, super::SdkError>;
 
     /// 估算当前上下文使用量。
     async fn estimate_context(

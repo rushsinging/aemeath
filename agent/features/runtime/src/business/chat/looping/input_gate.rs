@@ -52,9 +52,40 @@ pub struct ControlCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingCommand {
     Compact,
-    SwitchModel { params: sdk::ModelSwitchParams },
-    SetThinking { desired: Option<bool> },
+    SwitchModel {
+        params: sdk::ModelSwitchParams,
+    },
+    SetThinking {
+        desired: Option<bool>,
+    },
     EstimateContext,
+    /// 查询类命令（/cost /status /config /stats）。
+    QueryCost {
+        args: String,
+    },
+    QueryStatus,
+    QueryConfig {
+        args: String,
+    },
+    QueryStats {
+        args: String,
+    },
+    /// 初始化项目（/init）。
+    InitProject {
+        force: bool,
+    },
+    /// 管理会话（/session）。
+    ManageSession {
+        args: String,
+    },
+    /// 管理记忆（/memory 非 remind）。
+    ManageMemory {
+        args: String,
+    },
+    /// 恢复会话（/resume <id>）。
+    ResumeSession {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,6 +311,86 @@ where
                 } else {
                     // busy：放回 buffer，等回合结束回到 idle 再处理。
                     buffer.push(ChatInputEvent::EstimateContext);
+                }
+            }
+            ChatInputEvent::QueryCost { args } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::QueryCost { args });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::QueryCost { args });
+                }
+            }
+            ChatInputEvent::QueryStatus => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::QueryStatus);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::QueryStatus);
+                }
+            }
+            ChatInputEvent::QueryConfig { args } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::QueryConfig { args });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::QueryConfig { args });
+                }
+            }
+            ChatInputEvent::QueryStats { args } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::QueryStats { args });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::QueryStats { args });
+                }
+            }
+            ChatInputEvent::InitProject { force } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::InitProject { force });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::InitProject { force });
+                }
+            }
+            ChatInputEvent::ManageSession { args } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ManageSession { args });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::ManageSession { args });
+                }
+            }
+            ChatInputEvent::ManageMemory { args } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ManageMemory { args });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::ManageMemory { args });
+                }
+            }
+            ChatInputEvent::ResumeSession { id } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ResumeSession { id });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::ResumeSession { id });
                 }
             }
         }

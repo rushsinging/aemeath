@@ -195,6 +195,17 @@ pub enum RuntimeStreamEvent {
         estimate: sdk::ContextEstimate,
         message_count: usize,
     },
+    /// 查询命令执行完成，返回纯文本结果（#497）。
+    CommandResultText {
+        text: String,
+        is_error: bool,
+    },
+    /// 会话恢复完成通知（#497）。
+    SessionResumed {
+        messages: Vec<share::message::Message>,
+        session_id: String,
+        created_at: u64,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

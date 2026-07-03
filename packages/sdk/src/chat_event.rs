@@ -172,4 +172,16 @@ pub enum ChatEvent {
         estimate: crate::ContextEstimate,
         message_count: usize,
     },
+    /// 查询命令执行完成，返回纯文本结果（#497）。
+    /// TUI 据此 append_system_notice 或 append_error_notice。
+    CommandResultText {
+        text: String,
+        is_error: bool,
+    },
+    /// 会话恢复完成通知（#497）。TUI 据此更新 messages 和状态。
+    SessionResumed {
+        messages: Vec<ChatMessage>,
+        session_id: String,
+        created_at: u64,
+    },
 }

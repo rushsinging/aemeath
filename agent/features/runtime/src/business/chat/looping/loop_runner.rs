@@ -293,6 +293,85 @@ where
                         .await;
                         continue;
                     }
+                    PendingCommand::QueryCost { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_cost(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStatus => {
+                        let config = share::config::Config::default();
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_status(
+                            &config,
+                            &session_id,
+                            &cwd_str,
+                            client.model_name(),
+                        );
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryConfig { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) = super::idle_commands::execute_config(&args, &config);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStats { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) =
+                            super::idle_commands::execute_stats(&args, &session_id, &config).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::InitProject { force } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageSession { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_session(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageMemory { args } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) =
+                            super::idle_commands::execute_memory(&args, &cwd_str).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ResumeSession { id } => {
+                        match crate::business::session::load_session(&id).await {
+                            Ok(snapshot) => {
+                                messages = snapshot.messages;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::SessionResumed {
+                                        messages: messages.clone(),
+                                        session_id: id.clone(),
+                                        created_at: 0u64,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Failed to resume session {}: {}", id, e),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
@@ -485,6 +564,85 @@ where
                         .await;
                         continue;
                     }
+                    PendingCommand::QueryCost { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_cost(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStatus => {
+                        let config = share::config::Config::default();
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_status(
+                            &config,
+                            &session_id,
+                            &cwd_str,
+                            client.model_name(),
+                        );
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryConfig { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) = super::idle_commands::execute_config(&args, &config);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::QueryStats { args } => {
+                        let config = share::config::Config::default();
+                        let (text, is_error) =
+                            super::idle_commands::execute_stats(&args, &session_id, &config).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::InitProject { force } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageSession { args } => {
+                        let (text, is_error) =
+                            super::idle_commands::execute_session(&args, &session_id).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ManageMemory { args } => {
+                        let cwd_str = cwd.display().to_string();
+                        let (text, is_error) =
+                            super::idle_commands::execute_memory(&args, &cwd_str).await;
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                    }
+                    PendingCommand::ResumeSession { id } => {
+                        match crate::business::session::load_session(&id).await {
+                            Ok(snapshot) => {
+                                messages = snapshot.messages;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::SessionResumed {
+                                        messages: messages.clone(),
+                                        session_id: id.clone(),
+                                        created_at: 0u64,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Failed to resume session {}: {}", id, e),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -613,6 +771,109 @@ where
                             )
                             .await;
                             continue;
+                        }
+                        PendingCommand::QueryCost { args } => {
+                            let (text, is_error) =
+                                super::idle_commands::execute_cost(&args, &session_id).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::QueryStatus => {
+                            let config = share::config::Config::default();
+                            let cwd_str = cwd.display().to_string();
+                            let (text, is_error) = super::idle_commands::execute_status(
+                                &config,
+                                &session_id,
+                                &cwd_str,
+                                client.model_name(),
+                            );
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::QueryConfig { args } => {
+                            let config = share::config::Config::default();
+                            let (text, is_error) =
+                                super::idle_commands::execute_config(&args, &config);
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::QueryStats { args } => {
+                            let config = share::config::Config::default();
+                            let (text, is_error) =
+                                super::idle_commands::execute_stats(&args, &session_id, &config)
+                                    .await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::InitProject { force } => {
+                            let cwd_str = cwd.display().to_string();
+                            let (text, is_error) =
+                                super::idle_commands::execute_init(&cwd_str, force);
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::ManageSession { args } => {
+                            let (text, is_error) =
+                                super::idle_commands::execute_session(&args, &session_id).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::ManageMemory { args } => {
+                            let cwd_str = cwd.display().to_string();
+                            let (text, is_error) =
+                                super::idle_commands::execute_memory(&args, &cwd_str).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        PendingCommand::ResumeSession { id } => {
+                            match crate::business::session::load_session(&id).await {
+                                Ok(snapshot) => {
+                                    messages = snapshot.messages;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::SessionResumed {
+                                            messages: messages.clone(),
+                                            session_id: id.clone(),
+                                            created_at: 0u64,
+                                        })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Failed to resume session {}: {}", id, e),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
                         }
                     },
                     IdleResult::Shutdown => {
@@ -1018,6 +1279,115 @@ where
                                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                                 continue;
                             }
+                            PendingCommand::QueryCost { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_cost(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStatus => {
+                                let config = share::config::Config::default();
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) = super::idle_commands::execute_status(
+                                    &config,
+                                    &session_id,
+                                    &cwd_str,
+                                    client.model_name(),
+                                );
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryConfig { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_config(&args, &config);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStats { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) = super::idle_commands::execute_stats(
+                                    &args,
+                                    &session_id,
+                                    &config,
+                                )
+                                .await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::InitProject { force } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_init(&cwd_str, force);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageSession { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_session(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageMemory { args } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ResumeSession { id } => {
+                                match crate::business::session::load_session(&id).await {
+                                    Ok(snapshot) => {
+                                        messages = snapshot.messages;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::SessionResumed {
+                                                messages: messages.clone(),
+                                                session_id: id.clone(),
+                                                created_at: 0u64,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!(
+                                                    "Failed to resume session {}: {}",
+                                                    id, e
+                                                ),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
                         },
                     }
                 }
@@ -1164,6 +1534,117 @@ where
                                     .await;
                                     continue;
                                 }
+                                PendingCommand::QueryCost { args } => {
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_cost(&args, &session_id)
+                                            .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::QueryStatus => {
+                                    let config = share::config::Config::default();
+                                    let cwd_str = cwd.display().to_string();
+                                    let (text, is_error) = super::idle_commands::execute_status(
+                                        &config,
+                                        &session_id,
+                                        &cwd_str,
+                                        client.model_name(),
+                                    );
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::QueryConfig { args } => {
+                                    let config = share::config::Config::default();
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_config(&args, &config);
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::QueryStats { args } => {
+                                    let config = share::config::Config::default();
+                                    let (text, is_error) = super::idle_commands::execute_stats(
+                                        &args,
+                                        &session_id,
+                                        &config,
+                                    )
+                                    .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::InitProject { force } => {
+                                    let cwd_str = cwd.display().to_string();
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_init(&cwd_str, force);
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::ManageSession { args } => {
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_session(&args, &session_id)
+                                            .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::ManageMemory { args } => {
+                                    let cwd_str = cwd.display().to_string();
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
+                                PendingCommand::ResumeSession { id } => {
+                                    match crate::business::session::load_session(&id).await {
+                                        Ok(snapshot) => {
+                                            messages = snapshot.messages;
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::SessionResumed {
+                                                    messages: messages.clone(),
+                                                    session_id: id.clone(),
+                                                    created_at: 0u64,
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: format!(
+                                                        "Failed to resume session {}: {}",
+                                                        id, e
+                                                    ),
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
+                                }
                             },
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1261,6 +1742,115 @@ where
                                 )
                                 .await;
                                 continue;
+                            }
+                            PendingCommand::QueryCost { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_cost(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStatus => {
+                                let config = share::config::Config::default();
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) = super::idle_commands::execute_status(
+                                    &config,
+                                    &session_id,
+                                    &cwd_str,
+                                    client.model_name(),
+                                );
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryConfig { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_config(&args, &config);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::QueryStats { args } => {
+                                let config = share::config::Config::default();
+                                let (text, is_error) = super::idle_commands::execute_stats(
+                                    &args,
+                                    &session_id,
+                                    &config,
+                                )
+                                .await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::InitProject { force } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_init(&cwd_str, force);
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageSession { args } => {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_session(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ManageMemory { args } => {
+                                let cwd_str = cwd.display().to_string();
+                                let (text, is_error) =
+                                    super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
+                            PendingCommand::ResumeSession { id } => {
+                                match crate::business::session::load_session(&id).await {
+                                    Ok(snapshot) => {
+                                        messages = snapshot.messages;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::SessionResumed {
+                                                messages: messages.clone(),
+                                                session_id: id.clone(),
+                                                created_at: 0u64,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!(
+                                                    "Failed to resume session {}: {}",
+                                                    id, e
+                                                ),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
                             }
                         },
                         IdleResult::Shutdown => {

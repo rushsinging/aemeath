@@ -6,7 +6,6 @@ mod suggestions;
 
 use crate::tui::app::UiEvent;
 use crate::tui::effect::effect::Effect;
-use crate::tui::model::conversation::intent::*;
 
 /// 内置命令名常量（不再依赖 runtime::api）
 mod cmd {
@@ -188,63 +187,137 @@ impl super::App {
                 self.model.input.document.remove_all_images();
                 self.append_system_notice("[pending images cleared]");
             }
-            // Try to execute via AgentClient (delegates to CommandRegistry in runtime)
+            cmd if cmd == "/version" => {
+                let info = format!(
+                    "aemeath v{}
+
+Build info:
+  Rust version: stable
+  Target: {}",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::ARCH
+                );
+                self.append_system_notice(&info);
+            }
+            cmd if cmd == "/doctor" => {
+                let api_key =
+                    std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("CLAUDE_API_KEY"));
+                let home = dirs::home_dir();
+                let info = format!(
+                    "🔧 Doctor\n\n                     \
+                     API Key: {}\n                     \
+                     Home dir: {}\n                     \
+                     Architecture: {}",
+                    if api_key.is_ok() {
+                        "✅ set"
+                    } else {
+                        "❌ not set"
+                    },
+                    home.map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    std::env::consts::ARCH,
+                );
+                self.append_system_notice(&info);
+            }
+            cmd if cmd == "/rewind" => {
+                // /rewind <N> → 触发 compact（保留 N 条消息的语义通过 compact 实现）
+                if self.chat.input_event_tx.is_some() {
+                    self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+                }
+            }
+            cmd if cmd == "/cost" => {
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::QueryCost { args });
+                }
+            }
+            cmd if cmd == "/status" => {
+                if self.chat.input_event_tx.is_some() {
+                    self.chat.push_input_event(sdk::ChatInputEvent::QueryStatus);
+                }
+            }
+            cmd if cmd == "/config" => {
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::QueryConfig { args });
+                }
+            }
+            cmd if cmd == "/stats" => {
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::QueryStats { args });
+                }
+            }
+            cmd if cmd == "/init" => {
+                let force = parts.get(1).map(|p| *p == "force").unwrap_or(false);
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::InitProject { force });
+                }
+            }
+            cmd if cmd == "/session" => {
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::ManageSession { args });
+                }
+            }
+            cmd if cmd == "/resume" => {
+                if let Some(id) = parts.get(1) {
+                    if self.chat.input_event_tx.is_some() {
+                        self.chat
+                            .push_input_event(sdk::ChatInputEvent::ResumeSession {
+                                id: id.to_string(),
+                            });
+                    }
+                }
+            }
+            cmd if cmd == "/model" && has_args => {
+                // /model <name> — 解析参数并走 SwitchModel 事件流
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                if let Some(prompt) = self.handle_model_with_args(&args).await {
+                    return Some(prompt);
+                }
+            }
+            // /memory 的 remind 子命令已被上面截胡
+            // 非 remind 子命令走事件流
+            cmd if cmd == "/memory" => {
+                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                // 排除 remind 子命令（已被上面截胡）
+                let first_arg = parts.get(1).copied().unwrap_or("");
+                if first_arg != "remind"
+                    && first_arg != "reminder"
+                    && first_arg != "reminders"
+                    && self.chat.input_event_tx.is_some()
+                {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::ManageMemory { args });
+                }
+            }
             _ => {
+                // Skill alias lookup
                 let cmd_name = cmd.trim_start_matches('/');
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-
-                if let Some(ref ac) = self.agent_client {
-                    let ctx = sdk::CommandContext {
-                        cwd: self.session.cwd.to_string_lossy().to_string(),
-                        session_id: self.session.session_id().to_string(),
-                        models: vec![], // model list not needed for base commands
-                        current_model: self.session.current_model_display.clone(),
-                    };
-                    match ac.execute_command(cmd_name, &args, ctx).await {
-                        Ok(sdk::CommandResult::Success(msg)) => {
-                            self.append_system_notice(msg);
-                        }
-                        Ok(sdk::CommandResult::Error(msg)) => {
-                            self.append_error_notice(msg);
-                        }
-                        Ok(sdk::CommandResult::Action(action)) => {
-                            if let Some(prompt) = self.handle_command_action(action).await {
-                                return Some(prompt);
-                            }
-                        }
-                        Ok(sdk::CommandResult::Confirm { message, .. }) => {
-                            self.append_system_notice(format!("[confirm: {}]", message));
-                        }
-                        Err(_) => {
-                            // Fallback to skill alias lookup
-                            if let Some(skill) = self.find_skill_by_alias(cmd_name) {
-                                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                                let mut content = skill.content.clone();
-                                if !args.is_empty() {
-                                    content = format!("{content}\n\nArguments: {args}");
-                                }
-                                self.append_system_notice(format!("[skill: {}]", skill.name));
-                                return Some(content);
-                            }
-                            self.append_error_notice(format!("Unknown command: {cmd}"));
-                        }
-                    }
-                } else if let Some(skill) = self.find_skill_by_alias(cmd_name) {
-                    let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
+                if let Some(skill) = self.find_skill_by_alias(cmd_name) {
                     let mut content = skill.content.clone();
                     if !args.is_empty() {
-                        content = format!("{content}\n\nArguments: {args}");
+                        content = format!(
+                            "{content}
+
+Arguments: {args}"
+                        );
                     }
                     self.append_system_notice(format!("[skill: {}]", skill.name));
                     return Some(content);
-                } else {
-                    self.append_error_notice(format!("Unknown command: {cmd}"));
                 }
+                self.append_error_notice(format!("Unknown command: {cmd}"));
             }
         }
         None
     }
-
     /// #391 方案 B：清空会话。
     ///
     /// 即时清 TUI 状态（messages/output/输入框），同时经 `ChatInputEvent::Reset`
@@ -269,157 +342,48 @@ impl super::App {
         }
     }
 
-    /// Handle a command action returned by the AgentClient.
-    /// Returns Some(prompt) if a message should be sent to the LLM.
-    async fn handle_command_action(&mut self, action: sdk::CommandAction) -> Option<String> {
-        match action {
-            sdk::CommandAction::Exit => {
-                self.layout.request_exit();
-                None
-            }
-            sdk::CommandAction::Clear => {
-                self.clear_conversation().await;
-                self.append_system_notice("[cleared]");
-                None
-            }
-            sdk::CommandAction::Compact => {
-                // #497 子 issue 0：走 runtime 事件流，与 /compact 直接命令一致。
-                if self.chat.input_event_tx.is_some() {
-                    self.chat.push_input_event(sdk::ChatInputEvent::Compact);
-                } else if let Some(ref ac) = self.agent_client {
-                    // loop 未运行 → fallback
-                    match ac
-                        .compact_messages(
-                            self.chat.messages.clone(),
-                            &self.chat.system_prompt_text,
-                            self.chat.context_size,
-                        )
-                        .await
-                    {
-                        Ok((compacted, was_compacted)) => {
-                            if was_compacted {
-                                self.chat.messages = compacted;
-                                self.append_system_notice("[compacted]");
-                            } else {
-                                self.append_system_notice("[no compaction needed]");
-                            }
+    /// 解析 /model <name> 参数，返回 Some(prompt) 如果需要发起 LLM 调用。
+    async fn handle_model_with_args(&mut self, args: &str) -> Option<String> {
+        let arg = args.trim();
+        if arg.is_empty() {
+            return None;
+        }
+        // 尝试从配置中查找模型
+        if let Some(ref ac) = self.agent_client {
+            match ac.list_models().await {
+                Ok(models) => {
+                    // 精确匹配或模糊匹配
+                    let found = models
+                        .iter()
+                        .find(|m| m.id == arg || m.id.ends_with(arg) || m.name == arg);
+                    if let Some(model) = found {
+                        let params = sdk::ModelSwitchParams {
+                            provider_name: model.provider.clone(),
+                            model_id: model.id.clone(),
+                            model_name: model.name.clone(),
+                            base_url: String::new(),
+                            api_key: String::new(),
+                            driver: String::new(),
+                            max_tokens: model.max_tokens,
+                            context_window: model.context_window,
+                            reasoning: None,
+                        };
+                        if self.chat.input_event_tx.is_some() {
+                            self.chat
+                                .push_input_event(sdk::ChatInputEvent::SwitchModel { params });
                         }
-                        Err(e) => {
-                            self.append_error_notice(format!("compact failed: {}", e));
-                        }
+                        return None;
                     }
+                    self.append_error_notice(format!(
+                        "Model '{}' not found. Use /model list to see available models.",
+                        arg
+                    ));
                 }
-                None
-            }
-            sdk::CommandAction::SwitchModel {
-                provider_name,
-                model_id,
-                model_name,
-                base_url,
-                api_key,
-                driver,
-                max_tokens,
-                context_window,
-                reasoning,
-            } => {
-                let params = sdk::ModelSwitchParams {
-                    provider_name,
-                    model_id,
-                    model_name,
-                    base_url,
-                    api_key,
-                    driver,
-                    max_tokens,
-                    context_window,
-                    reasoning,
-                };
-                if self.chat.input_event_tx.is_some() {
-                    // #497 子 issue 1：走 runtime 事件流
-                    // （ChatInputEvent::SwitchModel → idle 分支 → ModelSwitched 事件），
-                    // 不再直接调 switch_model().await。TUI 状态更新由 UiEvent::ModelSwitched 驱动。
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::SwitchModel { params });
-                } else if let Some(ref ac) = self.agent_client {
-                    // loop 未运行（如启动前）→ fallback 到直接调用
-                    match ac.switch_model(params).await {
-                        Ok(result) => {
-                            if result.context_window > 0 {
-                                self.chat.context_size = result.context_window;
-                                self.model
-                                    .conversation
-                                    .apply(SetContextSize(result.context_window as u64));
-                            }
-                            self.session.current_model_display = result.display_name.clone();
-                            // model 真相归 ConversationModel，StatusBar 渲染时直接消费 StatusViewModel。
-                            self.model.conversation.apply(SetProviderModel {
-                                provider: self.model.conversation.provider.clone(),
-                                model_id: Some(result.display_name.clone()),
-                            });
-                            if let Some(ra) = result.reasoning_active {
-                                self.model.conversation.apply(SetThinking(ra));
-                            }
-                            self.append_system_notice(format!(
-                                "[switched to {}]",
-                                result.display_name
-                            ));
-                        }
-                        Err(e) => {
-                            self.append_error_notice(format!("model switch failed: {}", e));
-                        }
-                    }
+                Err(e) => {
+                    self.append_error_notice(format!("Failed to list models: {}", e));
                 }
-                None
-            }
-            sdk::CommandAction::RunSkill(content) => {
-                self.append_system_notice("[running skill...]");
-                Some(content)
-            }
-            sdk::CommandAction::SetThinking(desired) => {
-                // #497 子任务 4：走 runtime 事件流
-                //（ChatInputEvent::SetThinking → idle 分支 → ThinkingChanged 事件），
-                // 不再直接调 set_thinking().await。TUI 状态更新由 UiEvent::ThinkingChanged 驱动。
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::SetThinking { desired });
-                } else if let Some(ref ac) = self.agent_client {
-                    // loop 未运行（如启动前）→ fallback 到直接调用
-                    match ac.set_thinking(desired).await {
-                        Ok(new_state) => {
-                            let label = if new_state { "ON" } else { "OFF" };
-                            self.append_system_notice(format!("[thinking mode: {}]", label));
-                            self.model.conversation.apply(SetThinking(new_state));
-                        }
-                        Err(e) => {
-                            self.append_error_notice(format!("set thinking failed: {}", e));
-                        }
-                    }
-                }
-                None
-            }
-            sdk::CommandAction::ResumeSession(session_id) => {
-                if let Some(ref ac) = self.agent_client {
-                    match ac.load_session(&session_id).await {
-                        Ok(snapshot) => {
-                            self.resume_session_messages(
-                                &session_id,
-                                snapshot.messages,
-                                snapshot.created_at.unwrap_or_default(),
-                            );
-                        }
-                        Err(e) => {
-                            self.append_error_notice(format!(
-                                "Failed to resume session {}: {}",
-                                session_id, e
-                            ));
-                        }
-                    }
-                }
-                None
-            }
-            _ => {
-                self.append_system_notice(format!("[action: {:?}]", action));
-                None
             }
         }
+        None
     }
 }

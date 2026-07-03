@@ -134,15 +134,6 @@ impl sdk::AgentClient for BlockingReflectionClient {
         }
     }
 
-    async fn execute_command(
-        &self,
-        _name: &str,
-        _args: &str,
-        _ctx: sdk::CommandContext,
-    ) -> Result<sdk::CommandResult, sdk::SdkError> {
-        Ok(sdk::CommandResult::Success("ok".to_string()))
-    }
-
     async fn estimate_context(
         &self,
         _messages: &[sdk::ChatMessage],

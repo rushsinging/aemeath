@@ -363,6 +363,24 @@ pub(crate) fn runtime_event_to_sdk_event(
             estimate,
             message_count,
         },
+        crate::business::chat::RuntimeStreamEvent::CommandResultText { text, is_error } => {
+            ChatEvent::CommandResultText { text, is_error }
+        }
+        crate::business::chat::RuntimeStreamEvent::SessionResumed {
+            messages,
+            session_id,
+            created_at,
+        } => {
+            let sdk_messages = messages
+                .into_iter()
+                .map(super::mapping::message_to_sdk)
+                .collect();
+            ChatEvent::SessionResumed {
+                messages: sdk_messages,
+                session_id,
+                created_at,
+            }
+        }
     }
 }
 

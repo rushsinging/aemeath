@@ -1,27 +1,32 @@
 //! Slash command metadata exposed to TUI completion + command execution DTOs.
 
-use serde::{Deserialize, Serialize};
-
 // ─── Builtin command metadata (TUI autocomplete) ───
 
 pub fn builtin_commands() -> Vec<(String, String, Vec<String>)> {
     [
-        ("help", "Show available commands", vec!["h"]),
+        ("help", "Show available commands", vec![]),
         ("clear", "Clear the current conversation", vec![]),
         ("compact", "Compact the current conversation", vec![]),
         ("usage", "Show current token usage", vec![]),
         ("model", "Switch model", vec![]),
-        ("models", "List configured models", vec![]),
-        ("resume", "Resume a previous session", vec![]),
-        ("sessions", "List previous sessions", vec![]),
-        ("save", "Save current session", vec![]),
         ("context", "Show context window usage", vec![]),
+        ("cost", "Show API cost statistics", vec![]),
+        ("status", "Show current session status", vec![]),
+        ("config", "Manage configuration settings", vec![]),
+        ("stats", "Show statistics", vec![]),
+        ("init", "Initialize project", vec![]),
+        ("session", "Manage sessions", vec![]),
+        ("resume", "Resume a previous session", vec![]),
+        ("memory", "Manage memory", vec![]),
+        ("version", "Show version information", vec![]),
+        ("doctor", "Run system diagnostics", vec![]),
+        ("rewind", "Rewind conversation", vec![]),
+        ("save", "Save current session", vec![]),
         ("reflect", "Run reflection", vec![]),
-        ("memory", "Manage memory", vec!["mem"]),
         ("paste", "Paste image from clipboard", vec![]),
         ("images", "List pending images", vec![]),
         ("clear-images", "Clear pending images", vec![]),
-        ("exit", "Exit the application", vec!["quit"]),
+        ("exit", "Exit the application", vec![]),
     ]
     .into_iter()
     .map(|(name, description, aliases)| {
@@ -35,73 +40,6 @@ pub fn builtin_commands() -> Vec<(String, String, Vec<String>)> {
 }
 
 // ─── Command execution types (SDK DTO) ───
-
-/// Context passed from CLI to Runtime for command execution.
-#[derive(Debug, Clone)]
-pub struct CommandContext {
-    /// Current working directory
-    pub cwd: String,
-    /// Current session ID
-    pub session_id: String,
-    /// Available model summaries (for model-switch autocomplete etc.)
-    pub models: Vec<super::ModelSummary>,
-    /// Current model display name
-    pub current_model: String,
-}
-
-/// Result of executing a command in Runtime.
-#[derive(Debug, Clone)]
-pub enum CommandResult {
-    /// Command produced output text
-    Success(String),
-    /// Command requires caller to handle an action
-    Action(CommandAction),
-    /// Command failed
-    Error(String),
-    /// Command needs confirmation
-    Confirm {
-        message: String,
-        action: ConfirmAction,
-    },
-}
-
-/// Side-effect actions that Runtime commands want the CLI to perform.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CommandAction {
-    Exit,
-    Clear,
-    Compact,
-    /// Resume a previous session
-    ResumeSession(String),
-    NewSession,
-    ChangeMode(String),
-    /// Switch to a different model (Runtime builds the new client)
-    SwitchModel {
-        provider_name: String,
-        model_id: String,
-        model_name: String,
-        base_url: String,
-        api_key: String,
-        driver: String,
-        max_tokens: u32,
-        context_window: usize,
-        reasoning: Option<bool>,
-    },
-    /// Run a skill (content injected as user message)
-    RunSkill(String),
-    /// Toggle / set reasoning mode (None = toggle)
-    SetThinking(Option<bool>),
-}
-
-/// Confirmation-required actions from commands.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ConfirmAction {
-    DeleteSession(String),
-    ResetConfig,
-    ClearCostHistory,
-}
-
-// ─── Context estimation (SDK DTO) ───
 
 /// Result of estimating context window usage.
 #[derive(Debug, Clone, Copy)]

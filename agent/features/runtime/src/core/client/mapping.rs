@@ -319,69 +319,6 @@ pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Mes
     }
 }
 
-/// 将 runtime CommandResult 映射为 SDK 版本。
-pub(crate) fn map_command_result(
-    result: crate::core::command::CommandResult,
-) -> sdk::CommandResult {
-    match result {
-        crate::core::command::CommandResult::Success(msg) => sdk::CommandResult::Success(msg),
-        crate::core::command::CommandResult::Error(msg) => sdk::CommandResult::Error(msg),
-        crate::core::command::CommandResult::Action(action) => {
-            sdk::CommandResult::Action(map_command_action(action))
-        }
-        crate::core::command::CommandResult::Confirm { message, action } => {
-            sdk::CommandResult::Confirm {
-                message,
-                action: map_confirm_action(action),
-            }
-        }
-    }
-}
-
-fn map_command_action(action: crate::core::command::CommandAction) -> sdk::CommandAction {
-    use crate::core::command::CommandAction as Rt;
-    match action {
-        Rt::Exit => sdk::CommandAction::Exit,
-        Rt::Clear => sdk::CommandAction::Clear,
-        Rt::Compact => sdk::CommandAction::Compact,
-        Rt::ResumeSession(id) => sdk::CommandAction::ResumeSession(id),
-        Rt::NewSession => sdk::CommandAction::NewSession,
-        Rt::ChangeMode(mode) => sdk::CommandAction::ChangeMode(mode),
-        Rt::SwitchModel {
-            provider_name,
-            model_id,
-            model_name,
-            base_url,
-            api_key,
-            driver,
-            max_tokens,
-            context_window,
-            reasoning,
-        } => sdk::CommandAction::SwitchModel {
-            provider_name,
-            model_id,
-            model_name,
-            base_url,
-            api_key,
-            driver,
-            max_tokens,
-            context_window,
-            reasoning,
-        },
-        Rt::RunSkill(content) => sdk::CommandAction::RunSkill(content),
-        Rt::SetThinking(desired) => sdk::CommandAction::SetThinking(desired),
-    }
-}
-
-fn map_confirm_action(action: crate::core::command::ConfirmAction) -> sdk::ConfirmAction {
-    use crate::core::command::ConfirmAction as Rt;
-    match action {
-        Rt::DeleteSession(id) => sdk::ConfirmAction::DeleteSession(id),
-        Rt::ResetConfig => sdk::ConfirmAction::ResetConfig,
-        Rt::ClearCostHistory => sdk::ConfirmAction::ClearCostHistory,
-    }
-}
-
 pub(crate) fn model_display(source_key: &str, model_name: &str, model_id: &str) -> String {
     let display_name = if model_name.is_empty() {
         model_id

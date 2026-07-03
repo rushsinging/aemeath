@@ -337,6 +337,22 @@ impl App {
                     self.append_system_notice("[auto-compaction will trigger at 80%]");
                 }
             }
+            UiEvent::CommandResultText { text, is_error } => {
+                if is_error {
+                    self.append_error_notice(&text);
+                } else {
+                    self.append_system_notice(&text);
+                }
+            }
+            UiEvent::SessionResumed {
+                messages,
+                session_id,
+                ..
+            } => {
+                self.chat.messages = messages;
+                self.session.rename_session(&session_id);
+                self.append_system_notice(format!("[resumed session: {}]", session_id));
+            }
             UiEvent::Done { .. } => {
                 effects.extend(self.handle_done(ui_tx, None));
                 self.chat.clear_processing_handle();

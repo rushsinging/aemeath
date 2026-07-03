@@ -65,6 +65,8 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ModelSwitched { .. } => "ModelSwitched",
         UiEvent::ThinkingChanged { .. } => "ThinkingChanged",
         UiEvent::ContextEstimated { .. } => "ContextEstimated",
+        UiEvent::CommandResultText { .. } => "CommandResultText",
+        UiEvent::SessionResumed { .. } => "SessionResumed",
     }
 }
 

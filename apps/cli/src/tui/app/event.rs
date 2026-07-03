@@ -168,5 +168,17 @@ pub enum AppEvent {
         estimate: sdk::ContextEstimate,
         message_count: usize,
     },
+    /// 查询命令执行完成，返回纯文本结果（#497）。
+    CommandResultText {
+        text: String,
+        is_error: bool,
+    },
+    /// 会话恢复完成（#497）。TUI 据此更新 messages。
+    SessionResumed {
+        messages: Vec<sdk::ChatMessage>,
+        session_id: String,
+        #[allow(dead_code)]
+        created_at: u64,
+    },
 }
 pub type UiEvent = AppEvent;

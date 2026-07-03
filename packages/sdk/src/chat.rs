@@ -79,6 +79,29 @@ pub enum ChatInputEvent {
     /// 由 `/context` 触发，走 runtime 事件流（#497）。runtime idle 分支用 loop 内部
     /// messages + system_prompt 估算，结果通过 `ContextEstimated` 事件回传 TUI。
     EstimateContext,
+    /// 查询费用信息。由 `/cost` 触发。
+    /// args: "" / "session" = 当前会话, "total" = 全部, "clear" = 清除历史
+    QueryCost { args: String },
+    /// 查询当前会话状态。由 `/status` 触发。
+    QueryStatus,
+    /// 查询/管理配置。由 `/config` 触发。
+    /// args: "" = 查看全部, "get <key>" = 获取, "reset" = 重置
+    QueryConfig { args: String },
+    /// 查询统计信息。由 `/stats` 触发。
+    /// args: "" = 总览, "session" / "tools" / "tokens"
+    QueryStats { args: String },
+    /// 初始化项目。由 `/init` 触发。
+    /// force = true 时强制重新初始化
+    InitProject { force: bool },
+    /// 管理会话。由 `/session` 触发。
+    /// args: "" / "list" / "new" / "rename <id> <name>" / "delete <id>" / "export <id>" / "import <file>"
+    ManageSession { args: String },
+    /// 管理记忆。由 `/memory` 触发（非 remind 子命令）。
+    /// args: "" / "list" / "add ..." / "delete ..." / "pin ..." / "search ..." / "compact" / "stats"
+    ManageMemory { args: String },
+    /// 恢复指定会话。由 `/resume <id>` 触发。
+    /// 需要走 idle gate（替换 loop messages）。
+    ResumeSession { id: String },
 }
 
 impl ChatInputEvent {

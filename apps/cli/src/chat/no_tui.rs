@@ -103,6 +103,8 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::ModelSwitched { .. }
         | sdk::ChatEvent::ThinkingChanged { .. }
         | sdk::ChatEvent::ContextEstimated { .. }
+        | sdk::ChatEvent::CommandResultText { .. }
+        | sdk::ChatEvent::SessionResumed { .. }
         | sdk::ChatEvent::ToolCallUpdate { .. } => {}
         sdk::ChatEvent::ToolResult {
             tool_name,

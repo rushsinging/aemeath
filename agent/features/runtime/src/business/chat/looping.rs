@@ -6,6 +6,7 @@ mod engine;
 mod events;
 mod finalize;
 mod hook_ui;
+mod idle_commands;
 mod input_gate;
 mod input_log;
 mod llm_log;
