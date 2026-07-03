@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct GrepResult {
     pub matches: Vec<Match>,
+    /// 真实匹配总行数（可能大于 `matches.len()`）。
     pub total_matches: u64,
+    /// 实际返回的行数（`matches.len()`），便于消费方快速判断是否被 head_limit 截断。
+    pub shown: u64,
     pub query: String,
 }
 
@@ -22,6 +25,6 @@ pub struct GrepInput {
     pub path: Option<String>,
     /// File glob filter (e.g. "*.rs")
     pub glob: Option<String>,
-    /// Maximum number of matching lines to return (1-250, defaults to 250)
+    /// Maximum number of matching lines to return. If omitted, all matches are returned.
     pub head_limit: Option<u32>,
 }
