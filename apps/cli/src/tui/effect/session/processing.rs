@@ -867,17 +867,6 @@ mod tests {
             })
         }
 
-        async fn switch_model(
-            &self,
-            _params: sdk::ModelSwitchParams,
-        ) -> Result<sdk::ModelSwitchResult, sdk::SdkError> {
-            Ok(sdk::ModelSwitchResult {
-                display_name: "test/model".to_string(),
-                context_window: 0,
-                reasoning_active: None,
-            })
-        }
-
         async fn set_thinking(&self, _desired: Option<bool>) -> Result<bool, sdk::SdkError> {
             Ok(true)
         }

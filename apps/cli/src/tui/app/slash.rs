@@ -348,41 +348,13 @@ Arguments: {args}"
         if arg.is_empty() {
             return None;
         }
-        // 尝试从配置中查找模型
-        if let Some(ref ac) = self.agent_client {
-            match ac.list_models().await {
-                Ok(models) => {
-                    // 精确匹配或模糊匹配
-                    let found = models
-                        .iter()
-                        .find(|m| m.id == arg || m.id.ends_with(arg) || m.name == arg);
-                    if let Some(model) = found {
-                        let params = sdk::ModelSwitchParams {
-                            provider_name: model.provider.clone(),
-                            model_id: model.id.clone(),
-                            model_name: model.name.clone(),
-                            base_url: String::new(),
-                            api_key: String::new(),
-                            driver: String::new(),
-                            max_tokens: model.max_tokens,
-                            context_window: model.context_window,
-                            reasoning: None,
-                        };
-                        if self.chat.input_event_tx.is_some() {
-                            self.chat
-                                .push_input_event(sdk::ChatInputEvent::SwitchModel { params });
-                        }
-                        return None;
-                    }
-                    self.append_error_notice(format!(
-                        "Model '{}' not found. Use /model list to see available models.",
-                        arg
-                    ));
-                }
-                Err(e) => {
-                    self.append_error_notice(format!("Failed to list models: {}", e));
-                }
-            }
+        // 直接将 selection 字符串转发给 runtime，由 runtime 通过
+        // `resolve_model_selection` 解析（#567）。
+        if self.chat.input_event_tx.is_some() {
+            self.chat
+                .push_input_event(sdk::ChatInputEvent::SwitchModel {
+                    selection: arg.to_string(),
+                });
         }
         None
     }

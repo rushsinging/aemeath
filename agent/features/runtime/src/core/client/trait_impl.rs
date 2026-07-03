@@ -41,12 +41,6 @@ impl AgentClient for AgentClientImpl {
     ) -> Result<sdk::ContextEstimate, SdkError> {
         super::trait_compact::estimate_context_impl(self, messages, system_prompt).await
     }
-    async fn switch_model(
-        &self,
-        params: sdk::ModelSwitchParams,
-    ) -> Result<sdk::ModelSwitchResult, SdkError> {
-        super::trait_model::switch_model_impl(self, params).await
-    }
     async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, SdkError> {
         super::trait_model::set_thinking_impl(self, desired).await
     }
