@@ -128,13 +128,27 @@ pub struct ToolCallBlockView {
 /// - `args_preview`：工具入参 JSON（用于 Edit diff 语法高亮扩展名推断）。
 /// - `summary`：人类可读摘要（如 `"L12-L34 (23 lines)"`）。
 /// - `result_text`：结果摘要文本（源同 assembler 的 `tool_result_summary`）。
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+/// - `data`：结构化 typed result JSON（如 `EditResult`），供 diff 等富渲染直接读取（#546）。
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolResultBlockView {
     pub key: String,
     pub tool_title: String,
     pub args_preview: Option<String>,
     pub result_text: String,
+    pub data: Option<serde_json::Value>,
     pub style: SemanticStyle,
+}
+
+// 手写 Hash：serde_json::Value 不 impl Hash，只 hash 标识字段（key/tool_title/result_text/
+// args_preview/style），data 不参与缓存指纹（同 ToolResultPayload 的处理方式）。
+impl std::hash::Hash for ToolResultBlockView {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+        self.tool_title.hash(state);
+        self.args_preview.hash(state);
+        self.result_text.hash(state);
+        self.style.hash(state);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

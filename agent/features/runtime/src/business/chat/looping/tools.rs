@@ -321,10 +321,10 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 mod tests {
     use super::tool_results_for_api;
     use crate::business::agent::ToolExecution;
-    use crate::business::compact::MAX_TOOL_RESULT_CHARS;
     use sdk::ids::ToolCallId;
     use share::message::ContentBlock;
     use share::tool::ToolOutcome;
+    use storage::api::MAX_TOOL_RESULT_CHARS;
 
     #[test]
     fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {

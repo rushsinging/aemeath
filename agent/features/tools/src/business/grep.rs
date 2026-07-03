@@ -98,11 +98,19 @@ impl TypedTool for GrepTool {
                         GrepResult {
                             matches: vec![],
                             total_matches: 0,
+                            shown: 0,
                             query: pattern.to_string(),
                         },
                     )
                 } else {
-                    let lines: Vec<&str> = stdout.lines().take(250).collect();
+                    let all_lines: Vec<&str> = stdout.lines().collect();
+                    let actual_total = all_lines.len();
+                    let limit = args
+                        .head_limit
+                        .map(|n| n as usize)
+                        .unwrap_or(usize::MAX)
+                        .min(actual_total);
+                    let lines: Vec<&str> = all_lines.iter().take(limit).copied().collect();
                     let parsed_matches: Vec<Match> = lines
                         .iter()
                         .filter_map(|line| {
@@ -117,18 +125,27 @@ impl TypedTool for GrepTool {
                             })
                         })
                         .collect();
-                    let total_matches = parsed_matches.len() as u64;
+                    let shown = parsed_matches.len() as u64;
                     let query = pattern.to_string();
                     let body = parsed_matches
                         .iter()
                         .map(|m| format!("{}:{}: {}", m.file_path.display(), m.line_number, m.line))
                         .collect::<Vec<_>>()
                         .join("\n");
+                    let text = if (shown as usize) < actual_total {
+                        format!(
+                            "Found {} matches (showing first {})\n\n{}",
+                            actual_total, shown, body
+                        )
+                    } else {
+                        format!("Found {} matches\n\n{}", shown, body)
+                    };
                     TypedToolResult::success(
-                        format!("Found {} matches\n\n{}", total_matches, body),
+                        text,
                         GrepResult {
                             matches: parsed_matches,
-                            total_matches,
+                            total_matches: actual_total as u64,
+                            shown,
                             query,
                         },
                     )
@@ -157,3 +174,7 @@ async fn is_rg_available() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+#[path = "grep_tests.rs"]
+mod grep_tests;

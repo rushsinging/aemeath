@@ -188,11 +188,12 @@ impl TypedTool for FileEditTool {
                     file_path: file_path.to_string(),
                     replacements_made: occurrences as u64,
                     dry_run: false,
+                    old: matched_old.clone(),
+                    new: actual_new.clone(),
+                    start_line: diff_start_line as u64,
                 };
                 TypedToolResult::success(
-                    format!(
-                        "Replaced {occurrences} occurrence(s) in {file_path}\n---DIFF:LINE:{diff_start_line}---\n{matched_old}\n---DIFF:LINE:{diff_start_line}---\n{actual_new}"
-                    ),
+                    format!("Replaced {occurrences} occurrence(s) in {file_path}"),
                     data,
                 )
             }

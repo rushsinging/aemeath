@@ -21,9 +21,8 @@ pub use token_estimation::*;
 
 // truncate 模块
 pub use truncate::{
-    apply_tool_result_budget, offload_tool_result, truncate_tool_result, truncate_tool_results,
-    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS, MAX_TOOL_RESULT_CHARS, TRUNCATION_PREVIEW_HEAD,
-    TRUNCATION_PREVIEW_TAIL,
+    apply_tool_result_budget, truncate_tool_result, truncate_tool_results,
+    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS, TRUNCATION_PREVIEW_HEAD, TRUNCATION_PREVIEW_TAIL,
 };
 
 // autocompact 模块

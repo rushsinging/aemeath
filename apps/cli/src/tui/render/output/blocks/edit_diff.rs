@@ -1,10 +1,18 @@
-//! Edit 工具结果的 diff 渲染：解析 `---DIFF---` 标记内的 old/new 文本，
+//! Edit 工具结果的 diff 渲染。
+//!
+//! **数据来源（两条路径，结构化优先）**：
+//! 1. `edit_diff_from_data`：从 `EditResult` 的结构化 JSON（`old`/`new`/`start_line`）
+//!    直接构造 `EditDiff`——这是 #546 后的正道，diff 内容走 `data` 通道而非 LLM `text`。
+//! 2. `parse_edit_diff`：从 `text` 中的 `---DIFF:LINE:N---` 标记解析——历史 session 兼容
+//!    （旧 session 的 `data` 里没有 `old`/`new`/`start_line`，只能从 text 回退解析）。
+//!
 //! 复用 `primitives::diff::diff`（行号 + 加减语义色 + 语法高亮 + 缩进）渲染为
 //! `RenderedLine`，下游统一经 `apply_selection_overlay` 可选中并保留前景色（bug #61）。
 
 use crate::tui::render::output::primitives::diff::diff_from;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::syntax::extension_from_path;
+use serde_json::Value;
 
 /// Edit 工具结果中包裹 old/new 文本的旧标记。
 pub(crate) const LEGACY_DIFF_MARKER: &str = "---DIFF---";
@@ -83,6 +91,22 @@ fn strip_edge_newlines(text: &str) -> &str {
     text.strip_suffix('\n').unwrap_or(text)
 }
 
+/// 从结构化 data（`EditResult` JSON）直接构造 `EditDiff`（#546）。
+///
+/// 这是优先路径：diff 内容走 `data` 通道而非 LLM `text`。
+/// 返回 `None` 时调用方应回退到 `parse_edit_diff`（兼容历史 session）。
+pub fn edit_diff_from_data(data: Option<&Value>) -> Option<EditDiff> {
+    let data = data?;
+    let old = data.get("old")?.as_str()?;
+    let new = data.get("new")?.as_str()?;
+    let start_line = data.get("start_line")?.as_u64()?.max(1) as usize;
+    Some(EditDiff {
+        old: old.to_string(),
+        new: new.to_string(),
+        start_line,
+    })
+}
+
 /// 推断 Edit diff 的语法高亮扩展名。
 ///
 /// 运行时 `view.title` 是裸工具名 `"Edit"`（无路径括号，见
@@ -114,14 +138,19 @@ fn file_ext_from_result_header(result: &str) -> Option<String> {
 
 /// 若 result 是 Edit diff，则渲染为带行号/语义色/语法高亮的 diff 行。
 ///
+/// **数据来源优先级**（#546）：
+/// 1. `data`（结构化 `EditResult` JSON）→ `edit_diff_from_data`
+/// 2. `result`（text 中的 `---DIFF---` 标记）→ `parse_edit_diff`（历史兼容）
+///
 /// `summary`（工具入参 JSON）用于推断语法高亮语言；退而用 result header 的 `in {path}`。
 /// `width` 传入 diff 原语。
 pub fn render_edit_diff(
+    data: Option<&Value>,
     summary: Option<&str>,
     result: &str,
     width: u16,
 ) -> Option<Vec<RenderedLine>> {
-    let parsed = parse_edit_diff(result)?;
+    let parsed = edit_diff_from_data(data).or_else(|| parse_edit_diff(result))?;
     let ext = file_ext_for_edit(summary, result);
     Some(diff_from(
         &parsed.old,
@@ -212,7 +241,7 @@ mod tests {
     fn test_render_edit_diff_emits_line_numbers_signs_indent_and_color() {
         let result = edit_result("let a = 1;", "let a = 2;");
         let summary = r#"{"file_path":"src/lib.rs"}"#;
-        let lines = render_edit_diff(Some(summary), &result, 80).unwrap();
+        let lines = render_edit_diff(None, Some(summary), &result, 80).unwrap();
 
         let plains: Vec<&str> = lines.iter().map(|line| line.plain.as_str()).collect();
 
@@ -246,13 +275,13 @@ mod tests {
 
     #[test]
     fn test_render_edit_diff_none_for_non_diff_result() {
-        assert!(render_edit_diff(Some(r#"{"file_path":"a.rs"}"#), "120 lines", 80).is_none());
+        assert!(render_edit_diff(None, Some(r#"{"file_path":"a.rs"}"#), "120 lines", 80).is_none());
     }
 
     #[test]
     fn test_render_edit_diff_does_not_contain_raw_marker() {
         let result = edit_result("a", "b");
-        let lines = render_edit_diff(Some(r#"{"file_path":"x.rs"}"#), &result, 80).unwrap();
+        let lines = render_edit_diff(None, Some(r#"{"file_path":"x.rs"}"#), &result, 80).unwrap();
 
         assert!(
             lines
@@ -272,8 +301,8 @@ mod tests {
             "edited Dockerfile\n---DIFF---\nfn old() {}\n---DIFF---\nfn new() {}".to_string();
         let summary = r#"{"file_path":"src/lib.rs","old_string":"fn old() {}"}"#;
 
-        let with_ext = render_edit_diff(Some(summary), &result, 80).unwrap();
-        let without_ext = render_edit_diff(Some("{}"), &result, 80).unwrap();
+        let with_ext = render_edit_diff(None, Some(summary), &result, 80).unwrap();
+        let without_ext = render_edit_diff(None, Some("{}"), &result, 80).unwrap();
 
         // 新增行（含 "new"）。
         let added_with = with_ext
@@ -291,6 +320,69 @@ mod tests {
             "summary 含 file_path 时应激活语法高亮（更多 span）: with={} without={}",
             added_with.spans.len(),
             added_without.spans.len()
+        );
+    }
+
+    // ── #546：结构化 data 通道测试 ──────────────────────────────────
+
+    #[test]
+    fn test_edit_diff_from_data_extracts_structured_fields() {
+        let data = serde_json::json!({
+            "file_path": "src/lib.rs",
+            "replacements_made": 1,
+            "dry_run": false,
+            "old": "let a = 1;",
+            "new": "let a = 2;",
+            "start_line": 5
+        });
+        let parsed = edit_diff_from_data(Some(&data)).unwrap();
+
+        assert_eq!(parsed.old, "let a = 1;");
+        assert_eq!(parsed.new, "let a = 2;");
+        assert_eq!(parsed.start_line, 5);
+    }
+
+    #[test]
+    fn test_edit_diff_from_data_returns_none_when_missing_fields() {
+        // 缺 old/new/start_line → None（回退到 parse_edit_diff）
+        let data = serde_json::json!({"file_path": "a.rs", "replacements_made": 1});
+        assert!(edit_diff_from_data(Some(&data)).is_none());
+        assert!(edit_diff_from_data(None).is_none());
+    }
+
+    #[test]
+    fn test_render_edit_diff_prefers_data_over_text() {
+        // data 含结构化 diff 时优先走 data，即使 text 不含 ---DIFF--- 标记也能渲染。
+        let data = serde_json::json!({
+            "old": "let a = 1;",
+            "new": "let a = 2;",
+            "start_line": 1
+        });
+        let summary = r#"{"file_path":"src/lib.rs"}"#;
+        let lines = render_edit_diff(Some(&data), Some(summary), "Replaced 1 occurrence(s)", 80)
+            .expect("data 通道应成功渲染 diff");
+
+        let plains: Vec<&str> = lines.iter().map(|line| line.plain.as_str()).collect();
+        assert!(
+            plains.iter().any(|p| p.contains("- ") && p.contains("1;")),
+            "应含删除行，got: {plains:?}"
+        );
+        assert!(
+            plains.iter().any(|p| p.contains("+ ") && p.contains("2;")),
+            "应含新增行，got: {plains:?}"
+        );
+    }
+
+    #[test]
+    fn test_render_edit_diff_falls_back_to_text_when_data_absent() {
+        // data 为 None（历史 session）时回退到 parse_edit_diff。
+        let result = edit_result("let a = 1;", "let a = 2;");
+        let lines = render_edit_diff(None, Some(r#"{"file_path":"src/lib.rs"}"#), &result, 80)
+            .expect("回退 parse_edit_diff 应成功渲染");
+
+        assert!(
+            lines.iter().any(|l| l.plain.contains("1;")),
+            "回退路径也应正确渲染 diff"
         );
     }
 }

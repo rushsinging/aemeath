@@ -150,20 +150,8 @@ pub(super) fn display_text_for_tool_result(
             _ => {}
         }
     }
-    // Edit 工具：从 data.diff 提取 diff 标记文本，供 render_edit_diff 渲染
-    if matches!(tool_name, Some("Edit" | "file_edit")) {
-        let message = content
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if let Some(diff) = content
-            .get("data")
-            .and_then(|d| d.get("diff"))
-            .and_then(|v| v.as_str())
-        {
-            return expand_tabs(&format!("{message}\n{diff}"));
-        }
-    }
+    // Edit 工具的 diff 内容已通过结构化 data 通道（ToolResultBlockView.data）
+    // 直接传给渲染层（edit_diff::edit_diff_from_data），无需在 display_text 里拼装。
     let text = content
         .get("display")
         .and_then(|value| value.as_str())

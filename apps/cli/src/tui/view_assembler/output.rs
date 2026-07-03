@@ -108,6 +108,7 @@ impl OutputViewAssembler {
                                     tool_title: tool.title.clone(),
                                     args_preview: tool.args_preview.clone(),
                                     result_text,
+                                    data: tool.result_payload.as_ref().map(|p| p.content.clone()),
                                     style: tool.style,
                                 }),
                             );

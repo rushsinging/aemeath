@@ -44,7 +44,7 @@ fn test_start_line_of_match_error_when_missing() {
 }
 
 #[tokio::test]
-async fn test_file_edit_success_diff_marker_includes_real_line_number() {
+async fn test_file_edit_text_excludes_diff_data_carries_structured_diff() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sample.rs");
     tokio::fs::write(&path, "one\ntwo\nthree\n").await.unwrap();
@@ -64,12 +64,23 @@ async fn test_file_edit_success_diff_marker_includes_real_line_number() {
         .await;
 
     assert!(!result.is_error, "edit should succeed: {}", result.text);
+    // text 不含 diff 标记（diff 已移到 data 通道，LLM 不再看到 diff）
     assert!(
-        result.text.contains("---DIFF:LINE:2---"),
-        "diff marker should include real line number, got: {}",
+        !result.text.contains("---DIFF"),
+        "text should NOT contain diff markers, got: {}",
         result.text
     );
-    // 落盘验证：确认文件内容真的被改写（此前无任何测试读回文件，回归盲区）
+    assert!(
+        result.text.contains("Replaced 1 occurrence(s)"),
+        "text should contain confirmation line, got: {}",
+        result.text
+    );
+    // data 含结构化 diff 字段
+    let data = result.data.expect("data should be present");
+    assert_eq!(data.old, "two", "data.old should be the matched old text");
+    assert_eq!(data.new, "TWO", "data.new should be the actual new text");
+    assert_eq!(data.start_line, 2, "data.start_line should be line 2");
+    // 落盘验证：确认文件内容真的被改写
     let persisted = tokio::fs::read_to_string(&path).await.unwrap();
     assert_eq!(
         persisted, "one\nTWO\nthree\n",

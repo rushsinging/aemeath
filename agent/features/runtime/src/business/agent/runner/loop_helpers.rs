@@ -175,8 +175,8 @@ pub(super) fn append_tool_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::business::compact::MAX_TOOL_RESULT_CHARS;
     use share::message::ContentBlock;
+    use storage::api::MAX_TOOL_RESULT_CHARS;
 
     #[test]
     fn test_append_tool_results_uses_provider_id_not_runtime_id() {
