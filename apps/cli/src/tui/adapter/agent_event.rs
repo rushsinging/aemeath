@@ -28,20 +28,20 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
-        UiEvent::Text { context, text } => conversation(ConversationIntent::ObserveAssistantText(
-            ObserveAssistantText {
+        UiEvent::Text { context, text } => {
+            conversation(ConversationIntent::AssistantText(AssistantText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
-            },
-        )),
-        UiEvent::Thinking { context, text } => conversation(
-            ConversationIntent::ObserveThinkingText(ObserveThinkingText {
+            }))
+        }
+        UiEvent::Thinking { context, text } => {
+            conversation(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
-            }),
-        ),
+            }))
+        }
         UiEvent::BlockComplete { context, .. } => {
             conversation(ConversationIntent::CompleteBlock(CompleteBlock {
                 chat_id: context.chat_id.clone(),
@@ -64,16 +64,14 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 name,
                 index,
             );
-            conversation(ConversationIntent::ObserveToolCallStart(
-                ObserveToolCallStart {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: *index,
-                },
-            ))
+            conversation(ConversationIntent::ToolCallStart(ToolCallStart {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                name: name.clone(),
+                index: *index,
+            }))
         }
         UiEvent::ToolCallUpdate {
             context,
@@ -98,20 +96,18 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 index,
                 args.as_ref().map(|s| s.len()).unwrap_or(0),
             );
-            conversation(ConversationIntent::ObserveToolCallUpdate(
-                ObserveToolCallUpdate {
-                    chat_id: context.chat_id.clone(),
-                    turn_id: context.turn_id.clone(),
-                    id: id.clone(),
-                    provider_id: provider_id.clone(),
-                    name: name.clone(),
-                    index: *index,
-                    arguments: args
-                        .as_ref()
-                        .map(|value| sanitize_tool_arguments_delta(name, value)),
-                    status: tool_call_status_from_sdk(*status),
-                },
-            ))
+            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+                chat_id: context.chat_id.clone(),
+                turn_id: context.turn_id.clone(),
+                id: id.clone(),
+                provider_id: provider_id.clone(),
+                name: name.clone(),
+                index: *index,
+                arguments: args
+                    .as_ref()
+                    .map(|value| sanitize_tool_arguments_delta(name, value)),
+                status: tool_call_status_from_sdk(*status),
+            }))
         }
         UiEvent::ToolResult {
             context,
@@ -135,7 +131,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 is_error,
                 images.len(),
             );
-            conversation(ConversationIntent::ObserveToolResult(ObserveToolResult {
+            conversation(ConversationIntent::ToolResult(ToolResult {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: id.clone(),
@@ -485,7 +481,7 @@ mod tests {
         });
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveAssistantText(ObserveAssistantText { text, .. })) if text == "hello"
+            Some(ConversationIntent::AssistantText(AssistantText { text, .. })) if text == "hello"
         ));
     }
 
@@ -498,7 +494,7 @@ mod tests {
 
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveAssistantText(ObserveAssistantText { text, .. })) if text == "hello"
+            Some(ConversationIntent::AssistantText(AssistantText { text, .. })) if text == "hello"
         ));
     }
 
@@ -511,7 +507,7 @@ mod tests {
 
         assert!(matches!(
             first_observation(&mapping),
-            Some(ConversationIntent::ObserveThinkingText(ObserveThinkingText { text, .. })) if text == "reason"
+            Some(ConversationIntent::ThinkingText(ThinkingText { text, .. })) if text == "reason"
         ));
     }
 
@@ -554,10 +550,7 @@ mod tests {
         let mapping = map_agent_event(&event);
 
         match first_observation(&mapping) {
-            Some(ConversationIntent::ObserveToolCallUpdate(ObserveToolCallUpdate {
-                arguments,
-                ..
-            })) => {
+            Some(ConversationIntent::ToolCallUpdate(ToolCallUpdate { arguments, .. })) => {
                 // arguments_delta 为 None 时，fallback 到 arguments JSON 字符串
                 assert!(arguments.is_some());
             }

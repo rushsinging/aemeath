@@ -17,6 +17,7 @@ mod model_tests;
 pub mod notice;
 pub mod processing_job;
 pub mod queued_submission;
+pub mod runtime_state;
 pub mod spinner;
 pub mod status_notice;
 pub mod stream;

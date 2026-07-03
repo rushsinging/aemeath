@@ -192,7 +192,7 @@ impl App {
                 // 仅在处理中（有运行中 block 的 gutter 动画需要重绘）时才标脏 output。
                 // idle/完成态标脏会导致每 90ms 全量重建整会话 → 大会话伪卡死（live-lock）。
                 // #536: 可见性由 chat_active 驱动。
-                if self.model.conversation.spinner.chat_active {
+                if self.model.conversation.runtime.spinner.chat_active {
                     self.mark_output_dirty();
                 }
                 crate::tui::log_trace!(
@@ -202,8 +202,8 @@ impl App {
                     before_version,
                     self.view_state.animation.version,
                     self.view_state.spinner.frame,
-                    self.model.conversation.spinner.chat_active,
-                    self.model.conversation.spinner.phase,
+                    self.model.conversation.runtime.spinner.chat_active,
+                    self.model.conversation.runtime.spinner.phase,
                     self.view_state.spinner.verb,
                     self.view_state.dirty.output
                 );
@@ -279,6 +279,7 @@ impl App {
         let current_workspace_root: Option<String> = self
             .model
             .conversation
+            .runtime
             .workspace
             .workspace_root
             .as_deref()
@@ -422,7 +423,7 @@ impl App {
     /// 而非纯 reducer。
     pub(crate) fn refresh_live_status_from_model(&mut self) {
         // #536: 可见性由 chat_active 驱动。
-        let active = self.model.conversation.spinner.chat_active;
+        let active = self.model.conversation.runtime.spinner.chat_active;
         let before_anim = self.view_state.spinner.clone();
         if active {
             if self.view_state.spinner.verb.is_empty() {
@@ -430,14 +431,14 @@ impl App {
             }
             self.view_state
                 .spinner
-                .sync_phase(self.model.conversation.spinner.phase.clone());
+                .sync_phase(self.model.conversation.runtime.spinner.phase.clone());
         } else if self.view_state.spinner != crate::tui::view_state::SpinnerAnim::default() {
             self.view_state.spinner = crate::tui::view_state::SpinnerAnim::default();
         }
         crate::tui::log_trace!(
             "tui.spinner.refresh active={} phase={:?} before_frame={} after_frame={} before_phase_frame={} after_phase_frame={} before_phase={:?} after_phase={:?} before_verb={} after_verb={}",
             active,
-            self.model.conversation.spinner.phase,
+            self.model.conversation.runtime.spinner.phase,
             before_anim.frame,
             self.view_state.spinner.frame,
             before_anim.phase_frame,

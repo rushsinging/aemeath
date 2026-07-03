@@ -509,7 +509,7 @@ async fn test_clear_command_clears_task_store_and_task_window() {
     app.refresh_live_status_from_model();
 
     assert_eq!(client.clear_tasks_calls.load(Ordering::SeqCst), 1);
-    assert!(app.model.conversation.task_status.lines.is_empty());
+    assert!(app.model.conversation.runtime.task_status.lines.is_empty());
     assert!(app.live_status_view_model().task_lines.is_empty());
     let _ = finish_tx.send(());
 }
@@ -533,7 +533,7 @@ async fn test_spawn_llm_reflection_returns_before_llm_finishes() {
     // spinner 业务真相在 Model；渲染直接消费 LiveStatusViewModel。
     // #536: /reflect 经 run_loop 兜底设 Thinking（spinner_phase → chat_active=true）。
     assert!(
-        app.model.conversation.spinner.chat_active,
+        app.model.conversation.runtime.spinner.chat_active,
         "/reflect 后 Model spinner 应 active"
     );
     app.refresh_live_status_from_model();
@@ -592,7 +592,7 @@ async fn test_auto_reflection_triggers_on_configured_interval() {
         .expect("第二轮应触发后台 reflection");
     assert!(!app.chat.is_processing, "自动 reflection 不应阻塞 UI 输入");
     assert!(
-        !app.model.conversation.spinner.chat_active,
+        !app.model.conversation.runtime.spinner.chat_active,
         "自动 reflection 不应启动 spinner（Model 真相）"
     );
     app.refresh_live_status_from_model();

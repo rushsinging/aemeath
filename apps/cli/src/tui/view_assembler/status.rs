@@ -20,10 +20,10 @@ impl StatusViewAssembler {
         diagnostics: &DiagnosticModel,
     ) -> StatusViewModel {
         StatusViewModel {
-            notice: Self::assemble_notice_view(&conversation.status_notice),
+            notice: Self::assemble_notice_view(&conversation.runtime.status_notice),
             runtime: Self::assemble_runtime_view(conversation, session),
             line: Self::assemble_from_runtime_session(conversation, session, diagnostics),
-            thinking: conversation.thinking,
+            thinking: conversation.runtime.thinking,
         }
     }
 
@@ -48,27 +48,34 @@ impl StatusViewAssembler {
         session: Option<&SessionModel>,
     ) -> StatusRuntimeViewModel {
         StatusRuntimeViewModel {
-            model: conversation.model_id.clone(),
+            model: conversation.runtime.model_id.clone(),
             session_id: session.and_then(|s| s.current_session_id.clone()),
-            input_tokens: conversation.usage.input_tokens,
-            output_tokens: conversation.usage.output_tokens,
-            last_input_tokens: conversation.usage.last_input_tokens,
-            api_calls: conversation.usage.api_calls,
-            context_size: conversation.usage.context_size,
-            tps: conversation.live_tps.unwrap_or(0.0),
+            input_tokens: conversation.runtime.usage.input_tokens,
+            output_tokens: conversation.runtime.usage.output_tokens,
+            last_input_tokens: conversation.runtime.usage.last_input_tokens,
+            api_calls: conversation.runtime.usage.api_calls,
+            context_size: conversation.runtime.usage.context_size,
+            tps: conversation.runtime.live_tps.unwrap_or(0.0),
             context: StatusContextViewModel {
-                path_base: conversation.workspace.path_base.clone().unwrap_or_default(),
+                path_base: conversation
+                    .runtime
+                    .workspace
+                    .path_base
+                    .clone()
+                    .unwrap_or_default(),
                 workspace_root: conversation
+                    .runtime
                     .workspace
                     .workspace_root
                     .clone()
                     .unwrap_or_default(),
                 branch: conversation
+                    .runtime
                     .workspace
                     .branch
                     .clone()
                     .filter(|branch| !branch.trim().is_empty()),
-                kind: match conversation.workspace.kind {
+                kind: match conversation.runtime.workspace.kind {
                     ModelWorktreeKind::LinkedWorktree => StatusWorktreeKind::Worktree,
                     _ => StatusWorktreeKind::Main,
                 },
@@ -81,7 +88,7 @@ impl StatusViewAssembler {
         diagnostic: &DiagnosticModel,
     ) -> StatusLineViewModel {
         let mut vm = StatusLineViewModel::default();
-        if let Some(provider) = conversation.provider.as_deref() {
+        if let Some(provider) = conversation.runtime.provider.as_deref() {
             vm.left.push(StatusSegment {
                 key: "provider".to_string(),
                 text: provider.to_string(),
@@ -89,7 +96,7 @@ impl StatusViewAssembler {
                 priority: 5,
             });
         }
-        if let Some(model_id) = conversation.model_id.as_deref() {
+        if let Some(model_id) = conversation.runtime.model_id.as_deref() {
             vm.left.push(StatusSegment {
                 key: "model".to_string(),
                 text: model_id.to_string(),
@@ -97,7 +104,7 @@ impl StatusViewAssembler {
                 priority: 10,
             });
         }
-        if let Some(branch) = conversation.workspace.branch.as_deref() {
+        if let Some(branch) = conversation.runtime.workspace.branch.as_deref() {
             vm.left.push(StatusSegment {
                 key: "branch".to_string(),
                 text: branch.to_string(),
@@ -105,7 +112,7 @@ impl StatusViewAssembler {
                 priority: 15,
             });
         }
-        if let Some(cwd) = conversation.workspace.cwd.as_deref() {
+        if let Some(cwd) = conversation.runtime.workspace.cwd.as_deref() {
             vm.right.push(StatusSegment {
                 key: "cwd".to_string(),
                 text: cwd.to_string(),
@@ -113,18 +120,21 @@ impl StatusViewAssembler {
                 priority: 20,
             });
         }
-        if conversation.usage.input_tokens > 0 || conversation.usage.output_tokens > 0 {
+        if conversation.runtime.usage.input_tokens > 0
+            || conversation.runtime.usage.output_tokens > 0
+        {
             vm.right.push(StatusSegment {
                 key: "tokens".to_string(),
                 text: format!(
                     "{}↑ {}↓",
-                    conversation.usage.input_tokens, conversation.usage.output_tokens
+                    conversation.runtime.usage.input_tokens,
+                    conversation.runtime.usage.output_tokens
                 ),
                 style: SemanticStyle::Muted,
                 priority: 30,
             });
         }
-        if let Some(tps) = conversation.live_tps {
+        if let Some(tps) = conversation.runtime.live_tps {
             vm.right.push(StatusSegment {
                 key: "tps".to_string(),
                 text: format!("{tps:.1} tps"),
@@ -132,20 +142,20 @@ impl StatusViewAssembler {
                 priority: 31,
             });
         }
-        if conversation.task_status.total > 0 {
+        if conversation.runtime.task_status.total > 0 {
             vm.right.push(StatusSegment {
                 key: "tasks".to_string(),
                 text: format!(
                     "tasks {}/{} (+{})",
-                    conversation.task_status.completed,
-                    conversation.task_status.total,
-                    conversation.task_status.in_progress
+                    conversation.runtime.task_status.completed,
+                    conversation.runtime.task_status.total,
+                    conversation.runtime.task_status.in_progress
                 ),
                 style: SemanticStyle::Muted,
                 priority: 40,
             });
         }
-        if conversation.processing_jobs.iter().any(|job| {
+        if conversation.runtime.processing_jobs.iter().any(|job| {
             matches!(
                 job.status,
                 ProcessingStatus::Running | ProcessingStatus::Starting
@@ -224,7 +234,7 @@ mod tests {
     #[test]
     fn test_assemble_runtime_view_normal_path_derives_all_fields() {
         let mut conversation = ConversationModel::default();
-        conversation.model_id = Some("glm-5.1".to_string());
+        conversation.runtime.model_id = Some("glm-5.1".to_string());
         conversation.apply(RecordLiveTps { tps: 42.0 });
         conversation.apply(WorkspaceSnapshotReceived {
             path_base: Some("~/repo/cli".to_string()),
@@ -284,7 +294,7 @@ mod tests {
     #[test]
     fn test_status_assembler_reads_runtime_and_diagnostic() {
         let mut conversation = ConversationModel::default();
-        conversation.model_id = Some("gpt-5.5".to_string());
+        conversation.runtime.model_id = Some("gpt-5.5".to_string());
         conversation.apply(UpdateWorkspace {
             cwd: "/repo".to_string(),
             worktree: None,

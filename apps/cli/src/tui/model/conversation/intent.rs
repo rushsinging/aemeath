@@ -42,14 +42,14 @@ pub struct AppendUserMessage {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObserveAssistantText {
+pub struct AssistantText {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
     pub text: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObserveThinkingText {
+pub struct ThinkingText {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
     pub text: String,
@@ -62,7 +62,7 @@ pub struct CompleteBlock {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObserveToolCallStart {
+pub struct ToolCallStart {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
     pub id: ToolCallId,
@@ -72,7 +72,7 @@ pub struct ObserveToolCallStart {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObserveToolCallUpdate {
+pub struct ToolCallUpdate {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
     pub id: ToolCallId,
@@ -84,7 +84,7 @@ pub struct ObserveToolCallUpdate {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ObserveToolResult {
+pub struct ToolResult {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
     pub id: ToolCallId,
@@ -286,12 +286,12 @@ pub enum ConversationIntent {
     StartChat(StartChat),
     ResumeConversation(ResumeConversation),
     AppendUserMessage(AppendUserMessage),
-    ObserveAssistantText(ObserveAssistantText),
-    ObserveThinkingText(ObserveThinkingText),
+    AssistantText(AssistantText),
+    ThinkingText(ThinkingText),
     CompleteBlock(CompleteBlock),
-    ObserveToolCallStart(ObserveToolCallStart),
-    ObserveToolCallUpdate(ObserveToolCallUpdate),
-    ObserveToolResult(ObserveToolResult),
+    ToolCallStart(ToolCallStart),
+    ToolCallUpdate(ToolCallUpdate),
+    ToolResult(ToolResult),
     AppendSystemMessage(AppendSystemMessage),
     AppendHookNotice(AppendHookNotice),
     AppendError(AppendError),

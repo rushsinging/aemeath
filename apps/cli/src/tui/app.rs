@@ -314,8 +314,8 @@ impl App {
             output_rect,
             input_rect,
             status_rect,
-            self.model.conversation.spinner.chat_active,
-            self.model.conversation.spinner.phase,
+            self.model.conversation.runtime.spinner.chat_active,
+            self.model.conversation.runtime.spinner.phase,
             self.view_state.animation.spinner_frame,
             self.output_area.document().total_lines()
         );
