@@ -102,7 +102,11 @@ impl TypedTool for GrepTool {
                         },
                     )
                 } else {
-                    let lines: Vec<&str> = stdout.lines().take(250).collect();
+                    let limit = args
+                        .head_limit
+                        .map(|n| (n as usize).min(250))
+                        .unwrap_or(250);
+                    let lines: Vec<&str> = stdout.lines().take(limit).collect();
                     let parsed_matches: Vec<Match> = lines
                         .iter()
                         .filter_map(|line| {
@@ -157,3 +161,7 @@ async fn is_rg_available() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+#[path = "grep_tests.rs"]
+mod grep_tests;

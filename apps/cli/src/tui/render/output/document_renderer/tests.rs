@@ -114,6 +114,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         tool_title: "Bash".into(),
         args_preview: None,
         result_text: "```\ncode\n```".into(),
+        data: None,
         style: SemanticStyle::Success,
     });
     let tool_node = BlockNode {

@@ -22,4 +22,6 @@ pub struct GrepInput {
     pub path: Option<String>,
     /// File glob filter (e.g. "*.rs")
     pub glob: Option<String>,
+    /// Maximum number of matching lines to return (1-250, defaults to 250)
+    pub head_limit: Option<u32>,
 }

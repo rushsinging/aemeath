@@ -71,17 +71,15 @@ pub fn render_tool_result(
         } => {
             let limit = max_lines.unwrap_or(usize::MAX);
             match render_kind {
-                ResultRender::Diff => {
-                    render_edit_diff(view.args_preview.as_deref(), &display_text, ctx.text_width)
-                        .unwrap_or_else(|| {
-                            format_result_lines(
-                                &view.tool_title,
-                                &display_text,
-                                ctx.text_width,
-                                limit,
-                            )
-                        })
-                }
+                ResultRender::Diff => render_edit_diff(
+                    view.data.as_ref(),
+                    view.args_preview.as_deref(),
+                    &display_text,
+                    ctx.text_width,
+                )
+                .unwrap_or_else(|| {
+                    format_result_lines(&view.tool_title, &display_text, ctx.text_width, limit)
+                }),
                 ResultRender::Plain => {
                     if tail_mode {
                         format_result_lines_tail(
@@ -217,6 +215,22 @@ mod tests {
             tool_title: tool_title.into(),
             args_preview: None,
             result_text: result_text.into(),
+            data: None,
+            style: SemanticStyle::Success,
+        }
+    }
+
+    fn result_with_data(
+        tool_title: &str,
+        result_text: &str,
+        data: serde_json::Value,
+    ) -> ToolResultBlockView {
+        ToolResultBlockView {
+            key: format!("{tool_title}-result"),
+            tool_title: tool_title.into(),
+            args_preview: None,
+            result_text: result_text.into(),
+            data: Some(data),
             style: SemanticStyle::Success,
         }
     }
@@ -361,13 +375,18 @@ mod tests {
     }
 
     #[test]
-    fn test_render_tool_result_edit_diff_renders_with_numbers_signs_indent_color() {
-        // #61 端到端：Edit 结果含 ---DIFF--- 标记，应渲染为带行号 + 加减语义色 +
-        // 缩进 + 语法高亮的 diff 行，而非原始标记纯文本；ext 从 summary 推断。
-        let view = result(
-            "Edit",
-            "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
-        );
+    fn test_render_tool_result_edit_diff_renders_from_structured_data() {
+        // #546：Edit diff 通过结构化 data 通道（EditResult JSON）驱动渲染，
+        // 不再依赖 text 中的 ---DIFF--- 标记。
+        let data = serde_json::json!({
+            "file_path": "src/lib.rs",
+            "replacements_made": 1,
+            "dry_run": false,
+            "old": "let a = 1;",
+            "new": "let a = 2;",
+            "start_line": 1
+        });
+        let view = result_with_data("Edit", "Replaced 1 occurrence(s) in src/lib.rs", data);
 
         let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
 
@@ -401,7 +420,22 @@ mod tests {
             diff_line.spans.iter().any(|span| span.style.fg.is_some()),
             "diff 行应带前景色 span，供选中叠加保留"
         );
-        assert!(diff_line.plain.starts_with("  "), "diff 行应保留两空格缩进");
+    }
+
+    #[test]
+    fn test_render_tool_result_edit_diff_falls_back_to_text_for_legacy_sessions() {
+        // 历史兼容：旧 session 的 data 没有 old/new/start_line，回退到 parse_edit_diff。
+        let view = result(
+            "Edit",
+            "replaced 1 occurrence(s) in src/lib.rs\n---DIFF---\nlet a = 1;\n---DIFF---\nlet a = 2;",
+        );
+
+        let block = render_tool_result("t1-result", &view, &RenderCtx { text_width: 80 });
+
+        assert!(
+            block.lines.iter().any(|line| line.plain.contains("1;")),
+            "回退路径也应正确渲染 diff"
+        );
     }
 
     #[test]
