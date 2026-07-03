@@ -7,7 +7,7 @@ use crate::{
     ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView, TaskSummary,
 };
 
-use crate::commands::ContextEstimate;
+use crate::chat_event::ChatEvent;
 
 /// Agent Runtime 的统一客户端 trait。
 ///
@@ -85,9 +85,6 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 列出可用模型摘要。
     async fn list_models(&self) -> Result<Vec<ModelSummary>, super::SdkError>;
 
-    /// 压缩 session 消息。
-    async fn compact(&self) -> Result<(), super::SdkError>;
-
     /// 读取剪贴板图片，返回 TUI 可渲染视图。
     async fn read_clipboard_image(&self) -> Result<ClipboardImageView, super::SdkError>;
 
@@ -107,23 +104,8 @@ pub trait AgentClient: Send + Sync + 'static {
         output: ReflectionOutputView,
     ) -> Result<String, super::SdkError>;
 
-    /// 估算当前上下文使用量。
-    async fn estimate_context(
-        &self,
-        messages: &[super::ChatMessage],
-        system_prompt: &str,
-    ) -> Result<ContextEstimate, super::SdkError>;
-
     /// 设置推理模式（None = 切换）。
     async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, super::SdkError>;
-
-    /// 压缩消息列表，返回压缩后的消息和是否发生了压缩。
-    async fn compact_messages(
-        &self,
-        messages: Vec<super::ChatMessage>,
-        system_prompt: &str,
-        context_size: usize,
-    ) -> Result<(Vec<super::ChatMessage>, bool), super::SdkError>;
 
     // ─── Hook ───
 

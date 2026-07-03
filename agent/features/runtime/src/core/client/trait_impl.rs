@@ -33,34 +33,14 @@ impl AgentClient for AgentClientImpl {
         super::trait_session::delete_session_impl(self, id).await
     }
 
-    // command
-    async fn estimate_context(
-        &self,
-        messages: &[sdk::ChatMessage],
-        system_prompt: &str,
-    ) -> Result<sdk::ContextEstimate, SdkError> {
-        super::trait_compact::estimate_context_impl(self, messages, system_prompt).await
-    }
     async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, SdkError> {
         super::trait_model::set_thinking_impl(self, desired).await
-    }
-    async fn compact_messages(
-        &self,
-        messages: Vec<sdk::ChatMessage>,
-        system_prompt: &str,
-        context_size: usize,
-    ) -> Result<(Vec<sdk::ChatMessage>, bool), SdkError> {
-        super::trait_compact::compact_messages_impl(self, messages, system_prompt, context_size)
-            .await
     }
     async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), SdkError> {
         super::trait_misc::notify_hook_impl(self, message, kind).await
     }
     async fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
         super::trait_model::list_models_impl(self).await
-    }
-    async fn compact(&self) -> Result<(), SdkError> {
-        super::trait_compact::compact_impl(self).await
     }
     async fn read_clipboard_image(&self) -> Result<ClipboardImageView, SdkError> {
         super::trait_misc::read_clipboard_image_impl(self).await
