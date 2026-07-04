@@ -94,6 +94,7 @@ impl InputEventDrainPort for EmptyInputEvents {
 struct RecordingSink {
     events: Arc<Mutex<Vec<String>>>,
     messages_syncs: Arc<Mutex<Vec<Vec<Message>>>>,
+    compact_rollback_snapshots: Arc<Mutex<Vec<Vec<Message>>>>,
     done_durations: Arc<Mutex<Vec<std::time::Duration>>>,
 }
 
@@ -114,19 +115,50 @@ impl ChatEventSink for RecordingSink {
 
 impl RecordingSink {
     fn record(&self, event: RuntimeStreamEvent) {
-        let name = match event {
-            RuntimeStreamEvent::MessagesSync(messages) => {
+        let name = match &event {
+            RuntimeStreamEvent::TurnStarted { messages }
+            | RuntimeStreamEvent::MicrocompactDone { messages, .. }
+            | RuntimeStreamEvent::StopHookBlocked { messages }
+            | RuntimeStreamEvent::PostToolExecutionSync { messages }
+            | RuntimeStreamEvent::CompactFinished { messages } => {
                 self.messages_syncs.lock().unwrap().push(messages.clone());
+                let tag = match &event {
+                    RuntimeStreamEvent::TurnStarted { .. } => "TurnStarted",
+                    RuntimeStreamEvent::MicrocompactDone { .. } => "MicrocompactDone",
+                    RuntimeStreamEvent::StopHookBlocked { .. } => "StopHookBlocked",
+                    RuntimeStreamEvent::PostToolExecutionSync { .. } => "PostToolExecutionSync",
+                    RuntimeStreamEvent::CompactFinished { .. } => "CompactFinished",
+                    _ => "Sync",
+                };
                 format!(
-                    "MessagesSync:{}",
+                    "{}:{}",
+                    tag,
                     messages
                         .last()
                         .map(|message| message.text_content())
                         .unwrap_or_default()
                 )
             }
+            RuntimeStreamEvent::CompactRollback { messages } => {
+                self.messages_syncs.lock().unwrap().push(messages.clone());
+                self.compact_rollback_snapshots
+                    .lock()
+                    .unwrap()
+                    .push(messages.clone());
+                format!(
+                    "CompactRollback:{}",
+                    messages
+                        .last()
+                        .map(|message| message.text_content())
+                        .unwrap_or_default()
+                )
+            }
+            RuntimeStreamEvent::ApiError { messages, error } => {
+                self.messages_syncs.lock().unwrap().push(messages.clone());
+                format!("ApiError:{}", error)
+            }
             RuntimeStreamEvent::DoneWithDuration { duration, .. } => {
-                self.done_durations.lock().unwrap().push(duration);
+                self.done_durations.lock().unwrap().push(*duration);
                 "DoneWithDuration".to_string()
             }
             RuntimeStreamEvent::HookEvent(event) => {
@@ -388,7 +420,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     let feedback_sync = events
         .iter()
         .position(|event| {
-            event.starts_with("MessagesSync:")
+            event.starts_with("StopHookBlocked:")
                 && event.contains("You MUST first satisfy the Stop hook requirement")
         })
         .expect("blocked Stop hook feedback should be synced into messages");
@@ -610,7 +642,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     let events = sink.events();
     let queued_sync = events
         .iter()
-        .position(|event| event == "MessagesSync:stop-hook input")
+        .position(|event| event == "PostToolExecutionSync:stop-hook input")
         .expect("queued input should be synced after Stop hook");
     let done = events
         .iter()
@@ -1707,11 +1739,11 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         .expect("应有 Cancelled 事件");
     let syncs_before_cancel = events[..cancelled_idx]
         .iter()
-        .filter(|e| e.starts_with("MessagesSync"))
+        .filter(|e| e.starts_with("CompactRollback"))
         .count();
     assert!(
         syncs_before_cancel >= 1,
-        "Cancelled 前应至少有一次 MessagesSync（回滚同步）: {events:?}"
+        "Cancelled 前应至少有一次 CompactRollback（回滚同步）: {events:?}"
     );
     let rollback_snapshot = &sink.synced_messages()[syncs_before_cancel - 1];
     let rollback_texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
@@ -1927,26 +1959,36 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         "回合 2 进行中 cancel 应发出 Cancelled 事件: {events:?}"
     );
 
-    // 关键回归断言：回合 2 取消后第一次 MessagesSync（cancel_to_idle 内的回滚同步）
+    // 关键回归断言：回合 2 取消后第一次 CompactRollback（cancel_to_idle 内的回滚同步）
     // 必须仍包含回合 1 的 user+assistant。pre-fix 用 loop_start_baseline=0 回滚 →
     // 这两条被删除 → 断言失败；修复后 per-turn 基线保留它们 → 通过。
     let cancelled_idx = events
         .iter()
         .position(|e| e == "Cancelled")
         .expect("应有 Cancelled 事件");
-    // cancel_to_idle 先发 MessagesSync（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
-    // MessagesSync 对应的快照即「取消回滚后的 messages」。
+    // cancel_to_idle 先发 CompactRollback（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
+    // CompactRollback 对应的快照即「取消回滚后的 messages」。
     let syncs = sink.synced_messages();
-    // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 MessagesSync。
+    // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 CompactRollback。
     let messages_sync_count_before_cancel = events[..cancelled_idx]
         .iter()
-        .filter(|e| e.starts_with("MessagesSync"))
+        .filter(|e| e.starts_with("CompactRollback"))
         .count();
     assert!(
         messages_sync_count_before_cancel >= 1,
-        "Cancelled 前应至少有一次 MessagesSync（回滚同步）: {events:?}"
+        "Cancelled 前应至少有一次 CompactRollback（回滚同步）: {events:?}"
     );
-    let rollback_snapshot = &syncs[messages_sync_count_before_cancel - 1];
+    // syncs 按时间顺序收集所有 sync 类事件（TurnStarted/PostToolExecutionSync/CompactRollback 等）的快照。
+    // cancel_to_idle 中 Cancelled 之前最后一次 sync 就是 CompactRollback（回滚后）。
+    // 但 syncs 也包含非 rollback 事件，需要找最后一个。由于 cancel 前最后一次 sync 必然是回滚，
+    // 直接取 syncs 中 Cancelled 前最后一次即可。
+    // syncs 的事件和 events 一一对应（所有 sync 类事件都同时 push 到 syncs 和 events）。
+    // 但 events 也包含非 sync 事件（如 Cancelled、Thinking 等），所以不能直接索引。
+    // 简化：syncs 的最后一个元素就是 cancel 前最后一次 sync 的快照。
+    let rollback_guard = sink.compact_rollback_snapshots.lock().unwrap();
+    let rollback_snapshot = rollback_guard
+        .last()
+        .expect("应至少有一次 CompactRollback 快照");
     let texts: Vec<String> = rollback_snapshot.iter().map(|m| m.text_content()).collect();
     assert!(
         texts.iter().any(|t| t == "turn1-user"),

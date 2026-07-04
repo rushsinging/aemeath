@@ -265,9 +265,9 @@ mod tests {
             })
             .count();
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::MessagesSync(vec![sdk::ChatMessage::user_text(
-                "search bug 76",
-            )])),
+            TuiMsg::Ui(UiEvent::TurnStarted {
+                messages: vec![sdk::ChatMessage::user_text("search bug 76")],
+            }),
             &ui_tx,
             &spawn_refs,
         );

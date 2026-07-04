@@ -86,7 +86,12 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::Token { text, .. } => print_stdout(&text)?,
         sdk::ChatEvent::BlockComplete { .. } => {}
         sdk::ChatEvent::Thinking { .. }
-        | sdk::ChatEvent::MessagesSync(_)
+        | sdk::ChatEvent::TurnStarted { .. }
+        | sdk::ChatEvent::MicrocompactDone { .. }
+        | sdk::ChatEvent::StopHookBlocked { .. }
+        | sdk::ChatEvent::PostToolExecutionSync { .. }
+        | sdk::ChatEvent::CompactRollback { .. }
+        | sdk::ChatEvent::CompactFinished { .. }
         | sdk::ChatEvent::UserMessagesAdded { .. }
         | sdk::ChatEvent::Usage { .. }
         | sdk::ChatEvent::LiveTps(_)
@@ -106,6 +111,9 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CommandResultText { .. }
         | sdk::ChatEvent::SessionResumed { .. }
         | sdk::ChatEvent::ToolCallUpdate { .. } => {}
+        sdk::ChatEvent::ApiError { error, .. } => {
+            eprintln!("\n  ✗ API 错误: {error}");
+        }
         sdk::ChatEvent::ToolResult {
             tool_name,
             output,

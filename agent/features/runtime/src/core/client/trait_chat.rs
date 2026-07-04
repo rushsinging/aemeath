@@ -126,7 +126,7 @@ pub(super) async fn chat_impl(
         if let Ok(mut guard) = inner.current_cancel.lock() {
             *guard = tokio_util::sync::CancellationToken::new();
         }
-        // auto-save：loop 退出后自动保存当前 session（messages 已通过 MessagesSync
+        // auto-save：loop 退出后自动保存当前 session（messages 已通过各 sync 事件
         // 同步到 inner.current_messages）。TUI 退出时只需 drop input_event_tx →
         // loop shutdown → runtime 自动 save，不再调 session RPC。
         if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {

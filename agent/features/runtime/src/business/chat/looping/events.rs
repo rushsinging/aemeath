@@ -125,7 +125,29 @@ pub enum RuntimeStreamEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    MessagesSync(Vec<Message>),
+    MicrocompactDone {
+        messages: Vec<Message>,
+        cleared_count: usize,
+    },
+    StopHookBlocked {
+        messages: Vec<Message>,
+    },
+    PostToolExecutionSync {
+        messages: Vec<Message>,
+    },
+    ApiError {
+        messages: Vec<Message>,
+        error: String,
+    },
+    CompactRollback {
+        messages: Vec<Message>,
+    },
+    CompactFinished {
+        messages: Vec<Message>,
+    },
+    TurnStarted {
+        messages: Vec<Message>,
+    },
     /// 批量用户输入归宿通知（每条含 InputId + 派生 Message，用于 #507 修复后 TUI 回显含占位符）。
     /// A2 仅建立通道，emit 由 Task 4 完成；#507 修复后 payload 改为 (InputId, Message) 元组。
     UserMessagesAdded {

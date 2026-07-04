@@ -14,10 +14,10 @@ fn test_app() -> App {
     )
 }
 
-/// A3 Task 4: MessagesSync 退出 display —— 仅镜像 chat.messages，不产生 UserMessage 回显块，
+/// 消息同步事件（如 PostToolExecutionSync）只镜像 chat.messages，不产生 UserMessage 回显块，
 /// 也不清除占位（回显与占位清理由 UserMessagesAdded 负责）。
 #[test]
-fn test_update_ui_messages_sync_only_mirrors_no_echo() {
+fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
     let mut app = test_app();
     app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     let echo_id = sdk::InputId::new_v7();
@@ -29,7 +29,11 @@ fn test_update_ui_messages_sync_only_mirrors_no_echo() {
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
-    app.update_ui(UiEvent::MessagesSync(messages), &ui_tx, &spawn_refs);
+    app.update_ui(
+        UiEvent::PostToolExecutionSync { messages },
+        &ui_tx,
+        &spawn_refs,
+    );
 
     // 镜像成功：chat.messages 更新到新的 msgs
     assert_eq!(app.chat.messages.len(), 2);
@@ -43,12 +47,12 @@ fn test_update_ui_messages_sync_only_mirrors_no_echo() {
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         1,
-        "MessagesSync 不应清占位"
+        "消息同步不应清占位"
     );
 }
 
 #[test]
-fn test_update_ui_messages_sync_does_not_echo_system_generated_user_message() {
+fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let mut app = test_app();
     app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
@@ -59,22 +63,26 @@ fn test_update_ui_messages_sync_does_not_echo_system_generated_user_message() {
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = SpawnContextRefs { agent_client: None };
 
-    app.update_ui(UiEvent::MessagesSync(messages), &ui_tx, &spawn_refs);
+    app.update_ui(
+        UiEvent::PostToolExecutionSync { messages },
+        &ui_tx,
+        &spawn_refs,
+    );
 
     assert!(app.model.conversation.timeline.items().iter().all(|item| {
         !matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == reminder)
     }));
 }
 
-/// Task 4: MessagesSync 退出 display，仅镜像 + 落盘
+/// 消息同步事件只镜像 + 落盘，不产生 display
 ///
-/// 场景：存在一条占位（id_a="hello"），收到包含 user_text("hello") 的 MessagesSync。
+/// 场景：存在一条占位（id_a="hello"），收到包含 user_text("hello") 的同步事件。
 /// 期望：
 /// - handler 后 self.chat.messages == msgs（镜像成功）
 /// - 不产生任何 UserMessage 回显块（退出 display）
 /// - 占位未被清除（清占位归 UserMessagesAdded 负责）
 #[test]
-fn test_messages_sync_no_display() {
+fn test_post_tool_sync_no_display() {
     let mut app = test_app();
     let (ui_tx, _ui_rx) = mpsc::channel(1);
     let spawn_refs = make_spawn_refs();
@@ -86,13 +94,19 @@ fn test_messages_sync_no_display() {
 
     // 构造包含该 user message 的 msgs
     let msgs = vec![sdk::ChatMessage::user_text("hello")];
-    app.update_ui(UiEvent::MessagesSync(msgs.clone()), &ui_tx, &spawn_refs);
+    app.update_ui(
+        UiEvent::PostToolExecutionSync {
+            messages: msgs.clone(),
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
 
     // 镜像成功
     assert_eq!(
         app.chat.messages.len(),
         1,
-        "MessagesSync 后 chat.messages 应镜像"
+        "消息同步后 chat.messages 应镜像"
     );
 
     // 不产生 UserMessage 回显块
@@ -298,20 +312,21 @@ fn test_messages_sync_clears_compact_runtime_state() {
         "precondition: compact_progress 已设置"
     );
 
-    app.update_ui(UiEvent::MessagesSync(vec![]), &ui_tx, &spawn_refs);
+    app.update_ui(
+        UiEvent::CompactFinished { messages: vec![] },
+        &ui_tx,
+        &spawn_refs,
+    );
 
-    // 修复后：全部 compact runtime 状态被清空
+    // CompactFinished 后：compact runtime 状态被清空，但 spinner 不停（turn 仍在进行）
     assert!(
-        !app.model.conversation.runtime.spinner.chat_active,
-        "MessagesSync 后 chat_active 必须为 false（spinner 行才会消失）"
+        app.model.conversation.runtime.compact_progress.is_none(),
+        "CompactFinished 后 compact_progress 必须清空"
     );
-    assert_eq!(
-        app.model.conversation.runtime.spinner.phase, None,
-        "MessagesSync 后 phase 必须清空"
-    );
-    assert_eq!(
-        app.model.conversation.runtime.spinner.running_tool_count, 0,
-        "MessagesSync 后 running_tool_count 必须清零"
+    // spinner 不应被 CompactFinished 停止
+    assert!(
+        app.model.conversation.runtime.spinner.chat_active,
+        "CompactFinished 后 chat_active 保持 true（turn 仍在进行）"
     );
     assert!(
         app.model.conversation.runtime.compact_progress.is_none(),

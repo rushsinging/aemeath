@@ -23,6 +23,7 @@ pub(crate) const MAX_STOP_HOOK_BLOCKS: usize = 5;
 /// feedback is injected as a system-reminder and the loop `continue`s — the
 /// next iteration will again drain the queue first.
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // #590: API error 不再走 stop hook，此函数暂时未被调用
 pub(crate) async fn finalize_main_loop<S>(
     outcome: &AgentRunOutcome,
     sink: &S,

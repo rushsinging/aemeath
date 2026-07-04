@@ -54,8 +54,8 @@ mod tests {
             "assemble tool_call_view",
             "render tool_call block_id",
             "render tool_result block_id",
-            "spinner phase set",
-            "spinner stopped",
+            "[SPINNER_DEBUG] spinner_phase",
+            "[SPINNER_DEBUG] spinner_stop",
         ] {
             assert!(
                 combined.contains(marker),
