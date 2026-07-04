@@ -6,7 +6,7 @@
 //! 快照仅存内存，不落盘；重启进程即重建基线。
 
 use sha2::{Digest, Sha256};
-use share::config::snapshot::{FileChange, FileChangeKind, FileSnapshot};
+use share::config::file_snapshot::{FileChange, FileChangeKind, FileSnapshot};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
