@@ -41,7 +41,6 @@ impl ConfigAppService {
 
     /// Create with a custom global config path (for testing).
     pub(crate) fn with_global_path(project_dir: Option<&Path>, global_path: PathBuf) -> Self {
-        let global_path = share::config::paths::global_config_path();
         let project_path = project_dir.map(share::config::paths::project_config_path);
         let claude_project_settings_path =
             project_dir.map(share::config::paths::project_claude_settings_path);
