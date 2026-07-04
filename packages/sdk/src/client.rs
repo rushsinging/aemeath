@@ -104,9 +104,6 @@ pub trait AgentClient: Send + Sync + 'static {
         output: ReflectionOutputView,
     ) -> Result<String, super::SdkError>;
 
-    /// 设置推理模式（None = 切换）。
-    async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, super::SdkError>;
-
     // ─── Hook ───
 
     /// 触发 hook 通知（消息变更等）。
@@ -122,11 +119,6 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 完成指定 reminder。
     async fn complete_reminder(&self, id: &str) -> Result<(), super::SdkError>;
-
-    // ─── Thinking ───
-
-    /// 获取当前推理模式状态。
-    async fn get_thinking(&self) -> Result<bool, super::SdkError>;
 
     // ─── TaskStore ───
 

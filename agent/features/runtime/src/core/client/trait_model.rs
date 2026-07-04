@@ -1,8 +1,6 @@
 use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::core::port::ProviderInfoPort;
-use crate::utils::adapter::LlmClientAdapter;
 use crate::utils::bootstrap::config_manager::ConfigManager;
 
 type Result<T> = std::result::Result<T, SdkError>;
@@ -69,29 +67,6 @@ pub(crate) async fn build_llm_client_for_switch(
     };
 
     Ok((new_client, result))
-}
-
-pub(super) async fn set_thinking_impl(me: &AgentClientImpl, desired: Option<bool>) -> Result<bool> {
-    let client = me.inner.current_client.read().unwrap().clone();
-    let adapter = LlmClientAdapter::new(client);
-    let current = adapter.current_reasoning_level();
-    let new_state = desired.unwrap_or(matches!(current, provider::contract::ReasoningLevel::Off));
-    let level = if new_state {
-        provider::contract::ReasoningLevel::Medium
-    } else {
-        provider::contract::ReasoningLevel::Off
-    };
-    adapter.set_reasoning_level(level);
-    Ok(new_state)
-}
-
-pub(super) async fn get_thinking_impl(me: &AgentClientImpl) -> Result<bool> {
-    let client = me.inner.current_client.read().unwrap().clone();
-    let adapter = LlmClientAdapter::new(client);
-    Ok(!matches!(
-        adapter.current_reasoning_level(),
-        provider::contract::ReasoningLevel::Off
-    ))
 }
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {

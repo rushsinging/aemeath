@@ -16,6 +16,7 @@ mod cmd {
     pub const HELP: &str = "help";
     pub const USAGE: &str = "usage";
     pub const REFLECT: &str = "reflect";
+    pub const THINK: &str = "think";
 }
 
 impl super::App {
@@ -79,6 +80,24 @@ impl super::App {
                         .push_input_event(sdk::ChatInputEvent::EstimateContext);
                 } else {
                     self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
+                }
+            }
+            cmd if cmd == format!("/{}", cmd::THINK) => {
+                // #497：reasoning 模式切换走 runtime 事件流
+                //（ChatInputEvent::SetThinking → idle 分支 → ThinkingChanged 事件）。
+                // /think       → toggle（desired = None）
+                // /think on    → 开启（desired = Some(true)）
+                // /think off   → 关闭（desired = Some(false)）
+                let desired = match parts.get(1).copied() {
+                    Some("on") => Some(true),
+                    Some("off") => Some(false),
+                    _ => None, // toggle
+                };
+                if self.chat.input_event_tx.is_some() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::SetThinking { desired });
+                } else {
+                    self.append_system_notice("[think skipped: agent loop not running]");
                 }
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
