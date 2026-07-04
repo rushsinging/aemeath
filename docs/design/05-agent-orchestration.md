@@ -83,18 +83,23 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 - **与 agent loop 的区别**（Anthropic *Building Effective Agents* 的经典区分）：
   - **agent**：模型自主决定路径与工具，灵活性高、可控性低。
   - **workflow**：路径由代码预先定义，模型只在指定节点决策，可控性高、灵活性低。
-- **代表实践**：Claude Code 的 `/commit` 这类 skill，本质就是被 prompt 化的 mini-workflow——流程固定（收集变更 → 生成消息 → 提交），关键判断点（提交信息措辞）交给 LLM。
+- **orchestrator-workers 模式**（Anthropic 提出、被 LangGraph/CrewAI 文档转引）：中心 orchestrator 把任务拆给多个 worker LLM 动态执行，再综合结果——专门适配子任务数量/内容无法预先确定的场景（如需要改未知数量文件的代码生成任务）。是 §2.3 sub-agent 委托模式的直接先例，也是业界「Workflow 编排多 agent」最常见的落地形态。
+- **代表实践**：Claude Code 的 `/commit` 这类 skill，本质就是被 prompt 化的 mini-workflow——流程固定（收集变更 → 生成消息 → 提交），关键判断点（提交信息措辞）交给 LLM。业界生产级实现详见 §7.1。
 
 ### 2.5 Graph（状态图编排）
 
 - **核心问题**：当流程复杂到需要**分叉、合并、回放、并行子图**时，线性 workflow 不够用，需要图抽象。
-- **关键原语**（LangGraph 思路）：
-  - **node**（节点）：一个执行单元（LLM 调用 / 工具 / 子图）。
-  - **edge**（边）：节点间的转移，可为条件边（依据 state 决定下一节点）。
-  - **state**（状态）：贯穿全图的显式状态对象，节点读写它。
-  - **checkpoint**（检查点）：在每个节点边界持久化 state，支持分叉重跑、回放、A/B。
+- **执行模型**（Pregel/BSP，Google 提出；LangGraph 与微软 Agent Framework 独立收敛到同一套算法家族，详见 §7.2）：
+  - **superstep（超步）**：图执行切成离散轮次，同一超步内并行的节点属于同一轮，需等上游产出的节点属于下一轮。
+  - **同步屏障（synchronization barrier）**：本超步内所有被触发的节点必须全部完成，才允许推进到下一超步；且超步具有事务性——超步内任一节点异常，本超步全部 state 更新一起回滚，不会出现部分生效的中间态。
+  - **条件边（conditional edge）**：超步边界的路由决策。LangGraph 是「看全局 state」的 path 函数（可返回单个/多个目标节点，或 `END`）；微软 Agent Framework 是「逐边挂谓词、只看流经该边的消息」——两种作用域不同的实现，aemeath 设计时需明确选哪种。
+- **关键原语**：
+  - **node/executor**（节点）：一个执行单元（LLM 调用 / 工具 / 子图）。微软 Agent Framework 官方不用 "node" 这一术语，只用 **Executor**。
+  - **edge**（边）：节点间的转移。LangGraph 的条件边 + **Send API**（动态 map-reduce 式并行分支——routing 函数返回运行时才确定数量的 `Send(目标, payload)` 列表，同批 `Send` 在同一 superstep 内并行执行）；微软 Agent Framework 固定五种一等公民 Edge 类型（Direct / Conditional / Switch-Case / Multi-Selection Fan-out / Fan-in，Fan-in 是显式命名的 Barrier 原语，语义是同步 join）。
+  - **state**（状态）：LangGraph 用 `Annotated` 附加 reducer 函数控制合并语义（默认覆盖，可自定义拼接，内置 `add_messages` 按消息 ID 合并）；微软 Agent Framework 是「消息传递 + 按 scope 隔离的共享状态存储」混合模型，可见性同样受 superstep 屏障约束。
+  - **checkpoint**（检查点）：两家都支持 superstep 边界持久化，用于分叉重跑、回放、A/B。LangGraph 额外拆分 checkpointer（thread 级短期状态）与 store（跨 thread 长期记忆）两套机制，并提供 `exit`/`async`/`sync` 三档可调的持久化强度。
 - **与 workflow 的区别**：workflow 是图的特例（线性 / 树形），graph 引入了显式 state 与 checkpoint 语义，面向复杂控制流与可恢复性。
-- **代表实践**：LangGraph（Python）、其在 Rust 生态尚无成熟同类——这是 aemeath 若引入 graph 抽象 **MUST** 直面的生态现实。
+- **代表实践**：LangGraph（Python，Pregel/BSP + Send API 的先行实现）、微软 Agent Framework（.NET/Python，独立实现同款 Pregel/BSP 模型）——两者均验证了这套执行模型不是单一厂商偏好，但在 Rust 生态均无成熟同类，这是 aemeath 若引入 graph 抽象 **MUST** 直面的生态现实。
 
 ## 3. 范式光谱与权衡
 
@@ -132,8 +137,8 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 | **Context** | ✅ 扎实 | `prompt/`（guidance resolver + skill loader）、`runtime/business/compact/`（compact/microcompact/autocompact/token_estimation/summary/truncate）、`compact_if_needed` 按 `api_input*100/ctx_context_size` 的 urgency（50%/35% 阈值）触发 | — |
 | **Harness** | ✅ 扎实 | `tools/`（TypedTool trait + registry + Agent/Task/WebSearch 等）、`policy/`、`hook/`、`audit/` | — |
 | **Loop** | ✅ 扎实 | `runtime/business/agent/runner/loop_run.rs::run_loop`：`for turn in 0..max_turns` 经典工程化 agent loop；停止条件 `EndTurn \|\| tool_calls.is_empty()`；暂停 `ctx.cancel`；超时 `max_duration`；重试与防死循环（见 Issue #372/#374） | **无 checkpoint**：状态散在 `self.messages`/`self.ctx` 等局部变量，无显式状态对象，无 turn 边界持久化 |
-| **Workflow** | ❌ 基本空白 | —（grep `workflow` 仅命中字符串字面量，非抽象层） | 全部：router、显式流程步进、流程级测试 |
-| **Graph** | ❌ 基本空白 | — | 全部：node/edge/state/checkpoint 原语 |
+| **Workflow** | ❌ 基本空白 | —（grep `workflow` 仅命中字符串字面量，非抽象层）；`docs/design/08-agent-workflow-graph.md`（PR #533，待合并）提出了线性序列版 `PlanWorkflow` 落地方案 | 全部：router、显式流程步进、流程级测试。业界参考见 §7.1 |
+| **Graph** | ❌ 基本空白 | — | 全部：node/edge/state/checkpoint 原语，尤其是 superstep + 同步屏障的并行/汇合语义（§2.5）。业界参考见 §7.2 |
 | **sub-agent** | ⚠️ 语义偏弱 | `tools/business/agent_tool.rs`：实现 `TypedTool`，name=`"Agent"`，作为普通工具注册；内部复用 `SubAgentRun::run_loop` | 无子图表达、无独立 checkpoint、输入输出契约隐式 |
 
 **结论**：Context / Harness / Loop 三条线支撑了当前「开放编程助手」场景，但 Workflow / Graph 的空白导致 Issue #358 所列三个痛点无解——高频路径的成本与漂移无法靠 prompt 根治。
@@ -180,18 +185,62 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 1. **是否需要独立的 `agent/features/orchestration/**` feature？**
    - 倾向：方向 A 可先在 runtime 叠加（纯 router + workflow 函数），验证后再决定是否独立 feature；方向 B/C/D 几乎必然需要独立 feature（checkpoint 状态机横切多个 feature）。
 2. **自研 vs 复用 LangGraph 思路？**
-   - 事实：Rust 生态无成熟 LangGraph 同类。
-   - 倾向：自研，但 **SHOULD** 先复刻 LangGraph 的 node/edge/state/checkpoint 四原语语义，而非另起概念。
+   - 事实：Rust 生态无成熟 LangGraph 同类；但 LangGraph 与微软 Agent Framework 两个独立团队都收敛到 Pregel/BSP + superstep + 同步屏障这套执行模型（§2.5、§7.2），说明这不是单一厂商偏好，而是图编排问题的某种自然解。
+   - 倾向：自研，但 **SHOULD** 先复刻这套已经两方独立验证的 node/edge/state/checkpoint 四原语语义（含 superstep 屏障与条件边路由），而非另起概念。
 3. **workflow 与现有 skill 系统的关系？**
    - 选项一：skill 升级为 workflow 的载体（skill = 声明式 workflow 描述）。
    - 选项二：两套并行（skill 负责 prompt 化能力注入，workflow 负责代码化流程编排）。
    - 倾向：PoC 阶段并行，跑通后按实际耦合度决定合并与否。
 
-## 7. 参考
+## 7. 业界调研成果（Issue #358 补充材料，2026-07）
 
-- **Anthropic**, *Building Effective Agents*（workflow vs agent 的经典区分）。
+本节整理针对 Workflow / Graph 两条主线的多轮 deep-research 调研结果（6 轮独立调研、100+ 信源、3 票对抗式验证），作为 §2.4 / §2.5 摘要陈述的详细佐证。Context / Harness / Loop 三条线业界证据同样充分（Anthropic context engineering 官方文章、MCP 授权规范、ReAct 论文、Claude Code 源码级验证），但 aemeath 在这三线已有扎实实现（§4），故此处不展开，仅列入 §8 参考。
+
+### 7.1 Workflow：四个代表实现的设计取舍
+
+| 实现 | 核心抽象 | 编排方式 | 与 aemeath 的关联 |
+|---|---|---|---|
+| **Temporal** | Workflow（确定性编排层）/ Activity（非确定性工作单元） | Workflow 只发 Command、不直接执行副作用；LLM/工具调用全部包在 Activity 里；崩溃恢复靠重放 event-sourced Event History（非快照），已完成的 Activity 不重新执行，只取历史结果 | 平台级强确定性约束，代价是 Workflow 代码必须可重放；⚠️ 不能假设它能完全替代 LangGraph 式 checkpointer（相关强结论已被验证推翻） |
+| **CrewAI** | Agent / Task / Crew / Process | Sequential（固定顺序，前一任务输出作下一任务上下文）；Hierarchical（**代码级强制**要求 `manager_llm`/`manager_agent`，缺失直接报错，构成 orchestrator-workers，而非图拓扑涌现路由） | Hierarchical 模式是「角色化 workflow」的清晰参考；显式声明优于隐式约定的设计值得借鉴 |
+| **AutoGen** | GroupChatManager + 可插拔 speaker selection | pub/sub 广播消息 + 集中式 manager 选人（默认 LLM 选择器，可换规则/自定义函数/legacy 四种字符串策略）；终止条件用可组合 `TerminationCondition`（按位或组合） | 对话驱动、无显式图结构（但生态内另有独立 `GraphFlow`/`DiGraphBuilder` 服务显式流程场景，与对话驱动模式并列非融合） |
+| **AutoGPT** | 从 Classic（自主循环 + Forge 组件）转向 **AutoGPT Platform**（用户拼接 Block 的可视化工作流） | Classic 已官方废弃（无安全维护）；Platform 的核心交互是「连接 Block」而非 LLM 运行时自主任务分解——原始「自主 agent」项目自身完成了向 Workflow 范式的转型 | 印证 §1 的判断：「高频确定路径应从 agent loop 抽出为 workflow」不是 aemeath 一家的孤立判断，而是行业已验证的演化方向 |
+
+`orchestrator-workers` 模式（Anthropic 提出，被 LangGraph、CrewAI 文档转引）是四个实现中出现频率最高的公共模式，也是 §2.3 sub-agent 委托的直接先例。
+
+### 7.2 Graph：Pregel/BSP 在两个独立生态的收敛
+
+| 维度 | LangGraph | 微软 Agent Framework |
+|---|---|---|
+| 节点术语 | node | **Executor**（官方明确不用 "node"） |
+| 执行模型 | 显式自称 "modified Pregel" BSP | 显式自称 "modified Pregel" BSP（与 LangGraph **算法同源、独立实现**） |
+| 同步屏障 | 超步末尾全部节点 inactive 且无消息在途才终止；超步事务性（异常则整批更新回滚） | 同一同步屏障语义；官方文档明确指出 fan-out 场景下的木桶效应（短分支需等长分支） |
+| 条件边 | `add_conditional_edges` path 函数，读**全局 state** 决定路由 | 逐边布尔谓词，只读**流经该边的消息**，不接触全局 state——作用域比 LangGraph 更局部 |
+| 并行分支 | **Send API**：routing 函数返回运行时确定数量的 `Send(目标, payload)` 列表，同批 `Send` 同一 superstep 内并行 | 五种一等公民 Edge 类型（Direct/Conditional/Switch-Case/Multi-Selection Fan-out/Fan-in），Fan-in 是显式命名的 `AddFanInBarrierEdge` 同步 join 原语 |
+| 状态模型 | `Annotated` + reducer 函数（默认覆盖，可自定义合并，内置 `add_messages` 按消息 ID 合并） | 消息传递 + 按 scope 隔离的共享状态存储，可见性受 superstep 屏障约束 |
+| 持久化 | checkpointer（thread 级短期状态）+ store（跨 thread 长期记忆）；`exit`/`async`/`sync` 三档可调持久化强度 | superstep 边界 checkpoint（第三方评论：目前偏基础能力，手动续跑、无自动故障检测，生产级容错还需配 Azure Durable Task Extension） |
+
+**两个独立团队收敛到同一套执行模型**（Pregel/BSP + superstep + 同步屏障），是本次调研对 aemeath 最有分量的信号：如果未来把 `08-agent-workflow-graph.md` 的线性序列升级为真正的 DAG（该文档 §6.2 的 `branch`/`switch`/`join`），这套「superstep 边界同步、事务性批量提交、条件边路由」的设计已经过两方独立验证，风险低于自创一套并行同步语义。
+
+### 7.3 尚未确证的开放问题
+
+- **微软 Agent Framework 与 Semantic Kernel Process Framework 的血缘关系**：三轮调研均未获得证据，需要专门再查官方迁移指南。
+- **Temporal 能否替代 LangGraph 式 checkpointer**：相关强结论已被验证推翻（1-2 票）——不能假设引入 Temporal 就能省去应用层状态持久化设计。
+- **AutoGen 是否存在隐藏的最小状态机**：「无显式 state machine/graph 结构」的定性表述本身是 2-1 分裂票，manager 侧确实维护了 `_previous_participant_topic_type` 之类的最小标量状态，不宜视为板上钉钉的结论。
+- **原始 AutoGPT 项目与 AutoGPT+P 论文需严格区分**：AutoGPT+P 是 2024 年一篇无关的机器人任务规划学术论文（同名不同源），调研中曾被误用，已在本轮修正为直接查 AutoGPT 官方仓库/文档。
+
+## 8. 参考
+
+- **Anthropic**, *Building Effective Agents*（workflow vs agent 的经典区分、orchestrator-workers 等模式）。
+- **Anthropic**, *Effective context engineering for AI agents*（compaction / just-in-time 检索 / 结构化笔记记忆）。
 - **Yao et al., 2022**, *ReAct: Synergizing Reasoning and Acting in Language Models*（agent loop 的理论根基）。
-- **LangGraph** 文档：node / edge / state / checkpoint 原语。
+- **Model Context Protocol**，官方规范 *Authorization*（OAuth 2.1 子集、RFC 8707、RFC 9728）。
+- **LangGraph** 官方文档：*Graph API overview*、*Durable execution*（node / edge / state / checkpoint / Send API / Pregel-BSP 原语）。
+- **微软 Agent Framework** 官方文档：`learn.microsoft.com/en-us/agent-framework/workflows/`（Executor / Edge / superstep / checkpoint 原语）。
+- **Temporal** 官方文档与博客：`docs.temporal.io/workflows`、*Durable Execution meets AI*（Workflow/Activity 分层、event-sourced 崩溃恢复）。
+- **CrewAI** 官方文档：`docs.crewai.com/en/concepts/processes`（Sequential/Hierarchical process）。
+- **AutoGen** 官方文档：`microsoft.github.io/autogen`（GroupChat、speaker selection、TerminationCondition、GraphFlow）。
+- **AutoGPT** 官方仓库与文档：`github.com/Significant-Gravitas/AutoGPT`、`agpt.co/docs/classic`（Classic → Platform 的架构转型）。
 - Issue #358：本方向的原始动机与四个探索方向。
 - `docs/design/01-outline.md` §核心域 / §Bounded Context：aemeath 的领域划分，编排层的落点 **MUST** 遵循。
 - `docs/design/03-runtime-design.md`：现有 Agent Looping 的设计真相源，任何 loop 改造 **MUST** 先核对此文档。
+- `docs/design/08-agent-workflow-graph.md`（PR #533，待合并）：Workflow 主线的具体落地设计（`PlanWorkflow` tool、线性序列 + cursor、准入准出守卫）。
