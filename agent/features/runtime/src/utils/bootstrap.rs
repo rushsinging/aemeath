@@ -29,14 +29,23 @@ pub fn resolve_context_size(
     config_file: Option<&Config>,
     model_context_window: usize,
 ) -> usize {
+    let config_ctx = config_file.map(|c| c.model.context_size).unwrap_or(0);
+    let env_val = std::env::var("AEMEATH_CONTEXT_SIZE").ok();
+    log::debug!(
+        target: "aemeath:agent:runtime",
+        "resolve_context_size: cli={}, model_context_window={}, config.model.context_size={}, env AEMEATH_CONTEXT_SIZE={:?}",
+        cli_context_size, model_context_window, config_ctx, env_val,
+    );
     // CLI 非零 → 用户显式设置了
     if cli_context_size > 0 {
+        log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=cli, result={}", cli_context_size);
         return cli_context_size;
     }
     // env AEMEATH_CONTEXT_SIZE
     if let Ok(env_val) = std::env::var("AEMEATH_CONTEXT_SIZE") {
         if let Ok(parsed) = env_val.parse::<usize>() {
             if parsed > 0 {
+                log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=env, result={}", parsed);
                 return parsed;
             }
         }
@@ -44,14 +53,16 @@ pub fn resolve_context_size(
     // config model.context_size（全局覆盖）
     if let Some(config) = config_file {
         if config.model.context_size > 0 {
+            log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=config_model, result={}", config.model.context_size);
             return config.model.context_size;
         }
     }
     // resolved provider model 的 contextWindow（来自 models.providers.*.models[].contextWindow）
     if model_context_window > 0 {
+        log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=provider_model, result={}", model_context_window);
         return model_context_window;
     }
-    // default
+    log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=default, result=128000");
     128_000
 }
 

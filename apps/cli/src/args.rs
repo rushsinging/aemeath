@@ -47,8 +47,8 @@ pub struct RunArgs {
     #[arg(long)]
     pub no_markdown: bool,
 
-    /// Context window size in tokens
-    #[arg(long, env = "AEMEATH_CONTEXT_SIZE", default_value = "128000")]
+    /// Context window size in tokens (0 = auto-resolve from provider model config)
+    #[arg(long, env = "AEMEATH_CONTEXT_SIZE", default_value = "0")]
     pub context_size: usize,
 
     /// Resume a saved session by ID
