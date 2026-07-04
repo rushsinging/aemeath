@@ -5,8 +5,8 @@
 
 use super::snapshot_registry::SourceSnapshotRegistry;
 use crate::LOG_TARGET;
+use share::config::file_snapshot::{FileChange, FileChangeKind};
 use share::config::paths;
-use share::config::snapshot::{FileChange, FileChangeKind};
 use share::config::GuidanceReloadPolicy;
 use std::path::{Path, PathBuf};
 
