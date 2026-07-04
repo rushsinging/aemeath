@@ -32,10 +32,7 @@ impl AgentClient for AgentClientImpl {
     async fn delete_session(&self, id: &str) -> Result<(), SdkError> {
         super::trait_session::delete_session_impl(self, id).await
     }
-
-    async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, SdkError> {
-        super::trait_model::set_thinking_impl(self, desired).await
-    }
+  
     async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), SdkError> {
         super::trait_misc::notify_hook_impl(self, message, kind).await
     }
@@ -65,9 +62,6 @@ impl AgentClient for AgentClientImpl {
     }
     async fn complete_reminder(&self, id: &str) -> Result<(), SdkError> {
         super::trait_memory::complete_reminder_impl(self, id).await
-    }
-    async fn get_thinking(&self) -> Result<bool, SdkError> {
-        super::trait_model::get_thinking_impl(self).await
     }
 
     // accessor methods (sync)

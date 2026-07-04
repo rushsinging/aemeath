@@ -850,10 +850,6 @@ mod tests {
             Ok("applied".to_string())
         }
 
-        async fn set_thinking(&self, _desired: Option<bool>) -> Result<bool, sdk::SdkError> {
-            Ok(true)
-        }
-
         async fn notify_hook(&self, _message: &str, _kind: &str) -> Result<(), sdk::SdkError> {
             Ok(())
         }
@@ -868,10 +864,6 @@ mod tests {
 
         async fn complete_reminder(&self, _id: &str) -> Result<(), sdk::SdkError> {
             Ok(())
-        }
-
-        async fn get_thinking(&self) -> Result<bool, sdk::SdkError> {
-            Ok(false)
         }
 
         async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
