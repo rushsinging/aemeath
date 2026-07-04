@@ -1,23 +1,127 @@
 # 配置分层 / Claude Code 兼容
 
-**Scope**：`agent/shared/src/config/**`——配置分层、provider 默认值（base URL / 默认 model / env 名）、Claude Code 兼容、运行时路径。
-**主触发**：改 `agent/shared/src/config/**`。
+**Scope**：`agent/shared/src/config/**`、`agent/features/runtime/src/core/config_app_service.rs`、`agent/features/runtime/src/core/config_port.rs`——配置分层、provider 默认值（base URL / 默认 model / env 名）、Claude Code 兼容、运行时路径。
+**主触发**：改 `agent/shared/src/config/**` 或 `config_app_service.rs` / `config_port.rs`。
 **次触发**：新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级。
+
+## 架构（DDD + 六边形 + Clean）
+
+配置域采用分层架构：
+
+```
+Domain 层 (share/config/domain/)
+  纯数据 + 纯函数，不接触 fs/env/网络
+  - Config 聚合根
+  - ConfigSnapshot 只读视图（Arc<Config>，accessor）
+  - ConfigPatch + PriorityChain 合并策略
+  - driver_env driver→API key env name 映射
+
+Port 层 (runtime/core/config_port.rs)
+  ConfigReader trait（async snapshot + watch）
+  ※ async_trait 是行为，不属于 share kernel
+
+Adapter 层 (share/config/adapter/)
+  把外部格式翻译成 ConfigPatch
+  - EnvAdapter 唯一业务 env 读取点
+  - CliArgsAdapter / FileAdapter / ClaudeSettingsAdapter（stub）
+
+Application Service (runtime/core/config_app_service.rs)
+  ConfigAppService 编排 adapter 链 load/merge/watch/update/reload
+  resolve_provider_api_keys：per-provider API key 从 env 注入
+```
+
+### 层间依赖规则
+
+| 层 | 可依赖 | 不可依赖 |
+|---|---|---|
+| Domain (share) | 标准库 + serde | 任何外部 crate、fs、env |
+| Port (runtime) | Domain + async_trait | 具体 adapter 实现 |
+| Adapter (share) | Domain + 外部 crate | 反向被依赖 |
+| AppService (runtime) | Port + Domain + adapter | 反向被依赖 |
 
 ## 配置分层（优先级从高到低）
 
 1. CLI 参数（`--provider`、`--model` 等）
-2. 环境变量（`AEMEATH_*`、`ANTHROPIC_API_KEY` 等）
+2. 环境变量（`AEMEATH_*`、`*_API_KEY` 等）——由 `EnvAdapter` 统一读取
 3. 项目级配置：`.agents/aemeath.json` 优先，其次兼容 `.claude/settings.json` 的 hooks 配置
 4. 全局配置（`~/.agents/aemeath.json`）
-5. 硬编码默认值
+5. Claude Code settings.json（ACL 兼容层）
+6. 硬编码默认值
 
-入口：`agent/shared/src/config.rs`；运行时路径解析：`agent/shared/src/config/paths.rs`。
+**关键约束**：业务 env **NEVER** 在 config 包外读取。`check-config-env-guard.sh` 守卫强制执行此约束。消费方通过 `ConfigReader` port 或 `ConfigView` 获取配置值。
+
+## 环境变量
+
+### 业务配置 env
+
+以下 env 由 `EnvAdapter` 统一读取，进入 `ConfigPatch`：
+
+| env | 说明 |
+|---|---|
+| `AEMEATH_PROVIDER` | provider 名称 |
+| `AEMEATH_API_KEY` / `LLM_API_KEY` | 全局 API key |
+| `AEMEATH_BASE_URL` / `LLM_BASE_URL` | API base URL |
+| `AEMEATH_MODEL` | 模型名称 |
+| `AEMEATH_MAX_TOKENS` | 最大输出 token |
+| `AEMEATH_CONTEXT_SIZE` | 上下文窗口大小 |
+| `AEMEATH_PERMISSION_MODE` | 权限模式（ask / auto_read / allow_all） |
+| `AEMEATH_MAX_TOOL_CONCURRENCY` | 工具并发数 |
+| `AEMEATH_MAX_AGENT_CONCURRENCY` | 子代理并发数 |
+| `AEMEATH_VERBOSE` | verbose 模式 |
+| `NO_COLOR` | 禁用颜色 |
+| `AEMEATH_LOG_LEVEL` | 日志级别（全局级别或 per-target directive） |
+
+### 日志级别
+
+`AEMEATH_LOG_LEVEL` 替代了旧的 `RUST_LOG`，支持两种写法：
+
+```
+AEMEATH_LOG_LEVEL=info                                           # 全局级别
+AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace  # per-target
+```
+
+`set_max_level` 跟随 directive 中的最宽松级别（不再被 `Info` 硬闸门挡死）。
+
+### Driver-specific API key env
+
+Per-provider 的 driver-specific API key env 在 `ConfigAppService::load()` 的 `resolve_provider_api_keys` 后处理中注入：
+
+| driver | env |
+|---|---|
+| anthropic | `ANTHROPIC_API_KEY` |
+| openai | `OPENAI_API_KEY` |
+| deepseek | `DEEPSEEK_API_KEY` |
+| minimax | `MINIMAX_API_KEY` |
+| mimo | `MIMO_API_KEY` |
+| volcengine | `VOLCENGINE_CODING_PLAN_API_KEY` |
+| zhipu / litellm | 无 driver-specific env |
+
+fallback 链：driver-specific → `LLM_API_KEY` → `OPENAI_API_KEY`。
+
+### 系统级 env（白名单）
+
+以下 env 不属于业务配置，不在 `EnvAdapter` 管辖范围：
+
+| env | 用途 | 读取位置 |
+|---|---|---|
+| `HOME` | 用户主目录 | 全局 |
+| `AEMEATH_AGENTS_DIR` | 运行时根目录 | `config/paths.rs` |
+| `AEMEATH_LOG_STDERR` | 日志输出到 stderr（CLI 模式） | `logging_setup.rs` |
+| `AEMEATH_VERSION` | 版本号（编译期注入） | `build.rs` |
 
 ## Provider 默认值
 
 - 每个 provider 的默认 base URL、默认 model、API key 环境变量名定义在 `agent/shared/src/config/models/`（`types.rs`、`resolve.rs`）与 `agent/shared/src/config/legacy.rs`。
+- driver→env name 映射定义在 `agent/shared/src/config/domain/driver_env.rs`（单一真相）。
 - **NEVER** 硬编码 API key、base URL；新增 provider 的默认值在此补充（实现层见 `provider.md`）。
+
+## TUI 纯展示层约束
+
+TUI **NEVER** 直接读 config/env。config 变更通过事件流推送给 TUI：
+
+- runtime 通过 `ChangeSet::CONFIG` flag 通知 config 变更
+- TUI 调用 `AgentClient::config_view()` 获取 `ConfigView`（只读快照）
+- `ConfigView` 包含 TUI 需要的展示字段（model name、provider、api_key 状态、permission mode 等）
 
 ## Claude Code 兼容
 

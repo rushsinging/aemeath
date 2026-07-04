@@ -408,7 +408,6 @@
   - `agent/shared/src/config/paths` — `AEMEATH_AGENTS_DIR`，路径根
   - `agent/shared/src/config/domain/driver_env` — driver→env name 映射
   - `agent/features/runtime/src/core/config_app_service.rs` — `resolve_provider_api_keys` 在 config 加载时从 env 注入 per-provider API key
-  - `agent/features/runtime/src/utils/bootstrap/config_manager.rs` — **TODO(S5)**：ConfigManager 删除后移除
   - `packages/global/logging/` — `AEMEATH_LOG_LEVEL` 在 logging 层处理
   - `build.rs` — 编译期
   

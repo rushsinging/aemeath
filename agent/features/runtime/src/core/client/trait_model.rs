@@ -1,7 +1,7 @@
 use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::utils::bootstrap::config_manager::ConfigManager;
+use crate::core::config_app_service::ConfigAppService;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -19,7 +19,7 @@ pub(crate) async fn build_llm_client_for_switch(
     };
     use provider::api::ProviderDriverKind;
 
-    let config = ConfigManager::new(Some(cwd)).load().await?;
+    let config = ConfigAppService::new(Some(cwd)).load().await?;
 
     let resolved_model = config
         .models
@@ -70,7 +70,7 @@ pub(crate) async fn build_llm_client_for_switch(
 }
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
-    let config = ConfigManager::new(Some(&me.inner.cwd))
+    let config = ConfigAppService::new(Some(&me.inner.cwd))
         .load()
         .await
         .map_err(SdkError::Init)?;
