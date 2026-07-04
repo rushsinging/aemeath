@@ -416,12 +416,14 @@ where
     if appended_user_messages > 0 {
         log::debug!(
             target: LOG_TARGET,
-            "apply_gate sending MessagesSync + UserMessagesAdded count={} kind={:?}",
+            "apply_gate sending PostToolExecutionSync + UserMessagesAdded count={} kind={:?}",
             appended_user_messages,
             kind
         );
-        sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-            .await;
+        sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
+            messages: messages.clone(),
+        })
+        .await;
         sink.send_event(RuntimeStreamEvent::UserMessagesAdded { items: added })
             .await;
     }

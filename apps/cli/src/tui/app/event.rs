@@ -79,7 +79,36 @@ pub enum AppEvent {
     Cancelled {
         context: UiTurnContext,
     },
-    MessagesSync(Vec<sdk::ChatMessage>),
+    /// Turn 启动，TUI 据此启动 spinner(Thinking)。
+    TurnStarted {
+        messages: Vec<sdk::ChatMessage>,
+    },
+    /// Microcompact 清理了陈旧 tool result，TUI 只同步消息。
+    MicrocompactDone {
+        messages: Vec<sdk::ChatMessage>,
+        cleared_count: usize,
+    },
+    /// Stop hook 阻止 turn 结束，TUI 只同步消息。
+    StopHookBlocked {
+        messages: Vec<sdk::ChatMessage>,
+    },
+    /// Tool 执行完成后同步，TUI 只同步消息。
+    PostToolExecutionSync {
+        messages: Vec<sdk::ChatMessage>,
+    },
+    /// Provider API 调用失败，TUI stop spinner + 显示错误。
+    ApiError {
+        messages: Vec<sdk::ChatMessage>,
+        error: String,
+    },
+    /// Compact 失败回滚，TUI 只同步消息。
+    CompactRollback {
+        messages: Vec<sdk::ChatMessage>,
+    },
+    /// Compact 成功完成，TUI 同步消息 + 清 compact 状态。
+    CompactFinished {
+        messages: Vec<sdk::ChatMessage>,
+    },
     /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
     /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
     /// 清占位、ChatMessage.text_content() 还原回显（含 Image placeholder）。

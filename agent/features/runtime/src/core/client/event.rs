@@ -251,16 +251,87 @@ pub(crate) fn runtime_event_to_sdk_event(
             last_input,
             elapsed_secs,
         },
-        crate::business::chat::RuntimeStreamEvent::MessagesSync(messages) => {
+        crate::business::chat::RuntimeStreamEvent::TurnStarted { messages } => {
             if let Ok(mut guard) = current_messages.lock() {
                 *guard = messages.clone();
             }
-            ChatEvent::MessagesSync(
-                messages
+            ChatEvent::TurnStarted {
+                messages: messages
                     .into_iter()
                     .map(super::mapping::message_to_sdk)
                     .collect(),
-            )
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::MicrocompactDone {
+            messages,
+            cleared_count,
+        } => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::MicrocompactDone {
+                messages: messages
+                    .into_iter()
+                    .map(super::mapping::message_to_sdk)
+                    .collect(),
+                cleared_count,
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::StopHookBlocked { messages } => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::StopHookBlocked {
+                messages: messages
+                    .into_iter()
+                    .map(super::mapping::message_to_sdk)
+                    .collect(),
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::PostToolExecutionSync { messages } => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::PostToolExecutionSync {
+                messages: messages
+                    .into_iter()
+                    .map(super::mapping::message_to_sdk)
+                    .collect(),
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::ApiError { messages, error } => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::ApiError {
+                messages: messages
+                    .into_iter()
+                    .map(super::mapping::message_to_sdk)
+                    .collect(),
+                error,
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::CompactRollback { messages } => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::CompactRollback {
+                messages: messages
+                    .into_iter()
+                    .map(super::mapping::message_to_sdk)
+                    .collect(),
+            }
+        }
+        crate::business::chat::RuntimeStreamEvent::CompactFinished { messages } => {
+            if let Ok(mut guard) = current_messages.lock() {
+                *guard = messages.clone();
+            }
+            ChatEvent::CompactFinished {
+                messages: messages
+                    .into_iter()
+                    .map(super::mapping::message_to_sdk)
+                    .collect(),
+            }
         }
         crate::business::chat::RuntimeStreamEvent::UserMessagesAdded { items } => {
             // #507 修复：把 (InputId, Message) 元组映射为带 input_id 的 ChatMessage，

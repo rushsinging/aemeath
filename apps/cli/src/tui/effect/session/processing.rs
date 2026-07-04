@@ -115,7 +115,21 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             last_input,
             elapsed_secs,
         },
-        sdk::ChatEvent::MessagesSync(messages) => UiEvent::MessagesSync(messages),
+        sdk::ChatEvent::TurnStarted { messages } => UiEvent::TurnStarted { messages },
+        sdk::ChatEvent::MicrocompactDone {
+            messages,
+            cleared_count,
+        } => UiEvent::MicrocompactDone {
+            messages,
+            cleared_count,
+        },
+        sdk::ChatEvent::StopHookBlocked { messages } => UiEvent::StopHookBlocked { messages },
+        sdk::ChatEvent::PostToolExecutionSync { messages } => {
+            UiEvent::PostToolExecutionSync { messages }
+        }
+        sdk::ChatEvent::ApiError { messages, error } => UiEvent::ApiError { messages, error },
+        sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback { messages },
+        sdk::ChatEvent::CompactFinished { messages } => UiEvent::CompactFinished { messages },
         sdk::ChatEvent::UserMessagesAdded { items } => UiEvent::UserMessagesAdded(items),
         sdk::ChatEvent::Done { context } => UiEvent::Done {
             context: context.into(),
@@ -346,8 +360,16 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             last_input,
             elapsed_secs
         ),
-        sdk::ChatEvent::MessagesSync(messages) => {
+        sdk::ChatEvent::TurnStarted { messages }
+        | sdk::ChatEvent::MicrocompactDone { messages, .. }
+        | sdk::ChatEvent::StopHookBlocked { messages }
+        | sdk::ChatEvent::PostToolExecutionSync { messages }
+        | sdk::ChatEvent::CompactRollback { messages }
+        | sdk::ChatEvent::CompactFinished { messages } => {
             crate::tui::log_trace!("{} messages_sync count={}", stage, messages.len())
+        }
+        sdk::ChatEvent::ApiError { messages, error } => {
+            crate::tui::log_trace!("{} api_error count={} err={}", stage, messages.len(), error)
         }
         sdk::ChatEvent::UserMessagesAdded { items } => {
             crate::tui::log_trace!("{} user_messages_added count={}", stage, items.len())
@@ -685,13 +707,15 @@ mod tests {
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_messages_sync() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::MessagesSync(vec![
-            sdk::ChatMessage::user_text("hello"),
-        ]));
+    fn test_sdk_event_to_ui_event_maps_compact_finished() {
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::CompactFinished {
+            messages: vec![sdk::ChatMessage::user_text("hello")],
+        });
 
         match event {
-            UiEvent::MessagesSync(messages) => assert_eq!(messages[0].text_content(), "hello"),
+            UiEvent::CompactFinished { messages } => {
+                assert_eq!(messages[0].text_content(), "hello")
+            }
             other => panic!("unexpected event: {other:?}"),
         }
     }

@@ -86,8 +86,36 @@ pub enum ChatEvent {
         last_input: u32,
         elapsed_secs: f64,
     },
-    /// runtime 同步当前 messages。
-    MessagesSync(Vec<ChatMessage>),
+    /// Turn 启动，首次同步全量消息。TUI 据此启动 spinner(Thinking)。
+    TurnStarted {
+        messages: Vec<ChatMessage>,
+    },
+    /// Microcompact 清理了陈旧 tool result，turn 仍在进行。TUI 只同步消息，不动 spinner。
+    MicrocompactDone {
+        messages: Vec<ChatMessage>,
+        cleared_count: usize,
+    },
+    /// Stop hook 阻止了 turn 结束，追加 system-reminder 后继续。TUI 只同步消息。
+    StopHookBlocked {
+        messages: Vec<ChatMessage>,
+    },
+    /// Tool 执行完成后的消息同步（AwaitUser gate）。TUI 只同步消息。
+    PostToolExecutionSync {
+        messages: Vec<ChatMessage>,
+    },
+    /// Provider API 调用失败。TUI 据此 stop spinner + 显示错误。
+    ApiError {
+        messages: Vec<ChatMessage>,
+        error: String,
+    },
+    /// Compact 失败后回滚消息。TUI 只同步消息。
+    CompactRollback {
+        messages: Vec<ChatMessage>,
+    },
+    /// Compact（LLM 摘要）成功完成，替换消息列表。TUI 同步消息 + 清 compact 状态。
+    CompactFinished {
+        messages: Vec<ChatMessage>,
+    },
     /// 批量用户输入归宿通知。每条 ChatMessage 已由 runtime 端 share::Message 映射而来，
     /// 含 typed blocks + image placeholder；TUI 用 ChatMessage.input_id 清占位、
     /// ChatMessage.text_content() 还原回显（含 #507 占位符丢失修复）。

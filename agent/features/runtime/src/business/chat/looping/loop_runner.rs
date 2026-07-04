@@ -3,8 +3,7 @@ use crate::business::agent::Agent;
 use crate::business::chat::looping::apply_gate;
 use crate::business::chat::looping::compact::{auto_compact, manual_compact, CompactOutcome};
 use crate::business::chat::looping::finalize::{
-    finalize_main_loop, finish_completed_loop, run_stop_hook_before_finish,
-    stop_hook_block_limit_reached,
+    finish_completed_loop, run_stop_hook_before_finish, stop_hook_block_limit_reached,
 };
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
@@ -761,7 +760,10 @@ where
                 .await;
             // 同步到 TUI 镜像
             let _ = sink
-                .send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+                .send_event(RuntimeStreamEvent::MicrocompactDone {
+                    messages: messages.clone(),
+                    cleared_count: mc_cleared,
+                })
                 .await;
         }
         // compact：发生时替换 messages 为 recent tail，summary 走 system。
@@ -1163,8 +1165,10 @@ where
                 .await;
 
                 messages.push(resp.assistant_message.clone());
-                sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                    .await;
+                sink.send_event(RuntimeStreamEvent::TurnStarted {
+                    messages: messages.clone(),
+                })
+                .await;
 
                 if stall_detector.record_text(&resp.assistant_message.text_content()) {
                     sink.send_event(RuntimeStreamEvent::SystemMessage(
@@ -1219,8 +1223,10 @@ where
                         messages.push(Message::system_generated_user(format!(
                             "<system-reminder>\n{feedback}\n</system-reminder>"
                         )));
-                        sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                            .await;
+                        sink.send_event(RuntimeStreamEvent::StopHookBlocked {
+                            messages: messages.clone(),
+                        })
+                        .await;
                         stall_detector = StallDetector::new();
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
@@ -1325,8 +1331,10 @@ where
                         messages.push(Message::system_generated_user(format!(
                             "<system-reminder>\n{outcome}\n</system-reminder>"
                         )));
-                        sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                            .await;
+                        sink.send_event(RuntimeStreamEvent::StopHookBlocked {
+                            messages: messages.clone(),
+                        })
+                        .await;
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         loop_fsm
                             .assert_state(ChatLoopState::Running, "stop hook blocked resumes loop");
@@ -1638,8 +1646,10 @@ where
                     // Build tool result message for API
                     messages.push(tool_results_for_api(all_results, &session_id));
                     // Sync after tool execution
-                    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                        .await;
+                    sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
+                        messages: messages.clone(),
+                    })
+                    .await;
                     loop_fsm.transition(ChatLoopTransition::AwaitUser);
                     let gate = drain_and_apply_gate(
                         GateKind::AfterBlockingBoundary,
@@ -2137,49 +2147,16 @@ where
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     continue;
                 }
-                loop_fsm.transition(ChatLoopTransition::TryStop);
-                if let Some(outcome) = finalize_main_loop(
-                    &AgentRunOutcome {
-                        status: AgentRunStatus::ApiError(error_msg),
-                        turns: turn_count,
-                        duration: turn_start.elapsed(),
-                        role: None,
-                        model: client.model_name().to_string(),
-                    },
-                    &sink,
-                    &hook_ui,
-                    &hook_runner,
-                    &session_id,
-                    &turn_context,
-                    &task_store,
-                    &language,
-                    &cwd,
-                )
-                .await
-                {
-                    stop_hook_block_count += 1;
-                    if stop_hook_block_limit_reached(stop_hook_block_count, &sink, &mut loop_fsm)
-                        .await
-                    {
-                        break;
-                    }
-                    messages.push(Message::system_generated_user(format!(
-                        "<system-reminder>\n{outcome}\n</system-reminder>"
-                    )));
-                    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                        .await;
-                    loop_fsm.transition(ChatLoopTransition::StopBlocked);
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    loop_fsm.assert_state(
-                        ChatLoopState::Running,
-                        "api-error stop hook blocked resumes loop",
-                    );
-                    continue;
-                }
+                // API error 不走 stop hook，直接发送 ApiError 事件并结束 turn。
+                sink.send_event(RuntimeStreamEvent::ApiError {
+                    messages: messages.clone(),
+                    error: error_msg.clone(),
+                })
+                .await;
                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                 loop_fsm.assert_state(
                     ChatLoopState::Done,
-                    "api-error finalizes after stop hooks pass",
+                    "api-error finalizes loop without stop hooks",
                 );
                 break;
             }
@@ -2429,8 +2406,10 @@ where
     // 回滚到本回合基线（per-turn）：仅截掉当前回合产生的 assistant/tool 输出，
     // 保留本回合用户消息与所有先前已完成回合的消息，再同步给消费者。
     messages.truncate(rollback_baseline);
-    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-        .await;
+    sink.send_event(RuntimeStreamEvent::CompactRollback {
+        messages: messages.clone(),
+    })
+    .await;
     sink.send_event(RuntimeStreamEvent::Cancelled {
         context: turn_context.clone(),
     })
@@ -2452,7 +2431,7 @@ where
     .await
 }
 
-/// 应用 compact 结果到 loop 状态：冻结旧链 → 替换 messages → 设 summary → 发 MessagesSync。
+/// 应用 compact 结果到 loop 状态：冻结旧链 → 替换 messages → 设 summary → 发 CompactFinished。
 async fn apply_compact_outcome<S>(
     sink: &S,
     outcome: CompactOutcome,
@@ -2482,6 +2461,8 @@ async fn apply_compact_outcome<S>(
     if let Ok(mut guard) = active_summary_arc.lock() {
         *guard = active_summary.clone();
     }
-    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-        .await;
+    sink.send_event(RuntimeStreamEvent::CompactFinished {
+        messages: messages.clone(),
+    })
+    .await;
 }

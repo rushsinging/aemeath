@@ -54,8 +54,10 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                         "[guidance 已更新] guidance 文件已被外部修改，请关注后续 system prompt 中的最新指引。".to_string(),
                     );
                     messages.push(reminder);
-                    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-                        .await;
+                    sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
+                        messages: messages.clone(),
+                    })
+                    .await;
                     log::info!(target: LOG_TARGET, "[config_reload] guidance inject mode: injected reminder into messages");
                 }
                 GuidanceReloadPolicy::Remind => {

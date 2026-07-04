@@ -67,7 +67,9 @@ impl App {
                 self.spinner_phase(hook_spinner_phase(&event));
             }
             UiEvent::Error(msg) => {
-                // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，                // 此处不再重复写 output_area（消除双表示）。
+                // Error 消息已由 map_agent_event -> AppendError 注入 ConversationModel，
+                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Error → spinner_stop");
+                // 此处不再重复写 output_area（消除双表示）。
                 self.spinner_stop();
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
@@ -79,6 +81,7 @@ impl App {
             UiEvent::Cancelled { .. } => {
                 // 取消提示改为注入 ConversationModel 的 System notice，经 document 渲染。
                 self.append_system_notice("已取消");
+                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Cancelled → spinner_stop");
                 self.spinner_stop();
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
@@ -110,22 +113,61 @@ impl App {
                 self.mark_output_dirty();
                 // auto-save 已下沉到 runtime loop 退出时（#567 S5），不再 TUI 侧保存。
             }
-            UiEvent::MessagesSync(msgs) => {
-                // A3：MessagesSync 退出 display，仅作镜像 + 落盘；
-                // 用户回显改由 UserMessagesAdded 归宿事件驱动。
-                self.chat.messages = msgs;
-                // MessagesSync 意味着消息列表整体替换（compact/session reset），
-                // compact 已完成，集中清理 spinner + compact runtime 三态（#540）：
-                //  - spinner_stop(): chat_active=false + phase=None + running_tool_count=0
-                //  - clear_compact_runtime(): compact_progress=None（进度条消失）
-                // #497：走事件流的手动 /compact 不再有 TUI 侧手动 spinner 设停，
-                // 且 PostCompact hook 可能未配置，因此在此兜底停止。
-                self.spinner_stop();
-                self.model.conversation.runtime.clear_compact_runtime();
-                // 触发进度条 / spinner 行消失的渲染（#540：之前漏 mark_output_dirty
-                // 导致进度条卡在 90% 残留）。
+            UiEvent::TurnStarted { messages } => {
+                // Turn 启动：同步消息 + 启动 spinner(Thinking)。
+                self.chat.messages = messages;
+                crate::tui::log_info!(
+                    "[SPINNER_DEBUG] UiEvent::TurnStarted → spinner_phase(Thinking)"
+                );
+                self.spinner_phase(SpinnerPhase::Thinking);
                 self.mark_output_dirty();
-                // auto-save 已下沉到 runtime loop 退出时（#567 S5），不再 TUI 侧保存。
+            }
+            UiEvent::MicrocompactDone {
+                messages,
+                cleared_count,
+            } => {
+                // Microcompact 清理陈旧 tool result，turn 仍在进行。只同步消息。
+                self.chat.messages = messages;
+                crate::tui::log_info!(
+                    "[SPINNER_DEBUG] UiEvent::MicrocompactDone cleared={} (spinner 不动)",
+                    cleared_count
+                );
+                self.mark_output_dirty();
+            }
+            UiEvent::StopHookBlocked { messages } => {
+                // Stop hook 阻止 turn 结束，追加 reminder 后继续。只同步消息。
+                self.chat.messages = messages;
+                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::StopHookBlocked (spinner 不动)");
+                self.mark_output_dirty();
+            }
+            UiEvent::PostToolExecutionSync { messages } => {
+                // Tool 执行完成后同步消息。只同步消息。
+                self.chat.messages = messages;
+                self.mark_output_dirty();
+            }
+            UiEvent::ApiError { messages, error } => {
+                // Provider API 调用失败：同步消息 + stop spinner + 显示错误。
+                self.chat.messages = messages;
+                crate::tui::log_info!(
+                    "[SPINNER_DEBUG] UiEvent::ApiError → spinner_stop error={}",
+                    error
+                );
+                self.spinner_stop();
+                self.append_system_notice(&error);
+                self.mark_output_dirty();
+            }
+            UiEvent::CompactRollback { messages } => {
+                // Compact 失败回滚：同步消息，不动 spinner（turn 仍在进行）。
+                self.chat.messages = messages;
+                self.model.conversation.runtime.clear_compact_runtime();
+                self.mark_output_dirty();
+            }
+            UiEvent::CompactFinished { messages } => {
+                // Compact 成功完成：同步消息 + 清 compact 状态。
+                // 不停 spinner——compact 后 turn 仍在进行，LLM 会继续生成。
+                self.chat.messages = messages;
+                self.model.conversation.runtime.clear_compact_runtime();
+                self.mark_output_dirty();
             }
             UiEvent::ClipboardImage(img) => {
                 self.handle_input_intent(
@@ -161,6 +203,7 @@ impl App {
                 // token/api 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
             }
             UiEvent::ReflectionDone { output } => {
+                // ...
                 self.append_system_notice(output.content.clone());
                 if output.auto_applied {
                     self.chat.pending_reflection = None;
@@ -175,6 +218,7 @@ impl App {
                         self.append_system_notice("可运行 /reflect apply 应用这些 memory 建议");
                     }
                 }
+                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::ReflectionDone → spinner_stop");
                 self.spinner_stop();
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
@@ -207,6 +251,9 @@ impl App {
                     self.chat
                         .finish_tool_call(&sdk::ids::ToolCallId::new(&item.id));
                 }
+                crate::tui::log_info!(
+                    "[SPINNER_DEBUG] UiEvent::AskUserBatch(finish_tool_calls) → spinner_stop"
+                );
                 self.spinner_stop();
 
                 let n = items.len();
@@ -251,6 +298,7 @@ impl App {
                     self.input.ask_user_state =
                         Some(crate::tui::app::state::AskUserState { reply_tx, items });
                 }
+                crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::AskUserBatch(show) → spinner_stop");
                 self.spinner_stop();
             }
             UiEvent::CurrentTurnChanged(turn) => {

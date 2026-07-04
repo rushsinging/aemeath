@@ -25,8 +25,10 @@ where
         messages.push(Message::user(input));
     }
 
-    sink.send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
-        .await;
+    sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
+        messages: messages.clone(),
+    })
+    .await;
     true
 }
 
@@ -91,7 +93,9 @@ mod tests {
         let events = sink.events.lock().unwrap();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            RuntimeStreamEvent::MessagesSync(sync_messages) => {
+            RuntimeStreamEvent::PostToolExecutionSync {
+                messages: sync_messages,
+            } => {
                 assert_eq!(sync_messages.len(), 3);
                 assert_eq!(sync_messages[2].text_content(), "queued two");
             }

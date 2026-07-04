@@ -211,7 +211,15 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         UiEvent::SystemMessage(text) | UiEvent::ReminderRecap(text) => conversation(
             ConversationIntent::AppendSystemMessage(AppendSystemMessage { text: text.clone() }),
         ),
-        UiEvent::MessagesSync(messages) => session(SessionIntent::MessagesSynced {
+        UiEvent::TurnStarted { messages }
+        | UiEvent::MicrocompactDone { messages, .. }
+        | UiEvent::StopHookBlocked { messages }
+        | UiEvent::PostToolExecutionSync { messages }
+        | UiEvent::CompactRollback { messages }
+        | UiEvent::CompactFinished { messages } => session(SessionIntent::MessagesSynced {
+            message_count: messages.len(),
+        }),
+        UiEvent::ApiError { messages, .. } => session(SessionIntent::MessagesSynced {
             message_count: messages.len(),
         }),
         UiEvent::AskUserBatch { .. } => AgentEventMapping::default(),
