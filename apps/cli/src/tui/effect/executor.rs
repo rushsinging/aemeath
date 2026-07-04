@@ -47,9 +47,7 @@ impl App {
 
     fn cancel_agent_chat(&mut self) {
         self.chat.start_cancelling();
-        if let Some(ref ac) = self.agent_client {
-            ac.cancel();
-        }
+        self.chat.cancel_processing();
         self.model
             .conversation
             .apply(SetStatusNotice(StatusNotice::warning(

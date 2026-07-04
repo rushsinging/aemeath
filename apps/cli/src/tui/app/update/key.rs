@@ -64,7 +64,7 @@ impl App {
     pub(super) fn update_key(
         &mut self,
         key: crossterm::event::KeyEvent,
-        spawn_refs: &SpawnContextRefs,
+        _spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
             return UpdateResult::none();
@@ -148,9 +148,7 @@ impl App {
             }
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 // Esc during processing: interrupt current LLM turn + tool calls
-                if let Some(agent_client) = &spawn_refs.agent_client {
-                    agent_client.cancel();
-                }
+                self.chat.cancel_processing();
                 self.set_transient_notice(StatusNotice::warning("Interrupted"));
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {

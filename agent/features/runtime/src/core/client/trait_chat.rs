@@ -12,15 +12,14 @@ pub(super) async fn chat_impl(
     me: &AgentClientImpl,
     input: ChatRequest,
 ) -> Result<ChatStream, SdkError> {
-    // 会话级取消槽：每次 chat() 启动时重置为一个全新、未取消的 token。
-    // 常驻 loop 会从该共享槽逐回合读取「当前 token」，并在每次取消后自行重置
-    // （见 loop_runner::reset_cancel），因此此处只需保证起点干净。
-    *me.inner
-        .current_cancel
-        .lock()
-        .map_err(|_| SdkError::Internal("当前 chat 取消锁已损坏".to_string()))? =
-        tokio_util::sync::CancellationToken::new();
-    let cancel_slot = me.inner.current_cancel.clone();
+    // 会话级取消槽：由调用方（TUI spawn_processing）通过 ChatRequest.cancel 传入。
+    // 常驻 loop 从该共享槽逐回合读取「当前 token」，并在每次取消后自行重置
+    // （见 loop_runner::reset_cancel）。非 TUI 调用方（cancel=None）创建临时槽。
+    let cancel_slot = input.cancel.clone().unwrap_or_else(|| {
+        std::sync::Arc::new(std::sync::Mutex::new(
+            tokio_util::sync::CancellationToken::new(),
+        ))
+    });
     let queue_drain = input.queue_drain.clone();
     let input_events = input.input_events.clone();
     let messages: Vec<_> = input.messages.into_iter().map(message_from_sdk).collect();
@@ -105,11 +104,6 @@ pub(super) async fn chat_impl(
             ),
         })
         .await;
-        // loop 退出（shutdown / clear）后把取消槽重置为干净 token，
-        // 避免遗留的已取消 token 影响后续可能复用同一 RuntimeHandle 的 chat()。
-        if let Ok(mut guard) = inner.current_cancel.lock() {
-            *guard = tokio_util::sync::CancellationToken::new();
-        }
     });
     Ok(ChatStream::new(rx))
 }

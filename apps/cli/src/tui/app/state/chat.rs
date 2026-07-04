@@ -92,6 +92,13 @@ impl ChatState {
         self.is_cancelling = true;
     }
 
+    /// 触发当前 chat loop 的取消令牌。
+    pub(crate) fn cancel_processing(&self) {
+        if let Some(handle) = &self.processing_handle {
+            handle.cancel();
+        }
+    }
+
     pub(crate) fn set_processing_handle(
         &mut self,
         handle: crate::tui::effect::session::processing::ProcessingHandle,

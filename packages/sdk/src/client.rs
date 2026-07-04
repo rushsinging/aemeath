@@ -47,6 +47,7 @@ pub trait AgentClient: Send + Sync + 'static {
             messages: vec![super::ChatMessage::user_text(input.text)],
             queue_drain: None,
             input_events: None,
+            cancel: None,
         })
         .await
     }
@@ -66,9 +67,6 @@ pub trait AgentClient: Send + Sync + 'static {
     async fn save_session(&self) -> Result<(), super::SdkError> {
         self.save_current_session().await
     }
-
-    /// 取消当前进行中的 Chat。
-    fn cancel(&self);
 
     /// 设置当前 turn 编号（由 TUI run_loop 在每次新请求时调用）。
     fn set_current_turn(&self, _turn: usize) {}

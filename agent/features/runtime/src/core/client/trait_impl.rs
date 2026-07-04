@@ -115,9 +115,6 @@ impl AgentClient for AgentClientImpl {
     fn changes(&self) -> tokio::sync::watch::Receiver<ChangeSet> {
         super::trait_accessor::changes_impl(self)
     }
-    fn cancel(&self) {
-        super::trait_accessor::cancel_impl(self)
-    }
     fn set_current_turn(&self, turn: usize) {
         super::trait_accessor::set_current_turn_impl(self, turn)
     }

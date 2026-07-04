@@ -219,6 +219,7 @@ pub(crate) struct SpawnContext {
 #[derive(Debug)]
 pub(crate) struct ProcessingHandle {
     join: tokio::task::JoinHandle<()>,
+    cancel_slot: Option<std::sync::Arc<std::sync::Mutex<tokio_util::sync::CancellationToken>>>,
 }
 
 impl ProcessingHandle {
@@ -228,6 +229,16 @@ impl ProcessingHandle {
 
     pub(crate) fn is_finished(&self) -> bool {
         self.join.is_finished()
+    }
+
+    /// 触发当前回合的取消。锁 cancel 槽对「当前 token」调 `.cancel()`，
+    /// loop 处理完取消后会自行把槽重置为新 token（见 loop_runner::reset_cancel）。
+    pub(crate) fn cancel(&self) {
+        if let Some(slot) = &self.cancel_slot {
+            if let Ok(guard) = slot.lock() {
+                guard.cancel();
+            }
+        }
     }
 }
 
@@ -560,6 +571,12 @@ fn json_value_kind(value: &serde_json::Value) -> &'static str {
 }
 
 pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
+    // 创建会话级 cancel 槽：传入 ChatRequest 供 loop 使用，同时 clone 给
+    // ProcessingHandle 供 TUI 触发取消。
+    let cancel_slot = std::sync::Arc::new(std::sync::Mutex::new(
+        tokio_util::sync::CancellationToken::new(),
+    ));
+    let cancel_for_request = cancel_slot.clone();
     let join = tokio::spawn(async move {
         let mut stream = match ctx
             .agent_client
@@ -568,6 +585,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
                 // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
                 queue_drain: None,
                 input_events: Some(Arc::new(ctx.input_event_port.clone())),
+                cancel: Some(cancel_for_request),
             })
             .await
         {
@@ -592,7 +610,10 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             }
         }
     });
-    ProcessingHandle { join }
+    ProcessingHandle {
+        join,
+        cancel_slot: Some(cancel_slot),
+    }
 }
 
 #[cfg(test)]
@@ -806,8 +827,6 @@ mod tests {
         async fn save_current_session(&self) -> Result<(), sdk::SdkError> {
             Ok(())
         }
-
-        fn cancel(&self) {}
 
         async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
             Ok(self.session_snapshot())

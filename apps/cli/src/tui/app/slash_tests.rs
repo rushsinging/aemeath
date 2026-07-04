@@ -59,8 +59,6 @@ impl sdk::AgentClient for BlockingReflectionClient {
         Ok(())
     }
 
-    fn cancel(&self) {}
-
     async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
         Ok(self.session_snapshot())
     }

@@ -305,9 +305,6 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             current_client: std::sync::RwLock::new(client),
-            current_cancel: Arc::new(std::sync::Mutex::new(
-                tokio_util::sync::CancellationToken::new(),
-            )),
             current_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
             frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_summary: Arc::new(std::sync::Mutex::new(None)),

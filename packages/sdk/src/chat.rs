@@ -133,6 +133,13 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub queue_drain: Option<std::sync::Arc<dyn QueueDrainPort>>,
     pub input_events: Option<std::sync::Arc<dyn ChatInputEventPort>>,
+    /// 会话级取消令牌槽（常驻 actor 可重建）。
+    ///
+    /// TUI 在 `spawn_processing` 时创建，传入 ChatRequest 同时保留 clone 在
+    /// `ProcessingHandle` 中。loop 在每个回合开始时从该槽读取「当前 token」，
+    /// 处理完一次取消后把槽**重置为新 token** 供下个回合。`std::sync::Mutex`
+    /// —— NEVER 跨 `.await` 持有。
+    pub cancel: Option<std::sync::Arc<std::sync::Mutex<tokio_util::sync::CancellationToken>>>,
 }
 
 #[cfg(test)]
@@ -148,6 +155,7 @@ mod tests {
             ],
             queue_drain: None,
             input_events: None,
+            cancel: None,
         };
 
         assert_eq!(request.messages[0].role, "user");

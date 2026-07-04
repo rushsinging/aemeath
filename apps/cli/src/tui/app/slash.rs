@@ -332,9 +332,7 @@ Arguments: {args}"
         self.output_area.clear();
         if self.chat.input_event_tx.is_some() {
             // loop 运行中：发 Reset，由 runtime gate 统一清空。
-            if let Some(ref ac) = self.agent_client {
-                ac.cancel();
-            }
+            self.chat.cancel_processing();
             self.chat.push_input_event(sdk::ChatInputEvent::Reset);
         } else {
             // loop 未运行（如启动前）→ 直接本地清理。
