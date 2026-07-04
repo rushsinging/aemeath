@@ -458,8 +458,8 @@ async fn test_apply_reflection_success_keeps_new_pending_created_while_in_flight
 }
 
 #[tokio::test]
-async fn test_clear_command_clears_task_store_and_task_window() {
-    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
+async fn test_clear_command_clears_task_window() {
+    let (mut app, _started_rx, finish_tx, _client) = app_with_blocking_reflection_client_handle();
     app.model
         .conversation
         .apply(crate::tui::model::conversation::intent::UpdateTaskLines(
@@ -471,7 +471,8 @@ async fn test_clear_command_clears_task_store_and_task_window() {
     app.handle_slash_command_with_events("/clear", None).await;
     app.refresh_live_status_from_model();
 
-    assert_eq!(client.clear_tasks_calls.load(Ordering::SeqCst), 1);
+    // #567 S5：clear_tasks 已下沉到 runtime gate（Reset 事件 idle 分支），
+    // TUI 不再直接调 clear_tasks()。仅验证 UI 侧 task_lines 已清。
     assert!(app.model.conversation.runtime.task_status.lines.is_empty());
     assert!(app.live_status_view_model().task_lines.is_empty());
     let _ = finish_tx.send(());

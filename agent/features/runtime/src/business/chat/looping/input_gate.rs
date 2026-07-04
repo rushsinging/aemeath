@@ -86,6 +86,8 @@ pub enum PendingCommand {
     ResumeSession {
         id: String,
     },
+    /// 保存当前会话（/save）。
+    SaveSession,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +131,7 @@ impl PendingInputBuffer {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_loop_gate<Q, I, S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,
@@ -136,6 +139,7 @@ pub async fn run_loop_gate<Q, I, S>(
     input_events: &I,
     sink: &S,
     messages: &mut Vec<Message>,
+    task_store: &storage::api::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
 where
@@ -144,7 +148,7 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, messages, is_idle).await
+    apply_gate(kind, buffer, sink, messages, task_store, is_idle).await
 }
 
 pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
@@ -167,6 +171,7 @@ pub async fn apply_gate<S>(
     buffer: &mut PendingInputBuffer,
     sink: &S,
     messages: &mut Vec<Message>,
+    task_store: &storage::api::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
 where
@@ -232,6 +237,8 @@ where
                     messages.clear();
                     added.clear();
                     appended_user_messages = 0;
+                    // #567 S5：task_store 清理从 TUI RPC 下沉到 gate（不再调 clear_tasks()）
+                    task_store.clear().await;
                     sink.send_event(RuntimeStreamEvent::SessionReset).await;
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
@@ -393,6 +400,16 @@ where
                     buffer.push(ChatInputEvent::ResumeSession { id });
                 }
             }
+            ChatInputEvent::SaveSession => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::SaveSession);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::SaveSession);
+                }
+            }
         }
     }
 
@@ -497,6 +514,11 @@ mod tests {
     use crate::business::chat::looping::events::EventFuture;
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc;
+
+    /// #567 S5：gate 测试用 task_store（run_loop_gate 新增参数）
+    fn test_task_store() -> storage::api::TaskStore {
+        storage::api::TaskStore::new()
+    }
 
     /// Mock port backed by tokio mpsc; supports both drain and blocking recv.
     #[derive(Clone)]
@@ -627,6 +649,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = vec![Message::user("first")];
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeFinish,
             &mut buffer,
@@ -634,6 +657,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -666,6 +690,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -673,6 +698,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -729,6 +755,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let _ = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -736,6 +763,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -771,6 +799,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::AfterBlockingBoundary,
             &mut buffer,
@@ -778,6 +807,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -800,6 +830,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -807,6 +838,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -828,6 +860,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeFinish,
             &mut buffer,
@@ -835,6 +868,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -857,6 +891,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeFinish,
             &mut buffer,
@@ -864,6 +899,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -885,6 +921,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -892,6 +929,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -918,6 +956,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -925,6 +964,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false,
         )
         .await;
@@ -941,6 +981,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = vec![Message::user("old1"), Message::user("resp1")];
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -948,6 +989,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             true, // idle
         )
         .await;
@@ -975,6 +1017,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = vec![Message::user("old1")];
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -982,6 +1025,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false, // busy
         )
         .await;
@@ -1009,6 +1053,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = vec![Message::user("old1")];
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -1016,6 +1061,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             true, // idle
         )
         .await;
@@ -1062,6 +1108,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -1069,6 +1116,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             true, // idle
         )
         .await;
@@ -1096,6 +1144,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = Vec::new();
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -1103,6 +1152,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             true,
         )
         .await;
@@ -1128,6 +1178,7 @@ mod tests {
         let sink = TestSink::default();
         let mut messages = vec![Message::user("existing")];
 
+        let task_store = test_task_store();
         let outcome = run_loop_gate(
             GateKind::BeforeLlm,
             &mut buffer,
@@ -1135,6 +1186,7 @@ mod tests {
             &input,
             &sink,
             &mut messages,
+            &task_store,
             false, // busy
         )
         .await;

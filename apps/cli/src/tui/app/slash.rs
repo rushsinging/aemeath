@@ -65,9 +65,20 @@ impl super::App {
                 ));
             }
             "/save" => {
-                if let Some(tx) = ui_tx.clone() {
-                    self.execute_effect(Effect::SaveSession { notify: true }, &tx)
-                        .await;
+                if self.chat.input_event_tx.is_some() {
+                    // #567 S5：走 runtime 事件流
+                    //（ChatInputEvent::SaveSession → idle 分支 → CommandResultText 事件），
+                    // 不再直接调 save_current_session().await。
+                    self.chat.push_input_event(sdk::ChatInputEvent::SaveSession);
+                } else if let Some(ac) = self.agent_client.clone() {
+                    // loop 未运行（如启动前）→ fallback：先同步 messages 再 save
+                    if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
+                        self.append_system_notice(format!("[sync failed: {e}]"));
+                    }
+                    match ac.save_current_session().await {
+                        Ok(()) => self.append_system_notice("[session saved]"),
+                        Err(e) => self.append_system_notice(format!("[save failed: {e}]")),
+                    }
                 }
             }
             "/context" => {

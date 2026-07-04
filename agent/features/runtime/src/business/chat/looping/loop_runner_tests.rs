@@ -3,6 +3,16 @@
 
 use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
+
+fn test_save_session() -> Arc<
+    dyn Fn()
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
+        + Send
+        + Sync,
+> {
+    Arc::new(|| Box::pin(async { Ok(()) }))
+}
+
 use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
@@ -368,6 +378,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -449,6 +460,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -531,6 +543,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -589,6 +602,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -717,6 +731,7 @@ async fn test_continue_false_json_treated_as_block() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -804,6 +819,7 @@ async fn test_stall_triggers_stop_hook_check() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -953,6 +969,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -1133,6 +1150,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -1394,6 +1412,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -1457,6 +1476,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     })
     .await;
@@ -1648,6 +1668,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -1889,6 +1910,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -2121,6 +2143,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -2238,6 +2261,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         reasoning_graph: None,
         skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -2326,6 +2350,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         reasoning_graph: None,
         skip_first_pending_turn: true, // #503 核心：resume 标志
         build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
         language: "en".to_string(),
     };
 
@@ -2397,7 +2422,8 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         skip_first_pending_turn: false,
-        build_switched_client: Arc::new(test_build_switched_client), // 正常场景
+        build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(), // 正常场景
         language: "en".to_string(),
     };
 

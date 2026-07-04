@@ -20,6 +20,7 @@ pub(crate) async fn drain_and_apply_gate<Q, I, S>(
     input_events: &I,
     sink: &S,
     messages: &mut Vec<Message>,
+    task_store: &storage::api::TaskStore,
 ) -> GateOutcome
 where
     Q: QueueDrainPort,
@@ -27,5 +28,5 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, messages, false).await
+    apply_gate(kind, buffer, sink, messages, task_store, false).await
 }

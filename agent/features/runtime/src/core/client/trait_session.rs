@@ -1,8 +1,10 @@
 //! session 相关方法实际逻辑。
 
+use std::sync::Arc;
+
 use sdk::{SdkError, SessionSnapshot, SessionSummary};
 
-use super::accessors::AgentClientImpl;
+use super::accessors::{AgentClientImpl, RuntimeHandle};
 use super::mapping;
 
 pub(super) async fn sync_current_messages_impl(
@@ -20,14 +22,19 @@ pub(super) async fn sync_current_messages_impl(
 }
 
 pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<(), SdkError> {
-    let messages = me
-        .inner
+    save_session_from_handle(&me.inner).await
+}
+
+/// 从 RuntimeHandle 级别执行 save（不依赖 AgentClientImpl）。
+/// 供 chat_impl spawn task 中 loop 退出后 auto-save 使用。
+pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Result<(), SdkError> {
+    let messages = inner
         .current_messages
         .lock()
         .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))?
         .clone();
     let task_snapshot = {
-        let snap = me.inner.context.resources.task_store.snapshot().await;
+        let snap = inner.context.resources.task_store.snapshot().await;
         if snap.tasks.is_empty() {
             None
         } else {
@@ -35,16 +42,14 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
         }
     };
     let workspace = Some(project::api::WorkspacePersist::snapshot(
-        me.inner.workspace.as_ref(),
+        inner.workspace.as_ref(),
     ));
-    let summary = me
-        .inner
+    let summary = inner
         .active_summary
         .lock()
         .map_err(|_| SdkError::Internal("active_summary 锁已损坏".to_string()))?
         .clone();
-    let frozen_chats = me
-        .inner
+    let frozen_chats = inner
         .frozen_chats
         .lock()
         .map_err(|_| SdkError::Internal("frozen_chats 锁已损坏".to_string()))?
@@ -61,17 +66,17 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
     }
 
     let mut session = crate::business::session::Session::new(
-        me.inner.session_id.clone(),
-        me.inner.cwd.to_string_lossy().to_string(),
+        inner.session_id.clone(),
+        inner.cwd.to_string_lossy().to_string(),
     );
     session.chats = chats;
     // 旧 messages 字段置空（已迁移到 chats）
     session.messages = Vec::new();
     session.updated_at = crate::business::session::now_iso();
     session.metadata.model = Some(mapping::model_display(
-        &me.inner.resolved_model.source_key,
-        &me.inner.resolved_model.model.name,
-        &me.inner.resolved_model.model.id,
+        &inner.resolved_model.source_key,
+        &inner.resolved_model.model.name,
+        &inner.resolved_model.model.id,
     ));
     session.tasks = task_snapshot;
     session.workspace = workspace;

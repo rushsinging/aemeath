@@ -103,6 +103,9 @@ pub enum ChatInputEvent {
     /// 恢复指定会话。由 `/resume <id>` 触发。
     /// 需要走 idle gate（替换 loop messages）。
     ResumeSession { id: String },
+    /// 保存当前会话。由 `/save` 触发，走 runtime 事件流。
+    /// runtime idle 分支执行 save，结果通过 `CommandResultText` 事件回传 TUI。
+    SaveSession,
 }
 
 impl ChatInputEvent {

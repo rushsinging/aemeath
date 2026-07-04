@@ -93,18 +93,13 @@ impl App {
                 .catch_unwind()
                 .await;
 
-        // 无论是否 panic，都尝试 auto-save，避免会话丢失。
-        if !self.chat.messages.is_empty() {
-            if let Err(e) = agent_client
-                .sync_current_messages(self.chat.messages.clone())
-                .await
-            {
-                crate::tui::log_warn!("failed to sync session messages: {e}");
-            }
-            if let Err(e) = agent_client.save_current_session().await {
-                crate::tui::log_warn!("failed to auto-save session: {e}");
-            }
-        }
+        // auto-save 已下沉到 runtime：run_loop 退出时 drop input_event_tx →
+        // 常驻 loop shutdown → chat_impl spawn task 自动 save。
+        // 此处 await spawn task 完成（带超时兜底），确保 auto-save 在 runtime drop 前执行。
+        crate::tui::effect::session::processing::shutdown_and_save(
+            self.chat.take_processing_handle(),
+        )
+        .await;
 
         // guard 离开作用域 → Drop 恢复终端；此后 panic 可正常打印到 stderr。
         drop(guard);

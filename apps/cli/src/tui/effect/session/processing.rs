@@ -231,6 +231,21 @@ impl ProcessingHandle {
     }
 }
 
+/// 退出路径：drop input_event_tx → loop shutdown → spawn task 执行 auto-save →
+/// JoinHandle 完成。带超时兜底，超时后 abort。
+///
+/// 必须在 `run()` 返回前调用，否则 tokio runtime drop 会 cancel 未完成的 spawn task。
+pub(crate) async fn shutdown_and_save(handle: Option<ProcessingHandle>) {
+    if let Some(handle) = handle {
+        // 先 abort 如果已卡死——但给 loop 一点时间自然退出 + auto-save。
+        // JoinHandle.await 在 tokio runtime 中等待 task 完成。
+        let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), handle.join).await;
+        if timeout.is_err() {
+            crate::tui::log_warn!("auto-save timed out, forcing abort");
+        }
+    }
+}
+
 pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
     match event {
         sdk::ChatEvent::Token { context, text } => crate::tui::log_trace!(

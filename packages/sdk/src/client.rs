@@ -62,11 +62,6 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 保存 runtime 当前 session。
     async fn save_current_session(&self) -> Result<(), super::SdkError>;
 
-    /// 保存当前 session。
-    async fn save_session(&self) -> Result<(), super::SdkError> {
-        self.save_current_session().await
-    }
-
     /// 取消当前进行中的 Chat。
     fn cancel(&self);
 
