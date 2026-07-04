@@ -165,3 +165,37 @@ fn route_returns_aemeath_for_unknown_target() {
     let (_, path) = logger.route("app");
     assert_eq!(path, &logger.paths.aemeath);
 }
+
+#[test]
+fn parse_max_level_global() {
+    assert_eq!(parse_max_level("info"), LevelFilter::Info);
+    assert_eq!(parse_max_level("debug"), LevelFilter::Debug);
+    assert_eq!(parse_max_level("trace"), LevelFilter::Trace);
+    assert_eq!(parse_max_level("warn"), LevelFilter::Warn);
+    assert_eq!(parse_max_level("error"), LevelFilter::Error);
+}
+
+#[test]
+fn parse_max_level_per_target() {
+    assert_eq!(
+        parse_max_level("aemeath:tui=debug,aemeath:agent:runtime=trace"),
+        LevelFilter::Trace
+    );
+    assert_eq!(
+        parse_max_level("aemeath:tui=info,aemeath:agent:runtime=warn"),
+        LevelFilter::Info
+    );
+}
+
+#[test]
+fn parse_max_level_empty() {
+    assert_eq!(parse_max_level(""), LevelFilter::max());
+    assert_eq!(parse_max_level("   "), LevelFilter::max());
+}
+
+#[test]
+fn resolve_max_level_uses_config_when_no_env() {
+    std::env::remove_var("AEMEATH_LOG_LEVEL");
+    assert_eq!(resolve_max_level(LevelFilter::Info), LevelFilter::Info);
+    assert_eq!(resolve_max_level(LevelFilter::Warn), LevelFilter::Warn);
+}

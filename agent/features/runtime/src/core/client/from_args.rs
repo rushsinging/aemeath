@@ -189,9 +189,13 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     );
 
     // 17. context_size / verbose 合并
+    let snapshot_context_size = config_file
+        .as_ref()
+        .map(|c| c.model.context_size)
+        .unwrap_or(0);
     let context_size = resolve_context_size(
         args.context_size,
-        config_file.as_ref(),
+        snapshot_context_size,
         resolved_model.model.context_window,
     );
 

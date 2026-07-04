@@ -88,21 +88,8 @@ fn provider_driver_api_key_from_env(
     driver: ProviderDriverKind,
     env_value: EnvReader<'_>,
 ) -> Option<String> {
-    provider_driver_api_key_env_name(driver).and_then(|name| env_or_runtime(name, env_value))
-}
-
-fn provider_driver_api_key_env_name(driver: ProviderDriverKind) -> Option<&'static str> {
-    match driver {
-        ProviderDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
-        ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
-        ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
-        ProviderDriverKind::Minimax => Some("MINIMAX_API_KEY"),
-        ProviderDriverKind::Mimo => Some("MIMO_API_KEY"),
-        ProviderDriverKind::DeepSeek => Some("DEEPSEEK_API_KEY"),
-        ProviderDriverKind::Agnes => Some("AGNES_API_KEY"),
-        ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
-        ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
-    }
+    share::config::domain::driver_env::driver_api_key_env_name(driver.as_str())
+        .and_then(|name| env_or_runtime(name, env_value))
 }
 
 fn env_or_runtime(name: &str, env_value: EnvReader<'_>) -> Option<String> {

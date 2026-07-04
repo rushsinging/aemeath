@@ -2,16 +2,15 @@ use crate::args::Args;
 
 pub(crate) mod no_tui;
 
+#[allow(dead_code)] // S5 退役时删除
 pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
     matches!(mode, Some("allow_all"))
 }
 
-pub(super) fn apply_permission_env_override(mut args: Args) -> Args {
-    if !args.allow_all
-        && permission_env_override(std::env::var("AEMEATH_PERMISSION_MODE").ok().as_deref())
-    {
-        args.allow_all = true;
-    }
+/// `AEMEATH_PERMISSION_MODE` 现在由 `EnvAdapter` 统一读取，
+/// 进入 `ConfigSnapshot.permissions.mode`，经 `from_config()` 传递。
+/// 此函数已废弃，保留为 identity，S5 退役时删除。
+pub(super) fn apply_permission_env_override(args: Args) -> Args {
     args
 }
 

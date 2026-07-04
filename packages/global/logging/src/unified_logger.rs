@@ -27,7 +27,7 @@
 //!
 //! ## 过滤
 //!
-//! - `enabled()` 委托 `env_logger::Logger::enabled()`：保留 `RUST_LOG` + `config.level` 解析。
+//! - `enabled()` 委托 `env_logger::Logger::enabled()`：保留 `AEMEATH_LOG_LEVEL` + `config.level` 解析。
 //!
 //! ## 输出格式
 //!
@@ -248,7 +248,7 @@ impl UnifiedLogger {
         };
         let leaked: &'static UnifiedLogger = Box::leak(Box::new(logger));
         log::set_logger(leaked).map_err(|e| io::Error::other(e.to_string()))?;
-        log::set_max_level(max_level);
+        log::set_max_level(resolve_max_level(max_level));
         // LOGGER 重复 set 会失败，但 init 只能调用一次，与 log::set_logger 一致
         let _ = LOGGER.set(leaked);
         Ok(())
@@ -371,13 +371,60 @@ impl UnifiedLogger {
     }
 }
 
-fn build_filter(max_level: LevelFilter) -> env_logger::Logger {
+fn build_filter(config_level: LevelFilter) -> env_logger::Logger {
     let mut builder = env_logger::Builder::new();
-    builder.filter_level(max_level);
-    if let Ok(rust_log) = std::env::var("RUST_LOG") {
-        builder.parse_filters(&rust_log);
+    builder.filter_level(config_level);
+    if let Ok(aemeath_log) = std::env::var("AEMEATH_LOG_LEVEL") {
+        builder.parse_filters(&aemeath_log);
     }
     builder.build()
+}
+
+/// Resolve the effective `set_max_level` from `AEMEATH_LOG_LEVEL` directive.
+///
+/// Scans the directive string for the most permissive level.
+/// If `AEMEATH_LOG_LEVEL` is unset, falls back to `config_level`.
+pub fn resolve_max_level(config_level: LevelFilter) -> LevelFilter {
+    match std::env::var("AEMEATH_LOG_LEVEL") {
+        Ok(directive) => parse_max_level(&directive).max(config_level),
+        Err(_) => config_level,
+    }
+}
+
+/// Parse a directive string and return the most permissive level found.
+///
+/// Examples:
+/// - `"info"` → `Info`
+/// - `"debug"` → `Debug`
+/// - `"aemeath:tui=debug,aemeath:agent:runtime=trace"` → `Trace`
+/// - `""` → `LevelFilter::max()` (off filter = allow all)
+fn parse_max_level(directive: &str) -> LevelFilter {
+    let directive = directive.trim();
+    if directive.is_empty() {
+        return LevelFilter::max();
+    }
+
+    let mut max = LevelFilter::Off;
+    for part in directive.split(|c: char| c == ',' || c == '=' || c.is_whitespace()) {
+        let level = match part.to_lowercase().as_str() {
+            "trace" => LevelFilter::Trace,
+            "debug" => LevelFilter::Debug,
+            "info" => LevelFilter::Info,
+            "warn" => LevelFilter::Warn,
+            "error" => LevelFilter::Error,
+            "off" => LevelFilter::Off,
+            _ => continue,
+        };
+        if level > max {
+            max = level;
+        }
+    }
+    // If no level keyword found at all (e.g. only target names),
+    // default to max to avoid blocking logs.
+    if max == LevelFilter::Off {
+        return LevelFilter::max();
+    }
+    max
 }
 
 fn open_buf(path: &Path) -> io::Result<BufWriter<File>> {
