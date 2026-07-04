@@ -115,11 +115,16 @@ impl App {
                 // 用户回显改由 UserMessagesAdded 归宿事件驱动。
                 self.chat.messages = msgs;
                 // MessagesSync 意味着消息列表整体替换（compact/session reset），
-                // compact 已完成，停止 spinner 并清理 Gauge。
+                // compact 已完成，集中清理 spinner + compact runtime 三态（#540）：
+                //  - spinner_stop(): chat_active=false + phase=None + running_tool_count=0
+                //  - clear_compact_runtime(): compact_progress=None（进度条消失）
                 // #497：走事件流的手动 /compact 不再有 TUI 侧手动 spinner 设停，
                 // 且 PostCompact hook 可能未配置，因此在此兜底停止。
-                self.model.conversation.runtime.spinner.phase = None;
-                self.model.conversation.runtime.spinner.running_tool_count = 0;
+                self.spinner_stop();
+                self.model.conversation.runtime.clear_compact_runtime();
+                // 触发进度条 / spinner 行消失的渲染（#540：之前漏 mark_output_dirty
+                // 导致进度条卡在 90% 残留）。
+                self.mark_output_dirty();
                 return UpdateResult::one(Effect::SaveSession { notify: false });
             }
             UiEvent::ClipboardImage(img) => {
@@ -299,6 +304,10 @@ impl App {
                     current,
                     total,
                 });
+                // #540：进度条嵌在 spinner 行（output 区），dirty 归类为 output_dirty。
+                // ui_event.rs 直接 apply 绕开 reduce_agent_event 的 dirty 归类，
+                // 必须在此显式 mark_output_dirty 驱动刷新，否则依赖 SpinnerTick 兜底不可靠。
+                self.mark_output_dirty();
             }
             UiEvent::ModelSwitched { result } => {
                 // #497：模型切换走事件流，TUI 在此更新本地状态（与原 slash.rs RPC 路径对齐）。

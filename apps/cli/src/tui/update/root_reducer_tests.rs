@@ -241,3 +241,36 @@ fn test_up_down_history_when_completion_hidden() {
         "Up 在补全不可见时应翻历史"
     );
 }
+
+/// Bug #540：compact progress 嵌入 spinner 行（output 区），dirty 归类必须为 output_dirty
+/// 才能触发 `refresh_output_document_from_model` 链。现状被错误归类为 status_dirty，
+/// 进度条刷新依赖 SpinnerTick 每 90ms 兜底 mark_output_dirty，时序不可靠。
+#[test]
+fn test_set_compact_progress_marks_output_dirty_not_status_only() {
+    let mut model = TuiModel::default();
+    let result = reduce_agent_event(
+        &mut model,
+        AgentEventMapping {
+            conversation: vec![ConversationIntent::SetCompactProgress(SetCompactProgress {
+                stage: "summarizing".into(),
+                current: Some(2),
+                total: Some(10),
+            })],
+            ..Default::default()
+        },
+    );
+    assert!(
+        result.dirty.output,
+        "SetCompactProgress 必须 mark output_dirty（进度条嵌在 spinner 行）"
+    );
+    assert_eq!(
+        model
+            .conversation
+            .runtime
+            .compact_progress
+            .as_ref()
+            .map(|p| p.stage.as_str()),
+        Some("summarizing"),
+        "apply 后 model 应保存 progress 状态"
+    );
+}

@@ -102,6 +102,7 @@ fn same_phase(current: Option<&SpinnerPhase>, next: Option<&SpinnerPhase>) -> bo
         (Some(SpinnerPhase::Generating), Some(SpinnerPhase::Generating)) => true,
         (Some(SpinnerPhase::AgentWorking), Some(SpinnerPhase::AgentWorking)) => true,
         (Some(SpinnerPhase::Reflecting), Some(SpinnerPhase::Reflecting)) => true,
+        (Some(SpinnerPhase::Compacting), Some(SpinnerPhase::Compacting)) => true,
         (Some(SpinnerPhase::CallingTool(current)), Some(SpinnerPhase::CallingTool(next))) => {
             current == next
         }
@@ -251,5 +252,40 @@ mod tests {
         assert_eq!(anim.frame, 30);
         assert_eq!(anim.phase_frame, 20);
         assert_eq!(anim.verb, "Forging");
+    }
+
+    /// Bug #540：runtime 在 compact 期间会反复触发 SetCompactProgress（每个 chunk 一次），
+    /// 每次都会把 phase 设为 `Some(Compacting)`。`sync_phase` 必须识别同 phase，否则
+    /// `phase_frame` 被反复重置为 0，`phase_elapsed_secs` 永远显示 0s。
+    #[test]
+    fn test_spinner_anim_sync_phase_does_not_reset_for_same_compacting() {
+        let mut anim = SpinnerAnim {
+            frame: 100,
+            phase_frame: 55,
+            phase: Some(crate::tui::model::conversation::spinner::SpinnerPhase::Compacting),
+            verb: "Forging".to_string(),
+        };
+        anim.sync_phase(Some(
+            crate::tui::model::conversation::spinner::SpinnerPhase::Compacting,
+        ));
+        assert_eq!(anim.frame, 100, "总 frame 不应被重置");
+        assert_eq!(anim.phase_frame, 55, "同 Compacting 不应重置 phase_frame");
+        assert_eq!(anim.verb, "Forging");
+    }
+
+    /// 防御：`sync_phase(Compacting → Some(other))` 应重置 `phase_frame`。
+    #[test]
+    fn test_spinner_anim_sync_phase_resets_when_compacting_changes_to_other() {
+        let mut anim = SpinnerAnim {
+            frame: 100,
+            phase_frame: 55,
+            phase: Some(crate::tui::model::conversation::spinner::SpinnerPhase::Compacting),
+            verb: "Forging".to_string(),
+        };
+        anim.sync_phase(Some(
+            crate::tui::model::conversation::spinner::SpinnerPhase::Thinking,
+        ));
+        assert_eq!(anim.frame, 100);
+        assert_eq!(anim.phase_frame, 0, "跨 phase 切换应重置 phase_frame");
     }
 }

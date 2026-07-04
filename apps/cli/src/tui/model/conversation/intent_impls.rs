@@ -483,7 +483,9 @@ impl ConversationUpdate for SetCompactProgress {
         model
             .runtime
             .set_compact_progress(self.stage, self.current, self.total);
-        vec![ConversationChange::SpinnerPhaseChanged]
+        // 进度条嵌入 spinner 行（output 区），单独归类为 output_dirty 而非 status_dirty；
+        // 见 `ConversationChange::CompactProgressChanged`（#540）。
+        vec![ConversationChange::CompactProgressChanged]
     }
 }
 
