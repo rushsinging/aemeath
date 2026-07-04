@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use sdk::{
-    AgentClient, ChangeSet, ChatRequest, ChatStream, ClipboardImageView, CostInfo, ModelSummary,
-    ProjectContext, ReflectionOutputView, SdkError, SessionSnapshot, SessionSummary,
+    AgentClient, ChangeSet, ChatRequest, ChatStream, ClipboardImageView, ConfigView, CostInfo,
+    ModelSummary, ProjectContext, ReflectionOutputView, SdkError, SessionSnapshot, SessionSummary,
     TaskStatusView,
 };
 
@@ -79,5 +79,8 @@ impl AgentClient for AgentClientImpl {
     }
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), SdkError> {
         super::trait_accessor::restore_tasks_impl(self, snapshot).await
+    }
+    async fn config_view(&self) -> Result<ConfigView, SdkError> {
+        super::accessors::config_view_impl(self).await
     }
 }

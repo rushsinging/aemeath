@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use sdk::ChangeSet;
+use sdk::{ChangeSet, ConfigView};
 use tokio::sync::watch;
 
 use crate::core::port::ChatRuntimeContext;
@@ -136,4 +136,36 @@ impl AgentClientImpl {
             ),
         }
     }
+}
+
+pub async fn config_view_impl(this: &super::AgentClientImpl) -> Result<ConfigView, sdk::SdkError> {
+    let resolved = this.resolved_model();
+    let ctx = this.context();
+    let model_display = super::mapping::model_display(
+        &resolved.source_key,
+        &resolved.model.name,
+        &resolved.model.id,
+    );
+    let api_key = resolved.source_config.api_key.as_str();
+    Ok(ConfigView {
+        model_name: model_display,
+        provider: Some(resolved.source_key.clone()),
+        has_api_key: !api_key.is_empty(),
+        api_key_preview: if api_key.len() >= 8 {
+            Some(api_key[..8].to_string())
+        } else if !api_key.is_empty() {
+            Some(api_key.to_string())
+        } else {
+            None
+        },
+        permission_mode: if ctx.resources.allow_all {
+            "allow_all".into()
+        } else {
+            "ask".into()
+        },
+        markdown: true,
+        verbose: ctx.verbose,
+        context_size: ctx.resources.context_size,
+        logging_level: String::new(),
+    })
 }

@@ -10,5 +10,6 @@ bitflags::bitflags! {
         const COST    = 0b0010;
         const TASKS   = 0b0100;
         const PROJECT = 0b1000;
+        const CONFIG  = 0b1_0000;
     }
 }

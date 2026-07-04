@@ -105,4 +105,9 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 恢复 TaskStore 快照。
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), super::SdkError>;
+
+    // ─── Config ───
+
+    /// 获取当前配置视图（TUI 纯展示用）。
+    async fn config_view(&self) -> Result<super::ConfigView, super::SdkError>;
 }

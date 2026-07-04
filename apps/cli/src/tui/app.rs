@@ -57,6 +57,8 @@ pub struct App {
     // 业务数据（非 UI 状态）
     pub skills: std::collections::HashMap<String, sdk::SkillView>,
     pub agent_client: Option<Arc<dyn sdk::AgentClient>>,
+    /// 缓存的配置视图（由 runtime 推送，TUI 只读）
+    pub config_view: sdk::ConfigView,
 }
 
 #[cfg(test)]
@@ -193,6 +195,7 @@ impl App {
             model: model_state,
             view_state: AppViewState::default(),
             skills: std::collections::HashMap::new(),
+            config_view: sdk::ConfigView::default(),
             agent_client: None,
         }
     }

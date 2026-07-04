@@ -867,5 +867,8 @@ mod tests {
         async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
             Ok(())
         }
+        async fn config_view(&self) -> Result<sdk::ConfigView, sdk::SdkError> {
+            Ok(sdk::ConfigView::default())
+        }
     }
 }

@@ -11,6 +11,7 @@ mod chat_result;
 mod chat_view;
 pub mod client;
 pub mod commands;
+pub mod config_view;
 pub mod content;
 pub mod error;
 pub mod models;
@@ -34,6 +35,7 @@ pub use chat::{
 pub use client::AgentClient;
 pub use commands::builtin_commands;
 pub use commands::{ContextEstimate, ModelSwitchResult};
+pub use config_view::ConfigView;
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
 pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, ToolCallId};

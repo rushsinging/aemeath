@@ -134,6 +134,9 @@ impl sdk::AgentClient for BlockingReflectionClient {
     async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
         Ok(())
     }
+    async fn config_view(&self) -> Result<sdk::ConfigView, sdk::SdkError> {
+        Ok(sdk::ConfigView::default())
+    }
 }
 
 pub(super) fn app_with_blocking_reflection_client(
