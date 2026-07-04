@@ -4,10 +4,10 @@ use sdk::{ChangeSet, SdkError};
 use tokio::sync::watch;
 
 use crate::business::prompt::build::{build_system_prompt_parts, PromptContext};
+use crate::core::config_app_service::ConfigAppService;
 use crate::core::port::ChatRuntimeContext;
 use crate::core::port::ProviderInfoPort;
 use crate::utils::adapter::LlmClientAdapter;
-use crate::utils::bootstrap::config_manager::ConfigManager;
 use crate::utils::bootstrap::{
     self, apply_config_permission_mode, build_agent_runner, build_hook_runner, init_logging,
     resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_context_size,
@@ -39,7 +39,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     // 3. 加载配置
-    let config_file = ConfigManager::new(Some(&cwd)).load().await.ok();
+    let config_file = ConfigAppService::new(Some(&cwd)).load().await.ok();
 
     // 4. 日志初始化
     init_logging(

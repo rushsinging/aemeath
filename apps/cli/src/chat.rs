@@ -2,18 +2,6 @@ use crate::args::Args;
 
 pub(crate) mod no_tui;
 
-#[allow(dead_code)] // S5 退役时删除
-pub(super) fn permission_env_override(mode: Option<&str>) -> bool {
-    matches!(mode, Some("allow_all"))
-}
-
-/// `AEMEATH_PERMISSION_MODE` 现在由 `EnvAdapter` 统一读取，
-/// 进入 `ConfigSnapshot.permissions.mode`，经 `from_config()` 传递。
-/// 此函数已废弃，保留为 identity，S5 退役时删除。
-pub(super) fn apply_permission_env_override(args: Args) -> Args {
-    args
-}
-
 /// 从 CLI args 创建 AgentClient（原 runtime_adapter::agent_client_from_args）。
 pub(crate) async fn build_client_from_cli_args(
     args: composition::runtime::AgentArgs,
@@ -48,7 +36,6 @@ pub(crate) async fn run_chat(args: Args) {
     } else if should_clear_stderr_log_env(args.quiet, args.verbose) {
         std::env::remove_var("AEMEATH_LOG_STDERR");
     }
-    let args = apply_permission_env_override(args);
     let quiet = args.quiet;
     let initial_resume_id: Option<String> = initial_tui_resume_id(&args);
     let bootstrap = composition::app::build_agent_bootstrap(args.into())
@@ -110,13 +97,6 @@ pub(crate) async fn run_chat(args: Args) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_permission_env_override_only_accepts_allow_all() {
-        assert!(permission_env_override(Some("allow_all")));
-        assert!(!permission_env_override(Some("ask")));
-        assert!(!permission_env_override(None));
-    }
 
     #[test]
     fn test_initial_tui_resume_id_uses_cli_resume() {

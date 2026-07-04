@@ -23,8 +23,6 @@ WHITELIST_PATTERNS=(
   'agent/shared/src/config/paths'
   'agent/shared/src/config/domain/driver_env'
   'agent/features/runtime/src/core/config_app_service.rs'
-  # TODO(S5): config_manager.rs 删除后移除此行
-  'agent/features/runtime/src/utils/bootstrap/config_manager.rs'
   'packages/global/logging/'
   'build.rs'
 )
