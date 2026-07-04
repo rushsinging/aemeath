@@ -32,7 +32,7 @@ impl AgentClient for AgentClientImpl {
     async fn delete_session(&self, id: &str) -> Result<(), SdkError> {
         super::trait_session::delete_session_impl(self, id).await
     }
-  
+
     async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), SdkError> {
         super::trait_misc::notify_hook_impl(self, message, kind).await
     }
@@ -57,12 +57,6 @@ impl AgentClient for AgentClientImpl {
     async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, SdkError> {
         super::trait_memory::list_reminders_impl(self).await
     }
-    async fn add_reminder(&self, content: &str) -> Result<String, SdkError> {
-        super::trait_memory::add_reminder_impl(self, content).await
-    }
-    async fn complete_reminder(&self, id: &str) -> Result<(), SdkError> {
-        super::trait_memory::complete_reminder_impl(self, id).await
-    }
 
     // accessor methods (sync)
     fn session_snapshot(&self) -> SessionSnapshot {
@@ -70,9 +64,6 @@ impl AgentClient for AgentClientImpl {
     }
     fn cost(&self) -> CostInfo {
         super::trait_accessor::cost_impl(self)
-    }
-    fn task_list(&self) -> Vec<sdk::TaskSummary> {
-        super::trait_accessor::task_list_impl(self)
     }
     async fn task_status(&self) -> Result<TaskStatusView, SdkError> {
         super::trait_accessor::task_status_impl(self).await
@@ -83,16 +74,10 @@ impl AgentClient for AgentClientImpl {
     fn changes(&self) -> tokio::sync::watch::Receiver<ChangeSet> {
         super::trait_accessor::changes_impl(self)
     }
-    fn cancel(&self) {
-        super::trait_accessor::cancel_impl(self)
-    }
     fn set_current_turn(&self, turn: usize) {
         super::trait_accessor::set_current_turn_impl(self, turn)
     }
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), SdkError> {
         super::trait_accessor::restore_tasks_impl(self, snapshot).await
-    }
-    async fn clear_tasks(&self) -> Result<(), SdkError> {
-        super::trait_accessor::clear_tasks_impl(self).await
     }
 }

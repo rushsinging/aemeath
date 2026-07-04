@@ -25,10 +25,6 @@ pub(super) fn cost_impl(_me: &AgentClientImpl) -> CostInfo {
     CostInfo::default()
 }
 
-pub(super) fn task_list_impl(_me: &AgentClientImpl) -> Vec<sdk::TaskSummary> {
-    Vec::new()
-}
-
 pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusView> {
     let tasks = me
         .inner
@@ -82,16 +78,6 @@ pub(super) fn changes_impl(me: &AgentClientImpl) -> watch::Receiver<ChangeSet> {
     me.inner.change_rx.clone()
 }
 
-pub(super) fn cancel_impl(me: &AgentClientImpl) {
-    // 锁会话级取消槽，对「当前 token」触发取消。
-    // chat loop 每回合从同一槽读取当前 token，故此处取消会被进行中的回合观测到；
-    // 回合中止后 loop 会把槽重置为新 token（见 loop_runner::reset_cancel），
-    // 因此一次取消只作用于「当时进行中的那一个回合」，不会污染后续回合。
-    if let Ok(guard) = me.inner.current_cancel.lock() {
-        guard.cancel();
-    }
-}
-
 pub(super) fn set_current_turn_impl(_me: &AgentClientImpl, turn: usize) {
     crate::utils::bootstrap::set_current_turn(turn);
 }
@@ -105,14 +91,6 @@ pub(super) async fn restore_tasks_impl(
             store.restore(task_snapshot).await;
             me.notify_change(ChangeSet::TASKS);
         }
-    }
-    Ok(())
-}
-
-pub(super) async fn clear_tasks_impl(me: &AgentClientImpl) -> Result<()> {
-    if let Some(ref store) = me.inner.task_store {
-        store.clear().await;
-        me.notify_change(ChangeSet::TASKS);
     }
     Ok(())
 }

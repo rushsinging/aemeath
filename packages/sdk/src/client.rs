@@ -4,10 +4,8 @@ use async_trait::async_trait;
 
 use crate::{
     ChangeSet, ChatInput, ChatRequest, ChatStream, ClipboardImageView, CostInfo, ModelSummary,
-    ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView, TaskSummary,
+    ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView,
 };
-
-use crate::chat_event::ChatEvent;
 
 /// Agent Runtime 的统一客户端 trait。
 ///
@@ -21,9 +19,6 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 获取当前成本信息（Atomic 读取，纳秒级）。
     fn cost(&self) -> CostInfo;
-
-    /// 获取当前任务列表快照。
-    fn task_list(&self) -> Vec<TaskSummary>;
 
     /// 获取 TUI 可展示的任务状态视图。
     async fn task_status(&self) -> Result<TaskStatusView, super::SdkError>;
@@ -61,9 +56,6 @@ pub trait AgentClient: Send + Sync + 'static {
 
     /// 保存 runtime 当前 session。
     async fn save_current_session(&self) -> Result<(), super::SdkError>;
-
-    /// 取消当前进行中的 Chat。
-    fn cancel(&self);
 
     /// 设置当前 turn 编号（由 TUI run_loop 在每次新请求时调用）。
     fn set_current_turn(&self, _turn: usize) {}
@@ -109,17 +101,8 @@ pub trait AgentClient: Send + Sync + 'static {
     /// 列出当前 session 的 reminders。
     async fn list_reminders(&self) -> Result<Vec<super::ReminderView>, super::SdkError>;
 
-    /// 添加 reminder。
-    async fn add_reminder(&self, content: &str) -> Result<String, super::SdkError>;
-
-    /// 完成指定 reminder。
-    async fn complete_reminder(&self, id: &str) -> Result<(), super::SdkError>;
-
     // ─── TaskStore ───
 
     /// 恢复 TaskStore 快照。
     async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), super::SdkError>;
-
-    /// 清空 Runtime 持有的 TaskStore。
-    async fn clear_tasks(&self) -> Result<(), super::SdkError>;
 }

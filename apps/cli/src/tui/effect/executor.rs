@@ -45,8 +45,9 @@ impl App {
 
     fn cancel_agent_chat(&mut self) {
         self.chat.start_cancelling();
-        if let Some(ref ac) = self.agent_client {
-            ac.cancel();
+        // #567 S4：cancel 通过 ProcessingHandle.abort() 管理
+        if let Some(h) = &self.chat.processing_handle {
+            h.abort();
         }
         self.model
             .conversation

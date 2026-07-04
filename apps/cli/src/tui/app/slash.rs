@@ -16,7 +16,6 @@ mod cmd {
     pub const HELP: &str = "help";
     pub const USAGE: &str = "usage";
     pub const REFLECT: &str = "reflect";
-    pub const THINK: &str = "think";
 }
 
 impl super::App {
@@ -44,13 +43,14 @@ impl super::App {
                 self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                // #497：走 runtime 事件流（ChatInputEvent::Compact →
-                // manual_compact）。spinner / 进度 Gauge / 结果回显全部由
-                // runtime 的 PreCompact → CompactProgress → PostCompact →
-                // SystemMessage 事件驱动。
-                // loop 未运行时静默忽略（compact 需 loop 的 client/messages）。
+                // #497 子 issue 0：走 runtime 事件流（ChatInputEvent::Compact →
+                // manual_compact），不再直接调 compact_messages().await。
+                // spinner / 进度 Gauge / 结果回显全部由 runtime 的
+                // PreCompact → CompactProgress → PostCompact → SystemMessage 事件驱动。
                 if self.chat.input_event_tx.is_some() {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
+                } else {
+                    self.append_system_notice("[compact skipped: chat loop not running]");
                 }
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
@@ -66,49 +66,21 @@ impl super::App {
                 ));
             }
             "/save" => {
-                if self.chat.input_event_tx.is_some() {
-                    // #567 S5：走 runtime 事件流
-                    //（ChatInputEvent::SaveSession → idle 分支 → CommandResultText 事件），
-                    // 不再直接调 save_current_session().await。
-                    self.chat.push_input_event(sdk::ChatInputEvent::SaveSession);
-                } else if let Some(ac) = self.agent_client.clone() {
-                    // loop 未运行（如启动前）→ fallback：先同步 messages 再 save
-                    if let Err(e) = ac.sync_current_messages(self.chat.messages.clone()).await {
-                        self.append_system_notice(format!("[sync failed: {e}]"));
-                    }
-                    match ac.save_current_session().await {
-                        Ok(()) => self.append_system_notice("[session saved]"),
-                        Err(e) => self.append_system_notice(format!("[save failed: {e}]")),
-                    }
+                if let Some(tx) = ui_tx.clone() {
+                    self.execute_effect(Effect::SaveSession { notify: true }, &tx)
+                        .await;
                 }
             }
             "/context" => {
-                // #497：走 runtime 事件流（ChatInputEvent::EstimateContext →
-                // idle 分支 → ContextEstimated 事件），显示由 UiEvent 驱动。
-                // loop 未运行时显示简单 message count。
                 if self.chat.input_event_tx.is_some() {
+                    // #497 子任务 3：走 runtime 事件流
+                    //（ChatInputEvent::EstimateContext → idle 分支 → ContextEstimated 事件），
+                    // 不再直接调 estimate_context().await。显示由 UiEvent::ContextEstimated 驱动。
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::EstimateContext);
                 } else {
+                    // loop 未运行 → fallback：简单消息计数
                     self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
-                }
-            }
-            cmd if cmd == format!("/{}", cmd::THINK) => {
-                // #497：reasoning 模式切换走 runtime 事件流
-                //（ChatInputEvent::SetThinking → idle 分支 → ThinkingChanged 事件）。
-                // /think       → toggle（desired = None）
-                // /think on    → 开启（desired = Some(true)）
-                // /think off   → 关闭（desired = Some(false)）
-                let desired = match parts.get(1).copied() {
-                    Some("on") => Some(true),
-                    Some("off") => Some(false),
-                    _ => None, // toggle
-                };
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::SetThinking { desired });
-                } else {
-                    self.append_system_notice("[think skipped: agent loop not running]");
                 }
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
@@ -304,9 +276,7 @@ Arguments: {args}"
         self.output_area.clear();
         if self.chat.input_event_tx.is_some() {
             // loop 运行中：发 Reset，由 runtime gate 统一清空。
-            if let Some(ref ac) = self.agent_client {
-                ac.cancel();
-            }
+            // cancel 通过 ProcessingHandle 管理（#567 S4），不再调 ac.cancel()。
             self.chat.push_input_event(sdk::ChatInputEvent::Reset);
         } else {
             // loop 未运行（如启动前）→ 直接本地清理。

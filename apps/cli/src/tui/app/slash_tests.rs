@@ -8,7 +8,6 @@ use tokio::sync::{oneshot, watch};
 pub(super) struct BlockingReflectionClient {
     pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
     pub(super) finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
-    pub(super) clear_tasks_calls: AtomicUsize,
     pub(super) apply_reflection_calls: AtomicUsize,
     pub(super) apply_reflection_should_fail: std::sync::atomic::AtomicBool,
 }
@@ -33,10 +32,6 @@ impl sdk::AgentClient for BlockingReflectionClient {
         sdk::CostInfo::default()
     }
 
-    fn task_list(&self) -> Vec<sdk::TaskSummary> {
-        Vec::new()
-    }
-
     async fn task_status(&self) -> Result<sdk::TaskStatusView, sdk::SdkError> {
         Ok(sdk::TaskStatusView::default())
     }
@@ -58,8 +53,6 @@ impl sdk::AgentClient for BlockingReflectionClient {
     async fn save_current_session(&self) -> Result<(), sdk::SdkError> {
         Ok(())
     }
-
-    fn cancel(&self) {}
 
     async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
         Ok(self.session_snapshot())
@@ -138,20 +131,7 @@ impl sdk::AgentClient for BlockingReflectionClient {
         Ok(Vec::new())
     }
 
-    async fn add_reminder(&self, _content: &str) -> Result<String, sdk::SdkError> {
-        Ok("test-id".to_string())
-    }
-
-    async fn complete_reminder(&self, _id: &str) -> Result<(), sdk::SdkError> {
-        Ok(())
-    }
-
     async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
-        Ok(())
-    }
-
-    async fn clear_tasks(&self) -> Result<(), sdk::SdkError> {
-        self.clear_tasks_calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -173,7 +153,6 @@ pub(super) fn app_with_blocking_reflection_client_handle() -> (
     let client = Arc::new(BlockingReflectionClient {
         started_tx: Mutex::new(Some(started_tx)),
         finish_rx: Mutex::new(Some(finish_rx)),
-        clear_tasks_calls: AtomicUsize::new(0),
         apply_reflection_calls: AtomicUsize::new(0),
         apply_reflection_should_fail: std::sync::atomic::AtomicBool::new(false),
     });
@@ -450,8 +429,8 @@ async fn test_apply_reflection_success_keeps_new_pending_created_while_in_flight
 }
 
 #[tokio::test]
-async fn test_clear_command_clears_task_window() {
-    let (mut app, _started_rx, finish_tx, _client) = app_with_blocking_reflection_client_handle();
+async fn test_clear_command_clears_task_store_and_task_window() {
+    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
     app.model
         .conversation
         .apply(crate::tui::model::conversation::intent::UpdateTaskLines(
@@ -463,8 +442,6 @@ async fn test_clear_command_clears_task_window() {
     app.handle_slash_command_with_events("/clear", None).await;
     app.refresh_live_status_from_model();
 
-    // #567 S5：clear_tasks 已下沉到 runtime gate（Reset 事件 idle 分支），
-    // TUI 不再直接调 clear_tasks()。仅验证 UI 侧 task_lines 已清。
     assert!(app.model.conversation.runtime.task_status.lines.is_empty());
     assert!(app.live_status_view_model().task_lines.is_empty());
     let _ = finish_tx.send(());
