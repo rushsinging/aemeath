@@ -36,6 +36,11 @@ struct Inner {
 
 impl ConfigAppService {
     pub fn new(project_dir: Option<&Path>) -> Self {
+        Self::with_global_path(project_dir, share::config::paths::global_config_path())
+    }
+
+    /// Create with a custom global config path (for testing).
+    pub(crate) fn with_global_path(project_dir: Option<&Path>, global_path: PathBuf) -> Self {
         let global_path = share::config::paths::global_config_path();
         let project_path = project_dir.map(share::config::paths::project_config_path);
         let claude_project_settings_path =
@@ -177,18 +182,30 @@ impl ConfigReader for ConfigAppService {
 mod tests {
     use super::*;
 
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("aemeath_test_{name}_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    /// Create a ConfigAppService that writes to a temp file, NOT ~/.agents/aemeath.json
+    fn test_svc(dir: &std::path::Path) -> ConfigAppService {
+        let global = dir.join("aemeath.json");
+        ConfigAppService::with_global_path(Some(dir), global)
+    }
+
     #[tokio::test]
     async fn test_default_load() {
-        let tmp = std::env::temp_dir().join("aemeath_rt_test_default");
-        let svc = ConfigAppService::new(Some(&tmp));
+        let dir = test_dir("default_load");
+        let svc = test_svc(&dir);
         let config = svc.load().await.unwrap();
         assert_eq!(config.model.context_size, 0);
     }
 
     #[tokio::test]
     async fn test_watch_and_update() {
-        let tmp = std::env::temp_dir().join("aemeath_rt_test_watch");
-        let svc = ConfigAppService::new(Some(&tmp));
+        let dir = test_dir("watch_update");
+        let svc = test_svc(&dir);
         let mut rx = svc.watch().await;
 
         svc.update(|c| c.model.name = "watch-test".into())
@@ -201,8 +218,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cli_patch_overrides() {
-        let tmp = std::env::temp_dir().join("aemeath_rt_test_cli");
-        let svc = ConfigAppService::new(Some(&tmp));
+        let dir = test_dir("cli_patch");
+        let svc = test_svc(&dir);
 
         let mut cli = ConfigPatch::default();
         cli.model.get_or_insert(Default::default()).max_tokens = Some(99999);
