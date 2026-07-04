@@ -23,8 +23,12 @@ use share::config::Config;
 use std::sync::Arc;
 use tools::api::McpConnectionManager;
 
-/// 合并 context_size（优先级：CLI > env > config > 默认 128000）。
-pub fn resolve_context_size(cli_context_size: usize, config_file: Option<&Config>) -> usize {
+/// 合并 context_size（优先级：CLI > env > config model.context_size > resolved model contextWindow > 默认 128000）。
+pub fn resolve_context_size(
+    cli_context_size: usize,
+    config_file: Option<&Config>,
+    model_context_window: usize,
+) -> usize {
     // CLI 非零 → 用户显式设置了
     if cli_context_size > 0 {
         return cli_context_size;
@@ -37,11 +41,15 @@ pub fn resolve_context_size(cli_context_size: usize, config_file: Option<&Config
             }
         }
     }
-    // config model.context_size
+    // config model.context_size（全局覆盖）
     if let Some(config) = config_file {
         if config.model.context_size > 0 {
             return config.model.context_size;
         }
+    }
+    // resolved provider model 的 contextWindow（来自 models.providers.*.models[].contextWindow）
+    if model_context_window > 0 {
+        return model_context_window;
     }
     // default
     128_000
