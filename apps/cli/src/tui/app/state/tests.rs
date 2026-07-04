@@ -199,8 +199,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_submit_then_user_messages_added_echoes_user_message() {
-        // A3 Task 4：MessagesSync 退出 display，用户回显改由 UserMessagesAdded 驱动。
-        // 模拟流程：Enter 提交 → runtime 回传 UserMessagesAdded → TUI 回显 `> search bug 76`；
+        // A3 Task 4：MessagesSync 退出 display，用户回显改由 UserMessagesAdopted 驱动。
+        // 模拟流程：Enter 提交 → runtime 回传 UserMessagesAdopted → TUI 回显 `> search bug 76`；
         // MessagesSync 仅负责镜像 chat.messages，不再产生 UserMessage 回显块。
         let mut app = App::new(
             "sess-e2e".to_string(),
@@ -227,16 +227,19 @@ mod tests {
             "首条提交应经事件通道发 UserMessage"
         );
 
-        // 模拟 runtime 回传 UserMessagesAdded（归宿事件，携带 InputId，驱动 TUI 回显）。
+        // 模拟 runtime 回传 UserMessagesAdopted（归宿事件，携带 InputId，驱动 TUI 回显）。
         let input_id = sdk::InputId::new_v7();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::ChatMessage {
-                role: "user".to_string(),
-                content: vec![sdk::ContentBlock::text("search bug 76")],
-                metadata: None,
-                input_id: Some(input_id),
-            }])),
+            TuiMsg::Ui(UiEvent::UserMessagesAdopted {
+                items: vec![sdk::ChatMessage {
+                    role: "user".to_string(),
+                    content: vec![sdk::ContentBlock::text("search bug 76")],
+                    metadata: None,
+                    input_id: Some(input_id),
+                }],
+                queued: vec![],
+            }),
             &ui_tx,
             &spawn_refs,
         );
@@ -250,7 +253,7 @@ mod tests {
         });
         assert!(
             has_user_echo,
-            "UserMessagesAdded 应回显用户消息为 UserMessage 块"
+            "UserMessagesAdopted 应回显用户消息为 UserMessage 块"
         );
 
         // 同步 MessagesSync 仅镜像，不额外产生回显块
@@ -308,17 +311,20 @@ mod tests {
         let spawn_refs = SpawnContextRefs { agent_client: None };
 
         let _ = app.update(TuiMsg::Key(enter_key()), &ui_tx, &spawn_refs);
-        // A3 Task 4：用户回显改由 UserMessagesAdded 归宿事件驱动（MessagesSync 已退出 display）。
-        // 先建占位，再触发 UserMessagesAdded，使 `> search bug 76` 回显。
+        // A3 Task 4：用户回显改由 UserMessagesAdopted 归宿事件驱动（MessagesSync 已退出 display）。
+        // 先建占位，再触发 UserMessagesAdopted，使 `> search bug 76` 回显。
         let input_id = sdk::InputId::new_v7();
         app.enqueue_submission_echo(input_id.clone(), "search bug 76");
         let _ = app.update(
-            TuiMsg::Ui(UiEvent::UserMessagesAdded(vec![sdk::ChatMessage {
-                role: "user".to_string(),
-                content: vec![sdk::ContentBlock::text("search bug 76")],
-                metadata: None,
-                input_id: Some(input_id),
-            }])),
+            TuiMsg::Ui(UiEvent::UserMessagesAdopted {
+                items: vec![sdk::ChatMessage {
+                    role: "user".to_string(),
+                    content: vec![sdk::ContentBlock::text("search bug 76")],
+                    metadata: None,
+                    input_id: Some(input_id),
+                }],
+                queued: vec![],
+            }),
             &ui_tx,
             &spawn_refs,
         );

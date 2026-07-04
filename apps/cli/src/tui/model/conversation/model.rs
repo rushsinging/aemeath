@@ -215,6 +215,30 @@ impl ConversationModel {
         ]
     }
 
+    /// 以 runtime 返回的全量 queued 快照为准重渲染 queue 区域。
+    pub fn sync_queued_from_runtime(&mut self, queued: &[sdk::ChatMessage]) {
+        self.queued_submissions.clear();
+        self.timeline
+            .retain(|it| !matches!(it, OutputTimelineItem::QueuedUserMessage { .. }));
+        for msg in queued {
+            let id = self.next_block_id("queued");
+            let input_id = msg
+                .input_id
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(sdk::InputId::new_v7);
+            let text = msg.text_content().to_string();
+            self.queued_submissions.push(QueuedSubmission::new(
+                id.clone(),
+                input_id.clone(),
+                text.clone(),
+            ));
+            self.timeline
+                .push(OutputTimelineItem::QueuedUserMessage { id, input_id, text });
+        }
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     pub(super) fn next_block_id(&mut self, prefix: &str) -> String {
         self.next_block_sequence += 1;
         format!("{prefix}-{}", self.next_block_sequence)

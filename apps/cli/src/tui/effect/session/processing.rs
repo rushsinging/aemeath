@@ -130,7 +130,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::ApiError { messages, error } => UiEvent::ApiError { messages, error },
         sdk::ChatEvent::CompactRollback { messages } => UiEvent::CompactRollback { messages },
         sdk::ChatEvent::CompactFinished { messages } => UiEvent::CompactFinished { messages },
-        sdk::ChatEvent::UserMessagesAdded { items } => UiEvent::UserMessagesAdded(items),
+        sdk::ChatEvent::UserMessagesAdopted { items, queued } => {
+            UiEvent::UserMessagesAdopted { items, queued }
+        }
+        sdk::ChatEvent::UserMessagesQueued { queued } => UiEvent::UserMessagesQueued { queued },
         sdk::ChatEvent::Done { context } => UiEvent::Done {
             context: context.into(),
         },
@@ -371,8 +374,20 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::ApiError { messages, error } => {
             crate::tui::log_trace!("{} api_error count={} err={}", stage, messages.len(), error)
         }
-        sdk::ChatEvent::UserMessagesAdded { items } => {
-            crate::tui::log_trace!("{} user_messages_added count={}", stage, items.len())
+        sdk::ChatEvent::UserMessagesAdopted { items, queued } => {
+            crate::tui::log_trace!(
+                "{} user_messages_adopted count={} queued={}",
+                stage,
+                items.len(),
+                queued.len()
+            )
+        }
+        sdk::ChatEvent::UserMessagesQueued { queued } => {
+            crate::tui::log_trace!(
+                "{} user_messages_queued count={}",
+                stage,
+                queued.len()
+            )
         }
         sdk::ChatEvent::Done { context } => crate::tui::log_trace!(
             "{} done chat_id={} turn_id={}",

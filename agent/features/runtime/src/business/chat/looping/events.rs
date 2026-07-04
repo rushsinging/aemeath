@@ -148,10 +148,18 @@ pub enum RuntimeStreamEvent {
     TurnStarted {
         messages: Vec<Message>,
     },
-    /// 批量用户输入归宿通知（每条含 InputId + 派生 Message，用于 #507 修复后 TUI 回显含占位符）。
-    /// A2 仅建立通道，emit 由 Task 4 完成；#507 修复后 payload 改为 (InputId, Message) 元组。
-    UserMessagesAdded {
+    /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
+    /// items = 本批接纳的消息（InputId + 派生 Message）；
+    /// queued = gate 处理后仍留在 buffer 中的排队消息快照（一般空，batch drain 时可能有剩余）。
+    /// TUI 用 items 清占位/渲染正式消息，用 queued 重渲染 queue 区域。
+    UserMessagesAdopted {
         items: Vec<(sdk::InputId, Message)>,
+        queued: Vec<(sdk::InputId, Message)>,
+    },
+    /// busy 阶段收到新输入并存入 runtime 内部 buffer 后的确认。
+    /// queued = 当前 buffer 全量快照。TUI 据此全量重渲染 queue 区域。
+    UserMessagesQueued {
+        queued: Vec<(sdk::InputId, Message)>,
     },
     /// loop 执行 reset 清理（messages + pending）后发出，通知 TUI 同步清镜像。
     SessionReset,

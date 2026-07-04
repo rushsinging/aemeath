@@ -86,20 +86,19 @@ impl App {
                 self.chat.stop_processing();
                 self.chat.clear_processing_handle();
             }
-            UiEvent::UserMessagesAdded(items) => {
+            UiEvent::UserMessagesAdopted { items, queued } => {
                 let before_queued = self.model.conversation.queued_submissions.len();
                 crate::tui::log_debug!(
-                    "UserMessagesAdded items={} is_processing={} before_queued={}",
+                    "UserMessagesAdopted items={} queued={} is_processing={} before_queued={}",
                     items.len(),
+                    queued.len(),
                     self.chat.is_processing,
                     before_queued
                 );
                 for item in items {
-                    // #507 修复：用 item.input_id 按 id 清占位（不依赖 text 匹配），
-                    // 用 item.text_content() 还原回显（含 Image placeholder）。
                     let preview = item.text_content().chars().take(60).collect::<String>();
                     crate::tui::log_debug!(
-                        "UserMessagesAdded item input_id={:?} text_preview={:?}",
+                        "UserMessagesAdopted item input_id={:?} text_preview={:?}",
                         item.input_id.as_ref().map(|id| id.as_str().to_string()),
                         preview
                     );
@@ -108,10 +107,19 @@ impl App {
                     }
                     self.append_user_echo(item.text_content());
                 }
+                self.model.conversation.sync_queued_from_runtime(&queued);
                 let after_queued = self.model.conversation.queued_submissions.len();
-                crate::tui::log_debug!("UserMessagesAdded done after_queued={}", after_queued);
+                crate::tui::log_debug!("UserMessagesAdopted done after_queued={}", after_queued);
                 self.mark_output_dirty();
-                // auto-save 已下沉到 runtime loop 退出时（#567 S5），不再 TUI 侧保存。
+            }
+            UiEvent::UserMessagesQueued { queued } => {
+                crate::tui::log_debug!(
+                    "UserMessagesQueued count={} is_processing={}",
+                    queued.len(),
+                    self.chat.is_processing
+                );
+                self.model.conversation.sync_queued_from_runtime(&queued);
+                self.mark_output_dirty();
             }
             UiEvent::TurnStarted { messages } => {
                 // Turn 启动：同步消息 + 启动 spinner(Thinking)。

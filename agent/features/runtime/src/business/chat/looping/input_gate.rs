@@ -416,7 +416,7 @@ where
     if appended_user_messages > 0 {
         log::debug!(
             target: LOG_TARGET,
-            "apply_gate sending PostToolExecutionSync + UserMessagesAdded count={} kind={:?}",
+            "apply_gate sending PostToolExecutionSync + UserMessagesAdopted count={} kind={:?}",
             appended_user_messages,
             kind
         );
@@ -424,8 +424,11 @@ where
             messages: messages.clone(),
         })
         .await;
-        sink.send_event(RuntimeStreamEvent::UserMessagesAdded { items: added })
-            .await;
+        sink.send_event(RuntimeStreamEvent::UserMessagesAdopted {
+            items: added,
+            queued: vec![],
+        })
+        .await;
     }
 
     if decision == GateDecision::Proceed && appended_user_messages > 0 {
@@ -667,7 +670,7 @@ mod tests {
         assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
         assert_eq!(outcome.appended_user_messages, 1);
         assert_eq!(messages.last().unwrap().text_content(), "继续");
-        // 现在 append 时发 MessagesSync + UserMessagesAdded 两个事件
+        // 现在 append 时发 MessagesSync + UserMessagesAdopted 两个事件
         assert_eq!(sink.events.lock().unwrap().len(), 2);
     }
 
@@ -939,10 +942,10 @@ mod tests {
         assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
         assert_eq!(messages.len(), 2);
         let added = sink.events.lock().unwrap().iter().find_map(|e| match e {
-            RuntimeStreamEvent::UserMessagesAdded { items } => Some(items.clone()),
+            RuntimeStreamEvent::UserMessagesAdopted { items, .. } => Some(items.clone()),
             _ => None,
         });
-        let items = added.expect("应发出一个 UserMessagesAdded 批事件");
+        let items = added.expect("应发出一个 UserMessagesAdopted 批事件");
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].1.text_content(), "same");
         assert_eq!(items[1].1.text_content(), "same");
