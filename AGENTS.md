@@ -138,6 +138,60 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 - `breaking`：PR 标题含 `!` 或 body 含 `BREAKING CHANGE:` 时由 auto-labeler 自动添加。
 - `migrated-from:docs` 仅用于历史迁移条目。
 
+### Milestone / Release Gate 管理
+
+Milestone 跟 release 版本走，用于表达某个版本要交付的**可验收能力包**，**NEVER** 作为 issue 分类桶或按子系统碎片化拆分。
+
+1. **命名规则**：milestone 标题 **MUST** 使用 `vX.Y.Z — 能力目标`，版本号从现有 release 顺序继续递增；能力目标描述用户或系统能获得的可感知能力。
+2. **范围规则**：每个 issue **SHOULD** 只归属一个 milestone；跨版本或长期方向的 RFC / backlog **SHOULD NOT** 进入 milestone，除非该版本明确要落地其 MVP。
+3. **Release Gate issue**：每个 milestone **MUST** 有且只有一个验收 issue，标题格式为 `[Release Gate] vX.Y.Z — 能力目标`，并关联到该 milestone。
+4. **关联规则**：纳入版本范围的执行 issue **MUST** 设置同一个 milestone，并在 Release Gate issue 的关联清单中出现；范围变化时 **MUST** 同步更新 milestone 与 Release Gate issue。
+5. **验收含义**：关闭 Release Gate issue 表示该 milestone 已满足发版判断，但 **NEVER** 替代“发版”流程；创建 / push release tag 仍 **MUST** 遵守下方发版规则并等待用户明确确认。
+6. **进度维护**：执行 issue 合入、移出或发现阻断时，**MUST** 更新 Release Gate issue 的 checklist / 阻断项 / out-of-scope，保持它作为该版本范围与验收状态的单一真相。
+
+Release Gate issue 模板：
+
+```md
+## 版本目标
+
+用 1-3 句话描述这个版本交付的可感知能力，以及为什么该版本值得发布。
+
+## 范围
+
+### Must have
+
+- [ ] 版本发布前必须完成的能力或修复。
+
+### Should have
+
+- [ ] 有价值但不阻断发布的能力；若延期，必须移出 milestone 或记录原因。
+
+### Out of scope
+
+- 明确不属于本版本的方向、RFC、重构或长期探索。
+
+## 关联 issue
+
+- [ ] #xxx
+- [ ] #yyy
+
+## 阻断项
+
+- 当前无；如发现发布阻断，记录 issue / PR / 验证失败链接。
+
+## 验收标准
+
+- [ ] 所有 Must have 对应 issue 已关闭，或经用户确认移出 milestone。
+- [ ] 必要的手动验收场景已执行并记录结论。
+- [ ] `cargo test` 通过。
+- [ ] `cargo clippy` 通过。
+- [ ] release 前确认无阻断 issue。
+
+## 发布判断
+
+所有 Must have 完成且验证通过后，关闭本 issue，允许进入 `vX.Y.Z` 发版流程。
+```
+
 ### 大型工作的拆分与跟踪（总 → 分 / 伞 issue）
 
 跨多个子系统、需多个 PR 才能完成的大型工作，**MUST** 按"总 → 分"组织，**NEVER** 塞进单一 issue 或单一 PR：
