@@ -46,6 +46,7 @@ pub(super) struct SubAgentRun<'a> {
 impl<'a> SubAgentRun<'a> {
     pub async fn run_loop(mut self) -> String {
         let workspace_root = self.ctx.workspace_read().current_workspace_root();
+        let memory_root = self.ctx.workspace_read().initial_cwd();
         macro_rules! finalize_and_return {
             ($status:expr, $turns:expr, $result:expr) => {{
                 let outcome = AgentRunOutcome {
@@ -92,10 +93,24 @@ impl<'a> SubAgentRun<'a> {
             (self.log_request_messages)(turn_number, &self.messages);
             self.log_input(turn_number);
 
+            // memory 注入（与主循环一致：每轮动态查询，cache_control=None）
+            let mut effective_blocks = self.system_blocks.clone();
+            let mc = &self.ctx.resources.memory_config;
+            if mc.enabled && mc.inject_count > 0 {
+                if let Some(block) =
+                    crate::business::chat::looping::memory_inject::build_memory_block(
+                        &memory_root,
+                        mc.inject_count,
+                    )
+                {
+                    effective_blocks.push(block);
+                }
+            }
+
             let response = self
                 .client
                 .stream_message(
-                    &self.system_blocks,
+                    &effective_blocks,
                     &self.messages,
                     &self.sub_schemas,
                     &mut self.handler,
