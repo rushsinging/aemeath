@@ -145,6 +145,7 @@ pub fn read() -> ConfigPatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn remove_all_business_env() {
         for key in &[
@@ -167,6 +168,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_no_env_yields_empty_patch() {
         remove_all_business_env();
         let patch = read();
@@ -180,6 +182,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_context_size() {
         remove_all_business_env();
         std::env::set_var("AEMEATH_CONTEXT_SIZE", "64000");
@@ -192,6 +195,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_permission_mode() {
         remove_all_business_env();
         std::env::set_var("AEMEATH_PERMISSION_MODE", "allowAll");
@@ -204,6 +208,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_log_level() {
         remove_all_business_env();
         std::env::set_var("AEMEATH_LOG_LEVEL", "debug");
