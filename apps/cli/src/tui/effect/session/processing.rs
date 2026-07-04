@@ -231,10 +231,7 @@ impl ProcessingHandle {
     }
 }
 
-/// 退出路径：drop input_event_tx → loop shutdown → spawn task 执行 auto-save →
-/// JoinHandle 完成。带超时兜底，超时后 abort。
-///
-/// 必须在 `run()` 返回前调用，否则 tokio runtime drop 会 cancel 未完成的 spawn task。
+/// #567 S5：退出时等待 spawn task 完成（含 auto-save），超时则放弃。
 pub(crate) async fn shutdown_and_save(handle: Option<ProcessingHandle>) {
     if let Some(handle) = handle {
         // 先 abort 如果已卡死——但给 loop 一点时间自然退出 + auto-save。
@@ -783,10 +780,6 @@ mod tests {
             sdk::CostInfo::default()
         }
 
-        fn task_list(&self) -> Vec<sdk::TaskSummary> {
-            Vec::new()
-        }
-
         async fn task_status(&self) -> Result<sdk::TaskStatusView, sdk::SdkError> {
             Ok(sdk::TaskStatusView::default())
         }
@@ -821,8 +814,6 @@ mod tests {
         async fn save_current_session(&self) -> Result<(), sdk::SdkError> {
             Ok(())
         }
-
-        fn cancel(&self) {}
 
         async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
             Ok(self.session_snapshot())
@@ -873,19 +864,7 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn add_reminder(&self, _content: &str) -> Result<String, sdk::SdkError> {
-            Ok("test-id".to_string())
-        }
-
-        async fn complete_reminder(&self, _id: &str) -> Result<(), sdk::SdkError> {
-            Ok(())
-        }
-
         async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
-            Ok(())
-        }
-
-        async fn clear_tasks(&self) -> Result<(), sdk::SdkError> {
             Ok(())
         }
     }

@@ -148,8 +148,9 @@ impl App {
             }
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 // Esc during processing: interrupt current LLM turn + tool calls
-                if let Some(agent_client) = &spawn_refs.agent_client {
-                    agent_client.cancel();
+                // #567 S4：cancel 通过 ProcessingHandle.abort() 管理
+                if let Some(h) = &self.chat.processing_handle {
+                    h.abort();
                 }
                 self.set_transient_notice(StatusNotice::warning("Interrupted"));
             }

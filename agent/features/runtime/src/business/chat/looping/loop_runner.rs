@@ -111,7 +111,7 @@ where
         dyn Fn() -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>,
             > + Send
-        + Sync,
+            + Sync,
     >,
 }
 
