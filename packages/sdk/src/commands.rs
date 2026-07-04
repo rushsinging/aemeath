@@ -54,21 +54,7 @@ pub struct ContextEstimate {
     pub usage_percentage: f64,
 }
 
-// ─── Model switch params / result ───
-
-/// Parameters for switching the active model.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelSwitchParams {
-    pub provider_name: String,
-    pub model_id: String,
-    pub model_name: String,
-    pub base_url: String,
-    pub api_key: String,
-    pub driver: String,
-    pub max_tokens: u32,
-    pub context_window: usize,
-    pub reasoning: Option<bool>,
-}
+// ─── Model switch result ───
 
 /// Result of switching the active model.
 #[derive(Debug, Clone)]

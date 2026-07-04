@@ -15,19 +15,31 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-/// 测试用模型切换构建器（#497）。返回 dummy LlmClient + result，
+/// 测试用模型切换构建器（#567）。返回 dummy LlmClient + result，
 /// 测试中模型切换不会被真正触发，此处仅满足 ChatLoopContext 字段约束。
 fn test_build_switched_client(
-    params: sdk::ModelSwitchParams,
-) -> (provider::api::LlmClient, sdk::ModelSwitchResult) {
-    let client =
-        provider::api::LlmClient::from_provider(Arc::new(SequenceProvider::new(vec!["dummy"])));
-    let result = sdk::ModelSwitchResult {
-        display_name: params.model_name,
-        context_window: params.context_window,
-        reasoning_active: params.reasoning,
-    };
-    (client, result)
+    selection: &str,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = std::result::Result<
+                    (provider::api::LlmClient, sdk::ModelSwitchResult),
+                    String,
+                >,
+            > + Send,
+    >,
+> {
+    let selection = selection.to_string();
+    Box::pin(async move {
+        let client =
+            provider::api::LlmClient::from_provider(Arc::new(SequenceProvider::new(vec!["dummy"])));
+        let result = sdk::ModelSwitchResult {
+            display_name: selection,
+            context_window: 0,
+            reasoning_active: None,
+        };
+        Ok((client, result))
+    })
 }
 
 #[test]

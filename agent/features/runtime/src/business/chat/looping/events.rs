@@ -182,7 +182,7 @@ pub enum RuntimeStreamEvent {
         current: Option<usize>,
         total: Option<usize>,
     },
-    /// 模型切换完成通知（#497）。runtime idle 分支执行 switch_model 后回传结果。
+    /// 模型切换完成通知（#567）。runtime idle 分支解析 selection 构建 client 后回传结果。
     ModelSwitched {
         result: sdk::ModelSwitchResult,
     },

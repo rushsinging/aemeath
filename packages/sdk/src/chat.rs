@@ -66,9 +66,10 @@ pub enum ChatInputEvent {
     Compact,
     /// 用户请求切换模型：idle 时立即执行，busy 时排队等回合结束后执行。
     ///
-    /// 由 `/model` 触发，走 runtime 事件流（#497），不再调 `switch_model()` trait。
-    /// runtime idle 分支执行 switch_model_impl，结果通过 `ModelSwitched` 事件回传 TUI。
-    SwitchModel { params: crate::ModelSwitchParams },
+    /// 由 `/model` 触发，走 runtime 事件流（#567）。`selection` 是用户输入的
+    /// `Provider/Model` 字符串，由 runtime 侧 `resolve_model_selection` 解析。
+    /// 结果通过 `ModelSwitched` 事件回传 TUI。
+    SwitchModel { selection: String },
     /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
     ///
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。

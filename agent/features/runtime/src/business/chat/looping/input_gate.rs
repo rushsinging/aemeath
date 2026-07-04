@@ -53,7 +53,7 @@ pub struct ControlCommand {
 pub enum PendingCommand {
     Compact,
     SwitchModel {
-        params: sdk::ModelSwitchParams,
+        selection: String,
     },
     SetThinking {
         desired: Option<bool>,
@@ -280,15 +280,15 @@ where
                     buffer.push(ChatInputEvent::Compact);
                 }
             }
-            ChatInputEvent::SwitchModel { params } => {
+            ChatInputEvent::SwitchModel { selection } => {
                 if is_idle {
-                    pending_command = Some(PendingCommand::SwitchModel { params });
+                    pending_command = Some(PendingCommand::SwitchModel { selection });
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
                     break;
                 } else {
                     // busy：放回 buffer，等回合结束回到 idle 再处理。
-                    buffer.push(ChatInputEvent::SwitchModel { params });
+                    buffer.push(ChatInputEvent::SwitchModel { selection });
                 }
             }
             ChatInputEvent::SetThinking { desired } => {

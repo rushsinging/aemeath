@@ -35,6 +35,24 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
 
+/// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
+/// `(LlmClient, ModelSwitchResult)` 或 `String` 错误。
+pub type SwitchClientFn = Arc<
+    dyn Fn(
+            &str,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = std::result::Result<
+                            (provider::api::LlmClient, sdk::ModelSwitchResult),
+                            String,
+                        >,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+
 /// 单次 chat loop 的完整执行状态。
 ///
 /// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
@@ -84,13 +102,10 @@ where
     pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
     /// Resume 后首次 loop-top idle 门跳过 pending user turn（#503）。
     pub skip_first_pending_turn: bool,
-    /// 模型切换构建器（#497）。由 core 层注入，避免 business 层反向依赖 core。
-    /// idle 分支收到 `SwitchModel` 事件时调用，返回新 `LlmClient` + `ModelSwitchResult`。
-    pub build_switched_client: Arc<
-        dyn Fn(sdk::ModelSwitchParams) -> (provider::api::LlmClient, sdk::ModelSwitchResult)
-            + Send
-            + Sync,
-    >,
+    /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。
+    /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
+    /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
+    pub build_switched_client: SwitchClientFn,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -274,13 +289,24 @@ where
                         // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
                         continue;
                     }
-                    PendingCommand::SwitchModel { params } => {
-                        let (new_client, result) = (build_switched_client)(params);
-                        client = Arc::new(new_client);
-                        context_size = result.context_window;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                            .await;
+                    PendingCommand::SwitchModel { selection } => {
+                        match (build_switched_client)(&selection).await {
+                            Ok((new_client, result)) => {
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
+                            }
+                            Err(msg) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: msg,
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
                         continue;
                     }
                     PendingCommand::SetThinking { desired } => {
@@ -547,13 +573,24 @@ where
                         }
                         continue;
                     }
-                    PendingCommand::SwitchModel { params } => {
-                        let (new_client, result) = (build_switched_client)(params);
-                        client = Arc::new(new_client);
-                        context_size = result.context_window;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                            .await;
+                    PendingCommand::SwitchModel { selection } => {
+                        match (build_switched_client)(&selection).await {
+                            Ok((new_client, result)) => {
+                                client = Arc::new(new_client);
+                                context_size = result.context_window;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                    .await;
+                            }
+                            Err(msg) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: msg,
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
                         continue;
                     }
                     PendingCommand::SetThinking { desired } => {
@@ -773,13 +810,24 @@ where
                             }
                             continue;
                         }
-                        PendingCommand::SwitchModel { params } => {
-                            let (new_client, result) = (build_switched_client)(params);
-                            client = Arc::new(new_client);
-                            context_size = result.context_window;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                .await;
+                        PendingCommand::SwitchModel { selection } => {
+                            match (build_switched_client)(&selection).await {
+                                Ok((new_client, result)) => {
+                                    client = Arc::new(new_client);
+                                    context_size = result.context_window;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
+                                        .await;
+                                }
+                                Err(msg) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: msg,
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
                             continue;
                         }
                         PendingCommand::SetThinking { desired } => {
@@ -1288,13 +1336,26 @@ where
                                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                                 continue;
                             }
-                            PendingCommand::SwitchModel { params } => {
-                                let (new_client, result) = (build_switched_client)(params);
-                                client = Arc::new(new_client);
-                                context_size = result.context_window;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                    .await;
+                            PendingCommand::SwitchModel { selection } => {
+                                match (build_switched_client)(&selection).await {
+                                    Ok((new_client, result)) => {
+                                        client = Arc::new(new_client);
+                                        context_size = result.context_window;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::ModelSwitched {
+                                                result,
+                                            })
+                                            .await;
+                                    }
+                                    Err(msg) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: msg,
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
                                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                                 continue;
                             }
@@ -1548,13 +1609,26 @@ where
                                     }
                                     continue;
                                 }
-                                PendingCommand::SwitchModel { params } => {
-                                    let (new_client, result) = (build_switched_client)(params);
-                                    client = Arc::new(new_client);
-                                    context_size = result.context_window;
-                                    let _ = sink
-                                        .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                        .await;
+                                PendingCommand::SwitchModel { selection } => {
+                                    match (build_switched_client)(&selection).await {
+                                        Ok((new_client, result)) => {
+                                            client = Arc::new(new_client);
+                                            context_size = result.context_window;
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::ModelSwitched {
+                                                    result,
+                                                })
+                                                .await;
+                                        }
+                                        Err(msg) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: msg,
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
                                     continue;
                                 }
                                 PendingCommand::SetThinking { desired } => {
@@ -1759,13 +1833,26 @@ where
                                 }
                                 continue;
                             }
-                            PendingCommand::SwitchModel { params } => {
-                                let (new_client, result) = (build_switched_client)(params);
-                                client = Arc::new(new_client);
-                                context_size = result.context_window;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                                    .await;
+                            PendingCommand::SwitchModel { selection } => {
+                                match (build_switched_client)(&selection).await {
+                                    Ok((new_client, result)) => {
+                                        client = Arc::new(new_client);
+                                        context_size = result.context_window;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::ModelSwitched {
+                                                result,
+                                            })
+                                            .await;
+                                    }
+                                    Err(msg) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: msg,
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
                                 continue;
                             }
                             PendingCommand::SetThinking { desired } => {

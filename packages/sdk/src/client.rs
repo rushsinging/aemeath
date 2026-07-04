@@ -7,7 +7,7 @@ use crate::{
     ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView, TaskSummary,
 };
 
-use crate::commands::{ContextEstimate, ModelSwitchParams, ModelSwitchResult};
+use crate::commands::ContextEstimate;
 
 /// Agent Runtime 的统一客户端 trait。
 ///
@@ -113,12 +113,6 @@ pub trait AgentClient: Send + Sync + 'static {
         messages: &[super::ChatMessage],
         system_prompt: &str,
     ) -> Result<ContextEstimate, super::SdkError>;
-
-    /// 切换当前模型（Runtime 负责构建新的 LlmClient）。
-    async fn switch_model(
-        &self,
-        params: ModelSwitchParams,
-    ) -> Result<ModelSwitchResult, super::SdkError>;
 
     /// 设置推理模式（None = 切换）。
     async fn set_thinking(&self, desired: Option<bool>) -> Result<bool, super::SdkError>;

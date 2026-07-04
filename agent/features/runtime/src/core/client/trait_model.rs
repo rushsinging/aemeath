@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
@@ -9,56 +7,68 @@ use crate::utils::bootstrap::config_manager::ConfigManager;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
-pub(super) async fn switch_model_impl(
-    me: &AgentClientImpl,
-    params: sdk::ModelSwitchParams,
-) -> Result<sdk::ModelSwitchResult> {
-    let (new_client, result) = build_llm_client_for_switch(params);
-    *me.inner.current_client.write().unwrap() = Arc::new(new_client);
-    Ok(result)
-}
-
-/// 由 `ModelSwitchParams` 构建新 `LlmClient` + `ModelSwitchResult`。
+/// 由 selection 字符串解析配置并构建新 `LlmClient` + `ModelSwitchResult`（#567）。
 ///
-/// 提取为独立函数供 `switch_model_impl`（RPC 路径）和 loop_runner idle 分支
-/// （事件流路径，#497）共用，DRY。
-pub(crate) fn build_llm_client_for_switch(
-    params: sdk::ModelSwitchParams,
-) -> (provider::api::LlmClient, sdk::ModelSwitchResult) {
-    use provider::api::openai_compatible::ReasoningConfig;
+/// 在 loop_runner idle 分支收到 `SwitchModel` 事件时调用。
+/// 从 `ConfigManager` 加载配置，经 `resolve_model_selection` 解析 `Provider/Model`，
+/// 再构建 `LlmClient`。解析失败返回 `String` 错误信息。
+pub(crate) async fn build_llm_client_for_switch(
+    selection: &str,
+    cwd: &std::path::Path,
+) -> std::result::Result<(provider::api::LlmClient, sdk::ModelSwitchResult), String> {
+    use crate::utils::bootstrap::{
+        build_llm_client, resolve_api_key, resolve_base_url, resolve_model_runtime_settings,
+    };
     use provider::api::ProviderDriverKind;
 
-    let driver = ProviderDriverKind::parse(&params.driver).unwrap_or(ProviderDriverKind::OpenAI);
-    let openai_config = switch_model_openai_config(driver, &params.provider_name);
+    let config = ConfigManager::new(Some(cwd)).load().await?;
 
-    let reasoning = params.reasoning.unwrap_or(true);
-    let reasoning_config = Some(ReasoningConfig::Bool(reasoning));
+    let resolved_model = config
+        .models
+        .resolve_model_selection(selection)
+        .map_err(|e| e.to_string())?;
 
-    let new_client = provider::api::LlmClient::from_config(provider::api::LlmConfigOptions {
+    let driver =
+        ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
+
+    let api_key = resolve_api_key(None, &resolved_model, None).ok_or_else(|| {
+        format!(
+            "API key 未设置。请为 {} 配置 api_key，或设置对应环境变量。",
+            resolved_model.source_key
+        )
+    })?;
+
+    let base_url = resolve_base_url(None, &resolved_model);
+    let model_id = resolved_model.model.id.clone();
+
+    let runtime_settings =
+        resolve_model_runtime_settings(None, &resolved_model.model, Some(&config), true)
+            .map_err(|e| e.to_string())?;
+
+    let new_client = build_llm_client(
         driver,
-        api_key: params.api_key,
-        base_url: Some(params.base_url),
-        model: params.model_id.clone(),
-        max_tokens: params.max_tokens,
-        reasoning,
-        reasoning_config,
-        openai_config,
-    });
+        api_key,
+        base_url,
+        model_id.clone(),
+        &resolved_model,
+        &runtime_settings,
+        None,
+    );
 
-    let display_name = if params.model_name.is_empty() {
-        &params.model_id
+    let display_name = if resolved_model.model.name.is_empty() {
+        &resolved_model.model.id
     } else {
-        &params.model_name
+        &resolved_model.model.name
     };
-    let display = format!("{}/{}", params.provider_name, display_name);
+    let display = format!("{}/{}", resolved_model.source_key, display_name);
 
     let result = sdk::ModelSwitchResult {
         display_name: display,
-        context_window: params.context_window,
-        reasoning_active: Some(reasoning),
+        context_window: resolved_model.model.context_window,
+        reasoning_active: Some(runtime_settings.reasoning),
     };
 
-    (new_client, result)
+    Ok((new_client, result))
 }
 
 pub(super) async fn set_thinking_impl(me: &AgentClientImpl, desired: Option<bool>) -> Result<bool> {
@@ -101,50 +111,4 @@ pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSu
             max_tokens: model.max_tokens,
         })
         .collect())
-}
-
-fn switch_model_openai_config(
-    driver: provider::api::ProviderDriverKind,
-    source_key: &str,
-) -> Option<provider::api::OpenAIProviderConfig> {
-    if matches!(
-        driver,
-        provider::api::ProviderDriverKind::Anthropic | provider::api::ProviderDriverKind::Ollama
-    ) {
-        None
-    } else {
-        Some(provider::api::OpenAIProviderConfig::from_driver(
-            driver, source_key,
-        ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_switch_model_openai_config_skips_ollama() {
-        let result =
-            switch_model_openai_config(provider::api::ProviderDriverKind::Ollama, "ollama");
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_switch_model_openai_config_skips_anthropic() {
-        let result =
-            switch_model_openai_config(provider::api::ProviderDriverKind::Anthropic, "anthropic");
-
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_switch_model_openai_config_uses_source_key_for_openai_compatible() {
-        let result = switch_model_openai_config(provider::api::ProviderDriverKind::Zhipu, "Zhipu")
-            .expect("zhipu should use openai-compatible config");
-
-        assert_eq!(result.source_key, "Zhipu");
-        assert_eq!(result.driver, provider::api::ProviderDriverKind::Zhipu);
-    }
 }
