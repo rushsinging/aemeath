@@ -100,6 +100,9 @@ pub enum ConversationChange {
     ProcessingJobChanged {
         id: String,
     },
+    /// Compact 进度条嵌入 spinner 行（output 区），与 phase 变化解耦——单独归类为 output_dirty，
+    /// 避免依赖 SpinnerTick 每 90ms 兜底 mark_output_dirty 的不可靠时序（#540）。
+    CompactProgressChanged,
     SpinnerPhaseChanged,
     SpinnerStopped,
     TaskLinesChanged,

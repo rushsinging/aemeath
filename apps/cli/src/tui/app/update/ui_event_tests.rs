@@ -271,3 +271,54 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
         "回显应经 message.text_content() 还原含占位符（#507 修复目标）"
     );
 }
+
+/// Bug #540：MessagesSync 兜底清理必须同时清空 compact runtime 三态（chat_active、
+/// phase、running_tool_count、compact_progress），否则 compact 完成后 spinner 行会
+/// 残留 Compacting 文案 + 90% 进度条。
+#[test]
+fn test_messages_sync_clears_compact_runtime_state() {
+    use crate::tui::model::conversation::intent::SetCompactProgress;
+    use crate::tui::model::conversation::spinner::SpinnerPhase;
+
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+
+    // 模拟 compact 进行中：直接写入 runtime 三态
+    app.model.conversation.runtime.spinner.chat_active = true;
+    app.model.conversation.runtime.spinner.phase = Some(SpinnerPhase::Compacting);
+    app.model.conversation.runtime.spinner.running_tool_count = 2;
+    app.model.conversation.apply(SetCompactProgress {
+        stage: "finalizing".into(),
+        current: Some(8),
+        total: Some(10),
+    });
+    assert!(
+        app.model.conversation.runtime.compact_progress.is_some(),
+        "precondition: compact_progress 已设置"
+    );
+
+    app.update_ui(UiEvent::MessagesSync(vec![]), &ui_tx, &spawn_refs);
+
+    // 修复后：全部 compact runtime 状态被清空
+    assert!(
+        !app.model.conversation.runtime.spinner.chat_active,
+        "MessagesSync 后 chat_active 必须为 false（spinner 行才会消失）"
+    );
+    assert_eq!(
+        app.model.conversation.runtime.spinner.phase, None,
+        "MessagesSync 后 phase 必须清空"
+    );
+    assert_eq!(
+        app.model.conversation.runtime.spinner.running_tool_count, 0,
+        "MessagesSync 后 running_tool_count 必须清零"
+    );
+    assert!(
+        app.model.conversation.runtime.compact_progress.is_none(),
+        "MessagesSync 后 compact_progress 必须清空（进度条才会消失）"
+    );
+    assert!(
+        app.view_state.dirty.output,
+        "MessagesSync 必须 mark_output_dirty 触发进度条消失渲染"
+    );
+}

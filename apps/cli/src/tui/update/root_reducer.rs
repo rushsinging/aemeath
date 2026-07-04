@@ -273,6 +273,7 @@ impl From<&ConversationChange> for ModelChange {
             | ConversationChange::AskUserShown { .. }
             | ConversationChange::AskUserUpdated { .. }
             | ConversationChange::AskUserDismissed
+            | ConversationChange::CompactProgressChanged
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
             ConversationChange::ChatStarted { .. }
             | ConversationChange::ChatTurnStarted { .. }

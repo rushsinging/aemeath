@@ -173,6 +173,20 @@ impl RuntimeState {
         self.spinner.chat_active = true;
         self.spinner.phase = Some(SpinnerPhase::Compacting);
     }
+
+    /// Compact 结束（或异常中止）兜底清理（#540）：
+    ///
+    /// 集中清空 compact 关联的运行态字段，避免 MessagesSync 兜底路径遗漏：
+    /// - `compact_progress` 清空 → 进度条消失
+    /// - `running_tool_count` 清零 → 防止残留工具计数
+    ///
+    /// **不**触碰 `chat_active` / `phase`——这两个字段归 `spinner_stop()` / `pause_chat()` /
+    /// `complete_chat()` 等对话生命周期方法管理，调用方按需叠加（#540 重构后
+    /// MessagesSync 路径统一复用 `spinner_stop()` + 本方法）。
+    pub fn clear_compact_runtime(&mut self) {
+        self.compact_progress = None;
+        self.spinner.running_tool_count = 0;
+    }
 }
 
 // ── 临时 notice 过期逻辑 ──
