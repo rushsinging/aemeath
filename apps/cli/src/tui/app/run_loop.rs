@@ -33,19 +33,36 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
 
 impl App {
     async fn handle_change_set(&mut self, change: ChangeSet) {
+        // 启动后首次拉取 config_view
+        if self.config_view.model_name.is_empty() {
+            self.refresh_config_view().await;
+        }
         crate::tui::log_trace!(
-            "tui.change_set received bits={:?} contains_tasks={} contains_project={} contains_session={} contains_cost={}",
+            "tui.change_set received bits={:?} contains_tasks={} contains_project={} contains_session={} contains_cost={} contains_config={}",
             change,
             change.contains(ChangeSet::TASKS),
             change.contains(ChangeSet::PROJECT),
             change.contains(ChangeSet::SESSION),
-            change.contains(ChangeSet::COST)
+            change.contains(ChangeSet::COST),
+            change.contains(ChangeSet::CONFIG)
         );
         if change.contains(ChangeSet::TASKS) {
             self.update_task_status(self.chat.is_processing).await;
         }
         if change.contains(ChangeSet::PROJECT) {
             self.update_project_context().await;
+        }
+        if change.contains(ChangeSet::CONFIG) {
+            self.refresh_config_view().await;
+        }
+    }
+
+    /// 从 runtime 拉取最新 config_view 并缓存。
+    async fn refresh_config_view(&mut self) {
+        if let Some(client) = &self.agent_client {
+            if let Ok(view) = client.config_view().await {
+                self.config_view = view;
+            }
         }
     }
 

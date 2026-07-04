@@ -144,19 +144,22 @@ Build info:
                 self.append_system_notice(&info);
             }
             cmd if cmd == "/doctor" => {
-                let api_key =
-                    std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("CLAUDE_API_KEY"));
+                let view = &self.config_view;
                 let home = dirs::home_dir();
                 let info = format!(
                     "🔧 Doctor\n\n                     \
+                     Model: {}\n                     \
                      API Key: {}\n                     \
+                     Permission: {}\n                     \
                      Home dir: {}\n                     \
                      Architecture: {}",
-                    if api_key.is_ok() {
+                    view.model_name,
+                    if view.has_api_key {
                         "✅ set"
                     } else {
                         "❌ not set"
                     },
+                    view.permission_mode,
                     home.map(|p| p.display().to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
                     std::env::consts::ARCH,
