@@ -145,7 +145,18 @@ pub fn read() -> ConfigPatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
+    use std::sync::Mutex;
+
+    /// Serializes env-mutating tests (env is process-global).
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    /// Run a closure with exclusive access to env vars.
+    /// Poisoned mutex is recovered to avoid cascade failures.
+    fn with_env_lock<F: FnOnce()>(f: F) {
+        let guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        f();
+        drop(guard);
+    }
 
     fn remove_all_business_env() {
         for key in &[
@@ -168,55 +179,59 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_no_env_yields_empty_patch() {
-        remove_all_business_env();
-        let patch = read();
-        assert!(patch.api.is_none());
-        assert!(patch.model.is_none());
-        assert!(patch.permissions.is_none());
-        assert!(patch.tools.is_none());
-        assert!(patch.agents.is_none());
-        assert!(patch.ui.is_none());
-        assert!(patch.logging.is_none());
+        with_env_lock(|| {
+            remove_all_business_env();
+            let patch = read();
+            assert!(patch.api.is_none());
+            assert!(patch.model.is_none());
+            assert!(patch.permissions.is_none());
+            assert!(patch.tools.is_none());
+            assert!(patch.agents.is_none());
+            assert!(patch.ui.is_none());
+            assert!(patch.logging.is_none());
+        });
     }
 
     #[test]
-    #[serial]
     fn test_context_size() {
-        remove_all_business_env();
-        std::env::set_var("AEMEATH_CONTEXT_SIZE", "64000");
-        let patch = read();
-        assert_eq!(
-            patch.model.as_ref().and_then(|m| m.context_size),
-            Some(64000)
-        );
-        std::env::remove_var("AEMEATH_CONTEXT_SIZE");
+        with_env_lock(|| {
+            remove_all_business_env();
+            std::env::set_var("AEMEATH_CONTEXT_SIZE", "64000");
+            let patch = read();
+            assert_eq!(
+                patch.model.as_ref().and_then(|m| m.context_size),
+                Some(64000)
+            );
+            std::env::remove_var("AEMEATH_CONTEXT_SIZE");
+        });
     }
 
     #[test]
-    #[serial]
     fn test_permission_mode() {
-        remove_all_business_env();
-        std::env::set_var("AEMEATH_PERMISSION_MODE", "allowAll");
-        let patch = read();
-        assert_eq!(
-            patch.permissions.as_ref().and_then(|p| p.mode.clone()),
-            Some(PermissionModeConfig::AllowAll)
-        );
-        std::env::remove_var("AEMEATH_PERMISSION_MODE");
+        with_env_lock(|| {
+            remove_all_business_env();
+            std::env::set_var("AEMEATH_PERMISSION_MODE", "allowAll");
+            let patch = read();
+            assert_eq!(
+                patch.permissions.as_ref().and_then(|p| p.mode.clone()),
+                Some(PermissionModeConfig::AllowAll)
+            );
+            std::env::remove_var("AEMEATH_PERMISSION_MODE");
+        });
     }
 
     #[test]
-    #[serial]
     fn test_log_level() {
-        remove_all_business_env();
-        std::env::set_var("AEMEATH_LOG_LEVEL", "debug");
-        let patch = read();
-        assert_eq!(
-            patch.logging.as_ref().and_then(|l| l.level.clone()),
-            Some("debug".to_string())
-        );
-        std::env::remove_var("AEMEATH_LOG_LEVEL");
+        with_env_lock(|| {
+            remove_all_business_env();
+            std::env::set_var("AEMEATH_LOG_LEVEL", "debug");
+            let patch = read();
+            assert_eq!(
+                patch.logging.as_ref().and_then(|l| l.level.clone()),
+                Some("debug".to_string())
+            );
+            std::env::remove_var("AEMEATH_LOG_LEVEL");
+        });
     }
 }
