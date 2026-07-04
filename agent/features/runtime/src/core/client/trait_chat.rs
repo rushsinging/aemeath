@@ -119,6 +119,52 @@ pub(super) async fn chat_impl(
                     )
                 })
             },
+            run_reflection_on_demand: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        // 从 inner.current_messages 读取
+                        let messages = me.inner.current_messages.lock().unwrap().clone();
+                        let sdk_msgs: Vec<sdk::ChatMessage> = messages
+                            .into_iter()
+                            .map(super::mapping::message_to_sdk)
+                            .collect();
+                        super::trait_reflection::run_reflection_impl(&me, sdk_msgs).await
+                    })
+                })
+            },
+            apply_reflection_on_demand: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move |output: sdk::ReflectionOutputView| {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_reflection::apply_reflection_impl(&me, output).await
+                    })
+                })
+            },
+            list_models: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_model::list_models_impl(&me).await
+                    })
+                })
+            },
+            list_reminders: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_memory::list_reminders_impl(&me).await
+                    })
+                })
+            },
         })
         .await;
         // loop 退出（shutdown / clear）后把取消槽重置为干净 token，

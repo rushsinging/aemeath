@@ -215,6 +215,14 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             created_at,
         },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
+        // #567: 新增变体暂不映射到 UiEvent，静默忽略。
+        sdk::ChatEvent::ReflectionResult { .. }
+        | sdk::ChatEvent::ModelList { .. }
+        | sdk::ChatEvent::ReminderList { .. }
+        | sdk::ChatEvent::SessionList { .. }
+        | sdk::ChatEvent::ProjectInfo { .. }
+        | sdk::ChatEvent::TasksSnapshot { .. }
+        | sdk::ChatEvent::CostUpdate { .. } => return UiEvent::SystemMessage(String::new()),
     }
 }
 
@@ -513,6 +521,14 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             result.text.len(),
             result.tokens_used
         ),
+        // #567: 新增变体暂不记录日志。
+        sdk::ChatEvent::ReflectionResult { .. }
+        | sdk::ChatEvent::ModelList { .. }
+        | sdk::ChatEvent::ReminderList { .. }
+        | sdk::ChatEvent::SessionList { .. }
+        | sdk::ChatEvent::ProjectInfo { .. }
+        | sdk::ChatEvent::TasksSnapshot { .. }
+        | sdk::ChatEvent::CostUpdate { .. } => {}
     }
 }
 
@@ -890,9 +906,6 @@ mod tests {
 
         async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
             Ok(())
-        }
-        async fn config_view(&self) -> Result<sdk::ConfigView, sdk::SdkError> {
-            Ok(sdk::ConfigView::default())
         }
     }
 }

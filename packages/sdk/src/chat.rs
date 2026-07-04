@@ -34,7 +34,7 @@ pub struct ChatInput {
 }
 
 /// Chat 运行期间追加到 runtime 的输入事件。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ChatInputEvent {
     /// 普通用户消息，延展当前 Chat 为新的 Turn。
     ///
@@ -75,22 +75,6 @@ pub enum ChatInputEvent {
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
     /// runtime idle 分支执行 set_reasoning_level，结果通过 `ThinkingChanged` 事件回传 TUI。
     SetThinking { desired: Option<bool> },
-    /// 用户请求估算上下文占用：idle 时立即执行，busy 时排队等回合结束后执行。
-    ///
-    /// 由 `/context` 触发，走 runtime 事件流（#497）。runtime idle 分支用 loop 内部
-    /// messages + system_prompt 估算，结果通过 `ContextEstimated` 事件回传 TUI。
-    EstimateContext,
-    /// 查询费用信息。由 `/cost` 触发。
-    /// args: "" / "session" = 当前会话, "total" = 全部, "clear" = 清除历史
-    QueryCost { args: String },
-    /// 查询当前会话状态。由 `/status` 触发。
-    QueryStatus,
-    /// 查询/管理配置。由 `/config` 触发。
-    /// args: "" = 查看全部, "get <key>" = 获取, "reset" = 重置
-    QueryConfig { args: String },
-    /// 查询统计信息。由 `/stats` 触发。
-    /// args: "" = 总览, "session" / "tools" / "tokens"
-    QueryStats { args: String },
     /// 初始化项目。由 `/init` 触发。
     /// force = true 时强制重新初始化
     InitProject { force: bool },
@@ -106,7 +90,23 @@ pub enum ChatInputEvent {
     /// 保存当前会话。由 `/save` 触发，走 runtime 事件流。
     /// runtime idle 分支执行 save，结果通过 `CommandResultText` 事件回传 TUI。
     SaveSession,
+    /// 运行 reflection。由 `/reflect` 或自动触发。
+    RunReflection,
+    /// 应用 reflection 结果。由 TUI 在 reflection UI 确认后触发。
+    ApplyReflection { output: crate::ReflectionOutputView },
+    /// 查询可用模型列表。由 TUI 启动时或 `/model` 触发。
+    ListModels,
+    /// 查询提醒列表。由 `/reminders` 触发。
+    ListReminders,
 }
+
+// #567: 手动实现 PartialEq/Eq，不比较变体内数据（测试只检查是否产生了事件）。
+impl PartialEq for ChatInputEvent {
+    fn eq(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+impl Eq for ChatInputEvent {}
 
 impl ChatInputEvent {
     pub fn user_message(text: impl Into<String>, images: Vec<crate::ChatInputImage>) -> Self {

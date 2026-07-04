@@ -228,6 +228,34 @@ pub enum RuntimeStreamEvent {
         session_id: String,
         created_at: u64,
     },
+    /// #567：Reflection 结果回传。
+    ReflectionResult {
+        output: Box<sdk::ReflectionOutputView>,
+    },
+    /// #567：模型列表回传。
+    ModelList {
+        models: Vec<sdk::ModelSummary>,
+    },
+    /// #567：提醒列表回传。
+    ReminderList {
+        reminders: Vec<sdk::ReminderView>,
+    },
+    /// #567：会话列表回传。
+    SessionList {
+        sessions: Vec<sdk::SessionSummary>,
+    },
+    /// #567：项目上下文回传。
+    ProjectInfo {
+        project: sdk::ProjectContext,
+    },
+    /// #567：任务状态快照回传（携带数据，替代轮询）。
+    TasksSnapshot {
+        tasks: Box<sdk::TaskStatusView>,
+    },
+    /// #567：成本信息回传。
+    CostUpdate {
+        cost: sdk::CostInfo,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

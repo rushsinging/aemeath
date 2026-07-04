@@ -57,13 +57,10 @@ impl App {
         }
     }
 
-    /// 从 runtime 拉取最新 config_view 并缓存。
+    /// #567: config_view() 方法已从 AgentClient trait 移除。
+    /// config_view 现在由本地配置加载维护，此方法保留为 no-op 占位。
     async fn refresh_config_view(&mut self) {
-        if let Some(client) = &self.agent_client {
-            if let Ok(view) = client.config_view().await {
-                self.config_view = view;
-            }
-        }
+        // config_view 在 App 初始化时由本地配置填充，不再从 runtime 拉取。
     }
 
     /// #390 A1：建立常驻 chat() 处理回路（启动一次 + `/clear` 后自愈重建）。

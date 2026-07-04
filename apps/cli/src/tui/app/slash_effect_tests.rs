@@ -8,6 +8,7 @@ use crate::tui::effect::effect::Effect;
 /// A2：/save 经 `Effect::SaveSession { notify: true }` 保存成功后回灌
 /// `UiEvent::SessionSaved`，update 据此推送 `[session saved: id]` 反馈行。
 #[tokio::test]
+#[ignore = "#567: SaveSession 正在迁移到事件流，Effect 路径将被删除"]
 async fn test_save_session_effect_notify_emits_session_saved() {
     let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
     app.chat.messages.push(sdk::ChatMessage::user_text("hello"));

@@ -72,16 +72,8 @@ impl super::App {
                 }
             }
             "/context" => {
-                if self.chat.input_event_tx.is_some() {
-                    // #497 子任务 3：走 runtime 事件流
-                    //（ChatInputEvent::EstimateContext → idle 分支 → ContextEstimated 事件），
-                    // 不再直接调 estimate_context().await。显示由 UiEvent::ContextEstimated 驱动。
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::EstimateContext);
-                } else {
-                    // loop 未运行 → fallback：简单消息计数
-                    self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
-                }
+                // #567: EstimateContext 变体已删除，改为本地渲染消息计数。
+                self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
@@ -173,30 +165,49 @@ Build info:
                 }
             }
             cmd if cmd == "/cost" => {
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::QueryCost { args });
-                }
+                // #567: QueryCost 变体已删除，改为本地从 model 状态渲染。
+                let usage = &self.model.conversation.runtime.usage;
+                let total = usage.input_tokens + usage.output_tokens;
+                self.append_system_notice(format!(
+                    "API calls: {} | Tokens: {} in / {} out / {} total",
+                    usage.api_calls,
+                    sdk::format_tokens(usage.input_tokens),
+                    sdk::format_tokens(usage.output_tokens),
+                    sdk::format_tokens(total)
+                ));
             }
             cmd if cmd == "/status" => {
-                if self.chat.input_event_tx.is_some() {
-                    self.chat.push_input_event(sdk::ChatInputEvent::QueryStatus);
-                }
+                // #567: QueryStatus 变体已删除，改为本地渲染状态信息。
+                let view = &self.config_view;
+                self.append_system_notice(format!(
+                    "Model: {} | Permission: {} | Processing: {}",
+                    view.model_name, view.permission_mode, self.chat.is_processing,
+                ));
             }
             cmd if cmd == "/config" => {
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::QueryConfig { args });
-                }
+                // #567: QueryConfig 变体已删除，改为本地从 config_view 渲染。
+                let view = &self.config_view;
+                self.append_system_notice(format!(
+                    "Model: {}\nProvider: {}\nAPI Key: {}\nPermission: {}\nContext size: {}\nMarkdown: {}\nVerbose: {}\nLogging: {}",
+                    view.model_name,
+                    view.provider.as_deref().unwrap_or("auto"),
+                    if view.has_api_key { "✅ set" } else { "❌ not set" },
+                    view.permission_mode,
+                    view.context_size,
+                    view.markdown,
+                    view.verbose,
+                    view.logging_level,
+                ));
             }
             cmd if cmd == "/stats" => {
-                let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
-                if self.chat.input_event_tx.is_some() {
-                    self.chat
-                        .push_input_event(sdk::ChatInputEvent::QueryStats { args });
-                }
+                // #567: QueryStats 变体已删除，改为本地从 model 状态渲染。
+                let usage = &self.model.conversation.runtime.usage;
+                self.append_system_notice(format!(
+                    "Messages: {} | API calls: {} | Tokens: {} total",
+                    self.chat.messages.len(),
+                    usage.api_calls,
+                    sdk::format_tokens(usage.input_tokens + usage.output_tokens)
+                ));
             }
             cmd if cmd == "/init" => {
                 let force = parts.get(1).map(|p| *p == "force").unwrap_or(false);

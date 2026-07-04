@@ -212,4 +212,32 @@ pub enum ChatEvent {
         session_id: String,
         created_at: u64,
     },
+    /// #567：Reflection 结果回传。
+    ReflectionResult {
+        output: Box<crate::ReflectionOutputView>,
+    },
+    /// #567：模型列表回传。
+    ModelList {
+        models: Vec<crate::ModelSummary>,
+    },
+    /// #567：提醒列表回传。
+    ReminderList {
+        reminders: Vec<crate::ReminderView>,
+    },
+    /// #567：会话列表回传。
+    SessionList {
+        sessions: Vec<crate::SessionSummary>,
+    },
+    /// #567：项目上下文回传。
+    ProjectInfo {
+        project: crate::ProjectContext,
+    },
+    /// #567：任务状态快照回传（携带数据，替代轮询）。
+    TasksSnapshot {
+        tasks: Box<crate::TaskStatusView>,
+    },
+    /// #567：成本信息回传。
+    CostUpdate {
+        cost: crate::CostInfo,
+    },
 }
