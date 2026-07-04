@@ -25,14 +25,9 @@ impl App {
             .apply(SetStatusNotice(StatusNotice::ready()));
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
-        if let Some(agent_client) = &self.agent_client {
-            if let Err(e) = agent_client.sync_current_messages(Vec::new()).await {
-                crate::tui::log_warn!("failed to reset SDK session messages: {e}");
-            }
-            if let Err(e) = agent_client.clear_tasks().await {
-                crate::tui::log_warn!("failed to clear SDK task store: {e}");
-            }
-        }
+        // #567 S5：sync_current_messages / clear_tasks 已下沉到 runtime gate
+        //（Reset 事件 idle 分支）。loop 未运行时 current_messages 会在下次 start_chat
+        // 时被覆写，task_store 不影响新对话。
         self.model.conversation.apply(UpdateTaskLines(Vec::new()));
     }
     /// Set loaded skills for slash command alias lookup

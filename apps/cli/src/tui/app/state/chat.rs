@@ -101,13 +101,11 @@ impl ChatState {
         self.processing_handle = Some(handle);
     }
 
-    pub(crate) fn abort_processing_handle(&mut self) {
-        if let Some(handle) = self.processing_handle.take() {
-            handle.abort();
-        }
-        self.clear_tool_activity();
-        self.is_processing = false;
-        self.is_cancelling = false;
+    /// 取出 ProcessingHandle 用于退出路径 await（auto-save 完成）。
+    pub(crate) fn take_processing_handle(
+        &mut self,
+    ) -> Option<crate::tui::effect::session::processing::ProcessingHandle> {
+        self.processing_handle.take()
     }
 
     pub(crate) fn clear_processing_handle(&mut self) {

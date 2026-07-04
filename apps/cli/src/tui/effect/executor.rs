@@ -18,11 +18,9 @@ impl App {
         match effect {
             Effect::None | Effect::RequestRender => {}
             Effect::QuitApplication => {
-                // #390 A1 常驻 loop shutdown：先 drop input_event_tx，使常驻 loop 的
-                // recv_next 收到 None（所有 sender 已 drop = shutdown）→ loop 干净退出 →
-                // 流结束 → 消费任务自然完成。再 abort 句柄兜底，避免任何残留 await 挂起。
+                // #390 A1 常驻 loop shutdown：drop input_event_tx → loop 干净退出 →
+                // spawn task 执行 auto-save。退出路径在 session_lifecycle.rs 中 await 完成。
                 self.chat.clear_input_event_buffer();
-                self.chat.abort_processing_handle();
                 self.layout.request_exit();
             }
             Effect::SpawnAgentChat { .. } => {}

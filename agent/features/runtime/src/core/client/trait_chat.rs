@@ -110,12 +110,27 @@ pub(super) async fn chat_impl(
                     })
                 })
             },
+            save_session: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(
+                        async move { super::trait_session::save_session_from_handle(&inner).await },
+                    )
+                })
+            },
         })
         .await;
         // loop 退出（shutdown / clear）后把取消槽重置为干净 token，
         // 避免遗留的已取消 token 影响后续可能复用同一 RuntimeHandle 的 chat()。
         if let Ok(mut guard) = inner.current_cancel.lock() {
             *guard = tokio_util::sync::CancellationToken::new();
+        }
+        // auto-save：loop 退出后自动保存当前 session（messages 已通过 MessagesSync
+        // 同步到 inner.current_messages）。TUI 退出时只需 drop input_event_tx →
+        // loop shutdown → runtime 自动 save，不再调 session RPC。
+        if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {
+            log::warn!(target: "aemeath:agent:runtime", "auto-save failed on loop exit: {e}");
         }
     });
     Ok(ChatStream::new(rx))

@@ -106,6 +106,13 @@ where
     /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
     /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
     pub build_switched_client: SwitchClientFn,
+    /// 会话保存闭包（#567 S5）。由 core 层注入，idle 分支收到 `SaveSession` 时调用。
+    pub save_session: Arc<
+        dyn Fn() -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>,
+            > + Send
+        + Sync,
+    >,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -145,6 +152,7 @@ where
         reasoning_graph,
         skip_first_pending_turn,
         build_switched_client,
+        save_session,
     } = ctx;
     let mut client = client;
     let mut reasoning_graph = reasoning_graph;
@@ -247,6 +255,7 @@ where
                 &sink,
                 &mut pending_input,
                 &mut messages,
+                &task_store,
                 None,
             )
             .await
@@ -404,6 +413,24 @@ where
                             }
                         }
                     }
+                    PendingCommand::SaveSession => match (save_session)().await {
+                        Ok(()) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Session saved: {}", session_id),
+                                    is_error: false,
+                                })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Failed to save session: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::TryStop);
@@ -524,6 +551,7 @@ where
                 &input_events,
                 &sink,
                 &mut messages,
+                &task_store,
             )
             .await;
             if outcome.decision == GateDecision::ContinueNextTurn {
@@ -536,6 +564,7 @@ where
                 &mut loop_fsm,
                 &mut messages,
                 &mut pending_input,
+                &task_store,
                 &cancel_slot,
                 turn_rollback_baseline,
                 &turn_context,
@@ -688,6 +717,24 @@ where
                             }
                         }
                     }
+                    PendingCommand::SaveSession => match (save_session)().await {
+                        Ok(()) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Session saved: {}", session_id),
+                                    is_error: false,
+                                })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Failed to save session: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
                 },
                 IdleResult::Shutdown => {
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -759,6 +806,7 @@ where
             &input_events,
             &sink,
             &mut messages,
+            &task_store,
         )
         .await;
         match gate.decision {
@@ -773,6 +821,7 @@ where
                     &mut loop_fsm,
                     &mut messages,
                     &mut pending_input,
+                    &task_store,
                     &cancel_slot,
                     turn_rollback_baseline,
                     &turn_context,
@@ -949,6 +998,24 @@ where
                                 }
                             }
                         }
+                        PendingCommand::SaveSession => match (save_session)().await {
+                            Ok(()) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Session saved: {}", session_id),
+                                        is_error: false,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Failed to save session: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        },
                     },
                     IdleResult::Shutdown => {
                         loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1112,6 +1179,7 @@ where
                         &input_events,
                         &sink,
                         &mut messages,
+                        &task_store,
                     )
                     .await;
                     if gate.decision == GateDecision::ContinueNextTurn {
@@ -1193,6 +1261,7 @@ where
                         &input_events,
                         &sink,
                         &mut messages,
+                        &task_store,
                     )
                     .await;
                     let before_finish_gate_continue =
@@ -1270,6 +1339,7 @@ where
                         &input_events,
                         &sink,
                         &mut messages,
+                        &task_store,
                     )
                     .await;
                     if gate.decision == GateDecision::ContinueNextTurn {
@@ -1289,6 +1359,7 @@ where
                         &sink,
                         &mut pending_input,
                         &mut messages,
+                        &task_store,
                         Some(&cancel_slot),
                     )
                     .await
@@ -1486,6 +1557,24 @@ where
                                     }
                                 }
                             }
+                            PendingCommand::SaveSession => match (save_session)().await {
+                                Ok(()) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Session saved: {}", session_id),
+                                            is_error: false,
+                                        })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Failed to save session: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            },
                         },
                     }
                 }
@@ -1559,6 +1648,7 @@ where
                         &input_events,
                         &sink,
                         &mut messages,
+                        &task_store,
                     )
                     .await;
                     if matches!(
@@ -1572,6 +1662,7 @@ where
                             &mut loop_fsm,
                             &mut messages,
                             &mut pending_input,
+                            &task_store,
                             &cancel_slot,
                             turn_rollback_baseline,
                             &turn_context,
@@ -1758,6 +1849,24 @@ where
                                         }
                                     }
                                 }
+                                PendingCommand::SaveSession => match (save_session)().await {
+                                    Ok(()) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("Session saved: {}", session_id),
+                                                is_error: false,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("Failed to save session: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                },
                             },
                             IdleResult::Shutdown => {
                                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1796,6 +1905,7 @@ where
                         &mut loop_fsm,
                         &mut messages,
                         &mut pending_input,
+                        &task_store,
                         &cancel_slot,
                         turn_rollback_baseline,
                         &turn_context,
@@ -1980,6 +2090,24 @@ where
                                     }
                                 }
                             }
+                            PendingCommand::SaveSession => match (save_session)().await {
+                                Ok(()) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Session saved: {}", session_id),
+                                            is_error: false,
+                                        })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Failed to save session: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            },
                         },
                         IdleResult::Shutdown => {
                             loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -2002,6 +2130,7 @@ where
                     &input_events,
                     &sink,
                     &mut messages,
+                    &task_store,
                 )
                 .await;
                 if gate.decision == GateDecision::ContinueNextTurn {
@@ -2218,6 +2347,7 @@ async fn idle_until_resume_or_shutdown<I, S>(
     sink: &S,
     pending: &mut PendingInputBuffer,
     messages: &mut Vec<Message>,
+    task_store: &storage::api::TaskStore,
     cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
 ) -> IdleResult
 where
@@ -2227,7 +2357,15 @@ where
     loop {
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
-                let gate = apply_gate(GateKind::BeforeLlm, pending, sink, messages, true).await;
+                let gate = apply_gate(
+                    GateKind::BeforeLlm,
+                    pending,
+                    sink,
+                    messages,
+                    &task_store,
+                    true,
+                )
+                .await;
                 if let Some(cmd) = gate.pending_command {
                     return IdleResult::CommandRequested(cmd);
                 }
@@ -2279,6 +2417,7 @@ async fn cancel_to_idle<I, S>(
     loop_fsm: &mut ChatLoopFsm,
     messages: &mut Vec<Message>,
     pending_input: &mut PendingInputBuffer,
+    task_store: &storage::api::TaskStore,
     cancel_slot: &std::sync::Mutex<CancellationToken>,
     rollback_baseline: usize,
     turn_context: &RuntimeTurnContext,
@@ -2307,6 +2446,7 @@ where
         sink,
         pending_input,
         messages,
+        task_store,
         Some(cancel_slot),
     )
     .await

@@ -108,7 +108,7 @@ impl App {
                 let after_queued = self.model.conversation.queued_submissions.len();
                 crate::tui::log_debug!("UserMessagesAdded done after_queued={}", after_queued);
                 self.mark_output_dirty();
-                return UpdateResult::one(Effect::SaveSession { notify: false });
+                // auto-save 已下沉到 runtime loop 退出时（#567 S5），不再 TUI 侧保存。
             }
             UiEvent::MessagesSync(msgs) => {
                 // A3：MessagesSync 退出 display，仅作镜像 + 落盘；
@@ -125,7 +125,7 @@ impl App {
                 // 触发进度条 / spinner 行消失的渲染（#540：之前漏 mark_output_dirty
                 // 导致进度条卡在 90% 残留）。
                 self.mark_output_dirty();
-                return UpdateResult::one(Effect::SaveSession { notify: false });
+                // auto-save 已下沉到 runtime loop 退出时（#567 S5），不再 TUI 侧保存。
             }
             UiEvent::ClipboardImage(img) => {
                 self.handle_input_intent(

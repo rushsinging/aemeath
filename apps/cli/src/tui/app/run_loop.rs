@@ -240,10 +240,10 @@ impl App {
         }
 
         // #390 A1 常驻 loop 退出收尾（覆盖所有退出路径：/exit、/quit、Ctrl+C 强退等）：
-        // drop input_event_tx → 常驻 loop recv_next 收到 None（shutdown）→ loop 干净退出，
-        // 不再 hang；再 abort 消费句柄兜底。clear_input_event_buffer 幂等，重复调用安全。
+        // drop input_event_tx → 常驻 loop recv_next 收到 None（shutdown）→ loop 干净退出 →
+        // spawn task 执行 auto-save。不再立即 abort——给 loop 时间退出 + save。
+        // clear_input_event_buffer 幂等，重复调用安全。
         self.chat.clear_input_event_buffer();
-        self.chat.abort_processing_handle();
 
         Ok(())
     }
