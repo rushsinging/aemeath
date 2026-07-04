@@ -15,12 +15,12 @@
 │   └─ reject-main-edit.sh    拦截在 main 工作区直接改代码     │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 18 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 20 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 18 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 20 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
 
 ## 守卫索引
 
@@ -44,6 +44,8 @@
 | 16 | `check-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
 | 17 | `check-log-target-prefix.sh` | 日志架构 | log target 字符串字面量必须以 `aemeath:` 开头 |
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
+| 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
+| 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
 
@@ -394,8 +396,23 @@
 - **跳过路径**：`.worktrees/`, `.claude/`, `target/`。
 - **白名单**：无（这就是"无例外"规则）。
 - **错误信息**：`Rust 2018+ 推荐使用与目录同名的文件代替 mod.rs：foo/mod.rs → foo.rs`.
-
-## 19. run_tui_single_source_structure_guard（内联）
+  
+## 19. check-config-env-guard.sh
+  
+- **位置**：`.agents/hooks/check-config-env-guard.sh`。
+- **功能**：禁止 config 包外读取业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`）。业务 env 只允许在白名单路径读取。
+- **扫描路径**：`agent/features/**`、`apps/cli/src/**`。
+- **业务 env 列表**：`AEMEATH_CONTEXT_SIZE`、`AEMEATH_PROVIDER`、`AEMEATH_API_KEY`、`AEMEATH_BASE_URL`、`AEMEATH_MODEL`、`AEMEATH_MAX_TOKENS`、`AEMEATH_PERMISSION_MODE`、`AEMEATH_MAX_TOOL_CONCURRENCY`、`AEMEATH_MAX_AGENT_CONCURRENCY`、`AEMEATH_VERBOSE`、`AEMEATH_LOG_LEVEL`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`CLAUDE_API_KEY`、`LLM_API_KEY`、`LLM_BASE_URL`、`DEEPSEEK_API_KEY`、`MINIMAX_API_KEY`、`MIMO_API_KEY`、`VOLCENGINE_CODING_PLAN_API_KEY`、`AGNES_API_KEY`、`OLLAMA_API_KEY`。
+- **白名单路径**：
+  - `agent/shared/src/config/adapter/env` — EnvAdapter，唯一业务 env 读取点
+  - `agent/shared/src/config/paths` — `AEMEATH_AGENTS_DIR`，路径根
+  - `agent/shared/src/config/domain/driver_env` — driver→env name 映射
+  - `agent/features/runtime/src/core/config_app_service.rs` — `resolve_provider_api_keys` 在 config 加载时从 env 注入 per-provider API key
+  - `agent/features/runtime/src/utils/bootstrap/config_manager.rs` — **TODO(S5)**：ConfigManager 删除后移除
+  - `packages/global/logging/` — `AEMEATH_LOG_LEVEL` 在 logging 层处理
+  - `build.rs` — 编译期
+  
+## 20. run_tui_single_source_structure_guard（内联）
 
 - **位置**：`check-architecture-guards.sh` 内的 `run_tui_single_source_structure_guard` 函数，**不**是独立脚本。
 - **功能**：feature #70 结构化单一真相规则——app/domain 真相只在 `model/` 或 `view_state/`；render widgets 仅保留 render 投影/缓存；退场 adapter 必须只活在 `#[cfg(test)]`。

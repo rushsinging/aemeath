@@ -106,5 +106,6 @@ run_tui_single_source_structure_guard
 "$HOOKS_DIR/check-unsafe-text-ops.sh"
 "$HOOKS_DIR/check-log-target-prefix.sh"
 "$HOOKS_DIR/no_mod_rs.sh"
+"$HOOKS_DIR/check-config-env-guard.sh"
 
 echo "All architecture guards passed."

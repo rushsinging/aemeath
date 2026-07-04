@@ -19,7 +19,8 @@ pub fn set_current_turn(turn: usize) {
 /// - `AEMEATH_LOG_STDERR=1` 或 `AEMEATH_LOG_STDERR=true`：用 `UnifiedLogger` 输出到 stderr
 ///   （JSON Lines 格式，CLI `-q` 模式调试用）。
 ///
-/// 日志级别由 `config.json` 的 `logging` 段控制；`AEMEATH_LOG_LEVEL` 环境变量始终优先。
+/// 日志级别由 `config.json` 的 `logging` 段控制；`AEMEATH_LOG_LEVEL` 环境变量
+/// 在 logging 层（UnifiedLogger）内部处理，此处不直接读取。
 pub fn init_logging(logging_config: &LoggingConfig) {
     let output_mode = if use_stderr_log_target() {
         OutputMode::Stderr
@@ -40,7 +41,7 @@ pub fn init_logging(logging_config: &LoggingConfig) {
     }
     log::info!(target: LOG_TARGET,
         "logging initialized: filter={} mode={:?} logs_dir={}",
-        std::env::var("AEMEATH_LOG_LEVEL").unwrap_or_else(|_| logging_config.to_filter_string()),
+        logging_config.to_filter_string(),
         output_mode,
         logs_dir.display()
     );
