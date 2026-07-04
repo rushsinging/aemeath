@@ -4,7 +4,6 @@
 #[derive(Debug)]
 pub(crate) struct ChatState {
     pub messages: Vec<sdk::ChatMessage>,
-    pub system_prompt_text: String,
     pub context_size: usize,
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<sdk::ids::ToolCallId>,
@@ -121,7 +120,6 @@ impl Default for ChatState {
     fn default() -> Self {
         Self {
             messages: Vec::new(),
-            system_prompt_text: String::new(),
             context_size: 200_000,
             tool_call_active: false,
             active_tool_call_ids: std::collections::HashSet::new(),

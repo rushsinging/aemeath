@@ -4,7 +4,6 @@ mod from_args;
 mod mapping;
 mod trait_accessor;
 mod trait_chat;
-mod trait_compact;
 mod trait_impl;
 mod trait_memory;
 mod trait_misc;

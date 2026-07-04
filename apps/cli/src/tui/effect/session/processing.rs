@@ -825,10 +825,6 @@ mod tests {
             Ok(Vec::new())
         }
 
-        async fn compact(&self) -> Result<(), sdk::SdkError> {
-            Ok(())
-        }
-
         async fn read_clipboard_image(&self) -> Result<sdk::ClipboardImageView, sdk::SdkError> {
             Err(sdk::SdkError::Internal("not implemented".to_string()))
         }
@@ -854,30 +850,8 @@ mod tests {
             Ok("applied".to_string())
         }
 
-        async fn estimate_context(
-            &self,
-            _messages: &[sdk::ChatMessage],
-            _system_prompt: &str,
-        ) -> Result<sdk::ContextEstimate, sdk::SdkError> {
-            Ok(sdk::ContextEstimate {
-                estimated_tokens: 0,
-                system_tokens: 0,
-                context_size: 0,
-                usage_percentage: 0.0,
-            })
-        }
-
         async fn set_thinking(&self, _desired: Option<bool>) -> Result<bool, sdk::SdkError> {
             Ok(true)
-        }
-
-        async fn compact_messages(
-            &self,
-            messages: Vec<sdk::ChatMessage>,
-            _system_prompt: &str,
-            _context_size: usize,
-        ) -> Result<(Vec<sdk::ChatMessage>, bool), sdk::SdkError> {
-            Ok((messages, false))
         }
 
         async fn notify_hook(&self, _message: &str, _kind: &str) -> Result<(), sdk::SdkError> {

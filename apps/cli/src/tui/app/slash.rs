@@ -43,47 +43,13 @@ impl super::App {
                 self.append_system_notice("[conversation cleared]");
             }
             cmd if cmd == format!("/{}", cmd::COMPACT) => {
-                // #497 子 issue 0：走 runtime 事件流（ChatInputEvent::Compact →
-                // manual_compact），不再直接调 compact_messages().await。
-                // spinner / 进度 Gauge / 结果回显全部由 runtime 的
-                // PreCompact → CompactProgress → PostCompact → SystemMessage 事件驱动。
+                // #497：走 runtime 事件流（ChatInputEvent::Compact →
+                // manual_compact）。spinner / 进度 Gauge / 结果回显全部由
+                // runtime 的 PreCompact → CompactProgress → PostCompact →
+                // SystemMessage 事件驱动。
+                // loop 未运行时静默忽略（compact 需 loop 的 client/messages）。
                 if self.chat.input_event_tx.is_some() {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
-                } else if let Some(ref ac) = self.agent_client {
-                    // loop 未运行（如启动前）→ fallback 到直接调用
-                    self.model.conversation.runtime.spinner.phase =
-                        Some(crate::tui::model::conversation::spinner::SpinnerPhase::Compacting);
-                    match ac
-                        .compact_messages(
-                            self.chat.messages.clone(),
-                            &self.chat.system_prompt_text,
-                            self.chat.context_size,
-                        )
-                        .await
-                    {
-                        Ok((compacted, was_compacted)) => {
-                            self.model.conversation.runtime.spinner.phase = None;
-                            self.model.conversation.runtime.spinner.running_tool_count = 0;
-                            if was_compacted {
-                                let old_len = self.chat.messages.len();
-                                self.chat.messages = compacted;
-                                self.append_system_notice(format!(
-                                    "[compacted: {} → {} messages]",
-                                    old_len,
-                                    self.chat.messages.len()
-                                ));
-                            } else {
-                                self.append_system_notice("[no compaction needed]");
-                            }
-                        }
-                        Err(e) => {
-                            self.model.conversation.runtime.spinner.phase = None;
-                            self.model.conversation.runtime.spinner.running_tool_count = 0;
-                            self.append_error_notice(format!("compact failed: {}", e));
-                        }
-                    }
-                } else {
-                    self.append_system_notice("[compact skipped: no agent client]");
                 }
             }
             cmd if cmd == format!("/{}", cmd::HELP) => self.show_slash_help(),
@@ -105,37 +71,13 @@ impl super::App {
                 }
             }
             "/context" => {
+                // #497：走 runtime 事件流（ChatInputEvent::EstimateContext →
+                // idle 分支 → ContextEstimated 事件），显示由 UiEvent 驱动。
+                // loop 未运行时显示简单 message count。
                 if self.chat.input_event_tx.is_some() {
-                    // #497 子任务 3：走 runtime 事件流
-                    //（ChatInputEvent::EstimateContext → idle 分支 → ContextEstimated 事件），
-                    // 不再直接调 estimate_context().await。显示由 UiEvent::ContextEstimated 驱动。
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::EstimateContext);
-                } else if let Some(ref ac) = self.agent_client {
-                    // loop 未运行（如启动前）→ fallback 到直接调用
-                    match ac
-                        .estimate_context(&self.chat.messages, &self.chat.system_prompt_text)
-                        .await
-                    {
-                        Ok(est) => {
-                            self.append_system_notice(format!(
-                                "Context window: ~{} / {} tokens ({:.0}%)",
-                                est.estimated_tokens, est.context_size, est.usage_percentage
-                            ));
-                            self.append_system_notice(format!(
-                                "Messages: {}",
-                                self.chat.messages.len()
-                            ));
-                            if est.usage_percentage > 80.0 {
-                                self.append_system_notice("[auto-compaction will trigger at 80%]");
-                            }
-                        }
-                        Err(e) => {
-                            self.append_error_notice(format!("context estimate failed: {}", e));
-                        }
-                    }
                 } else {
-                    // Fallback: simple message count
                     self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
                 }
             }
