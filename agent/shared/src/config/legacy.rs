@@ -118,5 +118,5 @@ pub(crate) fn default_max_tokens() -> u32 {
 }
 
 pub(crate) fn default_context_size() -> usize {
-    128000
+    0
 }
