@@ -58,6 +58,9 @@ impl WorkspaceRead for WorkspaceService {
         let root = self.lock().workspace_root.clone();
         self.git.in_worktree(&root)
     }
+    fn initial_cwd(&self) -> PathBuf {
+        self.lock().initial_cwd.clone()
+    }
 }
 
 impl WorkspaceControl for WorkspaceService {

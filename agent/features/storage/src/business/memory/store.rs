@@ -128,6 +128,15 @@ impl MemoryStore {
         Ok(all)
     }
 
+    /// 只读版 `top_for_inject`：返回 top N 条目但**不 touch**（不更新 accessed_at）。
+    /// 用于每轮 LLM 调用前的 memory 注入，避免排序漂移。
+    pub fn top_for_inject_readonly(&self, limit: usize) -> MemoryResult<Vec<MemoryEntry>> {
+        let mut all = self.all_active()?;
+        self.sort_for_inject(&mut all);
+        all.truncate(limit);
+        Ok(all)
+    }
+
     pub fn needs_eviction(&self, layer: MemoryLayer) -> MemoryResult<bool> {
         Ok(self.read_active(layer)?.len() >= self.max_entries)
     }

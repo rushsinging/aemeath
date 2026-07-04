@@ -14,6 +14,7 @@ use crate::business::chat::looping::loop_helpers::{
 use crate::business::chat::looping::loop_phases::{
     build_api_messages, handle_turn_boundary_config,
 };
+use crate::business::chat::looping::memory_inject::build_memory_block;
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
 use crate::business::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
 use crate::business::chat::looping::stall::StallDetector;
@@ -139,9 +140,12 @@ where
     // 初始值用于 loop 前的 config_snapshot 注册；loop 内每 turn 头会重新读取，
     // 使 hook env 跟随中途的 worktree 切换。
     let mut cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
+    // memory 读写绑定项目启动时的 cwd（init root），不受 worktree 切换影响。
+    let memory_cwd = project::api::WorkspaceRead::initial_cwd(workspace.as_ref());
     log::info!(target: LOG_TARGET,
-        "chat loop hook runner ready: workspace_root={} configured_events={}",
+        "chat loop hook runner ready: workspace_root={} memory_root={} configured_events={}",
         cwd.display(),
+        memory_cwd.display(),
         hook_runner.hook_count()
     );
     // `agent` 在每个回合内构造（见 loop 体顶部）：它持有「当前回合 token」的 clone，
@@ -250,7 +254,7 @@ where
                             &system_prompt_text,
                             context_size,
                             &memory_config,
-                            &cwd,
+                            &memory_cwd,
                             &client,
                             &language,
                             &cwd,
@@ -343,9 +347,11 @@ where
                             .await;
                     }
                     PendingCommand::ManageMemory { args } => {
-                        let cwd_str = cwd.display().to_string();
-                        let (text, is_error) =
-                            super::idle_commands::execute_memory(&args, &cwd_str).await;
+                        let (text, is_error) = super::idle_commands::execute_memory(
+                            &args,
+                            &memory_cwd.display().to_string(),
+                        )
+                        .await;
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                             .await;
@@ -522,7 +528,7 @@ where
                             &system_prompt_text,
                             context_size,
                             &memory_config,
-                            &cwd,
+                            &memory_cwd,
                             &client,
                             &language,
                             &cwd,
@@ -614,9 +620,11 @@ where
                             .await;
                     }
                     PendingCommand::ManageMemory { args } => {
-                        let cwd_str = cwd.display().to_string();
-                        let (text, is_error) =
-                            super::idle_commands::execute_memory(&args, &cwd_str).await;
+                        let (text, is_error) = super::idle_commands::execute_memory(
+                            &args,
+                            &memory_cwd.display().to_string(),
+                        )
+                        .await;
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                             .await;
@@ -688,7 +696,7 @@ where
             cached_tokens,
             reasoning_tokens,
             &memory_config,
-            &cwd,
+            &memory_cwd,
             &client,
             &language,
             &cwd,
@@ -746,7 +754,7 @@ where
                                 &system_prompt_text,
                                 context_size,
                                 &memory_config,
-                                &cwd,
+                                &memory_cwd,
                                 &client,
                                 &language,
                                 &cwd,
@@ -859,9 +867,11 @@ where
                                 .await;
                         }
                         PendingCommand::ManageMemory { args } => {
-                            let cwd_str = cwd.display().to_string();
-                            let (text, is_error) =
-                                super::idle_commands::execute_memory(&args, &cwd_str).await;
+                            let (text, is_error) = super::idle_commands::execute_memory(
+                                &args,
+                                &memory_cwd.display().to_string(),
+                            )
+                            .await;
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::CommandResultText {
                                     text,
@@ -935,8 +945,17 @@ where
         let request_id = uuid::Uuid::now_v7().to_string();
         logging::context::set_current_request_id(request_id);
 
-        // summary 注入 system_blocks（compact 后的摘要走 system 通道）
+        // memory 注入：每轮 LLM 调用前从 MemoryStore 取 top N 条注入为 system block。
+        // 用 initial_cwd（非 worktree cwd）确保 memory 绑定项目身份。
+        // cache_control = None：memory 内容可能随 reflection 新增条目而变，不缓存以隔离 cache 影响。
         let mut effective_system_blocks = system_blocks.clone();
+        if memory_config.enabled && memory_config.inject_count > 0 {
+            if let Some(block) = build_memory_block(&memory_cwd, memory_config.inject_count) {
+                effective_system_blocks.push(block);
+            }
+        }
+
+        // summary 注入 system_blocks（compact 后的摘要走 system 通道）
         if let Some(ref summary) = active_summary.clone() {
             effective_system_blocks.push(provider::api::SystemBlock {
                 block_type: "text".to_string(),
@@ -1145,7 +1164,7 @@ where
                             &memory_config,
                             turn_count,
                             &messages,
-                            &cwd,
+                            &memory_cwd,
                             &client,
                             &system_prompt_text,
                             &language,
@@ -1249,7 +1268,7 @@ where
                                     &system_prompt_text,
                                     context_size,
                                     &memory_config,
-                                    &cwd,
+                                    &memory_cwd,
                                     &client,
                                     &language,
                                     &cwd,
@@ -1369,9 +1388,11 @@ where
                                     .await;
                             }
                             PendingCommand::ManageMemory { args } => {
-                                let cwd_str = cwd.display().to_string();
-                                let (text, is_error) =
-                                    super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                let (text, is_error) = super::idle_commands::execute_memory(
+                                    &args,
+                                    &memory_cwd.display().to_string(),
+                                )
+                                .await;
                                 let _ = sink
                                     .send_event(RuntimeStreamEvent::CommandResultText {
                                         text,
@@ -1508,7 +1529,7 @@ where
                                         &system_prompt_text,
                                         context_size,
                                         &memory_config,
-                                        &cwd,
+                                        &memory_cwd,
                                         &client,
                                         &language,
                                         &cwd,
@@ -1626,9 +1647,11 @@ where
                                         .await;
                                 }
                                 PendingCommand::ManageMemory { args } => {
-                                    let cwd_str = cwd.display().to_string();
-                                    let (text, is_error) =
-                                        super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                    let (text, is_error) = super::idle_commands::execute_memory(
+                                        &args,
+                                        &memory_cwd.display().to_string(),
+                                    )
+                                    .await;
                                     let _ = sink
                                         .send_event(RuntimeStreamEvent::CommandResultText {
                                             text,
@@ -1717,7 +1740,7 @@ where
                                     &system_prompt_text,
                                     context_size,
                                     &memory_config,
-                                    &cwd,
+                                    &memory_cwd,
                                     &client,
                                     &language,
                                     &cwd,
@@ -1833,9 +1856,11 @@ where
                                     .await;
                             }
                             PendingCommand::ManageMemory { args } => {
-                                let cwd_str = cwd.display().to_string();
-                                let (text, is_error) =
-                                    super::idle_commands::execute_memory(&args, &cwd_str).await;
+                                let (text, is_error) = super::idle_commands::execute_memory(
+                                    &args,
+                                    &memory_cwd.display().to_string(),
+                                )
+                                .await;
                                 let _ = sink
                                     .send_event(RuntimeStreamEvent::CommandResultText {
                                         text,

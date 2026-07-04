@@ -14,6 +14,13 @@ pub(crate) fn default_interval_turns() -> usize {
     10
 }
 
+/// 默认注入条数。当前按 recency/pin 排序取 top N，相关性不高，
+/// 故默认值保守（5 条 ≈ 300 token）。
+/// 后续 #551 落地语义检索后应提高此值或改为动态决定。
+pub(crate) fn default_inject_count() -> usize {
+    5
+}
+
 /// Memory system configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
@@ -32,6 +39,12 @@ pub struct MemoryConfig {
     /// Reflection configuration.
     #[serde(default)]
     pub reflection: ReflectionConfig,
+
+    /// 每轮 LLM 调用前注入 system prompt 的 memory 条目数。
+    /// 当前按 recency/pin 排序，非语义相关性——默认值保守。
+    /// #551（语义检索）落地后应提高或改为动态。
+    #[serde(default = "default_inject_count")]
+    pub inject_count: usize,
 }
 
 impl Default for MemoryConfig {
@@ -41,6 +54,7 @@ impl Default for MemoryConfig {
             max_entries: default_max_entries(),
             similarity_threshold: default_similarity_threshold(),
             reflection: ReflectionConfig::default(),
+            inject_count: default_inject_count(),
         }
     }
 }

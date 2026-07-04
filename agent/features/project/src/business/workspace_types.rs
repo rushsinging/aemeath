@@ -79,6 +79,9 @@ pub trait WorkspaceRead: Send + Sync {
     /// 当前工作根是否位于 linked git worktree（`.git/worktrees/*`）。
     /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;
+    /// 项目启动时的 cwd（init root），worktree 切换时**不变**。
+    /// memory 等需要绑定项目身份（而非工作目录）的读写必须用此路径。
+    fn initial_cwd(&self) -> PathBuf;
 }
 
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
