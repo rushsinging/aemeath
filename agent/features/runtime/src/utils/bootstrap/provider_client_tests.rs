@@ -212,7 +212,7 @@ fn test_build_llm_client_ollama_constructs_ollama_provider() {
 #[test]
 fn test_provider_driver_api_key_env_name_ollama() {
     assert_eq!(
-        provider_driver_api_key_env_name(ProviderDriverKind::Ollama),
+        share::config::domain::driver_env::driver_api_key_env_name("ollama"),
         Some("OLLAMA_API_KEY")
     );
 }
@@ -220,7 +220,7 @@ fn test_provider_driver_api_key_env_name_ollama() {
 #[test]
 fn test_provider_driver_api_key_env_name_minimax() {
     assert_eq!(
-        provider_driver_api_key_env_name(ProviderDriverKind::Minimax),
+        share::config::domain::driver_env::driver_api_key_env_name("minimax"),
         Some("MINIMAX_API_KEY")
     );
 }
@@ -228,7 +228,7 @@ fn test_provider_driver_api_key_env_name_minimax() {
 #[test]
 fn test_provider_driver_api_key_env_name_mimo() {
     assert_eq!(
-        provider_driver_api_key_env_name(ProviderDriverKind::Mimo),
+        share::config::domain::driver_env::driver_api_key_env_name("mimo"),
         Some("MIMO_API_KEY")
     );
 }

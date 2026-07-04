@@ -16,15 +16,15 @@ pub struct Cli {
 #[derive(ClapArgs)]
 pub struct RunArgs {
     /// API key (overrides provider-specific env var)
-    #[arg(long, env = "AEMEATH_API_KEY")]
+    #[arg(long)]
     pub api_key: Option<String>,
 
     /// API base URL (overrides provider-specific default)
-    #[arg(long, env = "AEMEATH_BASE_URL")]
+    #[arg(long)]
     pub base_url: Option<String>,
 
-    /// Model selection in <source>/<model> format (overrides AEMEATH_MODEL)
-    #[arg(long, env = "AEMEATH_MODEL")]
+    /// Model selection in <source>/<model> format
+    #[arg(long)]
     pub model: Option<String>,
 
     /// Working directory
@@ -48,7 +48,7 @@ pub struct RunArgs {
     pub no_markdown: bool,
 
     /// Context window size in tokens (0 = auto-resolve from provider model config)
-    #[arg(long, env = "AEMEATH_CONTEXT_SIZE", default_value = "0")]
+    #[arg(long, default_value = "0")]
     pub context_size: usize,
 
     /// Resume a saved session by ID
@@ -60,11 +60,11 @@ pub struct RunArgs {
     pub allow_all: bool,
 
     /// Maximum number of concurrent tool executions (default: 10)
-    #[arg(long, env = "AEMEATH_MAX_TOOL_CONCURRENCY")]
+    #[arg(long)]
     pub max_tool_concurrency: Option<usize>,
 
     /// Maximum number of concurrent sub-agent executions (default: 4)
-    #[arg(long, env = "AEMEATH_MAX_AGENT_CONCURRENCY")]
+    #[arg(long)]
     pub max_agent_concurrency: Option<usize>,
 
     /// Disable reasoning/thinking mode (default: enabled)

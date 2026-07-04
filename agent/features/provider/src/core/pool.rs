@@ -133,18 +133,7 @@ impl LlmClientPool {
         };
         // API key — config first, then driver-specific / generic env vars.
         let api_key = if provider_config.api_key.is_empty() {
-            let driver_env = match driver {
-                ProviderDriverKind::Anthropic => Some("ANTHROPIC_API_KEY"),
-                ProviderDriverKind::OpenAI => Some("OPENAI_API_KEY"),
-                ProviderDriverKind::Volcengine => Some("VOLCENGINE_CODING_PLAN_API_KEY"),
-                ProviderDriverKind::Minimax => Some("MINIMAX_API_KEY"),
-                ProviderDriverKind::Mimo => Some("MIMO_API_KEY"),
-                ProviderDriverKind::DeepSeek => Some("DEEPSEEK_API_KEY"),
-                ProviderDriverKind::Agnes => Some("AGNES_API_KEY"),
-                ProviderDriverKind::Ollama => Some("OLLAMA_API_KEY"),
-                ProviderDriverKind::Zhipu | ProviderDriverKind::LiteLLM => None,
-            };
-            driver_env
+            share::config::domain::driver_env::driver_api_key_env_name(driver.as_str())
                 .and_then(|name| std::env::var(name).ok())
                 .or_else(|| std::env::var("LLM_API_KEY").ok())
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok())

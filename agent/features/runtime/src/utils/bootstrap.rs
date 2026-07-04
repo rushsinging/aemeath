@@ -19,45 +19,33 @@ pub use permissions::apply_config_permission_mode;
 pub use provider_client::{build_llm_client, resolve_api_key, resolve_base_url};
 pub use runtime_support::{build_agent_runner, build_hook_runner, start_session};
 use share::config::models::ResolvedModel;
-use share::config::Config;
 use std::sync::Arc;
 use tools::api::McpConnectionManager;
 
-/// 合并 context_size（优先级：CLI > env > config model.context_size > resolved model contextWindow > 默认 128000）。
+/// 合并 context_size（优先级：CLI > snapshot(env+config 已合并) > resolved model contextWindow > 默认 128000）。
+///
+/// env 读取已由 `EnvAdapter` 在 snapshot 构建时完成，此处不再直接读 env。
 pub fn resolve_context_size(
     cli_context_size: usize,
-    config_file: Option<&Config>,
+    snapshot_context_size: usize,
     model_context_window: usize,
 ) -> usize {
-    let config_ctx = config_file.map(|c| c.model.context_size).unwrap_or(0);
-    let env_val = std::env::var("AEMEATH_CONTEXT_SIZE").ok();
     log::debug!(
         target: "aemeath:agent:runtime",
-        "resolve_context_size: cli={}, model_context_window={}, config.model.context_size={}, env AEMEATH_CONTEXT_SIZE={:?}",
-        cli_context_size, model_context_window, config_ctx, env_val,
+        "resolve_context_size: cli={}, snapshot={}, model_context_window={}",
+        cli_context_size, snapshot_context_size, model_context_window,
     );
     // CLI 非零 → 用户显式设置了
     if cli_context_size > 0 {
         log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=cli, result={}", cli_context_size);
         return cli_context_size;
     }
-    // env AEMEATH_CONTEXT_SIZE
-    if let Ok(env_val) = std::env::var("AEMEATH_CONTEXT_SIZE") {
-        if let Ok(parsed) = env_val.parse::<usize>() {
-            if parsed > 0 {
-                log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=env, result={}", parsed);
-                return parsed;
-            }
-        }
+    // snapshot 值（env > file 已在 ConfigAppService::load 中合并）
+    if snapshot_context_size > 0 {
+        log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=snapshot, result={}", snapshot_context_size);
+        return snapshot_context_size;
     }
-    // config model.context_size（全局覆盖）
-    if let Some(config) = config_file {
-        if config.model.context_size > 0 {
-            log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=config_model, result={}", config.model.context_size);
-            return config.model.context_size;
-        }
-    }
-    // resolved provider model 的 contextWindow（来自 models.providers.*.models[].contextWindow）
+    // resolved provider model 的 contextWindow
     if model_context_window > 0 {
         log::debug!(target: "aemeath:agent:runtime", "resolve_context_size branch=provider_model, result={}", model_context_window);
         return model_context_window;
