@@ -116,7 +116,12 @@ impl ConfigAppService {
 
         drop(inner);
 
-        let config = chain.merge(Config::default());
+        let mut config = chain.merge(Config::default());
+
+        // Per-provider API key 后处理：对 api_key 为空的 provider，
+        // 根据 driver 从 env 补值（driver-specific / LLM_API_KEY / OPENAI_API_KEY）。
+        resolve_provider_api_keys(&mut config);
+
         let snapshot = ConfigSnapshot::new(config.clone());
 
         let mut writer = self.inner.write().await;
@@ -163,6 +168,31 @@ impl ConfigAppService {
     /// Get current config (backward compat).
     pub async fn get(&self) -> Config {
         self.inner.read().await.config.clone()
+    }
+}
+
+/// 对 `config.models.providers` 中 `api_key` 为空的 provider，
+/// 根据 `driver` 从 env 补值（driver-specific → LLM_API_KEY → OPENAI_API_KEY）。
+fn resolve_provider_api_keys(config: &mut Config) {
+    for provider in config.models.providers.values_mut() {
+        if !provider.api_key.is_empty() {
+            continue;
+        }
+        // driver → driver-specific env
+        if let Some(env_name) =
+            share::config::domain::driver_env::driver_api_key_env_name(&provider.driver)
+        {
+            if let Ok(val) = std::env::var(env_name) {
+                provider.api_key = val;
+                continue;
+            }
+        }
+        // fallback: LLM_API_KEY → OPENAI_API_KEY
+        if let Ok(val) = std::env::var("LLM_API_KEY") {
+            provider.api_key = val;
+        } else if let Ok(val) = std::env::var("OPENAI_API_KEY") {
+            provider.api_key = val;
+        }
     }
 }
 

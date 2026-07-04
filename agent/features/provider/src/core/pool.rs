@@ -131,18 +131,13 @@ impl LlmClientPool {
         } else {
             None
         };
-        // API key — config first, then driver-specific / generic env vars.
+        // API key — 由 ConfigAppService::load() 的 resolve_provider_api_keys
+        // 在 config 加载时从 env 注入，pool 只读 provider_config.api_key。
         let api_key = if provider_config.api_key.is_empty() {
-            share::config::domain::driver_env::driver_api_key_env_name(driver.as_str())
-                .and_then(|name| std::env::var(name).ok())
-                .or_else(|| std::env::var("LLM_API_KEY").ok())
-                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-                .ok_or_else(|| {
-                    format!(
-                        "no API key for provider '{}'. Set it in config.json or provider-specific env var",
-                        provider_name
-                    )
-                })?
+            return Err(format!(
+                "no API key for provider '{}'. Set it in config.json or provider-specific env var",
+                provider_name
+            ));
         } else {
             provider_config.api_key.clone()
         };
