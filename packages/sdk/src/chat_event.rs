@@ -116,11 +116,17 @@ pub enum ChatEvent {
     CompactFinished {
         messages: Vec<ChatMessage>,
     },
-    /// 批量用户输入归宿通知。每条 ChatMessage 已由 runtime 端 share::Message 映射而来，
-    /// 含 typed blocks + image placeholder；TUI 用 ChatMessage.input_id 清占位、
-    /// ChatMessage.text_content() 还原回显（含 #507 占位符丢失修复）。
-    UserMessagesAdded {
+    /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
+    /// items = 本批接纳的消息；queued = gate 处理后仍留在 buffer 中的排队消息快照（一般空）。
+    /// TUI 用 items 清占位、用 queued 重渲染 queue 区域。
+    UserMessagesAdopted {
         items: Vec<ChatMessage>,
+        queued: Vec<ChatMessage>,
+    },
+    /// busy 阶段收到新输入，存入 runtime 内部 buffer 后的确认。
+    /// queued = 当前 buffer 全量快照。TUI 据此全量重渲染 queue 区域。
+    UserMessagesQueued {
+        queued: Vec<ChatMessage>,
     },
     /// Chat 完成。
     Done {

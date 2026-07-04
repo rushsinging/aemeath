@@ -64,7 +64,7 @@ impl App {
 
     /// 按 InputId 精确清除单条「排队中」用户提交，并刷新 live-status 投影。
     ///
-    /// 用于 UserMessagesAdded handler 按 input_id 逐条清除占位的场景：仅移除与
+    /// 用于 UserMessagesAdopted handler 按 input_id 逐条清除占位的场景：仅移除与
     /// 给定 `input_id` 匹配的那一条，不影响其他排队项。
     /// （A3：原「全清」版本已随文本队列废弃一并删除，回显只按 id 精确清除。）
     pub(crate) fn clear_queued_submission_echo_by_id(&mut self, input_id: &sdk::InputId) {

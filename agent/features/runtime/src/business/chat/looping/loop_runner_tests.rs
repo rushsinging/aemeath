@@ -184,7 +184,8 @@ impl RecordingSink {
             }
             RuntimeStreamEvent::TasksChanged => "TasksChanged".to_string(),
             RuntimeStreamEvent::ConfigReloaded { .. } => "ConfigReloaded".to_string(),
-            RuntimeStreamEvent::UserMessagesAdded { .. } => "UserMessagesAdded".to_string(),
+            RuntimeStreamEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted".to_string(),
+            RuntimeStreamEvent::UserMessagesQueued { .. } => "UserMessagesQueued".to_string(),
             RuntimeStreamEvent::SessionReset => "SessionReset".to_string(),
             RuntimeStreamEvent::UserMessagesWithdrawn { .. } => "UserMessagesWithdrawn".to_string(),
             RuntimeStreamEvent::GraphPhaseChanged { .. } => "GraphPhaseChanged".to_string(),

@@ -15,7 +15,7 @@ fn test_app() -> App {
 }
 
 /// 消息同步事件（如 PostToolExecutionSync）只镜像 chat.messages，不产生 UserMessage 回显块，
-/// 也不清除占位（回显与占位清理由 UserMessagesAdded 负责）。
+/// 也不清除占位（回显与占位清理由 UserMessagesAdopted 负责）。
 #[test]
 fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
     let mut app = test_app();
@@ -43,7 +43,7 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
         !matches!(item, crate::tui::model::output_timeline::OutputTimelineItem::UserMessage { text, .. } if text == "a\nb\nc")
     }));
 
-    // 占位未被清除（归 UserMessagesAdded 负责）
+    // 占位未被清除（归 UserMessagesAdopted 负责）
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         1,
@@ -80,7 +80,7 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
 /// 期望：
 /// - handler 后 self.chat.messages == msgs（镜像成功）
 /// - 不产生任何 UserMessage 回显块（退出 display）
-/// - 占位未被清除（清占位归 UserMessagesAdded 负责）
+/// - 占位未被清除（清占位归 UserMessagesAdopted 负责）
 #[test]
 fn test_post_tool_sync_no_display() {
     let mut app = test_app();
@@ -128,18 +128,18 @@ fn test_post_tool_sync_no_display() {
         "MessagesSync 不应产生 UserMessage 回显块（退出 display）"
     );
 
-    // 占位未被清除（应由 UserMessagesAdded 负责）
+    // 占位未被清除（应由 UserMessagesAdopted 负责）
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
         1,
-        "MessagesSync 不应清除占位（清占位归 UserMessagesAdded）"
+        "MessagesSync 不应清除占位（清占位归 UserMessagesAdopted）"
     );
 }
 
-/// Task 3: UserMessagesAdded 按 id 清占位 + 顺序回显
+/// Task 3: UserMessagesAdopted 按 id 清占位 + 顺序回显
 ///
 /// 场景：入队两条占位（A="hi"，B="yo"）；
-/// handler 收到 UserMessagesAdded([{id:A,"hi"},{id:B,"yo"}])
+/// handler 收到 UserMessagesAdopted([{id:A,"hi"},{id:B,"yo"}])
 /// → A/B 占位全清、按序追加两条正式 UserMessage 回显 "hi"/"yo"，无残留占位。
 #[test]
 fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
@@ -171,7 +171,14 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
             input_id: Some(id_b.clone()),
         },
     ];
-    app.update_ui(UiEvent::UserMessagesAdded(items), &ui_tx, &spawn_refs);
+    app.update_ui(
+        UiEvent::UserMessagesAdopted {
+            items,
+            queued: vec![],
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
 
     // 占位全清
     assert!(
@@ -219,12 +226,12 @@ fn test_user_messages_added_consumes_placeholders_and_echoes_in_order() {
     );
 }
 
-/// #507 回归：UserMessagesAdded 携带 ChatMessage（typed blocks 含 Image.placeholder）
+/// #507 回归：UserMessagesAdopted 携带 ChatMessage（typed blocks 含 Image.placeholder）
 /// 时，回显文本应经 message.text_content() 还原出用户视角完整文本（含占位符）。
 ///
 /// 场景：用户输入"看图[Image #1]"（TUI 端 enqueue_submission_echo 用 display_text
 /// 写入排队块）；runtime 端构造 ChatMessage（content 含 Image { placeholder } + 对应
-/// input_id），通过 UserMessagesAdded 携带。
+/// input_id），通过 UserMessagesAdopted 携带。
 /// handler 收到后：
 /// - 按 message.input_id 清除对应占位块
 /// - 用 message.text_content() 还原 "看图[Image #1]"，写入 UserMessage 回显
@@ -252,7 +259,14 @@ fn test_user_messages_added_echoes_image_placeholder_from_message() {
     message.input_id = Some(input_id.clone());
     let items = vec![message];
 
-    app.update_ui(UiEvent::UserMessagesAdded(items), &ui_tx, &spawn_refs);
+    app.update_ui(
+        UiEvent::UserMessagesAdopted {
+            items,
+            queued: vec![],
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
 
     // 占位被清除
     assert!(

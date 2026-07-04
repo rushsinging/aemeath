@@ -177,7 +177,7 @@ impl App {
                     );
                     // 忙时 slash/control command 保持现有 mid-turn 行为：作为
                     // ControlCommand 事件入通道，永不作为 user message 发给 LLM（A3/#391）。
-                    // slash 命令是控制命令、无 UserMessagesAdded 归宿，剥离 MessagesSync
+                    // slash 命令是控制命令、无 UserMessagesAdopted 归宿，剥离 MessagesSync
                     // 全清后建占位会残留——故不建占位、不入文本队列（A3 Task 5）。
                     if submission.text.starts_with('/') {
                         let event = sdk::ChatInputEvent::ControlCommand {

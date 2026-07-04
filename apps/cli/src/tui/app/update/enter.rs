@@ -71,7 +71,7 @@ impl App {
             images,
         };
         // 入队即时显示「排队中」块（QueuedUserMessage，携 input_id），由归宿事件
-        // UserMessagesAdded 按 id 清除（#390 A3）。submission.text 仅经事件通道送达 runtime。
+        // UserMessagesAdopted 按 id 清除（#390 A3）。submission.text 仅经事件通道送达 runtime。
         self.enqueue_submission_echo(input_id, submission.display_text);
         UpdateResult::one(Effect::SendChatInputEvent { event })
     }

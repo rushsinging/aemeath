@@ -112,7 +112,17 @@ pub enum AppEvent {
     /// 批量用户输入归宿通知（#507 修复）。每条 ChatMessage 由 runtime 端 share::Message
     /// 映射而来，含 typed blocks + image placeholder + input_id；TUI 用 ChatMessage.input_id
     /// 清占位、ChatMessage.text_content() 还原回显（含 Image placeholder）。
-    UserMessagesAdded(Vec<sdk::ChatMessage>),
+    /// 用户输入被 gate 接纳（idle 直发或 batch drain）。
+    /// items = 本批接纳的消息；queued = 仍留在 buffer 中的排队消息（一般空）。
+    UserMessagesAdopted {
+        items: Vec<sdk::ChatMessage>,
+        queued: Vec<sdk::ChatMessage>,
+    },
+    /// busy 阶段收到新输入并存入 runtime buffer 后的确认。
+    /// queued = 全量 buffer 快照。TUI 据此全量重渲染 queue 区域。
+    UserMessagesQueued {
+        queued: Vec<sdk::ChatMessage>,
+    },
     Done {
         context: UiTurnContext,
     },
