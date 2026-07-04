@@ -656,6 +656,22 @@ where
         }
 
         loop_fsm.transition(ChatLoopTransition::Compact);
+        // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
+        // 在 auto-compact 前执行，可能减少 token 足以跳过 LLM 摘要。
+        let mc_cleared = crate::business::compact::microcompact_messages(&mut messages);
+        if mc_cleared > 0 {
+            log::info!(target: crate::LOG_TARGET,
+                "[microcompact] cleared {} stale exploratory tool results", mc_cleared);
+            let _ = sink
+                .send_event(RuntimeStreamEvent::SystemMessage(format!(
+                    "[microcompact: cleared {mc_cleared} old tool result(s)]"
+                )))
+                .await;
+            // 同步到 TUI 镜像
+            let _ = sink
+                .send_event(RuntimeStreamEvent::MessagesSync(messages.clone()))
+                .await;
+        }
         // compact：发生时替换 messages 为 recent tail，summary 走 system。
         // resume 保护 + 产生时定型原则下，messages 产生后只在 compact 时被替换。
         if let Some(outcome) = auto_compact(
