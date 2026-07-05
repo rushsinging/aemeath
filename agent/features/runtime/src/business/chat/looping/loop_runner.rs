@@ -905,12 +905,7 @@ where
         if mc_cleared > 0 {
             log::info!(target: crate::LOG_TARGET,
                 "[microcompact] cleared {} stale exploratory tool results", mc_cleared);
-            let _ = sink
-                .send_event(RuntimeStreamEvent::SystemMessage(format!(
-                    "[microcompact: cleared {mc_cleared} old tool result(s)]"
-                )))
-                .await;
-            // 同步到 TUI 镜像
+            // 同步到 TUI 镜像（仅同步 messages，不再向对话流注入 SystemMessage）
             let _ = sink
                 .send_event(RuntimeStreamEvent::MicrocompactDone {
                     messages: messages.clone(),
