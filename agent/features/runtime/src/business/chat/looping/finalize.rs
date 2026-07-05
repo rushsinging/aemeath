@@ -337,12 +337,16 @@ struct HookFeedbackLabels {
 
 /// 检查 Stop hook 连续阻断是否超过上限。
 ///
-/// 超过则发送 SystemMessage 提示、状态机转到 Done 并返回 `true`（调用方应 `break`）。
+/// 超过则发送 SystemMessage 提示、发出 `DoneWithDuration`（#604：否则 TUI spinner 永不停）、
+/// 状态机转到 Done 并返回 `true`（调用方应 `break`）。
 /// 未超过返回 `false`，调用方继续正常的阻断反馈注入与 `continue`。
 pub(crate) async fn stop_hook_block_limit_reached<S>(
     block_count: usize,
     sink: &S,
     loop_fsm: &mut ChatLoopFsm,
+    outcome: &AgentRunOutcome,
+    context: &RuntimeTurnContext,
+    task_store: &TaskStore,
 ) -> bool
 where
     S: ChatEventSink,
@@ -355,6 +359,8 @@ where
         .await;
         loop_fsm.transition(ChatLoopTransition::StopSucceeded);
         loop_fsm.assert_state(ChatLoopState::Done, "stop hook block limit exceeded");
+        // #604：必须发出 DoneWithDuration，否则 TUI 永远收不到 turn 结束信号
+        finish_completed_loop(outcome, sink, context, task_store).await;
         true
     } else {
         false

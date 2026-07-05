@@ -1368,6 +1368,9 @@ where
                             stop_hook_block_count,
                             &sink,
                             &mut loop_fsm,
+                            &stall_outcome,
+                            &turn_context,
+                            &task_store,
                         )
                         .await
                         {
@@ -1387,6 +1390,8 @@ where
                     }
                     loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                     loop_fsm.assert_state(ChatLoopState::Done, "stall stop finalizes loop");
+                    // #604：stall 完成退出也需发出 DoneWithDuration，否则 TUI spinner 永不停
+                    finish_completed_loop(&stall_outcome, &sink, &turn_context, &task_store).await;
                     break;
                 }
 
@@ -1460,7 +1465,7 @@ where
                         model: client.model_name().to_string(),
                     };
                     log_agent_outcome(&outcome, &session_id);
-                    if let Some(outcome) = run_stop_hook_before_finish(
+                    if let Some(feedback) = run_stop_hook_before_finish(
                         &outcome,
                         &sink,
                         &hook_ui,
@@ -1476,6 +1481,9 @@ where
                             stop_hook_block_count,
                             &sink,
                             &mut loop_fsm,
+                            &outcome,
+                            &turn_context,
+                            &task_store,
                         )
                         .await
                         {
@@ -1483,7 +1491,7 @@ where
                         }
                         loop_fsm.transition(ChatLoopTransition::StopBlocked);
                         messages.push(Message::system_generated_user(format!(
-                            "<system-reminder>\n{outcome}\n</system-reminder>"
+                            "<system-reminder>\n{feedback}\n</system-reminder>"
                         )));
                         sink.send_event(RuntimeStreamEvent::StopHookBlocked {
                             messages: messages.clone(),
@@ -2340,6 +2348,12 @@ where
             }
         }
     }
+    // #604 维护契约：所有"turn 异常终止后退出 loop"的 break 路径，
+    // MUST 在 break 前调用 `finish_completed_loop` 发出 `DoneWithDuration`，
+    // 否则 TUI spinner 永不停。已覆盖：stop hook blocked 上限（stall + 正常完成）、
+    // stall 放行退出。channel-close 类 break（用户取消/关闭）由 TUI 端处理；
+    // api-error break 发送 `ApiError` 事件作为 turn 结束信号。
+    // 新增异常终止 break 路径时 MUST 遵守此契约并补充对应测试。
 }
 
 /// idle 分支执行 `/think`：读当前 reasoning level，按 desired 设置新 level，

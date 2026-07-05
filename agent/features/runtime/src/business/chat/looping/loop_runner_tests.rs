@@ -1615,6 +1615,12 @@ async fn test_stop_hook_block_limit_stops_loop() {
         "should emit block-limit SystemMessage: {:?}",
         events
     );
+    // #604：blocked 上限退出时必须发出 DoneWithDuration，否则 TUI spinner 永不停
+    assert!(
+        !sink.done_durations.lock().unwrap().is_empty(),
+        "blocked-limit exit must emit DoneWithDuration, got events: {:?}",
+        events
+    );
 }
 
 /// 第 1 次调用阻塞直到 cancel 被触发后返回 `LlmError::Cancelled`，
