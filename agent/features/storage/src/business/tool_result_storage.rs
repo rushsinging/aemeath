@@ -11,7 +11,13 @@ use share::string_idx::{slice_head, slice_tail};
 use std::path::PathBuf;
 
 /// 单条工具结果在落盘前的最大字符数。超过此值时写盘，消息里只放预览 + 文件指针。
-pub const MAX_TOOL_RESULT_CHARS: usize = 30_000;
+///
+/// 注意：本层只管"单条"tool result 的落盘阈值，不管"一个消息里多条 tool result 的总字符数"。
+/// 例如一个 assistant 消息里塞了 5 条各 40k 的 tool result（合计 200k），每条单独看都未触发
+/// 落盘，但总量可能撑爆上下文。这种"单消息多 tool result 总预算"的截断能力暂未实现；
+/// 此前 runtime/compact/truncate.rs 中曾有相关草稿代码，但从未接入 compact 流程，已删除。
+/// 真要支持时建议在本层（或 compact 流程内）重新设计，而非恢复旧代码。
+pub const MAX_TOOL_RESULT_CHARS: usize = 50_000;
 
 /// 落盘后保留的头部预览字符数。
 const PREVIEW_HEAD: usize = 2_000;
