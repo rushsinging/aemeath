@@ -220,16 +220,28 @@ fn render_answering(
             )]));
         }
         lines.push(RenderedLine::new(vec![Span::raw("")]));
-        // Type something 输入框
+        // Type something 输入框（带光标）
         let input_text = &view.chat_input_text;
-        let prompt = format!("  ❯ Type something: {input_text}");
+        let cursor = view.chat_input_cursor.min(input_text.len());
+        let before = &input_text[..cursor];
+        let after = &input_text[cursor..];
+        let cursor_style = Style::default().bg(theme::ACCENT).fg(theme::BASE);
         lines.push(RenderedLine::new(vec![
-            Span::styled(prompt.clone(), header_style),
-            Span::styled(" ", Style::default().bg(theme::ACCENT)),
+            Span::styled("  ❯ Type something: ", header_style),
+            Span::raw(before.to_string()),
+            Span::styled(
+                after
+                    .chars()
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| " ".to_string()),
+                cursor_style,
+            ),
+            Span::raw(after.chars().skip(1).collect::<String>()),
         ]));
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         lines.push(RenderedLine::new(vec![Span::styled(
-            "  [Enter] 确认  [Esc] 取消".to_string(),
+            "  [Enter] 确认  [Esc] 取消  [←→] 移动光标  [Ctrl+W] 删词".to_string(),
             hint_style,
         )]));
         return RenderedBlock {
@@ -422,6 +434,7 @@ mod tests {
             selected: vec![false; options_count],
             chat_input_active: false,
             chat_input_text: String::new(),
+            chat_input_cursor: 0,
             confirm_cursor: 0,
             confirmed: false,
         }

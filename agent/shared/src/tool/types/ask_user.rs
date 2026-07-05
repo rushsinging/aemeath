@@ -19,6 +19,11 @@ pub struct AskUserQuestionResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AskUserQuestionInput {
     /// The question prompt only. Do not include selectable choices here; put choices in options.
+    ///
+    /// Markdown is encouraged: use short paragraphs, `- ` bullet lists, and line breaks to
+    /// structure complex confirmations. The TUI renders the full `question` as the body of
+    /// the prompt area — it is never truncated or used as a header — so prefer multi-line
+    /// Markdown over a single long sentence when the context warrants detail.
     pub question: String,
     /// Optional list of predefined answer choices. Each choice MUST be one separate array item — either a plain string or an object { title, description }. Do not combine choices into one string or embed them in question.
     pub options: Option<Vec<Value>>,

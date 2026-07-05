@@ -52,6 +52,7 @@ pub struct AskUserBatchBlockView {
     pub selected: Vec<bool>,
     pub chat_input_active: bool,
     pub chat_input_text: String,
+    pub chat_input_cursor: usize,
     pub confirm_cursor: usize,
     pub confirmed: bool,
 }
