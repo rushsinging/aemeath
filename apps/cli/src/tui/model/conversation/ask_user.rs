@@ -265,7 +265,9 @@ impl ConversationModel {
             if *chat_input_active && *chat_input_cursor > 0 {
                 let pos = *chat_input_cursor;
                 // 找到光标前一个 char 的起始 byte 位置
-                let prev_start = chat_input_text[..pos]
+                let prev_start = chat_input_text
+                    .get(..pos)
+                    .unwrap_or("")
                     .char_indices()
                     .last()
                     .map(|(i, _)| i)
@@ -293,7 +295,7 @@ impl ConversationModel {
                 let target = if delta < 0 {
                     // 向左回退 |delta| 个 char
                     let back = (-delta) as usize;
-                    let bytes_before = &chat_input_text[..pos];
+                    let bytes_before = chat_input_text.get(..pos).unwrap_or("");
                     let new_byte_pos = bytes_before
                         .char_indices()
                         .rev()
@@ -303,7 +305,7 @@ impl ConversationModel {
                     new_byte_pos
                 } else if delta > 0 {
                     // 向右前进 delta 个 char
-                    let bytes_after = &chat_input_text[pos..];
+                    let bytes_after = chat_input_text.get(pos..).unwrap_or("");
                     let new_byte_pos = bytes_after
                         .char_indices()
                         .nth(delta as usize)

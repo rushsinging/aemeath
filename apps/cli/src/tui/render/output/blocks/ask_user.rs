@@ -222,9 +222,10 @@ fn render_answering(
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         // Type something 输入框（带光标）
         let input_text = &view.chat_input_text;
-        let cursor = view.chat_input_cursor.min(input_text.len());
-        let before = &input_text[..cursor];
-        let after = &input_text[cursor..];
+        let raw_cursor = view.chat_input_cursor.min(input_text.len());
+        let cursor = input_text.floor_char_boundary(raw_cursor);
+        let before = input_text.get(..cursor).unwrap_or("");
+        let after = input_text.get(cursor..).unwrap_or("");
         let cursor_style = Style::default().bg(theme::ACCENT).fg(theme::BASE);
         lines.push(RenderedLine::new(vec![
             Span::styled("  ❯ Type something: ", header_style),
