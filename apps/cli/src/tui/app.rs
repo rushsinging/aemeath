@@ -190,6 +190,7 @@ impl App {
                 cached_models: Vec::new(),
                 current_model_display: model,
                 memory_config: sdk::MemoryConfigView::default(),
+                pending_resume_id: None,
             },
             layout: UiLayout::default(),
             model: model_state,

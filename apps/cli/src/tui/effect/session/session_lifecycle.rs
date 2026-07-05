@@ -14,71 +14,12 @@ impl App {
         agent_client: Arc<dyn sdk::AgentClient>,
         resume_id: Option<String>,
     ) -> io::Result<()> {
-        // Resume existing session if requested
-        if let Some(ref id) = resume_id {
-            match agent_client.load_session(id).await {
-                Ok(s) => {
-                    let msg_count = s.message_count;
-                    self.session.session_created_at = s.created_at.clone();
-                    // 恢复 workspace 上下文
-                    if let Some(ref ws) = s.workspace {
-                        self.session.cwd = ws.path_base.clone();
-                        let ev = crate::tui::app::status_context_for_workspace(ws.clone());
-                        if let crate::tui::app::event::UiEvent::WorkingDirectoryChanged(ctx) = ev {
-                            // 工作目录上下文真相归 RuntimeModel，StatusBar 渲染时直接消费 StatusViewModel。
-                            self.model.conversation.apply(
-                                crate::tui::model::conversation::intent::WorkspaceSnapshotReceived {
-                                    path_base: Some(ctx.path_base),
-                                    workspace_root: Some(ctx.workspace_root),
-                                    branch: ctx.branch,
-                                    kind: ctx.kind,
-                                },
-                            );
-                        }
-                    }
-                    // #567：restore_tasks 删除——runtime start_chat 内部恢复 tasks。
-                    // 渲染已恢复的消息（走 ResumeConversation intent，不触发 spinner）
-                    let msgs = s.messages;
-                    self.model.conversation.apply(
-                        crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
-                            crate::tui::model::conversation::intent::ResumeConversation {
-                                messages: msgs.clone(),
-                            },
-                        ),
-                    );
-                    self.chat.messages = msgs.clone();
-                    self.mark_output_dirty();
-                    apply_resume_input_history(self, &msgs);
-                    self.append_system_notice(format!(
-                        "[resumed session {} ({} messages)]",
-                        id, msg_count
-                    ));
-                    if s.trimmed > 0 {
-                        self.append_system_notice(format!(
-                            "[trimmed {} incomplete tool-call message(s)]",
-                            s.trimmed
-                        ));
-                    }
-                    if s.repaired > 0 {
-                        self.append_system_notice(format!(
-                            "[repaired {} message(s): removed orphaned tool results and fixed role ordering]",
-                            s.repaired
-                        ));
-                    }
-                }
-                Err(e) => {
-                    self.append_system_notice(format!(
-                        "[warning: failed to resume session {}: {}, starting new]",
-                        id, e
-                    ));
-                }
-            }
-        }
+        // #567：resume 走事件流。启动时存储 resume_id，
+        // start_chat 后发 ResumeSession 事件，runtime 通过 SessionResumed 回传。
+        self.session.pending_resume_id = resume_id;
 
-        // Pre-load session list for /resume autocomplete
-        self.refresh_session_cache().await;
-        // Pre-load model list for /model dialog + completion suggestions（消除纯路径 block_on）
-        self.refresh_model_cache().await;
+        // #567：list_sessions / list_models 走事件流（ManageSession / ListModels）。
+        // 不再启动时同步拉取。
 
         // 进入 TUI：RAII guard 保证任何退出路径（正常 / ? / panic 展开）都恢复终端。
         let mut guard = TerminalGuard::enter()?;

@@ -51,6 +51,7 @@ mod tests {
             cached_models: vec![],
             current_model_display: "gpt-4".into(),
             memory_config: make_memory_config(),
+            pending_resume_id: None,
         };
         assert_eq!(state.session_id, "sess-1");
         assert_eq!(state.current_model_display, "gpt-4");
@@ -66,6 +67,7 @@ mod tests {
             cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
+            pending_resume_id: None,
         };
         assert!(state.cached_sessions().is_empty());
     }
@@ -80,6 +82,7 @@ mod tests {
             cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
+            pending_resume_id: None,
         };
         state.cache_sessions(vec![("s2".to_string(), "summary".to_string())]);
         assert_eq!(
@@ -98,6 +101,7 @@ mod tests {
             cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
+            pending_resume_id: None,
         };
         state.rename_session("sess-2");
         assert_eq!(state.session_id(), "sess-2");
