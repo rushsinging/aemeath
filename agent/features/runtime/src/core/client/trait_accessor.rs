@@ -1,8 +1,7 @@
-use sdk::{ChangeSet, CostInfo, ProjectContext, SdkError, SessionSnapshot, TaskStatusView};
+use sdk::{ChangeSet, CostInfo, ProjectContext, SdkError, SessionSnapshot};
 use tokio::sync::watch;
 
 use super::accessors::AgentClientImpl;
-use storage::api::TaskStatus;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -23,35 +22,6 @@ pub(super) fn session_snapshot_impl(me: &AgentClientImpl) -> SessionSnapshot {
 pub(super) fn cost_impl(_me: &AgentClientImpl) -> CostInfo {
     // TODO: 从 cost_tracker 获取
     CostInfo::default()
-}
-
-pub(super) async fn task_status_impl(me: &AgentClientImpl) -> Result<TaskStatusView> {
-    let tasks = me
-        .inner
-        .context
-        .resources
-        .task_store
-        .list_current_batch()
-        .await;
-    let active: Vec<_> = tasks
-        .iter()
-        .filter(|t| t.status != TaskStatus::Deleted)
-        .cloned()
-        .collect();
-    if active.is_empty() {
-        return Ok(TaskStatusView::default());
-    }
-
-    let display_map = me
-        .inner
-        .context
-        .resources
-        .task_store
-        .get_batch_display_map()
-        .await;
-    let max_lines = share::config::TaskListConfig::default().max_lines;
-    let lines = super::mapping::task_status_lines(&active, &display_map, max_lines);
-    Ok(TaskStatusView { lines })
 }
 
 pub(super) fn project_impl(me: &AgentClientImpl) -> ProjectContext {

@@ -413,11 +413,6 @@ pub(crate) fn runtime_event_to_sdk_event(
                 workspace: super::mapping::workspace_context_to_sdk(workspace),
             }
         }
-        crate::business::chat::RuntimeStreamEvent::TasksChanged => {
-            let previous = *change_tx.borrow();
-            let _ = change_tx.send(previous | ChangeSet::TASKS);
-            ChatEvent::TasksChanged
-        }
         crate::business::chat::RuntimeStreamEvent::ConfigReloaded { changed_keys } => {
             ChatEvent::ConfigReloaded { changed_keys }
         }
@@ -570,19 +565,26 @@ mod tests {
     }
 
     #[test]
-    fn test_runtime_tasks_changed_emits_sdk_event_and_change_set() {
+    fn test_runtime_tasks_snapshot_emits_sdk_event() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
         let current_messages = Arc::new(Mutex::new(Vec::new()));
-        let (change_tx, mut change_rx) = tokio::sync::watch::channel(ChangeSet::empty());
+        let (change_tx, _change_rx) = tokio::sync::watch::channel(ChangeSet::empty());
 
+        let view = sdk::TaskStatusView {
+            lines: vec!["[ ] #1 sample".to_string()],
+        };
         let event = runtime_event_to_sdk_event(
-            crate::business::chat::RuntimeStreamEvent::TasksChanged,
+            crate::business::chat::RuntimeStreamEvent::TasksSnapshot {
+                tasks: Box::new(view.clone()),
+            },
             &current_messages,
             &change_tx,
         );
 
-        assert!(matches!(event, ChatEvent::TasksChanged));
-        assert!(change_rx.borrow_and_update().contains(ChangeSet::TASKS));
+        match event {
+            ChatEvent::TasksSnapshot { tasks } => assert_eq!(tasks.lines, view.lines),
+            other => panic!("unexpected event: {other:?}"),
+        }
         drop(tx);
     }
 

@@ -173,7 +173,7 @@ pub enum AppEvent {
     /// Current tool path base/working root changed.
     WorkingDirectoryChanged(StatusContextUpdate),
     /// Runtime task store changed; refresh TUI task list window.
-    TaskStatusChanged,
+    TaskStatusChanged(sdk::TaskStatusView),
     /// 版本检查结果（后台 spawn 完成后回送）。
     UpdateAvailable {
         current: String,

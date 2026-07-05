@@ -89,7 +89,6 @@ impl App {
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()).ok();
 
         // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
-        self.update_task_status(self.chat.is_processing).await;
         self.update_project_context().await;
         self.draw(terminal)?;
         self.refresh_output_document_from_model();

@@ -245,7 +245,7 @@ impl RecordingSink {
             RuntimeStreamEvent::WorkingDirectoryChanged { .. } => {
                 "WorkingDirectoryChanged".to_string()
             }
-            RuntimeStreamEvent::TasksChanged => "TasksChanged".to_string(),
+            RuntimeStreamEvent::TasksSnapshot { .. } => "TasksSnapshot".to_string(),
             RuntimeStreamEvent::ConfigReloaded { .. } => "ConfigReloaded".to_string(),
             RuntimeStreamEvent::UserMessagesAdopted { .. } => "UserMessagesAdopted".to_string(),
             RuntimeStreamEvent::UserMessagesQueued { .. } => "UserMessagesQueued".to_string(),

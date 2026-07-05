@@ -179,7 +179,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             raw_workspace_root: std::path::PathBuf::from(workspace_root),
             workspace,
         }),
-        sdk::ChatEvent::TasksChanged => UiEvent::TaskStatusChanged,
         sdk::ChatEvent::ConfigReloaded { changed_keys } => {
             let keys_str = changed_keys.join(", ");
             UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))
@@ -227,8 +226,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::ReminderList { .. }
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::TasksSnapshot { .. }
         | sdk::ChatEvent::CostUpdate { .. } => return UiEvent::SystemMessage(String::new()),
+        sdk::ChatEvent::TasksSnapshot { tasks } => {
+            return UiEvent::TaskStatusChanged(*tasks);
+        }
     }
 }
 
@@ -475,8 +476,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             workspace_root,
             workspace.context_stack.len()
         ),
-        sdk::ChatEvent::TasksChanged => {
-            crate::tui::log_trace!("{} tasks_changed", stage)
+        sdk::ChatEvent::TasksSnapshot { tasks } => {
+            crate::tui::log_trace!("{} tasks_snapshot lines={}", stage, tasks.lines.len())
         }
         sdk::ChatEvent::ConfigReloaded { changed_keys } => crate::tui::log_trace!(
             "{} config_reloaded changed_keys={:?}",
@@ -554,13 +555,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         ),
         // #567: 新增变体暂不记录日志。
         sdk::ChatEvent::ReflectionResult { .. }
-        | sdk::ChatEvent::ModelList { .. }
-        | sdk::ChatEvent::ReminderList { .. }
-        | sdk::ChatEvent::SessionList { .. }
-        | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::TasksSnapshot { .. }
-        | sdk::ChatEvent::CostUpdate { .. }
-        | sdk::ChatEvent::SessionResumeFailed { .. } => {}
+         | sdk::ChatEvent::ModelList { .. }
+         | sdk::ChatEvent::ReminderList { .. }
+         | sdk::ChatEvent::SessionList { .. }
+         | sdk::ChatEvent::ProjectInfo { .. }
+         | sdk::ChatEvent::TasksSnapshot { .. }
+         | sdk::ChatEvent::CostUpdate { .. }
+         | sdk::ChatEvent::SessionResumeFailed { .. } => {}
     }
 }
 
@@ -802,10 +803,18 @@ mod tests {
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_tasks_changed() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::TasksChanged);
+    fn test_sdk_event_to_ui_event_maps_tasks_snapshot() {
+        let view = sdk::TaskStatusView {
+            lines: vec!["[ ] #1 task".to_string()],
+        };
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::TasksSnapshot {
+            tasks: Box::new(view.clone()),
+        });
 
-        assert!(matches!(event, UiEvent::TaskStatusChanged));
+        match event {
+            UiEvent::TaskStatusChanged(v) => assert_eq!(v.lines, view.lines),
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 
     #[tokio::test]

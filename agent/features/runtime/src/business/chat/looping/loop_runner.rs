@@ -1385,12 +1385,23 @@ where
                         }
                     }
                     // Build tool result message for API
+                    let has_task_mutation = all_results
+                        .iter()
+                        .any(|r| super::events::is_task_store_mutation(&r.tool_name));
                     messages.push(tool_results_for_api(all_results, &session_id));
                     // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
                         messages: messages.clone(),
                     })
                     .await;
+                    // 若刚执行了 task store mutation 工具，推送 task snapshot（#642）
+                    if has_task_mutation {
+                        let snapshot = super::task_snapshot::build_task_snapshot(&task_store).await;
+                        sink.send_event(RuntimeStreamEvent::TasksSnapshot {
+                            tasks: Box::new(snapshot),
+                        })
+                        .await;
+                    }
                     loop_fsm.transition(ChatLoopTransition::AwaitUser);
                     let gate = drain_and_apply_gate(
                         GateKind::AfterBlockingBoundary,

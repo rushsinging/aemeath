@@ -195,7 +195,6 @@ pub enum RuntimeStreamEvent {
         workspace_root: String,
         workspace: PersistedWorkspaceContext,
     },
-    TasksChanged,
     /// 配置/指令/guidance 文件变更通知。
     ConfigReloaded {
         changed_keys: Vec<String>,
@@ -270,6 +269,17 @@ pub enum RuntimeStreamEvent {
     CostUpdate {
         cost: sdk::CostInfo,
     },
+}
+
+/// 判断 tool 名是否属于 task store mutation（会改变 task 状态）。
+///
+/// 用于 `TasksSnapshot` 事件推送触发点：只有 task mutation 工具执行后，
+/// 才需要重新取 task snapshot 并推送给前端（#642）。
+pub(crate) fn is_task_store_mutation(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "TaskCreate" | "TaskUpdate" | "TaskStop" | "TaskListCreate" | "TaskListComplete"
+    )
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {
