@@ -14,6 +14,7 @@
 4. **MUST** 遵循 DRY 原则。类型、辅助函数、常量、数据访问逻辑 **MUST** 定义一次、到处引用。**NEVER** 在多个文件重复相同逻辑。
 5. **MUST NOT** 手动调整代码格式。格式化由 `cargo fmt` / `rustfmt` 处理，只关注逻辑变更。
 6. **MUST** 遵循 TDD（测试先行）。新增或修改核心逻辑前，**MUST** 先新增或修改对应测试（feature 先写表达期望行为的测试、bug 先写复现问题的失败测试、重构先确认现有测试覆盖目标行为），再用 `cargo test` 验证修改结果；细节见 `specs/rust-coding.md`。
+7. **MUST** 跨层链路改动 **MUST** 为**每一层**补单元测试或场景测试，**NEVER** 只测首尾。跨 share → runtime → sdk → tui 的数据流改动，若只测源头 emit 和最终渲染，中间任一层（SDK 转发、adapter 分发、model 写入）的覆写 / 绕过 / 字段丢失都无法被测试捕获。典型反面教材：PR #635 数据全链路正确但 TUI 不显示，根因是 `AgentDisplay::format_header_line_with_result` 覆写了 trait 默认方法绕过了消费逻辑——因为链路中每一层都没有测试覆盖。
 
 ## 渐进式披露（Progressive Disclosure）
 
