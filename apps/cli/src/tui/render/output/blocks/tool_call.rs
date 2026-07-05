@@ -1,10 +1,10 @@
-use crate::tui::model::conversation::tool_call::AgentMeta;
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
 use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
 use crate::tui::view_model::tool_name::tool_display_name;
+use crate::tui::view_model::AgentMetaView;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::rc::Rc;
@@ -119,7 +119,7 @@ fn strip_leading_bullet(mut line: Line<'static>) -> Line<'static> {
 /// issue #499：当 user 只指定 role（未指定 model）时，runtime 根据 role 配置
 /// resolve 出实际 model。agent_meta 携带 resolve 后的值，此处合并到 JSON 副本，
 /// 使 `AgentDisplay::format_header` 能取到实际 model。
-fn merge_agent_meta(raw_json: &str, meta: Option<&AgentMeta>) -> String {
+fn merge_agent_meta(raw_json: &str, meta: Option<&AgentMetaView>) -> String {
     use serde_json::Value;
     let Some(meta) = meta else {
         return raw_json.to_string();
@@ -339,7 +339,7 @@ mod tests {
     fn test_merge_agent_meta_fills_role_and_model() {
         // case 2（input 只有 role 无 model）：agent_meta 补上 runtime resolve 的 model
         let raw = r#"{"prompt":"x","description":"task","role":"coder"}"#;
-        let meta = AgentMeta {
+        let meta = AgentMetaView {
             role: Some("coder".into()),
             model: "Zhipu/glm-5.2".into(),
         };
@@ -353,7 +353,7 @@ mod tests {
     fn test_merge_agent_meta_overrides_input_model() {
         // input 指定 model 但 runtime resolve 出不同值时，agent_meta 优先
         let raw = r#"{"prompt":"x","description":"task","model":"Old/model"}"#;
-        let meta = AgentMeta {
+        let meta = AgentMetaView {
             role: None,
             model: "New/model".into(),
         };
@@ -366,7 +366,7 @@ mod tests {
     fn test_merge_agent_meta_empty_model_not_overwritten() {
         // agent_meta.model 为空时不覆盖 input 已有的 model
         let raw = r#"{"prompt":"x","description":"task","model":"Keep/me"}"#;
-        let meta = AgentMeta {
+        let meta = AgentMetaView {
             role: Some("bot".into()),
             model: "".into(),
         };
@@ -380,7 +380,7 @@ mod tests {
     fn test_merge_agent_meta_invalid_json_falls_back() {
         // input JSON 无效时，agent_meta 仍可构造最小 JSON
         let raw = "not valid json";
-        let meta = AgentMeta {
+        let meta = AgentMetaView {
             role: Some("coder".into()),
             model: "Zhipu/glm-5.2".into(),
         };
