@@ -48,9 +48,7 @@ mod tests {
             workspace_root: None,
             collapsible: true,
             collapsed: false,
-            provider_id: None,
-            model_id: None,
-            role: None,
+            agent_meta: None,
         });
         let node = BlockNode {
             block_id: "chat-1/turn-1/tool-1".to_string(),

@@ -109,8 +109,6 @@ fn test_runtime_tool_event_creates_chat_from_runtime_context_without_active_chat
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
-        model_id: None,
-        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: runtime_chat_id,
@@ -168,8 +166,6 @@ fn test_tool_result_payload_stored_in_turn() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
-        model_id: None,
-        role: None,
     });
 
     let expected_output = "file contents here".to_string();

@@ -791,8 +791,6 @@ mod tests {
             fallback_context: UiTurnContext {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("fallback-turn"),
-                model_id: None,
-                role: None,
             },
             messages: Vec::new(),
         });

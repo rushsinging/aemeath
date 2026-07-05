@@ -113,9 +113,7 @@ pub(super) fn find_tool_view(
         workspace_root: workspace_root.map(|p| p.to_path_buf()),
         collapsible: true,
         collapsed: false,
-        provider_id: call.provider_id.clone(),
-        model_id: call.model_id.clone(),
-        role: call.role.clone(),
+        agent_meta: call.agent_meta.clone(),
     })
 }
 

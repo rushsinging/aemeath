@@ -24,8 +24,6 @@ fn test_reduce_agent_event_tool_call_updates_conversation() {
                 provider_id: Some("provider-1".to_string()),
                 name: "Read".to_string(),
                 index: 0,
-                model_id: None,
-                role: None,
             })],
             ..Default::default()
         },

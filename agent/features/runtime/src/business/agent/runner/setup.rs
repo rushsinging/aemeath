@@ -201,6 +201,17 @@ impl AgentRunner for CliAgentRunner {
         };
 
         let model_display = resolved_spec.as_deref().unwrap_or("default");
+        // issue #499：发送 Started 事件，让 TUI 在 Agent 工具 header 显示实际 role/model。
+        // 这是 sub-agent 的第一个 progress 事件，早于 ToolCalls/Message。
+        if let Some(ref tx) = progress_tx {
+            let _ = tx.try_send(AgentProgressEvent {
+                sequence: 0,
+                kind: AgentProgressKind::Started {
+                    role: Some(role_name_for_log.clone()),
+                    model: model_display.to_string(),
+                },
+            });
+        }
         progress(
             None,
             &format!("Sub-agent started with model: {}", model_display),

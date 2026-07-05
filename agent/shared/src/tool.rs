@@ -209,8 +209,19 @@ pub struct AgentProgressEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentProgressKind {
-    ToolCalls { calls: Vec<AgentToolCallProgress> },
-    Message { text: String },
+    /// Sub-agent 启动时发出（issue #499）。携带实际 resolve 后的 role/model，
+    /// 让 TUI 在 Agent 工具 header 显示 `Agent - [role] - Provider/model`。
+    /// 早于 ToolCalls/Message 发出，是 sub-agent 的第一个 progress 事件。
+    Started {
+        role: Option<String>,
+        model: String,
+    },
+    ToolCalls {
+        calls: Vec<AgentToolCallProgress>,
+    },
+    Message {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

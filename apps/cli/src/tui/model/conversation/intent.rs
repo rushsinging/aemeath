@@ -69,10 +69,6 @@ pub struct ToolCallStart {
     pub provider_id: Option<String>,
     pub name: String,
     pub index: usize,
-    /// 发起此 tool call 的 model id（如 `Zhipu/glm-5.2`）。来自 turn context。
-    pub model_id: Option<String>,
-    /// 发起此 tool call 的 role（main / subagent / 角色名）。主 turn 为 None。
-    pub role: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,6 +131,18 @@ pub struct RecordAgentProgress {
     pub turn_id: ChatTurnId,
     pub tool_id: ToolCallId,
     pub message: String,
+}
+
+/// 更新 Agent 工具的元数据（issue #499）。
+/// 由 `AgentProgressKind::Started` 事件触发，携带 sub-agent resolve 后的
+/// role/model，用于 header 渲染。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdateAgentMeta {
+    pub chat_id: ChatId,
+    pub turn_id: ChatTurnId,
+    pub tool_id: ToolCallId,
+    pub role: Option<String>,
+    pub model: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -320,6 +328,7 @@ pub enum ConversationIntent {
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
     RecordAgentProgress(RecordAgentProgress),
+    UpdateAgentMeta(UpdateAgentMeta),
     ShowAskUserBatch(ShowAskUserBatch),
     AnswerCurrentAskUser(AnswerCurrentAskUser),
     SetAskUserCursor(SetAskUserCursor),

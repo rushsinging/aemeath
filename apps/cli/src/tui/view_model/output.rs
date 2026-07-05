@@ -122,12 +122,8 @@ pub struct ToolCallBlockView {
     pub workspace_root: Option<std::path::PathBuf>,
     pub collapsible: bool,
     pub collapsed: bool,
-    /// 发起此 tool call 的 provider id（如 `Zhipu`）。issue #499。
-    pub provider_id: Option<String>,
-    /// 发起此 tool call 的 model id（如 `Zhipu/glm-5.2`）。issue #499。
-    pub model_id: Option<String>,
-    /// 发起此 tool call 的 role（main / subagent / 角色名）。主 turn 为 None。issue #499。
-    pub role: Option<String>,
+    /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时填充。
+    pub agent_meta: Option<crate::tui::model::conversation::tool_call::AgentMeta>,
 }
 
 /// 工具结果子块视图：作为 ToolCall 的子节点，独占结果富渲染。

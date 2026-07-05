@@ -52,9 +52,7 @@ mod tests {
             workspace_root: None,
             collapsible: false,
             collapsed: false,
-            provider_id: None,
-            model_id: None,
-            role: None,
+            agent_meta: None,
         })
     }
 

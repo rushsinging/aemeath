@@ -12,12 +12,22 @@ pub struct ToolCall {
     /// None = 尚未收到结果；Some = 已完成（成功或失败）。
     pub result: Option<ToolResultPayload>,
     pub activities: Vec<String>,
-    /// 发起此 tool call 的 provider id（如 `Zhipu`）。来自 ToolCallStart 事件。
-    pub provider_id: Option<String>,
-    /// 发起此 tool call 的 model id（如 `Zhipu/glm-5.2`）。来自 turn context。
-    pub model_id: Option<String>,
-    /// 发起此 tool call 的 role（main / subagent / 角色名）。主 turn 为 None。
+    /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时由
+    /// `AgentProgressKind::Started` 事件填充，用于 header 渲染
+    /// `Agent - [role] - Provider/model`。prompt 不在此处重复存储，
+    /// 渲染时从 `args_preview` 取（已在 ToolCallUpdate status=Ready 时填充）。
+    pub agent_meta: Option<AgentMeta>,
+}
+
+/// Agent 工具的元数据（issue #499）。
+/// 由 runtime 的 `AgentProgressKind::Started` 事件携带，
+/// 携带 sub-agent 实际 resolve 后的 role/model（而非 args 原始值）。
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct AgentMeta {
+    /// sub-agent 的角色名（如 `reviewer`）。None 表示未指定 role。
     pub role: Option<String>,
+    /// sub-agent 实际使用的 model（如 `Zhipu/glm-5.2`），runtime resolve 后的值。
+    pub model: String,
 }
 
 impl ToolCall {
@@ -30,9 +40,7 @@ impl ToolCall {
             status: ToolCallStatus::PendingArgs,
             result: None,
             activities: Vec::new(),
-            provider_id: None,
-            model_id: None,
-            role: None,
+            agent_meta: None,
         }
     }
     pub fn update_args(&mut self, partial_args: impl Into<String>) {

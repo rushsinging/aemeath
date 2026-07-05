@@ -85,8 +85,6 @@ impl ConversationUpdate for ResumeConversation {
                                     provider_id: None,
                                     name: name.clone(),
                                     index: block_index,
-                                    model_id: None,
-                                    role: None,
                                 }));
                                 all_changes.extend(model.apply(ToolCallUpdate {
                                     chat_id: chat_id.clone(),
@@ -160,8 +158,6 @@ impl ConversationUpdate for ToolCallStart {
             self.provider_id,
             self.name.clone(),
             self.index,
-            self.model_id,
-            self.role,
         )
     }
 }
@@ -235,6 +231,18 @@ impl ConversationUpdate for ClearAllQueuedSubmissions {
 impl ConversationUpdate for RecordAgentProgress {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.record_agent_progress(self.chat_id, self.turn_id, self.tool_id, self.message)
+    }
+}
+
+impl ConversationUpdate for UpdateAgentMeta {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.update_agent_meta(
+            self.chat_id,
+            self.turn_id,
+            self.tool_id,
+            self.role,
+            self.model,
+        )
     }
 }
 
@@ -534,6 +542,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::ClearQueuedSubmissionById(s) => s.update(model),
             Self::ClearAllQueuedSubmissions(s) => s.update(model),
             Self::RecordAgentProgress(s) => s.update(model),
+            Self::UpdateAgentMeta(s) => s.update(model),
             Self::ShowAskUserBatch(s) => s.update(model),
             Self::AnswerCurrentAskUser(s) => s.update(model),
             Self::SetAskUserCursor(s) => s.update(model),

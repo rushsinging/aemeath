@@ -51,6 +51,10 @@ pub enum ConversationChange {
         block_id: String,
         tool_id: String,
     },
+    /// Agent 工具的 role/model 元数据已写入（issue #499）。
+    AgentMetaUpdated {
+        tool_id: String,
+    },
     ChatCompleting {
         chat_id: String,
     },

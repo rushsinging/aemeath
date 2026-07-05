@@ -93,10 +93,7 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
 }
 
 fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
-    let mut ctx = ChatEventContext::new(context.chat_id, context.turn_id);
-    ctx.model_id = context.model_id;
-    ctx.role = context.role;
-    ctx
+    ChatEventContext::new(context.chat_id, context.turn_id)
 }
 
 fn tool_call_status_to_sdk(
@@ -534,6 +531,9 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
                 .collect(),
         },
         share::tool::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
+        share::tool::AgentProgressKind::Started { role, model } => {
+            AgentProgressKindView::Started { role, model }
+        }
     };
     AgentProgressEventView {
         sequence: event.sequence,

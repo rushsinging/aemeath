@@ -71,8 +71,6 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 provider_id: provider_id.clone(),
                 name: name.clone(),
                 index: *index,
-                model_id: context.model_id.clone(),
-                role: context.role.clone(),
             }))
         }
         UiEvent::ToolCallUpdate {
@@ -149,14 +147,25 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             context,
             tool_id,
             event,
-        } => conversation(ConversationIntent::RecordAgentProgress(
-            RecordAgentProgress {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                tool_id: tool_id.clone(),
-                message: format!("{event}"),
-            },
-        )),
+        } => match &event.kind {
+            sdk::AgentProgressKindView::Started { role, model } => {
+                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    tool_id: tool_id.clone(),
+                    role: role.clone(),
+                    model: model.clone(),
+                }))
+            }
+            _ => conversation(ConversationIntent::RecordAgentProgress(
+                RecordAgentProgress {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    tool_id: tool_id.clone(),
+                    message: format!("{event}"),
+                },
+            )),
+        },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
         | UiEvent::Cancelled { context } => {
@@ -410,8 +419,6 @@ mod tests {
         UiTurnContext {
             chat_id: ChatId::new("chat-test"),
             turn_id: ChatTurnId::new("turn-test"),
-            model_id: None,
-            role: None,
         }
     }
 

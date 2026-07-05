@@ -11,32 +11,11 @@ use std::pin::Pin;
 pub struct RuntimeTurnContext {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
-    /// 当前 turn 的 model id（如 `Zhipu/glm-5.2`）。
-    pub model_id: Option<String>,
-    /// 当前 turn 的 role（main / subagent / 具体角色名）。主 turn 为 None。
-    pub role: Option<String>,
 }
 
 impl RuntimeTurnContext {
     pub fn new(chat_id: ChatId, turn_id: ChatTurnId) -> Self {
-        Self {
-            chat_id,
-            turn_id,
-            model_id: None,
-            role: None,
-        }
-    }
-
-    /// Builder-style：设置 model_id。
-    pub fn with_model_id(mut self, model_id: impl Into<String>) -> Self {
-        self.model_id = Some(model_id.into());
-        self
-    }
-
-    /// Builder-style：设置 role。
-    pub fn with_role(mut self, role: impl Into<String>) -> Self {
-        self.role = Some(role.into());
-        self
+        Self { chat_id, turn_id }
     }
 }
 
