@@ -244,9 +244,22 @@ pub(crate) struct SpawnContext {
 #[derive(Debug)]
 pub(crate) struct ProcessingHandle {
     join: tokio::task::JoinHandle<()>,
+    /// #639：runtime chat 的 cancel 句柄。因 `chat()` 在 spawn task **内部** await，
+    /// 句柄要等 chat() 返回后才拿得到，故用共享 slot 由 task 回填、TUI 侧读取触发。
+    cancel: Arc<std::sync::Mutex<Option<sdk::CancelHandle>>>,
 }
 
 impl ProcessingHandle {
+    /// #639：即时取消当前 chat（触发 runtime 的 CancellationToken，进程内 out-of-band，
+    /// 不走事件流）。abort 只中断 TUI 消费流不停 runtime loop，故 cancel NEVER 用 abort。
+    pub(crate) fn cancel(&self) {
+        if let Ok(guard) = self.cancel.lock() {
+            if let Some(handle) = guard.as_ref() {
+                handle.cancel();
+            }
+        }
+    }
+
     pub(crate) fn abort(&self) {
         self.join.abort();
     }
@@ -625,6 +638,12 @@ fn json_value_kind(value: &serde_json::Value) -> &'static str {
 }
 
 pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
+    // #639：cancel 句柄共享 slot。chat() 在 task 内部 await，返回 stream 后回填此 slot；
+    // TUI 侧 ProcessingHandle::cancel() 读取触发。cancel-before-chat-returns 的极小窗口内
+    // 为 no-op（chat() 微秒级返回），可接受。
+    let cancel_slot: Arc<std::sync::Mutex<Option<sdk::CancelHandle>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let cancel_slot_for_task = cancel_slot.clone();
     let join = tokio::spawn(async move {
         let mut stream = match ctx
             .agent_client
@@ -648,6 +667,10 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
                 return;
             }
         };
+        // 回填 cancel 句柄，供 Ctrl+C/Esc 即时中断。
+        if let Ok(mut guard) = cancel_slot_for_task.lock() {
+            *guard = Some(stream.cancel_handle());
+        }
         while let Some(event) = stream.recv().await {
             log_sdk_event(&event, "sdk->ui.recv");
             let ui_event = sdk_event_to_ui_event(event);
@@ -657,7 +680,10 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             }
         }
     });
-    ProcessingHandle { join }
+    ProcessingHandle {
+        join,
+        cancel: cancel_slot,
+    }
 }
 
 #[cfg(test)]
