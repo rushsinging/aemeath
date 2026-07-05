@@ -36,10 +36,7 @@ impl App {
                             );
                         }
                     }
-                    // 恢复任务状态
-                    if let Some(tasks) = &s.tasks {
-                        let _ = agent_client.restore_tasks(tasks.clone()).await;
-                    }
+                    // #567：restore_tasks 删除——runtime start_chat 内部恢复 tasks。
                     // 渲染已恢复的消息（走 ResumeConversation intent，不触发 spinner）
                     let msgs = s.messages;
                     self.model.conversation.apply(

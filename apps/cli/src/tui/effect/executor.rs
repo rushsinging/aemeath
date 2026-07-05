@@ -93,72 +93,48 @@ impl App {
             }
             return;
         };
-        let messages = self.chat.messages.clone();
-        let session_id = self.session.session_id().to_string();
-        let tx = ui_tx.clone();
-        crate::tui::effect::spawn_guard::spawn_guarded("save_session", async move {
-            if let Err(e) = ac.sync_current_messages(messages).await {
-                crate::tui::log_warn!("sync failed: {e}");
-            }
-            match ac.save_current_session().await {
-                Ok(()) => {
-                    if notify {
-                        let _ = tx.send(UiEvent::SessionSaved { id: session_id }).await;
-                    }
-                }
-                Err(e) => {
-                    crate::tui::log_warn!("save failed: {e}");
-                    if notify {
-                        let _ = tx
-                            .send(UiEvent::SlashCommandFailed {
-                                message: format!("Failed to save session: {e}"),
-                            })
-                            .await;
-                    }
-                }
-            }
-        });
+        // #567：save 走事件流（ChatInputEvent::SaveSession），
+        // loop idle 分支执行 save 并通过 CommandResultText 回传。
+        // 不再调 ac.sync_current_messages / ac.save_current_session。
+        self.chat.push_input_event(sdk::ChatInputEvent::SaveSession);
+        if notify {
+            let tx = ui_tx.clone();
+            let id = self.session.session_id().to_string();
+            crate::tui::effect::spawn_guard::spawn_guarded("save_notify", async move {
+                let _ = tx.send(UiEvent::SessionSaved { id }).await;
+            });
+        }
     }
 
-    fn fetch_memory_list_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
-        let Some(ac) = self.agent_client.clone() else {
-            return;
-        };
-        let tx = ui_tx.clone();
-        crate::tui::effect::spawn_guard::spawn_guarded("fetch_memory_list", async move {
-            match ac.list_reminders().await {
-                Ok(reminders) => {
-                    let _ = tx.send(UiEvent::MemoryList(reminders)).await;
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(UiEvent::SlashCommandFailed {
-                            message: format!("获取 reminders 失败: {e}"),
-                        })
-                        .await;
-                }
-            }
-        });
+    fn fetch_memory_list_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
+        // #567：list_reminders 走事件流（ChatInputEvent::ListReminders）。
+        // runtime idle 分支查询，结果通过 ReminderList 事件回传。
+        self.chat
+            .push_input_event(sdk::ChatInputEvent::ListReminders);
     }
 
     fn run_hook_effect(&mut self, message: String, name: String) {
-        let Some(ac) = self.agent_client.clone() else {
-            return;
-        };
-        crate::tui::effect::spawn_guard::spawn_guarded("run_hook", async move {
-            let _ = ac.notify_hook(&message, &name).await;
-        });
+        // #567：notify_hook 删除——hook 是 runtime 内部行为，TUI 不参与。
+        // hook 触发由 runtime 在消息变更时自行执行。
+        let _ = (message, name);
     }
 
     fn read_clipboard_image_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
-        let Some(ac) = self.agent_client.clone() else {
-            return;
-        };
+        // #567 S10：read_clipboard_image 迁移到 TUI 本地
         let tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("clipboard_image", async move {
-            match ac.read_clipboard_image().await {
+            match crate::tui::render::input::clipboard::read_image().await {
                 Ok(img) => {
-                    let _ = tx.send(UiEvent::ClipboardImage(img)).await;
+                    use base64::Engine;
+                    let view = sdk::ClipboardImageView {
+                        base64: base64::engine::general_purpose::STANDARD.encode(&img.data),
+                        media_type: img.media_type,
+                        final_size: img.data.len(),
+                        display_path: None,
+                        width: None,
+                        height: None,
+                    };
+                    let _ = tx.send(UiEvent::ClipboardImage(view)).await;
                 }
                 Err(e) => crate::tui::log_warn!("clipboard read failed: {e}"),
             }
@@ -166,14 +142,21 @@ impl App {
     }
 
     fn process_image_file_effect(&mut self, path: String, ui_tx: &mpsc::Sender<UiEvent>) {
-        let Some(ac) = self.agent_client.clone() else {
-            return;
-        };
+        // #567 S10：process_image_file 迁移到 TUI 本地
         let tx = ui_tx.clone();
         crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
-            match ac.process_image_file(path).await {
+            match crate::tui::render::input::clipboard::process_image_file(&path) {
                 Ok(img) => {
-                    let _ = tx.send(UiEvent::ClipboardImage(img)).await;
+                    use base64::Engine;
+                    let view = sdk::ClipboardImageView {
+                        base64: base64::engine::general_purpose::STANDARD.encode(&img.data),
+                        media_type: img.media_type,
+                        final_size: img.data.len(),
+                        display_path: Some(path),
+                        width: None,
+                        height: None,
+                    };
+                    let _ = tx.send(UiEvent::ClipboardImage(view)).await;
                 }
                 Err(e) => crate::tui::log_warn!("image process failed: {e}"),
             }
@@ -193,57 +176,29 @@ impl App {
         }
     }
 
-    fn set_current_turn_effect(&mut self, turn: usize) {
-        if let Some(ref ac) = self.agent_client {
-            ac.set_current_turn(turn);
-        }
+    fn set_current_turn_effect(&mut self, _turn: usize) {
+        // #567：set_current_turn 删除——runtime loop 内部自维护 turn 计数器。
     }
 
     /// 执行 LLM reflection：克隆当前消息与 agent client，后台 spawn 调用 SDK，
     /// 结果经 UiEvent 回流到 update。前台发起时先推送 ReflectionStarted。
-    fn run_reflection_effect(&mut self, foreground: bool, ui_tx: &mpsc::Sender<UiEvent>) {
-        let Some(agent_client) = self.agent_client.clone() else {
-            return;
-        };
-        let messages = self.chat.messages.clone();
-        let tx = ui_tx.clone();
-        crate::tui::effect::spawn_guard::spawn_guarded("reflection", async move {
-            if foreground {
-                let _ = tx.send(UiEvent::ReflectionStarted).await;
-            }
-            match agent_client.run_reflection(messages).await {
-                Ok(output) => {
-                    let _ = tx.send(UiEvent::ReflectionUsage).await;
-                    let _ = tx.send(UiEvent::ReflectionDone { output }).await;
-                }
-                Err(error) => {
-                    let _ = tx
-                        .send(UiEvent::Error(format!("Reflection LLM 调用失败: {error}")))
-                        .await;
-                }
-            }
-        });
+    fn run_reflection_effect(&mut self, foreground: bool, _ui_tx: &mpsc::Sender<UiEvent>) {
+        // #567：run_reflection 走事件流（ChatInputEvent::RunReflection）。
+        // runtime idle 分支执行 reflection，结果通过 ReflectionResult 事件回传。
+        let _ = foreground;
+        self.chat
+            .push_input_event(sdk::ChatInputEvent::RunReflection);
     }
 
-    /// 将 reflection 输出应用到 SDK memory 能力（后台 spawn）。
     fn apply_reflection_effect(
         &mut self,
         output: sdk::ReflectionOutputView,
-        ui_tx: &mpsc::Sender<UiEvent>,
+        _ui_tx: &mpsc::Sender<UiEvent>,
     ) {
-        let Some(agent_client) = self.agent_client.clone() else {
-            return;
-        };
-        let tx = ui_tx.clone();
-        crate::tui::effect::spawn_guard::spawn_guarded("apply_reflection", async move {
-            let result = agent_client
-                .apply_reflection(output.clone())
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx
-                .send(UiEvent::ReflectionApplyDone { output, result })
-                .await;
-        });
+        // #567：apply_reflection 走事件流（ChatInputEvent::ApplyReflection）。
+        // runtime idle 分支执行 apply，结果通过 CommandResultText 事件回传。
+        self.chat
+            .push_input_event(sdk::ChatInputEvent::ApplyReflection { output });
     }
 
     /// 启动时后台检查版本更新（非阻塞）。
@@ -306,23 +261,11 @@ impl App {
         });
     }
 
-    fn fetch_reminder_recap_effect(&mut self, ui_tx: &mpsc::Sender<UiEvent>) {
-        let Some(ac) = self.agent_client.clone() else {
-            return;
-        };
-        let tx = ui_tx.clone();
-        crate::tui::effect::spawn_guard::spawn_guarded("fetch_reminder_recap", async move {
-            match ac.list_reminders().await {
-                Ok(reminders) => {
-                    if let Some(line) = sdk::ReminderView::recap_line(&reminders) {
-                        let _ = tx.send(UiEvent::ReminderRecap(line)).await;
-                    }
-                }
-                Err(e) => {
-                    crate::tui::log_warn!("fetch reminder recap failed: {e}")
-                }
-            }
-        });
+    fn fetch_reminder_recap_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
+        // #567：list_reminders 走事件流。reminder recap 由 ReminderList 事件回传后处理。
+        // 暂时发 ListReminders 事件，recap 在 UiEvent 处理中生成。
+        self.chat
+            .push_input_event(sdk::ChatInputEvent::ListReminders);
     }
 }
 
