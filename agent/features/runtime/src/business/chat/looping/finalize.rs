@@ -156,7 +156,19 @@ async fn stop_hook_feedback(
     session_id: &str,
     language: &str,
 ) -> Option<String> {
+    log::info!(target: LOG_TARGET,
+        "[stop_hook_debug] session={} evaluating {} hook result(s): {:?}",
+        session_id,
+        hook_results.len(),
+        hook_results.iter().map(|(entry, result, _)| {
+            format!("cmd={} blocked={} error={:?}", entry.command, result.blocked, result.error)
+        }).collect::<Vec<_>>()
+    );
     let (entry, result, json) = stop_hook_blocking_result(hook_results)?;
+    log::info!(target: LOG_TARGET,
+        "[stop_hook_debug] session={} BLOCKING hook cmd={} error={:?} output_len={}",
+        session_id, entry.command, result.error, result.output.len()
+    );
     let details = hook_feedback_details(result, json, session_id, &entry.command, language).await;
     let template = match language {
         "zh" => "Stop hook 阻止了停止。你现在还不能结束本轮处理。\n你 MUST 先满足下面 Stop hook 的要求，然后才能再次尝试停止。\n命令：{cmd}\n{details}",
@@ -351,6 +363,10 @@ pub(crate) async fn stop_hook_block_limit_reached<S>(
 where
     S: ChatEventSink,
 {
+    log::info!(target: LOG_TARGET,
+        "[stop_hook_debug] block_count={}/{} limit_reached={}",
+        block_count, MAX_STOP_HOOK_BLOCKS, block_count > MAX_STOP_HOOK_BLOCKS
+    );
     if block_count > MAX_STOP_HOOK_BLOCKS {
         sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
             "[stop hook blocked {MAX_STOP_HOOK_BLOCKS} times in a row; \

@@ -1545,7 +1545,7 @@ where
                         model: client.model_name().to_string(),
                     };
                     log_agent_outcome(&outcome, &session_id);
-                    if let Some(feedback) = run_stop_hook_before_finish(
+                    let stop_feedback = run_stop_hook_before_finish(
                         &outcome,
                         &sink,
                         &hook_ui,
@@ -1554,8 +1554,14 @@ where
                         &language,
                         &cwd,
                     )
-                    .await
-                    {
+                    .await;
+                    // [loop_debug] 关键分叉：Stop hook 放行 (None) 还是阻断 (Some)。
+                    log::info!(target: crate::LOG_TARGET,
+                        "[loop_debug] turn {} completed → stop_hook {}",
+                        turn_count,
+                        if stop_feedback.is_some() { "BLOCKED (will inject reminder + continue)" } else { "PASSED (→ Idle)" }
+                    );
+                    if let Some(feedback) = stop_feedback {
                         stop_hook_block_count += 1;
                         if stop_hook_block_limit_reached(
                             stop_hook_block_count,
@@ -1593,11 +1599,18 @@ where
                     )
                     .await;
                     if gate.decision == GateDecision::ContinueNextTurn {
+                        // [loop_debug] stop hook 放行后，gate 又收到新输入 → 继续跑而非进 Idle。
+                        log::info!(target: crate::LOG_TARGET,
+                            "[loop_debug] post-stophook gate → ContinueNextTurn (appended={}) — 未进 Idle",
+                            gate.appended_user_messages
+                        );
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
                     }
                     // 回合完成、stop hook 放行：发出 Done，但不退出常驻 loop。
                     // 进入空闲态阻塞等待下一条输入；通道关闭才 shutdown 退出。
+                    log::info!(target: crate::LOG_TARGET,
+                        "[loop_debug] turn {} → entering Idle (等待用户输入)", turn_count);
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
                     loop_fsm.transition(ChatLoopTransition::Idle);
                     loop_fsm.assert_state(
@@ -2617,10 +2630,20 @@ async fn await_idle_input<I: InputEventDrainPort>(
 ) -> IdleResult {
     match input_events.recv_next_input().await {
         Some(event) => {
+            // [loop_debug] 空闲态被唤醒：记录到底是什么事件把 loop 从 idle 拉起来。
+            // 若用户没输入却出现此日志，说明有事件被送进 input 通道（关键线索）。
+            log::info!(
+                target: LOG_TARGET,
+                "[loop_debug] await_idle_input WOKEN by event kind={}",
+                super::event_kind_name(&event)
+            );
             pending.push(event);
             IdleResult::Resumed
         }
-        None => IdleResult::Shutdown,
+        None => {
+            log::info!(target: LOG_TARGET, "[loop_debug] await_idle_input channel closed → Shutdown");
+            IdleResult::Shutdown
+        }
     }
 }
 
