@@ -1166,6 +1166,13 @@ where
                         }
                     }
                     loop_fsm.transition(ChatLoopTransition::TryStop);
+                    // #632: busy 截断点先 drain queued_buffer（busy select! 期间排队的输入）。
+                    // drain_and_apply_gate 不消费 queued_buffer，若不在此处 drain，
+                    // 排队消息会被遗漏直到 idle 阶段——但 gate 判定无新消息后直接进 Idle，
+                    // idle 先 await 再 drain，导致排队消息一直卡住。
+                    while let Some(event) = queued_buffer.pop_front() {
+                        pending_input.push(event);
+                    }
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
                         &mut pending_input,
@@ -1254,6 +1261,10 @@ where
                         loop_fsm
                             .assert_state(ChatLoopState::Running, "stop hook blocked resumes loop");
                         continue;
+                    }
+                    // #632: 同 first branch，stop hook 放行后也需 drain queued_buffer。
+                    while let Some(event) = queued_buffer.pop_front() {
+                        pending_input.push(event);
                     }
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
