@@ -420,7 +420,29 @@ where
             PendingCommand::ResumeSession { id } => {
                 match crate::business::session::load_session(&id).await {
                     Ok(snapshot) => {
-                        messages = snapshot.messages;
+                        // 统一通过 SessionRestore 提取活跃链运行时状态（与 trait_session::load_session_impl 共享）
+                        // 修复 #636：旧实现读 snapshot.messages（PR #643 后永远空），导致 resume 看不到历史
+                        let restore =
+                            crate::business::session::SessionRestore::from_session(&snapshot);
+                        if restore.trimmed > 0 || restore.repaired > 0 {
+                            log::info!(
+                                target: "aemeath:agent:runtime",
+                                "resume {}: trimmed={} repaired={}",
+                                id,
+                                restore.trimmed,
+                                restore.repaired
+                            );
+                        }
+                        messages = restore.active_messages;
+                        active_summary = restore.active_summary.clone();
+                        if let Ok(mut guard) = active_summary_arc.lock() {
+                            *guard = restore.active_summary;
+                        }
+                        if let Ok(mut guard) = frozen_chats.lock() {
+                            *guard = restore.frozen_chats;
+                        }
+                        // TODO #636: SessionResumed.created_at 当前为 u64，
+                        // 需从 restore.created_at (ISO 8601) 转 unix timestamp；暂保持 0。
                         let _ = sink
                             .send_event(RuntimeStreamEvent::SessionResumed {
                                 messages: messages.clone(),
@@ -428,6 +450,15 @@ where
                                 created_at: 0u64,
                             })
                             .await;
+                        if restore.trimmed > 0 || restore.repaired > 0 {
+                            log::info!(
+                                target: "aemeath:agent:runtime",
+                                "resume {}: trimmed={} repaired={}",
+                                id,
+                                restore.trimmed,
+                                restore.repaired
+                            );
+                        }
                     }
                     Err(e) => {
                         use crate::business::session::SessionLoadError;

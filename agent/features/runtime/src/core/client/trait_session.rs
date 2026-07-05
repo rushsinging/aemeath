@@ -91,49 +91,26 @@ pub(super) async fn load_session_impl(
 ) -> Result<SessionSnapshot, SdkError> {
     match crate::business::session::load_session(id).await {
         Ok(session) => {
-            // 从 chat 链提取活跃链（最后一个 Compact 段到末端）
-            let chain = crate::business::session::ChatChain::from_chats(&session.chats);
-            let summary = chain.active_summary().map(|s| s.to_string());
-
-            // 活跃链起点（旧链在此索引之前，冻结保留）
-            let active_start = session
-                .chats
-                .iter()
-                .rposition(|s| s.kind == crate::business::session::SegmentKind::Compact)
-                .or_else(|| session.chats.iter().position(|s| s.parent_id.is_none()))
-                .unwrap_or(0);
-            let frozen: Vec<crate::business::session::ChatSegment> =
-                session.chats[..active_start].to_vec();
+            // 统一通过 SessionRestore 提取活跃链运行时状态（与 loop_runner::ResumeSession 共享）
+            let restore = crate::business::session::SessionRestore::from_session(&session);
 
             // 写回 RuntimeHandle 状态
             if let Ok(mut guard) = me.inner.active_summary.lock() {
-                *guard = summary;
+                *guard = restore.active_summary;
             }
             if let Ok(mut guard) = me.inner.frozen_chats.lock() {
-                *guard = frozen;
+                *guard = restore.frozen_chats;
             }
             // 标记 resume：首次 chat() 时 loop-top idle 门据此跳过 pending user turn（#503）
             me.inner
                 .skip_first_pending_turn
                 .store(true, std::sync::atomic::Ordering::Relaxed);
 
-            let mut messages = chain.messages();
-            let trimmed = {
-                let before = messages.len();
-                crate::business::chat::message_integrity::sanitize_messages(&mut messages);
-                before.saturating_sub(messages.len())
-            };
-            let repaired = {
-                let integrity =
-                    crate::business::chat::message_integrity::check_message_integrity(&messages);
-                if integrity.has_issues() {
-                    crate::business::chat::message_integrity::deep_clean_messages(&mut messages)
-                } else {
-                    0
-                }
-            };
-            let sdk_messages: Vec<sdk::ChatMessage> =
-                messages.into_iter().map(mapping::message_to_sdk).collect();
+            let sdk_messages: Vec<sdk::ChatMessage> = restore
+                .active_messages
+                .into_iter()
+                .map(mapping::message_to_sdk)
+                .collect();
             let count = sdk_messages.len();
             let total_tokens: u64 = sdk_messages
                 .iter()
@@ -155,9 +132,9 @@ pub(super) async fn load_session_impl(
                 message_count: count,
                 total_tokens,
                 messages: sdk_messages,
-                created_at: Some(session.created_at),
-                trimmed,
-                repaired,
+                created_at: Some(restore.created_at),
+                trimmed: restore.trimmed,
+                repaired: restore.repaired,
                 workspace: workspace_sdk,
                 tasks: session
                     .tasks
