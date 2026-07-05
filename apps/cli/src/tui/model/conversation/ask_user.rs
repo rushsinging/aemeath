@@ -19,6 +19,8 @@ pub struct AskUserSnapshot {
     pub cursor: usize,
     pub selected: Vec<bool>,
     pub chat_input_active: bool,
+    /// Type something 输入框的光标位置（byte offset）。
+    pub chat_input_cursor: usize,
     pub confirm_cursor: usize,
     /// 当前激活问题的 LLM 选项数。
     pub llm_option_count: usize,
@@ -41,6 +43,7 @@ impl ConversationModel {
                 cursor,
                 selected,
                 chat_input_active,
+                chat_input_cursor,
                 confirm_cursor,
                 confirmed,
                 ..
@@ -53,6 +56,7 @@ impl ConversationModel {
                     cursor: *cursor,
                     selected: selected.clone(),
                     chat_input_active: *chat_input_active,
+                    chat_input_cursor: *chat_input_cursor,
                     confirm_cursor: *confirm_cursor,
                     llm_option_count: slot.map(|s| s.llm_option_count).unwrap_or(0),
                     options_count: slot.map(|s| s.options.len()).unwrap_or(0),
@@ -83,6 +87,7 @@ impl ConversationModel {
             selected: vec![false; first_total],
             chat_input_active: false,
             chat_input_text: String::new(),
+            chat_input_cursor: 0,
             confirm_cursor: n,
             confirmed: false,
         });
@@ -227,33 +232,147 @@ impl ConversationModel {
         Vec::new()
     }
 
-    /// 追加字符到 Type something 输入框。
+    /// 在 Type something 输入框当前光标位置插入字符。
     pub(super) fn append_ask_user_chat_char(&mut self, ch: char) -> Vec<ConversationChange> {
         if let Some(OutputTimelineItem::AskUserBatch {
             chat_input_active,
             chat_input_text,
+            chat_input_cursor,
             ..
         }) = self.ask_user_timeline_item_mut()
         {
             if *chat_input_active {
-                chat_input_text.push(ch);
+                let pos = *chat_input_cursor;
+                if pos <= chat_input_text.len() {
+                    chat_input_text.insert(pos, ch);
+                    *chat_input_cursor = pos + ch.len_utf8();
+                    return self.ask_user_updated();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// 删除 Type something 输入框光标前一个字符。
+    pub(super) fn delete_ask_user_chat_char(&mut self) -> Vec<ConversationChange> {
+        if let Some(OutputTimelineItem::AskUserBatch {
+            chat_input_active,
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        }) = self.ask_user_timeline_item_mut()
+        {
+            if *chat_input_active && *chat_input_cursor > 0 {
+                let pos = *chat_input_cursor;
+                // 找到光标前一个 char 的起始 byte 位置
+                let prev_start = chat_input_text
+                    .get(..pos)
+                    .unwrap_or("")
+                    .char_indices()
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                chat_input_text.replace_range(prev_start..pos, "");
+                *chat_input_cursor = prev_start;
                 return self.ask_user_updated();
             }
         }
         Vec::new()
     }
 
-    /// 删除 Type something 输入框末尾字符。
-    pub(super) fn delete_ask_user_chat_char(&mut self) -> Vec<ConversationChange> {
+    /// 移动 Type something 输入框光标，delta 为 char 数偏移（负数向左、正数向右）。
+    pub(super) fn move_ask_user_chat_cursor(&mut self, delta: isize) -> Vec<ConversationChange> {
         if let Some(OutputTimelineItem::AskUserBatch {
             chat_input_active,
             chat_input_text,
+            chat_input_cursor,
             ..
         }) = self.ask_user_timeline_item_mut()
         {
             if *chat_input_active {
-                chat_input_text.pop();
-                return self.ask_user_updated();
+                let pos = *chat_input_cursor;
+                let text_len = chat_input_text.len();
+                let target = if delta < 0 {
+                    // 向左回退 |delta| 个 char
+                    let back = (-delta) as usize;
+                    let bytes_before = chat_input_text.get(..pos).unwrap_or("");
+                    let new_byte_pos = bytes_before
+                        .char_indices()
+                        .rev()
+                        .nth(back.saturating_sub(1))
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    new_byte_pos
+                } else if delta > 0 {
+                    // 向右前进 delta 个 char
+                    let bytes_after = chat_input_text.get(pos..).unwrap_or("");
+                    let new_byte_pos = bytes_after
+                        .char_indices()
+                        .nth(delta as usize)
+                        .map(|(i, _)| pos + i)
+                        .unwrap_or(text_len);
+                    new_byte_pos
+                } else {
+                    pos
+                };
+                if target != *chat_input_cursor {
+                    *chat_input_cursor = target;
+                    return self.ask_user_updated();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// 将光标移到行首或行尾。
+    pub(super) fn move_ask_user_chat_cursor_end(
+        &mut self,
+        to_end: bool,
+    ) -> Vec<ConversationChange> {
+        if let Some(OutputTimelineItem::AskUserBatch {
+            chat_input_active,
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        }) = self.ask_user_timeline_item_mut()
+        {
+            if *chat_input_active {
+                let target = if to_end { chat_input_text.len() } else { 0 };
+                if target != *chat_input_cursor {
+                    *chat_input_cursor = target;
+                    return self.ask_user_updated();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// 删除光标前一个单词（按 char 边界 + 空白）。
+    pub(super) fn delete_ask_user_chat_word(&mut self) -> Vec<ConversationChange> {
+        if let Some(OutputTimelineItem::AskUserBatch {
+            chat_input_active,
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        }) = self.ask_user_timeline_item_mut()
+        {
+            if *chat_input_active && *chat_input_cursor > 0 {
+                let pos = *chat_input_cursor;
+                let bytes = chat_input_text.as_bytes();
+                let mut start = pos;
+                // 跳过紧邻光标的空白
+                while start > 0 && bytes[start - 1].is_ascii_whitespace() {
+                    start -= 1;
+                }
+                // 回退一个非空白词
+                while start > 0 && !bytes[start - 1].is_ascii_whitespace() {
+                    start -= 1;
+                }
+                if start < pos {
+                    chat_input_text.replace_range(start..pos, "");
+                    *chat_input_cursor = start;
+                    return self.ask_user_updated();
+                }
             }
         }
         Vec::new()
@@ -541,5 +660,131 @@ mod tests {
             b,
             crate::tui::model::output_timeline::OutputTimelineItem::AskUserBatch { .. }
         )));
+    }
+
+    // ── chat_input cursor 回归测试 ──
+
+    fn enable_chat_input(model: &mut ConversationModel) {
+        model.apply(SetAskUserChatInput { active: true });
+    }
+
+    #[test]
+    fn test_chat_input_cursor_insert_and_backspace_at_cursor() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+        enable_chat_input(&mut model);
+
+        // 输入 "abc"
+        model.apply(AppendAskUserChatChar { ch: 'a' });
+        model.apply(AppendAskUserChatChar { ch: 'b' });
+        model.apply(AppendAskUserChatChar { ch: 'c' });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_text, "abc");
+            assert_eq!(*chat_input_cursor, 3);
+        }
+
+        // 左移到 1，再插入 X 应该是 aXbc
+        model.apply(MoveAskUserChatCursor { delta: -2 });
+        model.apply(AppendAskUserChatChar { ch: 'X' });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_text, "aXbc");
+            assert_eq!(*chat_input_cursor, 2);
+        }
+
+        // 在 cursor=2 位置 backspace 删除 X
+        model.apply(DeleteAskUserChatChar);
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_text, "abc");
+            assert_eq!(*chat_input_cursor, 1);
+        }
+    }
+
+    #[test]
+    fn test_chat_input_cursor_move_home_end_word_delete() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+        enable_chat_input(&mut model);
+
+        // 输入 "hello world"
+        for ch in "hello world".chars() {
+            model.apply(AppendAskUserChatChar { ch });
+        }
+        // Home (cursor -> 0)
+        model.apply(MoveAskUserChatCursorEnd { to_end: false });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_cursor, ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_cursor, 0);
+        }
+        // Right 2 次
+        model.apply(MoveAskUserChatCursor { delta: 1 });
+        model.apply(MoveAskUserChatCursor { delta: 1 });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_cursor, ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_cursor, 2);
+        }
+        // End (cursor -> 11)
+        model.apply(MoveAskUserChatCursorEnd { to_end: true });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_cursor, ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_cursor, "hello world".len());
+        }
+        // Ctrl+W 删除 "world"
+        model.apply(DeleteAskUserChatWord);
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_text,
+            chat_input_cursor,
+            ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_text, "hello ");
+            assert_eq!(*chat_input_cursor, "hello ".len());
+        }
+    }
+
+    #[test]
+    fn test_chat_input_cursor_unicode_char_boundary() {
+        let mut model = ConversationModel::default();
+        show_batch(&mut model, vec![make_slot("q1", "问题1", &[])]);
+        enable_chat_input(&mut model);
+        // 输入中文 "你好"
+        model.apply(AppendAskUserChatChar { ch: '你' });
+        model.apply(AppendAskUserChatChar { ch: '好' });
+        // 左移一个 char (cursor 从 6 -> 3)
+        model.apply(MoveAskUserChatCursor { delta: -1 });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_cursor, ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_cursor, 3); // '你' 占 3 字节
+        }
+        // 再右移一个 char (cursor 从 3 -> 6)
+        model.apply(MoveAskUserChatCursor { delta: 1 });
+        if let OutputTimelineItem::AskUserBatch {
+            chat_input_cursor, ..
+        } = timeline_item(&model)
+        {
+            assert_eq!(*chat_input_cursor, 6);
+        }
     }
 }

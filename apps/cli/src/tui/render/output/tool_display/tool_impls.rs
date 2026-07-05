@@ -734,14 +734,10 @@ impl ToolDisplay for AskUserQuestionDisplay {
     fn name(&self) -> &str {
         "AskUserQuestion"
     }
-    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let question = str_arg(input, "question", "");
-        if question.is_empty() {
-            self.display_name().to_string()
-        } else {
-            let preview = truncate_ellipsis(question, 60usize);
-            format!("{} {preview}", self.display_name())
-        }
+    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        // Issue #545: 不再把 question 截断拼进 header，避免长问题信息丢失。
+        // 完整 question 由交互区域（blocks/ask_user.rs）按段落渲染。
+        self.display_name().to_string()
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -757,15 +753,15 @@ impl ToolDisplay for AskUserQuestionDisplay {
     /// suffix 形如 ` (N options)`。
     fn format_header_line_with_result(
         &self,
-        input: &serde_json::Value,
+        _input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let question = input.get("question").and_then(|v| v.as_str()).unwrap_or("");
+        // Issue #545: header 只显示 display_name + result suffix，不再带 question 预览。
         let n = typed_data::<sdk::tool_result::AskUserQuestionResult>(result_payload)
             .map(|r| r.options.len() as u64);
         let suffix = n.map(|c| format!(" ({c} options)")).unwrap_or_default();
-        build_header_line(self.display_name(), question, &suffix)
+        build_header_line(self.display_name(), "", &suffix)
     }
 }
 inventory::submit!(ToolDisplayEntry {
@@ -854,5 +850,47 @@ mod tests {
             Some(json!({ "task_id": "", "output": "done" })),
         );
         assert_eq!(text, "Agent do something");
+    }
+
+    // ── AskUserQuestionDisplay::format_header 回归测试 (#545) ──
+
+    /// Issue #545: header 不应包含 question 截断预览
+    #[test]
+    fn ask_user_header_never_includes_question_preview() {
+        let display = super::AskUserQuestionDisplay;
+        let long_question =
+            "这是一个非常非常非常长的问题，包含很多很多很多很多很多很多很多很多很多很多很多很多很多很多细节。";
+        let input =
+            json!({ "question": long_question, "options": [{"title": "a"}, {"title": "b"}] });
+        let header = display.format_header(&input, None);
+        assert_eq!(
+            header, "Ask",
+            "header 应只显示 display_name，不包含 question 截断预览"
+        );
+    }
+
+    /// Issue #545: format_header_line_with_result 也不应将 question 当 path 截断
+    #[test]
+    fn ask_user_header_line_never_includes_question_preview() {
+        let display = super::AskUserQuestionDisplay;
+        let long_question =
+            "这是一个非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常长的多段落问题。";
+        let input =
+            json!({ "question": long_question, "options": [{"title": "a"}, {"title": "b"}] });
+        let result = serde_json::json!({
+            "options": [{"title": "a", "description": ""}, {"title": "b", "description": ""}],
+            "free_input": null,
+        });
+        let payload = ToolResultPayload::new(String::new(), result, false, 0);
+        let line = display.format_header_line_with_result(&input, Some(&payload), None);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            !text.contains("非常"),
+            "header line 不应包含 question 内容: {text}"
+        );
+        assert!(
+            text.starts_with("Ask"),
+            "header line 应以 display_name 开头: {text}"
+        );
     }
 }

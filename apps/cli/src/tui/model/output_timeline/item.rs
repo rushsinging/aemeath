@@ -90,6 +90,8 @@ pub enum OutputTimelineItem {
         selected: Vec<bool>,
         chat_input_active: bool,
         chat_input_text: String,
+        /// Type something 输入框的光标位置（byte offset，0..=text.len()）。
+        chat_input_cursor: usize,
         confirm_cursor: usize,
         confirmed: bool,
     },

@@ -276,6 +276,24 @@ impl ConversationUpdate for DeleteAskUserChatChar {
     }
 }
 
+impl ConversationUpdate for MoveAskUserChatCursor {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.move_ask_user_chat_cursor(self.delta)
+    }
+}
+
+impl ConversationUpdate for MoveAskUserChatCursorEnd {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.move_ask_user_chat_cursor_end(self.to_end)
+    }
+}
+
+impl ConversationUpdate for DeleteAskUserChatWord {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.delete_ask_user_chat_word()
+    }
+}
+
 impl ConversationUpdate for NavigateAskUserTo {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.navigate_ask_user_to(self.index)
@@ -519,6 +537,9 @@ impl ConversationUpdate for ConversationIntent {
             Self::SetAskUserChatInput(s) => s.update(model),
             Self::AppendAskUserChatChar(s) => s.update(model),
             Self::DeleteAskUserChatChar(s) => s.update(model),
+            Self::MoveAskUserChatCursor(s) => s.update(model),
+            Self::MoveAskUserChatCursorEnd(s) => s.update(model),
+            Self::DeleteAskUserChatWord(s) => s.update(model),
             Self::NavigateAskUserTo(s) => s.update(model),
             Self::SetAskUserConfirmCursor(s) => s.update(model),
             Self::ConfirmAskUserBatch(s) => s.update(model),
