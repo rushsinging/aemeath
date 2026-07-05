@@ -119,6 +119,8 @@ pub enum ConversationBlock {
         chat_input_active: bool,
         /// Type something 输入框文本。
         chat_input_text: String,
+        /// Type something 输入框的光标位置（byte offset）。
+        chat_input_cursor: usize,
         /// 确认页导航光标。
         confirm_cursor: usize,
         /// 用户已确认提交（block 进入终态）。

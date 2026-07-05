@@ -331,7 +331,40 @@ impl App {
             KeyCode::Esc => {
                 self.set_ask_user_chat_input(false);
             }
-            KeyCode::Backspace => {
+            // Ctrl+ 修饰键优先匹配
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::DeleteAskUserChatWord(
+                        DeleteAskUserChatWord,
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
+                        MoveAskUserChatCursorEnd { to_end: false },
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
+                        MoveAskUserChatCursorEnd { to_end: true },
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::DeleteAskUserChatWord(
+                        DeleteAskUserChatWord,
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Backspace if key.modifiers == KeyModifiers::NONE => {
                 self.model
                     .conversation
                     .apply(ConversationIntent::DeleteAskUserChatChar(
@@ -339,11 +372,43 @@ impl App {
                     ));
                 self.mark_output_dirty();
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
                 self.model
                     .conversation
                     .apply(ConversationIntent::AppendAskUserChatChar(
                         AppendAskUserChatChar { ch: c },
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::MoveAskUserChatCursor(
+                        MoveAskUserChatCursor { delta: -1 },
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::MoveAskUserChatCursor(
+                        MoveAskUserChatCursor { delta: 1 },
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::Home if key.modifiers == KeyModifiers::NONE => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
+                        MoveAskUserChatCursorEnd { to_end: false },
+                    ));
+                self.mark_output_dirty();
+            }
+            KeyCode::End if key.modifiers == KeyModifiers::NONE => {
+                self.model
+                    .conversation
+                    .apply(ConversationIntent::MoveAskUserChatCursorEnd(
+                        MoveAskUserChatCursorEnd { to_end: true },
                     ));
                 self.mark_output_dirty();
             }

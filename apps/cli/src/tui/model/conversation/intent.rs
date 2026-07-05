@@ -170,6 +170,23 @@ pub struct AppendAskUserChatChar {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeleteAskUserChatChar;
 
+/// 移动 Type something 输入框光标。
+/// delta 为 char 数偏移：负数向左、正数向右。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MoveAskUserChatCursor {
+    pub delta: isize,
+}
+
+/// 将 Type something 输入框光标移到行首（to_end=false）或行尾（to_end=true）。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MoveAskUserChatCursorEnd {
+    pub to_end: bool,
+}
+
+/// 删除 Type something 输入框光标前一个单词（Ctrl+W）。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeleteAskUserChatWord;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NavigateAskUserTo {
     pub index: usize,
@@ -310,6 +327,9 @@ pub enum ConversationIntent {
     SetAskUserChatInput(SetAskUserChatInput),
     AppendAskUserChatChar(AppendAskUserChatChar),
     DeleteAskUserChatChar(DeleteAskUserChatChar),
+    MoveAskUserChatCursor(MoveAskUserChatCursor),
+    MoveAskUserChatCursorEnd(MoveAskUserChatCursorEnd),
+    DeleteAskUserChatWord(DeleteAskUserChatWord),
     NavigateAskUserTo(NavigateAskUserTo),
     SetAskUserConfirmCursor(SetAskUserConfirmCursor),
     ConfirmAskUserBatch(ConfirmAskUserBatch),

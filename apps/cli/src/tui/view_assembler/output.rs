@@ -228,6 +228,7 @@ impl OutputViewAssembler {
                     selected,
                     chat_input_active,
                     chat_input_text,
+                    chat_input_cursor,
                     confirm_cursor,
                     confirmed,
                 } => {
@@ -259,6 +260,7 @@ impl OutputViewAssembler {
                             selected: selected.clone(),
                             chat_input_active: *chat_input_active,
                             chat_input_text: chat_input_text.clone(),
+                            chat_input_cursor: *chat_input_cursor,
                             confirm_cursor: *confirm_cursor,
                             confirmed: *confirmed,
                         }),

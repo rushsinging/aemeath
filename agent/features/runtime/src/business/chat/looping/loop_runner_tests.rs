@@ -1582,6 +1582,218 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
 }
 
 #[tokio::test]
+async fn test_idle_pending_command_does_not_run_spurious_turn() {
+    // 回归 #628：idle 收到的 PendingCommand（SaveSession / ListReminders 等纯查询或动作命令）
+    // 处理后应回 idle 等下一条输入，而不是掉进 execute_tool_round 跑一轮幽灵 LLM turn。
+    // bug 表现：命令处理完无 continue，掉进 turn_count += 1 / StartTurn，用陈旧 tool_calls 跑一整轮。
+    //
+    // 与 test_idle_control_command_does_not_run_spurious_turn 的区别：前者走 ControlCommand 路径
+    // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::SaveSession → PendingCommand 路径，
+    // 命中 loop_runner.rs 中 6 处漏 continue 的 match 臂。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 完成（第 1 个 DoneWithDuration）→ loop 已进入空闲态阻塞于 await_idle_input。
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 空闲期投递 SaveSession（PendingCommand 路径）。
+        let _ = input_tx.send(sdk::ChatInputEvent::SaveSession);
+        // 给 loop 充分调度机会去（错误地）消费命令、退出空闲、跑陈旧历史空回合。
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        // 命令处理后 LLM 调用数仍应为 1（保持空闲，无空回合）。
+        assert_eq!(
+            driver_provider.calls(),
+            vec!["first".to_string()],
+            "空闲期单独 PendingCommand::SaveSession 不得触发 LLM 调用（应仍只有 first 一次）"
+        );
+
+        // 现在投递真实用户消息，应恢复运行并完成回合 2（第 2 次 LLM 调用）。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            provider.clone(),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-idle-pending-save".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: Arc::new(std::sync::Mutex::new(None)),
+        reasoning_graph: None,
+        skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
+        language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    assert_eq!(
+        provider.calls(),
+        vec!["first".to_string(), "second".to_string()],
+        "SaveSession 命令不得引发陈旧历史空回合: {:?}",
+        sink.events()
+    );
+}
+
+#[tokio::test]
+async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
+    // 回归 #628：idle 收到 ChatInputEvent::ListReminders（PendingCommand 路径）应直接回 idle，
+    // 不应掉进 turn 跑一轮幽灵 LLM 调用。
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    let provider = RecordingProvider::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("first", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver_provider = provider.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            let done_count = driver_sink
+                .events()
+                .iter()
+                .filter(|event| event.as_str() == "DoneWithDuration")
+                .count();
+            if done_count >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        let _ = input_tx.send(sdk::ChatInputEvent::ListReminders);
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            driver_provider.calls(),
+            vec!["first".to_string()],
+            "空闲期单独 PendingCommand::ListReminders 不得触发 LLM 调用"
+        );
+
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_provider.calls().len() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            provider.clone(),
+        ))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        messages: Vec::new(),
+        context_size: 200_000,
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-idle-pending-list-reminders".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: Arc::new(std::sync::Mutex::new(None)),
+        reasoning_graph: None,
+        skip_first_pending_turn: false,
+        build_switched_client: Arc::new(test_build_switched_client),
+        save_session: test_save_session(),
+        language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回，而非 hang");
+    driver.await.unwrap();
+
+    assert_eq!(
+        provider.calls(),
+        vec!["first".to_string(), "second".to_string()],
+        "ListReminders 命令不得引发陈旧历史空回合: {:?}",
+        sink.events()
+    );
+}
+
+#[tokio::test]
 async fn test_stop_hook_block_limit_stops_loop() {
     // #372 缺陷 3：Stop hook 连续阻断超过 MAX_STOP_HOOK_BLOCKS(5) 强制停止
     let sink = RecordingSink::default();
