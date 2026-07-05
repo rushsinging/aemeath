@@ -46,43 +46,26 @@ impl App {
     ///
     /// 单一真相：task 行真相归 `RuntimeModel.task_status.lines`，经 `UpdateTaskLines`
     /// intent 写入。widget 镜像由每帧 `refresh_live_status_from_model` 统一写回
-    /// （spinner + task 同源），此处只更新 Model，不直写 widget。
+    /// #567：task_status 轮询已删除——runtime 通过 TasksSnapshot 事件推送。
+    /// TUI 收到事件后直接更新 model，不再主动拉取。
     pub(crate) async fn update_task_status(&mut self, _is_processing: bool) {
-        let lines = match &self.agent_client {
-            None => Vec::new(),
-            Some(agent_client) => match agent_client.task_status().await {
-                Ok(view) => view.lines,
-                Err(e) => {
-                    crate::tui::log_warn!("failed to fetch SDK task status: {e}");
-                    return;
-                }
-            },
-        };
-        self.model.conversation.apply(UpdateTaskLines(lines));
+        // noop：等待 TasksSnapshot 事件
     }
 
     pub(crate) async fn update_project_context(&mut self) {
-        let project = match &self.agent_client {
-            None => return,
-            Some(agent_client) => agent_client.project(),
-        };
-        let path_base = empty_to_none(project.path_base);
-        let workspace_root = empty_to_none(project.workspace_root);
-        let kind = match workspace_root.as_deref() {
-            Some(root) if self.session.cwd.as_path() != std::path::Path::new(root) => {
-                WorktreeKind::LinkedWorktree
-            }
-            Some(_) => WorktreeKind::MainCheckout,
-            None => WorktreeKind::Unknown,
-        };
+        // #567：project() 已从 trait 删除，workspace_root 从 TuiLaunchContext 获取。
+        // 项目上下文通过 ProjectInfo 事件推送（后续 PR 实现）。
+        // 暂时从 session.cwd 获取。
+        let workspace_root = self.session.cwd.as_path().to_path_buf();
+        let kind = WorktreeKind::MainCheckout;
         self.model.conversation.apply(UpdateWorkspace {
-            cwd: project.cwd,
+            cwd: self.session.cwd.to_string_lossy().to_string(),
             worktree: None,
         });
         self.model.conversation.apply(WorkspaceSnapshotReceived {
-            path_base,
-            workspace_root,
-            branch: project.git_branch,
+            path_base: None,
+            workspace_root: Some(workspace_root.to_string_lossy().to_string()),
+            branch: None,
             kind,
         });
     }

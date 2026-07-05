@@ -8,16 +8,19 @@ impl crate::tui::app::App {
         if text.trim().is_empty() {
             // Empty paste — try to read clipboard image
             let output_tx = ui_tx.clone();
-            let Some(agent_client) = self.agent_client.clone() else {
-                self.append_system_notice("[cannot read clipboard image without SDK client]");
-                return;
-            };
             crate::tui::effect::spawn_guard::spawn_guarded("clipboard_image", async move {
-                match agent_client.read_clipboard_image().await {
+                match crate::tui::render::input::clipboard::read_image().await {
                     Ok(img) => {
-                        // #fix-tui-image-input-output：图片直接作为 span 插入输入区（带 [Image #N]
-                        // 占位符），不再发「添加成功」banner，由插入的占位 span 提示用户
-                        let _ = output_tx.send(UiEvent::ClipboardImage(img)).await;
+                        use base64::Engine;
+                        let view = sdk::ClipboardImageView {
+                            base64: base64::engine::general_purpose::STANDARD.encode(&img.data),
+                            media_type: img.media_type,
+                            final_size: img.data.len(),
+                            display_path: None,
+                            width: None,
+                            height: None,
+                        };
+                        let _ = output_tx.send(UiEvent::ClipboardImage(view)).await;
                     }
                     Err(e) => {
                         let _ = output_tx
@@ -32,16 +35,20 @@ impl crate::tui::app::App {
             // We can't await here directly since this is a sync method,
             // so we'll handle image file loading via spawn
             let path = text.trim().to_string();
-            let Some(agent_client) = self.agent_client.clone() else {
-                self.append_system_notice("[cannot load image without SDK client]");
-                return;
-            };
             let tx = ui_tx.clone();
             crate::tui::effect::spawn_guard::spawn_guarded("image_file", async move {
-                match agent_client.process_image_file(path).await {
+                match crate::tui::render::input::clipboard::process_image_file(&path) {
                     Ok(img) => {
-                        // #fix-tui-image-input-output：图片作为 span 插入输入区
-                        let _ = tx.send(UiEvent::ClipboardImage(img)).await;
+                        use base64::Engine;
+                        let view = sdk::ClipboardImageView {
+                            base64: base64::engine::general_purpose::STANDARD.encode(&img.data),
+                            media_type: img.media_type,
+                            final_size: img.data.len(),
+                            display_path: Some(path),
+                            width: None,
+                            height: None,
+                        };
+                        let _ = tx.send(UiEvent::ClipboardImage(view)).await;
                     }
                     Err(e) => {
                         let _ = tx

@@ -817,32 +817,6 @@ mod tests {
 
     #[async_trait]
     impl sdk::AgentClient for DoneOnlyAgentClient {
-        fn session_snapshot(&self) -> sdk::SessionSnapshot {
-            sdk::SessionSnapshot {
-                id: "test-session".to_string(),
-                message_count: 0,
-                total_tokens: 0,
-                messages: vec![],
-                created_at: None,
-                trimmed: 0,
-                repaired: 0,
-                workspace: None,
-                tasks: None,
-            }
-        }
-
-        fn cost(&self) -> sdk::CostInfo {
-            sdk::CostInfo::default()
-        }
-
-        async fn task_status(&self) -> Result<sdk::TaskStatusView, sdk::SdkError> {
-            Ok(sdk::TaskStatusView::default())
-        }
-
-        fn project(&self) -> sdk::ProjectContext {
-            sdk::ProjectContext::default()
-        }
-
         fn changes(&self) -> watch::Receiver<sdk::ChangeSet> {
             let (_tx, rx) = watch::channel(sdk::ChangeSet::empty());
             rx
@@ -858,20 +832,18 @@ mod tests {
             Ok(sdk::ChatStream::new(rx))
         }
 
-        async fn sync_current_messages(
-            &self,
-            _messages: Vec<sdk::ChatMessage>,
-        ) -> Result<(), sdk::SdkError> {
-            self.sync_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        async fn save_current_session(&self) -> Result<(), sdk::SdkError> {
-            Ok(())
-        }
-
         async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
-            Ok(self.session_snapshot())
+            Ok(sdk::SessionSnapshot {
+                id: "test-session".to_string(),
+                message_count: 0,
+                total_tokens: 0,
+                messages: vec![],
+                created_at: None,
+                trimmed: 0,
+                repaired: 0,
+                workspace: None,
+                tasks: None,
+            })
         }
 
         async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
@@ -884,43 +856,6 @@ mod tests {
 
         async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
             Ok(Vec::new())
-        }
-
-        async fn read_clipboard_image(&self) -> Result<sdk::ClipboardImageView, sdk::SdkError> {
-            Err(sdk::SdkError::Internal("not implemented".to_string()))
-        }
-
-        async fn process_image_file(
-            &self,
-            _path: String,
-        ) -> Result<sdk::ClipboardImageView, sdk::SdkError> {
-            Err(sdk::SdkError::Internal("not implemented".to_string()))
-        }
-
-        async fn run_reflection(
-            &self,
-            _messages: Vec<sdk::ChatMessage>,
-        ) -> Result<sdk::ReflectionOutputView, sdk::SdkError> {
-            Err(sdk::SdkError::Internal("not implemented".to_string()))
-        }
-
-        async fn apply_reflection(
-            &self,
-            _output: sdk::ReflectionOutputView,
-        ) -> Result<String, sdk::SdkError> {
-            Ok("applied".to_string())
-        }
-
-        async fn notify_hook(&self, _message: &str, _kind: &str) -> Result<(), sdk::SdkError> {
-            Ok(())
-        }
-
-        async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, sdk::SdkError> {
-            Ok(Vec::new())
-        }
-
-        async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), sdk::SdkError> {
-            Ok(())
         }
     }
 }
