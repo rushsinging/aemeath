@@ -319,8 +319,8 @@ impl App {
                 // 注入 RuntimeModel，经 adapter 单向写回 status_bar，此处仅同步会话 cwd。
                 self.session.cwd = ctx.raw_path_base.clone();
             }
-            UiEvent::TaskStatusChanged => {
-                effects.push(Effect::FetchTaskStatus);
+            UiEvent::TaskStatusChanged(view) => {
+                self.model.conversation.apply(UpdateTaskLines(view.lines));
             }
             UiEvent::UpdateAvailable {
                 current,

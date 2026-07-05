@@ -25,7 +25,6 @@ pub enum Effect {
     FetchReminderRecap,
     /// 拉取 reminder 列表（/memory 命令），结果经 UiEvent::MemoryList 回灌。
     FetchMemoryList,
-    FetchTaskStatus,
     CopyToClipboard {
         text: String,
     },

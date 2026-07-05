@@ -62,7 +62,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::AgentProgress { .. } => "AgentProgress",
         UiEvent::WorkingDirectoryChanged { .. } => "WorkingDirectoryChanged",
-        UiEvent::TaskStatusChanged => "TaskStatusChanged",
+        UiEvent::TaskStatusChanged(_) => "TaskStatusChanged",
         UiEvent::CurrentTurnChanged(_) => "CurrentTurnChanged",
         UiEvent::UpdateAvailable { .. } => "UpdateAvailable",
         UiEvent::SessionReset => "SessionReset",
