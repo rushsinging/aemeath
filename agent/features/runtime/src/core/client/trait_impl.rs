@@ -2,8 +2,10 @@
 
 use async_trait::async_trait;
 use sdk::{
-    AgentClient, ChatRequest, ChatStream, ModelSummary, SdkError, SessionSnapshot, SessionSummary,
+    AgentClient, ChangeSet, ChatRequest, ChatStream, ModelSummary, SdkError, SessionSnapshot,
+    SessionSummary,
 };
+use tokio::sync::watch;
 
 use super::accessors::AgentClientImpl;
 
@@ -27,5 +29,9 @@ impl AgentClient for AgentClientImpl {
 
     async fn list_models(&self) -> Result<Vec<ModelSummary>, SdkError> {
         super::trait_model::list_models_impl(self).await
+    }
+
+    fn changes(&self) -> watch::Receiver<ChangeSet> {
+        super::trait_accessor::changes_impl(self)
     }
 }
