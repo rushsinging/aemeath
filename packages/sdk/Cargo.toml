@@ -18,3 +18,7 @@ utils = { path = "../global/utils" }
 # See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
 # Phase 0a (方案 D) for the full design.
 share = { path = "../../agent/shared" }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

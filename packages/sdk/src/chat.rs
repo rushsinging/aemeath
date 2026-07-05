@@ -3,7 +3,9 @@
 use crate::{ChatInputEventPort, ChatMessage, QueueDrainPort};
 
 pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
-pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
+pub use crate::chat_result::{
+    CancelHandle, ChatInputImage, ChatResult, ChatStream, ToolResultImage,
+};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
     HookEventView, HookExecutionResultView, OptionItem, WorkspaceContextView,

@@ -36,7 +36,6 @@ impl App {
             Effect::RunReflection { foreground } => self.run_reflection_effect(foreground, ui_tx),
             Effect::ApplyReflection { output } => self.apply_reflection_effect(output, ui_tx),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
-            Effect::FetchTaskStatus => self.update_task_status(self.chat.is_processing).await,
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
             Effect::ResetRuntimeState => self.reset_runtime_state().await,
@@ -45,9 +44,10 @@ impl App {
 
     fn cancel_agent_chat(&mut self) {
         self.chat.start_cancelling();
-        // #567 S4：cancel 通过 ProcessingHandle.abort() 管理
+        // #639：cancel 触发 runtime 的 CancellationToken（即时、进程内 out-of-band），
+        // NEVER 用 abort()——abort 只中断 TUI 消费流、不停 runtime loop（#639 根因）。
         if let Some(h) = &self.chat.processing_handle {
-            h.abort();
+            h.cancel();
         }
         self.model
             .conversation

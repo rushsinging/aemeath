@@ -5,16 +5,22 @@
 //! - `chat_chain` — Chat 链结构（ChatSegment, SegmentKind, ChatChain）
 //! - `storage` — 序列化 / 反序列化 / 文件持久层
 //! - `search` — 会话搜索与过滤
+//! - `restore` — 从磁盘 Session 还原活跃链运行时状态（SessionRestore）
+//!
+//! Session 级 lock 文件（#636 D3）由 `sdk::session_lock` 提供，CLI 启动时调用。
 
 mod chat_chain;
+mod restore;
 mod search;
 mod storage;
 mod types;
 
 pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
+pub use restore::SessionRestore;
 pub use search::search_sessions;
 pub use storage::{
     delete_session, list_sessions, load_session, save_session, update_session_metadata,
+    SessionLoadError,
 };
 pub use types::{
     extract_project_name, new_session_id, now_iso, sessions_dir, validate_session_id,

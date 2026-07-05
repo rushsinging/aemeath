@@ -160,6 +160,36 @@ impl PendingInputBuffer {
     pub fn drain_all(&mut self) -> Vec<ChatInputEvent> {
         self.events.drain(..).collect()
     }
+
+    /// 取出所有 `UserMessage` 事件的文本，并从缓冲区移除这些事件。
+    /// 非 UserMessage 事件（命令等）保留在缓冲区中。
+    /// 用于 WithdrawAll：只撤回用户消息，保留命令待后续处理。
+    pub fn drain_user_message_texts(&mut self) -> Vec<String> {
+        let mut texts = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(event) = self.events.pop_front() {
+            match event {
+                ChatInputEvent::UserMessage { text, .. } => texts.push(text),
+                other => retained.push_back(other),
+            }
+        }
+        self.events = retained;
+        texts
+    }
+
+    /// 快照当前缓冲区中所有 `UserMessage` 事件（不修改缓冲区）。
+    /// 用于 busy select! 期间 emit `UserMessagesQueued` 事件。
+    pub fn user_message_snapshot(&self) -> Vec<(sdk::InputId, Message)> {
+        self.events
+            .iter()
+            .filter_map(|e| match e {
+                ChatInputEvent::UserMessage { id, text, .. } => {
+                    Some((id.clone(), Message::user(text.clone())))
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

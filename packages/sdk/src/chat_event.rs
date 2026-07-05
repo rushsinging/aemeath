@@ -167,9 +167,6 @@ pub enum ChatEvent {
         workspace_root: String,
         workspace: WorkspaceContextView,
     },
-    /// 任务列表状态发生变化，TUI 应重新拉取 task_status 快照。
-    TasksChanged,
-    /// 配置/指令/guidance 文件变更通知。
     ConfigReloaded {
         changed_keys: Vec<String>,
     },
@@ -218,6 +215,13 @@ pub enum ChatEvent {
         session_id: String,
         created_at: u64,
     },
+    /// 会话恢复失败（#636 D2）。`kind` 区分 not_found / corrupt / io，
+    /// TUI 据此显示对应错误并恢复到空 session。
+    SessionResumeFailed {
+        kind: SessionResumeFailureKind,
+        id: String,
+        message: String,
+    },
     /// #567：Reflection 结果回传。
     ReflectionResult {
         output: Box<crate::ReflectionOutputView>,
@@ -246,4 +250,16 @@ pub enum ChatEvent {
     CostUpdate {
         cost: crate::CostInfo,
     },
+}
+
+/// `SessionResumeFailed` 的失败分类（#636 D2）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionResumeFailureKind {
+    /// session 文件不存在。
+    NotFound,
+    /// JSON 损坏且 .bak 回退失败。
+    Corrupt,
+    /// 底层 IO 错误。
+    Io,
 }

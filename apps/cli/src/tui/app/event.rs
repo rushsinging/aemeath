@@ -173,7 +173,7 @@ pub enum AppEvent {
     /// Current tool path base/working root changed.
     WorkingDirectoryChanged(StatusContextUpdate),
     /// Runtime task store changed; refresh TUI task list window.
-    TaskStatusChanged,
+    TaskStatusChanged(sdk::TaskStatusView),
     /// 版本检查结果（后台 spawn 完成后回送）。
     UpdateAvailable {
         current: String,
@@ -218,6 +218,12 @@ pub enum AppEvent {
         session_id: String,
         #[allow(dead_code)]
         created_at: u64,
+    },
+    /// 会话恢复失败（#636 D2）。TUI 显示错误并退回空 session。
+    SessionResumeFailed {
+        kind: sdk::SessionResumeFailureKind,
+        id: String,
+        message: String,
     },
 }
 pub type UiEvent = AppEvent;

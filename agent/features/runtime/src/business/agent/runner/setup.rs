@@ -192,7 +192,7 @@ impl AgentRunner for CliAgentRunner {
             max_tool_concurrency: ctx.max_tool_concurrency,
             max_agent_concurrency: ctx.max_agent_concurrency,
             agent_semaphore: ctx.agent_semaphore.clone(), // 全局限流共享
-            progress_tx: None,                            // sub-agents don't stream progress (yet)
+            progress_tx: ctx.progress_tx.clone(), // 子 agent 复用父的 progress_tx，内部 tool 调用会通过 AgentProgress 转发到 TUI
             parent_session_id: ctx.parent_session_id.clone(),
         };
         let agent = Agent {

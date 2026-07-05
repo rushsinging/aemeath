@@ -179,7 +179,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             raw_workspace_root: std::path::PathBuf::from(workspace_root),
             workspace,
         }),
-        sdk::ChatEvent::TasksChanged => UiEvent::TaskStatusChanged,
         sdk::ChatEvent::ConfigReloaded { changed_keys } => {
             let keys_str = changed_keys.join(", ");
             UiEvent::SystemMessage(format!("[config reloaded] changed: {}", keys_str))
@@ -217,6 +216,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             session_id,
             created_at,
         },
+        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
+            UiEvent::SessionResumeFailed { kind, id, message }
+        }
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
         // #567: 新增变体暂不映射到 UiEvent，静默忽略。
         sdk::ChatEvent::ReflectionResult { .. }
@@ -224,8 +226,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::ReminderList { .. }
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::TasksSnapshot { .. }
         | sdk::ChatEvent::CostUpdate { .. } => return UiEvent::SystemMessage(String::new()),
+        sdk::ChatEvent::TasksSnapshot { tasks } => {
+            return UiEvent::TaskStatusChanged(*tasks);
+        }
     }
 }
 
@@ -244,9 +248,22 @@ pub(crate) struct SpawnContext {
 #[derive(Debug)]
 pub(crate) struct ProcessingHandle {
     join: tokio::task::JoinHandle<()>,
+    /// #639：runtime chat 的 cancel 句柄。因 `chat()` 在 spawn task **内部** await，
+    /// 句柄要等 chat() 返回后才拿得到，故用共享 slot 由 task 回填、TUI 侧读取触发。
+    cancel: Arc<std::sync::Mutex<Option<sdk::CancelHandle>>>,
 }
 
 impl ProcessingHandle {
+    /// #639：即时取消当前 chat（触发 runtime 的 CancellationToken，进程内 out-of-band，
+    /// 不走事件流）。abort 只中断 TUI 消费流不停 runtime loop，故 cancel NEVER 用 abort。
+    pub(crate) fn cancel(&self) {
+        if let Ok(guard) = self.cancel.lock() {
+            if let Some(handle) = guard.as_ref() {
+                handle.cancel();
+            }
+        }
+    }
+
     pub(crate) fn abort(&self) {
         self.join.abort();
     }
@@ -459,8 +476,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             workspace_root,
             workspace.context_stack.len()
         ),
-        sdk::ChatEvent::TasksChanged => {
-            crate::tui::log_trace!("{} tasks_changed", stage)
+        sdk::ChatEvent::TasksSnapshot { tasks } => {
+            crate::tui::log_trace!("{} tasks_snapshot lines={}", stage, tasks.lines.len())
         }
         sdk::ChatEvent::ConfigReloaded { changed_keys } => crate::tui::log_trace!(
             "{} config_reloaded changed_keys={:?}",
@@ -538,12 +555,13 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         ),
         // #567: 新增变体暂不记录日志。
         sdk::ChatEvent::ReflectionResult { .. }
-        | sdk::ChatEvent::ModelList { .. }
-        | sdk::ChatEvent::ReminderList { .. }
-        | sdk::ChatEvent::SessionList { .. }
-        | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::TasksSnapshot { .. }
-        | sdk::ChatEvent::CostUpdate { .. } => {}
+         | sdk::ChatEvent::ModelList { .. }
+         | sdk::ChatEvent::ReminderList { .. }
+         | sdk::ChatEvent::SessionList { .. }
+         | sdk::ChatEvent::ProjectInfo { .. }
+         | sdk::ChatEvent::TasksSnapshot { .. }
+         | sdk::ChatEvent::CostUpdate { .. }
+         | sdk::ChatEvent::SessionResumeFailed { .. } => {}
     }
 }
 
@@ -625,6 +643,12 @@ fn json_value_kind(value: &serde_json::Value) -> &'static str {
 }
 
 pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
+    // #639：cancel 句柄共享 slot。chat() 在 task 内部 await，返回 stream 后回填此 slot；
+    // TUI 侧 ProcessingHandle::cancel() 读取触发。cancel-before-chat-returns 的极小窗口内
+    // 为 no-op（chat() 微秒级返回），可接受。
+    let cancel_slot: Arc<std::sync::Mutex<Option<sdk::CancelHandle>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let cancel_slot_for_task = cancel_slot.clone();
     let join = tokio::spawn(async move {
         let mut stream = match ctx
             .agent_client
@@ -648,6 +672,10 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
                 return;
             }
         };
+        // 回填 cancel 句柄，供 Ctrl+C/Esc 即时中断。
+        if let Ok(mut guard) = cancel_slot_for_task.lock() {
+            *guard = Some(stream.cancel_handle());
+        }
         while let Some(event) = stream.recv().await {
             log_sdk_event(&event, "sdk->ui.recv");
             let ui_event = sdk_event_to_ui_event(event);
@@ -657,7 +685,10 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
             }
         }
     });
-    ProcessingHandle { join }
+    ProcessingHandle {
+        join,
+        cancel: cancel_slot,
+    }
 }
 
 #[cfg(test)]
@@ -772,10 +803,18 @@ mod tests {
     }
 
     #[test]
-    fn test_sdk_event_to_ui_event_maps_tasks_changed() {
-        let event = sdk_event_to_ui_event(sdk::ChatEvent::TasksChanged);
+    fn test_sdk_event_to_ui_event_maps_tasks_snapshot() {
+        let view = sdk::TaskStatusView {
+            lines: vec!["[ ] #1 task".to_string()],
+        };
+        let event = sdk_event_to_ui_event(sdk::ChatEvent::TasksSnapshot {
+            tasks: Box::new(view.clone()),
+        });
 
-        assert!(matches!(event, UiEvent::TaskStatusChanged));
+        match event {
+            UiEvent::TaskStatusChanged(v) => assert_eq!(v.lines, view.lines),
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 
     #[tokio::test]

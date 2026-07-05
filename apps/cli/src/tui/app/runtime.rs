@@ -46,12 +46,6 @@ impl App {
     ///
     /// 单一真相：task 行真相归 `RuntimeModel.task_status.lines`，经 `UpdateTaskLines`
     /// intent 写入。widget 镜像由每帧 `refresh_live_status_from_model` 统一写回
-    /// #567：task_status 轮询已删除——runtime 通过 TasksSnapshot 事件推送。
-    /// TUI 收到事件后直接更新 model，不再主动拉取。
-    pub(crate) async fn update_task_status(&mut self, _is_processing: bool) {
-        // noop：等待 TasksSnapshot 事件
-    }
-
     pub(crate) async fn update_project_context(&mut self) {
         // #567：project() 已从 trait 删除，workspace_root 从 TuiLaunchContext 获取。
         // 项目上下文通过 ProjectInfo 事件推送（后续 PR 实现）。

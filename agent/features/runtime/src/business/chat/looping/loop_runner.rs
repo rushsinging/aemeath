@@ -261,8 +261,6 @@ where
     let mut pending_input = PendingInputBuffer::default();
     /// busy 阶段（LLM 调用中）排队的用户输入。
     /// idle 门开启时 drain 进 pending_input → apply_gate。
-    let mut queued_buffer: std::collections::VecDeque<sdk::ChatInputEvent> =
-        std::collections::VecDeque::new();
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let chat_id = ChatId::new_v7();
@@ -422,7 +420,29 @@ where
             PendingCommand::ResumeSession { id } => {
                 match crate::business::session::load_session(&id).await {
                     Ok(snapshot) => {
-                        messages = snapshot.messages;
+                        // 统一通过 SessionRestore 提取活跃链运行时状态（与 trait_session::load_session_impl 共享）
+                        // 修复 #636：旧实现读 snapshot.messages（PR #643 后永远空），导致 resume 看不到历史
+                        let restore =
+                            crate::business::session::SessionRestore::from_session(&snapshot);
+                        if restore.trimmed > 0 || restore.repaired > 0 {
+                            log::info!(
+                                target: "aemeath:agent:runtime",
+                                "resume {}: trimmed={} repaired={}",
+                                id,
+                                restore.trimmed,
+                                restore.repaired
+                            );
+                        }
+                        messages = restore.active_messages;
+                        active_summary = restore.active_summary.clone();
+                        if let Ok(mut guard) = active_summary_arc.lock() {
+                            *guard = restore.active_summary;
+                        }
+                        if let Ok(mut guard) = frozen_chats.lock() {
+                            *guard = restore.frozen_chats;
+                        }
+                        // TODO #636: SessionResumed.created_at 当前为 u64，
+                        // 需从 restore.created_at (ISO 8601) 转 unix timestamp；暂保持 0。
                         let _ = sink
                             .send_event(RuntimeStreamEvent::SessionResumed {
                                 messages: messages.clone(),
@@ -430,12 +450,45 @@ where
                                 created_at: 0u64,
                             })
                             .await;
+                        if restore.trimmed > 0 || restore.repaired > 0 {
+                            log::info!(
+                                target: "aemeath:agent:runtime",
+                                "resume {}: trimmed={} repaired={}",
+                                id,
+                                restore.trimmed,
+                                restore.repaired
+                            );
+                        }
                     }
                     Err(e) => {
+                        use crate::business::session::SessionLoadError;
+                        use sdk::SessionResumeFailureKind;
+                        let (kind, message) = match &e {
+                            SessionLoadError::NotFound { .. } => (
+                                SessionResumeFailureKind::NotFound,
+                                format!("Session {id} 不存在，可用 `/sessions` 查看可用会话"),
+                            ),
+                            SessionLoadError::Corrupt {
+                                parse_err,
+                                corrupt_path,
+                                ..
+                            } => (
+                                SessionResumeFailureKind::Corrupt,
+                                format!(
+                                    "Session {id} 损坏（{parse_err}），原文件已转存到 {}",
+                                    corrupt_path.display()
+                                ),
+                            ),
+                            SessionLoadError::Io { source, .. } => (
+                                SessionResumeFailureKind::Io,
+                                format!("读取 session {id} 失败: {source}"),
+                            ),
+                        };
                         let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Failed to resume session {}: {}", id, e),
-                                is_error: true,
+                            .send_event(RuntimeStreamEvent::SessionResumeFailed {
+                                kind,
+                                id: id.clone(),
+                                message,
                             })
                             .await;
                     }
@@ -613,7 +666,6 @@ where
                 &input_events,
                 &sink,
                 &mut pending_input,
-                &mut queued_buffer,
                 &mut messages,
                 &task_store,
                 None,
@@ -762,7 +814,6 @@ where
                 &mut loop_fsm,
                 &mut messages,
                 &mut pending_input,
-                &mut queued_buffer,
                 &task_store,
                 &cancel_slot,
                 turn_rollback_baseline,
@@ -857,7 +908,6 @@ where
                     &mut loop_fsm,
                     &mut messages,
                     &mut pending_input,
-                    &mut queued_buffer,
                     &task_store,
                     &cancel_slot,
                     turn_rollback_baseline,
@@ -970,28 +1020,15 @@ where
                                     log::debug!(target: LOG_TARGET,
                                         "busy queued user message: session={} id={} text_preview={:?}",
                                         session_id, id, &text[..text.len().min(60)]);
-                                    queued_buffer.push_back(event);
-                                    let queued_snapshot: Vec<(sdk::InputId, Message)> = queued_buffer.iter()
-                                        .filter_map(|e| match e {
-                                            sdk::ChatInputEvent::UserMessage { id, text, .. } => {
-                                                Some((id.clone(), Message::user(text.clone())))
-                                            }
-                                            _ => None,
-                                        })
-                                        .collect();
+                                    pending_input.push(event);
+                                    let queued_snapshot: Vec<(sdk::InputId, Message)> = pending_input.user_message_snapshot();
                                     sink.send_event(RuntimeStreamEvent::UserMessagesQueued {
                                         queued: queued_snapshot,
                                     }).await;
                                 }
                                 sdk::ChatInputEvent::WithdrawAll => {
-                                    let texts: Vec<String> = queued_buffer.iter()
-                                        .filter_map(|e| match e {
-                                            sdk::ChatInputEvent::UserMessage { text, .. } => Some(text.clone()),
-                                            _ => None,
-                                        })
-                                        .collect();
+                                    let texts: Vec<String> = pending_input.drain_user_message_texts();
                                     let count = texts.len();
-                                    queued_buffer.clear();
                                     log::debug!(target: LOG_TARGET,
                                         "busy withdraw all queued: session={} count={}",
                                         session_id, count);
@@ -1279,6 +1316,16 @@ where
                     log::debug!(target: crate::LOG_TARGET,
                         "[loop_debug] turn {} → entering Idle (等待用户输入)", turn_count);
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
+                    // #636 D1: turn-level save —— 每轮 turn 完成立即落盘，避免进程被
+                    // kill 时丢失已完成 turn（SIGTERM/SIGHUP handler 见 chat 启动入口）。
+                    if let Err(e) = save_session().await {
+                        log::error!(
+                            target: crate::LOG_TARGET,
+                            "turn-level save_session failed (turn {}): {} — 下次 exit 时仍会兜底 save",
+                            turn_count,
+                            e
+                        );
+                    }
                     loop_fsm.transition(ChatLoopTransition::Idle);
                     loop_fsm.assert_state(
                         ChatLoopState::Idle,
@@ -1288,7 +1335,6 @@ where
                         &input_events,
                         &sink,
                         &mut pending_input,
-                        &mut queued_buffer,
                         &mut messages,
                         &task_store,
                         Some(&cancel_slot),
@@ -1370,12 +1416,23 @@ where
                         }
                     }
                     // Build tool result message for API
+                    let has_task_mutation = all_results
+                        .iter()
+                        .any(|r| super::events::is_task_store_mutation(&r.tool_name));
                     messages.push(tool_results_for_api(all_results, &session_id));
                     // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
                         messages: messages.clone(),
                     })
                     .await;
+                    // 若刚执行了 task store mutation 工具，推送 task snapshot（#642）
+                    if has_task_mutation {
+                        let snapshot = super::task_snapshot::build_task_snapshot(&task_store).await;
+                        sink.send_event(RuntimeStreamEvent::TasksSnapshot {
+                            tasks: Box::new(snapshot),
+                        })
+                        .await;
+                    }
                     loop_fsm.transition(ChatLoopTransition::AwaitUser);
                     let gate = drain_and_apply_gate(
                         GateKind::AfterBlockingBoundary,
@@ -1398,7 +1455,6 @@ where
                             &mut loop_fsm,
                             &mut messages,
                             &mut pending_input,
-                            &mut queued_buffer,
                             &task_store,
                             &cancel_slot,
                             turn_rollback_baseline,
@@ -1447,7 +1503,6 @@ where
                         &mut loop_fsm,
                         &mut messages,
                         &mut pending_input,
-                        &mut queued_buffer,
                         &task_store,
                         &cancel_slot,
                         turn_rollback_baseline,
@@ -1680,7 +1735,6 @@ async fn idle_until_resume_or_shutdown<I, S>(
     input_events: &I,
     sink: &S,
     pending: &mut PendingInputBuffer,
-    queued_buffer: &mut std::collections::VecDeque<sdk::ChatInputEvent>,
     messages: &mut Vec<Message>,
     task_store: &storage::api::TaskStore,
     cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
@@ -1692,10 +1746,6 @@ where
     loop {
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
-                // drain busy 阶段排队的输入（LLM 调用中通过 select! 存入 queued_buffer）。
-                while let Some(event) = queued_buffer.pop_front() {
-                    pending.push(event);
-                }
                 let gate = apply_gate(
                     GateKind::BeforeLlm,
                     pending,
@@ -1756,7 +1806,6 @@ async fn cancel_to_idle<I, S>(
     loop_fsm: &mut ChatLoopFsm,
     messages: &mut Vec<Message>,
     pending_input: &mut PendingInputBuffer,
-    queued_buffer: &mut std::collections::VecDeque<sdk::ChatInputEvent>,
     task_store: &storage::api::TaskStore,
     cancel_slot: &std::sync::Mutex<CancellationToken>,
     rollback_baseline: usize,
@@ -1787,7 +1836,6 @@ where
         input_events,
         sink,
         pending_input,
-        queued_buffer,
         messages,
         task_store,
         Some(cancel_slot),

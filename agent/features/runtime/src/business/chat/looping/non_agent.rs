@@ -325,21 +325,12 @@ where
             workspace_root,
         )
         .await;
-        if task_store_mutation_succeeded(&owned_call.name, is_error) {
-            let _ = sink.send_event(RuntimeStreamEvent::TasksChanged).await;
-        }
+        // TasksSnapshot 由 loop_runner 在 PostToolExecutionSync 之后统一推送（#642），
+        // 不再在此处发 TasksChanged 通知。
         send_tool_result(sink, context, &ex).await;
         out.push(ex);
     }
     out
-}
-
-fn task_store_mutation_succeeded(tool_name: &str, is_error: bool) -> bool {
-    !is_error
-        && matches!(
-            tool_name,
-            "TaskListCreate" | "TaskCreate" | "TaskUpdate" | "TaskStop" | "TaskListComplete"
-        )
 }
 
 async fn run_task_hooks<S>(

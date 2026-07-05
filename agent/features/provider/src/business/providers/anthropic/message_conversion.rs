@@ -156,7 +156,17 @@ pub(crate) async fn send_message_non_stream(
                     let input = block
                         .get("input")
                         .cloned()
-                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                        .unwrap_or_else(|| {
+                            // 非流式响应已通过 HTTP 完整接收，input 缺失属 provider 协议异常。
+                            // 记 warn 让 silent 变 visible；空对象作为兜底避免整个响应失败。
+                            // 真正的"截断"问题在流式路径处理（见 business/stream.rs）。
+                            log::warn!(
+                                target: "aemeath:agent:provider",
+                                "Anthropic 非流式响应 tool_use 块缺少 input 字段（id={}, name={}），使用空对象兜底",
+                                id, name,
+                            );
+                            serde_json::Value::Object(serde_json::Map::new())
+                        });
                     let idx = content_blocks.len();
                     handler.on_tool_use_start(&name, Some(&id), idx);
                     content_blocks.push(ContentBlock::ToolUse { id, name, input });

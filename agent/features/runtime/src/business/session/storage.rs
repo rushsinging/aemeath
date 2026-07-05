@@ -11,7 +11,33 @@
 
 use crate::business::session::types::*;
 use crate::LOG_TARGET;
+use std::path::PathBuf;
+use thiserror::Error;
 use tokio::io::AsyncWriteExt;
+
+/// `load_session` 的结构化错误。上层据此区分「不存在 / 损坏 / IO」三类。
+#[derive(Debug, Error)]
+pub enum SessionLoadError {
+    /// session 文件不存在（`{id}.json` 缺失）。
+    #[error("session not found: {id}")]
+    NotFound { id: String },
+
+    /// 文件存在但 JSON 损坏，且 `.bak` 回退失败；原文件已转存 `.corrupt`。
+    #[error("session {id} corrupted (parse: {parse_err}); no valid .bak; original moved to {corrupt_path}")]
+    Corrupt {
+        id: String,
+        parse_err: String,
+        corrupt_path: PathBuf,
+    },
+
+    /// 底层 IO 错误（权限、磁盘等）。
+    #[error("failed to read session {id}: {source}")]
+    Io {
+        id: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 /// 旧格式迁移：若 `chats` 为空且 `messages` 非空，把扁平 messages 包装为
 /// 单个 `ChatSegment::normal(None)`，存入 `chats`，清空 `messages`。
@@ -82,8 +108,8 @@ pub async fn save_session(session: &Session) -> Result<(), String> {
 /// Falls back to `.bak` if the primary file is corrupted; if no valid backup
 /// exists, moves the corrupted file to `.corrupt` and returns an error so the
 /// caller can surface it to the user instead of silently starting fresh.
-pub async fn load_session(id: &str) -> Result<Session, String> {
-    validate_session_id(id)?;
+pub async fn load_session(id: &str) -> Result<Session, SessionLoadError> {
+    validate_session_id(id).map_err(|_| SessionLoadError::NotFound { id: id.to_string() })?;
 
     let dir = sessions_dir();
     let path = dir.join(format!("{id}.json"));
@@ -91,11 +117,14 @@ pub async fn load_session(id: &str) -> Result<Session, String> {
     let corrupt_path = dir.join(format!("{id}.json.corrupt"));
 
     if !path.exists() {
-        return Err(format!("session not found: {id}"));
+        return Err(SessionLoadError::NotFound { id: id.to_string() });
     }
     let json = tokio::fs::read_to_string(&path)
         .await
-        .map_err(|e| format!("failed to read session: {e}"))?;
+        .map_err(|e| SessionLoadError::Io {
+            id: id.to_string(),
+            source: e,
+        })?;
 
     match serde_json::from_str::<Session>(&json) {
         Ok(mut session) => {
@@ -125,11 +154,11 @@ pub async fn load_session(id: &str) -> Result<Session, String> {
             }
             // .bak 不存在或也损坏：转存 .corrupt 保留原始数据供手工抢救
             let _ = tokio::fs::rename(&path, &corrupt_path).await;
-            let corrupt_display = corrupt_path.display();
-            Err(format!(
-                "session {id} is corrupted and no valid .bak exists. \
-                 Corrupted file moved to {corrupt_display}. Parse error: {parse_err}"
-            ))
+            Err(SessionLoadError::Corrupt {
+                id: id.to_string(),
+                parse_err: parse_err.to_string(),
+                corrupt_path,
+            })
         }
     }
 }
@@ -191,7 +220,7 @@ pub async fn update_session_metadata(
     notes: Option<String>,
     is_favorite: Option<bool>,
 ) -> Result<Session, String> {
-    let mut session = load_session(id).await?;
+    let mut session = load_session(id).await.map_err(|e| e.to_string())?;
 
     if let Some(t) = title {
         session.set_title(t);

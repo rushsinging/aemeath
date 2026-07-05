@@ -148,9 +148,9 @@ impl App {
             }
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 // Esc during processing: interrupt current LLM turn + tool calls
-                // #567 S4：cancel 通过 ProcessingHandle.abort() 管理
+                // #639：cancel 触发 runtime CancellationToken（即时），NEVER 用 abort()。
                 if let Some(h) = &self.chat.processing_handle {
-                    h.abort();
+                    h.cancel();
                 }
                 self.set_transient_notice(StatusNotice::warning("Interrupted"));
             }
@@ -230,6 +230,33 @@ impl App {
                 {
                     // #391 S3：busy + 有 pending → 发 WithdrawAll（runtime gate 批量撤回 +
                     // 回传 texts → handler 清占位 + join("\n") 还原输入框）。
+                    //
+                    // #589 改进：乐观即时清空。Up 键发送 WithdrawAll 的同时，
+                    // 本地立即清空 queued 显示 + 还原输入框，避免等待 runtime
+                    // round-trip 期间 UI 卡顿。runtime 回传 UserMessagesWithdrawn
+                    // 时 sync_queued_from_runtime 做权威校正（若状态漂移则修正）。
+                    let texts: Vec<String> = self
+                        .model
+                        .conversation
+                        .queued_submissions
+                        .iter()
+                        .map(|q| q.text.clone())
+                        .collect();
+                    let restored_input = texts.join("\n");
+                    // 乐观清空 queued 占位
+                    self.model.conversation.apply(
+                        crate::tui::model::conversation::intent::ConversationIntent::ClearAllQueuedSubmissions(
+                            crate::tui::model::conversation::intent::ClearAllQueuedSubmissions,
+                        ),
+                    );
+                    // 还原输入框（合并所有 queued 文本到 input buffer）
+                    if !restored_input.is_empty() {
+                        self.model.input.apply(
+                            crate::tui::model::input::intent::InputIntent::ReplaceText(
+                                restored_input,
+                            ),
+                        );
+                    }
                     return UpdateResult::one(Effect::SendChatInputEvent {
                         event: sdk::ChatInputEvent::WithdrawAll,
                     });

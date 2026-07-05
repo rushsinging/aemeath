@@ -1,6 +1,7 @@
 mod args;
 mod chat;
 mod panic_hook;
+mod session_lock;
 mod subcommand;
 mod tui;
 

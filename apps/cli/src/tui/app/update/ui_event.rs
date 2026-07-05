@@ -319,8 +319,8 @@ impl App {
                 // 注入 RuntimeModel，经 adapter 单向写回 status_bar，此处仅同步会话 cwd。
                 self.session.cwd = ctx.raw_path_base.clone();
             }
-            UiEvent::TaskStatusChanged => {
-                effects.push(Effect::FetchTaskStatus);
+            UiEvent::TaskStatusChanged(view) => {
+                self.model.conversation.apply(UpdateTaskLines(view.lines));
             }
             UiEvent::UpdateAvailable {
                 current,
@@ -414,11 +414,23 @@ impl App {
             UiEvent::SessionResumed {
                 messages,
                 session_id,
-                ..
+                created_at,
             } => {
-                self.chat.messages = messages;
-                self.session.rename_session(&session_id);
-                self.append_system_notice(format!("[resumed session: {}]", session_id));
+                self.resume_session_messages(&session_id, messages, created_at.to_string());
+            }
+            UiEvent::SessionResumeFailed { kind, id, message } => {
+                use sdk::SessionResumeFailureKind;
+                let prefix = match kind {
+                    SessionResumeFailureKind::NotFound => "⚠️ 会话恢复失败（不存在）",
+                    SessionResumeFailureKind::Corrupt => "⚠️ 会话恢复失败（文件损坏）",
+                    SessionResumeFailureKind::Io => "⚠️ 会话恢复失败（IO 错误）",
+                };
+                self.append_system_notice(format!("{prefix}: {message}"));
+                log::warn!(
+                    target: "aemeath:tui",
+                    "session resume failed: id={} kind={:?} msg={}",
+                    id, kind, message
+                );
             }
             UiEvent::Done { .. } => {
                 // 不清 processing_handle：Done 只表示这一个 turn 结束，常驻 loop

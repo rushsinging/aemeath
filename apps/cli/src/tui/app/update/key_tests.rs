@@ -166,11 +166,17 @@ fn test_up_arrow_busy_with_queued_sends_withdraw_all() {
         )
     });
     assert!(has_withdraw, "busy + 有 queued 时 Up 键应发 WithdrawAll");
-    // queued_submissions 不在此同步清理（等 runtime 回传 UserMessagesWithdrawn 后清）。
+    // #589: Up 键乐观清空 queued_submissions，不等 runtime round-trip。
     assert_eq!(
         app.model.conversation.queued_submissions.len(),
-        2,
-        "Up 键自身不清 queued_submissions（由 UiEvent::UserMessagesWithdrawn handler 清）"
+        0,
+        "Up 键乐观清空 queued_submissions（#589 即时撤回）"
+    );
+    // 还原输入框：两条 queued 文本 join("\n") 后回填到 input buffer。
+    assert_eq!(
+        app.model.input.document.display_text(),
+        "first\nsecond",
+        "Up 键撤回后 queued 文本应还原到输入框"
     );
 }
 
