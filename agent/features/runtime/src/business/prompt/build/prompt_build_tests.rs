@@ -198,7 +198,8 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
 
     let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config, "en").await;
 
-    std::fs::remove_dir_all(cwd).unwrap();
+    // cleanup 失败不应让测试 FAIL（cwd 可能被外部环境清理，见 #637）
+    let _ = std::fs::remove_dir_all(&cwd);
 
     assert!(parts.dynamic_part.contains("# Commit Message Guidance"));
     assert!(parts
