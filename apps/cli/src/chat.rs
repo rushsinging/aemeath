@@ -45,6 +45,17 @@ pub(crate) async fn run_chat(args: Args) {
             std::process::exit(1);
         });
     let session_id = bootstrap.session_id.clone();
+    // #636 D3: session lock —— 防止两个 aemeath 实例同时操作同一 session。
+    let _session_lock = match crate::session_lock::try_acquire_or_prompt(&session_id, quiet) {
+        Ok(lock) => lock,
+        Err(crate::session_lock::AcquireError::Denied) => {
+            std::process::exit(4);
+        }
+        Err(e) => {
+            eprintln!("Error: session lock acquire failed: {e}");
+            std::process::exit(1);
+        }
+    };
     if should_emit_cli_frontend_started_log() {
         crate::tui::log_info!("chat frontend started: quiet={quiet} session={session_id}");
     }

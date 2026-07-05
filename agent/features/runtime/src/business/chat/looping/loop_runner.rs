@@ -430,10 +430,34 @@ where
                             .await;
                     }
                     Err(e) => {
+                        use crate::business::session::SessionLoadError;
+                        use sdk::SessionResumeFailureKind;
+                        let (kind, message) = match &e {
+                            SessionLoadError::NotFound { .. } => (
+                                SessionResumeFailureKind::NotFound,
+                                format!("Session {id} 不存在，可用 `/sessions` 查看可用会话"),
+                            ),
+                            SessionLoadError::Corrupt {
+                                parse_err,
+                                corrupt_path,
+                                ..
+                            } => (
+                                SessionResumeFailureKind::Corrupt,
+                                format!(
+                                    "Session {id} 损坏（{parse_err}），原文件已转存到 {}",
+                                    corrupt_path.display()
+                                ),
+                            ),
+                            SessionLoadError::Io { source, .. } => (
+                                SessionResumeFailureKind::Io,
+                                format!("读取 session {id} 失败: {source}"),
+                            ),
+                        };
                         let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Failed to resume session {}: {}", id, e),
-                                is_error: true,
+                            .send_event(RuntimeStreamEvent::SessionResumeFailed {
+                                kind,
+                                id: id.clone(),
+                                message,
                             })
                             .await;
                     }
@@ -1261,6 +1285,16 @@ where
                     log::debug!(target: crate::LOG_TARGET,
                         "[loop_debug] turn {} → entering Idle (等待用户输入)", turn_count);
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
+                    // #636 D1: turn-level save —— 每轮 turn 完成立即落盘，避免进程被
+                    // kill 时丢失已完成 turn（SIGTERM/SIGHUP handler 见 chat 启动入口）。
+                    if let Err(e) = save_session().await {
+                        log::error!(
+                            target: crate::LOG_TARGET,
+                            "turn-level save_session failed (turn {}): {} — 下次 exit 时仍会兜底 save",
+                            turn_count,
+                            e
+                        );
+                    }
                     loop_fsm.transition(ChatLoopTransition::Idle);
                     loop_fsm.assert_state(
                         ChatLoopState::Idle,

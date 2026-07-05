@@ -472,6 +472,9 @@ pub(crate) fn runtime_event_to_sdk_event(
                 created_at,
             }
         }
+        crate::business::chat::RuntimeStreamEvent::SessionResumeFailed { kind, id, message } => {
+            ChatEvent::SessionResumeFailed { kind, id, message }
+        }
         crate::business::chat::RuntimeStreamEvent::ReflectionResult { output } => {
             ChatEvent::ReflectionResult { output }
         }

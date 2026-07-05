@@ -219,5 +219,11 @@ pub enum AppEvent {
         #[allow(dead_code)]
         created_at: u64,
     },
+    /// 会话恢复失败（#636 D2）。TUI 显示错误并退回空 session。
+    SessionResumeFailed {
+        kind: sdk::SessionResumeFailureKind,
+        id: String,
+        message: String,
+    },
 }
 pub type UiEvent = AppEvent;

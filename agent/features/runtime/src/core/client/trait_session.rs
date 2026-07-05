@@ -164,9 +164,23 @@ pub(super) async fn load_session_impl(
                     .map(|t| serde_json::to_value(t).unwrap_or_default()),
             })
         }
-        Err(e) => Err(SdkError::Internal(format!(
-            "Failed to load session {id}: {e}"
-        ))),
+        Err(e) => match e {
+            crate::business::session::SessionLoadError::NotFound { id } => {
+                Err(SdkError::SessionNotFound { id })
+            }
+            crate::business::session::SessionLoadError::Corrupt {
+                id,
+                parse_err,
+                corrupt_path,
+            } => Err(SdkError::SessionCorrupt {
+                id,
+                parse_err,
+                corrupt_path: corrupt_path.to_string_lossy().to_string(),
+            }),
+            crate::business::session::SessionLoadError::Io { id, source } => Err(
+                SdkError::Session(format!("Failed to read session {id}: {source}")),
+            ),
+        },
     }
 }
 

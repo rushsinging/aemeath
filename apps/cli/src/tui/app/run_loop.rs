@@ -81,6 +81,13 @@ impl App {
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last_loop_iteration = Instant::now();
 
+        // #636 D1: SIGTERM/SIGHUP graceful shutdown —— 收到信号后走正常 cleanup 路径，
+        // 触发 runtime loop 退出 + auto-save，避免进程被 kill 时 session 丢失。
+        let mut sig_term =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+        let mut sig_hup =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()).ok();
+
         // 首帧渲染先建立 layout 尺寸，再按真实宽度刷新启动横幅 document。
         self.update_task_status(self.chat.is_processing).await;
         self.update_project_context().await;
@@ -130,6 +137,16 @@ impl App {
             let msg: Option<TuiMsg> = tokio::select! {
                 biased;
                 ev = ui_rx.recv() => { ev.map(TuiMsg::Ui) }
+                _ = async { match &mut sig_term { Some(s) => s.recv().await, None => std::future::pending().await } } => {
+                    log::info!(target: "aemeath:tui", "received SIGTERM, initiating graceful shutdown");
+                    self.layout.should_exit = true;
+                    Some(TuiMsg::SpinnerTick) // 唤醒主 loop 让它检查 should_exit
+                }
+                _ = async { match &mut sig_hup { Some(s) => s.recv().await, None => std::future::pending().await } } => {
+                    log::info!(target: "aemeath:tui", "received SIGHUP, initiating graceful shutdown");
+                    self.layout.should_exit = true;
+                    Some(TuiMsg::SpinnerTick)
+                }
                 ev = event_stream.next() => {
                     match ev {
                         Some(Ok(event)) => match event {
