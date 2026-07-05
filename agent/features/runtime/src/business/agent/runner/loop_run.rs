@@ -79,6 +79,9 @@ impl<'a> SubAgentRun<'a> {
         for turn in 0..self.max_turns {
             let turn_number = turn + 1;
             if self.ctx.cancel.is_cancelled() {
+                log::info!(target: LOG_TARGET,
+                    "sub-agent cancel detected before turn {turn_number} (turn-boundary check)"
+                );
                 (self.progress)(Some(turn_number), "Agent cancelled by user");
                 let result = "Cancelled by user".to_string();
                 finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
@@ -150,6 +153,10 @@ impl<'a> SubAgentRun<'a> {
                 }
                 Err(e) => {
                     if e.is_cancelled() || self.ctx.cancel.is_cancelled() {
+                        log::info!(target: LOG_TARGET,
+                            "sub-agent cancel detected during turn {turn_number} (post-stream_message check): provider_err_is_cancelled={}, ctx_cancel_is_cancelled={}",
+                            e.is_cancelled(), self.ctx.cancel.is_cancelled()
+                        );
                         (self.progress)(Some(turn_number), "Agent cancelled by user");
                         let result = "Cancelled by user".to_string();
                         finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
