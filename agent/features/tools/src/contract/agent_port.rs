@@ -8,7 +8,7 @@ pub struct AgentRunRequest<'a> {
     pub prompt: &'a str,
     pub system: &'a str,
     pub ctx: &'a ToolExecutionContext,
-    pub max_turns: Option<u32>,
+    pub max_turns: u32,
     pub model_spec: Option<&'a str>,
     /// Optional channel to stream per-turn progress to TUI
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,

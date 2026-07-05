@@ -165,7 +165,7 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: Some(1),
+            max_turns: 1,
             model_spec: None,
             progress_tx: None,
         })
@@ -185,7 +185,7 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: Some(1),
+            max_turns: 1,
             model_spec: None,
             progress_tx: None,
         })
@@ -204,7 +204,7 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: Some(1),
+            max_turns: 1,
             model_spec: None,
             progress_tx: None,
         })

@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct StubRunner {
-    captured_max_turns: Mutex<Option<u32>>,
+    captured_max_turns: Mutex<u32>,
     captured_system: Mutex<String>,
     run_count: Mutex<usize>,
 }
@@ -54,7 +54,7 @@ fn test_ctx() -> ToolExecutionContext {
 }
 
 #[tokio::test]
-async fn test_agent_tool_uses_200_default_turns() {
+async fn test_agent_tool_uses_1000_default_turns() {
     let store = Arc::new(TaskStore::new());
     let tool = AgentTool { store };
     let runner = Arc::new(StubRunner::default());
@@ -71,16 +71,16 @@ async fn test_agent_tool_uses_200_default_turns() {
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), None);
+    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
     assert!(runner
         .captured_system
         .lock()
         .unwrap()
-        .contains("You have max 200 rounds of tool calls"));
+        .contains("You have max 1000 rounds of tool calls"));
 }
 
 #[tokio::test]
-async fn test_agent_tool_caps_max_turns_at_200() {
+async fn test_agent_tool_caps_max_turns_at_1000() {
     let store = Arc::new(TaskStore::new());
     let tool = AgentTool { store };
     let runner = Arc::new(StubRunner::default());
@@ -91,23 +91,23 @@ async fn test_agent_tool_caps_max_turns_at_200() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "max_turns": 250,
+                "max_turns": 1500,
             }),
             &ctx,
         )
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), Some(200));
+    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
     assert!(runner
         .captured_system
         .lock()
         .unwrap()
-        .contains("You have max 200 rounds of tool calls"));
+        .contains("You have max 1000 rounds of tool calls"));
 }
 
 #[test]
-fn test_agent_tool_schema_describes_200_turn_limit() {
+fn test_agent_tool_schema_describes_1000_turn_limit() {
     let tool = AgentTool {
         store: Arc::new(TaskStore::new()),
     };
@@ -115,8 +115,8 @@ fn test_agent_tool_schema_describes_200_turn_limit() {
     let schema = tool.input_schema().to_string();
     let description = tool.description();
 
-    assert!(schema.contains("default 200, max 200"));
-    assert!(description.contains("default 200 rounds"));
+    assert!(schema.contains("max 1000"));
+    assert!(description.contains("up to 1000 rounds"));
 }
 
 #[tokio::test]

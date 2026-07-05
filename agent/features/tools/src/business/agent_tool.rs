@@ -6,8 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
 
-const DEFAULT_AGENT_MAX_TURNS: u32 = 200;
-const AGENT_MAX_TURNS_CAP: u32 = 200;
+const SUB_AGENT_MAX_TURNS_CAP: u32 = 1000;
 
 pub struct AgentTool {
     pub store: Arc<TaskStore>,
@@ -21,7 +20,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, default 200 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `taskId` to bind to a tracked task for automatic status management."
+        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, up to 1000 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `taskId` to bind to a tracked task for automatic status management."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -45,7 +44,7 @@ impl TypedTool for AgentTool {
     }
 
     fn timeout_secs(&self) -> u64 {
-        600 // 10 minutes — sub-agents run multi-turn LLM conversations
+        1800 // 30 minutes — sub-agents run multi-turn LLM conversations
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<AgentResult> {
@@ -79,14 +78,17 @@ impl TypedTool for AgentTool {
         // (Previously, ScopeLevel::Block returned an error here, which was too
         // aggressive for expert users who know what they're doing.)
 
-        let max_turns = args.max_turns.map(|v| (v as u32).min(AGENT_MAX_TURNS_CAP));
+        let max_turns = args
+            .max_turns
+            .map(|v| (v as u32).min(SUB_AGENT_MAX_TURNS_CAP))
+            .unwrap_or(SUB_AGENT_MAX_TURNS_CAP);
         let runner = match &ctx.resources.agent_runner {
             Some(r) => r.clone(),
             None => return TypedToolResult::error("agent runner not available"),
         };
 
         let cwd_str = cwd.to_string_lossy();
-        let turns = max_turns.unwrap_or(DEFAULT_AGENT_MAX_TURNS);
+        let turns = max_turns;
 
         // Resolve role and model:
         //   - `model` takes precedence: a direct "provider/model_id" spec
