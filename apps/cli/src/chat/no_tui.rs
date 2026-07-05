@@ -111,7 +111,14 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::ContextEstimated { .. }
         | sdk::ChatEvent::CommandResultText { .. }
         | sdk::ChatEvent::SessionResumed { .. }
-        | sdk::ChatEvent::ToolCallUpdate { .. } => {}
+        | sdk::ChatEvent::ToolCallUpdate { .. }
+        | sdk::ChatEvent::ReflectionResult { .. }
+        | sdk::ChatEvent::ModelList { .. }
+        | sdk::ChatEvent::ReminderList { .. }
+        | sdk::ChatEvent::SessionList { .. }
+        | sdk::ChatEvent::ProjectInfo { .. }
+        | sdk::ChatEvent::TasksSnapshot { .. }
+        | sdk::ChatEvent::CostUpdate { .. } => {}
         sdk::ChatEvent::ApiError { error, .. } => {
             eprintln!("\n  ✗ API 错误: {error}");
         }

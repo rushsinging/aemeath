@@ -134,6 +134,7 @@ impl AgentClientImpl {
             session_reminders: Arc::new(
                 std::sync::Mutex::new(share::tool::SessionReminders::new()),
             ),
+            workspace_root: self.inner.cwd.clone(),
         }
     }
 }

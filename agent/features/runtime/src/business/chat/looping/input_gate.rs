@@ -49,7 +49,7 @@ pub struct ControlCommand {
 ///
 /// 泛化载体：新增命令只需加一个变体 + apply_gate idle 分支 + loop_runner 执行分支，
 /// 不再散弹式修改多处 match 臂。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum PendingCommand {
     Compact,
     SwitchModel {
@@ -57,18 +57,6 @@ pub enum PendingCommand {
     },
     SetThinking {
         desired: Option<bool>,
-    },
-    EstimateContext,
-    /// 查询类命令（/cost /status /config /stats）。
-    QueryCost {
-        args: String,
-    },
-    QueryStatus,
-    QueryConfig {
-        args: String,
-    },
-    QueryStats {
-        args: String,
     },
     /// 初始化项目（/init）。
     InitProject {
@@ -88,7 +76,25 @@ pub enum PendingCommand {
     },
     /// 保存当前会话（/save）。
     SaveSession,
+    /// 运行 reflection。
+    RunReflection,
+    /// 应用 reflection 结果。
+    ApplyReflection {
+        output: sdk::ReflectionOutputView,
+    },
+    /// 查询模型列表。
+    ListModels,
+    /// 查询提醒列表。
+    ListReminders,
 }
+
+// #567: 手动实现 PartialEq/Eq，不比较变体内数据。
+impl PartialEq for PendingCommand {
+    fn eq(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+impl Eq for PendingCommand {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateOutcome {
@@ -309,57 +315,6 @@ where
                     buffer.push(ChatInputEvent::SetThinking { desired });
                 }
             }
-            ChatInputEvent::EstimateContext => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::EstimateContext);
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    // busy：放回 buffer，等回合结束回到 idle 再处理。
-                    buffer.push(ChatInputEvent::EstimateContext);
-                }
-            }
-            ChatInputEvent::QueryCost { args } => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::QueryCost { args });
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::QueryCost { args });
-                }
-            }
-            ChatInputEvent::QueryStatus => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::QueryStatus);
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::QueryStatus);
-                }
-            }
-            ChatInputEvent::QueryConfig { args } => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::QueryConfig { args });
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::QueryConfig { args });
-                }
-            }
-            ChatInputEvent::QueryStats { args } => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::QueryStats { args });
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::QueryStats { args });
-                }
-            }
             ChatInputEvent::InitProject { force } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::InitProject { force });
@@ -409,6 +364,50 @@ where
                 } else {
                     buffer.push(ChatInputEvent::SaveSession);
                 }
+            }
+            ChatInputEvent::RunReflection => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::RunReflection);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::RunReflection);
+                }
+            }
+            ChatInputEvent::ApplyReflection { output } => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ApplyReflection { output });
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::ApplyReflection { output });
+                }
+            }
+            ChatInputEvent::ListModels => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ListModels);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::ListModels);
+                }
+            }
+            ChatInputEvent::ListReminders => {
+                if is_idle {
+                    pending_command = Some(PendingCommand::ListReminders);
+                    dropped_events = iter.count();
+                    decision = GateDecision::Proceed;
+                    break;
+                } else {
+                    buffer.push(ChatInputEvent::ListReminders);
+                }
+            }
+            _ => {
+                // 其他事件（已迁移到 TUI 层处理或事件流处理的事件）
+                // RunReflection / ApplyReflection / ListModels / ListReminders 走 idle 分支
             }
         }
     }

@@ -3,111 +3,95 @@
 use async_trait::async_trait;
 
 use crate::{
-    ChangeSet, ChatInput, ChatRequest, ChatStream, ClipboardImageView, CostInfo, ModelSummary,
-    ProjectContext, ReflectionOutputView, SessionSnapshot, TaskStatusView,
+    ChatMessage, ChatRequest, ChatStream, ClipboardImageView, CostInfo, ModelSummary,
+    ProjectContext, ReflectionOutputView, SessionSnapshot, SessionSummary, TaskStatusView,
 };
 
 /// Agent Runtime 的统一客户端 trait。
 ///
-/// CLI（薄入口）通过此 trait 与 Runtime 通信，不直接依赖 Runtime 内部类型。
+/// #567 后 trait 正在收窄为只有 `chat()`——所有交互通过事件流。
+/// 下方 `#[deprecated]` 方法是 TUI 侧尚未迁移的临时 stub，后续 PR 逐个删除。
 #[async_trait]
 pub trait AgentClient: Send + Sync + 'static {
-    // ─── 快照（无锁，永不阻塞） ───
-
-    /// 获取当前 session 快照（cheap clone）。
-    fn session_snapshot(&self) -> SessionSnapshot;
-
-    /// 获取当前成本信息（Atomic 读取，纳秒级）。
-    fn cost(&self) -> CostInfo;
-
-    /// 获取 TUI 可展示的任务状态视图。
-    async fn task_status(&self) -> Result<TaskStatusView, super::SdkError>;
-
-    /// 获取当前项目上下文（Copy 值类型）。
-    fn project(&self) -> ProjectContext;
-
-    // ─── 变更通道 ───
-
-    /// 订阅变更通道，TUI 通过 `changed()` 检测哪些领域发生了变化。
-    fn changes(&self) -> tokio::sync::watch::Receiver<ChangeSet>;
-
-    // ─── 写操作 ───
-
-    /// 发起一次 Chat。
+    /// 发起一次 Chat，返回事件流。
     async fn chat(&self, input: ChatRequest) -> Result<ChatStream, super::SdkError>;
 
-    /// 兼容非 TUI 调用方的一次性文本 Chat。
-    async fn chat_text(&self, input: ChatInput) -> Result<ChatStream, super::SdkError> {
+    // ─── 以下方法为 #567 迁移期间的临时 stub，后续 PR 逐个删除 ───
+
+    async fn chat_text(&self, input: crate::ChatInput) -> Result<ChatStream, super::SdkError> {
         self.chat(ChatRequest {
-            messages: vec![super::ChatMessage::user_text(input.text)],
+            messages: vec![ChatMessage::user_text(input.text)],
             queue_drain: None,
             input_events: None,
         })
         .await
     }
 
-    /// 更新 runtime 持有的当前 session messages。
+    fn session_snapshot(&self) -> SessionSnapshot {
+        unimplemented!("#567: session_snapshot 待迁移")
+    }
+    fn cost(&self) -> CostInfo {
+        unimplemented!("#567: cost 待迁移")
+    }
+    async fn task_status(&self) -> Result<TaskStatusView, super::SdkError> {
+        unimplemented!("#567: task_status 待迁移")
+    }
+    fn project(&self) -> ProjectContext {
+        unimplemented!("#567: project 待迁移")
+    }
+    fn changes(&self) -> tokio::sync::watch::Receiver<crate::ChangeSet> {
+        unimplemented!("#567: changes 待迁移")
+    }
     async fn sync_current_messages(
         &self,
-        _messages: Vec<super::ChatMessage>,
+        _messages: Vec<ChatMessage>,
     ) -> Result<(), super::SdkError> {
-        Ok(())
+        unimplemented!("#567: sync_current_messages 待迁移")
     }
-
-    /// 保存 runtime 当前 session。
-    async fn save_current_session(&self) -> Result<(), super::SdkError>;
-
-    /// 设置当前 turn 编号（由 TUI run_loop 在每次新请求时调用）。
+    async fn save_current_session(&self) -> Result<(), super::SdkError> {
+        unimplemented!("#567: save_current_session 待迁移")
+    }
     fn set_current_turn(&self, _turn: usize) {}
-
-    /// 加载指定 session。
-    async fn load_session(&self, id: &str) -> Result<SessionSnapshot, super::SdkError>;
-
-    /// 列出所有 session 摘要。
-    async fn list_sessions(&self) -> Result<Vec<super::session::SessionSummary>, super::SdkError>;
-
-    /// 删除指定 session。
-    async fn delete_session(&self, id: &str) -> Result<(), super::SdkError>;
-
-    /// 列出可用模型摘要。
-    async fn list_models(&self) -> Result<Vec<ModelSummary>, super::SdkError>;
-
-    /// 读取剪贴板图片，返回 TUI 可渲染视图。
-    async fn read_clipboard_image(&self) -> Result<ClipboardImageView, super::SdkError>;
-
-    /// 处理图片文件，返回 TUI 可渲染视图。
-    async fn process_image_file(&self, path: String)
-        -> Result<ClipboardImageView, super::SdkError>;
-
-    /// 基于当前消息运行 reflection。
+    async fn load_session(&self, _id: &str) -> Result<SessionSnapshot, super::SdkError> {
+        unimplemented!("#567: load_session 待迁移")
+    }
+    async fn list_sessions(&self) -> Result<Vec<SessionSummary>, super::SdkError> {
+        unimplemented!("#567: list_sessions 待迁移")
+    }
+    async fn delete_session(&self, _id: &str) -> Result<(), super::SdkError> {
+        unimplemented!("#567: delete_session 待迁移")
+    }
+    async fn list_models(&self) -> Result<Vec<ModelSummary>, super::SdkError> {
+        unimplemented!("#567: list_models 待迁移")
+    }
+    async fn read_clipboard_image(&self) -> Result<ClipboardImageView, super::SdkError> {
+        unimplemented!("#567: read_clipboard_image 待迁移")
+    }
+    async fn process_image_file(
+        &self,
+        _path: String,
+    ) -> Result<ClipboardImageView, super::SdkError> {
+        unimplemented!("#567: process_image_file 待迁移")
+    }
     async fn run_reflection(
         &self,
-        messages: Vec<super::ChatMessage>,
-    ) -> Result<ReflectionOutputView, super::SdkError>;
-
-    /// 应用 reflection 结果到记忆系统。
+        _messages: Vec<ChatMessage>,
+    ) -> Result<ReflectionOutputView, super::SdkError> {
+        unimplemented!("#567: run_reflection 待迁移")
+    }
     async fn apply_reflection(
         &self,
-        output: ReflectionOutputView,
-    ) -> Result<String, super::SdkError>;
-
-    // ─── Hook ───
-
-    /// 触发 hook 通知（消息变更等）。
-    async fn notify_hook(&self, message: &str, kind: &str) -> Result<(), super::SdkError>;
-
-    // ─── Reminder ───
-
-    /// 列出当前 session 的 reminders。
-    async fn list_reminders(&self) -> Result<Vec<super::ReminderView>, super::SdkError>;
-
-    // ─── TaskStore ───
-
-    /// 恢复 TaskStore 快照。
-    async fn restore_tasks(&self, snapshot: serde_json::Value) -> Result<(), super::SdkError>;
-
-    // ─── Config ───
-
-    /// 获取当前配置视图（TUI 纯展示用）。
-    async fn config_view(&self) -> Result<super::ConfigView, super::SdkError>;
+        _output: ReflectionOutputView,
+    ) -> Result<String, super::SdkError> {
+        unimplemented!("#567: apply_reflection 待迁移")
+    }
+    async fn notify_hook(&self, _message: &str, _kind: &str) -> Result<(), super::SdkError> {
+        unimplemented!("#567: notify_hook 待迁移")
+    }
+    async fn list_reminders(&self) -> Result<Vec<crate::ReminderView>, super::SdkError> {
+        unimplemented!("#567: list_reminders 待迁移")
+    }
+    async fn restore_tasks(&self, _snapshot: serde_json::Value) -> Result<(), super::SdkError> {
+        unimplemented!("#567: restore_tasks 待迁移")
+    }
 }

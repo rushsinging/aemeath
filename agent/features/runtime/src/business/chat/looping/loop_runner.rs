@@ -112,6 +112,46 @@ where
             > + Send
             + Sync,
     >,
+    /// 运行 reflection（#567）。由 core 层注入。
+    pub run_reflection_on_demand: Arc<
+        dyn Fn() -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<sdk::ReflectionOutputView, sdk::SdkError>,
+                        > + Send,
+                >,
+            > + Send
+            + Sync,
+    >,
+    /// 应用 reflection 结果（#567）。由 core 层注入。
+    pub apply_reflection_on_demand: Arc<
+        dyn Fn(
+                sdk::ReflectionOutputView,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<String, sdk::SdkError>> + Send>,
+            > + Send
+            + Sync,
+    >,
+    /// 查询模型列表（#567）。由 core 层注入。
+    pub list_models: Arc<
+        dyn Fn() -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = Result<Vec<sdk::ModelSummary>, sdk::SdkError>>
+                        + Send,
+                >,
+            > + Send
+            + Sync,
+    >,
+    /// 查询提醒列表（#567）。由 core 层注入。
+    pub list_reminders: Arc<
+        dyn Fn() -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<Output = Result<Vec<sdk::ReminderView>, sdk::SdkError>>
+                        + Send,
+                >,
+            > + Send
+            + Sync,
+    >,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -152,6 +192,10 @@ where
         skip_first_pending_turn,
         build_switched_client,
         save_session,
+        run_reflection_on_demand,
+        apply_reflection_on_demand,
+        list_models,
+        list_reminders,
     } = ctx;
     let mut client = client;
     let mut reasoning_graph = reasoning_graph;
@@ -326,51 +370,6 @@ where
                         execute_set_thinking(&client, &sink, desired).await;
                         continue;
                     }
-                    PendingCommand::EstimateContext => {
-                        execute_estimate_context(
-                            &messages,
-                            &system_prompt_text,
-                            context_size,
-                            &sink,
-                        )
-                        .await;
-                        continue;
-                    }
-                    PendingCommand::QueryCost { args } => {
-                        let (text, is_error) =
-                            super::idle_commands::execute_cost(&args, &session_id).await;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
-                    PendingCommand::QueryStatus => {
-                        let config = share::config::Config::default();
-                        let cwd_str = cwd.display().to_string();
-                        let (text, is_error) = super::idle_commands::execute_status(
-                            &config,
-                            &session_id,
-                            &cwd_str,
-                            client.model_name(),
-                        );
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
-                    PendingCommand::QueryConfig { args } => {
-                        let config = share::config::Config::default();
-                        let (text, is_error) = super::idle_commands::execute_config(&args, &config);
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
-                    PendingCommand::QueryStats { args } => {
-                        let config = share::config::Config::default();
-                        let (text, is_error) =
-                            super::idle_commands::execute_stats(&args, &session_id, &config).await;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
                     PendingCommand::InitProject { force } => {
                         let cwd_str = cwd.display().to_string();
                         let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
@@ -430,6 +429,73 @@ where
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::CommandResultText {
                                     text: format!("Failed to save session: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
+                    PendingCommand::RunReflection => match run_reflection_on_demand().await {
+                        Ok(view) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ReflectionResult {
+                                    output: Box::new(view),
+                                })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Reflection failed: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
+                    PendingCommand::ApplyReflection { output } => {
+                        match apply_reflection_on_demand(output).await {
+                            Ok(msg) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: msg,
+                                        is_error: false,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Apply reflection failed: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    PendingCommand::ListModels => match list_models().await {
+                        Ok(models) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ModelList { models })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("List models failed: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
+                    PendingCommand::ListReminders => match list_reminders().await {
+                        Ok(reminders) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ReminderList { reminders })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("List reminders failed: {e}"),
                                     is_error: true,
                                 })
                                 .await;
@@ -631,51 +697,6 @@ where
                         execute_set_thinking(&client, &sink, desired).await;
                         continue;
                     }
-                    PendingCommand::EstimateContext => {
-                        execute_estimate_context(
-                            &messages,
-                            &system_prompt_text,
-                            context_size,
-                            &sink,
-                        )
-                        .await;
-                        continue;
-                    }
-                    PendingCommand::QueryCost { args } => {
-                        let (text, is_error) =
-                            super::idle_commands::execute_cost(&args, &session_id).await;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
-                    PendingCommand::QueryStatus => {
-                        let config = share::config::Config::default();
-                        let cwd_str = cwd.display().to_string();
-                        let (text, is_error) = super::idle_commands::execute_status(
-                            &config,
-                            &session_id,
-                            &cwd_str,
-                            client.model_name(),
-                        );
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
-                    PendingCommand::QueryConfig { args } => {
-                        let config = share::config::Config::default();
-                        let (text, is_error) = super::idle_commands::execute_config(&args, &config);
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
-                    PendingCommand::QueryStats { args } => {
-                        let config = share::config::Config::default();
-                        let (text, is_error) =
-                            super::idle_commands::execute_stats(&args, &session_id, &config).await;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
-                    }
                     PendingCommand::InitProject { force } => {
                         let cwd_str = cwd.display().to_string();
                         let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
@@ -735,6 +756,73 @@ where
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::CommandResultText {
                                     text: format!("Failed to save session: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
+                    PendingCommand::RunReflection => match run_reflection_on_demand().await {
+                        Ok(view) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ReflectionResult {
+                                    output: Box::new(view),
+                                })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Reflection failed: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
+                    PendingCommand::ApplyReflection { output } => {
+                        match apply_reflection_on_demand(output).await {
+                            Ok(msg) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: msg,
+                                        is_error: false,
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Apply reflection failed: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    PendingCommand::ListModels => match list_models().await {
+                        Ok(models) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ModelList { models })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("List models failed: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    },
+                    PendingCommand::ListReminders => match list_reminders().await {
+                        Ok(reminders) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::ReminderList { reminders })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("List reminders failed: {e}"),
                                     is_error: true,
                                 })
                                 .await;
@@ -892,65 +980,6 @@ where
                             execute_set_thinking(&client, &sink, desired).await;
                             continue;
                         }
-                        PendingCommand::EstimateContext => {
-                            execute_estimate_context(
-                                &messages,
-                                &system_prompt_text,
-                                context_size,
-                                &sink,
-                            )
-                            .await;
-                            continue;
-                        }
-                        PendingCommand::QueryCost { args } => {
-                            let (text, is_error) =
-                                super::idle_commands::execute_cost(&args, &session_id).await;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text,
-                                    is_error,
-                                })
-                                .await;
-                        }
-                        PendingCommand::QueryStatus => {
-                            let config = share::config::Config::default();
-                            let cwd_str = cwd.display().to_string();
-                            let (text, is_error) = super::idle_commands::execute_status(
-                                &config,
-                                &session_id,
-                                &cwd_str,
-                                client.model_name(),
-                            );
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text,
-                                    is_error,
-                                })
-                                .await;
-                        }
-                        PendingCommand::QueryConfig { args } => {
-                            let config = share::config::Config::default();
-                            let (text, is_error) =
-                                super::idle_commands::execute_config(&args, &config);
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text,
-                                    is_error,
-                                })
-                                .await;
-                        }
-                        PendingCommand::QueryStats { args } => {
-                            let config = share::config::Config::default();
-                            let (text, is_error) =
-                                super::idle_commands::execute_stats(&args, &session_id, &config)
-                                    .await;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text,
-                                    is_error,
-                                })
-                                .await;
-                        }
                         PendingCommand::InitProject { force } => {
                             let cwd_str = cwd.display().to_string();
                             let (text, is_error) =
@@ -1020,6 +1049,73 @@ where
                                 let _ = sink
                                     .send_event(RuntimeStreamEvent::CommandResultText {
                                         text: format!("Failed to save session: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        },
+                        PendingCommand::RunReflection => match run_reflection_on_demand().await {
+                            Ok(view) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ReflectionResult {
+                                        output: Box::new(view),
+                                    })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("Reflection failed: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        },
+                        PendingCommand::ApplyReflection { output } => {
+                            match apply_reflection_on_demand(output).await {
+                                Ok(msg) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: msg,
+                                            is_error: false,
+                                        })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("Apply reflection failed: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
+                        }
+                        PendingCommand::ListModels => match list_models().await {
+                            Ok(models) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ModelList { models })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("List models failed: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        },
+                        PendingCommand::ListReminders => match list_reminders().await {
+                            Ok(reminders) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::ReminderList { reminders })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("List reminders failed: {e}"),
                                         is_error: true,
                                     })
                                     .await;
@@ -1502,69 +1598,6 @@ where
                                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                                 continue;
                             }
-                            PendingCommand::EstimateContext => {
-                                execute_estimate_context(
-                                    &messages,
-                                    &system_prompt_text,
-                                    context_size,
-                                    &sink,
-                                )
-                                .await;
-                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                                continue;
-                            }
-                            PendingCommand::QueryCost { args } => {
-                                let (text, is_error) =
-                                    super::idle_commands::execute_cost(&args, &session_id).await;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
-                            PendingCommand::QueryStatus => {
-                                let config = share::config::Config::default();
-                                let cwd_str = cwd.display().to_string();
-                                let (text, is_error) = super::idle_commands::execute_status(
-                                    &config,
-                                    &session_id,
-                                    &cwd_str,
-                                    client.model_name(),
-                                );
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
-                            PendingCommand::QueryConfig { args } => {
-                                let config = share::config::Config::default();
-                                let (text, is_error) =
-                                    super::idle_commands::execute_config(&args, &config);
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
-                            PendingCommand::QueryStats { args } => {
-                                let config = share::config::Config::default();
-                                let (text, is_error) = super::idle_commands::execute_stats(
-                                    &args,
-                                    &session_id,
-                                    &config,
-                                )
-                                .await;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
                             PendingCommand::InitProject { force } => {
                                 let cwd_str = cwd.display().to_string();
                                 let (text, is_error) =
@@ -1637,6 +1670,75 @@ where
                                     let _ = sink
                                         .send_event(RuntimeStreamEvent::CommandResultText {
                                             text: format!("Failed to save session: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            },
+                            PendingCommand::RunReflection => {
+                                match run_reflection_on_demand().await {
+                                    Ok(view) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::ReflectionResult {
+                                                output: Box::new(view),
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("Reflection failed: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                            PendingCommand::ApplyReflection { output } => {
+                                match apply_reflection_on_demand(output).await {
+                                    Ok(msg) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: msg,
+                                                is_error: false,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("Apply reflection failed: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                            PendingCommand::ListModels => match list_models().await {
+                                Ok(models) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ModelList { models })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List models failed: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            },
+                            PendingCommand::ListReminders => match list_reminders().await {
+                                Ok(reminders) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ReminderList { reminders })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List reminders failed: {e}"),
                                             is_error: true,
                                         })
                                         .await;
@@ -1796,69 +1898,6 @@ where
                                     execute_set_thinking(&client, &sink, desired).await;
                                     continue;
                                 }
-                                PendingCommand::EstimateContext => {
-                                    execute_estimate_context(
-                                        &messages,
-                                        &system_prompt_text,
-                                        context_size,
-                                        &sink,
-                                    )
-                                    .await;
-                                    continue;
-                                }
-                                PendingCommand::QueryCost { args } => {
-                                    let (text, is_error) =
-                                        super::idle_commands::execute_cost(&args, &session_id)
-                                            .await;
-                                    let _ = sink
-                                        .send_event(RuntimeStreamEvent::CommandResultText {
-                                            text,
-                                            is_error,
-                                        })
-                                        .await;
-                                }
-                                PendingCommand::QueryStatus => {
-                                    let config = share::config::Config::default();
-                                    let cwd_str = cwd.display().to_string();
-                                    let (text, is_error) = super::idle_commands::execute_status(
-                                        &config,
-                                        &session_id,
-                                        &cwd_str,
-                                        client.model_name(),
-                                    );
-                                    let _ = sink
-                                        .send_event(RuntimeStreamEvent::CommandResultText {
-                                            text,
-                                            is_error,
-                                        })
-                                        .await;
-                                }
-                                PendingCommand::QueryConfig { args } => {
-                                    let config = share::config::Config::default();
-                                    let (text, is_error) =
-                                        super::idle_commands::execute_config(&args, &config);
-                                    let _ = sink
-                                        .send_event(RuntimeStreamEvent::CommandResultText {
-                                            text,
-                                            is_error,
-                                        })
-                                        .await;
-                                }
-                                PendingCommand::QueryStats { args } => {
-                                    let config = share::config::Config::default();
-                                    let (text, is_error) = super::idle_commands::execute_stats(
-                                        &args,
-                                        &session_id,
-                                        &config,
-                                    )
-                                    .await;
-                                    let _ = sink
-                                        .send_event(RuntimeStreamEvent::CommandResultText {
-                                            text,
-                                            is_error,
-                                        })
-                                        .await;
-                                }
                                 PendingCommand::InitProject { force } => {
                                     let cwd_str = cwd.display().to_string();
                                     let (text, is_error) =
@@ -1932,6 +1971,77 @@ where
                                         let _ = sink
                                             .send_event(RuntimeStreamEvent::CommandResultText {
                                                 text: format!("Failed to save session: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                },
+                                PendingCommand::RunReflection => {
+                                    match run_reflection_on_demand().await {
+                                        Ok(view) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::ReflectionResult {
+                                                    output: Box::new(view),
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: format!("Reflection failed: {e}"),
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
+                                }
+                                PendingCommand::ApplyReflection { output } => {
+                                    match apply_reflection_on_demand(output).await {
+                                        Ok(msg) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: msg,
+                                                    is_error: false,
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: format!("Apply reflection failed: {e}"),
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
+                                }
+                                PendingCommand::ListModels => match list_models().await {
+                                    Ok(models) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::ModelList { models })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("List models failed: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                },
+                                PendingCommand::ListReminders => match list_reminders().await {
+                                    Ok(reminders) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::ReminderList {
+                                                reminders,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("List reminders failed: {e}"),
                                                 is_error: true,
                                             })
                                             .await;
@@ -2040,68 +2150,6 @@ where
                                 execute_set_thinking(&client, &sink, desired).await;
                                 continue;
                             }
-                            PendingCommand::EstimateContext => {
-                                execute_estimate_context(
-                                    &messages,
-                                    &system_prompt_text,
-                                    context_size,
-                                    &sink,
-                                )
-                                .await;
-                                continue;
-                            }
-                            PendingCommand::QueryCost { args } => {
-                                let (text, is_error) =
-                                    super::idle_commands::execute_cost(&args, &session_id).await;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
-                            PendingCommand::QueryStatus => {
-                                let config = share::config::Config::default();
-                                let cwd_str = cwd.display().to_string();
-                                let (text, is_error) = super::idle_commands::execute_status(
-                                    &config,
-                                    &session_id,
-                                    &cwd_str,
-                                    client.model_name(),
-                                );
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
-                            PendingCommand::QueryConfig { args } => {
-                                let config = share::config::Config::default();
-                                let (text, is_error) =
-                                    super::idle_commands::execute_config(&args, &config);
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
-                            PendingCommand::QueryStats { args } => {
-                                let config = share::config::Config::default();
-                                let (text, is_error) = super::idle_commands::execute_stats(
-                                    &args,
-                                    &session_id,
-                                    &config,
-                                )
-                                .await;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
-                            }
                             PendingCommand::InitProject { force } => {
                                 let cwd_str = cwd.display().to_string();
                                 let (text, is_error) =
@@ -2174,6 +2222,75 @@ where
                                     let _ = sink
                                         .send_event(RuntimeStreamEvent::CommandResultText {
                                             text: format!("Failed to save session: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            },
+                            PendingCommand::RunReflection => {
+                                match run_reflection_on_demand().await {
+                                    Ok(view) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::ReflectionResult {
+                                                output: Box::new(view),
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("Reflection failed: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                            PendingCommand::ApplyReflection { output } => {
+                                match apply_reflection_on_demand(output).await {
+                                    Ok(msg) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: msg,
+                                                is_error: false,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("Apply reflection failed: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            }
+                            PendingCommand::ListModels => match list_models().await {
+                                Ok(models) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ModelList { models })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List models failed: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            },
+                            PendingCommand::ListReminders => match list_reminders().await {
+                                Ok(reminders) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::ReminderList { reminders })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List reminders failed: {e}"),
                                             is_error: true,
                                         })
                                         .await;

@@ -13,6 +13,57 @@ fn test_save_session() -> Arc<
     Arc::new(|| Box::pin(async { Ok(()) }))
 }
 
+/// 测试用 reflection 闭包（#567）。测试中不会被真正触发，仅满足字段约束。
+fn test_run_reflection() -> Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<sdk::ReflectionOutputView, sdk::SdkError>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+> {
+    Arc::new(|| Box::pin(async { Ok(sdk::ReflectionOutputView::default()) }))
+}
+
+/// 测试用 apply-reflection 闭包（#567）。
+fn test_apply_reflection() -> Arc<
+    dyn Fn(
+            sdk::ReflectionOutputView,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<String, sdk::SdkError>> + Send>,
+        > + Send
+        + Sync,
+> {
+    Arc::new(|_output| Box::pin(async { Ok(String::new()) }))
+}
+
+/// 测试用 list-models 闭包（#567）。
+fn test_list_models() -> Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Vec<sdk::ModelSummary>, sdk::SdkError>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+> {
+    Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
+}
+
+/// 测试用 list-reminders 闭包（#567）。
+fn test_list_reminders() -> Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Vec<sdk::ReminderView>, sdk::SdkError>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+> {
+    Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
+}
+
 use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
@@ -195,6 +246,7 @@ impl RecordingSink {
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
             RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
             RuntimeStreamEvent::SessionResumed { .. } => "SessionResumed".to_string(),
+            _ => "Other".to_string(),
         };
         self.events.lock().unwrap().push(name);
     }
@@ -413,6 +465,10 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
     let _ = std::fs::remove_file(&flag_path);
@@ -495,6 +551,10 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
     let _ = std::fs::remove_file(&flag_path);
@@ -578,6 +638,10 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
 
@@ -637,6 +701,10 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
 
@@ -766,6 +834,10 @@ async fn test_continue_false_json_treated_as_block() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
     let _ = std::fs::remove_file(&flag_path);
@@ -854,6 +926,10 @@ async fn test_stall_triggers_stop_hook_check() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
     let _ = std::fs::remove_file(&counter_path);
@@ -1004,6 +1080,10 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
@@ -1185,6 +1265,10 @@ async fn test_stall_detector_resets_across_user_turns() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1447,6 +1531,10 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1511,6 +1599,10 @@ async fn test_stop_hook_block_limit_stops_loop() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     })
     .await;
 
@@ -1703,6 +1795,10 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1945,6 +2041,10 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
@@ -2188,6 +2288,10 @@ async fn test_chat_impl_idle_until_first_input_event() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2306,6 +2410,10 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2395,6 +2503,10 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2468,6 +2580,10 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(), // 正常场景
         language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))

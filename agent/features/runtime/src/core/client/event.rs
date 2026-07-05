@@ -472,6 +472,27 @@ pub(crate) fn runtime_event_to_sdk_event(
                 created_at,
             }
         }
+        crate::business::chat::RuntimeStreamEvent::ReflectionResult { output } => {
+            ChatEvent::ReflectionResult { output }
+        }
+        crate::business::chat::RuntimeStreamEvent::ModelList { models } => {
+            ChatEvent::ModelList { models }
+        }
+        crate::business::chat::RuntimeStreamEvent::ReminderList { reminders } => {
+            ChatEvent::ReminderList { reminders }
+        }
+        crate::business::chat::RuntimeStreamEvent::SessionList { sessions } => {
+            ChatEvent::SessionList { sessions }
+        }
+        crate::business::chat::RuntimeStreamEvent::ProjectInfo { project } => {
+            ChatEvent::ProjectInfo { project }
+        }
+        crate::business::chat::RuntimeStreamEvent::TasksSnapshot { tasks } => {
+            ChatEvent::TasksSnapshot { tasks }
+        }
+        crate::business::chat::RuntimeStreamEvent::CostUpdate { cost } => {
+            ChatEvent::CostUpdate { cost }
+        }
     }
 }
 

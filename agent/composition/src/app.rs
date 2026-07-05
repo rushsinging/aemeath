@@ -60,7 +60,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let launch = runtime_client.tui_launch_context();
     let thinking = launch.client.is_reasoning();
     let client = agent_client_from_runtime(runtime_client);
-    let cwd = PathBuf::from(client.project().workspace_root.clone());
+    let cwd = launch.workspace_root.clone();
 
     Ok(AgentClientBootstrap {
         client,
