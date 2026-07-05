@@ -217,13 +217,13 @@ where
 
     let events = buffer.drain_all();
     let event_count = events.len();
-    // [loop_debug] INFO 级：列出本次 gate 收到的所有事件类型。排查「无用户输入却
-    // 持续跑」时，这是关键证据——若 event_count>0 且含 UserMessage，说明有输入被
-    // 送进来（可能是 TUI 误发 / LLM 输出被当输入 / 队列重放）；若 event_count=0
-    // 但 loop 仍继续，则不是走 gate 路径（多半是 stop hook 阻断，见 stop_hook_debug）。
+    // [loop_debug] DEBUG 级诊断：列出本次 gate 收到的所有事件类型。排查「无用户输入
+    // 却持续跑」时是关键证据——若含 UserMessage/其它事件，说明有输入被送进来（TUI 误发
+    // / LLM 输出被当输入 / 队列重放）。默认级别不输出，`RUST_LOG=aemeath:agent:runtime=debug`
+    // 拉高即可见。
     if event_count > 0 {
         let kinds: Vec<&str> = events.iter().map(event_kind_name).collect();
-        log::info!(
+        log::debug!(
             target: LOG_TARGET,
             "[loop_debug] apply_gate kind={:?} is_idle={} drained_events={} kinds={:?}",
             kind, is_idle, event_count, kinds
@@ -473,9 +473,10 @@ where
         };
     }
 
-    // [loop_debug] 仅在有事件 / 有 append / 非 Proceed 决策时打点，避免刷屏。
+    // [loop_debug] DEBUG 级：gate 最终决策 + 追加用户消息数。仅在有事件 / 有 append /
+    // 非 Proceed 决策时打点，避免刷屏。默认不输出，调试时拉高级别可见。
     if event_count > 0 || appended_user_messages > 0 || decision != GateDecision::Proceed {
-        log::info!(
+        log::debug!(
             target: LOG_TARGET,
             "[loop_debug] apply_gate DONE kind={:?} decision={:?} appended_user_messages={} pending_command={:?}",
             kind, decision, appended_user_messages,
