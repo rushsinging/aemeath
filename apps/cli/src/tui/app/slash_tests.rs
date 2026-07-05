@@ -3,7 +3,7 @@ use crate::tui::effect::effect::Effect;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 
 pub(super) struct BlockingReflectionClient {
     pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
@@ -14,40 +14,9 @@ pub(super) struct BlockingReflectionClient {
 
 #[async_trait]
 impl sdk::AgentClient for BlockingReflectionClient {
-    fn changes(&self) -> watch::Receiver<sdk::ChangeSet> {
-        let (_tx, rx) = watch::channel(sdk::ChangeSet::empty());
-        rx
-    }
-
     async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(sdk::ChatStream::new(rx))
-    }
-
-    async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
-        Ok(sdk::SessionSnapshot {
-            id: "test-session".to_string(),
-            message_count: 0,
-            total_tokens: 0,
-            messages: vec![],
-            created_at: None,
-            trimmed: 0,
-            repaired: 0,
-            workspace: None,
-            tasks: None,
-        })
-    }
-
-    async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
-        Ok(Vec::new())
-    }
-
-    async fn delete_session(&self, _id: &str) -> Result<(), sdk::SdkError> {
-        Ok(())
-    }
-
-    async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
-        Ok(Vec::new())
     }
 }
 

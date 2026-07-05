@@ -12,6 +12,8 @@ pub(crate) struct SessionState {
     pub cached_models: Vec<sdk::ModelSummary>,
     pub current_model_display: String,
     pub memory_config: sdk::MemoryConfigView,
+    /// #567：启动时存储 resume_id，start_chat 后发 ResumeSession 事件
+    pub pending_resume_id: Option<String>,
 }
 
 impl SessionState {
@@ -53,6 +55,7 @@ mod tests {
             cached_models: vec![],
             current_model_display: String::new(),
             memory_config: sdk::MemoryConfigView::default(),
+            pending_resume_id: None,
         }
     }
 

@@ -25,10 +25,31 @@ fn model_row_display(model: &sdk::ModelSummary) -> (String, String, String, Stri
 }
 
 pub(crate) async fn run_models_command(client: Arc<dyn sdk::AgentClient>, json: bool) {
-    let models = client.list_models().await.unwrap_or_else(|e| {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
-    });
+    // #567：list_models 已从 trait 删除，改为通过 chat() 事件流请求。
+    let (input_tx, input_port) =
+        crate::tui::effect::session::processing::TuiInputEventPort::channel();
+    let mut stream = client
+        .chat(sdk::ChatRequest {
+            messages: Vec::new(),
+            queue_drain: None,
+            input_events: Some(std::sync::Arc::new(input_port)),
+        })
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        });
+    let _ = input_tx.send(sdk::ChatInputEvent::ListModels);
+    let models = loop {
+        match stream.recv().await {
+            Some(sdk::ChatEvent::ModelList { models }) => break models,
+            Some(_) => continue,
+            None => {
+                eprintln!("Error: stream closed before model list received");
+                std::process::exit(1);
+            }
+        }
+    };
     if models.is_empty() {
         eprintln!(
             "No models configured. Add models to ~/.agents/aemeath.json or .agents/aemeath.json"

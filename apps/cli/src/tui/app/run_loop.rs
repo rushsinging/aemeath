@@ -32,31 +32,6 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
 }
 
 impl App {
-    async fn handle_change_set(&mut self, change: ChangeSet) {
-        // 启动后首次拉取 config_view
-        if self.config_view.model_name.is_empty() {
-            self.refresh_config_view().await;
-        }
-        crate::tui::log_trace!(
-            "tui.change_set received bits={:?} contains_tasks={} contains_project={} contains_session={} contains_cost={} contains_config={}",
-            change,
-            change.contains(ChangeSet::TASKS),
-            change.contains(ChangeSet::PROJECT),
-            change.contains(ChangeSet::SESSION),
-            change.contains(ChangeSet::COST),
-            change.contains(ChangeSet::CONFIG)
-        );
-        if change.contains(ChangeSet::TASKS) {
-            self.update_task_status(self.chat.is_processing).await;
-        }
-        if change.contains(ChangeSet::PROJECT) {
-            self.update_project_context().await;
-        }
-        if change.contains(ChangeSet::CONFIG) {
-            self.refresh_config_view().await;
-        }
-    }
-
     /// #567: config_view() 方法已从 AgentClient trait 移除。
     /// config_view 现在由本地配置加载维护，此方法保留为 no-op 占位。
     async fn refresh_config_view(&mut self) {
@@ -80,6 +55,11 @@ impl App {
             Some(spawn_ctx) => {
                 let handle = processing::spawn_processing(spawn_ctx);
                 self.chat.set_processing_handle(handle);
+                // #567：resume 走事件流。启动后如果有 pending_resume_id，发 ResumeSession。
+                if let Some(id) = self.session.pending_resume_id.take() {
+                    self.chat
+                        .push_input_event(sdk::ChatInputEvent::ResumeSession { id });
+                }
             }
             None => self.append_error_notice("SDK agent client is unavailable"),
         }
@@ -97,7 +77,6 @@ impl App {
         self.spawn_update_check(ui_tx.clone());
 
         let mut event_stream = EventStream::new();
-        let mut change_rx = self.agent_client.as_ref().map(|client| client.changes());
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last_loop_iteration = Instant::now();
@@ -151,17 +130,6 @@ impl App {
             let msg: Option<TuiMsg> = tokio::select! {
                 biased;
                 ev = ui_rx.recv() => { ev.map(TuiMsg::Ui) }
-                change = async {
-                    match change_rx.as_mut() {
-                        Some(rx) => rx.changed().await.ok().map(|_| *rx.borrow()),
-                        None => futures::future::pending().await,
-                    }
-                } => {
-                    if let Some(change) = change {
-                        self.handle_change_set(change).await;
-                    }
-                    None
-                }
                 ev = event_stream.next() => {
                     match ev {
                         Some(Ok(event)) => match event {

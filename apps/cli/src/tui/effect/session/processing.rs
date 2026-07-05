@@ -666,7 +666,6 @@ mod tests {
     use async_trait::async_trait;
     use sdk::ChatInputEventPort as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio::sync::watch;
 
     fn test_sdk_event_context() -> sdk::ChatEventContext {
         sdk::ChatEventContext::new(
@@ -817,11 +816,6 @@ mod tests {
 
     #[async_trait]
     impl sdk::AgentClient for DoneOnlyAgentClient {
-        fn changes(&self) -> watch::Receiver<sdk::ChangeSet> {
-            let (_tx, rx) = watch::channel(sdk::ChangeSet::empty());
-            rx
-        }
-
         async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             tx.send(sdk::ChatEvent::Done {
@@ -830,32 +824,6 @@ mod tests {
             .unwrap();
             drop(tx);
             Ok(sdk::ChatStream::new(rx))
-        }
-
-        async fn load_session(&self, _id: &str) -> Result<sdk::SessionSnapshot, sdk::SdkError> {
-            Ok(sdk::SessionSnapshot {
-                id: "test-session".to_string(),
-                message_count: 0,
-                total_tokens: 0,
-                messages: vec![],
-                created_at: None,
-                trimmed: 0,
-                repaired: 0,
-                workspace: None,
-                tasks: None,
-            })
-        }
-
-        async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
-            Ok(Vec::new())
-        }
-
-        async fn delete_session(&self, _id: &str) -> Result<(), sdk::SdkError> {
-            Ok(())
-        }
-
-        async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
-            Ok(Vec::new())
         }
     }
 }
