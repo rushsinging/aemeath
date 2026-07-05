@@ -261,8 +261,6 @@ where
     let mut pending_input = PendingInputBuffer::default();
     /// busy 阶段（LLM 调用中）排队的用户输入。
     /// idle 门开启时 drain 进 pending_input → apply_gate。
-    let mut queued_buffer: std::collections::VecDeque<sdk::ChatInputEvent> =
-        std::collections::VecDeque::new();
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let chat_id = ChatId::new_v7();
@@ -613,7 +611,6 @@ where
                 &input_events,
                 &sink,
                 &mut pending_input,
-                &mut queued_buffer,
                 &mut messages,
                 &task_store,
                 None,
@@ -762,7 +759,6 @@ where
                 &mut loop_fsm,
                 &mut messages,
                 &mut pending_input,
-                &mut queued_buffer,
                 &task_store,
                 &cancel_slot,
                 turn_rollback_baseline,
@@ -857,7 +853,6 @@ where
                     &mut loop_fsm,
                     &mut messages,
                     &mut pending_input,
-                    &mut queued_buffer,
                     &task_store,
                     &cancel_slot,
                     turn_rollback_baseline,
@@ -970,28 +965,15 @@ where
                                     log::debug!(target: LOG_TARGET,
                                         "busy queued user message: session={} id={} text_preview={:?}",
                                         session_id, id, &text[..text.len().min(60)]);
-                                    queued_buffer.push_back(event);
-                                    let queued_snapshot: Vec<(sdk::InputId, Message)> = queued_buffer.iter()
-                                        .filter_map(|e| match e {
-                                            sdk::ChatInputEvent::UserMessage { id, text, .. } => {
-                                                Some((id.clone(), Message::user(text.clone())))
-                                            }
-                                            _ => None,
-                                        })
-                                        .collect();
+                                    pending_input.push(event);
+                                    let queued_snapshot: Vec<(sdk::InputId, Message)> = pending_input.user_message_snapshot();
                                     sink.send_event(RuntimeStreamEvent::UserMessagesQueued {
                                         queued: queued_snapshot,
                                     }).await;
                                 }
                                 sdk::ChatInputEvent::WithdrawAll => {
-                                    let texts: Vec<String> = queued_buffer.iter()
-                                        .filter_map(|e| match e {
-                                            sdk::ChatInputEvent::UserMessage { text, .. } => Some(text.clone()),
-                                            _ => None,
-                                        })
-                                        .collect();
+                                    let texts: Vec<String> = pending_input.drain_user_message_texts();
                                     let count = texts.len();
-                                    queued_buffer.clear();
                                     log::debug!(target: LOG_TARGET,
                                         "busy withdraw all queued: session={} count={}",
                                         session_id, count);
@@ -1288,7 +1270,6 @@ where
                         &input_events,
                         &sink,
                         &mut pending_input,
-                        &mut queued_buffer,
                         &mut messages,
                         &task_store,
                         Some(&cancel_slot),
@@ -1398,7 +1379,6 @@ where
                             &mut loop_fsm,
                             &mut messages,
                             &mut pending_input,
-                            &mut queued_buffer,
                             &task_store,
                             &cancel_slot,
                             turn_rollback_baseline,
@@ -1447,7 +1427,6 @@ where
                         &mut loop_fsm,
                         &mut messages,
                         &mut pending_input,
-                        &mut queued_buffer,
                         &task_store,
                         &cancel_slot,
                         turn_rollback_baseline,
@@ -1680,7 +1659,6 @@ async fn idle_until_resume_or_shutdown<I, S>(
     input_events: &I,
     sink: &S,
     pending: &mut PendingInputBuffer,
-    queued_buffer: &mut std::collections::VecDeque<sdk::ChatInputEvent>,
     messages: &mut Vec<Message>,
     task_store: &storage::api::TaskStore,
     cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
@@ -1692,10 +1670,6 @@ where
     loop {
         match await_idle_input(input_events, pending).await {
             IdleResult::Resumed => {
-                // drain busy 阶段排队的输入（LLM 调用中通过 select! 存入 queued_buffer）。
-                while let Some(event) = queued_buffer.pop_front() {
-                    pending.push(event);
-                }
                 let gate = apply_gate(
                     GateKind::BeforeLlm,
                     pending,
@@ -1756,7 +1730,6 @@ async fn cancel_to_idle<I, S>(
     loop_fsm: &mut ChatLoopFsm,
     messages: &mut Vec<Message>,
     pending_input: &mut PendingInputBuffer,
-    queued_buffer: &mut std::collections::VecDeque<sdk::ChatInputEvent>,
     task_store: &storage::api::TaskStore,
     cancel_slot: &std::sync::Mutex<CancellationToken>,
     rollback_baseline: usize,
@@ -1787,7 +1760,6 @@ where
         input_events,
         sink,
         pending_input,
-        queued_buffer,
         messages,
         task_store,
         Some(cancel_slot),
