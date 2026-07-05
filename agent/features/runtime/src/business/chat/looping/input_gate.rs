@@ -11,6 +11,31 @@ pub type InputEventFuture<'a> = Pin<Box<dyn Future<Output = Vec<ChatInputEvent>>
 pub type InputEventOptFuture<'a> =
     Pin<Box<dyn Future<Output = Option<ChatInputEvent>> + Send + 'a>>;
 
+/// [loop_debug] 返回 ChatInputEvent 的变体名（不含 payload），用于诊断日志。
+/// 排查「无用户输入却持续跑」时，逐条打印 gate 收到的事件类型。
+pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
+    match event {
+        ChatInputEvent::Cancel => "Cancel",
+        ChatInputEvent::ControlCommand { .. } => "ControlCommand",
+        ChatInputEvent::UserMessage { .. } => "UserMessage",
+        ChatInputEvent::Reset => "Reset",
+        ChatInputEvent::WithdrawAll => "WithdrawAll",
+        ChatInputEvent::Compact => "Compact",
+        ChatInputEvent::SwitchModel { .. } => "SwitchModel",
+        ChatInputEvent::SetThinking { .. } => "SetThinking",
+        ChatInputEvent::InitProject { .. } => "InitProject",
+        ChatInputEvent::ManageSession { .. } => "ManageSession",
+        ChatInputEvent::ManageMemory { .. } => "ManageMemory",
+        ChatInputEvent::ResumeSession { .. } => "ResumeSession",
+        ChatInputEvent::SaveSession => "SaveSession",
+        ChatInputEvent::RunReflection => "RunReflection",
+        ChatInputEvent::ApplyReflection { .. } => "ApplyReflection",
+        ChatInputEvent::ListModels => "ListModels",
+        ChatInputEvent::ListReminders => "ListReminders",
+        _ => "Other",
+    }
+}
+
 pub trait InputEventDrainPort: Clone + Send + Sync + 'static {
     fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a>;
     /// 阻塞等待下一条输入；None = 通道关闭（shutdown）。
@@ -192,13 +217,24 @@ where
 
     let events = buffer.drain_all();
     let event_count = events.len();
-    log::debug!(
-        target: LOG_TARGET,
-        "apply_gate kind={:?} is_idle={} drained_events={}",
-        kind,
-        is_idle,
-        event_count
-    );
+    // [loop_debug] INFO 级：列出本次 gate 收到的所有事件类型。排查「无用户输入却
+    // 持续跑」时，这是关键证据——若 event_count>0 且含 UserMessage，说明有输入被
+    // 送进来（可能是 TUI 误发 / LLM 输出被当输入 / 队列重放）；若 event_count=0
+    // 但 loop 仍继续，则不是走 gate 路径（多半是 stop hook 阻断，见 stop_hook_debug）。
+    if event_count > 0 {
+        let kinds: Vec<&str> = events.iter().map(event_kind_name).collect();
+        log::info!(
+            target: LOG_TARGET,
+            "[loop_debug] apply_gate kind={:?} is_idle={} drained_events={} kinds={:?}",
+            kind, is_idle, event_count, kinds
+        );
+    } else {
+        log::debug!(
+            target: LOG_TARGET,
+            "apply_gate kind={:?} is_idle={} drained_events=0",
+            kind, is_idle
+        );
+    }
     let mut appended_this_gate = 0usize;
     let mut iter = events.into_iter().peekable();
     while let Some(event) = iter.next() {
@@ -435,6 +471,16 @@ where
             GateKind::AfterBlockingBoundary => GateDecision::Proceed,
             GateKind::BeforeLlm | GateKind::BeforeFinish => GateDecision::ContinueNextTurn,
         };
+    }
+
+    // [loop_debug] 仅在有事件 / 有 append / 非 Proceed 决策时打点，避免刷屏。
+    if event_count > 0 || appended_user_messages > 0 || decision != GateDecision::Proceed {
+        log::info!(
+            target: LOG_TARGET,
+            "[loop_debug] apply_gate DONE kind={:?} decision={:?} appended_user_messages={} pending_command={:?}",
+            kind, decision, appended_user_messages,
+            pending_command.as_ref().map(|_| "some")
+        );
     }
 
     GateOutcome {

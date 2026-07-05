@@ -35,6 +35,7 @@ pub use events::{
     ChatEventSink, CompactStage, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
     RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
+pub(crate) use input_gate::event_kind_name;
 pub use input_gate::{
     apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,
     EmptyInputEventDrainPort, EmptyQueueDrainPort, GateDecision, GateKind, GateOutcome,
