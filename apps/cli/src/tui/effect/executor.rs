@@ -45,9 +45,10 @@ impl App {
 
     fn cancel_agent_chat(&mut self) {
         self.chat.start_cancelling();
-        // #567 S4：cancel 通过 ProcessingHandle.abort() 管理
+        // #639：cancel 触发 runtime 的 CancellationToken（即时、进程内 out-of-band），
+        // NEVER 用 abort()——abort 只中断 TUI 消费流、不停 runtime loop（#639 根因）。
         if let Some(h) = &self.chat.processing_handle {
-            h.abort();
+            h.cancel();
         }
         self.model
             .conversation

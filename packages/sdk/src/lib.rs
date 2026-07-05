@@ -28,9 +28,9 @@ pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
-    ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest,
-    ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView, OptionItem,
-    ToolCallStatusView, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
+    CancelHandle, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage,
+    ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView,
+    OptionItem, ToolCallStatusView, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;

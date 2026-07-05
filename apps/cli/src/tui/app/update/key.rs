@@ -148,9 +148,9 @@ impl App {
             }
             (KeyModifiers::NONE, KeyCode::Esc) => {
                 // Esc during processing: interrupt current LLM turn + tool calls
-                // #567 S4：cancel 通过 ProcessingHandle.abort() 管理
+                // #639：cancel 触发 runtime CancellationToken（即时），NEVER 用 abort()。
                 if let Some(h) = &self.chat.processing_handle {
-                    h.abort();
+                    h.cancel();
                 }
                 self.set_transient_notice(StatusNotice::warning("Interrupted"));
             }

@@ -189,5 +189,19 @@ pub(super) async fn chat_impl(
             log::warn!(target: "aemeath:agent:runtime", "auto-save failed on loop exit: {e}");
         }
     });
-    Ok(ChatStream::new(rx))
+
+    // #639：cancel 句柄——TUI 在 Ctrl+C/Esc 时调 `.cancel()`，即时触发共享 cancel 槽里
+    // 「当前回合的 token」。捕获槽（Arc<Mutex<CancellationToken>>）而非某个 token，故始终
+    // 取消 loop 正在用的那枚（loop 每回合 reset_cancel 换新 token，句柄照样命中）。
+    // 直接触发令牌 = 进程内 out-of-band 即时中断，NEVER 走事件流（避免工具/hook 期排队）。
+    let cancel_handle = {
+        let slot = me.inner.current_cancel.clone();
+        sdk::CancelHandle::new(move || {
+            if let Ok(guard) = slot.lock() {
+                log::debug!(target: "aemeath:agent:runtime", "[cancel] handle triggered → cancelling current token");
+                guard.cancel();
+            }
+        })
+    };
+    Ok(ChatStream::with_cancel(rx, cancel_handle))
 }
