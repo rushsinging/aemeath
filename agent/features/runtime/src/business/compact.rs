@@ -14,18 +14,11 @@ pub mod microcompact;
 pub mod restore;
 pub mod summary;
 mod token_estimation;
-pub mod truncate;
 
 // ---- 向后兼容的 re-exports ----
 
 // Token 估算函数（原始 compact.rs 中的 re-export）
 pub use token_estimation::*;
-
-// truncate 模块
-pub use truncate::{
-    apply_tool_result_budget, truncate_tool_result, truncate_tool_results,
-    MAX_TOOL_RESULTS_PER_MESSAGE_CHARS, TRUNCATION_PREVIEW_HEAD, TRUNCATION_PREVIEW_TAIL,
-};
 
 // autocompact 模块
 pub use autocompact::{AutoCompactState, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES};
