@@ -64,6 +64,18 @@ fn test_list_reminders() -> Arc<
     Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
 }
 
+fn test_list_sessions() -> Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Vec<sdk::SessionSummary>, sdk::SdkError>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+> {
+    Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
+}
+
 use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
@@ -469,6 +481,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
     let _ = std::fs::remove_file(&flag_path);
@@ -555,6 +568,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
     let _ = std::fs::remove_file(&flag_path);
@@ -642,6 +656,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
 
@@ -705,6 +720,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
 
@@ -838,6 +854,7 @@ async fn test_continue_false_json_treated_as_block() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
     let _ = std::fs::remove_file(&flag_path);
@@ -930,6 +947,7 @@ async fn test_stall_triggers_stop_hook_check() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
     let _ = std::fs::remove_file(&counter_path);
@@ -1084,6 +1102,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     // timeout 包裹：若 loop 在 shutdown 后未返回（hang），测试失败而非永久阻塞。
@@ -1269,6 +1288,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1535,6 +1555,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -1603,6 +1624,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     })
     .await;
 
@@ -1805,6 +1827,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2051,6 +2074,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     // timeout 包裹：未 shutdown（hang）则测试失败而非永久阻塞。
@@ -2298,6 +2322,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2420,6 +2445,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2513,6 +2539,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
@@ -2590,6 +2617,7 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
         apply_reflection_on_demand: test_apply_reflection(),
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
     };
 
     tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))

@@ -165,6 +165,16 @@ pub(super) async fn chat_impl(
                     })
                 })
             },
+            list_sessions: {
+                let inner = inner.clone();
+                std::sync::Arc::new(move || {
+                    let inner = inner.clone();
+                    Box::pin(async move {
+                        let me = super::accessors::AgentClientImpl { inner };
+                        super::trait_session::list_sessions_impl(&me).await
+                    })
+                })
+            },
         })
         .await;
         // loop 退出（shutdown / clear）后把取消槽重置为干净 token，
