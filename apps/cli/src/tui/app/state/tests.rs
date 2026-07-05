@@ -405,6 +405,8 @@ mod tests {
         crate::tui::app::event::UiTurnContext {
             chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-test"),
             turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-test"),
+            model_id: None,
+            role: None,
         }
     }
 

@@ -71,6 +71,8 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 provider_id: provider_id.clone(),
                 name: name.clone(),
                 index: *index,
+                model_id: context.model_id.clone(),
+                role: context.role.clone(),
             }))
         }
         UiEvent::ToolCallUpdate {
@@ -408,6 +410,8 @@ mod tests {
         UiTurnContext {
             chat_id: ChatId::new("chat-test"),
             turn_id: ChatTurnId::new("turn-test"),
+            model_id: None,
+            role: None,
         }
     }
 

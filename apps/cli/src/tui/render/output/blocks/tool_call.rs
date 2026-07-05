@@ -7,6 +7,7 @@ use crate::tui::view_model::tool_name::tool_display_name;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::rc::Rc;
+use unicode_width::UnicodeWidthStr;
 
 /// 渲染工具调用块：仅 header（标题）+ args detail 行 + 可选的 activity 状态行。
 ///
@@ -58,6 +59,13 @@ pub fn render_tool_call(
     let width = ctx.text_width as usize;
 
     let header_line = strip_leading_bullet(header_line);
+    // issue #499：在 header 前注入 [role] provider/model 元信息 span，按可用宽度截断。
+    let meta_spans = build_meta_spans(view, width);
+    let header_line = if meta_spans.is_empty() {
+        header_line
+    } else {
+        prepend_spans(header_line, meta_spans)
+    };
     let mut lines: Vec<RenderedLine> =
         wrap_spans_with_prefix(header_line.spans, width, None, WrapMode::Word)
             .into_iter()
@@ -109,6 +117,93 @@ fn strip_leading_bullet(mut line: Line<'static>) -> Line<'static> {
     line
 }
 
+/// issue #499：构造 header 前缀 meta span（`[role] provider/model — `）。
+///
+/// 格式（按可用宽度 `width` 截断，优先级 tool_name > model > role）：
+/// - 都有：`[role] Provider/Model — tool_name`
+/// - 仅 model：`Provider/Model — tool_name`
+/// - 仅 role：`[role] — tool_name`
+/// - 都无：返回空 Vec（header 不变）
+///
+/// 截断策略：当 meta + tool_name 预计超出 `width` 时，按优先级依次省略 role、model。
+fn build_meta_spans(view: &ToolCallBlockView, width: usize) -> Vec<Span<'static>> {
+    let role = view.role.as_deref();
+    // model_id 已是 `Provider/Model` 格式（如 `Zhipu/glm-5.2`），直接复用，包含 provider 信息。
+    let model = view.model_id.as_deref();
+
+    if role.is_none() && model.is_none() {
+        return Vec::new();
+    }
+
+    let tool_name_width = tool_display_name(&view.title).width();
+    // 预留：tool_name + " — " 分隔符(3) + marker(2)
+    let reserved = tool_name_width + 3 + 2;
+    let remaining = width.saturating_sub(reserved);
+
+    let role_seg = role.map(|r| format!("[{}] ", r)).unwrap_or_default();
+    let model_seg = model.map(|m| format!("{} ", m)).unwrap_or_default();
+    let full_meta = format!("{}{}", role_seg, model_seg);
+    let full_meta_width = full_meta.width();
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if full_meta_width <= remaining {
+        // 完整显示：role 段用 YELLOW，model 段用 TEXT_MUTED。
+        if let Some(r) = role {
+            spans.push(Span::styled(
+                format!("[{}] ", r),
+                Style::default().fg(theme::YELLOW),
+            ));
+        }
+        if let Some(m) = model {
+            spans.push(Span::styled(
+                format!("{} ", m),
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
+        }
+    } else if !model_seg.is_empty() {
+        // 省略 role，仅显示 model（若仍超长则截断 + …）。
+        let seg = if model_seg.width() > remaining {
+            let truncated = truncate_unicode(model.unwrap_or(""), remaining.saturating_sub(2));
+            format!("{}… ", truncated)
+        } else {
+            model_seg
+        };
+        spans.push(Span::styled(seg, Style::default().fg(theme::TEXT_MUTED)));
+    } else {
+        // 只有 role：截断 + …。
+        let truncated = truncate_unicode(role.unwrap_or(""), remaining.saturating_sub(2));
+        spans.push(Span::styled(
+            format!("[{}]… ", truncated),
+            Style::default().fg(theme::YELLOW),
+        ));
+    }
+    spans.push(Span::styled("— ", Style::default().fg(theme::TEXT_MUTED)));
+    spans
+}
+
+/// 按字符宽度截断 unicode 字符串，不会切断多字节字符的中间部分。
+fn truncate_unicode(s: &str, max_width: usize) -> String {
+    let mut width = 0;
+    let mut out = String::new();
+    for ch in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > max_width {
+            break;
+        }
+        width += cw;
+        out.push(ch);
+    }
+    out
+}
+
+/// 将 meta spans 前置到 header line（保持其它 span 顺序）。
+fn prepend_spans(mut line: Line<'static>, prefix: Vec<Span<'static>>) -> Line<'static> {
+    let mut new_spans = prefix;
+    new_spans.append(&mut line.spans);
+    line.spans = new_spans;
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +228,9 @@ mod tests {
             workspace_root: None,
             collapsible: false,
             collapsed: false,
+            provider_id: None,
+            model_id: None,
+            role: None,
         }
     }
 

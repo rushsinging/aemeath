@@ -85,6 +85,8 @@ impl ConversationUpdate for ResumeConversation {
                                     provider_id: None,
                                     name: name.clone(),
                                     index: block_index,
+                                    model_id: None,
+                                    role: None,
                                 }));
                                 all_changes.extend(model.apply(ToolCallUpdate {
                                     chat_id: chat_id.clone(),
@@ -158,6 +160,8 @@ impl ConversationUpdate for ToolCallStart {
             self.provider_id,
             self.name.clone(),
             self.index,
+            self.model_id,
+            self.role,
         )
     }
 }

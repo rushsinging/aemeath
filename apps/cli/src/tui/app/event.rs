@@ -5,6 +5,10 @@ use std::path::PathBuf;
 pub struct UiTurnContext {
     pub chat_id: ChatId,
     pub turn_id: ChatTurnId,
+    /// 当前 turn 的 model id（如 `Zhipu/glm-5.2`）。
+    pub model_id: Option<String>,
+    /// 当前 turn 的 role（main / subagent / 具体角色名）。主 turn 为 None。
+    pub role: Option<String>,
 }
 
 impl From<sdk::ChatEventContext> for UiTurnContext {
@@ -12,6 +16,8 @@ impl From<sdk::ChatEventContext> for UiTurnContext {
         Self {
             chat_id: context.chat_id,
             turn_id: context.turn_id,
+            model_id: context.model_id,
+            role: context.role,
         }
     }
 }

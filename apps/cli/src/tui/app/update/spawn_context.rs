@@ -30,11 +30,15 @@ impl App {
                 chat.turns.last().map(|turn| UiTurnContext {
                     chat_id: chat.id.clone(),
                     turn_id: turn.id.clone(),
+                    model_id: None,
+                    role: None,
                 })
             })
             .unwrap_or_else(|| UiTurnContext {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new_v7(),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new_v7(),
+                model_id: None,
+                role: None,
             })
     }
 }

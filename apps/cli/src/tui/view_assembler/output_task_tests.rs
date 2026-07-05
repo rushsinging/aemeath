@@ -113,6 +113,8 @@ fn add_task_tool(
         provider_id: None,
         name: name.to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),

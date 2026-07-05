@@ -93,7 +93,10 @@ impl crate::business::chat::InputEventDrainPort for RuntimeInputEventDrainPort {
 }
 
 fn turn_context_to_sdk(context: RuntimeTurnContext) -> ChatEventContext {
-    ChatEventContext::new(context.chat_id, context.turn_id)
+    let mut ctx = ChatEventContext::new(context.chat_id, context.turn_id);
+    ctx.model_id = context.model_id;
+    ctx.role = context.role;
+    ctx
 }
 
 fn tool_call_status_to_sdk(

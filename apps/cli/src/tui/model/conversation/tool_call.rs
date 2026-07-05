@@ -12,6 +12,12 @@ pub struct ToolCall {
     /// None = 尚未收到结果；Some = 已完成（成功或失败）。
     pub result: Option<ToolResultPayload>,
     pub activities: Vec<String>,
+    /// 发起此 tool call 的 provider id（如 `Zhipu`）。来自 ToolCallStart 事件。
+    pub provider_id: Option<String>,
+    /// 发起此 tool call 的 model id（如 `Zhipu/glm-5.2`）。来自 turn context。
+    pub model_id: Option<String>,
+    /// 发起此 tool call 的 role（main / subagent / 角色名）。主 turn 为 None。
+    pub role: Option<String>,
 }
 
 impl ToolCall {
@@ -24,6 +30,9 @@ impl ToolCall {
             status: ToolCallStatus::PendingArgs,
             result: None,
             activities: Vec::new(),
+            provider_id: None,
+            model_id: None,
+            role: None,
         }
     }
     pub fn update_args(&mut self, partial_args: impl Into<String>) {

@@ -21,9 +21,11 @@ impl ConversationModel {
         chat_id: ChatId,
         turn_id: ChatTurnId,
         id: ToolCallId,
-        _provider_id: Option<String>,
+        provider_id: Option<String>,
         name: String,
         index: usize,
+        model_id: Option<String>,
+        role: Option<String>,
     ) -> Vec<ConversationChange> {
         self.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
         crate::tui::log_debug!(
@@ -37,7 +39,15 @@ impl ConversationModel {
         );
         let tool_call_id = id.clone();
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-            turn.observe_tool_start(tool_call_id.clone(), chat_id.clone(), name.clone(), index);
+            turn.observe_tool_start(
+                tool_call_id.clone(),
+                chat_id.clone(),
+                name.clone(),
+                index,
+                provider_id,
+                model_id,
+                role,
+            );
         }
         self.insert_tool_call_block_before_active_text(chat_id, turn_id, tool_call_id);
         vec![
@@ -84,7 +94,15 @@ impl ConversationModel {
         }
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
-                turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
+                turn.observe_tool_start(
+                    id.clone(),
+                    chat_id.clone(),
+                    name.clone(),
+                    index,
+                    None,
+                    None,
+                    None,
+                );
                 let _ = turn.update_tool(id.as_ref(), arguments.clone(), status);
                 bound_id = id.clone();
             }

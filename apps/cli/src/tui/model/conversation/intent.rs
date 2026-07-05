@@ -69,6 +69,10 @@ pub struct ToolCallStart {
     pub provider_id: Option<String>,
     pub name: String,
     pub index: usize,
+    /// 发起此 tool call 的 model id（如 `Zhipu/glm-5.2`）。来自 turn context。
+    pub model_id: Option<String>,
+    /// 发起此 tool call 的 role（main / subagent / 角色名）。主 turn 为 None。
+    pub role: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

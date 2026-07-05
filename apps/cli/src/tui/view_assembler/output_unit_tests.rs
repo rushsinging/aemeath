@@ -69,6 +69,8 @@ fn test_non_embedded_tool_result_uses_summary() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -241,6 +243,8 @@ fn test_tool_index_call_matches_linear_scan() {
         provider_id: Some("p".to_string()),
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
 
     let index = ToolIndex::build(&conv);
@@ -276,6 +280,8 @@ fn test_tool_index_call_result_payload_matches_observed_values() {
         provider_id: Some("prov-1".to_string()),
         name: "Bash".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conv.apply(ToolCallUpdate {
         chat_id: chat.clone(),
@@ -351,6 +357,8 @@ fn test_non_embedded_tool_result_error_with_image_count_renders_correctly() {
         provider_id: Some("prov-1".to_string()),
         name: "Bash".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conv.apply(ToolCallUpdate {
         chat_id: chat.clone(),

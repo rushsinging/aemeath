@@ -11,11 +11,22 @@ use serde::{Deserialize, Serialize};
 pub struct ChatEventContext {
     pub chat_id: crate::ids::ChatId,
     pub turn_id: crate::ids::ChatTurnId,
+    /// 当前 turn 的 model id（如 `Zhipu/glm-5.2`），主 turn 也填。
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// 当前 turn 的 role（main / subagent / 具体角色名）。主 turn 为 None。
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 impl ChatEventContext {
     pub fn new(chat_id: crate::ids::ChatId, turn_id: crate::ids::ChatTurnId) -> Self {
-        Self { chat_id, turn_id }
+        Self {
+            chat_id,
+            turn_id,
+            model_id: None,
+            role: None,
+        }
     }
 }
 

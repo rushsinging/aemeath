@@ -76,6 +76,8 @@ fn test_record_agent_progress_uses_explicit_runtime_context_when_active_turn_dri
         provider_id: Some("provider-agent".to_string()),
         name: "Agent".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.ensure_runtime_turn(stale_chat.clone(), stale_turn.clone());
 
@@ -155,6 +157,8 @@ fn test_conversation_observes_tool_lifecycle() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -221,6 +225,8 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -257,6 +263,8 @@ fn test_conversation_reused_runtime_ids_across_turns_do_not_overwrite_earlier_bl
         provider_id: None,
         name: "Skill".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -313,6 +321,8 @@ fn test_conversation_observe_tool_events_use_explicit_runtime_context_when_activ
         provider_id: Some("call-read".to_string()),
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: live_chat.clone(),
@@ -380,6 +390,8 @@ fn test_conversation_repeated_runtime_id_result_does_not_complete_previous_provi
         provider_id: Some("call-skill".to_string()),
         name: "Skill".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -479,6 +491,8 @@ fn test_conversation_binds_tool_call_by_provider_id_when_runtime_id_changed() {
         provider_id: Some("call-provider-skill".to_string()),
         name: "Skill".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -534,6 +548,8 @@ fn test_conversation_late_tool_call_binds_existing_result() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolResult {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -677,6 +693,8 @@ fn test_conversation_keeps_live_tool_call_after_preceding_assistant_text() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -741,6 +759,8 @@ fn test_conversation_keeps_tool_after_completed_assistant_text() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -804,6 +824,8 @@ fn test_conversation_places_tool_result_after_late_bound_tool_call() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -853,6 +875,8 @@ fn test_conversation_keeps_tool_result_after_existing_tool_call() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -986,6 +1010,8 @@ fn test_conversation_keeps_tool_args_preview() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -1087,6 +1113,8 @@ fn test_agent_tool_result_not_orphan_with_index_mismatch() {
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     // ToolCall 用 content_block index=1（因为 text 占了 block 0）
     model.apply(ToolCallUpdate {
@@ -1157,6 +1185,8 @@ fn test_agent_tool_result_not_orphan_text_streaming_then_tool() {
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     model.apply(ToolCallUpdate {
         chat_id: super::ids::ChatId::new("chat-1"),
@@ -1266,6 +1296,8 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
 
     // 4. Agent progress — 不进 timeline，只写入 tool_calls[].activities
@@ -1363,6 +1395,8 @@ fn test_a43_insert_tool_call_dedup_reads_timeline() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
 
     // ToolCallUpdate with same id → 不应重复插入 ToolCall
@@ -1442,6 +1476,8 @@ fn test_a43_promote_orphan_timeline_ordering() {
         provider_id: None,
         name: "Bash".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
 
     // ToolCallUpdate → 触发 promote_orphan_tool_result（confirm binding）
@@ -1505,6 +1541,8 @@ fn test_a43_update_tool_call_no_duplicate_timeline_entry() {
         provider_id: None,
         name: "Write".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
 
     // Multiple ToolCallUpdates with same id — should NOT create duplicate ToolCall entries

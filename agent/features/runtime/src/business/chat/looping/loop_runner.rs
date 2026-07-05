@@ -551,7 +551,8 @@ where
 
         turn_count += 1;
         let turn_id = ChatTurnId::new_v7();
-        let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id);
+        let turn_context =
+            RuntimeTurnContext::new(chat_id.clone(), turn_id).with_model_id(client.model_name());
         loop_fsm.transition(ChatLoopTransition::StartTurn);
         sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
             .await;

@@ -156,6 +156,8 @@ fn test_output_assembler_late_bound_tool_result_stays_inside_tool_block() {
         provider_id: None,
         name: "Edit".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolResult {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -294,6 +296,8 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -349,6 +353,8 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
         provider_id: None,
         name: "Read".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -389,6 +395,8 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -456,6 +464,8 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
         provider_id: None,
         name: "Agent".to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -545,6 +555,8 @@ fn add_completed_tool(
         provider_id: None,
         name: name.to_string(),
         index: 0,
+        model_id: None,
+        role: None,
     });
     conversation.apply(ToolCallUpdate {
         chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
@@ -598,6 +610,8 @@ fn bench_refresh_cost_by_conversation_size() {
                 provider_id: Some(format!("p{i}")),
                 name: "Read".to_string(),
                 index: 0,
+                model_id: None,
+                role: None,
             });
             conv.apply(ToolResult {
                 chat_id: chat_id.clone(),

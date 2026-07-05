@@ -28,9 +28,16 @@ impl ChatTurn {
         chat_id: ChatId,
         name: String,
         index: usize,
+        provider_id: Option<String>,
+        model_id: Option<String>,
+        role: Option<String>,
     ) {
         let key = ToolStreamKey::new(chat_id, self.id.clone(), name, index);
-        self.tool_calls.push(ToolCall::pending(id, key));
+        let mut call = ToolCall::pending(id, key);
+        call.provider_id = provider_id;
+        call.model_id = model_id;
+        call.role = role;
+        self.tool_calls.push(call);
         self.status = ChatTurnStatus::ToolExecuting;
     }
 
@@ -121,8 +128,16 @@ mod tests {
         let chat = ChatId::new("c");
         let call_r = ToolCallId::new("call_r");
         let call_b = ToolCallId::new("call_b");
-        turn.observe_tool_start(call_r.clone(), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(call_b.clone(), chat, "Bash".into(), 1);
+        turn.observe_tool_start(
+            call_r.clone(),
+            chat.clone(),
+            "Read".into(),
+            0,
+            None,
+            None,
+            None,
+        );
+        turn.observe_tool_start(call_b.clone(), chat, "Bash".into(), 1, None, None, None);
 
         assert!(turn.bind_tool(call_r.as_str()).is_some());
         assert_eq!(turn.tool_calls[0].id.as_ref(), Some(&call_r));
@@ -138,8 +153,16 @@ mod tests {
         let chat = ChatId::new("c");
         let call_a = ToolCallId::new("call_a");
         let call_b = ToolCallId::new("call_b");
-        turn.observe_tool_start(call_a.clone(), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(call_b.clone(), chat, "Read".into(), 1);
+        turn.observe_tool_start(
+            call_a.clone(),
+            chat.clone(),
+            "Read".into(),
+            0,
+            None,
+            None,
+            None,
+        );
+        turn.observe_tool_start(call_b.clone(), chat, "Read".into(), 1, None, None, None);
 
         assert!(turn.bind_tool(call_a.as_str()).is_some());
         assert!(
@@ -163,12 +186,36 @@ mod tests {
         let call_2a = ToolCallId::new("call_2a");
         let call_2 = ToolCallId::new("call_2");
         // 轮 1 占位 + 绑定。
-        turn.observe_tool_start(call_1a.clone(), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(call_1.clone(), chat.clone(), "Read".into(), 1);
+        turn.observe_tool_start(
+            call_1a.clone(),
+            chat.clone(),
+            "Read".into(),
+            0,
+            None,
+            None,
+            None,
+        );
+        turn.observe_tool_start(
+            call_1.clone(),
+            chat.clone(),
+            "Read".into(),
+            1,
+            None,
+            None,
+            None,
+        );
         turn.bind_tool(call_1.as_str());
         // 轮 2 占位（index 跨轮重复）。
-        turn.observe_tool_start(call_2a.clone(), chat.clone(), "Read".into(), 0);
-        turn.observe_tool_start(call_2.clone(), chat, "Read".into(), 1);
+        turn.observe_tool_start(
+            call_2a.clone(),
+            chat.clone(),
+            "Read".into(),
+            0,
+            None,
+            None,
+            None,
+        );
+        turn.observe_tool_start(call_2.clone(), chat, "Read".into(), 1, None, None, None);
         // 轮 2 bind(index=1)：internal id 直连，不会覆盖轮1 已绑 call_1。
         turn.bind_tool(call_2.as_str());
 
