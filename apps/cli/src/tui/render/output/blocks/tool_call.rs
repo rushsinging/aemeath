@@ -4,6 +4,7 @@ use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
 use crate::tui::view_model::tool_name::tool_display_name;
+use crate::tui::view_model::AgentMetaView;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::rc::Rc;
@@ -20,9 +21,13 @@ pub fn render_tool_call(
     let header_input = view.args_preview.as_deref().filter(|s| !s.is_empty());
     let (header_line, detail_lines) = header_input
         .map(|raw_json| {
+            // issue #499：Agent 工具的 role/model 可能由 runtime resolve（如 user 指定
+            // role 但未指定 model）。此时 input JSON 不含实际 model，而 agent_meta 携带
+            // resolve 后的值。将 agent_meta 合并到 JSON 副本，format_tool_call 自然取到。
+            let effective_json = merge_agent_meta(raw_json, view.agent_meta.as_ref());
             format_tool_call(
                 &view.title,
-                raw_json,
+                &effective_json,
                 view.result_payload.as_ref(),
                 view.workspace_root.as_deref(),
             )
@@ -109,6 +114,29 @@ fn strip_leading_bullet(mut line: Line<'static>) -> Line<'static> {
     line
 }
 
+/// 将 agent_meta 的 role/model 合并到 Agent tool 的 input JSON 字符串。
+///
+/// issue #499：当 user 只指定 role（未指定 model）时，runtime 根据 role 配置
+/// resolve 出实际 model。agent_meta 携带 resolve 后的值，此处合并到 JSON 副本，
+/// 使 `AgentDisplay::format_header` 能取到实际 model。
+fn merge_agent_meta(raw_json: &str, meta: Option<&AgentMetaView>) -> String {
+    use serde_json::Value;
+    let Some(meta) = meta else {
+        return raw_json.to_string();
+    };
+    let mut json: Value =
+        serde_json::from_str(raw_json).unwrap_or(Value::Object(Default::default()));
+    if let Value::Object(ref mut obj) = json {
+        if let Some(role) = &meta.role {
+            obj.insert("role".to_string(), Value::String(role.clone()));
+        }
+        if !meta.model.is_empty() {
+            obj.insert("model".to_string(), Value::String(meta.model.clone()));
+        }
+    }
+    serde_json::to_string(&json).unwrap_or_else(|_| raw_json.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +161,7 @@ mod tests {
             workspace_root: None,
             collapsible: false,
             collapsed: false,
+            agent_meta: None,
         }
     }
 
@@ -297,5 +326,67 @@ mod tests {
                 line.plain
             );
         }
+    }
+
+    #[test]
+    fn test_merge_agent_meta_none_returns_original() {
+        // 无 agent_meta 时 JSON 原样返回（main agent 或非 Agent tool）
+        let raw = r#"{"prompt":"do something","description":"task"}"#;
+        assert_eq!(merge_agent_meta(raw, None), raw);
+    }
+
+    #[test]
+    fn test_merge_agent_meta_fills_role_and_model() {
+        // case 2（input 只有 role 无 model）：agent_meta 补上 runtime resolve 的 model
+        let raw = r#"{"prompt":"x","description":"task","role":"coder"}"#;
+        let meta = AgentMetaView {
+            role: Some("coder".into()),
+            model: "Zhipu/glm-5.2".into(),
+        };
+        let merged = merge_agent_meta(raw, Some(&meta));
+        let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(v["role"], "coder");
+        assert_eq!(v["model"], "Zhipu/glm-5.2");
+    }
+
+    #[test]
+    fn test_merge_agent_meta_overrides_input_model() {
+        // input 指定 model 但 runtime resolve 出不同值时，agent_meta 优先
+        let raw = r#"{"prompt":"x","description":"task","model":"Old/model"}"#;
+        let meta = AgentMetaView {
+            role: None,
+            model: "New/model".into(),
+        };
+        let merged = merge_agent_meta(raw, Some(&meta));
+        let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(v["model"], "New/model");
+    }
+
+    #[test]
+    fn test_merge_agent_meta_empty_model_not_overwritten() {
+        // agent_meta.model 为空时不覆盖 input 已有的 model
+        let raw = r#"{"prompt":"x","description":"task","model":"Keep/me"}"#;
+        let meta = AgentMetaView {
+            role: Some("bot".into()),
+            model: "".into(),
+        };
+        let merged = merge_agent_meta(raw, Some(&meta));
+        let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(v["model"], "Keep/me");
+        assert_eq!(v["role"], "bot");
+    }
+
+    #[test]
+    fn test_merge_agent_meta_invalid_json_falls_back() {
+        // input JSON 无效时，agent_meta 仍可构造最小 JSON
+        let raw = "not valid json";
+        let meta = AgentMetaView {
+            role: Some("coder".into()),
+            model: "Zhipu/glm-5.2".into(),
+        };
+        let merged = merge_agent_meta(raw, Some(&meta));
+        let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(v["role"], "coder");
+        assert_eq!(v["model"], "Zhipu/glm-5.2");
     }
 }

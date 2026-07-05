@@ -129,3 +129,35 @@ TUI 采用 **Catppuccin Macchiato** 暗色主题。原始色值定义在 `apps/c
 - **ACCENT_BRIGHT (Mauve)**：内容区强调——syntax keyword、tool display name。语义为"操作类型/关键字"。
 - **TEXT / TEXT_MUTED / TEXT_DIM**：三级文本层次，tool header 内 `name(Mauve) > args(TEXT) > meta(TEXT_MUTED)`。
 - **状态色**：`SUCCESS`(Green) / `TOOL_RUNNING`(Peach) / `ERROR`(Red) 专用于状态 marker，**NEVER** 用于普通文本。
+
+## Agent tool call 显示
+
+### AgentProgressEvent 数据流
+
+Sub-agent 的实时活动通过 `AgentProgressEvent` 从 runtime 流向 TUI，**MUST** 保持结构化传递，**NEVER** 中途压扁成字符串：
+
+```
+SubAgentRun.role_name_for_log / model_name_for_log
+  → AgentProgressKind::Started { role, model }   (share 层)
+  → setup.rs emit Started 事件                    (runtime 层)
+  → AgentProgressKindView::Started                (SDK 层透传)
+  → UpdateAgentMeta intent                        (TUI adapter)
+  → ToolCall.agent_meta                           (TUI model 层)
+  → AgentMetaView                                 (view_model 层投影)
+  → merge_agent_meta 合并到 JSON 副本             (render 层)
+  → AgentDisplay::format_header_line_with_result 显示
+```
+
+关键约定：
+
+- **MUST** `AgentProgressEvent` 新增字段 **MUST** 加 `#[serde(default)]`，保证历史 session 反序列化兼容。
+- **MUST** view_model 层 **MUST NOT** 直接引用 model 层类型（架构守卫拦截），**MUST** 定义独立的 view 类型（如 `AgentMetaView`）并在 view_assembler 处投影。
+- **MUST** Agent tool 的 role/model 显示（`[role: xxx] [model: xxx]`）**MUST** 在 `AgentDisplay::format_header_line_with_result` 中处理——这是实际被调用的入口。**NEVER** 只改 trait 默认方法 `format_header` 而不动覆写方法，覆写会切断调用链。
+- **MUST** main agent 的 ToolCall（Read/Write/Bash 等）`agent_meta` 始终为 `None` → 天然不显示 role/model。**NEVER** 在主 turn context 注入 role/model。
+
+### Sub-agent 实时活动展示（未来）
+
+`AgentProgressEvent` 是 sub-agent → TUI 的结构化实时事件通道，为后续"实时显示 subagent 在做什么"打下基础：
+
+- 当前：`Started` 携带 role/model，`Message` / `ToolCalls` 被 `format_agent_progress` 压扁成字符串。
+- 未来：`Message` / `ToolCalls` **SHOULD** 保持结构化传递，TUI 展开嵌套显示（类似 Claude Code 的 SubAgent 折叠块）。

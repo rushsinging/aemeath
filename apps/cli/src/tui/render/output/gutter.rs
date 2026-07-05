@@ -176,6 +176,7 @@ mod tests {
             workspace_root: None,
             collapsible: false,
             collapsed: false,
+            agent_meta: None,
         })
     }
 

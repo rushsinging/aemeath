@@ -108,6 +108,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         workspace_root: None,
         collapsible: false,
         collapsed: false,
+        agent_meta: None,
     });
     let result_kind = OutputBlockKind::ToolResult(ToolResultBlockView {
         key: "tool-result".into(),
@@ -414,6 +415,7 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
         workspace_root: None,
         collapsible: false,
         collapsed: false,
+        agent_meta: None,
     });
     let tool_node = BlockNode {
         block_id: "tool".into(),

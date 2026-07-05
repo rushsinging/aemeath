@@ -2,7 +2,7 @@ use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
 use crate::tui::model::conversation::tool_call::{ToolCall, ToolCallStatus};
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 use crate::tui::view_model::tool_name::tool_display_name;
-use crate::tui::view_model::{SemanticStyle, ToolCallBlockView, ToolSemanticStatus};
+use crate::tui::view_model::{AgentMetaView, SemanticStyle, ToolCallBlockView, ToolSemanticStatus};
 
 use crate::tui::view_assembler::output::ToolIndex;
 
@@ -113,6 +113,10 @@ pub(super) fn find_tool_view(
         workspace_root: workspace_root.map(|p| p.to_path_buf()),
         collapsible: true,
         collapsed: false,
+        agent_meta: call.agent_meta.as_ref().map(|m| AgentMetaView {
+            role: m.role.clone(),
+            model: m.model.clone(),
+        }),
     })
 }
 

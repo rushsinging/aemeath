@@ -13,9 +13,9 @@ pub use input::InputAreaViewModel;
 pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
-    AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode, HookNoticeBlockView,
-    HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, TextBlockView, ToolCallBlockView,
-    ToolResultBlockView, ToolSemanticStatus,
+    AgentMetaView, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
+    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, TextBlockView,
+    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
@@ -48,6 +48,7 @@ mod tests {
             workspace_root: None,
             collapsible: true,
             collapsed: false,
+            agent_meta: None,
         });
         let node = BlockNode {
             block_id: "chat-1/turn-1/tool-1".to_string(),

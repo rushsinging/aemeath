@@ -76,6 +76,11 @@ impl std::fmt::Display for AgentToolCallProgressView {
 /// Sub-agent 进度类型。
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentProgressKindView {
+    /// Sub-agent 启动，携带 role / model 元数据。
+    Started {
+        role: Option<String>,
+        model: String,
+    },
     Message {
         text: String,
     },
@@ -87,6 +92,10 @@ pub enum AgentProgressKindView {
 impl std::fmt::Display for AgentProgressKindView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Started { role, model } => match role {
+                Some(r) => write!(f, "{r} · {model}"),
+                None => write!(f, "{model}"),
+            },
             Self::Message { text } => write!(f, "{text}"),
             Self::ToolCalls { calls } => {
                 for (i, call) in calls.iter().enumerate() {

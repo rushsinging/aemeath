@@ -2,7 +2,7 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
-use super::tool_call::ToolCallStatus;
+use super::tool_call::{AgentMeta, ToolCallStatus};
 
 pub(super) struct ToolCallUpdateObservation {
     pub(super) chat_id: ChatId,
@@ -168,5 +168,35 @@ impl ConversationModel {
             message.clone(),
         ));
         vec![ConversationChange::OutputDirty]
+    }
+
+    /// 写入 Agent 工具的 role/model 元数据（issue #499）。
+    ///
+    /// 由 `AgentProgressKind::Started` 事件触发。仅当 ToolCall 存在且
+    /// `agent_meta` 尚未设置时才写入，避免重复覆盖。
+    pub(super) fn update_agent_meta(
+        &mut self,
+        chat_id: ChatId,
+        turn_id: ChatTurnId,
+        tool_id: ToolCallId,
+        role: Option<String>,
+        model: String,
+    ) -> Vec<ConversationChange> {
+        let mut changes = Vec::new();
+        if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
+            if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
+                c.id.as_ref()
+                    .is_some_and(|id| id.as_ref() == tool_id.to_string())
+            }) {
+                if call.agent_meta.is_none() {
+                    call.agent_meta = Some(AgentMeta { role, model });
+                    changes.push(ConversationChange::AgentMetaUpdated {
+                        tool_id: tool_id.to_string(),
+                    });
+                    changes.push(ConversationChange::OutputDirty);
+                }
+            }
+        }
+        changes
     }
 }

@@ -133,6 +133,18 @@ pub struct RecordAgentProgress {
     pub message: String,
 }
 
+/// 更新 Agent 工具的元数据（issue #499）。
+/// 由 `AgentProgressKind::Started` 事件触发，携带 sub-agent resolve 后的
+/// role/model，用于 header 渲染。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdateAgentMeta {
+    pub chat_id: ChatId,
+    pub turn_id: ChatTurnId,
+    pub tool_id: ToolCallId,
+    pub role: Option<String>,
+    pub model: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShowAskUserBatch {
     pub slots: Vec<AskUserSlot>,
@@ -316,6 +328,7 @@ pub enum ConversationIntent {
     ClearQueuedSubmissionById(ClearQueuedSubmissionById),
     ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
     RecordAgentProgress(RecordAgentProgress),
+    UpdateAgentMeta(UpdateAgentMeta),
     ShowAskUserBatch(ShowAskUserBatch),
     AnswerCurrentAskUser(AnswerCurrentAskUser),
     SetAskUserCursor(SetAskUserCursor),

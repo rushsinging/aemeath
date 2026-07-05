@@ -148,14 +148,25 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
             context,
             tool_id,
             event,
-        } => conversation(ConversationIntent::RecordAgentProgress(
-            RecordAgentProgress {
-                chat_id: context.chat_id.clone(),
-                turn_id: context.turn_id.clone(),
-                tool_id: tool_id.clone(),
-                message: format_agent_progress(&event),
-            },
-        )),
+        } => match &event.kind {
+            sdk::AgentProgressKindView::Started { role, model } => {
+                conversation(ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    tool_id: tool_id.clone(),
+                    role: role.clone(),
+                    model: model.clone(),
+                }))
+            }
+            _ => conversation(ConversationIntent::RecordAgentProgress(
+                RecordAgentProgress {
+                    chat_id: context.chat_id.clone(),
+                    turn_id: context.turn_id.clone(),
+                    tool_id: tool_id.clone(),
+                    message: format_agent_progress(&event),
+                },
+            )),
+        },
         UiEvent::Done { context }
         | UiEvent::DoneWithDuration { context, .. }
         | UiEvent::Cancelled { context } => {
@@ -635,6 +646,7 @@ mod tests {
 /// 把 AgentProgressEventView 格式化为人类可读消息，供 TUI activities 渲染。
 fn format_agent_progress(event: &AgentProgressEventView) -> String {
     match &event.kind {
+        AgentProgressKindView::Started { .. } => String::new(),
         AgentProgressKindView::Message { text } => text.clone(),
         AgentProgressKindView::ToolCalls { calls } => {
             if calls.is_empty() {

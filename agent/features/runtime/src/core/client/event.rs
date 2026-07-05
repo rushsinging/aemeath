@@ -529,6 +529,9 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
                 .collect(),
         },
         share::tool::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
+        share::tool::AgentProgressKind::Started { role, model } => {
+            AgentProgressKindView::Started { role, model }
+        }
     };
     AgentProgressEventView {
         sequence: event.sequence,

@@ -97,3 +97,35 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 - **MUST** 纯逻辑函数（无 I/O、无副作用）为最高优先级测试目标。UI 渲染代码、`main.rs` 入口代码可豁免。
 - 一行委托/包装函数可豁免 3 测试用例要求，但仍 SHOULD 有测试。
 - Code review 时 reviewer **MUST** 检查新增代码的测试覆盖。未覆盖核心逻辑的 PR 不应合并。
+
+## 调试方法论
+
+### 诊断日志先于推理
+
+- **MUST** 定位 bug 时，**MUST** 优先添加日志确认数据流（事件是否到达、字段是否填充），而不是依赖推理和猜测。
+- **SHOULD** 诊断日志先用 `info!` 级别确认链路通，验证通过后降回 `debug!` 或删除——避免被全局日志级别过滤掉看不到。
+- **MUST** 全局日志级别由 `logging.level` 配置（默认 `info`），debug 级别日志需要 `AEMEATH_LOG_LEVEL=debug` 环境变量拉高，或 `RUST_LOG=aemeath:<target>=debug` 按 target 拉高。详见 `AGENTS.md` 日志级别说明。
+- **SHOULD** 诊断完成后 **SHOULD** 清理诊断日志，避免污染生产日志。
+
+### 链路验证不要跳层
+
+- **MUST** 当 A → B → C → D 链路中 D 不显示时，**MUST NOT** 只查 A/B/C 的传递而假设 D 内部正确。**MUST** 确认 D 内部是否真的调用了消费逻辑（如覆写方法是否绕过了默认调用链）。
+- **MUST** 排查前 **MUST** 确认用户跑的是最新编译的二进制（对比 `target/debug/aemeath` 时间戳与 `date`），避免在旧二进制上浪费诊断轮次。
+- **SHOULD** 在每一层（share → runtime → sdk → tui）的入口/出口加日志，逐层确认数据传递。
+
+### Trait 默认方法覆写陷阱
+
+- **MUST** Trait 默认方法调用其它默认方法时，**任何覆写都可能切断调用链**。新增字段要想被消费，**MUST** 确认实际被调用的入口（而非"应该被调用"的默认方法）。
+- 例：`ToolDisplay::format_header_line_with_result` 覆写了默认实现，绕过了 `format_header`——新增在 `format_header` 中解析的字段永远不会被消费。修正方式：在覆写方法中显式调用消费逻辑。
+- **SHOULD** 覆写 trait 方法时，**SHOULD** 在文档注释中说明是否调用默认方法链、以及为什么覆写。
+
+### 架构守卫的价值
+
+- **MUST** 架构守卫不是阻碍，是**设计纠偏**。view_model 不能依赖 model internals 这类守卫强制我们在 view_model 层定义独立类型 + 在 view_assembler 处投影。
+- **MUST** 守卫拦截后 **MUST NOT** 绕过，**MUST** 修正设计使其合规。如果没有守卫，反向依赖会成为长期技术债。
+
+### 选型穷举所有 case
+
+- **MUST** 选型时 **MUST** 穷举所有 case，确认方案在每种 case 下都能工作。
+- 例：role/model 显示有 4 种组合（None/None、Some/None、None/Some、Some/Some）。方案 A（从 input JSON 解析）在 case 2（只有 role 无 model）失败，因为 model 是 runtime 内部 resolve 的。
+- **SHOULD** 做当前需求时，**SHOULD** 思考"这个改动是否为后续需求铺路"。优先选择可扩展的方案（如 AgentProgressEvent 携带元数据，为后续"实时显示 subagent 活动"打下通道基础）。

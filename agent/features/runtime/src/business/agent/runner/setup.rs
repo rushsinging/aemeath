@@ -112,8 +112,15 @@ impl AgentRunner for CliAgentRunner {
             })
             .unwrap_or_else(|| "subagent".to_string());
         let session_id_for_log = session_id.clone();
-        let role_name = model_spec.unwrap_or("default").to_string();
-        let model_name = resolved_spec.as_deref().unwrap_or("default").to_string();
+        let role_name = model_spec.map(|s| s.to_string()).unwrap_or_else(|| {
+            // 未配 role 时 fallback 到实际 client 的 model 名，而非硬编码 "default"
+            resolved_spec
+                .clone()
+                .unwrap_or_else(|| client.model_name().to_string())
+        });
+        let model_name = resolved_spec
+            .clone()
+            .unwrap_or_else(|| client.model_name().to_string());
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
         // 将 sub-agent 的 model 同步到日志 context（影响 hook/audit 等共享 sink 的 model 字段）
@@ -200,7 +207,19 @@ impl AgentRunner for CliAgentRunner {
             ctx: sub_ctx,
         };
 
-        let model_display = resolved_spec.as_deref().unwrap_or("default");
+        let model_display = resolved_spec.as_deref().unwrap_or(&model_name_for_log);
+        // issue #499：发送 Started 事件，让 TUI 在 Agent 工具 header 显示实际 role/model。
+        // 这是 sub-agent 的第一个 progress 事件，早于 ToolCalls/Message。
+        if let Some(ref tx) = progress_tx {
+            let _ = tx.try_send(AgentProgressEvent {
+                sequence: 0,
+                kind: AgentProgressKind::Started {
+                    // 未配 role 时发 None，TUI 不显示 [role: ...] 标记。
+                    role: model_spec.map(|s| s.to_string()),
+                    model: model_display.to_string(),
+                },
+            });
+        }
         progress(
             None,
             &format!("Sub-agent started with model: {}", model_display),

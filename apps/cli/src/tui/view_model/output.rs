@@ -122,6 +122,21 @@ pub struct ToolCallBlockView {
     pub workspace_root: Option<std::path::PathBuf>,
     pub collapsible: bool,
     pub collapsed: bool,
+    /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时填充。
+    pub agent_meta: Option<AgentMetaView>,
+}
+
+/// Agent 工具元数据的 view 层投影（issue #499）。
+///
+/// 独立于 `model::conversation::tool_call::AgentMeta`，避免 view_model
+/// 反向依赖 model internals（架构守卫：TUI view_model must not depend on
+/// model internals）。view_assembler 负责从 model 层投影到此 view 类型。
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct AgentMetaView {
+    /// sub-agent 的角色名（如 `reviewer`）。None 表示未指定 role。
+    pub role: Option<String>,
+    /// sub-agent 实际使用的 model（runtime resolve 后的值）。
+    pub model: String,
 }
 
 /// 工具结果子块视图：作为 ToolCall 的子节点，独占结果富渲染。
