@@ -103,7 +103,7 @@ aemeath/                    # workspace root
 >
 > **终端测试**：`echo '{prompt}' | AEMEATH_VERSION= RUST_LOG= cargo run -- -qv`（`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试；`AEMEATH_VERSION=` 覆盖版本号、`RUST_LOG=` 覆盖日志级别，方便测试）。可用 `--model Zhipu/glm-5.2` 等参数指定模型。
 >
-> **日志级别**：全局配置 `logging.level` 默认 `info`，debug 级别日志仅在文件和 stderr 中可见（文件已路由到对应 target 文件）。调试时用 `RUST_LOG` 环境变量按 target 单独拉高：`RUST_LOG=aemeath:tui=debug,aemeath:agent:runtime=debug cargo run`。
+> **日志级别**：全局配置 `logging.level` 默认 `info`，debug 级别日志仅在文件和 stderr 中可见（文件已路由到对应 target 文件）。调试时用 `AEMEATH_LOG_LEVEL=debug` 环境变量全局拉高到 debug：`AEMEATH_LOG_LEVEL=debug cargo run`；也可用 `RUST_LOG` 按 target 单独拉高：`RUST_LOG=aemeath:tui=debug,aemeath:agent:runtime=debug cargo run`。
 >
 > **注意**：`log::set_max_level()` 设为 `Info` 时会全局过滤掉所有 debug 日志。若需在非交互模式下验证 debug 日志，需将全局配置 `logging.level` 改为 `debug`，或将日志临时改为 `info!` 级别。
 ├── memory/                  # 持久化记忆存储

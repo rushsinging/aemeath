@@ -569,7 +569,15 @@ impl ToolDisplay for AgentDisplay {
             Some(id) => format!("{description} -> [{id}]"),
             None => description.to_string(),
         };
-        build_header_line(self.display_name(), &arg, "")
+        // issue #499：追加 role/model 标记（由 merge_agent_meta 从 agent_meta 合并而来）
+        let mut suffix = String::new();
+        if let Some(role) = input.get("role").and_then(|v| v.as_str()) {
+            suffix.push_str(&format!(" [role: {role}]"));
+        }
+        if let Some(model) = input.get("model").and_then(|v| v.as_str()) {
+            suffix.push_str(&format!(" [model: {model}]"));
+        }
+        build_header_line(self.display_name(), &arg, &suffix)
     }
 }
 inventory::submit!(ToolDisplayEntry {
