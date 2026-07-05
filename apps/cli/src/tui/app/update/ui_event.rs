@@ -84,7 +84,9 @@ impl App {
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::Cancelled → spinner_stop");
                 self.spinner_stop();
                 self.chat.stop_processing();
-                self.chat.clear_processing_handle();
+                // 不清 processing_handle：cancel_to_idle 只把 loop FSM 带回 Idle，
+                // 常驻 loop 任务本身并未退出（等待下一条输入），提前清空会让后续
+                // Esc/Ctrl+C 的 abort() 找不到 handle、静默失效。见 #624。
             }
             UiEvent::UserMessagesAdopted { items, queued } => {
                 let before_queued = self.model.conversation.queued_submissions.len();
@@ -419,12 +421,13 @@ impl App {
                 self.append_system_notice(format!("[resumed session: {}]", session_id));
             }
             UiEvent::Done { .. } => {
+                // 不清 processing_handle：Done 只表示这一个 turn 结束，常驻 loop
+                // 回 Idle 继续等待下一条输入，任务本身没退出。见 #624。
                 effects.extend(self.handle_done(ui_tx, None));
-                self.chat.clear_processing_handle();
             }
             UiEvent::DoneWithDuration { duration, .. } => {
+                // 同上：DoneWithDuration 同样只是「这一回合完成」，不是任务退出。
                 effects.extend(self.handle_done(ui_tx, Some(duration)));
-                self.chat.clear_processing_handle();
             }
         }
 

@@ -195,6 +195,66 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
 }
 
 #[tokio::test]
+async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly() {
+    // 复现真实场景：cancel 在 sub-agent 正阻塞于 stream_message（真实进行中的 LLM 调用）
+    // 时才到达——而不是调用前已取消、也不是 provider 立刻返回 Cancelled。
+    // 之前的两个测试都只覆盖了「调用前」的两种情形，没有覆盖「调用中」，
+    // 而用户实际点击停止时，sub-agent 几乎总是正阻塞在某次 stream_message 里。
+    let calls = Arc::new(std::sync::Mutex::new(0usize));
+    let runner = test_runner_with_blocking_provider(calls.clone());
+    let cwd = std::env::current_dir().unwrap();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let ctx = ToolExecutionContext {
+        resources: tools::api::ToolResources {
+            agent_runner: None,
+            registry: None,
+            memory_config: share::config::MemoryConfig::default(),
+            lang: "en".to_string(),
+            allow_all: true,
+        },
+        workspace: project::api::WorkspaceService::new(cwd),
+        cancel: cancel.clone(),
+        read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+        session_reminders: None,
+        plan_mode: None,
+        max_tool_concurrency: 10,
+        max_agent_concurrency: 4,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        progress_tx: None,
+        parent_session_id: None,
+    };
+
+    let canceller_calls = calls.clone();
+    let canceller = tokio::spawn(async move {
+        // 等 stream_message 真正开始阻塞后再取消，确保取消落在「调用进行中」。
+        loop {
+            if *canceller_calls.lock().unwrap() >= 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        cancel.cancel();
+    });
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        runner.run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            ctx: &ctx,
+            max_turns: 5,
+            model_spec: None,
+            progress_tx: None,
+        }),
+    )
+    .await
+    .expect("run_agent 必须在 mid-flight cancel 后及时返回，不能挂起等待 provider 自然结束");
+
+    canceller.await.unwrap();
+    assert_eq!(result, "Cancelled by user");
+}
+
+#[tokio::test]
 async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
     let runner = test_runner(LlmError::Network("boom".to_string()));
     let ctx = test_ctx();
@@ -245,6 +305,58 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: Arc::new(share::config::ModelsConfig::default()),
+    }
+}
+
+fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> CliAgentRunner {
+    CliAgentRunner {
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+            BlockingThenCancelledProvider { calls },
+        ))),
+        pool: None,
+        agents_config: Arc::new(share::config::AgentsConfig::default()),
+        hook_runner: hook::api::HookRunner::empty(),
+        reasoning: false,
+        models_config: Arc::new(share::config::ModelsConfig::default()),
+    }
+}
+
+/// 模拟真实进行中的 LLM 流：`stream_message` 阻塞在 `cancel.cancelled()` 上，
+/// 而不是立刻返回，用于复现「cancel 在调用进行中才到达」的场景。
+struct BlockingThenCancelledProvider {
+    calls: Arc<std::sync::Mutex<usize>>,
+}
+
+#[async_trait]
+impl LlmProvider for BlockingThenCancelledProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _handler: &mut dyn provider::api::StreamHandler,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<StreamResponse, LlmError> {
+        {
+            let mut guard = self.calls.lock().unwrap();
+            *guard += 1;
+        }
+        cancel.cancelled().await;
+        Err(LlmError::Cancelled)
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
     }
 }
 
