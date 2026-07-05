@@ -7,6 +7,7 @@ use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::text::safe_str_slice_by_char;
+use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
 use serde_json::{Map, Value};
 
 #[derive(Debug, Default, PartialEq)]
@@ -152,7 +153,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 tool_id: tool_id.clone(),
-                message: format!("{event}"),
+                message: format_agent_progress(&event),
             },
         )),
         UiEvent::Done { context }
@@ -628,5 +629,35 @@ mod tests {
             sanitized.contains("omitted") || sanitized == partial,
             "partial JSON should be truncated, got: {sanitized}"
         );
+    }
+}
+
+/// 把 AgentProgressEventView 格式化为人类可读消息，供 TUI activities 渲染。
+fn format_agent_progress(event: &AgentProgressEventView) -> String {
+    match &event.kind {
+        AgentProgressKindView::Message { text } => text.clone(),
+        AgentProgressKindView::ToolCalls { calls } => {
+            if calls.is_empty() {
+                return String::new();
+            }
+            let lines: Vec<String> = calls
+                .iter()
+                .map(|tc| {
+                    let input_preview = match &tc.input {
+                        Value::String(s) => s.chars().take(80).collect::<String>(),
+                        v => {
+                            let s = v.to_string();
+                            s.chars().take(80).collect::<String>()
+                        }
+                    };
+                    if input_preview.is_empty() {
+                        format!("→ {}", tc.name)
+                    } else {
+                        format!("→ {}  {}", tc.name, input_preview)
+                    }
+                })
+                .collect();
+            lines.join("\n")
+        }
     }
 }
