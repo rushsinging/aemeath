@@ -17,6 +17,10 @@ pub mod error;
 pub mod models;
 pub mod project;
 pub mod session;
+pub mod session_lock;
+
+/// 会话恢复失败分类（#636 D2）。顶层 re-export 方便 runtime / CLI 直接引用。
+pub use chat_event::SessionResumeFailureKind;
 pub mod tool_result;
 pub mod tui;
 pub mod types;

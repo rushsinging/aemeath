@@ -217,6 +217,9 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             session_id,
             created_at,
         },
+        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
+            UiEvent::SessionResumeFailed { kind, id, message }
+        }
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
         // #567: 新增变体暂不映射到 UiEvent，静默忽略。
         sdk::ChatEvent::ReflectionResult { .. }
@@ -556,7 +559,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
         | sdk::ChatEvent::TasksSnapshot { .. }
-        | sdk::ChatEvent::CostUpdate { .. } => {}
+        | sdk::ChatEvent::CostUpdate { .. }
+        | sdk::ChatEvent::SessionResumeFailed { .. } => {}
     }
 }
 

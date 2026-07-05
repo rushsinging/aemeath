@@ -75,7 +75,23 @@ async fn run_single_turn(
             input_events: None,
         })
         .await?;
-    while let Some(event) = stream.recv().await {
+    // #636 D1: SIGTERM/SIGHUP 时让 stream 自然结束（runtime 端会 graceful + auto-save）。
+    let mut sig_term =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+    let mut sig_hup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()).ok();
+    loop {
+        let event = tokio::select! {
+            biased;
+            ev = stream.recv() => match ev { Some(e) => e, None => break, },
+            _ = async { match &mut sig_term { Some(s) => s.recv().await, None => std::future::pending().await } } => {
+                log::info!(target: "aemeath:tui", "no_tui: received SIGTERM, draining stream");
+                continue;
+            }
+            _ = async { match &mut sig_hup { Some(s) => s.recv().await, None => std::future::pending().await } } => {
+                log::info!(target: "aemeath:tui", "no_tui: received SIGHUP, draining stream");
+                continue;
+            }
+        };
         crate::tui::effect::session::processing::log_sdk_event(&event, "no_tui.recv");
         render_event(event)?;
     }
@@ -163,6 +179,16 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         }
         sdk::ChatEvent::AgentProgress { event, .. } => {
             eprintln!("[agent] {event}");
+        }
+        sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
+            use sdk::SessionResumeFailureKind;
+            let label = match kind {
+                SessionResumeFailureKind::NotFound => "session 不存在",
+                SessionResumeFailureKind::Corrupt => "session 文件损坏",
+                SessionResumeFailureKind::Io => "IO 错误",
+            };
+            eprintln!("⚠️  恢复失败 [{label}] id={id}: {message}");
+            eprintln!("    用 `/sessions` 查看可用会话，或直接开始新会话。");
         }
     }
     Ok(())

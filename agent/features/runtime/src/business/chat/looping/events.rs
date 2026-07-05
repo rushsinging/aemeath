@@ -236,6 +236,12 @@ pub enum RuntimeStreamEvent {
         session_id: String,
         created_at: u64,
     },
+    /// 会话恢复失败（#636 D2）。区分 not_found / corrupt / io，前端展示对应错误。
+    SessionResumeFailed {
+        kind: sdk::SessionResumeFailureKind,
+        id: String,
+        message: String,
+    },
     /// #567：Reflection 结果回传。
     ReflectionResult {
         output: Box<sdk::ReflectionOutputView>,

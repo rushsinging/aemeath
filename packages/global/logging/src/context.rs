@@ -12,6 +12,7 @@
 //! | `CURRENT_MODEL` | `setup.rs` model 解析后 | 可变，模型可能切换 |
 //! | `BOOT_TS` | `init_logging` 时调用一次 | 一次写入，`OnceLock` |
 //! | `APP_VERSION` | `init_logging` 时调用一次 | 一次写入，`OnceLock` |
+//! | `PID` | `init_logging` 时调用一次 | 一次写入，`OnceLock`，进程 pid |
 //! | `CURRENT_PROVIDER` | 每次 LLM 调用前 | 可变，`RwLock` |
 //! | `CURRENT_REQUEST_ID` | 每次 LLM 调用前 | 可变，`RwLock` |
 //! | `CURRENT_ROLE` | 主 agent 为 `"default"`，sub-agent 为其 role 名 | 可变，`RwLock` |
@@ -25,6 +26,7 @@ static CURRENT_TURN: AtomicUsize = AtomicUsize::new(0);
 static CURRENT_MODEL: RwLock<String> = RwLock::new(String::new());
 static BOOT_TS: OnceLock<String> = OnceLock::new();
 static APP_VERSION: OnceLock<String> = OnceLock::new();
+static PID: OnceLock<u32> = OnceLock::new();
 static CURRENT_PROVIDER: RwLock<String> = RwLock::new(String::new());
 static CURRENT_REQUEST_ID: RwLock<String> = RwLock::new(String::new());
 static CURRENT_ROLE: RwLock<String> = RwLock::new(String::new());
@@ -81,6 +83,11 @@ pub fn set_app_version(ver: String) {
     let _ = APP_VERSION.set(ver);
 }
 
+/// 设置进程 pid。`init_logging` 时调用一次，未显式设置时惰性取 `std::process::id()`。
+pub fn ensure_pid() {
+    let _ = PID.get_or_init(std::process::id);
+}
+
 /// 设置当前 provider。
 pub fn set_current_provider(provider: String) {
     if let Ok(mut current) = CURRENT_PROVIDER.write() {
@@ -111,6 +118,11 @@ pub fn current_model() -> Option<String> {
 
 pub fn boot_ts() -> Option<&'static str> {
     BOOT_TS.get().map(|s| s.as_str())
+}
+
+/// 获取进程 pid。惰性取 `std::process::id()`。
+pub fn pid() -> u32 {
+    *PID.get_or_init(std::process::id)
 }
 
 pub fn app_version() -> Option<&'static str> {
@@ -234,5 +246,12 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         set_current_role("default".to_string());
         assert_eq!(current_role().as_deref(), Some("default"));
+    }
+
+    #[test]
+    fn pid_returns_process_id() {
+        // pid 应等于当前进程 id（get_or_init 首次调用写入）
+        let p = pid();
+        assert_eq!(p, std::process::id());
     }
 }

@@ -1,6 +1,6 @@
-//! 日志格式化：`&log::Record` → 13 字段紧凑 JSON 行。
+//! 日志格式化：`&log::Record` → 14 字段紧凑 JSON 行。
 //!
-//! 字段固定：`ts / boot_ts / ver / session / chat / turn / request_id /
+//! 字段固定：`ts / boot_ts / pid / ver / session / chat / turn / request_id /
 //! model / provider / role / level / target / msg`。
 //!
 //! 写入格式为 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
@@ -36,6 +36,7 @@ pub fn format_diag_json_line_from_parts(level: &str, target: &str, msg: &str) ->
     let line = json!({
         "ts": timestamp_local_rfc3339(),
         "boot_ts": context::boot_ts(),
+        "pid": context::pid(),
         "ver": context::app_version(),
         "session": Value::String(context::session_id().unwrap_or("-").to_string()),
         "chat": Value::String(context::current_chat_id().as_deref().unwrap_or("-").to_string()),
@@ -57,14 +58,15 @@ mod tests {
     use serde_json::Value;
 
     #[test]
-    fn diag_line_has_thirteen_fields() {
+    fn diag_line_has_fourteen_fields() {
         let line = format_diag_json_line_from_parts("INFO", "cli::render", "frame");
         let value: Value = serde_json::from_str(&line).expect("valid json");
         let obj = value.as_object().expect("object");
-        assert_eq!(obj.len(), 13);
+        assert_eq!(obj.len(), 14);
         for key in [
             "ts",
             "boot_ts",
+            "pid",
             "ver",
             "session",
             "chat",

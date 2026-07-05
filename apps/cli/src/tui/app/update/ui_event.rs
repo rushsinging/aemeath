@@ -420,6 +420,20 @@ impl App {
                 self.session.rename_session(&session_id);
                 self.append_system_notice(format!("[resumed session: {}]", session_id));
             }
+            UiEvent::SessionResumeFailed { kind, id, message } => {
+                use sdk::SessionResumeFailureKind;
+                let prefix = match kind {
+                    SessionResumeFailureKind::NotFound => "⚠️ 会话恢复失败（不存在）",
+                    SessionResumeFailureKind::Corrupt => "⚠️ 会话恢复失败（文件损坏）",
+                    SessionResumeFailureKind::Io => "⚠️ 会话恢复失败（IO 错误）",
+                };
+                self.append_system_notice(format!("{prefix}: {message}"));
+                log::warn!(
+                    target: "aemeath:tui",
+                    "session resume failed: id={} kind={:?} msg={}",
+                    id, kind, message
+                );
+            }
             UiEvent::Done { .. } => {
                 // 不清 processing_handle：Done 只表示这一个 turn 结束，常驻 loop
                 // 回 Idle 继续等待下一条输入，任务本身没退出。见 #624。

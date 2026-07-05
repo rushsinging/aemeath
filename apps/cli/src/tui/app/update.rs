@@ -74,6 +74,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ContextEstimated { .. } => "ContextEstimated",
         UiEvent::CommandResultText { .. } => "CommandResultText",
         UiEvent::SessionResumed { .. } => "SessionResumed",
+        UiEvent::SessionResumeFailed { .. } => "SessionResumeFailed",
     }
 }
 
