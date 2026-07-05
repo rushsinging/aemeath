@@ -414,11 +414,9 @@ impl App {
             UiEvent::SessionResumed {
                 messages,
                 session_id,
-                ..
+                created_at,
             } => {
-                self.chat.messages = messages;
-                self.session.rename_session(&session_id);
-                self.append_system_notice(format!("[resumed session: {}]", session_id));
+                self.resume_session_messages(&session_id, messages, created_at.to_string());
             }
             UiEvent::SessionResumeFailed { kind, id, message } => {
                 use sdk::SessionResumeFailureKind;
