@@ -152,6 +152,17 @@ where
             > + Send
             + Sync,
     >,
+    /// 查询会话列表（#567 S14）。由 core 层注入。
+    pub list_sessions: Arc<
+        dyn Fn() -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<Vec<sdk::SessionSummary>, sdk::SdkError>,
+                        > + Send,
+                >,
+            > + Send
+            + Sync,
+    >,
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
@@ -196,6 +207,7 @@ where
         apply_reflection_on_demand,
         list_models,
         list_reminders,
+        list_sessions,
     } = ctx;
     let mut client = client;
     let mut reasoning_graph = reasoning_graph;
@@ -378,11 +390,34 @@ where
                             .await;
                     }
                     PendingCommand::ManageSession { args } => {
-                        let (text, is_error) =
-                            super::idle_commands::execute_session(&args, &session_id).await;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
+                        let trimmed = args.trim();
+                        // #567 S14: list/空 args 发结构化 SessionList 事件
+                        if trimmed.is_empty() || trimmed == "list" {
+                            match list_sessions().await {
+                                Ok(sessions) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::SessionList { sessions })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List sessions failed: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
+                        } else {
+                            let (text, is_error) =
+                                super::idle_commands::execute_session(&args, &session_id).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
                     }
                     PendingCommand::ManageMemory { args } => {
                         let (text, is_error) = super::idle_commands::execute_memory(
@@ -705,11 +740,34 @@ where
                             .await;
                     }
                     PendingCommand::ManageSession { args } => {
-                        let (text, is_error) =
-                            super::idle_commands::execute_session(&args, &session_id).await;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                            .await;
+                        let trimmed = args.trim();
+                        // #567 S14: list/空 args 发结构化 SessionList 事件
+                        if trimmed.is_empty() || trimmed == "list" {
+                            match list_sessions().await {
+                                Ok(sessions) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::SessionList { sessions })
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text: format!("List sessions failed: {e}"),
+                                            is_error: true,
+                                        })
+                                        .await;
+                                }
+                            }
+                        } else {
+                            let (text, is_error) =
+                                super::idle_commands::execute_session(&args, &session_id).await;
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
                     }
                     PendingCommand::ManageMemory { args } => {
                         let (text, is_error) = super::idle_commands::execute_memory(
@@ -992,14 +1050,36 @@ where
                                 .await;
                         }
                         PendingCommand::ManageSession { args } => {
-                            let (text, is_error) =
-                                super::idle_commands::execute_session(&args, &session_id).await;
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text,
-                                    is_error,
-                                })
-                                .await;
+                            let trimmed = args.trim();
+                            // #567 S14: list/空 args 发结构化 SessionList 事件
+                            if trimmed.is_empty() || trimmed == "list" {
+                                match list_sessions().await {
+                                    Ok(sessions) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::SessionList {
+                                                sessions,
+                                            })
+                                            .await;
+                                    }
+                                    Err(e) => {
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text: format!("List sessions failed: {e}"),
+                                                is_error: true,
+                                            })
+                                            .await;
+                                    }
+                                }
+                            } else {
+                                let (text, is_error) =
+                                    super::idle_commands::execute_session(&args, &session_id).await;
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text,
+                                        is_error,
+                                    })
+                                    .await;
+                            }
                         }
                         PendingCommand::ManageMemory { args } => {
                             let (text, is_error) = super::idle_commands::execute_memory(
@@ -1618,14 +1698,37 @@ where
                                     .await;
                             }
                             PendingCommand::ManageSession { args } => {
-                                let (text, is_error) =
-                                    super::idle_commands::execute_session(&args, &session_id).await;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
+                                let trimmed = args.trim();
+                                // #567 S14: list/空 args 发结构化 SessionList 事件
+                                if trimmed.is_empty() || trimmed == "list" {
+                                    match list_sessions().await {
+                                        Ok(sessions) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::SessionList {
+                                                    sessions,
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: format!("List sessions failed: {e}"),
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
+                                } else {
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_session(&args, &session_id)
+                                            .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
                             }
                             PendingCommand::ManageMemory { args } => {
                                 let (text, is_error) = super::idle_commands::execute_memory(
@@ -1918,15 +2021,44 @@ where
                                         .await;
                                 }
                                 PendingCommand::ManageSession { args } => {
-                                    let (text, is_error) =
-                                        super::idle_commands::execute_session(&args, &session_id)
+                                    let trimmed = args.trim();
+                                    // #567 S14: list/空 args 发结构化 SessionList 事件
+                                    if trimmed.is_empty() || trimmed == "list" {
+                                        match list_sessions().await {
+                                            Ok(sessions) => {
+                                                let _ = sink
+                                                    .send_event(RuntimeStreamEvent::SessionList {
+                                                        sessions,
+                                                    })
+                                                    .await;
+                                            }
+                                            Err(e) => {
+                                                let _ = sink
+                                                    .send_event(
+                                                        RuntimeStreamEvent::CommandResultText {
+                                                            text: format!(
+                                                                "List sessions failed: {e}"
+                                                            ),
+                                                            is_error: true,
+                                                        },
+                                                    )
+                                                    .await;
+                                            }
+                                        }
+                                    } else {
+                                        let (text, is_error) =
+                                            super::idle_commands::execute_session(
+                                                &args,
+                                                &session_id,
+                                            )
                                             .await;
-                                    let _ = sink
-                                        .send_event(RuntimeStreamEvent::CommandResultText {
-                                            text,
-                                            is_error,
-                                        })
-                                        .await;
+                                        let _ = sink
+                                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                                text,
+                                                is_error,
+                                            })
+                                            .await;
+                                    }
                                 }
                                 PendingCommand::ManageMemory { args } => {
                                     let (text, is_error) = super::idle_commands::execute_memory(
@@ -2170,14 +2302,37 @@ where
                                     .await;
                             }
                             PendingCommand::ManageSession { args } => {
-                                let (text, is_error) =
-                                    super::idle_commands::execute_session(&args, &session_id).await;
-                                let _ = sink
-                                    .send_event(RuntimeStreamEvent::CommandResultText {
-                                        text,
-                                        is_error,
-                                    })
-                                    .await;
+                                let trimmed = args.trim();
+                                // #567 S14: list/空 args 发结构化 SessionList 事件
+                                if trimmed.is_empty() || trimmed == "list" {
+                                    match list_sessions().await {
+                                        Ok(sessions) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::SessionList {
+                                                    sessions,
+                                                })
+                                                .await;
+                                        }
+                                        Err(e) => {
+                                            let _ = sink
+                                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                                    text: format!("List sessions failed: {e}"),
+                                                    is_error: true,
+                                                })
+                                                .await;
+                                        }
+                                    }
+                                } else {
+                                    let (text, is_error) =
+                                        super::idle_commands::execute_session(&args, &session_id)
+                                            .await;
+                                    let _ = sink
+                                        .send_event(RuntimeStreamEvent::CommandResultText {
+                                            text,
+                                            is_error,
+                                        })
+                                        .await;
+                                }
                             }
                             PendingCommand::ManageMemory { args } => {
                                 let (text, is_error) = super::idle_commands::execute_memory(

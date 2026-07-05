@@ -432,6 +432,14 @@
 | 19.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
 | 19.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
 
+### 20. AgentClient trait 最小化（#567 事件流收口）
+
+`check-agent-client-trait-minimal.sh`
+
+| # | 规则 | 理由 |
+|---|---|---|
+| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 方法 | #567 后所有 TUI↔runtime 交互走 `ChatInputEvent` 事件流 + `ChatEvent` 回传，不允许在 trait 上新增 RPC 方法绕过事件流 |
+
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 
 ## 附：钩子体系（非架构守卫）
