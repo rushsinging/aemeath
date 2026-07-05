@@ -1,4 +1,4 @@
-use super::try_complete_truncated_json;
+use crate::business::json_recovery::try_complete_truncated_json;
 use serde_json::json;
 
 #[test]

@@ -96,6 +96,15 @@ Rules:
 - Choose the value that best matches your actual intent for that specific call.
 - If unsure, omit `"phase"` — the system will infer it.
 </phase_declaration>
+
+<large_file_chunking>
+When you need to create or rewrite a file larger than ~12,000 characters (roughly 3,000-4,000 tokens), MUST split the work to avoid provider-side SSE truncation:
+
+- Prefer `Edit` with multiple smaller chunks over a single `Write` with huge `content`.
+- For brand-new files exceeding 12k chars, use `Bash` with a heredoc (`cat > path << 'EOF' ... EOF`) split across multiple calls if needed.
+- A truncated tool call cannot be "resumed" mid-stream — the entire tool call is discarded and must be reissued. Keep each tool call's `content`/`command` argument compact enough to fit within a single provider response.
+- The provider's own `max_output_tokens` (often 4k-8k regardless of what the client requests) is the real limit, not the client-side `max_tokens`.
+</large_file_chunking>
 "#;
 
 /// Universal execution discipline (Chinese) — injected for ALL models, not overridable.
@@ -191,6 +200,15 @@ pub const UNIVERSAL_EXECUTION_DISCIPLINE_ZH: &str = r#"# 执行纪律
 - 选择最匹配该次调用实际意图的值。
 - 不确定时省略 `"phase"`——系统会自动推断。
 </phase_declaration>
+
+<large_file_chunking>
+当需要创建或重写超过约 12,000 字符（约 3,000-4,000 token）的大文件时，必须分块操作，以避免 provider 端 SSE 截断：
+
+- 优先使用 `Edit` 分多次小块写入，而非单次 `Write` 塞入巨大 `content`。
+- 全新文件超过 12k 字符时，用 `Bash` heredoc（`cat > path << 'EOF' ... EOF`），必要时分多次调用。
+- 被截断的 tool call 无法"续传"——整个 tool call 会被丢弃并重发。保持每次 tool call 的 `content`/`command` 参数足够紧凑，使其能在一次 provider 响应内完成。
+- provider 自身的 `max_output_tokens`（通常 4k-8k，与客户端 `max_tokens` 设置无关）才是真正的限制。
+</large_file_chunking>
 "#;
 
 /// Select universal execution discipline by language code (`"en"` / `"zh"`).

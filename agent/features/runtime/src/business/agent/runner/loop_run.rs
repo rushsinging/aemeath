@@ -77,7 +77,7 @@ impl<'a> SubAgentRun<'a> {
         }
 
         for turn in 0..self.max_turns {
-            let turn_number = turn + 1;
+            let mut turn_number = turn + 1;
             if self.ctx.cancel.is_cancelled() {
                 log::debug!(target: LOG_TARGET,
                     "sub-agent cancel detected before turn {turn_number} (turn-boundary check)"
@@ -130,6 +130,30 @@ impl<'a> SubAgentRun<'a> {
                     self.send_text_progress(turn, &resp);
 
                     let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+
+                    // 检测 max_tokens 截断：告知 LLM 上次输出被截断，下次请分块
+                    if resp.stop_reason == StopReason::MaxTokens {
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
+                            turn_number,
+                        );
+                        self.messages.push(Message::user(
+                            "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
+                             请基于已有内容继续，或用更紧凑的方式重新组织响应：\
+                             大文件改用 Edit 分块写入（每次 < 12k 字符），\
+                             长命令用 Bash heredoc 分段执行。\
+                             不要重复已输出的内容，直接从截断点继续。"
+                                .to_string(),
+                        ));
+                        if tool_calls.is_empty() {
+                            // tool_calls 为空说明截断在文本生成阶段，不当 completed，继续下一轮让 LLM 重试
+                            turn_number += 1;
+                            continue;
+                        }
+                        // tool_calls 不为空（截断在 tool call 阶段但部分有效），继续执行 tool
+                    }
+
                     if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
                         (self.progress)(Some(turn_number), "Agent completed");
                         let result = resp.assistant_message.text_content();

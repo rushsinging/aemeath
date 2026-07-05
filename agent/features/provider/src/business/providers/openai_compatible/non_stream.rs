@@ -130,8 +130,29 @@ impl OpenAICompatibleProvider {
                                     .get("arguments")
                                     .and_then(|a| a.as_str())
                                     .unwrap_or("{}");
-                                let input: serde_json::Value = serde_json::from_str(arguments)
-                                    .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                                let input: serde_json::Value = match serde_json::from_str(arguments)
+                                {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        // 非流式 HTTP body 已完整接收，arguments 解析失败属 provider 协议异常。
+                                        // 仍尝试启发式恢复（防 arguments 被切在 string 字面量中间），
+                                        // 恢复失败则记 warn 用空对象兜底（避免整个响应失败）。
+                                        log::warn!(
+                                            target: "aemeath:agent:provider",
+                                            "OpenAI 非流式 tool_call arguments 解析失败（id={}, name={}, err={}, raw_len={}），尝试恢复",
+                                            id, name, e, arguments.len(),
+                                        );
+                                        crate::business::json_recovery::try_complete_truncated_json(arguments)
+                                            .unwrap_or_else(|| {
+                                                log::warn!(
+                                                    target: "aemeath:agent:provider",
+                                                    "启发式恢复未成功（id={}, name={}），使用空对象兜底",
+                                                    id, name,
+                                                );
+                                                serde_json::Value::Object(serde_json::Map::new())
+                                            })
+                                    }
+                                };
 
                                 handler.on_tool_use_start(&name, Some(&id), idx);
                                 if !name.is_empty() {
