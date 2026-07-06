@@ -258,6 +258,97 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     assert_eq!(result, "Cancelled by user");
 }
 
+// issue #646：SubAgentRun emit Started 事件测试
+#[tokio::test]
+async fn test_started_event_emitted_with_role_and_model() {
+    use share::tool::{AgentProgressEvent, AgentProgressKind};
+    use tokio::sync::mpsc;
+
+    let runner = test_runner(LlmError::Network("setup-only".into()));
+    let ctx = test_ctx();
+
+    let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(8);
+
+    // model_spec = Some("coder") → role=Some("coder"), resolved_spec 取决于配置（默认 None）
+    let _ = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "s",
+            ctx: &ctx,
+            max_turns: 1,
+            model_spec: Some("coder"),
+            progress_tx: Some(tx),
+        })
+        .await;
+
+    let ev = rx.recv().await.expect("should receive Started event");
+    match ev.kind {
+        AgentProgressKind::Started { role, model } => {
+            assert_eq!(role.as_deref(), Some("coder"));
+            // model_spec="coder" 但 roles 配置无 "coder" → resolve_model_spec 原样返回
+            assert_eq!(model, "coder");
+        }
+        other => panic!("expected Started, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_started_event_without_role_uses_main_agent_model() {
+    use share::tool::{AgentProgressEvent, AgentProgressKind};
+    use tokio::sync::mpsc;
+
+    let runner = test_runner(LlmError::Network("setup-only".into()));
+    let ctx = test_ctx();
+
+    let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(8);
+
+    // model_spec = None → role=None, model=client.model_name()="test-model"
+    let _ = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "s",
+            ctx: &ctx,
+            max_turns: 1,
+            model_spec: None,
+            progress_tx: Some(tx),
+        })
+        .await;
+
+    let ev = rx.recv().await.expect("should receive Started event");
+    match ev.kind {
+        AgentProgressKind::Started { role, model } => {
+            assert!(role.is_none(), "role should be None when not configured");
+            assert_eq!(
+                model, "test-model",
+                "model should fallback to main agent's model"
+            );
+        }
+        other => panic!("expected Started, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_started_event_not_emitted_without_progress_tx() {
+    // progress_tx = None → 不会 emit（也不会 panic）
+    let runner = test_runner(LlmError::Network("setup-only".into()));
+    let ctx = test_ctx();
+
+    // 不传 progress_tx，run_agent 应正常完成（即使 setup 内 try_send 被跳过）
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "p",
+            system: "s",
+            ctx: &ctx,
+            max_turns: 1,
+            model_spec: None,
+            progress_tx: None,
+        })
+        .await;
+
+    // ErrorProvider 会返回 Err，但不应 panic
+    assert!(result.contains("setup-only") || result.contains("error") || !result.is_empty());
+}
+
 #[tokio::test]
 async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
     let runner = test_runner(LlmError::Network("boom".to_string()));

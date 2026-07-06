@@ -198,6 +198,66 @@ mod tests {
         assert!(!result.is_error);
         assert_eq!(result.data, serde_json::Value::Null);
     }
+
+    // issue #646：AgentProgressKind::Started 构造/字段/PartialEq 验证
+    #[test]
+    fn test_agent_progress_started_with_role() {
+        let ev = AgentProgressEvent {
+            sequence: 0,
+            kind: AgentProgressKind::Started {
+                role: Some("coder".into()),
+                model: "Zhipu/glm-5.2".into(),
+            },
+        };
+        match &ev.kind {
+            AgentProgressKind::Started { role, model } => {
+                assert_eq!(role.as_deref(), Some("coder"));
+                assert_eq!(model, "Zhipu/glm-5.2");
+            }
+            _ => panic!("expected Started"),
+        }
+    }
+
+    #[test]
+    fn test_agent_progress_started_without_role() {
+        let ev = AgentProgressEvent {
+            sequence: 0,
+            kind: AgentProgressKind::Started {
+                role: None,
+                model: "default-model".into(),
+            },
+        };
+        match &ev.kind {
+            AgentProgressKind::Started { role, model } => {
+                assert!(role.is_none());
+                assert_eq!(model, "default-model");
+            }
+            _ => panic!("expected Started"),
+        }
+    }
+
+    #[test]
+    fn test_agent_progress_kind_partial_eq() {
+        let a = AgentProgressKind::Started {
+            role: None,
+            model: "x".into(),
+        };
+        let b = AgentProgressKind::Started {
+            role: None,
+            model: "x".into(),
+        };
+        assert_eq!(a, b);
+
+        let c = AgentProgressKind::Started {
+            role: Some("y".into()),
+            model: "x".into(),
+        };
+        assert_ne!(a, c);
+
+        // 不同变体不相等
+        let d = AgentProgressKind::Message { text: "x".into() };
+        assert_ne!(a, d);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
