@@ -164,11 +164,6 @@ impl ConfigAppService {
         self.tx.send_replace(snapshot);
         Ok(())
     }
-
-    /// Get current config (backward compat).
-    pub async fn get(&self) -> Config {
-        self.inner.read().await.config.clone()
-    }
 }
 
 /// 对 `config.models.providers` 中 `api_key` 为空的 provider，
