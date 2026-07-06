@@ -613,4 +613,58 @@ mod tests {
 
         assert_eq!(drained, None);
     }
+
+    // issue #646：share → sdk view 转发测试
+    #[test]
+    fn test_agent_progress_event_to_sdk_started_with_role() {
+        let ev = share::tool::AgentProgressEvent {
+            sequence: 7,
+            kind: share::tool::AgentProgressKind::Started {
+                role: Some("coder".into()),
+                model: "Zhipu/glm-5.2".into(),
+            },
+        };
+        let view = agent_progress_event_to_sdk(ev);
+        assert_eq!(view.sequence, 7);
+        match view.kind {
+            AgentProgressKindView::Started { role, model } => {
+                assert_eq!(role.as_deref(), Some("coder"));
+                assert_eq!(model, "Zhipu/glm-5.2");
+            }
+            _ => panic!("expected Started"),
+        }
+    }
+
+    #[test]
+    fn test_agent_progress_event_to_sdk_started_without_role() {
+        let ev = share::tool::AgentProgressEvent {
+            sequence: 0,
+            kind: share::tool::AgentProgressKind::Started {
+                role: None,
+                model: "default-model".into(),
+            },
+        };
+        let view = agent_progress_event_to_sdk(ev);
+        match view.kind {
+            AgentProgressKindView::Started { role, model } => {
+                assert!(role.is_none());
+                assert_eq!(model, "default-model");
+            }
+            _ => panic!("expected Started"),
+        }
+    }
+
+    #[test]
+    fn test_agent_progress_event_to_sdk_started_preserves_sequence() {
+        // 确保 sequence 字段也透传
+        let ev = share::tool::AgentProgressEvent {
+            sequence: 42,
+            kind: share::tool::AgentProgressKind::Started {
+                role: None,
+                model: "m".into(),
+            },
+        };
+        let view = agent_progress_event_to_sdk(ev);
+        assert_eq!(view.sequence, 42);
+    }
 }

@@ -211,3 +211,146 @@ fn test_tool_result_payload_stored_in_turn() {
         "tool_calls[i].result 应为 Some(ToolResultPayload) 且字段正确"
     );
 }
+
+// issue #646：update_agent_meta 测试
+fn setup_turn_with_agent_tool() -> (ConversationModel, ChatId, ChatTurnId, ToolCallId) {
+    let mut model = ConversationModel::default();
+    let chat_id = ChatId::new("chat-meta");
+    let turn_id = ChatTurnId::new("turn-meta");
+    let tool_id = ToolCallId::new("tool-meta");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+    (model, chat_id, turn_id, tool_id)
+}
+
+fn find_tool_call<'a>(
+    model: &'a ConversationModel,
+    chat_id: &ChatId,
+    turn_id: &ChatTurnId,
+    tool_id: &ToolCallId,
+) -> Option<&'a super::tool_call::ToolCall> {
+    model
+        .chats
+        .iter()
+        .filter(|ch| ch.id == *chat_id)
+        .flat_map(|ch| ch.turns.iter())
+        .filter(|t| t.id == *turn_id)
+        .flat_map(|t| t.tool_calls.iter())
+        .find(|c| {
+            c.id.as_ref()
+                .is_some_and(|id| id.as_ref() == tool_id.to_string())
+        })
+}
+
+#[test]
+fn test_update_agent_meta_writes_role_and_model() {
+    let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+
+    let changes = model.apply(UpdateAgentMeta {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        role: Some("coder".to_string()),
+        model: "Zhipu/glm-5.2".to_string(),
+    });
+
+    // 应该触发 AgentMetaUpdated + OutputDirty
+    assert!(
+        changes
+            .iter()
+            .any(|c| matches!(c, ConversationChange::AgentMetaUpdated { .. })),
+        "should emit AgentMetaUpdated"
+    );
+
+    // 验证写入
+    let call =
+        find_tool_call(&model, &chat_id, &turn_id, &tool_id).expect("tool call should exist");
+    let meta = call.agent_meta.as_ref().expect("agent_meta should be set");
+    assert_eq!(meta.role.as_deref(), Some("coder"));
+    assert_eq!(meta.model, "Zhipu/glm-5.2");
+}
+
+#[test]
+fn test_update_agent_meta_without_role() {
+    let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+
+    model.apply(UpdateAgentMeta {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        role: None,
+        model: "fallback-model".to_string(),
+    });
+
+    let call =
+        find_tool_call(&model, &chat_id, &turn_id, &tool_id).expect("tool call should exist");
+    let meta = call.agent_meta.as_ref().expect("agent_meta should be set");
+    assert!(meta.role.is_none());
+    assert_eq!(meta.model, "fallback-model");
+}
+
+#[test]
+fn test_update_agent_meta_does_not_overwrite_existing() {
+    let (mut model, chat_id, turn_id, tool_id) = setup_turn_with_agent_tool();
+
+    // 第一次写入
+    model.apply(UpdateAgentMeta {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        role: Some("coder".to_string()),
+        model: "Zhipu/glm-5.2".to_string(),
+    });
+
+    // 第二次写入（不同值）——应该被忽略
+    let changes = model.apply(UpdateAgentMeta {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        role: Some("reviewer".to_string()),
+        model: "Other/model".to_string(),
+    });
+
+    // 不应再触发 AgentMetaUpdated
+    assert!(
+        !changes
+            .iter()
+            .any(|c| matches!(c, ConversationChange::AgentMetaUpdated { .. })),
+        "should not emit AgentMetaUpdated when meta already set"
+    );
+
+    // 值应保持第一次的
+    let call =
+        find_tool_call(&model, &chat_id, &turn_id, &tool_id).expect("tool call should exist");
+    let meta = call.agent_meta.as_ref().expect("agent_meta should be set");
+    assert_eq!(meta.role.as_deref(), Some("coder"));
+    assert_eq!(meta.model, "Zhipu/glm-5.2");
+}
+
+#[test]
+fn test_update_agent_meta_unknown_tool_id_is_noop() {
+    let (mut model, chat_id, turn_id, _tool_id) = setup_turn_with_agent_tool();
+    let unknown_tool_id = ToolCallId::new("nonexistent");
+
+    let changes = model.apply(UpdateAgentMeta {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: unknown_tool_id,
+        role: Some("coder".to_string()),
+        model: "X".to_string(),
+    });
+
+    // 不应触发任何 change
+    assert!(
+        changes.is_empty(),
+        "should emit no changes for unknown tool_id"
+    );
+}

@@ -673,3 +673,98 @@ fn format_agent_progress(event: &AgentProgressEventView) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod started_tests {
+    use super::*;
+    use crate::tui::app::event::UiTurnContext;
+    use crate::tui::model::conversation::ids::{ChatId, ChatTurnId, ToolCallId};
+    use sdk::AgentProgressEventView;
+    use sdk::AgentProgressKindView;
+
+    fn ctx() -> UiTurnContext {
+        UiTurnContext {
+            chat_id: ChatId::new("chat-test"),
+            turn_id: ChatTurnId::new("turn-test"),
+        }
+    }
+
+    fn started_event(role: Option<&str>, model: &str) -> UiEvent {
+        UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: ToolCallId::new("tool-1"),
+            event: AgentProgressEventView {
+                sequence: 0,
+                kind: AgentProgressKindView::Started {
+                    role: role.map(|s| s.to_string()),
+                    model: model.to_string(),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn test_started_event_maps_to_update_agent_meta() {
+        let tool_id = ToolCallId::new("tool-1");
+        let ev = UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: tool_id.clone(),
+            event: AgentProgressEventView {
+                sequence: 0,
+                kind: AgentProgressKindView::Started {
+                    role: Some("coder".to_string()),
+                    model: "Zhipu/glm-5.2".to_string(),
+                },
+            },
+        };
+        let mapping = map_agent_event(&ev);
+        assert_eq!(mapping.conversation.len(), 1);
+        match &mapping.conversation[0] {
+            ConversationIntent::UpdateAgentMeta(UpdateAgentMeta {
+                role,
+                model,
+                tool_id: got_id,
+                ..
+            }) => {
+                assert_eq!(role.as_deref(), Some("coder"));
+                assert_eq!(model, "Zhipu/glm-5.2");
+                assert_eq!(got_id, &tool_id);
+            }
+            other => panic!("expected UpdateAgentMeta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_started_event_without_role_maps_to_update_agent_meta() {
+        let ev = started_event(None, "fallback-model");
+        let mapping = map_agent_event(&ev);
+        match &mapping.conversation[0] {
+            ConversationIntent::UpdateAgentMeta(UpdateAgentMeta { role, model, .. }) => {
+                assert!(role.is_none());
+                assert_eq!(model, "fallback-model");
+            }
+            other => panic!("expected UpdateAgentMeta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_non_started_event_maps_to_record_agent_progress() {
+        let ev = UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: ToolCallId::new("tool-1"),
+            event: AgentProgressEventView {
+                sequence: 1,
+                kind: AgentProgressKindView::Message {
+                    text: "working".to_string(),
+                },
+            },
+        };
+        let mapping = map_agent_event(&ev);
+        match &mapping.conversation[0] {
+            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
+                assert_eq!(message, "working");
+            }
+            other => panic!("expected RecordAgentProgress, got {other:?}"),
+        }
+    }
+}
