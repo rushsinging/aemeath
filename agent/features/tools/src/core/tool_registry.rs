@@ -21,6 +21,16 @@ fn normalize_key(name: &str) -> String {
     name.to_ascii_lowercase()
 }
 
+fn description_with_concurrency_hint(description: &str, concurrency_safe: bool) -> String {
+    let hint = if concurrency_safe {
+        "Concurrency: Parallel-safe. If multiple calls to this tool are independent, issue them in the SAME response so they can run concurrently."
+    } else {
+        "Concurrency: Sequential-only. Do not run multiple calls to this tool in parallel; preserve order."
+    };
+
+    format!("{description}\n\n{hint}")
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
@@ -75,7 +85,10 @@ impl ToolRegistry {
             .map(|tool| {
                 serde_json::json!({
                     "name": tool.name(),
-                    "description": tool.description_for(lang),
+                    "description": description_with_concurrency_hint(
+                        &tool.description_for(lang),
+                        tool.is_concurrency_safe()
+                    ),
                     "input_schema": tool.input_schema(),
                     "data_schema": tool.data_schema(),
                 })
@@ -115,6 +128,7 @@ mod tests {
     struct DummyTool {
         name: String,
         description: String,
+        concurrency_safe: bool,
     }
 
     impl DummyTool {
@@ -122,6 +136,15 @@ mod tests {
             Self {
                 name: name.to_string(),
                 description: description.to_string(),
+                concurrency_safe: true,
+            }
+        }
+
+        fn sequential(name: &str, description: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                description: description.to_string(),
+                concurrency_safe: false,
             }
         }
     }
@@ -140,6 +163,10 @@ mod tests {
 
         fn input_schema(&self) -> Value {
             serde_json::json!({"type": "object"})
+        }
+
+        fn is_concurrency_safe(&self) -> bool {
+            self.concurrency_safe
         }
 
         async fn call(
@@ -223,5 +250,31 @@ mod tests {
         assert!(registry.get("mcp__server__tool").is_some());
         assert!(registry.get("MCP__SERVER__TOOL").is_some());
         assert_eq!(registry.len(), 1);
+    }
+
+    #[test]
+    fn schemas_for_exposes_parallel_safe_hint_to_llm() {
+        let registry = ToolRegistry::new();
+        registry.register(DummyTool::new("parallel", "Parallel tool"));
+
+        let schemas = registry.schemas_for("en");
+
+        let description = schemas[0]["description"].as_str().unwrap();
+        assert!(description.contains("Concurrency: Parallel-safe"));
+        assert!(description.contains("SAME response"));
+        assert!(description.contains("run concurrently"));
+    }
+
+    #[test]
+    fn schemas_for_exposes_sequential_only_hint_to_llm() {
+        let registry = ToolRegistry::new();
+        registry.register(DummyTool::sequential("sequential", "Sequential tool"));
+
+        let schemas = registry.schemas_for("en");
+
+        let description = schemas[0]["description"].as_str().unwrap();
+        assert!(description.contains("Concurrency: Sequential-only"));
+        assert!(description.contains("Do not run multiple calls"));
+        assert!(description.contains("preserve order"));
     }
 }
