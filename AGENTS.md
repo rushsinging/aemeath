@@ -125,9 +125,11 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 新建 issue 时 **SHOULD** 使用 `.github/ISSUE_TEMPLATE/bug.yml` 或 `feature.yml`，以保证 `kind:*`、`area:*`、`priority:*` 标签由 `.github/workflows/auto-labeler.yml` 一致地应用。创建 PR 时 **SHOULD** 使用 `.github/pull_request_template.md` 填写 Summary、Refs、Breaking change、Test plan。
 
 1. **阅读 Issue**：用 `gh issue view <编号> --repo rushsinging/aemeath` 拉取 issue 标题、labels、完整 body（body 顶部有 `<!-- Migrated from: <source> -->` 标记，可追溯到原 `docs/bug/archived/<id>-<slug>.md` 或 `docs/active.md#<id>`）。设计稿类 issue **SHOULD** 配套阅读 `docs/snapshot/specs/<file>.md`，每份 spec 顶部已写入 `> 对应 Issue: <url>` 指针。
+   - **MUST** 检查 issue 是否关联 milestone。未关联 milestone 的 issue **MUST** 先提醒用户关联，**NEVER** 在无 milestone 的情况下直接开 worktree 修改。
+   - **MUST** 根据 milestone 版本号定位对应的 `release/vX.Y.Z` 集成分支（见下方「Git 工作流」）。分支不存在时 **MUST** 提醒用户从 `origin/main` 创建并 push。
 2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。方案中的任务必须拆分为单一、具体、可验证的最小步骤（如“修改 A 文件的 B 函数”“为 C 场景添加测试”“运行 cargo clippy”），**NEVER** 使用“实施并验证”这类宽泛任务概括多个步骤。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划；即使是简单改动，也 **MUST** 先给出简明方案，禁止直接开始修改。
 3. **等待用户明确同意**：在获得用户的明确书面同意（如“同意”、“开始改”）前，**NEVER** 调用 Edit/Write/Bash 等会修改文件或系统状态的工具。如果用户只给出笼统意图（如“修一下”）而未确认具体方案，**MUST** 先呈现方案并等待确认。
-4. **执行与验证**：在 worktree 中实施，通过编译、测试、clippy 验证后合并回 `main`。
+4. **执行与验证**：在 worktree 中实施，worktree **MUST** 基于 issue 所属 milestone 的 `release/vX.Y.Z` 集成分支创建（**NEVER** 直接基于 `main` 开 feature 分支，除非是无 milestone 的紧急修复且经用户确认）。通过编译、测试、clippy 验证后 PR 合入对应 release 分支。
 5. **用户确认后关闭 Issue**：agent **NEVER** 自行关闭 issue。合并完成后，由用户确认是否关闭；用户确认后，可用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
 
 修复 bug 或实现 feature 时，**MUST** 做根因层面的修正（fact-check），而不是只做最小化补丁绕过症状。应评估相关代码路径、数据流和状态机，确保同类问题不再复发。
@@ -220,11 +222,15 @@ Release Gate issue 模板：
 
 ### Git 工作流
 
-- **MUST** 所有代码、文档、配置修改都在独立 git worktree 中执行，NEVER 直接在 `main` 工作区修改。
-- **MUST** worktree 分支完成验证并提交后，通过 **Pull Request** 提交回 `main`；**NEVER** 直接 push 到 `main`（`main` 已受保护，不允许直接推送）。
-- **MUST** 合并 PR 时使用 **Squash merge**，将分支上的多个提交压缩为一个提交后合入 `main`；**NEVER** 使用 rebase merge 或普通 merge commit。
+milestone 开始时从 `origin/main` 最新 commit 切出 `release/vX.Y.Z` 集成分支，作为该 milestone 所有 feature / bugfix 的开发主线。各 release 分支互相独立、按版本号递进。
+
+- **MUST** 所有 feature / bugfix 在独立 worktree 中开发，worktree 基于 issue 所属 milestone 的 `release/vX.Y.Z` 分支创建；**NEVER** 直接 push 到 `release/*` 或 `main`（均受保护，只接受 PR）。
+- **MUST** feature / bugfix 分支完成后通过 **Pull Request** 提交到对应的 `release/vX.Y.Z` 分支（base: `release/vX.Y.Z`）。
+- **MUST** 合并 PR 时使用 **Squash merge**，将分支上的多个提交压缩为一个提交后合入；**NEVER** 使用 rebase merge 或普通 merge commit。
 - **MUST NEVER** 由 agent 自动合并 PR。PR 创建后由用户 review，用户确认后手动合并；agent 只能在用户明确授权后执行合并动作。
-- **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin main` 拉取最新 main；若存在冲突，解决后重新通过验证门禁，才能推送分支并创建 PR。
+- **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin release/vX.Y.Z` 拉取最新集成分支；若存在冲突，解决后重新通过验证门禁，才能推送分支并创建 PR。
+- **MUST** 同一 milestone 的所有执行 issue 合入 release 分支后，将 `release/vX.Y.Z` 通过 PR 合入 `main`（base: `main`，head: `release/vX.Y.Z`），squash merge 后在 main HEAD 打 `vX.Y.Z` tag 触发发版 workflow。
+- 补丁版本（`X.Y.Z+n`）：在原 `release/vX.Y.Z` 分支上继续修复，或从 `origin/main` 新切 `release/vX.Y.(Z+1)` 分支；修复合入 main 后打 `vX.Y.(Z+1)` tag 发版。
 
 ### 代码修改后检查
 
@@ -244,7 +250,7 @@ Release Gate issue 模板：
 发版通过 push `v*` tag 触发 `.github/workflows/release.yml` 自动完成（校验 → macOS 双架构构建 → 创建 GitHub Release + checksums）。**MUST** 遵守：
 
 - **MUST** 由用户明确指定版本号（如"发 0.0.2"），agent **NEVER** 自行决定发版或推演版本号。
-- **MUST** tag 打在 `origin/main` 最新 commit 上（已 review、已同步到远端），**NEVER** 打在本地未 push 的 HEAD 上。本地若有未 push 的 commit，**MUST** 先判断其是否为已通过 PR 合入内容的噪音（如 merge commit、仅含 `.agents/*` 等运行时副产物的提交）；若是则 tag 仍打在 `origin/main`，发版后 reset 清理。
+- **MUST** tag 打在 `release/vX.Y.Z` 合入 `main` 之后的 `origin/main` HEAD 上（已 review、已同步到远端），**NEVER** 打在本地未 push 的 HEAD 上。本地若有未 push 的 commit，**MUST** 先判断其是否为已通过 PR 合入内容的噪音（如 merge commit、仅含 `.agents/*` 等运行时副产物的提交）；若是则 tag 仍打在 `origin/main`，发版后 reset 清理。
 - **MUST** 使用轻量 tag（沿用 v0.0.1 风格），格式 `vX.Y.Z`。**NEVER** 改 `Cargo.toml` 的 `workspace.version`（占位符 `0.0.0`）；实际版本由 `release.yml` 的 `build` job 显式注入 `AEMEATH_VERSION` env（取自 `validate.outputs.version`），`build.rs` 不再从 git 历史读 tag。
 - **MUST** push tag 前先向用户输出方案（tag 指向哪个 commit、版本号、自上一 tag 以来的变更摘要）并等待确认；**NEVER** 未经确认直接 push tag。
 - **MUST** push 后用 `gh run list --workflow=release.yml` 监控三个阶段（Validate & Gate / Build ×2 / Create Release）全部通过；任一失败 **MUST** 排查并报告。
