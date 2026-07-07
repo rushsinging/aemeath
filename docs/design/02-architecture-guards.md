@@ -169,7 +169,6 @@
 | `agent/features/provider/src/business/providers/openai_compatible/stream.rs` | `core` | OpenAI 兼容流式 |
 | `agent/features/provider/src/business/stream.rs` | `core` | Provider 通用 stream |
 | `agent/features/runtime/src/utils/adapter.rs` | `core` | runtime 临时 wiring |
-| `agent/features/runtime/src/utils/bootstrap.rs` | `core` | runtime bootstrap |
 | `agent/features/runtime/src/utils/bootstrap/runtime_support.rs` | `business` | bootstrap 临时 wiring |
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 

@@ -48,7 +48,6 @@ LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/provider/src/business/providers/openai_compatible/stream.rs", "core"),
     ("agent/features/provider/src/business/stream.rs", "core"),
     ("agent/features/runtime/src/utils/adapter.rs", "core"),
-    ("agent/features/runtime/src/utils/bootstrap.rs", "core"),
     ("agent/features/runtime/src/utils/bootstrap/runtime_support.rs", "business"),
     ("agent/features/tools/src/business/mcp_manager/connection.rs", "core"),
 }
