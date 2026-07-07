@@ -10,8 +10,8 @@ use crate::core::port::ProviderInfoPort;
 use crate::utils::adapter::LlmClientAdapter;
 use crate::utils::bootstrap::{
     self, apply_config_permission_mode, build_agent_runner, build_hook_runner, init_logging,
-    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_context_size,
-    resolve_model_runtime_settings, spawn_mcp_connect,
+    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
+    spawn_mcp_connect,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
 use prompt::api::skill::{load_all_skills, Skill};
@@ -50,7 +50,18 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     );
 
     // 5. 权限模式
-    apply_config_permission_mode(&mut args, config_file.as_ref());
+    apply_config_permission_mode(
+        &mut args,
+        config_file
+            .as_ref()
+            .map(|c| {
+                matches!(
+                    c.permissions.mode,
+                    share::config::PermissionModeConfig::AllowAll
+                )
+            })
+            .unwrap_or(false),
+    );
 
     // 6. 模型选择 — 直接使用 ModelsConfig::select_for_run
     let config = config_file.as_ref().ok_or_else(|| {
@@ -77,7 +88,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let runtime_settings = resolve_model_runtime_settings(
         args.max_tokens,
         &resolved_model.model,
-        config_file.as_ref(),
+        config_file.as_ref().map(|c| c.model.max_tokens),
         !args.no_think,
     )
     .map_err(|e| SdkError::Init(e.to_string()))?;
@@ -179,7 +190,14 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
-        config_file.as_ref(),
+        config_file
+            .as_ref()
+            .map(|c| c.tools.max_concurrency)
+            .unwrap_or(0),
+        config_file
+            .as_ref()
+            .map(|c| c.agents.max_concurrency)
+            .unwrap_or(0),
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,
@@ -193,11 +211,19 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .as_ref()
         .map(|c| c.model.context_size)
         .unwrap_or(0);
-    let context_size = resolve_context_size(
-        args.context_size,
-        snapshot_context_size,
-        resolved_model.model.context_window,
-    );
+    let context_size = {
+        let cli = args.context_size;
+        let model_cw = resolved_model.model.context_window;
+        if cli > 0 {
+            cli
+        } else if snapshot_context_size > 0 {
+            snapshot_context_size
+        } else if model_cw > 0 {
+            model_cw
+        } else {
+            128_000
+        }
+    };
 
     // 18. 组装 context
     let memory_config = config_file
