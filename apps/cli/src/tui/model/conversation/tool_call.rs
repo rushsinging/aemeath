@@ -1,4 +1,5 @@
 use super::ids::{ToolCallId, ToolStreamKey};
+use super::streaming_preview::ToolStreamingPreviewBuffer;
 use super::tool_result_payload::ToolResultPayload;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,6 +13,7 @@ pub struct ToolCall {
     /// None = 尚未收到结果；Some = 已完成（成功或失败）。
     pub result: Option<ToolResultPayload>,
     pub activities: Vec<String>,
+    pub streaming_preview: Option<ToolStreamingPreviewBuffer>,
     /// Agent 工具特化元数据（issue #499）。仅 `tool_name == "Agent"` 时由
     /// `AgentProgressKind::Started` 事件填充，用于 header 渲染
     /// `Agent - [role] - Provider/model`。prompt 不在此处重复存储，
@@ -40,6 +42,7 @@ impl ToolCall {
             status: ToolCallStatus::PendingArgs,
             result: None,
             activities: Vec::new(),
+            streaming_preview: None,
             agent_meta: None,
         }
     }

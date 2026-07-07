@@ -21,6 +21,7 @@ pub mod runtime_state;
 pub mod spinner;
 pub mod status_notice;
 pub mod stream;
+pub mod streaming_preview;
 pub mod system_reminder;
 pub mod task_status;
 pub mod text_stream;

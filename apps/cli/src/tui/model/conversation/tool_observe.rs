@@ -2,7 +2,23 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
-use super::tool_call::{AgentMeta, ToolCallStatus};
+use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
+use super::tool_call::{AgentMeta, ToolCall, ToolCallStatus};
+
+const STREAM_CAP: usize = 4 * 1024;
+
+fn push_streaming_preview_activity(call: &mut ToolCall, message: &str) {
+    let policy = match call.name.as_str() {
+        "Bash" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
+        "Agent" => ToolStreamingPreviewPolicy::new(5, false, STREAM_CAP),
+        _ => return,
+    };
+    let buffer = call
+        .streaming_preview
+        .get_or_insert_with(|| ToolStreamingPreviewBuffer::new(policy));
+    buffer.push_chunk(message);
+    call.activities = buffer.display_lines();
+}
 
 pub(super) struct ToolCallUpdateObservation {
     pub(super) chat_id: ChatId,
@@ -144,20 +160,8 @@ impl ConversationModel {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                // For Bash streaming stdout: accumulate into a single activity
-                // entry so the TUI shows the full live output (up to STREAM_CAP)
-                // rather than just the latest chunk. Other tools (e.g. sub-agent
-                // status messages) use per-message push as before.
-                if call.name == "Bash" {
-                    if let Some(last) = call.activities.last_mut() {
-                        last.push_str(&message);
-                        // Trim oldest content if over cap (keep the tail).
-                        if last.len() > STREAM_CAP {
-                            *last = sdk::slice_tail(last, STREAM_CAP).to_string();
-                        }
-                    } else {
-                        call.activities.push(message.clone());
-                    }
+                if call.name == "Bash" || call.name == "Agent" {
+                    push_streaming_preview_activity(call, &message);
                 } else {
                     call.activities.push(message.clone());
                 }

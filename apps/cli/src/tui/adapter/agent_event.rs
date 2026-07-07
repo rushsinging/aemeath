@@ -7,7 +7,7 @@ use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::text::safe_str_slice_by_char;
-use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
+use sdk::{AgentProgressEventView, AgentProgressKindView};
 use serde_json::{Map, Value};
 
 #[derive(Debug, Default, PartialEq)]
@@ -296,7 +296,6 @@ fn session(intent: SessionIntent) -> AgentEventMapping {
 //  Helpers — tool output sanitization (inlined from tool_flow_projector)
 // ════════════════════════════════════════════════════════════════════
 
-const TOOL_TEXT_PREVIEW_LIMIT: usize = 16 * 1024;
 const TOOL_STREAM_PREVIEW_LIMIT: usize = 512;
 const TOOL_LARGE_FIELD_PREVIEW_LIMIT: usize = 256;
 
@@ -325,6 +324,37 @@ fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String 
 
 fn sanitize_tool_output(tool_name: &str, output: &str) -> String {
     truncate_large_tool_text(output, Some(tool_name))
+}
+
+fn truncate_tool_text(text: &str, limit: usize, tool_name: Option<&str>) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let prefix = utf8_prefix(text, limit);
+    let label = tool_name.unwrap_or("tool");
+    format!(
+        "{} ... ({} bytes omitted from TUI {label} preview)",
+        prefix,
+        text.len().saturating_sub(prefix.len())
+    )
+}
+
+fn truncate_large_tool_text(text: &str, tool_name: Option<&str>) -> String {
+    truncate_tool_text(text, TOOL_STREAM_PREVIEW_LIMIT, tool_name)
+}
+
+fn truncate_json_value(value: Value, tool_name: &str, field: &str) -> Value {
+    match value {
+        Value::String(text) => Value::String(truncate_tool_text(
+            &text,
+            TOOL_LARGE_FIELD_PREVIEW_LIMIT,
+            Some(tool_name),
+        )),
+        other => Value::String(format!(
+            "<{} omitted from TUI {tool_name}.{field} preview>",
+            json_value_kind(&other)
+        )),
+    }
 }
 
 fn sanitize_tool_result_content(tool_name: &str, content: Value) -> Value {
@@ -356,47 +386,28 @@ fn large_fields_for_tool(tool_name: &str) -> &'static [&'static str] {
 }
 
 fn summarize_object_string_field(object: &mut Map<String, Value>, tool_name: &str, field: &str) {
-    let Some(value) = object.get_mut(field) else {
+    let Some(text) = object.get(field).and_then(Value::as_str) else {
         return;
     };
-    let Some(text) = value.as_str() else {
-        return;
+    let text_len = text.len();
+    let should_truncate = text_len > TOOL_LARGE_FIELD_PREVIEW_LIMIT;
+    let replacement = if should_truncate {
+        let prefix = utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT);
+        Some(Value::String(format!(
+            "{} ... ({} bytes omitted from TUI {tool_name}.{field} preview)",
+            prefix,
+            text_len.saturating_sub(prefix.len())
+        )))
+    } else {
+        None
     };
-    if text.len() <= TOOL_LARGE_FIELD_PREVIEW_LIMIT {
-        return;
+
+    if tool_name == "Write" && field == "content" {
+        object.insert("content_bytes".to_string(), Value::from(text_len as u64));
     }
-    *value = Value::String(format!(
-        "{} ... ({} bytes omitted from TUI {tool_name}.{field} preview)",
-        utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT),
-        text.len()
-            .saturating_sub(utf8_prefix(text, TOOL_LARGE_FIELD_PREVIEW_LIMIT).len())
-    ));
-}
-
-fn truncate_json_value(value: Value, tool_name: &str, field: &str) -> Value {
-    let text = value.to_string();
-    Value::String(truncate_tool_text(
-        &text,
-        TOOL_TEXT_PREVIEW_LIMIT,
-        Some(&format!("{tool_name}.{field}")),
-    ))
-}
-
-fn truncate_large_tool_text(text: &str, context: Option<&str>) -> String {
-    truncate_tool_text(text, TOOL_TEXT_PREVIEW_LIMIT, context)
-}
-
-fn truncate_tool_text(text: &str, limit: usize, context: Option<&str>) -> String {
-    if text.len() <= limit {
-        return text.to_string();
+    if let Some(replacement) = replacement {
+        object.insert(field.to_string(), replacement);
     }
-    let prefix = utf8_prefix(text, limit);
-    let omitted = text.len().saturating_sub(prefix.len());
-    let suffix = match context {
-        Some(context) => format!("... ({omitted} bytes omitted from TUI preview for {context})"),
-        None => format!("... ({omitted} bytes omitted from TUI preview)"),
-    };
-    format!("{prefix}\n{suffix}")
 }
 
 fn utf8_prefix(text: &str, limit: usize) -> &str {
@@ -644,6 +655,18 @@ mod tests {
 }
 
 /// 把 AgentProgressEventView 格式化为人类可读消息，供 TUI activities 渲染。
+fn format_agent_tool_call_header(name: &str, input: &Value) -> String {
+    let input_preview = match input {
+        Value::String(s) => s.chars().take(80).collect::<String>(),
+        value => value.to_string().chars().take(80).collect::<String>(),
+    };
+    if input_preview.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}  {input_preview}")
+    }
+}
+
 fn format_agent_progress(event: &AgentProgressEventView) -> String {
     match &event.kind {
         AgentProgressKindView::Started { .. } => String::new(),
@@ -655,17 +678,11 @@ fn format_agent_progress(event: &AgentProgressEventView) -> String {
             let lines: Vec<String> = calls
                 .iter()
                 .map(|tc| {
-                    let input_preview = match &tc.input {
-                        Value::String(s) => s.chars().take(80).collect::<String>(),
-                        v => {
-                            let s = v.to_string();
-                            s.chars().take(80).collect::<String>()
-                        }
-                    };
-                    if input_preview.is_empty() {
+                    let text = format_agent_tool_call_header(&tc.name, &tc.input);
+                    if text.trim().is_empty() {
                         format!("→ {}", tc.name)
                     } else {
-                        format!("→ {}  {}", tc.name, input_preview)
+                        format!("→ {text}")
                     }
                 })
                 .collect();
