@@ -41,7 +41,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 3. 加载配置
     let svc = ConfigAppService::new(Some(&cwd));
-    let config_file = svc.load().await.ok();
+    svc.load().await.ok();
     let snapshot = svc.snapshot().await;
 
     // 4. 日志初始化
@@ -111,7 +111,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
 
     // 11. Hook runner
-    let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
+    let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
     let hook_runner_before = hook_runner.clone();
 
     // 12. Session
@@ -120,7 +120,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 13. Agent runner
     let agent_runner = build_agent_runner(
-        config_file.as_ref(),
+        Some(snapshot.models()),
+        Some(snapshot.agents()),
         client.clone(),
         hook_runner.clone(),
         runtime_settings.reasoning,

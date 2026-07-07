@@ -21,7 +21,7 @@ pub(crate) async fn build_llm_client_for_switch(
     use provider::api::ProviderDriverKind;
 
     let svc = ConfigAppService::new(Some(cwd));
-    let _config = svc.load().await?;
+    svc.load().await?;
     let snapshot = svc.snapshot().await;
 
     let resolved_model = snapshot
