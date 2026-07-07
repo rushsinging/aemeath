@@ -214,7 +214,7 @@ mod tests {
             std::env::set_var("AEMEATH_PERMISSION_MODE", "allowAll");
             let patch = read();
             assert_eq!(
-                patch.permissions.as_ref().and_then(|p| p.mode.clone()),
+                patch.permissions.as_ref().and_then(|p| p.mode),
                 Some(PermissionModeConfig::AllowAll)
             );
             std::env::remove_var("AEMEATH_PERMISSION_MODE");
