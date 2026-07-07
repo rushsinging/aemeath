@@ -311,7 +311,6 @@ mod tests {
             current_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
             frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_summary: Arc::new(std::sync::Mutex::new(None)),
-            skip_first_pending_turn: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),
             change_tx,
             change_rx,

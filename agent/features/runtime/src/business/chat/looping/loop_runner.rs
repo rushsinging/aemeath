@@ -103,8 +103,6 @@ where
     pub frozen_chats: Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
     pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
-    /// Resume 后首次 loop-top idle 门跳过 pending user turn（#503）。
-    pub skip_first_pending_turn: bool,
     /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。
     /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
     /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
@@ -204,7 +202,6 @@ where
         frozen_chats,
         active_summary: active_summary_arc,
         reasoning_graph,
-        skip_first_pending_turn,
         build_switched_client,
         save_session,
         run_reflection_on_demand,
@@ -275,9 +272,11 @@ where
     // 初始化配置变更快照注册表（turn 边界轮询用）
     let mut config_snapshot =
         crate::business::chat::looping::config_reload::init_snapshot_registry(&cwd);
-    // #503：resume 后首次遇到 pending user turn 时跳过，改为 idle 等待新输入。
-    // 消费一次后置 false，后续正常行为不受影响。
-    let mut skip_pending = skip_first_pending_turn;
+    // #672：仅首次 loop-top 迭代无条件等待 pending_input（runtime 启动 / resume /
+    // load session 后永远等用户输入，不管 messages 末尾）。后续迭代的 idle 由
+    // completion arm / cancel arm 内部的 idle_until_resume_or_shutdown 负责，
+    // 避免 completion arm Resumed 后 continue 回 loop-top 的 double-idle 死锁。
+    let mut first_loop_top = true;
 
     /// 处理 idle 期收到的 `PendingCommand`。
     ///
@@ -650,8 +649,7 @@ where
         // 等待第一条输入，而不是以空消息列表发起回合。
         //
         // 与回合完成后的空闲（completion arm）协作：completion arm 已 idle-wait 并把下
-        // 一条 UserMessage append 进 messages 后再 continue；此时 has_pending_user_turn
-        // 为 true，不会触发 double-wait。
+        // 一条 UserMessage append 进 messages 后再 continue；pending_input 非空 → 直接进入回合。
         //
         // FSM 注意：此处 FSM 处于 Running 态（loop 首轮默认 Running；后续轮经
         // `ResumeRunning` 回到 Running）。loop-top idle 是「回合前置等待」，不经过
@@ -661,13 +659,25 @@ where
         // `None` cancel_slot：前置等待不重置 cancel 槽——此时 loop 体的 `cancel` clone
         // 尚未读取（在本门之后才 `current_cancel_token`），重置会破坏首回合的外部 cancel。
         //
-        // #503：resume 后末条消息可能是等待 assistant 回复的 User 消息（纯文本或
-        // tool_result）。此时 has_pending_user_turn 为 true，正常路径会自动发起 LLM
-        // 请求恢复中断的对话。skip_pending 标志使首次遇到此情况时改为 idle 等待，
-        // 让用户决定是否继续。idle 门内收到新 UserMessage 后 append 到 messages，
-        // skip_pending 被消费为 false。
-        let should_idle = (!has_pending_user_turn(&messages) && pending_input.is_empty())
-            || (skip_pending && has_pending_user_turn(&messages));
+        // #672：runtime 启动 / resume / load session 后永远等待用户输入，
+        // 不管 messages 末尾是什么角色。agent loop 内部多轮（tool call → 再调
+        // LLM）由 FSM 的 ResumeRunning 状态转换驱动，不经过 idle 门。
+        //
+        // 首次 loop-top 迭代（startup / resume）：无条件等待 pending_input，
+        // #672：runtime 启动 / resume / load session 后永远等待用户输入，
+        // 不管 messages 末尾是什么角色。agent loop 内部多轮（tool call → 再调
+        // LLM）由 FSM 的 ResumeRunning 状态转换驱动，不经过 idle 门。
+        //
+        // 后续迭代（first_loop_top=false）：completion arm / cancel arm 已通过
+        // idle_until_resume_or_shutdown 处理了空闲等待，其 Resumed 路径会 continue
+        // 回 loop-top。此时若 pending_input 为空但 messages 已含待答回合（user tail
+        // 或 tool-result），不应再次 idle（否则 double-idle 死锁）。
+        let should_idle = if first_loop_top {
+            pending_input.is_empty()
+        } else {
+            !has_pending_user_turn(&messages) && pending_input.is_empty()
+        };
+        first_loop_top = false;
         if should_idle {
             match idle_until_resume_or_shutdown(
                 &input_events,
@@ -683,8 +693,6 @@ where
                     // messages 已含新 UserMessage（由 idle 门内的 BeforeLlm gate 附加），
                     // pending_input 已清空。继续进入下方回合头：turn_count 推进、
                     // turn_rollback_baseline 在用户消息已入、assistant 未产生处捕获。
-                    // #503：消费 skip 标志，后续回合恢复正常行为。
-                    skip_pending = false;
                 }
                 IdleResult::CommandRequested(cmd) => {
                     handle_pending_command!(cmd, false);
@@ -1711,8 +1719,9 @@ enum IdleResult {
 /// 最后一条消息是 User 角色 → 有待答回合（true）；
 /// 否则（空、末尾是 assistant / tool / system）→ 无待答回合（false）。
 ///
-/// 用于 loop 顶部空闲门：若无待答回合且 pending_input 也为空，
-/// 则先 idle-wait 直到收到真实 UserMessage 才开始回合。
+/// 用于 loop 顶部空闲门的后续迭代检查（#672 后仅首次迭代无条件 idle）：
+/// completion arm Resumed 后 continue 回 loop-top 时，messages 已含 user tail，
+/// 本函数返回 true → 不 double-idle。
 fn has_pending_user_turn(messages: &[Message]) -> bool {
     matches!(messages.last(), Some(m) if m.role == Role::User)
 }

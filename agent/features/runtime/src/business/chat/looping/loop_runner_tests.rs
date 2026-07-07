@@ -443,11 +443,36 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
     ));
     let _ = std::fs::remove_file(&flag_path);
     let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
 
-    process_chat_loop(ChatLoopContext {
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count()
+                >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None, None, None, None]),
-        input_events: EmptyInputEvents,
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
@@ -455,7 +480,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stop-hook-blocked".to_string(),
@@ -473,7 +498,6 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -482,8 +506,11 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
@@ -530,11 +557,36 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
     ));
     let _ = std::fs::remove_file(&flag_path);
     let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
 
-    process_chat_loop(ChatLoopContext {
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count()
+                >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None, None, None, None]),
-        input_events: EmptyInputEvents,
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
@@ -542,7 +594,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stop-hook-metadata".to_string(),
@@ -560,7 +612,6 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -569,8 +620,11 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
     let feedback = sink
@@ -619,10 +673,36 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         }],
     );
 
-    process_chat_loop(ChatLoopContext {
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count()
+                >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None, None]),
-        input_events: EmptyInputEvents,
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["final response"]),
         ))),
@@ -630,7 +710,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace,
         session_id: "test-worktree-stop-hook-env".to_string(),
@@ -648,7 +728,6 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -657,8 +736,11 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
 
     assert!(sink
         .events()
@@ -676,6 +758,16 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
 #[tokio::test]
 async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    // queue 仍在 mid-turn gate 中被 drain（idle 门不消费 queue）。
     let queue = SequenceQueueDrainPort::new(vec![
         None,
         Some(vec!["stop-hook input".to_string()]),
@@ -683,10 +775,27 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         None,
     ]);
 
-    process_chat_loop(ChatLoopContext {
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count()
+                >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
         queue,
-        input_events: EmptyInputEvents,
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             TwoTurnProvider,
         ))),
@@ -694,7 +803,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-session".to_string(),
@@ -712,7 +821,6 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -721,8 +829,11 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
 
     let events = sink.events();
     let queued_sync = events
@@ -816,11 +927,36 @@ async fn test_continue_false_json_treated_as_block() {
     ));
     let _ = std::fs::remove_file(&flag_path);
     let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
 
-    process_chat_loop(ChatLoopContext {
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count()
+                >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
+
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None, None, None, None]),
-        input_events: EmptyInputEvents,
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first response", "second response"]),
         ))),
@@ -828,7 +964,7 @@ async fn test_continue_false_json_treated_as_block() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-continue-false".to_string(),
@@ -846,7 +982,6 @@ async fn test_continue_false_json_treated_as_block() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -855,8 +990,11 @@ async fn test_continue_false_json_treated_as_block() {
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
     let _ = std::fs::remove_file(&flag_path);
 
     let events = sink.events();
@@ -902,13 +1040,38 @@ async fn test_stall_triggers_stop_hook_check() {
     ));
     let _ = std::fs::remove_file(&counter_path);
     let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .filter(|e| e.as_str() == "DoneWithDuration")
+                .count()
+                >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
 
     // LLM 前 3 次返回相同输出（触发 stall），第 4 次返回不同输出
     // Stop hook 前 3 次阻断，第 4 次放行
-    process_chat_loop(ChatLoopContext {
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None, None, None, None, None, None]),
-        input_events: EmptyInputEvents,
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec![
                 "same output",
@@ -921,7 +1084,7 @@ async fn test_stall_triggers_stop_hook_check() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stall-hook".to_string(),
@@ -939,7 +1102,6 @@ async fn test_stall_triggers_stop_hook_check() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -948,8 +1110,11 @@ async fn test_stall_triggers_stop_hook_check() {
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
     let _ = std::fs::remove_file(&counter_path);
 
     let events = sink.events();
@@ -1094,7 +1259,6 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -1280,7 +1444,6 @@ async fn test_stall_detector_resets_across_user_turns() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -1547,7 +1710,6 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -1668,7 +1830,6 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -1769,7 +1930,6 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -1797,12 +1957,31 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
 async fn test_stop_hook_block_limit_stops_loop() {
     // #372 缺陷 3：Stop hook 连续阻断超过 MAX_STOP_HOOK_BLOCKS(5) 强制停止
     let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    input_tx
+        .send(sdk::ChatInputEvent::user_message(
+            "hello".to_string(),
+            Vec::new(),
+        ))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if !driver_sink.done_durations.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx);
+    });
 
     // 每次返回不同输出避免 stall；Stop hook 每次阻断
-    process_chat_loop(ChatLoopContext {
+    let ctx = ChatLoopContext {
         sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![None, None, None, None, None, None, None, None]),
-        input_events: EmptyInputEvents,
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
         client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
         ))),
@@ -1810,7 +1989,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![Message::user("hello")],
+        messages: vec![],
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-block-limit".to_string(),
@@ -1828,7 +2007,6 @@ async fn test_stop_hook_block_limit_stops_loop() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -1837,8 +2015,11 @@ async fn test_stop_hook_block_limit_stops_loop() {
         list_models: test_list_models(),
         list_reminders: test_list_reminders(),
         list_sessions: test_list_sessions(),
-    })
-    .await;
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop should complete after shutdown");
+    driver.await.unwrap();
 
     let events = sink.events();
     // 超过上限应发出 SystemMessage 提示
@@ -2031,7 +2212,6 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -2278,7 +2458,6 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -2526,7 +2705,6 @@ async fn test_chat_impl_idle_until_first_input_event() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -2649,7 +2827,6 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
         save_session: test_save_session(),
         language: "en".to_string(),
@@ -2684,8 +2861,8 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
     );
 }
 
-/// #503：resume 后 messages 末尾为 User 消息（纯文本）时，skip_first_pending_turn=true
-/// 使 loop-top idle 门强制等待，而非自动发起 LLM 请求恢复被中断的对话。
+/// #672/#503：resume 后 messages 末尾为 User 消息（纯文本）时，loop-top idle 门
+/// 强制等待新输入，而非自动发起 LLM 请求恢复被中断的对话。
 #[tokio::test]
 async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     let sink = RecordingSink::default();
@@ -2743,9 +2920,8 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: true, // #503 核心：resume 标志
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_session: test_save_session(), // 正常场景
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2772,24 +2948,20 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     );
 }
 
-/// #503 回归：正常场景（非 resume）末条消息为 User 时，skip_first_pending_turn=false，
-/// loop-top idle 门不阻断，正常进入回合。
+/// #672：runtime 启动后永远等待用户输入，不管 messages 末尾是什么角色。
+/// 末条 User 消息 + pending_input 空 → idle 等待，不自动触发 LLM。
 #[tokio::test]
-async fn test_normal_pending_user_turn_proceeds_without_skip() {
+async fn test_messages_with_user_tail_idles_without_pending_input() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 
     let messages = vec![Message::user("hello")];
 
-    // driver：等回合完成后关闭通道触发 shutdown
+    // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
     let driver_sink = sink.clone();
     let driver = tokio::spawn(async move {
-        loop {
-            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        // 给 loop 充分时间进入 idle
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         drop(input_tx); // 关闭通道 → shutdown
     });
 
@@ -2806,7 +2978,7 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
         messages,
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
-        session_id: "test-normal-no-skip".to_string(),
+        session_id: "test-user-tail-idle".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
@@ -2821,9 +2993,8 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
-        skip_first_pending_turn: false,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(), // 正常场景
+        save_session: test_save_session(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2838,9 +3009,9 @@ async fn test_normal_pending_user_turn_proceeds_without_skip() {
     driver.await.unwrap();
 
     let events = sink.events();
-    // 正常场景：末条 User 消息直接触发 LLM 调用，产出文本
+    // #672：pending_input 空时，即使 messages 末尾是 User，也不应触发 LLM 响应
     assert!(
-        events.iter().any(|e| e.contains("hi there")),
-        "正常场景（非 resume）末条 User 消息应直接触发 LLM 响应: {events:?}"
+        !events.iter().any(|e| e.contains("hi there")),
+        "messages 末尾 User + pending_input 空 → 应 idle 等待，不应触发 LLM: {events:?}"
     );
 }
