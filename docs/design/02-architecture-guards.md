@@ -15,12 +15,12 @@
 │   └─ reject-main-edit.sh    拦截在 main 工作区直接改代码     │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 20 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 22 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 20 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 22 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
 
 ## 守卫索引
 
@@ -46,6 +46,8 @@
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` |
+| 22 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
 
@@ -440,6 +442,23 @@
 | 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 方法 | #567 后所有 TUI↔runtime 交互走 `ChatInputEvent` 事件流 + `ChatEvent` 回传，不允许在 trait 上新增 RPC 方法绕过事件流 |
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
+
+## 22. check-config-reader-injection.sh
+
+- **位置**：`.agents/hooks/check-config-reader-injection.sh`。
+- **功能**：runtime 消费方（`agent/features/runtime/src/`）不得直接调用 `ConfigAppService::new()`。配置应通过注入的 `Arc<dyn ConfigReader>` port 获取 `ConfigSnapshot`。
+- **守护**：DDD 依赖注入原则——`ConfigAppService` 是 Application Service，其构造（`new`）只应在 composition 装配根完成。runtime 消费方直接 new 会绕过依赖注入，导致配置来源不可追踪、测试不可 mock。
+- **检查方式**：`grep -rn "ConfigAppService::new" agent/features/runtime/src/ --include="*.rs"`，排除例外文件。
+- **例外**：
+
+| 路径 | 理由 |
+|---|---|
+| `agent/features/runtime/src/core/client/from_args.rs` | CLI 启动路径，暂未改造为注入模式 |
+| `agent/features/runtime/src/core/client/trait_model.rs` | CLI 启动路径（`AgentClientImpl` wiring），暂未改造为注入模式 |
+| `*_test*` / `tests/` | 测试代码豁免 |
+
+- **注**：`agent/composition/src/`（装配根）不在扫描范围内（守卫只扫 `runtime/src/`），天然放行。
+- **失败模式**：`❌ Config reader injection guard FAILED: runtime consumer directly new-ing ConfigAppService`
 
 ## 附：钩子体系（非架构守卫）
 
