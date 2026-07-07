@@ -51,8 +51,6 @@ pub struct RuntimeHandle {
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
-    /// 而非自动恢复被中断的对话（#503）。
-    pub(crate) skip_first_pending_turn: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
     pub(crate) change_rx: watch::Receiver<ChangeSet>,

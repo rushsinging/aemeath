@@ -150,11 +150,11 @@ impl LlmClientPool {
         let max_tokens = model_entry.max_tokens;
         if max_tokens == 0 {
             log::warn!(target: LOG_TARGET,
-                "[LlmClientPool] max_tokens is 0 for '{}' — using 200000 default",
+                "[LlmClientPool] max_tokens is 0 for '{}' — using 8192 default",
                 spec
             );
         }
-        let max_tokens = if max_tokens > 0 { max_tokens } else { 200000 };
+        let max_tokens = if max_tokens > 0 { max_tokens } else { 8192 };
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 

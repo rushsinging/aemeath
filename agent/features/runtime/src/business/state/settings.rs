@@ -76,7 +76,7 @@ fn default_model() -> String {
 }
 
 fn default_max_tokens() -> u32 {
-    200000
+    8192
 }
 
 fn default_context_size() -> usize {
@@ -108,7 +108,7 @@ mod tests {
     fn test_settings_default() {
         let settings = Settings::default();
         assert_eq!(settings.model, "claude-sonnet-4-6");
-        assert_eq!(settings.max_tokens, 200000);
+        assert_eq!(settings.max_tokens, 8192);
         assert_eq!(settings.permission_mode, PermissionMode::Ask);
     }
 }
