@@ -73,8 +73,8 @@ impl TypedTool for BashTool {
         };
         let command = args.command.as_str();
         if let Some(reason) = check_command_safety(command) {
-            if !ctx.resources.allow_all {
-                return TypedToolResult::error(format!("Destructive command blocked ({reason}): {command}\nIf you really need to run this, ask the user to execute it manually."));
+            if reason.contains("dedicated file tools") || !ctx.resources.allow_all {
+                return TypedToolResult::error(format!("Command blocked ({reason}): {command}\nUse the dedicated tool requested by the error message, or ask the user to execute it manually if this is intentional."));
             }
         }
         // Check for shell injection patterns (skip when allow_all is set)

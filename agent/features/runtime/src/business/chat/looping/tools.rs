@@ -5,6 +5,9 @@ use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::evaluate_calls;
+use crate::business::chat::looping::tool_fuse::{
+    blocked_tool_execution, ToolCallFuse, ToolFuseDecision,
+};
 use crate::business::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
@@ -34,6 +37,7 @@ pub(crate) async fn execute_tool_round<S>(
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &Path,
+    tool_call_fuse: &mut ToolCallFuse,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -51,8 +55,33 @@ where
     let denied_results =
         deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
+    let mut fused_results = Vec::new();
+    let mut fuse_allowed = Vec::new();
+    for call in approved {
+        match tool_call_fuse.inspect(&call) {
+            ToolFuseDecision::Allow => fuse_allowed.push(call),
+            ToolFuseDecision::SoftBlock { reason } | ToolFuseDecision::HardPause { reason } => {
+                let _ = sink
+                    .send_event(RuntimeStreamEvent::ToolCallUpdate {
+                        context: context.clone(),
+                        id: call.id.clone(),
+                        provider_id: Some(call.provider_id.clone()),
+                        name: call.name.clone(),
+                        index: call.index,
+                        arguments_delta: None,
+                        arguments: Some(call.input.clone()),
+                        status: RuntimeToolCallStatus::Running,
+                    })
+                    .await;
+                let execution = blocked_tool_execution(&call, &reason);
+                send_tool_result(sink, context, &execution).await;
+                fused_results.push(execution);
+            }
+        }
+    }
+
     // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
-    for call in &approved {
+    for call in &fuse_allowed {
         let _ = sink
             .send_event(RuntimeStreamEvent::ToolCallUpdate {
                 context: context.clone(),
@@ -67,7 +96,7 @@ where
             .await;
     }
     let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
-        approved.into_iter().partition(|c| c.name == "Agent");
+        fuse_allowed.into_iter().partition(|c| c.name == "Agent");
 
     let ask_user_results = ask_user(
         context,
@@ -107,6 +136,7 @@ where
         .into_iter()
         .chain(non_agent_results)
         .chain(agent_results)
+        .chain(fused_results)
         .chain(denied_results)
         .collect()
 }
