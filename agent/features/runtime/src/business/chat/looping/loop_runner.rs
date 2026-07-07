@@ -413,6 +413,7 @@ where
                 let (text, is_error) = super::idle_commands::execute_memory(
                     &args,
                     &memory_cwd.display().to_string(),
+                    &memory_config,
                 )
                 .await;
                 let _ = sink

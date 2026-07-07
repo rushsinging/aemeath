@@ -104,6 +104,10 @@ impl ConfigSnapshot {
         self.0.ui.markdown
     }
 
+    pub fn tui(&self) -> bool {
+        self.0.ui.tui
+    }
+
     // ── Memory ───────────────────────────────────────────────
 
     pub fn memory_enabled(&self) -> bool {
@@ -202,7 +206,6 @@ impl ConfigSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::*;
     use crate::config::models::ProviderModelsConfig;
     use crate::config::Config;
@@ -327,5 +330,106 @@ mod tests {
         let ids: Vec<&str> = entries.iter().map(|(_, m)| m.id.as_str()).collect();
         assert!(ids.contains(&"glm-5.1"));
         assert!(ids.contains(&"glm-5.2"));
+    }
+
+    // ── PR-C: from_args snapshot accessor 组合测试 ──────────────────────
+    //
+    // 以下测试模拟 from_args.rs 中消费方拿到 ConfigSnapshot 后调 accessor
+    // 的场景，验证非默认配置值能正确透传。
+
+    /// Config.model.context_size=32000 时，消费方调 snapshot.context_size() 应得 32000。
+    #[test]
+    fn test_snapshot_context_size_priority() {
+        // Arrange
+        let mut config = Config::default();
+        config.model.context_size = 32000;
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert
+        assert_eq!(snap.context_size(), 32000);
+    }
+
+    /// Config.model.max_tokens=8192 时，消费方调 snapshot.max_tokens() 应得 8192。
+    #[test]
+    fn test_snapshot_max_tokens() {
+        // Arrange
+        let mut config = Config::default();
+        config.model.max_tokens = 8192;
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert
+        assert_eq!(snap.max_tokens(), 8192);
+    }
+
+    /// Config 含 tools.max_concurrency=8 / agents.max_concurrency=4 时，
+    /// 消费方调对应 accessor 应得正确值。
+    #[test]
+    fn test_snapshot_concurrency_limits() {
+        // Arrange
+        let mut config = Config::default();
+        config.tools.max_concurrency = 8;
+        config.agents.max_concurrency = 4;
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert
+        assert_eq!(snap.max_tool_concurrency(), 8);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    /// resolve_context_size 在 CLI 传 0 时应忽略 CLI（用 snapshot 值），
+    /// CLI 传 128000 时应直接使用 CLI 值。
+    #[test]
+    fn test_snapshot_resolve_context_size_with_model_window() {
+        // Arrange — snapshot 值为 32000，model_window 为 96000
+        let mut config = Config::default();
+        config.model.context_size = 32000;
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert — CLI 0 被忽略，回退到 snapshot 32000
+        assert_eq!(snap.resolve_context_size(Some(0), 96000), 32000);
+
+        // Act & Assert — CLI 128000 覆盖 snapshot
+        assert_eq!(snap.resolve_context_size(Some(128000), 96000), 128000);
+    }
+
+    /// Config 含 memory.enabled=true / reasoning_graph.enabled=true 时，
+    /// 子结构 accessor 返回正确值。
+    #[test]
+    fn test_snapshot_memory_and_reasoning_graph() {
+        // Arrange
+        let mut config = Config::default();
+        config.memory.enabled = true;
+        config.reasoning_graph.enabled = true;
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert
+        assert!(snap.memory().enabled, "memory().enabled 应为 true");
+        assert!(
+            snap.reasoning_graph().enabled,
+            "reasoning_graph().enabled 应为 true"
+        );
+    }
+
+    /// Config.language="zh" 时，snapshot.language() 应返回 "zh"。
+    #[test]
+    fn test_snapshot_language() {
+        // Arrange
+        let mut config = Config::default();
+        config.language = "zh".to_string();
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert
+        assert_eq!(snap.language(), "zh");
+    }
+
+    /// Default Config 的 language 应为 "en"。
+    #[test]
+    fn test_snapshot_language_default() {
+        // Arrange
+        let config = Config::default();
+        let snap = ConfigSnapshot::new(config);
+
+        // Act & Assert
+        assert_eq!(snap.language(), "en");
     }
 }

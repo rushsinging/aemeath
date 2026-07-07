@@ -5,6 +5,7 @@ use tokio::sync::watch;
 
 use crate::business::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::core::config_app_service::ConfigAppService;
+use crate::core::config_port::ConfigReader;
 use crate::core::port::ChatRuntimeContext;
 use crate::core::port::ProviderInfoPort;
 use crate::utils::adapter::LlmClientAdapter;
@@ -39,38 +40,19 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     // 3. 加载配置
-    let config_file = ConfigAppService::new(Some(&cwd)).load().await.ok();
+    let svc = ConfigAppService::new(Some(&cwd));
+    let config_file = svc.load().await.ok();
+    let snapshot = svc.snapshot().await;
 
     // 4. 日志初始化
-    init_logging(
-        config_file
-            .as_ref()
-            .map(|c| &c.logging)
-            .unwrap_or(&share::config::LoggingConfig::default()),
-    );
+    init_logging(snapshot.logging());
 
     // 5. 权限模式
-    apply_config_permission_mode(
-        &mut args,
-        config_file
-            .as_ref()
-            .map(|c| {
-                matches!(
-                    c.permissions.mode,
-                    share::config::PermissionModeConfig::AllowAll
-                )
-            })
-            .unwrap_or(false),
-    );
+    apply_config_permission_mode(&mut args, snapshot.allow_all());
 
     // 6. 模型选择 — 直接使用 ModelsConfig::select_for_run
-    let config = config_file.as_ref().ok_or_else(|| {
-        SdkError::Init(
-            "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.agents/aemeath.json 配置 models.default".to_string(),
-        )
-    })?;
-    let resolved_model = config
-        .models
+    let resolved_model = snapshot
+        .models()
         .select_for_run(args.model.as_deref())
         .map_err(|e| SdkError::Init(e.to_string()))?;
     let driver =
@@ -88,7 +70,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let runtime_settings = resolve_model_runtime_settings(
         args.max_tokens,
         &resolved_model.model,
-        config_file.as_ref().map(|c| c.model.max_tokens),
+        Some(snapshot.max_tokens()),
         !args.no_think,
     )
     .map_err(|e| SdkError::Init(e.to_string()))?;
@@ -116,7 +98,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     // 10. Tooling
     let task_store = Arc::new(TaskStore::new());
     let task_store_before = task_store.clone();
-    let skills_map = load_configured_skills(&cwd, config_file.as_ref().map(|c| &c.skills));
+    let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
@@ -145,32 +127,20 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     );
 
     // 15. Prompt bundle
-    let prompt_memory_config = config_file
-        .as_ref()
-        .map(|c| c.memory.clone())
-        .unwrap_or_default();
     let client_adapter = LlmClientAdapter::new(client.clone());
     let prompt_context = PromptContext::new(
         &cwd,
         Some(client_adapter.provider_name()),
         Some(client_adapter.model_name()),
     );
-    let prompt_parts = build_system_prompt_parts(
-        &prompt_context,
-        &hook_runner,
-        &prompt_memory_config,
-        config_file
-            .as_ref()
-            .map(|c| c.language.as_str())
-            .unwrap_or("en"),
-    )
-    .await;
+    let prompt_parts =
+        build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language()).await;
 
     let static_prompt = crate::business::prompt::prompt_build_ext::build_static_prompt(
         &cwd,
         &model,
         runtime_settings.reasoning,
-        config_file.as_ref(),
+        Some(&snapshot),
         &hook_runner,
         prompt_parts.clone(),
         &skills,
@@ -190,14 +160,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
-        config_file
-            .as_ref()
-            .map(|c| c.tools.max_concurrency)
-            .unwrap_or(0),
-        config_file
-            .as_ref()
-            .map(|c| c.agents.max_concurrency)
-            .unwrap_or(0),
+        snapshot.max_tool_concurrency(),
+        snapshot.max_agent_concurrency(),
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,
@@ -207,32 +171,16 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     );
 
     // 17. context_size / verbose 合并
-    let snapshot_context_size = config_file
-        .as_ref()
-        .map(|c| c.model.context_size)
-        .unwrap_or(0);
-    let context_size = {
-        let cli = args.context_size;
-        let model_cw = resolved_model.model.context_window;
-        if cli > 0 {
-            cli
-        } else if snapshot_context_size > 0 {
-            snapshot_context_size
-        } else if model_cw > 0 {
-            model_cw
-        } else {
-            128_000
-        }
-    };
+    let context_size =
+        snapshot.resolve_context_size(Some(args.context_size), resolved_model.model.context_window);
 
     // 18. 组装 context
-    let memory_config = config_file
-        .as_ref()
-        .map(|c| c.memory.clone())
-        .unwrap_or_default();
-    let reasoning_graph_config = config_file.as_ref().map(|c| {
-        crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(&c.reasoning_graph)
-    });
+    let memory_config = snapshot.memory().clone();
+    let reasoning_graph_config = Some(
+        crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(
+            snapshot.reasoning_graph(),
+        ),
+    );
     let context = ChatRuntimeContext {
         resources: crate::core::resources::RuntimeResources {
             client,
@@ -248,10 +196,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
             agent_semaphore,
             allow_all: args.allow_all,
             context_size,
-            language: config_file
-                .as_ref()
-                .map(|c| c.language.clone())
-                .unwrap_or_else(|| "en".to_string()),
+            language: snapshot.language().to_string(),
             reasoning_graph_config,
         },
         verbose: args.verbose,

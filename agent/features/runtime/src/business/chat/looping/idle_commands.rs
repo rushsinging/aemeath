@@ -3,7 +3,9 @@
 //! 从旧 CommandRegistry 迁移，每个命令是独立函数。
 //! 结果通过 RuntimeStreamEvent::CommandResultText { text, is_error } 回传 TUI。
 
-use share::config::Config;
+use share::config::domain::snapshot::ConfigSnapshot;
+use share::config::MemoryConfig;
+use share::config::PermissionModeConfig;
 
 /// 执行 /cost 命令。args: "" / "session" = 当前会话, "total" = 全部。
 pub async fn execute_cost(args: &str, session_id: &str) -> (String, bool) {
@@ -19,29 +21,25 @@ pub async fn execute_cost(args: &str, session_id: &str) -> (String, bool) {
 
 /// 执行 /status 命令。
 pub fn execute_status(
-    config: &Config,
+    config: &ConfigSnapshot,
     session_id: &str,
     cwd: &str,
     current_model: &str,
 ) -> (String, bool) {
-    use share::config::PermissionModeConfig;
-    let permission_emoji = match config.permissions.mode {
+    let permission_mode = config.permission_mode();
+    let permission_emoji = match permission_mode {
         PermissionModeConfig::Ask => "🔔",
         PermissionModeConfig::AutoRead => "📖",
         PermissionModeConfig::AllowAll => "🔓",
     };
-    let permission_text = match config.permissions.mode {
+    let permission_text = match permission_mode {
         PermissionModeConfig::Ask => "ask",
         PermissionModeConfig::AutoRead => "auto-read",
         PermissionModeConfig::AllowAll => "allow-all",
     };
-    let markdown_icon = if config.ui.markdown { "✅" } else { "❌" };
-    let tui_icon = if config.ui.tui { "✅" } else { "❌" };
-    let base_url = config
-        .api
-        .base_url
-        .as_deref()
-        .unwrap_or("https://api.anthropic.com");
+    let markdown_icon = if config.markdown() { "✅" } else { "❌" };
+    let tui_icon = if config.tui() { "✅" } else { "❌" };
+    let base_url = config.base_url().unwrap_or("https://api.anthropic.com");
     let info = format!(
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\
          📊 Session Status\n\
@@ -61,25 +59,25 @@ pub fn execute_status(
         session_id,
         cwd,
         current_model,
-        config.model.max_tokens,
+        config.max_tokens(),
         permission_emoji,
         permission_text,
         base_url,
         markdown_icon,
-        if config.ui.markdown {
+        if config.markdown() {
             "enabled"
         } else {
             "disabled"
         },
         tui_icon,
-        if config.ui.tui { "enabled" } else { "disabled" },
+        if config.tui() { "enabled" } else { "disabled" },
     );
     (info, false)
 }
 
 /// 执行 /config 命令。args: "" = 查看, "get <key>" = 获取值, "reset" = 确认重置。
-pub fn execute_config(args: &str, config: &Config) -> (String, bool) {
-    use share::config::PermissionModeConfig;
+pub fn execute_config(args: &str, config: &ConfigSnapshot) -> (String, bool) {
+    let permission_mode = config.permission_mode();
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
         let output = format!(
@@ -88,22 +86,18 @@ pub fn execute_config(args: &str, config: &Config) -> (String, bool) {
              UI:\n  Markdown: {}\n  Color: {}\n  TUI: {}\n\n\
              Permissions:\n  Mode: {}\n\n\
              Storage:\n  Persist sessions: {}\n",
-            config.model.name,
-            config.model.max_tokens,
-            config
-                .api
-                .base_url
-                .as_deref()
-                .unwrap_or("https://api.anthropic.com"),
-            config.ui.markdown,
-            config.ui.color,
-            config.ui.tui,
-            match config.permissions.mode {
+            config.model_name(),
+            config.max_tokens(),
+            config.base_url().unwrap_or("https://api.anthropic.com"),
+            config.markdown(),
+            config.color(),
+            config.tui(),
+            match permission_mode {
                 PermissionModeConfig::Ask => "ask",
                 PermissionModeConfig::AutoRead => "auto-read",
                 PermissionModeConfig::AllowAll => "allow-all",
             },
-            config.storage.persist_sessions,
+            config.persist_sessions(),
         );
         (output, false)
     } else {
@@ -113,15 +107,14 @@ pub fn execute_config(args: &str, config: &Config) -> (String, bool) {
                     return ("Usage: /config get <key>".to_string(), true);
                 }
                 let val = match parts[1] {
-                    "model" => config.model.name.clone(),
-                    "max_tokens" => config.model.max_tokens.to_string(),
+                    "model" => config.model_name().to_string(),
+                    "max_tokens" => config.max_tokens().to_string(),
                     "base_url" => config
-                        .api
-                        .base_url
-                        .clone()
+                        .base_url()
+                        .map(|s| s.to_string())
                         .unwrap_or_else(|| "default".to_string()),
-                    "context_size" => config.model.context_size.to_string(),
-                    "permission_mode" => match config.permissions.mode {
+                    "context_size" => config.context_size().to_string(),
+                    "permission_mode" => match permission_mode {
                         PermissionModeConfig::Ask => "ask".to_string(),
                         PermissionModeConfig::AutoRead => "auto-read".to_string(),
                         PermissionModeConfig::AllowAll => "allow-all".to_string(),
@@ -175,7 +168,11 @@ pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
 }
 
 /// 执行 /stats 命令。
-pub async fn execute_stats(args: &str, _session_id: &str, config: &Config) -> (String, bool) {
+pub async fn execute_stats(
+    args: &str,
+    _session_id: &str,
+    config: &ConfigSnapshot,
+) -> (String, bool) {
     let arg = args.trim().to_lowercase();
     match arg.as_str() {
         "" | "all" => {
@@ -188,7 +185,9 @@ pub async fn execute_stats(args: &str, _session_id: &str, config: &Config) -> (S
                  Max tokens: {}\n\n\
                  Use /stats session for session details\n\
                  Use /stats tokens for token estimation",
-                session_count, config.model.name, config.model.max_tokens,
+                session_count,
+                config.model_name(),
+                config.max_tokens(),
             );
             (info, false)
         }
@@ -306,10 +305,10 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
 }
 
 /// 执行 /memory 命令（非 remind 子命令）。
-pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
+pub async fn execute_memory(args: &str, cwd: &str, mem: &MemoryConfig) -> (String, bool) {
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() || parts[0] == "list" {
-        let store = match open_memory_store(cwd) {
+        let store = match open_memory_store(cwd, mem).await {
             Ok(s) => s,
             Err(e) => return (format!("Failed to open memory store: {}", e), true),
         };
@@ -329,7 +328,7 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
                     return ("Usage: /memory add <content>".to_string(), true);
                 }
                 let content = parts[1..].join(" ");
-                let mut store = match open_memory_store(cwd) {
+                let mut store = match open_memory_store(cwd, mem).await {
                     Ok(s) => s,
                     Err(e) => return (format!("Failed to open memory store: {}", e), true),
                 };
@@ -354,7 +353,7 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
                 if parts.len() < 2 {
                     return ("Usage: /memory delete <id>".to_string(), true);
                 }
-                let mut store = match open_memory_store(cwd) {
+                let mut store = match open_memory_store(cwd, mem).await {
                     Ok(s) => s,
                     Err(e) => return (format!("Failed to open memory store: {}", e), true),
                 };
@@ -367,7 +366,7 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
                 if parts.len() < 2 {
                     return (format!("Usage: /memory {} <id>", parts[0]), true);
                 }
-                let mut store = match open_memory_store(cwd) {
+                let mut store = match open_memory_store(cwd, mem).await {
                     Ok(s) => s,
                     Err(e) => return (format!("Failed to open memory store: {}", e), true),
                 };
@@ -389,7 +388,7 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
                     return ("Usage: /memory search <query>".to_string(), true);
                 }
                 let query = parts[1..].join(" ");
-                let store = match open_memory_store(cwd) {
+                let store = match open_memory_store(cwd, mem).await {
                     Ok(s) => s,
                     Err(e) => return (format!("Failed to open memory store: {}", e), true),
                 };
@@ -404,7 +403,7 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
                 }
             }
             "compact" => {
-                let mut store = match open_memory_store(cwd) {
+                let mut store = match open_memory_store(cwd, mem).await {
                     Ok(s) => s,
                     Err(e) => return (format!("Failed to open memory store: {}", e), true),
                 };
@@ -420,7 +419,7 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
                 }
             }
             "stats" => {
-                let store = match open_memory_store(cwd) {
+                let store = match open_memory_store(cwd, mem).await {
                     Ok(s) => s,
                     Err(e) => return (format!("Failed to open memory store: {}", e), true),
                 };
@@ -450,18 +449,134 @@ pub async fn execute_memory(args: &str, cwd: &str) -> (String, bool) {
 }
 
 /// 打开 memory store（从旧 memory_support.rs 提取）。
-fn open_memory_store(cwd: &str) -> Result<storage::api::MemoryStore, String> {
+///
+/// 接收已由调用方（composition 层）解析好的 `MemoryConfig`，避免 business 层
+/// 反向依赖 core 的 ConfigAppService（COLA 分层：business 不得依赖 core）。
+async fn open_memory_store(
+    cwd: &str,
+    mem: &MemoryConfig,
+) -> Result<storage::api::MemoryStore, String> {
     use storage::api::{memory_base_dir, project_file_name, MemoryStore};
 
-    let config = share::config::Config::default();
-    if !config.memory.enabled {
+    if !mem.enabled {
         return Err("Memory 系统已禁用。".to_string());
     }
     MemoryStore::new(
         memory_base_dir(),
         project_file_name(cwd),
-        config.memory.max_entries,
-        config.memory.similarity_threshold,
+        mem.max_entries,
+        mem.similarity_threshold,
     )
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use share::config::MemoryConfig;
+
+    // ── open_memory_store ──────────────────────────────────────────────
+
+    /// 回归 PR-C：enabled=true 时不应返回"已禁用"错误。
+    ///
+    /// 修复前 `open_memory_store` 内部用 `Config::default()`，
+    /// 其 `memory.enabled` 恒为 false（注：此处为该函数旧实现的缺陷，
+    /// 现已改为显式接收 `&MemoryConfig`）。本测试锁定注入路径生效。
+    #[tokio::test]
+    async fn test_open_memory_store_enabled_returns_store() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: true,
+            max_entries: 100,
+            similarity_threshold: 0.7,
+            ..MemoryConfig::default()
+        };
+
+        // Act
+        let result = open_memory_store("/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert —— 成功构造 store；"已禁用"只会出现在 Err 分支，Ok 即证明未被禁用
+        assert!(
+            result.is_ok(),
+            "enabled store should open, got err: {:?}",
+            result.err()
+        );
+    }
+
+    /// 回归 PR-C：enabled=false 时必须返回"已禁用"。
+    ///
+    /// 这正是修复前 `/memory` 命令永远报"已禁用"的根因所在——
+    /// 现在只有显式禁用才会触发，本测试锁定该行为不被回退。
+    #[tokio::test]
+    async fn test_open_memory_store_disabled_returns_disabled_message() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: false,
+            ..MemoryConfig::default()
+        };
+
+        // Act
+        let result = open_memory_store("/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert —— 用 match 避免 MemoryStore: Debug 约束
+        match result {
+            Ok(_) => panic!("disabled store must error, but got Ok"),
+            Err(err) => assert!(
+                err.contains("已禁用"),
+                "disabled path should report disabled, got: {err}"
+            ),
+        }
+    }
+
+    // ── execute_memory ────────────────────────────────────────────────
+
+    /// 回归 PR-C：通过 `execute_memory` 端到端验证禁用路径。
+    ///
+    /// `execute_memory` 会把 `open_memory_store` 的 `Err` 包裹为
+    /// `"Failed to open memory store: ..."` 并标记 `is_error = true`。
+    #[tokio::test]
+    async fn test_execute_memory_disabled_returns_disabled_message() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: false,
+            ..MemoryConfig::default()
+        };
+
+        // Act —— /memory 无参数（list 分支）
+        let (text, is_error) = execute_memory("", "/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert
+        assert!(is_error, "disabled memory should be an error");
+        assert!(
+            text.contains("已禁用"),
+            "should surface disabled message, got: {text}"
+        );
+    }
+
+    /// 回归 PR-C：`execute_memory` 在 enabled=true 时绝不返回"已禁用"。
+    ///
+    /// 使用不存在的 cwd 触发 `list` 空结果路径，验证文本不含禁用字样。
+    #[tokio::test]
+    async fn test_execute_memory_enabled_does_not_return_disabled() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: true,
+            max_entries: 100,
+            similarity_threshold: 0.7,
+            ..MemoryConfig::default()
+        };
+
+        // Act —— /memory 无参数（list 分支）
+        let (text, is_error) = execute_memory("", "/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert —— 非错误，且不含禁用字样
+        assert!(
+            !is_error,
+            "enabled memory list should not be an error, got: {text}"
+        );
+        assert!(
+            !text.contains("已禁用"),
+            "enabled path must never surface disabled message, got: {text}"
+        );
+    }
 }
