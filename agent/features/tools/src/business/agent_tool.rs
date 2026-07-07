@@ -1,4 +1,5 @@
 use crate::api::{ToolExecutionContext, TypedTool, TypedToolResult};
+use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::agent::{AgentInput, AgentResult};
@@ -191,6 +192,14 @@ Instructions:- Complete the task described in the user message
         } else {
             final_output.clone()
         };
+        log::debug!(
+            target: LOG_TARGET,
+            "agent final output: task_id={:?}, output_bytes={}, text_bytes={}, output_preview={:?}",
+            task_id,
+            final_output.len(),
+            text.len(),
+            truncate_debug_preview(&final_output, 500)
+        );
         TypedToolResult::success(
             text,
             AgentResult {
@@ -331,6 +340,16 @@ fn is_agent_failure(result: &str) -> bool {
         || result.contains("[Sub-agent timed out")
         || result.contains("Sub-agent error:")
         || result.contains("[Sub-agent reached max turns")
+}
+
+fn truncate_debug_preview(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let preview: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{preview}…")
+    } else {
+        preview
+    }
 }
 
 #[cfg(test)]

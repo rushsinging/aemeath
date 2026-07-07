@@ -1342,6 +1342,66 @@ fn test_timeline_mirrors_blocks_no_agent_progress() {
     );
 }
 
+#[test]
+fn test_bash_streaming_preview_tails_complete_lines() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-bash-stream");
+    let turn_id = super::ids::ChatTurnId::new("turn-bash-stream");
+    let tool_id = super::ids::ToolCallId::new("tool-bash-stream");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+    });
+
+    model.apply(RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        message: "a\nb\nc\nd\ne\nf".to_string(),
+    });
+
+    let activities = tool_call(&model, &chat_id, &turn_id, &tool_id)
+        .map(|call| call.activities.clone())
+        .unwrap_or_default();
+    assert_eq!(activities, vec!["b", "c", "d", "e", "f"]);
+}
+
+#[test]
+fn test_agent_progress_preview_limits_activity_lines() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-agent-stream");
+    let turn_id = super::ids::ChatTurnId::new("turn-agent-stream");
+    let tool_id = super::ids::ToolCallId::new("tool-agent-stream");
+
+    model.ensure_runtime_turn(chat_id.clone(), turn_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "Agent".to_string(),
+        index: 0,
+    });
+
+    model.apply(RecordAgentProgress {
+        chat_id: chat_id.clone(),
+        turn_id: turn_id.clone(),
+        tool_id: tool_id.clone(),
+        message: "one\ntwo\nthree\nfour\nfive\nsix".to_string(),
+    });
+
+    let activities = tool_call(&model, &chat_id, &turn_id, &tool_id)
+        .map(|call| call.activities.clone())
+        .unwrap_or_default();
+    assert_eq!(activities, vec!["one", "two", "three", "four", "five"]);
+}
+
 // --- A4.3 基线测试：位置查询改读 timeline ---
 
 /// A4.3 TDD 基线：insert_tool_call_block_before_active_text 用 timeline 去重

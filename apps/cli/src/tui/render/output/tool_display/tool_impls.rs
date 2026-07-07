@@ -296,11 +296,18 @@ impl ToolDisplay for WriteDisplay {
             // regex 回退：旧 ToolResult 仅 message 含 "Wrote N bytes to ..."
             .or_else(|| result_payload.and_then(|p| parse_bytes_from_message(&p.output)));
 
-        // 计算入参中的字节数（回退值）
+        // 计算入参中的字节数（回退值）；streaming 阶段优先使用 TUI
+        // 参数预览中派生的 content_bytes，避免 content 被截断后 header 失真。
         let input_bytes = input
-            .get("content")
-            .and_then(|v| v.as_str())
-            .map(|s| s.len())
+            .get("content_bytes")
+            .and_then(|v| v.as_u64())
+            .map(|bytes| bytes as usize)
+            .or_else(|| {
+                input
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+            })
             .unwrap_or(0);
 
         let bytes = actual_bytes.unwrap_or(input_bytes);
