@@ -143,7 +143,7 @@ impl LlmClient {
             api_key,
             base_url: None,
             model: None,
-            max_tokens: 200000,
+            max_tokens: 8192,
             reasoning: false,
             reasoning_config: None,
         })
