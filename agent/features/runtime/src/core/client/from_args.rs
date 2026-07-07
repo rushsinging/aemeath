@@ -221,7 +221,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         current_messages: Arc::new(Mutex::new(Vec::new())),
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
-        skip_first_pending_turn: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         workspace,
         change_tx,
         change_rx,
