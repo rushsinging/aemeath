@@ -39,9 +39,13 @@ pub(crate) async fn build_llm_client_for_switch(
     let base_url = resolve_base_url(None, &resolved_model);
     let model_id = resolved_model.model.id.clone();
 
-    let runtime_settings =
-        resolve_model_runtime_settings(None, &resolved_model.model, Some(&config), true)
-            .map_err(|e| e.to_string())?;
+    let runtime_settings = resolve_model_runtime_settings(
+        None,
+        &resolved_model.model,
+        Some(config.model.max_tokens),
+        true,
+    )
+    .map_err(|e| e.to_string())?;
 
     let new_client = build_llm_client(
         driver,
