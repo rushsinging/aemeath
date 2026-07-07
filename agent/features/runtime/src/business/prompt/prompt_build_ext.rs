@@ -3,23 +3,23 @@
 use crate::utils::bootstrap;
 use hook::api::HookRunner;
 use prompt::api::skill::Skill;
-use share::config::Config;
+use share::config::domain::snapshot::ConfigSnapshot;
 use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header, skills_header};
 
 pub async fn build_static_prompt(
     cwd: &std::path::Path,
     model: &str,
     reasoning: bool,
-    config_file: Option<&Config>,
+    config_file: Option<&ConfigSnapshot>,
     hook_runner: &HookRunner,
     prompt_parts: crate::business::prompt::build::SystemPromptParts,
     skills: &tokio::sync::Mutex<std::collections::HashMap<String, Skill>>,
 ) -> String {
     let skills_guard = skills.lock().await;
     let guidance_config = config_file
-        .map(|c| c.models.guidance.clone())
+        .map(|snap| snap.models().guidance.clone())
         .unwrap_or_default();
-    let language = config_file.map(|c| c.language.as_str()).unwrap_or("en");
+    let language = config_file.map(|snap| snap.language()).unwrap_or("en");
     let instructions_hook = bootstrap::InstructionsLoadedHookRunner {
         hook_runner,
         workspace_root: cwd,
@@ -69,15 +69,15 @@ fn append_skills(
     prompt.push_str(&format!("{}{}", header, skill_list.join("\n")));
 }
 
-fn append_agent_roles(prompt: &mut String, config_file: Option<&Config>, lang: &str) {
-    let Some(cfg) = config_file else {
+fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>, lang: &str) {
+    let Some(snap) = config_file else {
         return;
     };
-    if cfg.agents.roles.is_empty() {
+    if snap.agents().roles.is_empty() {
         return;
     }
-    let role_lines: Vec<String> = cfg
-        .agents
+    let role_lines: Vec<String> = snap
+        .agents()
         .roles
         .iter()
         .map(|(name, role)| {

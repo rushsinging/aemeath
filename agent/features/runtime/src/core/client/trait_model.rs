@@ -2,6 +2,7 @@ use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::core::config_app_service::ConfigAppService;
+use crate::core::config_port::ConfigReader;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -19,10 +20,11 @@ pub(crate) async fn build_llm_client_for_switch(
     };
     use provider::api::ProviderDriverKind;
 
-    let config = ConfigAppService::new(Some(cwd)).load().await?;
+    let svc = ConfigAppService::new(Some(cwd));
+    let _config = svc.load().await?;
+    let snapshot = svc.snapshot().await;
 
-    let resolved_model = config
-        .models
+    let resolved_model = snapshot
         .resolve_model_selection(selection)
         .map_err(|e| e.to_string())?;
 
@@ -42,7 +44,7 @@ pub(crate) async fn build_llm_client_for_switch(
     let runtime_settings = resolve_model_runtime_settings(
         None,
         &resolved_model.model,
-        Some(config.model.max_tokens),
+        Some(snapshot.max_tokens()),
         true,
     )
     .map_err(|e| e.to_string())?;
@@ -74,12 +76,10 @@ pub(crate) async fn build_llm_client_for_switch(
 }
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
-    let config = ConfigAppService::new(Some(&me.inner.cwd))
-        .load()
-        .await
-        .map_err(SdkError::Init)?;
-    Ok(config
-        .models
+    let svc = ConfigAppService::new(Some(&me.inner.cwd));
+    let _ = svc.load().await.map_err(SdkError::Init)?;
+    let snapshot = svc.snapshot().await;
+    Ok(snapshot
         .list_models()
         .into_iter()
         .map(|(provider, model)| ModelSummary {

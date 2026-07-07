@@ -104,6 +104,10 @@ impl ConfigSnapshot {
         self.0.ui.markdown
     }
 
+    pub fn tui(&self) -> bool {
+        self.0.ui.tui
+    }
+
     // ── Memory ───────────────────────────────────────────────
 
     pub fn memory_enabled(&self) -> bool {
