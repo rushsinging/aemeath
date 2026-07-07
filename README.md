@@ -32,3 +32,7 @@ aemeath/
 - 设计真相源：[`docs/design/README.md`](docs/design/README.md)
 - Bug / Feature 追踪：[GitHub Issues](https://github.com/rushsinging/aemeath/issues)
 - Agent 工作约束：[`AGENTS.md`](AGENTS.md)
+
+## License
+
+本项目使用 [MIT License](LICENSE) 开源。
