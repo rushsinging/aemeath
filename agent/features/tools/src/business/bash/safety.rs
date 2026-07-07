@@ -191,6 +191,12 @@ pub fn check_shell_injection(command: &str) -> Option<&'static str> {
 /// Aligned with Claude Code TS bashSecurity.ts patterns.
 pub fn check_command_safety(command: &str) -> Option<&'static str> {
     let cmd = command.trim();
+    if is_dedicated_file_read_command(cmd) {
+        return Some(
+            "use dedicated file tools (Read, Glob, or Grep) instead of Bash to read file contents",
+        );
+    }
+
     let lower = cmd.to_lowercase();
 
     // === File system destruction ===
@@ -291,6 +297,21 @@ pub fn check_command_safety(command: &str) -> Option<&'static str> {
     None
 }
 
+const DEDICATED_FILE_READ_COMMANDS: &[&str] = &["cat", "head", "tail"];
+
+fn is_dedicated_file_read_command(command: &str) -> bool {
+    let first = command.split('|').next().unwrap_or(command).trim();
+    let first = first.split("&&").next().unwrap_or(first).trim();
+    let first = first.split(';').next().unwrap_or(first).trim();
+    let Some(cmd) = first.split_whitespace().next() else {
+        return false;
+    };
+    if DEDICATED_FILE_READ_COMMANDS.contains(&cmd) {
+        return true;
+    }
+    cmd == "sed" && first.split_whitespace().any(|part| part == "-n")
+}
+
 /// List of commands considered read-only / safe to auto-approve.
 /// Aligned with Claude Code TS READONLY_COMMANDS.
 ///
@@ -378,11 +399,6 @@ pub fn is_readonly_command(command: &str) -> bool {
         return false;
     }
 
-    // Reject command substitution in arguments (but check_shell_injection handles chains)
-    // This allows safe commands like `echo $(whoami)` to pass through
-    // as long as they don't contain other dangerous patterns
-
-    // Check first command in pipe chain (pipes are still blocked)
     let first = cmd.split('|').next().unwrap_or(cmd).trim();
     for pattern in READONLY_COMMANDS {
         if first.starts_with(pattern) {
@@ -390,4 +406,29 @@ pub fn is_readonly_command(command: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_bash_file_read_commands_that_should_use_dedicated_tools() {
+        for command in [
+            "cat agent/features/runtime/src/lib.rs",
+            "head agent/features/runtime/src/lib.rs",
+            "tail -n 20 agent/features/runtime/src/lib.rs",
+            "sed -n '1,20p' agent/features/runtime/src/lib.rs",
+        ] {
+            let reason = check_command_safety(command)
+                .expect("file read command should be blocked by bash safety");
+            assert!(reason.contains("dedicated file tools"));
+        }
+    }
+
+    #[test]
+    fn allows_non_file_read_safe_commands() {
+        assert_eq!(check_command_safety("cargo test -p runtime"), None);
+        assert_eq!(check_command_safety("git status --short"), None);
+    }
 }
