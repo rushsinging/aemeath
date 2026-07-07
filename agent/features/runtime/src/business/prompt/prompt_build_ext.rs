@@ -98,3 +98,131 @@ fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>,
     let header = agent_roles_header(lang);
     prompt.push_str(&format!("{}{}{}", header, role_lines.join("\n"), footer));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use share::config::AgentRoleConfig;
+    use share::config::Config;
+    use std::collections::HashMap;
+
+    /// 构造一个 ConfigSnapshot，其中 `agents.roles` 与 `language` 按参数设置。
+    /// 其余字段使用 `Config::default()`，不触碰文件系统。
+    fn make_snapshot(roles: HashMap<String, AgentRoleConfig>, language: &str) -> ConfigSnapshot {
+        let mut config = Config::default();
+        config.agents.roles = roles;
+        config.language = language.to_string();
+        ConfigSnapshot::new(config)
+    }
+
+    // ── append_agent_roles ────────────────────────────────────
+
+    /// ConfigSnapshot 含 2 个 agent roles（coder + reviewer，带 description 与 model），
+    /// 调 append_agent_roles 后 prompt 应包含 role 名 / description / model。
+    #[test]
+    fn test_append_agent_roles_with_snapshot() {
+        // Arrange
+        let mut roles = HashMap::new();
+        roles.insert(
+            "coder".to_string(),
+            AgentRoleConfig {
+                model: "deepseek/deepseek-chat".to_string(),
+                description: "Writes and edits code".to_string(),
+                ..Default::default()
+            },
+        );
+        roles.insert(
+            "reviewer".to_string(),
+            AgentRoleConfig {
+                model: "anthropic/claude-sonnet-4".to_string(),
+                description: "Reviews code for quality".to_string(),
+                ..Default::default()
+            },
+        );
+        let snap = make_snapshot(roles, "en");
+        let mut prompt = String::new();
+
+        // Act
+        append_agent_roles(&mut prompt, Some(&snap), "en");
+
+        // Assert — role 名、description、model 都应出现在 prompt 中
+        assert!(prompt.contains("`coder`"), "应包含 role 名 coder");
+        assert!(prompt.contains("`reviewer`"), "应包含 role 名 reviewer");
+        assert!(
+            prompt.contains("Writes and edits code"),
+            "应包含 coder 的 description"
+        );
+        assert!(
+            prompt.contains("Reviews code for quality"),
+            "应包含 reviewer 的 description"
+        );
+        assert!(
+            prompt.contains("deepseek/deepseek-chat"),
+            "应包含 coder 的 model"
+        );
+        assert!(
+            prompt.contains("anthropic/claude-sonnet-4"),
+            "应包含 reviewer 的 model"
+        );
+    }
+
+    /// ConfigSnapshot 含 agents.roles 空 HashMap，调 append_agent_roles 后
+    /// prompt 不应包含任何 role 段（保持为空）。
+    #[test]
+    fn test_append_agent_roles_empty_snapshot() {
+        // Arrange
+        let snap = make_snapshot(HashMap::new(), "en");
+        let mut prompt = String::from("base");
+
+        // Act
+        append_agent_roles(&mut prompt, Some(&snap), "en");
+
+        // Assert — 空 roles 时函数应提前返回，prompt 不追加任何内容
+        assert_eq!(prompt, "base", "空 roles 时 prompt 不应追加任何 role 段");
+    }
+
+    /// config_file 为 None 时，append_agent_roles 应直接返回，不追加任何内容。
+    #[test]
+    fn test_append_agent_roles_none_snapshot() {
+        // Arrange
+        let mut prompt = String::from("base");
+
+        // Act
+        append_agent_roles(&mut prompt, None, "en");
+
+        // Assert
+        assert_eq!(
+            prompt, "base",
+            "config_file 为 None 时 prompt 不应追加任何内容"
+        );
+    }
+
+    /// ConfigSnapshot.language="zh" 且 lang 参数传 "zh" 时，
+    /// append_agent_roles 应使用中文 header/footer，prompt 中应出现中文 description。
+    /// 此测试验证 language 被正确传递给 i18n header/footer（build_static_prompt
+    /// 从 snap.language() 读取后传入本函数的 lang 参数）。
+    #[test]
+    fn test_append_agent_roles_with_snapshot_language_zh() {
+        // Arrange — language=zh，验证 lang 参数正确驱动 i18n 文案
+        let mut roles = HashMap::new();
+        roles.insert(
+            "coder".to_string(),
+            AgentRoleConfig {
+                description: "编写代码".to_string(),
+                ..Default::default()
+            },
+        );
+        let snap = make_snapshot(roles, "zh");
+        let mut prompt = String::new();
+
+        // Act
+        append_agent_roles(&mut prompt, Some(&snap), "zh");
+
+        // Assert — language=zh 时 role 名与中文 description 应出现
+        assert!(prompt.contains("`coder`"), "应包含 role 名 coder");
+        assert!(
+            prompt.contains("编写代码"),
+            "应包含中文 description（language=zh 已正确传递）"
+        );
+    }
+}

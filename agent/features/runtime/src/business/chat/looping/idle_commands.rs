@@ -469,3 +469,114 @@ async fn open_memory_store(
     )
     .map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use share::config::MemoryConfig;
+
+    // ── open_memory_store ──────────────────────────────────────────────
+
+    /// 回归 PR-C：enabled=true 时不应返回"已禁用"错误。
+    ///
+    /// 修复前 `open_memory_store` 内部用 `Config::default()`，
+    /// 其 `memory.enabled` 恒为 false（注：此处为该函数旧实现的缺陷，
+    /// 现已改为显式接收 `&MemoryConfig`）。本测试锁定注入路径生效。
+    #[tokio::test]
+    async fn test_open_memory_store_enabled_returns_store() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: true,
+            max_entries: 100,
+            similarity_threshold: 0.7,
+            ..MemoryConfig::default()
+        };
+
+        // Act
+        let result = open_memory_store("/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert —— 成功构造 store；"已禁用"只会出现在 Err 分支，Ok 即证明未被禁用
+        assert!(
+            result.is_ok(),
+            "enabled store should open, got err: {:?}",
+            result.err()
+        );
+    }
+
+    /// 回归 PR-C：enabled=false 时必须返回"已禁用"。
+    ///
+    /// 这正是修复前 `/memory` 命令永远报"已禁用"的根因所在——
+    /// 现在只有显式禁用才会触发，本测试锁定该行为不被回退。
+    #[tokio::test]
+    async fn test_open_memory_store_disabled_returns_disabled_message() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: false,
+            ..MemoryConfig::default()
+        };
+
+        // Act
+        let result = open_memory_store("/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert —— 用 match 避免 MemoryStore: Debug 约束
+        match result {
+            Ok(_) => panic!("disabled store must error, but got Ok"),
+            Err(err) => assert!(
+                err.contains("已禁用"),
+                "disabled path should report disabled, got: {err}"
+            ),
+        }
+    }
+
+    // ── execute_memory ────────────────────────────────────────────────
+
+    /// 回归 PR-C：通过 `execute_memory` 端到端验证禁用路径。
+    ///
+    /// `execute_memory` 会把 `open_memory_store` 的 `Err` 包裹为
+    /// `"Failed to open memory store: ..."` 并标记 `is_error = true`。
+    #[tokio::test]
+    async fn test_execute_memory_disabled_returns_disabled_message() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: false,
+            ..MemoryConfig::default()
+        };
+
+        // Act —— /memory 无参数（list 分支）
+        let (text, is_error) = execute_memory("", "/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert
+        assert!(is_error, "disabled memory should be an error");
+        assert!(
+            text.contains("已禁用"),
+            "should surface disabled message, got: {text}"
+        );
+    }
+
+    /// 回归 PR-C：`execute_memory` 在 enabled=true 时绝不返回"已禁用"。
+    ///
+    /// 使用不存在的 cwd 触发 `list` 空结果路径，验证文本不含禁用字样。
+    #[tokio::test]
+    async fn test_execute_memory_enabled_does_not_return_disabled() {
+        // Arrange
+        let mem = MemoryConfig {
+            enabled: true,
+            max_entries: 100,
+            similarity_threshold: 0.7,
+            ..MemoryConfig::default()
+        };
+
+        // Act —— /memory 无参数（list 分支）
+        let (text, is_error) = execute_memory("", "/tmp/aemeath-test-nonexistent", &mem).await;
+
+        // Assert —— 非错误，且不含禁用字样
+        assert!(
+            !is_error,
+            "enabled memory list should not be an error, got: {text}"
+        );
+        assert!(
+            !text.contains("已禁用"),
+            "enabled path must never surface disabled message, got: {text}"
+        );
+    }
+}
