@@ -1,5 +1,7 @@
 use super::*;
 use crate::tui::effect::effect::Effect;
+use crate::tui::model::input::completion::SuggestionType;
+use crate::tui::model::input::completion_item::CompletionItem;
 
 /// Task 5 (A3) — busy + slash 提交：产 ControlCommand 事件，不建占位。
 #[test]
@@ -216,6 +218,153 @@ fn test_up_arrow_idle_or_no_queued_moves_cursor() {
         !has_withdraw2,
         "busy 但无 queued 时 Up 键不应发 WithdrawAll"
     );
+}
+
+#[test]
+fn test_busy_slash_triggers_completion() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &spawn_refs);
+
+    assert_eq!(app.model.input.document.buffer, "/");
+    assert!(app.model.input.completion.visible);
+    assert_eq!(app.model.input.completion.query, "/");
+    assert!(app
+        .model
+        .input
+        .completion
+        .items
+        .iter()
+        .any(|item| item.label == "/help"));
+}
+
+#[test]
+fn test_busy_at_triggers_mention_completion_state() {
+    let cwd = std::env::temp_dir().join(format!("aemeath-key-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cwd);
+    std::fs::create_dir_all(&cwd).expect("create temp cwd");
+    std::fs::write(cwd.join("src.rs"), "").expect("write mention candidate");
+    let mut app = App::new(
+        "test-session".to_string(),
+        cwd.clone(),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Char('@'), KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &spawn_refs);
+
+    assert_eq!(app.model.input.document.buffer, "@");
+    assert!(app.model.input.completion.visible);
+    assert_eq!(app.model.input.completion.query, "@");
+    assert!(app
+        .model
+        .input
+        .completion
+        .items
+        .iter()
+        .any(|item| item.label == "src.rs"));
+    let _ = std::fs::remove_dir_all(cwd);
+}
+
+#[test]
+fn test_busy_backspace_refreshes_completion() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    app.model
+        .input
+        .apply(InputIntent::ReplaceText("/he".to_string()));
+    app.handle_input_intent(InputIntent::SetCompletions {
+        query: "/he".to_string(),
+        items: vec![CompletionItem::new("/help", "/help")],
+    });
+
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &spawn_refs);
+
+    assert_eq!(app.model.input.document.buffer, "/h");
+    assert!(app.model.input.completion.visible);
+    assert_eq!(app.model.input.completion.query, "/h");
+    assert!(app
+        .model
+        .input
+        .completion
+        .items
+        .iter()
+        .any(|item| item.label == "/help"));
+}
+
+#[test]
+fn test_busy_esc_closes_completion_before_interrupting_runtime() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    app.handle_input_intent(InputIntent::SetCompletions {
+        query: "/".to_string(),
+        items: vec![CompletionItem::new("/help", "/help")],
+    });
+
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &spawn_refs);
+
+    assert!(!app.model.input.completion.visible);
+    assert!(app.chat.is_processing);
+    assert!(app
+        .model
+        .conversation
+        .runtime
+        .transient_notice_expiry
+        .is_none());
+}
+
+#[test]
+fn test_busy_tab_applies_visible_completion() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    app.model
+        .input
+        .apply(InputIntent::ReplaceText("/he".to_string()));
+    app.handle_input_intent(InputIntent::SetCompletions {
+        query: "/he".to_string(),
+        items: vec![CompletionItem::with_type(
+            "/help",
+            "/help",
+            SuggestionType::Command,
+        )],
+    });
+
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let key = crossterm::event::KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
+
+    let _ = app.update_key(key, &spawn_refs);
+
+    assert_eq!(app.model.input.document.buffer, "/help");
+    assert!(!app.model.input.completion.visible);
 }
 
 #[test]
