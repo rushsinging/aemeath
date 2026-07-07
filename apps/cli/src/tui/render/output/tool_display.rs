@@ -4,6 +4,7 @@ mod tool_impls;
 
 use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use crate::tui::view_model::tool_display::{format_tool_header_view, ToolHeaderView};
 use crate::tui::view_model::tool_name::tool_display_name;
 use common::truncate_json;
 use ratatui::style::Style;
@@ -174,6 +175,44 @@ pub fn result_render_kind(name: &str) -> ResultRender {
     }
 }
 
+fn uses_tool_header_view(name: &str) -> bool {
+    matches!(
+        name,
+        "Bash"
+            | "Read"
+            | "Write"
+            | "Edit"
+            | "Glob"
+            | "Grep"
+            | "Agent"
+            | "EnterWorktree"
+            | "ExitWorktree"
+            | "WebFetch"
+            | "AskUserQuestion"
+    )
+}
+
+/// Format a plain ToolHeaderView as styled `Line`。
+fn render_header_line(view: &ToolHeaderView) -> Line<'static> {
+    let name = view
+        .title
+        .split_once(' ')
+        .map(|(name, _)| name)
+        .unwrap_or(view.title.as_str())
+        .to_string();
+    if let Some(rest) = view.title.strip_prefix(&name) {
+        Line::from(vec![
+            Span::styled(name, Style::default().fg(theme::ACCENT_BRIGHT)),
+            Span::raw(rest.to_string()),
+        ])
+    } else {
+        Line::from(Span::styled(
+            view.title.clone(),
+            Style::default().fg(theme::ACCENT_BRIGHT),
+        ))
+    }
+}
+
 /// Format a tool call for human-friendly display.
 /// 返回 `(Line, details)`：Line 已含样式，details 为纯文本行。
 ///
@@ -191,6 +230,16 @@ pub fn format_tool_call(
         serde_json::from_str(raw_json).unwrap_or(serde_json::Value::Null);
 
     if let Some(display) = lookup_display(name) {
+        if uses_tool_header_view(name) {
+            let view = format_tool_header_view(name, &parsed, result_payload, workspace_root);
+            let header = render_header_line(&view);
+            let details = match display.render_policy().details {
+                DetailsPolicy::Expanded => view.details,
+                DetailsPolicy::Hidden => vec![],
+            };
+            return (header, details);
+        }
+
         let header =
             display.format_header_line_with_result(&parsed, result_payload, workspace_root);
         let details = match display.render_policy().details {
