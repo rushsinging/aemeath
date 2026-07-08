@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::api::ProviderDriverKind;
 use crate::LOG_TARGET;
+use share::config::models::{RuntimeModelRequest, RuntimeModelResolver};
 use share::config::ModelsConfig;
 
 use crate::core::client::{LlmClient, OpenAIProviderConfig};
@@ -88,34 +89,42 @@ impl LlmClientPool {
             )
         })?;
 
-        // Look up in ModelsConfig
-        let (provider_config, model_entry) = self
-            .models_config
-            .find_model(spec)
-            .map(|(_pn, pc, me)| (pc, me))
-            .ok_or_else(|| {
-                let available: Vec<String> = self
-                    .models_config
-                    .providers
-                    .get(provider_name)
-                    .map(|p| {
-                        p.models
-                            .iter()
-                            .map(|m| format!("{} (id: {})", m.name, m.id))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                format!(
-                    "model '{}' not found under provider '{}'. Available: {}",
-                    model_query,
-                    provider_name,
-                    if available.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        available.join(", ")
-                    }
-                )
-            })?;
+        // Resolve runtime model in config domain.
+        let runtime_model = RuntimeModelResolver::resolve(
+            self.models_config.as_ref(),
+            RuntimeModelRequest {
+                model_override: Some(spec),
+                cli_max_tokens: None,
+                config_max_tokens: None,
+            },
+        )
+        .map_err(|e| {
+            let available: Vec<String> = self
+                .models_config
+                .providers
+                .get(provider_name)
+                .map(|p| {
+                    p.models
+                        .iter()
+                        .map(|m| format!("{} (id: {})", m.name, m.id))
+                        .collect()
+                })
+                .unwrap_or_default();
+            format!(
+                "model '{}' not found under provider '{}'. Available: {} ({})",
+                model_query,
+                provider_name,
+                if available.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    available.join(", ")
+                },
+                e
+            )
+        })?;
+        let resolved_model = runtime_model.resolved_model();
+        let provider_config = &resolved_model.source_config;
+        let model_entry = &resolved_model.model;
 
         // Resolve ProviderDriverKind from config (the `driver` field)
         let driver = ProviderDriverKind::parse(&provider_config.driver)
@@ -147,14 +156,7 @@ impl LlmClientPool {
             Some(provider_config.base_url.clone())
         };
 
-        let max_tokens = model_entry.max_tokens;
-        if max_tokens == 0 {
-            log::warn!(target: LOG_TARGET,
-                "[LlmClientPool] max_tokens is 0 for '{}' — using 8192 default",
-                spec
-            );
-        }
-        let max_tokens = if max_tokens > 0 { max_tokens } else { 8192 };
+        let max_tokens = runtime_model.max_tokens();
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
@@ -163,7 +165,7 @@ impl LlmClientPool {
                 driver,
                 api_key,
                 base_url,
-                model: model_entry.id,
+                model: model_entry.id.clone(),
                 max_tokens,
                 reasoning,
                 reasoning_config: None,
@@ -175,5 +177,76 @@ impl LlmClientPool {
     /// Get the default client.
     pub fn default_client(&self) -> Arc<LlmClient> {
         self.default_client.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
+
+    fn models_config(max_tokens: u32) -> ModelsConfig {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "zhipu".to_string(),
+            ProviderModelsConfig {
+                base_url: "https://zhipu.example.com".to_string(),
+                api_key: "zhipu-key".to_string(),
+                driver: "zhipu".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "glm-5.2".to_string(),
+                    name: "GLM 5.2".to_string(),
+                    input: Vec::new(),
+                    context_window: 128_000,
+                    max_tokens,
+                    reasoning: None,
+                }],
+            },
+        );
+        ModelsConfig {
+            mode: String::new(),
+            default: "zhipu/glm-5.2".to_string(),
+            providers,
+            guidance: HashMap::new(),
+        }
+    }
+
+    fn default_client() -> Arc<LlmClient> {
+        Arc::new(LlmClient::from_config(
+            crate::core::client::LlmConfigOptions {
+                driver: ProviderDriverKind::Zhipu,
+                api_key: "default-key".to_string(),
+                base_url: Some("https://default.example.com".to_string()),
+                model: "default-model".to_string(),
+                max_tokens: 4_096,
+                reasoning: false,
+                reasoning_config: None,
+                openai_config: Some(OpenAIProviderConfig::from_driver(
+                    ProviderDriverKind::Zhipu,
+                    "zhipu",
+                )),
+            },
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_llm_client_pool_uses_model_max_tokens() {
+        let pool = LlmClientPool::new(default_client(), Arc::new(models_config(16_000)));
+
+        let client = pool.get_client(Some("zhipu/glm-5.2")).await;
+
+        assert_eq!(client.max_tokens(), 16_000);
+    }
+
+    #[tokio::test]
+    async fn test_llm_client_pool_model_zero_uses_default_max_tokens() {
+        let pool = LlmClientPool::new(default_client(), Arc::new(models_config(0)));
+
+        let client = pool.get_client(Some("zhipu/glm-5.2")).await;
+
+        assert_eq!(
+            client.max_tokens(),
+            share::config::models::DEFAULT_MAX_TOKENS
+        );
     }
 }
