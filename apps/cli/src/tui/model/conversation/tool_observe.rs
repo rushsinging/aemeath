@@ -3,7 +3,7 @@ use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
 use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
-use super::tool_call::{AgentMeta, ToolCall, ToolCallStatus};
+use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
 
 const STREAM_CAP: usize = 4 * 1024;
 
@@ -87,11 +87,15 @@ impl ConversationModel {
         let mut bound_id = id.clone();
         let mut args_preview = arguments.clone().unwrap_or_default();
         let mut bound = false;
+        let mut running = false;
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             for candidate_id in candidate_ids.into_iter().flatten() {
-                if let Some(preview) = turn.update_tool(&candidate_id, arguments.clone(), status) {
+                if let Some((preview, changes)) =
+                    turn.update_tool(&candidate_id, arguments.clone(), status)
+                {
                     args_preview = preview;
                     bound_id = ToolCallId::from_legacy_or_new(&candidate_id);
+                    running = changes.contains(&ToolCallChange::Running);
 
                     bound = true;
                     break;
@@ -101,7 +105,9 @@ impl ConversationModel {
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
-                let _ = turn.update_tool(id.as_ref(), arguments.clone(), status);
+                running = turn
+                    .update_tool(id.as_ref(), arguments.clone(), status)
+                    .is_some_and(|(_, changes)| changes.contains(&ToolCallChange::Running));
                 bound_id = id.clone();
             }
         }
@@ -137,6 +143,7 @@ impl ConversationModel {
             ConversationChange::ToolCallBound {
                 id: bound_id.to_string(),
                 name,
+                running,
             },
             ConversationChange::OutputDirty,
         ]

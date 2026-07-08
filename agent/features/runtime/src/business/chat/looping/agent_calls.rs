@@ -1,7 +1,11 @@
 use crate::business::agent::{ToolCall, ToolExecution};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::tools::{run_post_tool_hooks, send_tool_result};
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
+use crate::business::chat::looping::tools::{
+    run_post_tool_hooks, send_tool_call_status, send_tool_result,
+};
+use crate::business::chat::looping::{
+    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use share::tool::ToolOutcome;
@@ -104,9 +108,13 @@ where
             .as_deref()
             .unwrap_or("Blocked by PreToolUse hook");
         let result = ToolExecution::new(&call, ToolOutcome::error(error_detail));
+        send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Running).await;
         send_tool_result(&sink, context, &result).await;
         return vec![result];
     }
+
+    send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Ready).await;
+    send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Running).await;
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
     ag_ctx.progress_tx = Some(prog_tx);
