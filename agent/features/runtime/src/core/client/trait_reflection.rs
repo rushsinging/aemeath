@@ -308,7 +308,9 @@ mod tests {
             current_cancel: Arc::new(std::sync::Mutex::new(
                 tokio_util::sync::CancellationToken::new(),
             )),
-            current_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
+            current_chain: Arc::new(std::sync::Mutex::new(
+                crate::business::session::ChatChain::default(),
+            )),
             frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_summary: Arc::new(std::sync::Mutex::new(None)),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),

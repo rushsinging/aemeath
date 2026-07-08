@@ -4,6 +4,8 @@
 use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
 
+use crate::business::session::ChatChain;
+
 fn test_save_session() -> Arc<
     dyn Fn()
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
@@ -480,7 +482,8 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stop-hook-blocked".to_string(),
@@ -594,7 +597,8 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stop-hook-metadata".to_string(),
@@ -710,7 +714,8 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace,
         session_id: "test-worktree-stop-hook-env".to_string(),
@@ -803,7 +808,8 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-session".to_string(),
@@ -964,7 +970,8 @@ async fn test_continue_false_json_treated_as_block() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-continue-false".to_string(),
@@ -1084,7 +1091,8 @@ async fn test_stall_triggers_stop_hook_check() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stall-hook".to_string(),
@@ -1241,7 +1249,8 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-persistent-loop".to_string(),
@@ -1426,7 +1435,8 @@ async fn test_stall_detector_resets_across_user_turns() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stall-reset-across-turns".to_string(),
@@ -1692,7 +1702,8 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-control-command".to_string(),
@@ -1812,7 +1823,8 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-pending-save".to_string(),
@@ -1912,7 +1924,8 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-pending-list-reminders".to_string(),
@@ -1989,7 +2002,8 @@ async fn test_stop_hook_block_limit_stops_loop() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: vec![],
+        chain: ChatChain::from_flat_messages(vec![]),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-block-limit".to_string(),
@@ -2194,7 +2208,8 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-cancel-then-idle".to_string(),
@@ -2440,7 +2455,8 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(),
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-cancel-preserves-prior-turns".to_string(),
@@ -2687,7 +2703,8 @@ async fn test_chat_impl_idle_until_first_input_event() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(), // 空 messages：无待答回合，loop 必须先 idle-wait
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())), // 空 messages：无待答回合，loop 必须先 idle-wait
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-until-first-input".to_string(),
@@ -2809,7 +2826,8 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages: Vec::new(), // 空 seed：无待答回合，loop 必须先 idle-wait
+        chain: ChatChain::from_flat_messages(Vec::new()),
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())), // 空 seed：无待答回合，loop 必须先 idle-wait
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-no-turn-signal-before-first-input".to_string(),
@@ -2869,7 +2887,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
     let (input_tx, input_events) = ChannelInputEvents::new();
 
     // messages 模拟 resume 加载的历史：末条是 User（等待 assistant 回复）
-    let messages = vec![Message::user("unfinished question")];
+    let messages = ChatChain::from_flat_messages(vec![Message::user("unfinished question")]);
 
     // driver：先确认 loop 在 idle（无 LLM 调用），再投递新消息触发回合
     let driver_sink = sink.clone();
@@ -2902,7 +2920,8 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages, // 末条为 User，模拟 resume
+        chain: messages, // 末条为 User，模拟 resume
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-resume-skip-pending".to_string(),
@@ -2955,7 +2974,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
 
-    let messages = vec![Message::user("hello")];
+    let messages = ChatChain::from_flat_messages(vec![Message::user("hello")]);
 
     // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
     let driver_sink = sink.clone();
@@ -2975,7 +2994,8 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
-        messages,
+        chain: messages,
+        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-user-tail-idle".to_string(),
