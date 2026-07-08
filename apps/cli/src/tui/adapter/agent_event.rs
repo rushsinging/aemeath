@@ -7,6 +7,7 @@ use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::text::safe_str_slice_by_char;
+use crate::tui::view_model::tool_display::format_tool_header_view;
 use sdk::{AgentProgressEventView, AgentProgressKindView};
 use serde_json::{Map, Value};
 
@@ -643,6 +644,68 @@ mod tests {
     }
 
     #[test]
+    fn test_agent_tool_calls_use_tool_header_view() {
+        let event = AgentProgressEventView {
+            sequence: 1,
+            kind: AgentProgressKindView::ToolCalls {
+                calls: vec![sdk::AgentToolCallProgressView {
+                    id: sdk::ToolCallId::new("child-read-1"),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({"file_path":"src/lib.rs","offset": 10,"limit": 20}),
+                }],
+            },
+        };
+
+        let formatted = format_agent_progress(&event);
+        assert_eq!(formatted, "→ Read src/lib.rs 11:30");
+        assert!(!formatted.contains("file_path"));
+    }
+
+    #[test]
+    fn test_agent_tool_calls_format_multiple_tools_and_fallback() {
+        let event = AgentProgressEventView {
+            sequence: 2,
+            kind: AgentProgressKindView::ToolCalls {
+                calls: vec![
+                    sdk::AgentToolCallProgressView {
+                        id: sdk::ToolCallId::new("child-bash"),
+                        name: "Bash".to_string(),
+                        input: serde_json::json!({"command":"cargo test"}),
+                    },
+                    sdk::AgentToolCallProgressView {
+                        id: sdk::ToolCallId::new("child-write"),
+                        name: "Write".to_string(),
+                        input: serde_json::json!({"file_path":"out.rs","content_bytes": 42}),
+                    },
+                    sdk::AgentToolCallProgressView {
+                        id: sdk::ToolCallId::new("child-unknown"),
+                        name: "UnknownTool".to_string(),
+                        input: serde_json::json!({"key":"value"}),
+                    },
+                ],
+            },
+        };
+
+        let formatted = format_agent_progress(&event);
+        assert_eq!(
+            formatted,
+            "→ Run cargo test  cargo test
+→ Write out.rs 42 bytes
+→ UnknownTool  {\"key\":\"value\"}"
+        );
+    }
+
+    #[test]
+    fn test_write_arguments_delta_includes_realtime_content_bytes() {
+        let sanitized = sanitize_tool_arguments_delta(
+            "Write",
+            r#"{"file_path":"out.rs","content":"hello world"}"#,
+        );
+        let value: Value = serde_json::from_str(&sanitized).expect("valid sanitized json");
+        assert_eq!(value.get("content_bytes").and_then(Value::as_u64), Some(11));
+    }
+
+    #[test]
     fn test_sanitize_partial_json_truncates() {
         let partial = r#"{"file_path":"src/main.rs","old_string":"x"#;
         let sanitized = sanitize_tool_arguments_delta("Edit", partial);
@@ -656,14 +719,11 @@ mod tests {
 
 /// 把 AgentProgressEventView 格式化为人类可读消息，供 TUI activities 渲染。
 fn format_agent_tool_call_header(name: &str, input: &Value) -> String {
-    let input_preview = match input {
-        Value::String(s) => s.chars().take(80).collect::<String>(),
-        value => value.to_string().chars().take(80).collect::<String>(),
-    };
-    if input_preview.is_empty() {
-        name.to_string()
+    let view = format_tool_header_view(name, input, None, None);
+    if view.details.is_empty() {
+        view.title
     } else {
-        format!("{name}  {input_preview}")
+        format!("{}  {}", view.title, view.details.join("  "))
     }
 }
 
