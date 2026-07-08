@@ -436,6 +436,96 @@ mod tests {
     }
 
     #[test]
+    fn bash_header_includes_non_zero_exit() {
+        let input = json!({"command":"cargo test"});
+        let payload = ToolResultPayload::new(
+            String::new(),
+            json!({"stdout":"","stderr":"fail","exit_code":2,"signal":null}),
+            true,
+            0,
+        );
+        let view = format_tool_header_view("Bash", &input, Some(&payload), None);
+        assert_eq!(view.title, "Run cargo test (exit 2)");
+    }
+
+    #[test]
+    fn glob_and_grep_headers_include_result_counts() {
+        let glob_payload = ToolResultPayload::new(
+            String::new(),
+            json!({"files":["a.rs","b.rs"],"count":2}),
+            false,
+            0,
+        );
+        let glob = format_tool_header_view(
+            "Glob",
+            &json!({"pattern":"**/*.rs"}),
+            Some(&glob_payload),
+            None,
+        );
+        assert_eq!(glob.title, "Find **/*.rs (2 files)");
+
+        let grep_payload = ToolResultPayload::new(
+            String::new(),
+            json!({"matches":[],"total_matches":7,"shown":5,"query":"foo"}),
+            false,
+            0,
+        );
+        let grep = format_tool_header_view(
+            "Grep",
+            &json!({"pattern":"foo","path":"src"}),
+            Some(&grep_payload),
+            None,
+        );
+        assert_eq!(grep.title, "Search /foo/, path=src (7 matches)");
+    }
+
+    #[test]
+    fn edit_and_worktree_headers_include_result_payload() {
+        let edit_payload = ToolResultPayload::new(
+            String::new(),
+            json!({
+                "file_path":"src/lib.rs",
+                "replacements_made":3,
+                "dry_run":false,
+                "old":"a",
+                "new":"b",
+                "start_line":1
+            }),
+            false,
+            0,
+        );
+        let edit = format_tool_header_view(
+            "Edit",
+            &json!({"file_path":"src/lib.rs","old_string":"a","new_string":"b"}),
+            Some(&edit_payload),
+            None,
+        );
+        assert_eq!(edit.title, "Edit src/lib.rs (Replaced 3)");
+
+        let enter_payload = ToolResultPayload::new(
+            String::new(),
+            json!({
+                "branch":"fix/demo",
+                "path_base":"/repo/.worktrees/fix-demo",
+                "workspace_root":"/repo/.worktrees/fix-demo",
+                "guidance":""
+            }),
+            false,
+            0,
+        );
+        let enter = format_tool_header_view(
+            "EnterWorktree",
+            &json!({"branch":"fix/demo"}),
+            Some(&enter_payload),
+            None,
+        );
+        assert_eq!(
+            enter.title,
+            "Enter Worktree branch=fix/demo (/repo/.worktrees/fix-demo)"
+        );
+    }
+
+    #[test]
     fn unknown_tool_has_fallback_detail() {
         let view = format_tool_header_view("UnknownTool", &json!({"key":"value"}), None, None);
         assert_eq!(view.title, "UnknownTool");

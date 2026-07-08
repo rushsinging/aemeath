@@ -87,28 +87,30 @@ impl<'a> SubAgentRun<'a> {
             return;
         }
 
-        // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
-        // 清理后重新判断是否还需要 LLM 摘要。
-        let mc_cleared = crate::business::compact::microcompact_messages(&mut self.messages);
-        if mc_cleared > 0 {
-            log::info!(target: crate::LOG_TARGET,
-                "[microcompact] sub-agent cleared {} stale tool results", mc_cleared);
-            // 清理后重新检查是否还需要 compact
-            let mc_input = crate::business::compact::estimate_messages_tokens(&self.messages);
-            let remaining_budget =
-                crate::business::compact::autocompact_threshold(self.ctx_context_size, 8192);
-            // 估算下一轮 input ≈ 当前 mc_input + system + tool schemas
-            // 用 api_input 作为上界（microcompact 前），减去已清理部分
-            if mc_input + (api_input as usize) <= remaining_budget {
-                (self.progress)(
-                    Some(turn_number),
-                    &format!(
-                        "[microcompact: cleared {mc_cleared} old tool result(s), skipped LLM compact]"
-                    ),
-                );
-                return;
-            }
-        }
+        // TODO(#680): microcompact 已完全禁用（sub-agent）。
+        // 待 #680 按 segment 边界修复后，恢复以下调用与清理后跳过 LLM compact 的判断。
+        // // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
+        // // 清理后重新判断是否还需要 LLM 摘要。
+        // let mc_cleared = crate::business::compact::microcompact_messages(&mut self.messages);
+        // if mc_cleared > 0 {
+        //     log::info!(target: crate::LOG_TARGET,
+        //         "[microcompact] sub-agent cleared {} stale tool results", mc_cleared);
+        //     // 清理后重新检查是否还需要 compact
+        //     let mc_input = crate::business::compact::estimate_messages_tokens(&self.messages);
+        //     let remaining_budget =
+        //         crate::business::compact::autocompact_threshold(self.ctx_context_size, 8192);
+        //     // 估算下一轮 input ≈ 当前 mc_input + system + tool schemas
+        //     // 用 api_input 作为上界（microcompact 前），减去已清理部分
+        //     if mc_input + (api_input as usize) <= remaining_budget {
+        //         (self.progress)(
+        //             Some(turn_number),
+        //             &format!(
+        //                 "[microcompact: cleared {mc_cleared} old tool result(s), skipped LLM compact]"
+        //             ),
+        //         );
+        //         return;
+        //     }
+        // }
 
         let old_len = self.messages.len();
         let result = crate::business::compact::compact_messages_with_llm(

@@ -18,9 +18,7 @@ use crate::business::chat::looping::post_batch::run_post_tool_batch;
 use crate::business::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
 use crate::business::chat::looping::stall::StallDetector;
 use crate::business::chat::looping::task_reminder::TaskReminderState;
-use crate::business::chat::looping::tool_fuse::{
-    SessionBudgetDecision, SessionBudgetFuse, ToolCallFuse,
-};
+use crate::business::chat::looping::tool_fuse::ToolCallFuse;
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::business::chat::looping::{
     ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, GateDecision, GateKind,
@@ -31,7 +29,6 @@ use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
-use share::message::ContentBlock;
 use share::message::Message;
 use share::message::Role;
 use std::sync::Arc;
@@ -265,7 +262,6 @@ where
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let mut tool_call_fuse = ToolCallFuse::new();
-    let mut session_budget_fuse = SessionBudgetFuse::new(context_size);
     let chat_id = ChatId::new_v7();
     // 将 chat_id 同步到日志 context，影响 tool/audit/hook 等共享 sink 的 chat 字段
     logging::context::set_current_chat_id(chat_id.to_string());
@@ -852,20 +848,22 @@ where
         }
 
         loop_fsm.transition(ChatLoopTransition::Compact);
-        // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
-        // 在 auto-compact 前执行，可能减少 token 足以跳过 LLM 摘要。
-        let mc_cleared = crate::business::compact::microcompact_messages(&mut messages);
-        if mc_cleared > 0 {
-            log::info!(target: crate::LOG_TARGET,
-                "[microcompact] cleared {} stale exploratory tool results", mc_cleared);
-            // 同步到 TUI 镜像（仅同步 messages，不再向对话流注入 SystemMessage）
-            let _ = sink
-                .send_event(RuntimeStreamEvent::MicrocompactDone {
-                    messages: messages.clone(),
-                    cleared_count: mc_cleared,
-                })
-                .await;
-        }
+        // TODO(#680): microcompact 已完全禁用（主循环）。
+        // 待 #680 按 segment 边界修复后，恢复以下调用与 MicrocompactDone 事件 emit。
+        // // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
+        // // 在 auto-compact 前执行，可能减少 token 足以跳过 LLM 摘要。
+        // let mc_cleared = crate::business::compact::microcompact_messages(&mut messages);
+        // if mc_cleared > 0 {
+        //     log::info!(target: crate::LOG_TARGET,
+        //         "[microcompact] cleared {} stale exploratory tool results", mc_cleared);
+        //     // 同步到 TUI 镜像（仅同步 messages，不再向对话流注入 SystemMessage）
+        //     let _ = sink
+        //         .send_event(RuntimeStreamEvent::MicrocompactDone {
+        //             messages: messages.clone(),
+        //             cleared_count: mc_cleared,
+        //         })
+        //         .await;
+        // }
         // compact：发生时替换 messages 为 recent tail，summary 走 system。
         // resume 保护 + 产生时定型原则下，messages 产生后只在 compact 时被替换。
         if let Some(outcome) = auto_compact(
@@ -1109,41 +1107,6 @@ where
                     pct
                 );
 
-                match session_budget_fuse.record_usage(turn_count, last_api_input_tokens) {
-                    SessionBudgetDecision::Allow => {}
-                    SessionBudgetDecision::Warning(reason) => {
-                        log::warn!(
-                            target: LOG_TARGET,
-                            "session budget warning: session={}, turn={}, reason={}, input={}, context_size={}",
-                            session_id,
-                            turn_count,
-                            reason,
-                            last_api_input_tokens,
-                            context_size,
-                        );
-                    }
-                    SessionBudgetDecision::HardPause(reason) => {
-                        let message =
-                            format!("[agent loop paused: session budget fuse triggered: {reason}]");
-                        log::error!(
-                            target: LOG_TARGET,
-                            "session budget hard pause: session={}, turn={}, reason={}, input={}, context_size={}",
-                            session_id,
-                            turn_count,
-                            reason,
-                            last_api_input_tokens,
-                            context_size,
-                        );
-                        messages.push(Message {
-                            role: Role::Assistant,
-                            content: vec![ContentBlock::Text { text: message }],
-                            metadata: None,
-                        });
-                        loop_fsm.transition(ChatLoopTransition::TryStop);
-                        continue;
-                    }
-                }
-
                 sink.send_event(RuntimeStreamEvent::Usage {
                     input: resp.usage.input_tokens,
                     output: resp.usage.output_tokens,
@@ -1240,7 +1203,6 @@ where
                     api_elapsed,
                 );
                 if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-                    session_budget_fuse.record_assistant_text();
                     // ReasoningGraph: 无 tool call → 回 Idle
                     if let Some(graph) = reasoning_graph.as_mut() {
                         let prev = graph.current_node();
@@ -1410,37 +1372,6 @@ where
                     }
                 }
                 {
-                    match session_budget_fuse.record_tool_only_round() {
-                        SessionBudgetDecision::Allow => {}
-                        SessionBudgetDecision::Warning(reason) => {
-                            log::warn!(
-                                target: LOG_TARGET,
-                                "session budget warning: session={}, turn={}, reason={}",
-                                session_id,
-                                turn_count,
-                                reason,
-                            );
-                        }
-                        SessionBudgetDecision::HardPause(reason) => {
-                            let message = format!(
-                                "[agent loop paused: session budget fuse triggered: {reason}]"
-                            );
-                            log::error!(
-                                target: LOG_TARGET,
-                                "session budget hard pause: session={}, turn={}, reason={}",
-                                session_id,
-                                turn_count,
-                                reason,
-                            );
-                            messages.push(Message {
-                                role: Role::Assistant,
-                                content: vec![ContentBlock::Text { text: message }],
-                                metadata: None,
-                            });
-                            loop_fsm.transition(ChatLoopTransition::TryStop);
-                            continue;
-                        }
-                    }
                     loop_fsm.transition(ChatLoopTransition::AwaitTool);
                     let all_results = execute_tool_round(
                         &turn_context,
