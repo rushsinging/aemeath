@@ -72,34 +72,12 @@ impl App {
         self.chat.push_input_event(event);
     }
 
-    /// 保存当前会话（/save 与 MessagesSync 共用）。当 `notify=true`（来自 /save）时，    /// 经 UiEvent 回灌成功/失败反馈行，保持原 `[session saved: id]` / `Failed` 体验；
-    /// 后台自动保存（MessagesSync）静默。
+    /// `/save` 命令——仅 UX 反馈。Runtime 已有 turn-level auto-save + loop-exit auto-save，
+    /// TUI 不再发 ChatInputEvent::SaveSession。
     fn save_session_effect(&mut self, notify: bool, ui_tx: &mpsc::Sender<UiEvent>) {
-        // 后台自动保存（notify=false）在无消息时静默跳过，避免空会话写盘与噪声。
-        if !notify && self.chat.messages.is_empty() {
-            return;
-        }
-        let Some(ac) = self.agent_client.clone() else {
-            if notify {
-                let tx = ui_tx.clone();
-                crate::tui::effect::spawn_guard::spawn_guarded("save_session", async move {
-                    let _ = tx
-                        .send(UiEvent::SlashCommandFailed {
-                            message: "Failed to save session: SDK agent client is unavailable"
-                                .to_string(),
-                        })
-                        .await;
-                });
-            }
-            return;
-        };
-        // #567：save 走事件流（ChatInputEvent::SaveSession），
-        // loop idle 分支执行 save 并通过 CommandResultText 回传。
-        // 不再调 ac.sync_current_messages / ac.save_current_session。
-        self.chat.push_input_event(sdk::ChatInputEvent::SaveSession);
         if notify {
-            let tx = ui_tx.clone();
             let id = self.session.session_id().to_string();
+            let tx = ui_tx.clone();
             crate::tui::effect::spawn_guard::spawn_guarded("save_notify", async move {
                 let _ = tx.send(UiEvent::SessionSaved { id }).await;
             });

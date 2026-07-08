@@ -1,5 +1,6 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::business::chat::looping::queue::{QueueDrainPort, QueueFuture};
+use crate::business::session::ChatChain;
 use crate::LOG_TARGET;
 use sdk::ChatInputEvent;
 use share::message::Message;
@@ -27,7 +28,6 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ManageSession { .. } => "ManageSession",
         ChatInputEvent::ManageMemory { .. } => "ManageMemory",
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
-        ChatInputEvent::SaveSession => "SaveSession",
         ChatInputEvent::RunReflection => "RunReflection",
         ChatInputEvent::ApplyReflection { .. } => "ApplyReflection",
         ChatInputEvent::ListModels => "ListModels",
@@ -99,8 +99,6 @@ pub enum PendingCommand {
     ResumeSession {
         id: String,
     },
-    /// 保存当前会话（/save）。
-    SaveSession,
     /// 运行 reflection。
     RunReflection,
     /// 应用 reflection 结果。
@@ -199,7 +197,8 @@ pub async fn run_loop_gate<Q, I, S>(
     queue: &Q,
     input_events: &I,
     sink: &S,
-    messages: &mut Vec<Message>,
+    chain: &mut ChatChain,
+    segment_id: &str,
     task_store: &storage::api::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
@@ -209,7 +208,7 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, messages, task_store, is_idle).await
+    apply_gate(kind, buffer, sink, chain, segment_id, task_store, is_idle).await
 }
 
 pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
@@ -231,7 +230,8 @@ pub async fn apply_gate<S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,
     sink: &S,
-    messages: &mut Vec<Message>,
+    chain: &mut ChatChain,
+    segment_id: &str,
     task_store: &storage::api::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
@@ -282,7 +282,7 @@ where
                 if kind == ControlCommandKind::Abort {
                     dropped_events = iter.count();
                     for _ in 0..appended_this_gate {
-                        messages.pop();
+                        chain.pop_last_message();
                     }
                     appended_user_messages = 0;
                     added.clear();
@@ -299,14 +299,14 @@ where
                     text_preview,
                     images.len()
                 );
-                added.push(append_user_message(messages, id, text, images));
+                added.push(append_user_message(chain, segment_id, id, text, images));
                 appended_this_gate += 1;
                 appended_user_messages += 1;
             }
             ChatInputEvent::Reset => {
                 if is_idle {
                     // idle：立即清空会话并通知 UI（保持 idle，不退出 loop）。
-                    messages.clear();
+                    chain.clear();
                     added.clear();
                     appended_user_messages = 0;
                     // #567 S5：task_store 清理从 TUI RPC 下沉到 gate（不再调 clear_tasks()）
@@ -337,7 +337,7 @@ where
                     all_texts.append(&mut texts);
                     // 回滚已 append 的 messages。
                     for _ in 0..appended_this_gate {
-                        messages.pop();
+                        chain.pop_last_message();
                     }
                     appended_user_messages = 0;
                     added.clear();
@@ -421,16 +421,6 @@ where
                     buffer.push(ChatInputEvent::ResumeSession { id });
                 }
             }
-            ChatInputEvent::SaveSession => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::SaveSession);
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::SaveSession);
-                }
-            }
             ChatInputEvent::RunReflection => {
                 if is_idle {
                     pending_command = Some(PendingCommand::RunReflection);
@@ -485,10 +475,9 @@ where
             appended_user_messages,
             kind
         );
-        sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
-            messages: messages.clone(),
-        })
-        .await;
+        let flat = chain.messages_flat();
+        sink.send_event(RuntimeStreamEvent::PostToolExecutionSync { messages: flat })
+            .await;
         sink.send_event(RuntimeStreamEvent::UserMessagesAdopted {
             items: added,
             queued: vec![],
@@ -524,7 +513,8 @@ where
 }
 
 fn append_user_message(
-    messages: &mut Vec<Message>,
+    chain: &mut ChatChain,
+    segment_id: &str,
     id: sdk::InputId,
     text: String,
     images: Vec<sdk::ChatInputImage>,
@@ -537,7 +527,7 @@ fn append_user_message(
         })).unwrap_or_default()
     );
     let message = user_message_with_images(text, images);
-    messages.push(message.clone());
+    chain.push(message.clone(), segment_id);
     (id, message)
 }
 
@@ -728,7 +718,7 @@ mod tests {
         let queue = EmptyQueueDrainPort;
         let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("继续", Vec::new())]);
         let sink = TestSink::default();
-        let mut messages = vec![Message::user("first")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("first")]);
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -737,7 +727,8 @@ mod tests {
             &queue,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
@@ -745,7 +736,7 @@ mod tests {
 
         assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
         assert_eq!(outcome.appended_user_messages, 1);
-        assert_eq!(messages.last().unwrap().text_content(), "继续");
+        assert_eq!(chain.messages_flat().last().unwrap().text_content(), "继续");
         // 现在 append 时发 MessagesSync + UserMessagesAdopted 两个事件
         assert_eq!(sink.events.lock().unwrap().len(), 2);
     }
@@ -769,7 +760,7 @@ mod tests {
             vec![img],
         )]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -778,14 +769,16 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
         .await;
 
         assert_eq!(outcome.appended_user_messages, 1);
-        let last = messages.last().expect("应追加一条消息");
+        let msgs = chain.messages_flat();
+        let last = msgs.last().expect("应追加一条消息");
         // text_content 拼回完整文本（拆块后还原）
         assert_eq!(last.text_content(), text_with_marker);
         // 期望 content 是 [Text("看"), Image, Text("这张图")] 三块
@@ -834,7 +827,7 @@ mod tests {
         let mut buffer = PendingInputBuffer::default();
         let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(text.clone(), imgs)]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let _ = run_loop_gate(
@@ -843,13 +836,15 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
         .await;
 
-        let last = messages.last().expect("应追加一条消息");
+        let msgs = chain.messages_flat();
+        let last = msgs.last().expect("应追加一条消息");
         assert_eq!(last.text_content(), text);
         let placeholders: Vec<String> = last
             .content
@@ -878,7 +873,7 @@ mod tests {
             Vec::new(),
         )]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -887,7 +882,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
@@ -895,7 +891,7 @@ mod tests {
 
         assert_eq!(outcome.decision, GateDecision::Proceed);
         assert_eq!(outcome.appended_user_messages, 1);
-        assert_eq!(messages[0].text_content(), "tool 后输入");
+        assert_eq!(chain.messages_flat()[0].text_content(), "tool 后输入");
     }
 
     #[tokio::test]
@@ -909,7 +905,7 @@ mod tests {
             ChatInputEvent::user_message("text2", Vec::new()),
         ]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -918,7 +914,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
@@ -927,8 +924,8 @@ mod tests {
         assert_eq!(outcome.decision, GateDecision::ContinueNextTurn);
         assert_eq!(outcome.commands.len(), 1);
         assert_eq!(outcome.commands[0].raw, "/save");
-        assert_eq!(messages[0].text_content(), "text1");
-        assert_eq!(messages[1].text_content(), "text2");
+        assert_eq!(chain.messages_flat()[0].text_content(), "text1");
+        assert_eq!(chain.messages_flat()[1].text_content(), "text2");
     }
 
     #[tokio::test]
@@ -939,7 +936,7 @@ mod tests {
             ChatInputEvent::user_message("ignored", Vec::new()),
         ]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -948,14 +945,15 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
         .await;
 
         assert_eq!(outcome.decision, GateDecision::CancelCurrentLoop);
-        assert!(messages.is_empty());
+        assert!(chain.is_empty());
         assert!(sink.events.lock().unwrap().is_empty());
     }
 
@@ -970,7 +968,7 @@ mod tests {
             ChatInputEvent::user_message("text2", Vec::new()),
         ]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -979,7 +977,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
@@ -988,7 +987,7 @@ mod tests {
         assert_eq!(outcome.decision, GateDecision::AbortCurrentLoop);
         assert_eq!(outcome.dropped_events, 1);
         assert_eq!(outcome.commands[0].kind, ControlCommandKind::Abort);
-        assert!(messages.is_empty());
+        assert!(chain.is_empty());
     }
 
     #[tokio::test]
@@ -1000,7 +999,7 @@ mod tests {
             ChatInputEvent::user_message("same", Vec::new()),
         ]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1009,14 +1008,15 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
         .await;
 
         assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-        assert_eq!(messages.len(), 2);
+        assert_eq!(chain.messages_flat().len(), 2);
         let added = sink.events.lock().unwrap().iter().find_map(|e| match e {
             RuntimeStreamEvent::UserMessagesAdopted { items, .. } => Some(items.clone()),
             _ => None,
@@ -1035,7 +1035,7 @@ mod tests {
         let queue = TestQueuePort::new(Some(vec!["same".to_string()]));
         let input = TestInputEventPort::new(vec![ChatInputEvent::user_message("same", Vec::new())]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1044,14 +1044,15 @@ mod tests {
             &queue,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false,
         )
         .await;
 
         assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-        assert_eq!(messages.len(), 2);
+        assert_eq!(chain.messages_flat().len(), 2);
     }
 
     /// #391 S1-3：idle gate 收到 Reset → 清空 messages + 发 SessionReset，保持 idle。
@@ -1060,7 +1061,8 @@ mod tests {
         let mut buffer = PendingInputBuffer::default();
         let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
         let sink = TestSink::default();
-        let mut messages = vec![Message::user("old1"), Message::user("resp1")];
+        let mut chain =
+            ChatChain::from_flat_messages(vec![Message::user("old1"), Message::user("resp1")]);
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1069,7 +1071,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             true, // idle
         )
@@ -1077,9 +1080,9 @@ mod tests {
 
         assert_eq!(outcome.decision, GateDecision::Proceed);
         assert!(
-            messages.is_empty(),
+            chain.is_empty(),
             "idle Reset 应清空所有消息，实际 {:?}",
-            messages
+            chain.messages_flat()
         );
         let has_reset = sink
             .events
@@ -1096,7 +1099,7 @@ mod tests {
         let mut buffer = PendingInputBuffer::default();
         let input = TestInputEventPort::new(vec![ChatInputEvent::Reset]);
         let sink = TestSink::default();
-        let mut messages = vec![Message::user("old1")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("old1")]);
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1105,13 +1108,18 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false, // busy
         )
         .await;
 
-        assert_eq!(messages.len(), 1, "busy gate 不应清空 messages");
+        assert_eq!(
+            chain.messages_flat().len(),
+            1,
+            "busy gate 不应清空 messages"
+        );
         assert_eq!(buffer.len(), 1, "Reset 应留在 buffer 等待 idle");
         assert_eq!(outcome.decision, GateDecision::Proceed);
         let has_reset = sink
@@ -1132,7 +1140,7 @@ mod tests {
             ChatInputEvent::user_message("after-reset", Vec::new()),
         ]);
         let sink = TestSink::default();
-        let mut messages = vec![Message::user("old1")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("old1")]);
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1141,14 +1149,15 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             true, // idle
         )
         .await;
 
         assert_eq!(outcome.dropped_events, 1, "Reset 后的 UserMessage 应被丢弃");
-        assert!(messages.is_empty(), "Reset 清空后不应 append 后续消息");
+        assert!(chain.is_empty(), "Reset 清空后不应 append 后续消息");
     }
 
     /// #391 S3-1：drain_all 非空 → 返回全部事件 + buffer 清空。
@@ -1187,7 +1196,7 @@ mod tests {
             ChatInputEvent::WithdrawAll,
         ]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1196,7 +1205,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             true, // idle
         )
@@ -1212,7 +1222,7 @@ mod tests {
             vec!["aaa".to_string(), "bbb".to_string()],
             "应收集所有 UserMessage text（含已 append 的）"
         );
-        assert!(messages.is_empty(), "WithdrawAll 应回滚已 append 的消息");
+        assert!(chain.is_empty(), "WithdrawAll 应回滚已 append 的消息");
         assert!(buffer.is_empty(), "buffer 应为空");
         assert_eq!(outcome.appended_user_messages, 0);
     }
@@ -1223,7 +1233,7 @@ mod tests {
         let mut buffer = PendingInputBuffer::default();
         let input = TestInputEventPort::new(vec![ChatInputEvent::WithdrawAll]);
         let sink = TestSink::default();
-        let mut messages = Vec::new();
+        let mut chain = ChatChain::from_flat_messages(Vec::new());
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1232,7 +1242,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             true,
         )
@@ -1257,7 +1268,7 @@ mod tests {
             ChatInputEvent::WithdrawAll,
         ]);
         let sink = TestSink::default();
-        let mut messages = vec![Message::user("existing")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("existing")]);
 
         let task_store = test_task_store();
         let outcome = run_loop_gate(
@@ -1266,7 +1277,8 @@ mod tests {
             &EmptyQueueDrainPort,
             &input,
             &sink,
-            &mut messages,
+            &mut chain,
+            "seg",
             &task_store,
             false, // busy
         )
@@ -1283,8 +1295,12 @@ mod tests {
             "只撤回本批 UserMessage"
         );
         // existing 保留（上一回合的），queued 被回滚
-        assert_eq!(messages.len(), 1, "queued 应被回滚，只保留 existing");
-        assert_eq!(messages[0].text_content(), "existing");
+        assert_eq!(
+            chain.messages_flat().len(),
+            1,
+            "queued 应被回滚，只保留 existing"
+        );
+        assert_eq!(chain.messages_flat()[0].text_content(), "existing");
         assert_eq!(outcome.appended_user_messages, 0);
     }
 }

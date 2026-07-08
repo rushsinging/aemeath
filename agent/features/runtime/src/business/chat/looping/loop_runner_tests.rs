@@ -6,13 +6,15 @@ use super::*;
 
 use crate::business::session::ChatChain;
 
-fn test_save_session() -> Arc<
-    dyn Fn()
+fn test_save_chain() -> Arc<
+    dyn Fn(
+            &crate::business::session::ChatChain,
+        )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
         + Send
         + Sync,
 > {
-    Arc::new(|| Box::pin(async { Ok(()) }))
+    Arc::new(|_chain| Box::pin(async { Ok(()) }))
 }
 
 /// 测试用 reflection 闭包（#567）。测试中不会被真正触发，仅满足字段约束。
@@ -483,7 +485,6 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stop-hook-blocked".to_string(),
@@ -502,7 +503,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -598,7 +599,6 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stop-hook-metadata".to_string(),
@@ -617,7 +617,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -715,7 +715,6 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace,
         session_id: "test-worktree-stop-hook-env".to_string(),
@@ -734,7 +733,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -809,7 +808,6 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-session".to_string(),
@@ -828,7 +826,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -971,7 +969,6 @@ async fn test_continue_false_json_treated_as_block() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-continue-false".to_string(),
@@ -990,7 +987,7 @@ async fn test_continue_false_json_treated_as_block() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -1092,7 +1089,6 @@ async fn test_stall_triggers_stop_hook_check() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stall-hook".to_string(),
@@ -1111,7 +1107,7 @@ async fn test_stall_triggers_stop_hook_check() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -1250,7 +1246,6 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-persistent-loop".to_string(),
@@ -1269,7 +1264,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -1436,7 +1431,6 @@ async fn test_stall_detector_resets_across_user_turns() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-stall-reset-across-turns".to_string(),
@@ -1455,7 +1449,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -1703,7 +1697,6 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-control-command".to_string(),
@@ -1722,7 +1715,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -1756,12 +1749,12 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
 
 #[tokio::test]
 async fn test_idle_pending_command_does_not_run_spurious_turn() {
-    // 回归 #628：idle 收到的 PendingCommand（SaveSession / ListReminders 等纯查询或动作命令）
+    // 回归 #628：idle 收到的 PendingCommand（ListReminders 等纯查询或动作命令）
     // 处理后应回 idle 等下一条输入，而不是掉进 execute_tool_round 跑一轮幽灵 LLM turn。
     // bug 表现：命令处理完无 continue，掉进 turn_count += 1 / StartTurn，用陈旧 tool_calls 跑一整轮。
     //
     // 与 test_idle_control_command_does_not_run_spurious_turn 的区别：前者走 ControlCommand 路径
-    // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::SaveSession → PendingCommand 路径，
+    // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::ListReminders → PendingCommand 路径，
     // 命中 loop_runner.rs 中 6 处漏 continue 的 match 臂。
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
@@ -1786,8 +1779,8 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
             }
             tokio::task::yield_now().await;
         }
-        // 空闲期投递 SaveSession（PendingCommand 路径）。
-        let _ = input_tx.send(sdk::ChatInputEvent::SaveSession);
+        // 空闲期投递 ListReminders（PendingCommand 路径）。
+        let _ = input_tx.send(sdk::ChatInputEvent::ListReminders);
         // 给 loop 充分调度机会去（错误地）消费命令、退出空闲、跑陈旧历史空回合。
         for _ in 0..200 {
             tokio::task::yield_now().await;
@@ -1796,7 +1789,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         assert_eq!(
             driver_provider.calls(),
             vec!["first".to_string()],
-            "空闲期单独 PendingCommand::SaveSession 不得触发 LLM 调用（应仍只有 first 一次）"
+            "空闲期单独 PendingCommand::ListReminders 不得触发 LLM 调用（应仍只有 first 一次）"
         );
 
         // 现在投递真实用户消息，应恢复运行并完成回合 2（第 2 次 LLM 调用）。
@@ -1824,7 +1817,6 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-pending-save".to_string(),
@@ -1843,7 +1835,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -1860,7 +1852,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
     assert_eq!(
         provider.calls(),
         vec!["first".to_string(), "second".to_string()],
-        "SaveSession 命令不得引发陈旧历史空回合: {:?}",
+        "ListReminders 命令不得引发陈旧历史空回合: {:?}",
         sink.events()
     );
 }
@@ -1925,7 +1917,6 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-pending-list-reminders".to_string(),
@@ -1944,7 +1935,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2003,7 +1994,6 @@ async fn test_stop_hook_block_limit_stops_loop() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-block-limit".to_string(),
@@ -2022,7 +2012,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2209,7 +2199,6 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-cancel-then-idle".to_string(),
@@ -2228,7 +2217,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2456,7 +2445,6 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-cancel-preserves-prior-turns".to_string(),
@@ -2475,7 +2463,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2704,7 +2692,6 @@ async fn test_chat_impl_idle_until_first_input_event() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())), // 空 messages：无待答回合，loop 必须先 idle-wait
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-idle-until-first-input".to_string(),
@@ -2723,7 +2710,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2827,7 +2814,6 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())), // 空 seed：无待答回合，loop 必须先 idle-wait
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-no-turn-signal-before-first-input".to_string(),
@@ -2846,7 +2832,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2921,7 +2907,6 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: messages, // 末条为 User，模拟 resume
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-resume-skip-pending".to_string(),
@@ -2940,7 +2925,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(), // 正常场景
+        save_chain: test_save_chain(), // 正常场景
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
@@ -2995,7 +2980,6 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: messages,
-        current_chain_slot: std::sync::Arc::new(std::sync::Mutex::new(ChatChain::default())),
         context_size: 200_000,
         workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
         session_id: "test-user-tail-idle".to_string(),
@@ -3014,7 +2998,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning_graph: None,
         build_switched_client: Arc::new(test_build_switched_client),
-        save_session: test_save_session(),
+        save_chain: test_save_chain(),
         language: "en".to_string(),
         run_reflection_on_demand: test_run_reflection(),
         apply_reflection_on_demand: test_apply_reflection(),
