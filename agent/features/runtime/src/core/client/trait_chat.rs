@@ -6,15 +6,12 @@ use sdk::{ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
 use super::event::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort, SdkChatEventSink};
-use super::mapping::message_from_sdk;
 
 pub(super) async fn chat_impl(
     me: &AgentClientImpl,
     input: ChatRequest,
 ) -> Result<ChatStream, SdkError> {
     // 会话级取消槽：每次 chat() 启动时重置为一个全新、未取消的 token。
-    // 常驻 loop 会从该共享槽逐回合读取「当前 token」，并在每次取消后自行重置
-    // （见 loop_runner::reset_cancel），因此此处只需保证起点干净。
     *me.inner
         .current_cancel
         .lock()
@@ -23,34 +20,58 @@ pub(super) async fn chat_impl(
     let cancel_slot = me.inner.current_cancel.clone();
     let queue_drain = input.queue_drain.clone();
     let input_events = input.input_events.clone();
-    let messages: Vec<_> = input.messages.into_iter().map(message_from_sdk).collect();
 
-    // 前置校验：如果消息包含图片但当前模型不支持图片输入，返回清晰错误
-    let has_image = messages.iter().any(|msg| {
-        msg.content
-            .iter()
-            .any(|block| matches!(block, share::message::ContentBlock::Image { .. }))
-    });
-    if has_image {
-        let supports_image = me
-            .inner
-            .resolved_model
-            .model
-            .input
-            .iter()
-            .any(|t| t == "image");
-        if !supports_image {
-            let model_id = &me.inner.resolved_model.model.id;
-            let provider = &me.inner.resolved_model.source_key;
-            return Err(SdkError::Internal(format!(
-                "当前模型 {provider}/{model_id} 不支持图片输入。\
-                 请切换到支持图片的模型（如 MiniMax/MiniMax-M3）或使用 /clear-images 清除待发送图片后重试。"
-            )));
+    // 前置校验：如果初始输入包含图片但当前模型不支持
+    if let Some(ref user_input) = input.user_input {
+        if !user_input.images.is_empty() {
+            let supports_image = me
+                .inner
+                .resolved_model
+                .model
+                .input
+                .iter()
+                .any(|t| t == "image");
+            if !supports_image {
+                let model_id = &me.inner.resolved_model.model.id;
+                let provider = &me.inner.resolved_model.source_key;
+                return Err(SdkError::Internal(format!(
+                    "当前模型 {provider}/{model_id} 不支持图片输入。\
+                     请切换到支持图片的模型（如 MiniMax/MiniMax-M3）或使用 /clear-images 清除待发送图片后重试。"
+                )));
+            }
         }
     }
 
-    // 构造 ChatChain（单 segment 包裹全部消息）并写入共享 chain slot。
-    let chain = crate::business::session::ChatChain::from_flat_messages(messages);
+    // 获取 chain：优先复用 current_chain（resume 场景已 load），
+    // 否则初始化空 chain（loop idle 会等第一条用户输入）。
+    // 若有初始 user_input，构造首条消息放入 chain。
+    let chain = {
+        let existing = me
+            .inner
+            .current_chain
+            .lock()
+            .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))?;
+        if !existing.is_empty() {
+            existing.clone()
+        } else if let Some(ref user_input) = input.user_input {
+            // 首次启动且有初始输入：构造单条消息
+            let msg = if user_input.images.is_empty() {
+                share::message::Message::user(&user_input.text)
+            } else {
+                share::message::Message::user_with_images(
+                    user_input.text.clone(),
+                    user_input
+                        .images
+                        .iter()
+                        .map(|img| (img.id.clone(), img.base64.clone(), img.media_type.clone()))
+                        .collect(),
+                )
+            };
+            crate::business::session::ChatChain::from_flat_messages(vec![msg])
+        } else {
+            crate::business::session::ChatChain::default()
+        }
+    };
 
     *me.inner
         .current_chain

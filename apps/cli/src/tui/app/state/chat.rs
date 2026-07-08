@@ -3,7 +3,6 @@
 /// 聊天会话的所有可变数据（不含视图组件 output_area）
 #[derive(Debug)]
 pub(crate) struct ChatState {
-    pub messages: Vec<sdk::ChatMessage>,
     pub context_size: usize,
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<sdk::ids::ToolCallId>,
@@ -117,7 +116,6 @@ impl ChatState {
 impl Default for ChatState {
     fn default() -> Self {
         Self {
-            messages: Vec::new(),
             context_size: 200_000,
             tool_call_active: false,
             active_tool_call_ids: std::collections::HashSet::new(),

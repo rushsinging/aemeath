@@ -34,7 +34,8 @@ pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
     CancelHandle, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage,
     ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView,
-    OptionItem, ToolCallStatusView, ToolResultImage, WorkspaceContextView, WorkspaceStackEntryView,
+    OptionItem, ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView,
+    WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;

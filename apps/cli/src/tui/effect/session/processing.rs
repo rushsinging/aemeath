@@ -242,7 +242,6 @@ pub(crate) struct SpawnContext {
     pub input_event_port: TuiInputEventPort,
     pub agent_client: Arc<dyn sdk::AgentClient>,
     pub fallback_context: UiTurnContext,
-    pub messages: Vec<sdk::ChatMessage>,
 }
 
 #[derive(Debug)]
@@ -653,7 +652,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
         let mut stream = match ctx
             .agent_client
             .chat(sdk::ChatRequest {
-                messages: ctx.messages,
+                user_input: None,
                 // 文本队列已断开（#390 A3）：统一走 input_events 事件通道。
                 queue_drain: None,
                 input_events: Some(Arc::new(ctx.input_event_port.clone())),
@@ -831,7 +830,6 @@ mod tests {
                 chat_id: crate::tui::model::conversation::ids::ChatId::new("fallback-chat"),
                 turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("fallback-turn"),
             },
-            messages: Vec::new(),
         });
 
         let event = tokio::time::timeout(std::time::Duration::from_secs(1), ui_rx.recv())
