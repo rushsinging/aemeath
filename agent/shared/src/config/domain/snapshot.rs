@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use crate::config::models::{ModelEntryConfig, ModelResolveError, ModelsConfig, ResolvedModel};
+use crate::config::models::{
+    ModelEntryConfig, ModelResolveError, ModelsConfig, ResolvedModel, ResolvedRuntimeModel,
+    RuntimeModelRequest, RuntimeModelResolutionError, RuntimeModelResolver,
+};
 use crate::config::permissions::PermissionModeConfig;
 use crate::config::{
     AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, ReasoningGraphConfig,
@@ -53,7 +56,11 @@ impl ConfigSnapshot {
     }
 
     pub fn max_tokens(&self) -> u32 {
-        self.0.model.max_tokens
+        if self.0.model.max_tokens > 0 {
+            self.0.model.max_tokens
+        } else {
+            crate::config::models::DEFAULT_MAX_TOKENS
+        }
     }
 
     pub fn context_size(&self) -> usize {
@@ -196,6 +203,22 @@ impl ConfigSnapshot {
         selection: &str,
     ) -> Result<ResolvedModel, ModelResolveError> {
         self.0.models.resolve_model_selection(selection)
+    }
+
+    /// 解析本次运行使用的模型与运行参数。
+    pub fn resolve_runtime_model(
+        &self,
+        model_override: Option<&str>,
+        cli_max_tokens: Option<u32>,
+    ) -> Result<ResolvedRuntimeModel, RuntimeModelResolutionError> {
+        RuntimeModelResolver::resolve(
+            &self.0.models,
+            RuntimeModelRequest {
+                model_override,
+                cli_max_tokens,
+                config_max_tokens: Some(self.0.model.max_tokens),
+            },
+        )
     }
 
     /// 列出所有可用模型 `(source_key, ModelEntryConfig)`，委派给 `ModelsConfig::list_models`。
@@ -359,6 +382,103 @@ mod tests {
 
         // Act & Assert
         assert_eq!(snap.max_tokens(), 8192);
+    }
+
+    #[test]
+    fn test_snapshot_max_tokens_zero_uses_default() {
+        let mut config = Config::default();
+        config.model.max_tokens = 0;
+        let snap = ConfigSnapshot::new(config);
+
+        assert_eq!(snap.max_tokens(), crate::config::models::DEFAULT_MAX_TOKENS);
+    }
+
+    #[test]
+    fn test_snapshot_resolve_runtime_model_model_wins_over_config() {
+        let mut config = Config::default();
+        config.model.max_tokens = 200_000;
+        config.models.default = "zhipu/glm-5.1".to_string();
+        config.models.providers.insert(
+            "zhipu".to_string(),
+            ProviderModelsConfig {
+                driver: "zhipu".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "glm-5.1".to_string(),
+                    name: "GLM 5.1".to_string(),
+                    context_window: 128_000,
+                    max_tokens: 8192,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        let snap = ConfigSnapshot::new(config);
+
+        let runtime_model = snap.resolve_runtime_model(None, None).unwrap();
+
+        assert_eq!(runtime_model.max_tokens(), 8192);
+        assert_eq!(
+            runtime_model.max_tokens_source(),
+            crate::config::models::MaxTokensSource::Model
+        );
+    }
+
+    #[test]
+    fn test_snapshot_resolve_runtime_model_cli_wins() {
+        let mut config = Config::default();
+        config.model.max_tokens = 200_000;
+        config.models.default = "zhipu/glm-5.1".to_string();
+        config.models.providers.insert(
+            "zhipu".to_string(),
+            ProviderModelsConfig {
+                driver: "zhipu".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "glm-5.1".to_string(),
+                    name: "GLM 5.1".to_string(),
+                    context_window: 128_000,
+                    max_tokens: 8192,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        let snap = ConfigSnapshot::new(config);
+
+        let runtime_model = snap.resolve_runtime_model(None, Some(4096)).unwrap();
+
+        assert_eq!(runtime_model.max_tokens(), 4096);
+        assert_eq!(
+            runtime_model.max_tokens_source(),
+            crate::config::models::MaxTokensSource::Cli
+        );
+    }
+
+    #[test]
+    fn test_snapshot_resolve_runtime_model_cli_zero_errors() {
+        let mut config = Config::default();
+        config.models.default = "zhipu/glm-5.1".to_string();
+        config.models.providers.insert(
+            "zhipu".to_string(),
+            ProviderModelsConfig {
+                driver: "zhipu".to_string(),
+                models: vec![ModelEntryConfig {
+                    id: "glm-5.1".to_string(),
+                    name: "GLM 5.1".to_string(),
+                    context_window: 128_000,
+                    max_tokens: 8192,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        let snap = ConfigSnapshot::new(config);
+
+        let err = snap.resolve_runtime_model(None, Some(0)).unwrap_err();
+
+        assert_eq!(
+            err,
+            crate::config::models::RuntimeModelResolutionError::CliMaxTokensZero
+        );
     }
 
     /// Config 含 tools.max_concurrency=8 / agents.max_concurrency=4 时，

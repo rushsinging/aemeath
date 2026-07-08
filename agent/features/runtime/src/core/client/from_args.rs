@@ -50,11 +50,11 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     // 5. 权限模式
     apply_config_permission_mode(&mut args, snapshot.allow_all());
 
-    // 6. 模型选择 — 直接使用 ModelsConfig::select_for_run
-    let resolved_model = snapshot
-        .models()
-        .select_for_run(args.model.as_deref())
+    // 6. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
+    let runtime_model = snapshot
+        .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
         .map_err(|e| SdkError::Init(e.to_string()))?;
+    let resolved_model = runtime_model.resolved_model().clone();
     let driver =
         ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
     // 7. API key
@@ -68,12 +68,10 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let base_url = resolve_base_url(args.base_url.clone(), &resolved_model);
     let model = resolved_model.model.id.clone();
     let runtime_settings = resolve_model_runtime_settings(
-        args.max_tokens,
+        runtime_model.max_tokens(),
         &resolved_model.model,
-        Some(snapshot.max_tokens()),
         !args.no_think,
-    )
-    .map_err(|e| SdkError::Init(e.to_string()))?;
+    );
 
     log::info!(target: LOG_TARGET,
         "[main] source={} api={} model={} reasoning={} args.no_think={}",

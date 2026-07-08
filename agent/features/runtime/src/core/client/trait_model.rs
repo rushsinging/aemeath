@@ -24,9 +24,10 @@ pub(crate) async fn build_llm_client_for_switch(
     svc.load().await?;
     let snapshot = svc.snapshot().await;
 
-    let resolved_model = snapshot
-        .resolve_model_selection(selection)
+    let runtime_model = snapshot
+        .resolve_runtime_model(Some(selection), None)
         .map_err(|e| e.to_string())?;
+    let resolved_model = runtime_model.resolved_model().clone();
 
     let driver =
         ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
@@ -41,13 +42,8 @@ pub(crate) async fn build_llm_client_for_switch(
     let base_url = resolve_base_url(None, &resolved_model);
     let model_id = resolved_model.model.id.clone();
 
-    let runtime_settings = resolve_model_runtime_settings(
-        None,
-        &resolved_model.model,
-        Some(snapshot.max_tokens()),
-        true,
-    )
-    .map_err(|e| e.to_string())?;
+    let runtime_settings =
+        resolve_model_runtime_settings(runtime_model.max_tokens(), &resolved_model.model, true);
 
     let new_client = build_llm_client(
         driver,
