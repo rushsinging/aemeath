@@ -1,6 +1,5 @@
 use crate::business::chat::{RuntimeHookEvent, RuntimeHookEventStatus};
 use crate::LOG_TARGET;
-use std::sync::{Arc, Mutex};
 
 use crate::business::chat::looping::RuntimeTurnContext;
 use sdk::{
@@ -8,11 +7,11 @@ use sdk::{
     ChatEventContext, HookEventStatus, HookEventView, HookExecutionResultView, ToolCallStatusView,
     ToolResultImage,
 };
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct SdkChatEventSink {
     pub(super) tx: tokio::sync::mpsc::UnboundedSender<ChatEvent>,
-    pub(super) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
     pub(super) change_tx: tokio::sync::watch::Sender<ChangeSet>,
 }
 
@@ -22,20 +21,16 @@ impl crate::business::chat::ChatEventSink for SdkChatEventSink {
         event: crate::business::chat::RuntimeStreamEvent,
     ) -> crate::business::chat::EventFuture<'a> {
         Box::pin(async move {
-            let _ = self.tx.send(runtime_event_to_sdk_event(
-                event,
-                &self.current_messages,
-                &self.change_tx,
-            ));
+            let _ = self
+                .tx
+                .send(runtime_event_to_sdk_event(event, &self.change_tx));
         })
     }
 
     fn try_send_event(&self, event: crate::business::chat::RuntimeStreamEvent) {
-        let _ = self.tx.send(runtime_event_to_sdk_event(
-            event,
-            &self.current_messages,
-            &self.change_tx,
-        ));
+        let _ = self
+            .tx
+            .send(runtime_event_to_sdk_event(event, &self.change_tx));
     }
 }
 
@@ -110,7 +105,6 @@ fn tool_call_status_to_sdk(
 
 pub(crate) fn runtime_event_to_sdk_event(
     event: crate::business::chat::RuntimeStreamEvent,
-    current_messages: &Arc<Mutex<Vec<share::message::Message>>>,
     change_tx: &tokio::sync::watch::Sender<ChangeSet>,
 ) -> ChatEvent {
     match event {
@@ -252,9 +246,6 @@ pub(crate) fn runtime_event_to_sdk_event(
             elapsed_secs,
         },
         crate::business::chat::RuntimeStreamEvent::TurnStarted { messages } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
             ChatEvent::TurnStarted {
                 messages: messages
                     .into_iter()
@@ -265,22 +256,14 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::MicrocompactDone {
             messages,
             cleared_count,
-        } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
-            ChatEvent::MicrocompactDone {
-                messages: messages
-                    .into_iter()
-                    .map(super::mapping::message_to_sdk)
-                    .collect(),
-                cleared_count,
-            }
-        }
+        } => ChatEvent::MicrocompactDone {
+            messages: messages
+                .into_iter()
+                .map(super::mapping::message_to_sdk)
+                .collect(),
+            cleared_count,
+        },
         crate::business::chat::RuntimeStreamEvent::StopHookBlocked { messages } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
             ChatEvent::StopHookBlocked {
                 messages: messages
                     .into_iter()
@@ -289,9 +272,6 @@ pub(crate) fn runtime_event_to_sdk_event(
             }
         }
         crate::business::chat::RuntimeStreamEvent::PostToolExecutionSync { messages } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
             ChatEvent::PostToolExecutionSync {
                 messages: messages
                     .into_iter()
@@ -300,9 +280,6 @@ pub(crate) fn runtime_event_to_sdk_event(
             }
         }
         crate::business::chat::RuntimeStreamEvent::ApiError { messages, error } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
             ChatEvent::ApiError {
                 messages: messages
                     .into_iter()
@@ -312,9 +289,6 @@ pub(crate) fn runtime_event_to_sdk_event(
             }
         }
         crate::business::chat::RuntimeStreamEvent::CompactRollback { messages } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
             ChatEvent::CompactRollback {
                 messages: messages
                     .into_iter()
@@ -323,9 +297,6 @@ pub(crate) fn runtime_event_to_sdk_event(
             }
         }
         crate::business::chat::RuntimeStreamEvent::CompactFinished { messages } => {
-            if let Ok(mut guard) = current_messages.lock() {
-                *guard = messages.clone();
-            }
             ChatEvent::CompactFinished {
                 messages: messages
                     .into_iter()
@@ -543,6 +514,7 @@ fn agent_progress_event_to_sdk(event: share::tool::AgentProgressEvent) -> AgentP
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     struct CountingQueueDrainPort {
         calls: Arc<AtomicUsize>,
@@ -569,8 +541,7 @@ mod tests {
 
     #[test]
     fn test_runtime_tasks_snapshot_emits_sdk_event() {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
-        let current_messages = Arc::new(Mutex::new(Vec::new()));
+        let (_tx, _rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
         let (change_tx, _change_rx) = tokio::sync::watch::channel(ChangeSet::empty());
 
         let view = sdk::TaskStatusView {
@@ -580,7 +551,6 @@ mod tests {
             crate::business::chat::RuntimeStreamEvent::TasksSnapshot {
                 tasks: Box::new(view.clone()),
             },
-            &current_messages,
             &change_tx,
         );
 
@@ -588,7 +558,6 @@ mod tests {
             ChatEvent::TasksSnapshot { tasks } => assert_eq!(tasks.lines, view.lines),
             other => panic!("unexpected event: {other:?}"),
         }
-        drop(tx);
     }
 
     #[tokio::test]

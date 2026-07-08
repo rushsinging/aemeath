@@ -7,20 +7,6 @@ use sdk::{SdkError, SessionSnapshot, SessionSummary};
 use super::accessors::{AgentClientImpl, RuntimeHandle};
 use super::mapping;
 
-pub(super) async fn sync_current_messages_impl(
-    me: &AgentClientImpl,
-    messages: Vec<sdk::ChatMessage>,
-) -> Result<(), SdkError> {
-    *me.inner
-        .current_messages
-        .lock()
-        .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))? = messages
-        .into_iter()
-        .map(mapping::message_from_sdk)
-        .collect();
-    Ok(())
-}
-
 pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<(), SdkError> {
     save_session_from_handle(&me.inner).await
 }
@@ -28,11 +14,14 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
 /// 从 RuntimeHandle 级别执行 save（不依赖 AgentClientImpl）。
 /// 供 chat_impl spawn task 中 loop 退出后 auto-save 使用。
 pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Result<(), SdkError> {
-    let messages = inner
-        .current_messages
-        .lock()
-        .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))?
-        .clone();
+    // 从 current_chain 聚合取活跃段（真实 segment 边界）
+    let active_segments: Vec<crate::business::session::ChatSegment> = {
+        let chain = inner
+            .current_chain
+            .lock()
+            .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))?;
+        chain.active_segments().to_vec()
+    };
     let task_snapshot = {
         let snap = inner.context.resources.task_store.snapshot().await;
         if snap.tasks.is_empty() {
@@ -44,11 +33,6 @@ pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Resu
     let workspace = Some(project::api::WorkspacePersist::snapshot(
         inner.workspace.as_ref(),
     ));
-    let summary = inner
-        .active_summary
-        .lock()
-        .map_err(|_| SdkError::Internal("active_summary 锁已损坏".to_string()))?
-        .clone();
     let frozen_chats = inner
         .frozen_chats
         .lock()
@@ -57,13 +41,7 @@ pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Resu
 
     // 构造 chats = 旧链（冻结）+ 活跃段
     let mut chats = frozen_chats;
-    if let Some(s) = summary {
-        chats.push(crate::business::session::ChatSegment::compact(s, messages));
-    } else {
-        let mut seg = crate::business::session::ChatSegment::normal(None);
-        seg.messages = messages;
-        chats.push(seg);
-    }
+    chats.extend(active_segments);
 
     let mut session = crate::business::session::Session::new(
         inner.session_id.clone(),
@@ -100,6 +78,12 @@ pub(super) async fn load_session_impl(
             }
             if let Ok(mut guard) = me.inner.frozen_chats.lock() {
                 *guard = restore.frozen_chats;
+            }
+            // 写回 current_chain（从扁平消息构造单段链）
+            if let Ok(mut guard) = me.inner.current_chain.lock() {
+                *guard = crate::business::session::ChatChain::from_flat_messages(
+                    restore.active_messages.clone(),
+                );
             }
 
             let sdk_messages: Vec<sdk::ChatMessage> = restore

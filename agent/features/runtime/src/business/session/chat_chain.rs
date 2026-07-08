@@ -95,12 +95,17 @@ impl ChatChain {
         Self { segments }
     }
 
-    /// 扁平视图：合并所有段的 messages（供 chat loop 使用）
+    /// 扁平视图：合并所有段的 messages（供 chat loop 使用）。
     pub fn messages(&self) -> Vec<Message> {
         self.segments
             .iter()
             .flat_map(|s| s.messages.iter().cloned())
             .collect()
+    }
+
+    /// `messages` 的语义别名——强调「派生读模型，用完即弃」。
+    pub fn messages_flat(&self) -> Vec<Message> {
+        self.messages()
     }
 
     /// 活跃链的 summary（首个 Compact 段的 summary）
@@ -113,10 +118,40 @@ impl ChatChain {
         }
     }
 
-    /// 追加消息到最后一个段
+    /// 追加消息到最后一个段（活跃 segment）。
+    ///
+    /// 若链为空（无 segment），自动创建一个 Normal 段再追加。
     pub fn push(&mut self, msg: Message) {
+        if self.segments.is_empty() {
+            self.segments.push(ChatSegment::normal(None));
+        }
         if let Some(last) = self.segments.last_mut() {
             last.messages.push(msg);
+        }
+    }
+
+    /// `push` 的语义别名——强调「追加到活跃 segment」。
+    pub fn push_to_active(&mut self, msg: Message) {
+        self.push(msg);
+    }
+
+    /// 整体替换活跃链（compact / resume 时使用）。
+    pub fn replace_chain(&mut self, new_chain: ChatChain) {
+        self.segments = new_chain.segments;
+    }
+
+    /// 从扁平消息列表构造链。
+    ///
+    /// 把全部消息放入单个 Normal 段（此阶段不按 turn 分段，
+    /// #688 会引入 `is_user_turn_boundary` 实现真实分段）。
+    pub fn from_flat_messages(messages: Vec<Message>) -> Self {
+        if messages.is_empty() {
+            return Self::default();
+        }
+        let mut seg = ChatSegment::normal(None);
+        seg.messages = messages;
+        Self {
+            segments: vec![seg],
         }
     }
 
@@ -141,6 +176,39 @@ impl ChatChain {
     /// 所有段是否均为空消息
     pub fn is_empty(&self) -> bool {
         self.segments.iter().all(|s| s.messages.is_empty())
+    }
+
+    /// 扁平消息总数。
+    pub fn message_count(&self) -> usize {
+        self.segments.iter().map(|s| s.messages.len()).sum()
+    }
+
+    /// 最后一条消息的引用（若无返回 None）。
+    pub fn last_message(&self) -> Option<&Message> {
+        self.segments.last().and_then(|seg| seg.messages.last())
+    }
+
+    /// 按扁平消息截断到指定长度（回滚用）。
+    ///
+    /// 从末尾逐条删除直到扁平总长度 == `len`。
+    pub fn truncate_flat(&mut self, len: usize) {
+        loop {
+            let current = self.message_count();
+            if current <= len {
+                break;
+            }
+            // 从最后一个 segment 的末尾删除一条
+            if let Some(last_seg) = self.segments.last_mut() {
+                if !last_seg.messages.is_empty() {
+                    last_seg.messages.pop();
+                } else {
+                    // 空 segment，移除
+                    self.segments.pop();
+                }
+            } else {
+                break;
+            }
+        }
     }
 }
 
@@ -307,5 +375,75 @@ mod tests {
         assert!(de.parent_id.is_none());
         assert!(de.summary.is_none());
         assert!(de.messages.is_empty());
+    }
+
+    // ── 新增 API 测试 ──────────────────────────────────
+
+    #[test]
+    fn test_push_to_active_appends_to_last_segment() {
+        let mut chain = ChatChain {
+            segments: vec![ChatSegment::normal(None)],
+        };
+        chain.push_to_active(user_msg("hello"));
+        assert_eq!(chain.messages().len(), 1);
+        assert_eq!(chain.messages()[0].text_content(), "hello");
+    }
+
+    #[test]
+    fn test_push_to_active_creates_segment_if_empty() {
+        let mut chain = ChatChain::default();
+        chain.push_to_active(user_msg("auto-seg"));
+        assert_eq!(chain.active_segments().len(), 1);
+        assert_eq!(chain.messages().len(), 1);
+    }
+
+    #[test]
+    fn test_messages_flat_equals_messages() {
+        let mut chain = ChatChain {
+            segments: vec![ChatSegment::normal(None)],
+        };
+        chain.push(user_msg("a"));
+        chain.push(asst_msg("b"));
+        // 逐元素比对（Message 无 PartialEq）
+        let flat = chain.messages_flat();
+        let msgs = chain.messages();
+        assert_eq!(flat.len(), msgs.len());
+        assert_eq!(flat[0].text_content(), msgs[0].text_content());
+        assert_eq!(flat[1].text_content(), msgs[1].text_content());
+    }
+
+    #[test]
+    fn test_replace_chain() {
+        let mut chain = ChatChain {
+            segments: vec![ChatSegment::normal(None)],
+        };
+        chain.push(user_msg("old"));
+
+        let mut new_chain = ChatChain::default();
+        new_chain.push(user_msg("new1"));
+        new_chain.push(asst_msg("new2"));
+
+        chain.replace_chain(new_chain);
+        assert_eq!(chain.messages().len(), 2);
+        assert_eq!(chain.messages()[0].text_content(), "new1");
+        assert_eq!(chain.messages()[1].text_content(), "new2");
+    }
+
+    #[test]
+    fn test_from_flat_messages_empty() {
+        let chain = ChatChain::from_flat_messages(Vec::new());
+        assert!(chain.is_empty());
+        assert_eq!(chain.active_segments().len(), 0);
+    }
+
+    #[test]
+    fn test_from_flat_messages_single_segment() {
+        let msgs = vec![user_msg("a"), asst_msg("b"), user_msg("c")];
+        let chain = ChatChain::from_flat_messages(msgs);
+        // 此阶段全部放入单个 segment
+        assert_eq!(chain.active_segments().len(), 1);
+        assert_eq!(chain.messages().len(), 3);
+        assert_eq!(chain.messages()[0].text_content(), "a");
+        assert_eq!(chain.messages()[2].text_content(), "c");
     }
 }
