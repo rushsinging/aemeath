@@ -1497,7 +1497,7 @@ async fn test_stall_detector_resets_across_user_turns() {
 fn test_is_new_user_turn_message_genuine_user() {
     // 正常路径：真正的新用户输入 → true（应触发 per-turn 重置）。
     let msg = Message::user("turn-1");
-    assert!(super::loop_runner::is_new_user_turn_message(Some(&msg)));
+    assert!(super::idle_lifecycle::is_new_user_turn_message(Some(&msg)));
 }
 
 #[test]
@@ -1512,7 +1512,7 @@ fn test_is_new_user_turn_message_tool_result_is_not_new_turn() {
         Vec::new(),
     )]);
     assert!(tool_msg.has_tool_results());
-    assert!(!super::loop_runner::is_new_user_turn_message(Some(
+    assert!(!super::idle_lifecycle::is_new_user_turn_message(Some(
         &tool_msg
     )));
 }
@@ -1521,7 +1521,7 @@ fn test_is_new_user_turn_message_tool_result_is_not_new_turn() {
 fn test_is_new_user_turn_message_system_generated_is_not_new_turn() {
     // 边界：stop-hook 阻断注入的 system-generated 用户消息 → false（回合仍在继续）。
     let sys_msg = Message::system_generated_user("<system-reminder>keep working</system-reminder>");
-    assert!(!super::loop_runner::is_new_user_turn_message(Some(
+    assert!(!super::idle_lifecycle::is_new_user_turn_message(Some(
         &sys_msg
     )));
 }
@@ -1536,10 +1536,10 @@ fn test_is_new_user_turn_message_assistant_or_empty_is_not_new_turn() {
         }],
         metadata: None,
     };
-    assert!(!super::loop_runner::is_new_user_turn_message(Some(
+    assert!(!super::idle_lifecycle::is_new_user_turn_message(Some(
         &assistant
     )));
-    assert!(!super::loop_runner::is_new_user_turn_message(None));
+    assert!(!super::idle_lifecycle::is_new_user_turn_message(None));
 }
 
 /// 记录每次 LLM 调用时 messages 中最后一条用户消息的文本。
