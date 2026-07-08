@@ -134,6 +134,20 @@ sdk         → share, utils
 - **PermissionDecision 与 HookDecision 分离**。
 - **Memory 不依赖 Skill / Guidance**。
 
+## 会话历史单一真相
+
+会话历史（Session / Chat / Turn 的消息流）**MUST** 有唯一可变真相——与 `WorkspaceService`（唯一可变 workspace 状态源）、TUI 输入（唯一真相在 `model.input.document`）同一 doctrine。它是当前仓库唯一尚未收口的核心状态。
+
+**唯一真相 = runtime core 单一持有的领域聚合 `Session` + `ChatChain`**（`ChatChain` = 按真实 user turn 分段的 `ChatSegment` 链，`business/session/chat_chain.rs`）。其余全是它的派生投影：
+
+- **持久化**（`storage` 出站端口）：磁盘 `Session.chats` JSON 只是聚合的序列化快照，仅静止 / 重启时权威。
+- **给 LLM**：`Message::to_llm_view` 的扁平 text-first 列表是按需派生读模型（`ToolResult` 降 text-first、剥结构化 data），用完即弃，**NEVER** 当存储。
+- **TUI**：`conversation.timeline` 是只读渲染投影，订阅领域事件增量维护，单向 `domain → event → view`。
+
+**现状违背**（详细数据流诊断见 [#680](https://github.com/rushsinging/aemeath/issues/680)）：真相散落 ≥5 处——磁盘 `chats`、runtime `current_messages`（扁平 `Vec<Message>`，**非聚合**）、loop 本地 `messages`、TUI `chat.messages`（每 turn 被 runtime 整块覆盖的上下文镜像）、TUI `timeline`。`ChatChain` 仅在 load / save 瞬间存在，`start_new_segment()` 是死代码 → turn 边界在运行时被摧毁（这正是 microcompact 只能退化成按 `Role::User` 数消息、边界偏移的根因）。
+
+**收口方向**：runtime 直接持有并按 turn 维护 `ChatChain` 聚合；`storage` 端口化，落盘忠实序列化聚合；TUI 投影化——删 `chat.messages` 上下文镜像、废 `sync_current_messages` 回写、收敛单一 resume 落点。
+
 ## 模块设计索引
 
 | 模块 | 设计文档 | 角色 |
