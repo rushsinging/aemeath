@@ -834,22 +834,20 @@ where
         }
 
         loop_fsm.transition(ChatLoopTransition::Compact);
-        // TODO(#680): microcompact 已完全禁用（主循环）。
-        // 待 #680 按 segment 边界修复后，恢复以下调用与 MicrocompactDone 事件 emit。
-        // // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
-        // // 在 auto-compact 前执行，可能减少 token 足以跳过 LLM 摘要。
-        // let mc_cleared = crate::business::compact::microcompact_messages(&mut messages);
-        // if mc_cleared > 0 {
-        //     log::info!(target: crate::LOG_TARGET,
-        //         "[microcompact] cleared {} stale exploratory tool results", mc_cleared);
-        //     // 同步到 TUI 镜像（仅同步 messages，不再向对话流注入 SystemMessage）
-        //     let _ = sink
-        //         .send_event(RuntimeStreamEvent::MicrocompactDone {
-        //             messages: messages.clone(),
-        //             cleared_count: mc_cleared,
-        //         })
-        //         .await;
-        // }
+        // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
+        // 在 auto-compact 前执行，可能减少 token 足以跳过 LLM 摘要。
+        // 保护最近 3 个 segment（大 loop），折叠更早的探索类 ToolResult。
+        let mc_cleared = crate::business::compact::microcompact_chain(&mut chain);
+        if mc_cleared > 0 {
+            log::info!(target: crate::LOG_TARGET,
+                "[microcompact] cleared {} stale exploratory tool results", mc_cleared);
+            let _ = sink
+                .send_event(RuntimeStreamEvent::MicrocompactDone {
+                    messages: chain.messages_flat(),
+                    cleared_count: mc_cleared,
+                })
+                .await;
+        }
         // compact：发生时替换 messages 为 recent tail，summary 走 system。
         // resume 保护 + 产生时定型原则下，messages 产生后只在 compact 时被替换。
         if let Some(outcome) = auto_compact(

@@ -95,6 +95,11 @@ impl ChatChain {
         Self { segments }
     }
 
+    /// 从已有段列表构造（测试 / restore 用）。
+    pub fn from_segments(segments: Vec<ChatSegment>) -> Self {
+        Self { segments }
+    }
+
     /// 扁平视图：合并所有段的 messages（供 chat loop 使用）。
     pub fn messages(&self) -> Vec<Message> {
         self.segments
@@ -169,9 +174,14 @@ impl ChatChain {
         self.segments = vec![ChatSegment::compact(summary, recent_messages)];
     }
 
-    /// 活跃链的段列表（供持久化）
+    /// 活跃链的段列表（供持久化 / 只读访问）
     pub fn active_segments(&self) -> &[ChatSegment] {
         &self.segments
+    }
+
+    /// 活跃链的段列表（可变访问，供 microcompact 等原地修改）
+    pub fn active_segments_mut(&mut self) -> &mut [ChatSegment] {
+        &mut self.segments
     }
 
     /// 所有段是否均为空消息
