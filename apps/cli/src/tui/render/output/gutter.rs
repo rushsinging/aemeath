@@ -26,6 +26,7 @@ pub fn marker_glyph(kind: &OutputBlockKind) -> &'static str {
 pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'static str {
     match kind {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
+            ToolSemanticStatus::Pending => "○",
             ToolSemanticStatus::Success => "✓",
             ToolSemanticStatus::Error => "✗",
             ToolSemanticStatus::Cancelled => "–",
@@ -57,6 +58,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
 fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
     match kind {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
+            ToolSemanticStatus::Pending => theme::TEXT_MUTED,
             ToolSemanticStatus::Success => theme::SUCCESS,
             ToolSemanticStatus::Error => theme::ERROR,
             ToolSemanticStatus::Running => theme::TOOL_RUNNING,
@@ -182,6 +184,7 @@ mod tests {
 
     #[test]
     fn test_marker_glyph_for_tool_status() {
+        assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Pending)), "○");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Success)), "✓");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Error)), "✗");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Running)), "●");
