@@ -47,7 +47,7 @@ pub trait Tool: Send + Sync {
     }
 
     fn is_concurrency_safe(&self) -> bool {
-        true
+        false
     }
 
     fn timeout_secs(&self) -> u64 {
@@ -139,7 +139,7 @@ pub trait TypedTool: Send + Sync {
     }
 
     fn is_concurrency_safe(&self) -> bool {
-        true
+        false
     }
 
     fn timeout_secs(&self) -> u64 {

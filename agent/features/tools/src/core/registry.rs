@@ -2,9 +2,8 @@
 
 use crate::business::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep, lsp,
-    memory_tool, plan_mode, skill_tool, sleep, task_create, task_get, task_list,
-    task_list_complete, task_list_create, task_stop, task_update, tool_search, web_fetch,
-    web_search, worktree,
+    memory_tool, plan_mode, skill_tool, task_create, task_get, task_list, task_list_complete,
+    task_list_create, task_stop, task_update, tool_search, web_fetch, web_search, worktree,
 };
 use share::skill_ops::Skill;
 use std::collections::HashMap;
@@ -151,7 +150,6 @@ pub fn register_tools(
     reg!("Memory", memory_tool::MemoryTool);
 
     // Utility tools
-    reg!("Sleep", sleep::SleepTool);
     reg!("AskUserQuestion", ask_user::AskUserQuestionTool);
     reg!("Brief", brief::BriefTool);
 

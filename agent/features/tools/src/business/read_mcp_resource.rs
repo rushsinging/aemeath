@@ -67,7 +67,8 @@ impl TypedTool for ReadMcpResourceTool {
     }
 
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // MCP resource semantics are server-defined; keep serial until capabilities say otherwise.
+        false
     }
 
     async fn call(

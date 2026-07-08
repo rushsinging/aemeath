@@ -41,7 +41,8 @@ impl TypedTool for LspTool {
     }
 
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Conservative default: diagnostics may run cargo/tsc/go and write build caches.
+        false
     }
     fn path_accesses(&self) -> &'static [PathAccess] {
         &FILE_ACCESS
