@@ -70,7 +70,10 @@ async fn run_single_turn(
 ) -> Result<(), sdk::SdkError> {
     let mut stream = client
         .chat(sdk::ChatRequest {
-            messages: vec![sdk::ChatMessage::user_text(text)],
+            user_input: Some(sdk::UserInput {
+                text,
+                images: Vec::new(),
+            }),
             queue_drain: None,
             input_events: None,
         })

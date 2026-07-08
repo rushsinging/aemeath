@@ -16,7 +16,6 @@ impl App {
         self.model.session.apply(SessionIntent::SetCurrentSession {
             id: session_id.to_string(),
         });
-        self.chat.messages.clear();
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         // 走 ResumeConversation intent，不触发 spinner 副作用
         self.model.conversation.apply(
@@ -26,7 +25,6 @@ impl App {
                 },
             ),
         );
-        self.chat.messages = messages.clone();
         self.mark_output_dirty();
         apply_resume_input_history(self, &messages);
         self.append_system_notice(format!(

@@ -16,7 +16,6 @@ impl App {
             input_event_port,
             agent_client,
             fallback_context: self.fallback_runtime_context(),
-            messages: self.chat.messages.clone(),
         })
     }
 

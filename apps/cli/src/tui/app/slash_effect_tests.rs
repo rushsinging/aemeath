@@ -11,7 +11,6 @@ use crate::tui::effect::effect::Effect;
 #[ignore = "#567: SaveSession 正在迁移到事件流，Effect 路径将被删除"]
 async fn test_save_session_effect_notify_emits_session_saved() {
     let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
-    app.chat.messages.push(sdk::ChatMessage::user_text("hello"));
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
@@ -52,7 +51,13 @@ async fn test_save_session_effect_no_client_emits_saved() {
         std::env::temp_dir(),
         "test-model".to_string(),
     );
-    app.chat.messages.push(sdk::ChatMessage::user_text("hi"));
+    app.model.conversation.apply(
+        crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+            crate::tui::model::conversation::intent::ResumeConversation {
+                messages: vec![sdk::ChatMessage::user_text("hi")],
+            },
+        ),
+    );
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
