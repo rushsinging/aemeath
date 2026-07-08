@@ -216,7 +216,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
         current_cancel: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
-        current_messages: Arc::new(Mutex::new(Vec::new())),
+        current_chain: Arc::new(Mutex::new(crate::business::session::ChatChain::default())),
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
         workspace,

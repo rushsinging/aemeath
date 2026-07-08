@@ -49,19 +49,22 @@ pub(super) async fn chat_impl(
         }
     }
 
+    // 构造 ChatChain（单 segment 包裹全部消息）并写入共享 chain slot。
+    let chain = crate::business::session::ChatChain::from_flat_messages(messages);
+
     *me.inner
-        .current_messages
+        .current_chain
         .lock()
-        .map_err(|_| SdkError::Internal("当前 session 消息锁已损坏".to_string()))? =
-        messages.clone();
+        .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))? =
+        chain.clone();
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = SdkChatEventSink {
         tx,
-        current_messages: me.inner.current_messages.clone(),
         change_tx: me.inner.change_tx.clone(),
     };
     let inner = me.inner.clone();
+    let current_chain_slot = inner.current_chain.clone();
     tokio::spawn(async move {
         crate::business::chat::process_chat_loop(crate::business::chat::ChatLoopContext {
             sink,
@@ -72,7 +75,8 @@ pub(super) async fn chat_impl(
             system_blocks: inner.context.resources.system_blocks.clone(),
             system_prompt_text: inner.context.resources.system_prompt_text.clone(),
             user_context: inner.context.resources.user_context.clone(),
-            messages,
+            chain,
+            current_chain_slot,
             context_size: inner.context.resources.context_size,
             workspace: inner.workspace.clone(),
             session_id: inner.session_id.clone(),
@@ -122,8 +126,8 @@ pub(super) async fn chat_impl(
                     let inner = inner.clone();
                     Box::pin(async move {
                         let me = super::accessors::AgentClientImpl { inner };
-                        // 从 inner.current_messages 读取
-                        let messages = me.inner.current_messages.lock().unwrap().clone();
+                        // 从 inner.current_chain 读取扁平消息
+                        let messages = me.inner.current_chain.lock().unwrap().messages_flat();
                         let sdk_msgs: Vec<sdk::ChatMessage> = messages
                             .into_iter()
                             .map(super::mapping::message_to_sdk)
@@ -179,8 +183,8 @@ pub(super) async fn chat_impl(
         if let Ok(mut guard) = inner.current_cancel.lock() {
             *guard = tokio_util::sync::CancellationToken::new();
         }
-        // auto-save：loop 退出后自动保存当前 session（messages 已通过各 sync 事件
-        // 同步到 inner.current_messages）。TUI 退出时只需 drop input_event_tx →
+        // auto-save：loop 退出后自动保存当前 session（chain 已通过 loop 内
+        // 写共享 chain slot 同步到 inner.current_chain）。TUI 退出时只需 drop input_event_tx →
         // loop shutdown → runtime 自动 save，不再调 session RPC。
         if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {
             log::warn!(target: "aemeath:agent:runtime", "auto-save failed on loop exit: {e}");
