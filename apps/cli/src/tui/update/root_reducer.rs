@@ -72,7 +72,9 @@ fn apply_conversation_changes(
             | ConversationChange::ChatCompleting { .. } => runtime.complete_chat(),
             ConversationChange::AssistantTextAppended { .. } => runtime.generate(),
             ConversationChange::ThinkingTextAppended { .. } => runtime.think(),
-            ConversationChange::ToolCallObserved { name, .. } => runtime.start_tool_call(name),
+            ConversationChange::ToolCallBound { name, running, .. } if *running => {
+                runtime.start_tool_call(name)
+            }
             ConversationChange::ToolCallCompleted { .. } => runtime.complete_tool_call(),
             ConversationChange::ErrorAppended { .. } => runtime.abort_chat(),
             ConversationChange::AgentProgressRecorded { .. } => runtime.report_agent_progress(),

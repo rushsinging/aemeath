@@ -1,6 +1,8 @@
 use crate::business::agent::{Agent, ToolCall, ToolExecution};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
+use crate::business::chat::looping::{
+    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use share::tool::ToolOutcome;
@@ -8,7 +10,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::tools::{
-    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_result,
+    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_call_status,
+    send_tool_result,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -238,12 +241,16 @@ where
         };
         let error_detail = blocked_result.error.as_deref().unwrap_or(default_blocked);
         let result = ToolExecution::new(&owned_call, ToolOutcome::error(error_detail));
+        send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
         send_tool_result(sink, context, &result).await;
         return vec![result];
     }
     // Only Bash supports stdout streaming via progress_tx. For other tools,
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = owned_call.name == "Bash";
+
+    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Ready).await;
+    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
 
     let exec_results = if is_bash {
         // Set up progress channel for stdout streaming (mirrors agent_calls.rs
