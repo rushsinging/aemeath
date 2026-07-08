@@ -22,8 +22,9 @@ pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,
     turn_count: usize,
     sink: &S,
-    messages: &mut Vec<Message>,
+    chain: &mut crate::business::session::ChatChain,
     language: &str,
+    segment_id: &str,
 ) where
     S: ChatEventSink,
 {
@@ -53,9 +54,9 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                     let reminder = Message::user(
                         "[guidance 已更新] guidance 文件已被外部修改，请关注后续 system prompt 中的最新指引。".to_string(),
                     );
-                    messages.push(reminder);
+                    chain.push(reminder, segment_id);
                     sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
-                        messages: messages.clone(),
+                        messages: chain.messages_flat(),
                     })
                     .await;
                     log::info!(target: LOG_TARGET, "[config_reload] guidance inject mode: injected reminder into messages");
@@ -67,7 +68,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                         _ => "<system-reminder>The guidance files have been modified externally. Please use the Read tool to re-read ~/.agents/guidance/_default.md and the matching model prefix file to get the latest instructions.</system-reminder>",
                     };
                     let reminder = Message::user(reminder_text.to_string());
-                    messages.push(reminder);
+                    chain.push(reminder, segment_id);
                     log::info!(target: LOG_TARGET, "[config_reload] guidance remind mode: injected system-reminder");
                 }
                 GuidanceReloadPolicy::Confirm => {
@@ -77,7 +78,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
                         _ => "<system-reminder>The guidance files have been modified externally and will be applied after user confirmation. The TUI status bar shows \"guidance changes pending\".</system-reminder>",
                     };
                     let reminder = Message::user(reminder_text.to_string());
-                    messages.push(reminder);
+                    chain.push(reminder, segment_id);
                     sink.send_event(RuntimeStreamEvent::SystemMessage(
                         "[guidance] guidance 文件已变更，等待用户确认后应用".to_string(),
                     ))

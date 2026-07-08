@@ -64,127 +64,130 @@ pub(super) async fn chat_impl(
         change_tx: me.inner.change_tx.clone(),
     };
     let inner = me.inner.clone();
-    let current_chain_slot = inner.current_chain.clone();
     tokio::spawn(async move {
-        crate::business::chat::process_chat_loop(crate::business::chat::ChatLoopContext {
-            sink,
-            queue: RuntimeQueueDrainPort::new(queue_drain),
-            input_events: RuntimeInputEventDrainPort::new(input_events),
-            client: inner.context.resources.client.clone(),
-            registry: inner.context.resources.registry.clone(),
-            system_blocks: inner.context.resources.system_blocks.clone(),
-            system_prompt_text: inner.context.resources.system_prompt_text.clone(),
-            user_context: inner.context.resources.user_context.clone(),
-            chain,
-            current_chain_slot,
-            context_size: inner.context.resources.context_size,
-            workspace: inner.workspace.clone(),
-            session_id: inner.session_id.clone(),
-            read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            session_reminders: Arc::new(Mutex::new(Default::default())),
-            agent_runner: Some(inner.context.resources.agent_runner.clone()),
-            allow_all: inner.context.resources.allow_all,
-            cancel: cancel_slot,
-            task_store: inner.context.resources.task_store.clone(),
-            max_tool_concurrency: inner.max_tool_concurrency,
-            max_agent_concurrency: inner.max_agent_concurrency,
-            agent_semaphore: inner.context.resources.agent_semaphore.clone(),
-            hook_runner: inner.context.resources.hook_runner.clone(),
-            memory_config: inner.context.resources.memory_config.clone(),
-            language: inner.context.resources.language.clone(),
-            frozen_chats: inner.frozen_chats.clone(),
-            active_summary: inner.active_summary.clone(),
-            reasoning_graph: inner
-                .context
-                .resources
-                .reasoning_graph_config
-                .as_ref()
-                .filter(|c| c.enabled)
-                .map(|c| crate::business::reasoning_graph::ReasoningGraph::new(c.clone())),
-            build_switched_client: {
-                let cwd = inner.cwd.clone();
-                std::sync::Arc::new(move |selection: &str| {
-                    let selection = selection.to_string();
-                    let cwd = cwd.clone();
-                    Box::pin(async move {
-                        super::trait_model::build_llm_client_for_switch(&selection, &cwd).await
+        let final_chain =
+            crate::business::chat::process_chat_loop(crate::business::chat::ChatLoopContext {
+                sink,
+                queue: RuntimeQueueDrainPort::new(queue_drain),
+                input_events: RuntimeInputEventDrainPort::new(input_events),
+                client: inner.context.resources.client.clone(),
+                registry: inner.context.resources.registry.clone(),
+                system_blocks: inner.context.resources.system_blocks.clone(),
+                system_prompt_text: inner.context.resources.system_prompt_text.clone(),
+                user_context: inner.context.resources.user_context.clone(),
+                chain,
+                context_size: inner.context.resources.context_size,
+                workspace: inner.workspace.clone(),
+                session_id: inner.session_id.clone(),
+                read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
+                session_reminders: Arc::new(Mutex::new(Default::default())),
+                agent_runner: Some(inner.context.resources.agent_runner.clone()),
+                allow_all: inner.context.resources.allow_all,
+                cancel: cancel_slot,
+                task_store: inner.context.resources.task_store.clone(),
+                max_tool_concurrency: inner.max_tool_concurrency,
+                max_agent_concurrency: inner.max_agent_concurrency,
+                agent_semaphore: inner.context.resources.agent_semaphore.clone(),
+                hook_runner: inner.context.resources.hook_runner.clone(),
+                memory_config: inner.context.resources.memory_config.clone(),
+                language: inner.context.resources.language.clone(),
+                frozen_chats: inner.frozen_chats.clone(),
+                active_summary: inner.active_summary.clone(),
+                reasoning_graph: inner
+                    .context
+                    .resources
+                    .reasoning_graph_config
+                    .as_ref()
+                    .filter(|c| c.enabled)
+                    .map(|c| crate::business::reasoning_graph::ReasoningGraph::new(c.clone())),
+                build_switched_client: {
+                    let cwd = inner.cwd.clone();
+                    std::sync::Arc::new(move |selection: &str| {
+                        let selection = selection.to_string();
+                        let cwd = cwd.clone();
+                        Box::pin(async move {
+                            super::trait_model::build_llm_client_for_switch(&selection, &cwd).await
+                        })
                     })
-                })
-            },
-            save_session: {
-                let inner = inner.clone();
-                std::sync::Arc::new(move || {
+                },
+                save_chain: {
                     let inner = inner.clone();
-                    Box::pin(
-                        async move { super::trait_session::save_session_from_handle(&inner).await },
-                    )
-                })
-            },
-            run_reflection_on_demand: {
-                let inner = inner.clone();
-                std::sync::Arc::new(move || {
-                    let inner = inner.clone();
-                    Box::pin(async move {
-                        let me = super::accessors::AgentClientImpl { inner };
-                        // 从 inner.current_chain 读取扁平消息
-                        let messages = me.inner.current_chain.lock().unwrap().messages_flat();
-                        let sdk_msgs: Vec<sdk::ChatMessage> = messages
-                            .into_iter()
-                            .map(super::mapping::message_to_sdk)
-                            .collect();
-                        super::trait_reflection::run_reflection_impl(&me, sdk_msgs).await
+                    std::sync::Arc::new(move |chain: &crate::business::session::ChatChain| {
+                        let inner = inner.clone();
+                        let chain = chain.clone();
+                        Box::pin(async move {
+                            super::trait_session::save_chain_to_handle(&chain, &inner).await
+                        })
                     })
-                })
-            },
-            apply_reflection_on_demand: {
-                let inner = inner.clone();
-                std::sync::Arc::new(move |output: sdk::ReflectionOutputView| {
+                },
+                run_reflection_on_demand: {
                     let inner = inner.clone();
-                    Box::pin(async move {
-                        let me = super::accessors::AgentClientImpl { inner };
-                        super::trait_reflection::apply_reflection_impl(&me, output).await
+                    std::sync::Arc::new(move || {
+                        let inner = inner.clone();
+                        Box::pin(async move {
+                            let me = super::accessors::AgentClientImpl { inner };
+                            // 从 inner.current_chain 读取扁平消息
+                            let messages = me.inner.current_chain.lock().unwrap().messages_flat();
+                            let sdk_msgs: Vec<sdk::ChatMessage> = messages
+                                .into_iter()
+                                .map(super::mapping::message_to_sdk)
+                                .collect();
+                            super::trait_reflection::run_reflection_impl(&me, sdk_msgs).await
+                        })
                     })
-                })
-            },
-            list_models: {
-                let inner = inner.clone();
-                std::sync::Arc::new(move || {
+                },
+                apply_reflection_on_demand: {
                     let inner = inner.clone();
-                    Box::pin(async move {
-                        let me = super::accessors::AgentClientImpl { inner };
-                        super::trait_model::list_models_impl(&me).await
+                    std::sync::Arc::new(move |output: sdk::ReflectionOutputView| {
+                        let inner = inner.clone();
+                        Box::pin(async move {
+                            let me = super::accessors::AgentClientImpl { inner };
+                            super::trait_reflection::apply_reflection_impl(&me, output).await
+                        })
                     })
-                })
-            },
-            list_reminders: {
-                let inner = inner.clone();
-                std::sync::Arc::new(move || {
+                },
+                list_models: {
                     let inner = inner.clone();
-                    Box::pin(async move {
-                        let me = super::accessors::AgentClientImpl { inner };
-                        super::trait_memory::list_reminders_impl(&me).await
+                    std::sync::Arc::new(move || {
+                        let inner = inner.clone();
+                        Box::pin(async move {
+                            let me = super::accessors::AgentClientImpl { inner };
+                            super::trait_model::list_models_impl(&me).await
+                        })
                     })
-                })
-            },
-            list_sessions: {
-                let inner = inner.clone();
-                std::sync::Arc::new(move || {
+                },
+                list_reminders: {
                     let inner = inner.clone();
-                    Box::pin(async move {
-                        let me = super::accessors::AgentClientImpl { inner };
-                        super::trait_session::list_sessions_impl(&me).await
+                    std::sync::Arc::new(move || {
+                        let inner = inner.clone();
+                        Box::pin(async move {
+                            let me = super::accessors::AgentClientImpl { inner };
+                            super::trait_memory::list_reminders_impl(&me).await
+                        })
                     })
-                })
-            },
-        })
-        .await;
+                },
+                list_sessions: {
+                    let inner = inner.clone();
+                    std::sync::Arc::new(move || {
+                        let inner = inner.clone();
+                        Box::pin(async move {
+                            let me = super::accessors::AgentClientImpl { inner };
+                            super::trait_session::list_sessions_impl(&me).await
+                        })
+                    })
+                },
+            })
+            .await;
         // loop 退出（shutdown / clear）后把取消槽重置为干净 token，
         // 避免遗留的已取消 token 影响后续可能复用同一 RuntimeHandle 的 chat()。
         if let Ok(mut guard) = inner.current_cancel.lock() {
             *guard = tokio_util::sync::CancellationToken::new();
         }
-        // auto-save：loop 退出后自动保存当前 session（chain 已通过 loop 内
-        // 写共享 chain slot 同步到 inner.current_chain）。TUI 退出时只需 drop input_event_tx →
+        // 最终 chain 同步到共享 slot（覆盖 loop 内任何未同步的变更）。
+        if let Ok(mut guard) = inner.current_chain.lock() {
+            *guard = final_chain;
+        }
+        // auto-save：loop 退出后自动保存当前 session。TUI 退出时只需 drop input_event_tx →
         // loop shutdown → runtime 自动 save，不再调 session RPC。
         if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {
             log::warn!(target: "aemeath:agent:runtime", "auto-save failed on loop exit: {e}");

@@ -44,7 +44,9 @@ async fn test_save_session_effect_silent_when_not_notify_and_empty() {
 
 /// A2 错误路径：无 agent client 时 /save 回灌 SlashCommandFailed 反馈。
 #[tokio::test]
-async fn test_save_session_effect_no_client_emits_failure() {
+async fn test_save_session_effect_no_client_emits_saved() {
+    // #688: /save 不再发 ChatInputEvent::SaveSession（runtime 有 turn-level auto-save）。
+    // 无 client 时仍直接返回 SessionSaved UX 反馈。
     let mut app = super::App::new(
         "test-session".to_string(),
         std::env::temp_dir(),
@@ -56,13 +58,13 @@ async fn test_save_session_effect_no_client_emits_failure() {
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
         .await;
 
-    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
+    // spawn_guarded 后台执行，需 yield 让后台任务完成。
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let event = rx.try_recv().expect("/save 无 client 应回灌失败事件");
+    let event = rx.try_recv().expect("/save 应回灌 SessionSaved 事件");
     assert!(
-        matches!(event, UiEvent::SlashCommandFailed { ref message } if message.contains("Failed to save session")),
-        "应回灌保存失败反馈，实际: {event:?}"
+        matches!(event, UiEvent::SessionSaved { ref id } if id == "test-session"),
+        "应回灌 SessionSaved，实际: {event:?}"
     );
 }
 

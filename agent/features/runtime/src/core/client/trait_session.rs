@@ -11,17 +11,15 @@ pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<()
     save_session_from_handle(&me.inner).await
 }
 
-/// 从 RuntimeHandle 级别执行 save（不依赖 AgentClientImpl）。
-/// 供 chat_impl spawn task 中 loop 退出后 auto-save 使用。
-pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Result<(), SdkError> {
-    // 从 current_chain 聚合取活跃段（真实 segment 边界）
-    let active_segments: Vec<crate::business::session::ChatSegment> = {
-        let chain = inner
-            .current_chain
-            .lock()
-            .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))?;
-        chain.active_segments().to_vec()
-    };
+/// 从 chain + handle 数据保存 session。
+/// loop 内部直接传入 chain（无需经过 inner.current_chain）。
+pub(super) async fn save_chain_to_handle(
+    chain: &crate::business::session::ChatChain,
+    inner: &Arc<RuntimeHandle>,
+) -> Result<(), SdkError> {
+    // 从 chain 取活跃段（真实 segment 边界）
+    let active_segments: Vec<crate::business::session::ChatSegment> =
+        chain.active_segments().to_vec();
     let task_snapshot = {
         let snap = inner.context.resources.task_store.snapshot().await;
         if snap.tasks.is_empty() {
@@ -63,6 +61,17 @@ pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Resu
         .map_err(SdkError::Session)
 }
 
+/// 兼容：从 inner.current_chain 读 chain 后调 save_chain_to_handle。
+/// 仅供 load_session_impl 等 loop 外部路径使用。
+pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Result<(), SdkError> {
+    let chain = inner
+        .current_chain
+        .lock()
+        .map_err(|_| SdkError::Internal("当前 session chain 锁已损坏".to_string()))?
+        .clone();
+    save_chain_to_handle(&chain, inner).await
+}
+
 pub(super) async fn load_session_impl(
     me: &AgentClientImpl,
     id: &str,
@@ -79,11 +88,9 @@ pub(super) async fn load_session_impl(
             if let Ok(mut guard) = me.inner.frozen_chats.lock() {
                 *guard = restore.frozen_chats;
             }
-            // 写回 current_chain（从扁平消息构造单段链）
+            // 写回 current_chain（按 user turn 自动分段）
             if let Ok(mut guard) = me.inner.current_chain.lock() {
-                *guard = crate::business::session::ChatChain::from_flat_messages(
-                    restore.active_messages.clone(),
-                );
+                *guard = restore.active_chain.clone();
             }
 
             let sdk_messages: Vec<sdk::ChatMessage> = restore

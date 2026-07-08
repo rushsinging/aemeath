@@ -26,6 +26,7 @@ use crate::business::chat::looping::{
     RuntimeStreamHandler, RuntimeTurnContext,
 };
 use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
+use crate::business::session::ChatChain;
 use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
@@ -72,9 +73,6 @@ where
     pub system_prompt_text: String,
     pub user_context: String,
     pub chain: crate::business::session::ChatChain,
-    /// 共享 chain slot（供 save / reflection 等外部读者读取当前活跃链）。
-    /// loop 在每次 emit 事件前同步到该 slot。
-    pub current_chain_slot: Arc<std::sync::Mutex<crate::business::session::ChatChain>>,
     pub context_size: usize,
     pub workspace: Arc<project::api::WorkspaceService>,
     pub session_id: String,
@@ -107,9 +105,11 @@ where
     /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
     /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
     pub build_switched_client: SwitchClientFn,
-    /// 会话保存闭包（#567 S5）。由 core 层注入，idle 分支收到 `SaveSession` 时调用。
-    pub save_session: Arc<
-        dyn Fn() -> std::pin::Pin<
+    /// 会话保存闭包（#688）。由 core 层注入，直接接受 chain 引用保存。
+    pub save_chain: Arc<
+        dyn Fn(
+                &crate::business::session::ChatChain,
+            ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>,
             > + Send
             + Sync,
@@ -168,7 +168,9 @@ where
 }
 
 /// Background task: runs the agent loop and sends UI events via sink.
-pub async fn process_chat_loop<S, Q, I>(ctx: ChatLoopContext<S, Q, I>)
+pub async fn process_chat_loop<S, Q, I>(
+    ctx: ChatLoopContext<S, Q, I>,
+) -> crate::business::session::ChatChain
 where
     S: ChatEventSink,
     Q: QueueDrainPort,
@@ -184,7 +186,6 @@ where
         system_prompt_text,
         user_context,
         mut chain,
-        current_chain_slot,
         mut context_size,
         workspace,
         session_id,
@@ -204,7 +205,7 @@ where
         active_summary: active_summary_arc,
         reasoning_graph,
         build_switched_client,
-        save_session,
+        save_chain,
         run_reflection_on_demand,
         apply_reflection_on_demand,
         list_models,
@@ -257,6 +258,7 @@ where
     // 使 `DoneWithDuration` 的 duration 反映本回合时长而非会话总时长（#390 A1）。
     let mut turn_start = std::time::Instant::now();
     let mut turn_count: usize = 0;
+    let mut segment_id = String::new();
     let mut task_reminder_state = TaskReminderState::new();
     let mut stall_detector = StallDetector::new();
     let mut stop_hook_block_count: usize = 0;
@@ -317,17 +319,15 @@ where
                 )
                 .await
                 {
-                    let mut flat = chain.messages_flat();
                     apply_compact_outcome(
                         &sink,
                         outcome,
-                        &mut flat,
+                        &mut chain,
                         &frozen_chats,
                         &mut active_summary,
                         &active_summary_arc,
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                 }
                 // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
                 if $needs_resume {
@@ -441,7 +441,7 @@ where
                                 restore.repaired
                             );
                         }
-                        chain = crate::business::session::ChatChain::from_flat_messages(restore.active_messages);
+                        chain = restore.active_chain;
                         active_summary = restore.active_summary.clone();
                         if let Ok(mut guard) = active_summary_arc.lock() {
                             *guard = restore.active_summary;
@@ -506,32 +506,6 @@ where
                 }
                 continue;
             }
-            PendingCommand::SaveSession => match (save_session)().await {
-                Ok(()) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText {
-                            text: format!("Session saved: {}", session_id),
-                            is_error: false,
-                        })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-                Err(e) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText {
-                            text: format!("Failed to save session: {e}"),
-                            is_error: true,
-                        })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-            },
             PendingCommand::RunReflection => match run_reflection_on_demand().await {
                 Ok(view) => {
                     let _ = sink
@@ -681,19 +655,18 @@ where
         };
         first_loop_top = false;
         if should_idle {
-            let mut flat = chain.messages_flat();
             let idle_result = idle_until_resume_or_shutdown(
                 &input_events,
                 &sink,
                 &mut pending_input,
-                &mut flat,
+                &mut chain,
                 &task_store,
                 None,
             )
             .await;
-            chain = crate::business::session::ChatChain::from_flat_messages(flat);
             match idle_result {
-                IdleResult::Resumed => {
+                IdleResult::Resumed(seg) => {
+                    segment_id = seg;
                     // messages 已含新 UserMessage（由 idle 门内的 BeforeLlm gate 附加），
                     // pending_input 已清空。继续进入下方回合头：turn_count 推进、
                     // turn_rollback_baseline 在用户消息已入、assistant 未产生处捕获。
@@ -795,16 +768,15 @@ where
         };
 
         // ── turn 边界：检测配置/指令/guidance 文件变更 ──
-        let mut flat = chain.messages_flat();
         handle_turn_boundary_config(
             &mut config_snapshot,
             turn_count,
             &sink,
-            &mut flat,
+            &mut chain,
             &language,
+            &segment_id,
         )
         .await;
-        chain = crate::business::session::ChatChain::from_flat_messages(flat);
 
         // Refresh tool schemas each turn so dynamically registered MCP tools
         // are visible to the LLM once the background connector finishes.
@@ -815,28 +787,26 @@ where
         if cancel.is_cancelled() {
             // 回合起点即发现 token 已取消（外部在回合边界触发 cancel）：
             // 先看排队输入能否续跑；否则中止本回合、重置 token、回空闲。
-            let mut flat = chain.messages_flat();
             let outcome = drain_and_apply_gate(
                 GateKind::BeforeFinish,
                 &mut pending_input,
                 &queue,
                 &input_events,
                 &sink,
-                &mut flat,
+                &mut chain,
+                &segment_id,
                 &task_store,
             )
             .await;
-            chain = crate::business::session::ChatChain::from_flat_messages(flat);
             if outcome.decision == GateDecision::ContinueNextTurn {
                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                 continue;
             }
-            let mut flat = chain.messages_flat();
             let idle_result = cancel_to_idle(
                 &sink,
                 &input_events,
                 &mut loop_fsm,
-                &mut flat,
+                &mut chain,
                 &mut pending_input,
                 &task_store,
                 &cancel_slot,
@@ -844,9 +814,11 @@ where
                 &turn_context,
             )
             .await;
-            chain = crate::business::session::ChatChain::from_flat_messages(flat);
             match idle_result {
-                IdleResult::Resumed => continue,
+                IdleResult::Resumed(seg) => {
+                    segment_id = seg;
+                    continue;
+                }
                 IdleResult::CommandRequested(cmd) => {
                     handle_pending_command!(cmd, false);
                 }
@@ -901,44 +873,40 @@ where
         )
         .await
         {
-            let mut flat = chain.messages_flat();
             apply_compact_outcome(
                 &sink,
                 outcome,
-                &mut flat,
+                &mut chain,
                 &frozen_chats,
                 &mut active_summary,
                 &active_summary_arc,
             )
             .await;
-            chain = crate::business::session::ChatChain::from_flat_messages(flat);
         }
         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
 
-        let mut flat = chain.messages_flat();
         let gate = drain_and_apply_gate(
             GateKind::BeforeLlm,
             &mut pending_input,
             &queue,
             &input_events,
             &sink,
-            &mut flat,
+            &mut chain,
+            &segment_id,
             &task_store,
         )
         .await;
-        chain = crate::business::session::ChatChain::from_flat_messages(flat);
         match gate.decision {
             GateDecision::Proceed | GateDecision::ContinueNextTurn => {
                 loop_fsm.transition(ChatLoopTransition::ResumeRunning);
             }
             GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop => {
                 // before-llm 门禁收到取消 / /clear：中止本回合、重置 token、回空闲（不退 loop）。
-                let mut flat = chain.messages_flat();
                 let idle_result = cancel_to_idle(
                     &sink,
                     &input_events,
                     &mut loop_fsm,
-                    &mut flat,
+                    &mut chain,
                     &mut pending_input,
                     &task_store,
                     &cancel_slot,
@@ -946,9 +914,11 @@ where
                     &turn_context,
                 )
                 .await;
-                chain = crate::business::session::ChatChain::from_flat_messages(flat);
                 match idle_result {
-                    IdleResult::Resumed => continue,
+                    IdleResult::Resumed(seg) => {
+                        segment_id = seg;
+                        continue;
+                    }
                     IdleResult::CommandRequested(cmd) => {
                         handle_pending_command!(cmd, true);
                     }
@@ -1135,10 +1105,7 @@ where
                 })
                 .await;
 
-                chain.push(resp.assistant_message.clone());
-                if let Ok(mut guard) = current_chain_slot.lock() {
-                    *guard = chain.clone();
-                }
+                chain.push(resp.assistant_message.clone(), &segment_id);
                 sink.send_event(RuntimeStreamEvent::TurnStarted {
                     messages: chain.messages_flat(),
                 })
@@ -1150,18 +1117,17 @@ where
                     ))
                     .await;
                     loop_fsm.transition(ChatLoopTransition::TryStop);
-                    let mut flat = chain.messages_flat();
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
                         &mut pending_input,
                         &queue,
                         &input_events,
                         &sink,
-                        &mut flat,
+                        &mut chain,
+                        &segment_id,
                         &task_store,
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                     if gate.decision == GateDecision::ContinueNextTurn {
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         continue;
@@ -1199,12 +1165,12 @@ where
                             break;
                         }
                         loop_fsm.transition(ChatLoopTransition::StopBlocked);
-                        chain.push(Message::system_generated_user(format!(
-                            "<system-reminder>\n{feedback}\n</system-reminder>"
-                        )));
-                        if let Ok(mut guard) = current_chain_slot.lock() {
-                            *guard = chain.clone();
-                        }
+                        chain.push(
+                            Message::system_generated_user(format!(
+                                "<system-reminder>\n{feedback}\n</system-reminder>"
+                            )),
+                            &segment_id,
+                        );
                         sink.send_event(RuntimeStreamEvent::StopHookBlocked {
                             messages: chain.messages_flat(),
                         })
@@ -1244,18 +1210,17 @@ where
                         }
                     }
                     loop_fsm.transition(ChatLoopTransition::TryStop);
-                    let mut flat = chain.messages_flat();
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
                         &mut pending_input,
                         &queue,
                         &input_events,
                         &sink,
-                        &mut flat,
+                        &mut chain,
+                        &segment_id,
                         &task_store,
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                     let before_finish_gate_continue =
                         gate.decision == GateDecision::ContinueNextTurn;
                     if before_finish_gate_continue {
@@ -1323,12 +1288,12 @@ where
                             break;
                         }
                         loop_fsm.transition(ChatLoopTransition::StopBlocked);
-                        chain.push(Message::system_generated_user(format!(
-                            "<system-reminder>\n{feedback}\n</system-reminder>"
-                        )));
-                        if let Ok(mut guard) = current_chain_slot.lock() {
-                            *guard = chain.clone();
-                        }
+                        chain.push(
+                            Message::system_generated_user(format!(
+                                "<system-reminder>\n{feedback}\n</system-reminder>"
+                            )),
+                            &segment_id,
+                        );
                         sink.send_event(RuntimeStreamEvent::StopHookBlocked {
                             messages: chain.messages_flat(),
                         })
@@ -1338,18 +1303,17 @@ where
                             .assert_state(ChatLoopState::Running, "stop hook blocked resumes loop");
                         continue;
                     }
-                    let mut flat = chain.messages_flat();
                     let gate = drain_and_apply_gate(
                         GateKind::BeforeFinish,
                         &mut pending_input,
                         &queue,
                         &input_events,
                         &sink,
-                        &mut flat,
+                        &mut chain,
+                        &segment_id,
                         &task_store,
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                     if gate.decision == GateDecision::ContinueNextTurn {
                         // [loop_debug] stop hook 放行后，gate 又收到新输入 → 继续跑而非进 Idle。
                         log::debug!(target: crate::LOG_TARGET,
@@ -1366,10 +1330,10 @@ where
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
                     // #636 D1: turn-level save —— 每轮 turn 完成立即落盘，避免进程被
                     // kill 时丢失已完成 turn（SIGTERM/SIGHUP handler 见 chat 启动入口）。
-                    if let Err(e) = save_session().await {
+                    if let Err(e) = save_chain(&chain).await {
                         log::error!(
                             target: crate::LOG_TARGET,
-                            "turn-level save_session failed (turn {}): {} — 下次 exit 时仍会兜底 save",
+                            "turn-level save_chain failed (turn {}): {} — 下次 exit 时仍会兜底 save",
                             turn_count,
                             e
                         );
@@ -1379,17 +1343,15 @@ where
                         ChatLoopState::Idle,
                         "completed loop idles after stop hooks pass",
                     );
-                    let mut flat = chain.messages_flat();
                     let idle_result = idle_until_resume_or_shutdown(
                         &input_events,
                         &sink,
                         &mut pending_input,
-                        &mut flat,
+                        &mut chain,
                         &task_store,
                         Some(&cancel_slot),
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                     match idle_result {
                         IdleResult::Shutdown => {
                             loop_fsm.transition(ChatLoopTransition::StopSucceeded);
@@ -1399,7 +1361,8 @@ where
                             );
                             break;
                         }
-                        IdleResult::Resumed => {
+                        IdleResult::Resumed(seg) => {
+                            segment_id = seg;
                             loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                             continue;
                         }
@@ -1470,10 +1433,7 @@ where
                     let has_task_mutation = all_results
                         .iter()
                         .any(|r| super::events::is_task_store_mutation(&r.tool_name));
-                    chain.push(tool_results_for_api(all_results, &session_id));
-                    if let Ok(mut guard) = current_chain_slot.lock() {
-                        *guard = chain.clone();
-                    }
+                    chain.push(tool_results_for_api(all_results, &session_id), &segment_id);
                     // Sync after tool execution
                     sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
                         messages: chain.messages_flat(),
@@ -1488,29 +1448,27 @@ where
                         .await;
                     }
                     loop_fsm.transition(ChatLoopTransition::AwaitUser);
-                    let mut flat = chain.messages_flat();
                     let gate = drain_and_apply_gate(
                         GateKind::AfterBlockingBoundary,
                         &mut pending_input,
                         &queue,
                         &input_events,
                         &sink,
-                        &mut flat,
+                        &mut chain,
+                        &segment_id,
                         &task_store,
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                     if matches!(
                         gate.decision,
                         GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
                     ) {
                         // tool 执行后门禁收到取消 / /clear：中止本回合、重置 token、回空闲。
-                        let mut flat = chain.messages_flat();
                         let idle_result = cancel_to_idle(
                             &sink,
                             &input_events,
                             &mut loop_fsm,
-                            &mut flat,
+                            &mut chain,
                             &mut pending_input,
                             &task_store,
                             &cancel_slot,
@@ -1518,9 +1476,11 @@ where
                             &turn_context,
                         )
                         .await;
-                        chain = crate::business::session::ChatChain::from_flat_messages(flat);
                         match idle_result {
-                            IdleResult::Resumed => continue,
+                            IdleResult::Resumed(seg) => {
+                                segment_id = seg;
+                                continue;
+                            }
                             IdleResult::CommandRequested(cmd) => {
                                 handle_pending_command!(cmd, false);
                             }
@@ -1555,12 +1515,11 @@ where
                 {
                     // LLM 调用被取消（provider 报 Cancelled，或本回合 token 已取消）：
                     // 中止本回合、重置 token、回空闲（常驻 loop 不退出）。
-                    let mut flat = chain.messages_flat();
                     let idle_result = cancel_to_idle(
                         &sink,
                         &input_events,
                         &mut loop_fsm,
-                        &mut flat,
+                        &mut chain,
                         &mut pending_input,
                         &task_store,
                         &cancel_slot,
@@ -1568,9 +1527,11 @@ where
                         &turn_context,
                     )
                     .await;
-                    chain = crate::business::session::ChatChain::from_flat_messages(flat);
                     match idle_result {
-                        IdleResult::Resumed => continue,
+                        IdleResult::Resumed(seg) => {
+                            segment_id = seg;
+                            continue;
+                        }
                         IdleResult::CommandRequested(cmd) => {
                             handle_pending_command!(cmd, false);
                         }
@@ -1588,26 +1549,22 @@ where
                 let error_msg = e.to_string();
                 sink.send_event(RuntimeStreamEvent::Error(error_msg.clone()))
                     .await;
-                let mut flat = chain.messages_flat();
                 let gate = drain_and_apply_gate(
                     GateKind::BeforeFinish,
                     &mut pending_input,
                     &queue,
                     &input_events,
                     &sink,
-                    &mut flat,
+                    &mut chain,
+                    &segment_id,
                     &task_store,
                 )
                 .await;
-                chain = crate::business::session::ChatChain::from_flat_messages(flat);
                 if gate.decision == GateDecision::ContinueNextTurn {
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     continue;
                 }
                 // API error 不走 stop hook，直接发送 ApiError 事件并结束 turn。
-                if let Ok(mut guard) = current_chain_slot.lock() {
-                    *guard = chain.clone();
-                }
                 sink.send_event(RuntimeStreamEvent::ApiError {
                     messages: chain.messages_flat(),
                     error: error_msg.clone(),
@@ -1628,6 +1585,7 @@ where
     // stall 放行退出。channel-close 类 break（用户取消/关闭）由 TUI 端处理；
     // api-error break 发送 `ApiError` 事件作为 turn 结束信号。
     // 新增异常终止 break 路径时 MUST 遵守此契约并补充对应测试。
+    chain
 }
 
 /// idle 分支执行 `/think`：读当前 reasoning level，按 desired 设置新 level，
@@ -1691,7 +1649,8 @@ async fn execute_estimate_context<S>(
 
 /// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或待执行命令。
 enum IdleResult {
-    Resumed,
+    /// 收到新用户消息，已 append 到 chain。携带本 turn 的 segment ID。
+    Resumed(String),
     Shutdown,
     /// idle gate 收到待执行命令（Compact / SwitchModel / …，#497 泛化载体）。
     CommandRequested(PendingCommand),
@@ -1746,7 +1705,7 @@ async fn await_idle_input<I: InputEventDrainPort>(
                 super::event_kind_name(&event)
             );
             pending.push(event);
-            IdleResult::Resumed
+            IdleResult::Resumed(String::new())
         }
         None => {
             log::debug!(target: LOG_TARGET, "[loop_debug] await_idle_input channel closed → Shutdown");
@@ -1801,7 +1760,7 @@ async fn idle_until_resume_or_shutdown<I, S>(
     input_events: &I,
     sink: &S,
     pending: &mut PendingInputBuffer,
-    messages: &mut Vec<Message>,
+    chain: &mut ChatChain,
     task_store: &storage::api::TaskStore,
     cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
 ) -> IdleResult
@@ -1811,12 +1770,15 @@ where
 {
     loop {
         match await_idle_input(input_events, pending).await {
-            IdleResult::Resumed => {
+            IdleResult::Resumed(_) => {
+                // 生成新 segment ID（新 turn）
+                let segment_id = sdk::ids::ChatId::new_v7().to_string();
                 let gate = apply_gate(
                     GateKind::BeforeLlm,
                     pending,
                     sink,
-                    messages,
+                    chain,
+                    &segment_id,
                     &task_store,
                     true,
                 )
@@ -1834,7 +1796,7 @@ where
                     if let Some(slot) = cancel_slot {
                         reset_cancel(slot);
                     }
-                    return IdleResult::Resumed;
+                    return IdleResult::Resumed(segment_id);
                 }
                 if matches!(
                     gate.decision,
@@ -1870,7 +1832,7 @@ async fn cancel_to_idle<I, S>(
     sink: &S,
     input_events: &I,
     loop_fsm: &mut ChatLoopFsm,
-    messages: &mut Vec<Message>,
+    chain: &mut ChatChain,
     pending_input: &mut PendingInputBuffer,
     task_store: &storage::api::TaskStore,
     cancel_slot: &std::sync::Mutex<CancellationToken>,
@@ -1883,11 +1845,10 @@ where
 {
     // 回滚到本回合基线（per-turn）：仅截掉当前回合产生的 assistant/tool 输出，
     // 保留本回合用户消息与所有先前已完成回合的消息，再同步给消费者。
-    messages.truncate(rollback_baseline);
-    sink.send_event(RuntimeStreamEvent::CompactRollback {
-        messages: messages.clone(),
-    })
-    .await;
+    chain.truncate_flat(rollback_baseline);
+    let flat = chain.messages_flat();
+    sink.send_event(RuntimeStreamEvent::CompactRollback { messages: flat })
+        .await;
     sink.send_event(RuntimeStreamEvent::Cancelled {
         context: turn_context.clone(),
     })
@@ -1902,7 +1863,7 @@ where
         input_events,
         sink,
         pending_input,
-        messages,
+        chain,
         task_store,
         Some(cancel_slot),
     )
@@ -1913,26 +1874,21 @@ where
 async fn apply_compact_outcome<S>(
     sink: &S,
     outcome: CompactOutcome,
-    messages: &mut Vec<Message>,
+    chain: &mut crate::business::session::ChatChain,
     frozen_chats: &Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
     active_summary: &mut Option<String>,
     active_summary_arc: &Arc<std::sync::Mutex<Option<String>>>,
 ) where
     S: ChatEventSink,
 {
-    // 1. 冻结旧链
-    let old_segment = {
-        use crate::business::session::ChatSegment;
-        let mut seg = ChatSegment::normal(None);
-        seg.messages = std::mem::take(messages);
-        seg
-    };
+    // 1. 冻结旧链：把当前活跃段全部冻结
+    let old_segments: Vec<crate::business::session::ChatSegment> = chain.active_segments().to_vec();
     if let Ok(mut guard) = frozen_chats.lock() {
-        guard.push(old_segment);
+        guard.extend(old_segments);
     }
 
-    // 2. 替换为 recent tail
-    *messages = outcome.messages;
+    // 2. 用 compact 结果（summary + recent tail）替换活跃链
+    chain.compact(outcome.summary.clone(), outcome.messages);
 
     // 3. 设 summary
     *active_summary = Some(outcome.summary);
@@ -1940,7 +1896,7 @@ async fn apply_compact_outcome<S>(
         *guard = active_summary.clone();
     }
     sink.send_event(RuntimeStreamEvent::CompactFinished {
-        messages: messages.clone(),
+        messages: chain.messages_flat(),
     })
     .await;
 }
