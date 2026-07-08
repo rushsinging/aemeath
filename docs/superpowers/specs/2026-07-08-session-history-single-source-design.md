@@ -3,7 +3,7 @@
 **日期**：2026-07-08
 **对应 Issue**：[#680](https://github.com/rushsinging/aemeath/issues/680)
 **关联**：原则版收进 [`docs/design/01-outline.md` §会话历史单一真相](../../design/01-outline.md)；TUI model 层的对话真相收敛见 [`2026-07-01-conversation-single-source-merge-runtime.md`](2026-07-01-conversation-single-source-merge-runtime.md)
-**状态**：草案 —— 「现状诊断」已核对当前 `release/v0.0.8` 代码；「目标架构」为收口方向，尚未落地。
+**状态**：已落地（#680 / #687–#691）—— 「现状诊断」保留作为历史记录；「目标架构」已实现。
 
 ## 背景与动机
 
