@@ -33,6 +33,9 @@ impl TypedTool for TimedTool {
     fn is_concurrency_safe(&self) -> bool {
         self.safe
     }
+    fn timeout_secs(&self) -> u64 {
+        5
+    }
     async fn call(
         &self,
         _input: Value,
@@ -186,6 +189,39 @@ async fn test_call_tool_with_timeout_accepts_valid_input() {
         .expect("valid input should succeed");
     assert!(!result.is_error, "合法 input 不应报错");
     assert!(called.load(Ordering::SeqCst), "call() 应被正常调用");
+}
+
+#[test]
+fn test_typed_tool_defaults_to_not_concurrency_safe() {
+    struct DefaultConcurrencyTool;
+
+    #[async_trait]
+    impl TypedTool for DefaultConcurrencyTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "default_concurrency"
+        }
+        fn description(&self) -> &str {
+            "default concurrency test tool"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            TypedToolResult::success("ok", Value::Null)
+        }
+    }
+
+    let tool: Arc<dyn Tool> = Arc::new(TypedToolAdapter::new(DefaultConcurrencyTool));
+    assert!(
+        !tool.is_concurrency_safe(),
+        "tools must opt in to concurrent execution"
+    );
 }
 
 #[tokio::test]

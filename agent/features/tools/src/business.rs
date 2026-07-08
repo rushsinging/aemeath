@@ -26,7 +26,6 @@ pub mod plan_mode;
 #[allow(dead_code)]
 pub mod read_mcp_resource;
 pub mod skill_tool;
-pub mod sleep;
 pub mod task_create;
 pub mod task_get;
 pub mod task_list;

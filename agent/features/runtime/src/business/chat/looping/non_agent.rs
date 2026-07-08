@@ -385,3 +385,168 @@ async fn run_task_hooks<S>(
         .await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use serde_json::Value;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+
+    struct ConcurrencyFlagTool {
+        name: &'static str,
+        safe: bool,
+    }
+
+    #[async_trait]
+    impl TypedTool for ConcurrencyFlagTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            "concurrency classification test tool"
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        fn is_concurrency_safe(&self) -> bool {
+            self.safe
+        }
+
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            TypedToolResult::success("ok", Value::Null)
+        }
+    }
+
+    fn test_ctx() -> ToolExecutionContext {
+        let cwd = std::env::current_dir().unwrap();
+        ToolExecutionContext {
+            resources: tools::api::ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
+            workspace: project::api::WorkspaceService::new(cwd),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            session_reminders: None,
+            plan_mode: None,
+            max_tool_concurrency: 10,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        }
+    }
+
+    fn call(name: &str, index: usize) -> ToolCall {
+        ToolCall {
+            provider_id: "provider-test".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new(&format!("call-{index}")),
+            name: name.to_string(),
+            index,
+            input: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn test_partition_calls_routes_concurrency_safe_tools_to_concurrent() {
+        let registry = ToolRegistry::new();
+        registry.register(ConcurrencyFlagTool {
+            name: "safe_a",
+            safe: true,
+        });
+        registry.register(ConcurrencyFlagTool {
+            name: "safe_b",
+            safe: true,
+        });
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("safe_a", 0), call("safe_b", 1)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert_eq!(concurrent, vec![0, 1]);
+        assert!(sequential.is_empty());
+    }
+
+    #[test]
+    fn test_partition_calls_routes_non_concurrency_safe_tools_to_sequential() {
+        let registry = ToolRegistry::new();
+        registry.register(ConcurrencyFlagTool {
+            name: "unsafe_a",
+            safe: false,
+        });
+        registry.register(ConcurrencyFlagTool {
+            name: "unsafe_b",
+            safe: false,
+        });
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("unsafe_a", 0), call("unsafe_b", 1)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert!(concurrent.is_empty());
+        assert_eq!(sequential, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_partition_calls_preserves_mixed_positions() {
+        let registry = ToolRegistry::new();
+        registry.register(ConcurrencyFlagTool {
+            name: "safe",
+            safe: true,
+        });
+        registry.register(ConcurrencyFlagTool {
+            name: "unsafe",
+            safe: false,
+        });
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("safe", 0), call("unsafe", 1), call("safe", 2)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert_eq!(concurrent, vec![0, 2]);
+        assert_eq!(sequential, vec![1]);
+    }
+
+    #[test]
+    fn test_partition_calls_routes_unknown_tools_to_sequential() {
+        let registry = ToolRegistry::new();
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("missing", 0)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert!(concurrent.is_empty());
+        assert_eq!(sequential, vec![0]);
+    }
+}

@@ -33,7 +33,8 @@ impl TypedTool for TaskStopTool {
         false
     }
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Mutates persistent task state; keep ordered with related task operations.
+        false
     }
 
     async fn call(
