@@ -14,7 +14,8 @@ use crate::business::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
 
 use message_conversion::{
-    sanitize_tool_schemas, send_message_non_stream, RequestParams, TrackingHandler,
+    convert_messages, sanitize_tool_schemas, send_message_non_stream, RequestParams,
+    TrackingHandler,
 };
 
 pub struct AnthropicProvider {
@@ -113,10 +114,7 @@ impl LlmProvider for AnthropicProvider {
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let api_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .filter_map(|m| serde_json::to_value(m).ok())
-            .collect();
+        let api_messages = convert_messages(messages);
 
         // 先清洗 tool schema（移除 data_schema 等内部扩展字段），再为
         // 最后一个 tool 追加 cache_control 断点，让 Anthropic 缓存整个

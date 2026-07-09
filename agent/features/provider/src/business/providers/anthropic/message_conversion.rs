@@ -42,8 +42,80 @@ pub(crate) fn sanitize_tool_schemas(tool_schemas: &[serde_json::Value]) -> Vec<s
 }
 
 // ---------------------------------------------------------------------------
-// TrackingHandler – wraps a StreamHandler to detect if any user-visible
-// content (text / tool_use / thinking) was emitted.
+// Message conversion — explicitly build Anthropic Messages API JSON from
+// internal Message, avoiding serde_json::to_value leaks (metadata,
+// placeholder, text etc. are internal-only and must never reach the wire).
+// ---------------------------------------------------------------------------
+
+/// 将内部 `Message` 列表转换为 Anthropic Messages API 兼容的 JSON 数组。
+///
+/// 显式遍历每个 `ContentBlock`，按 API 规范构建 wire format，丢弃所有
+/// 内部扩展字段（`metadata`、`Image.placeholder`、`ToolResult.text`）。
+/// 与 OpenAI 兼容 driver 的 `convert_messages` 对齐——各 driver 负责自己
+/// 的 wire format。
+pub(crate) fn convert_messages(messages: &[Message]) -> Vec<serde_json::Value> {
+    messages.iter().map(convert_message).collect()
+}
+
+fn convert_message(msg: &Message) -> serde_json::Value {
+    let role = match msg.role {
+        Role::User => "user",
+        Role::Assistant => "assistant",
+    };
+    let content: Vec<serde_json::Value> = msg.content.iter().map(convert_block).collect();
+    serde_json::json!({
+        "role": role,
+        "content": content,
+    })
+}
+
+fn convert_block(block: &ContentBlock) -> serde_json::Value {
+    match block {
+        ContentBlock::Text { text } => serde_json::json!({
+            "type": "text",
+            "text": text,
+        }),
+        ContentBlock::Image { source, .. } => {
+            // 丢弃 placeholder（内部 round-trip 字段，不发给 LLM）
+            match source {
+                share::message::ImageSource::Base64 { media_type, data } => serde_json::json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": data,
+                    },
+                }),
+            }
+        }
+        ContentBlock::ToolUse { id, name, input } => serde_json::json!({
+            "type": "tool_use",
+            "id": id,
+            "name": name,
+            "input": input,
+        }),
+        ContentBlock::ToolResult {
+            tool_use_id,
+            content,
+            is_error,
+            ..
+        } => {
+            // 丢弃 text（内部 text-first 字段，to_llm_view 已降级到 content）
+            serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": content,
+                "is_error": is_error,
+            })
+        }
+        ContentBlock::Thinking { thinking } => serde_json::json!({
+            "type": "thinking",
+            "thinking": thinking,
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
 /// Handler wrapper that tracks whether any user-visible content was emitted.
@@ -111,10 +183,7 @@ pub(crate) async fn send_message_non_stream(
     tool_schemas: &[serde_json::Value],
     handler: &mut dyn StreamHandler,
 ) -> Result<StreamResponse, crate::LlmError> {
-    let api_messages: Vec<serde_json::Value> = messages
-        .iter()
-        .filter_map(|m| serde_json::to_value(m).ok())
-        .collect();
+    let api_messages = convert_messages(messages);
 
     let request = CreateMessageRequest::new(
         params.model,
@@ -252,7 +321,10 @@ pub(crate) async fn send_message_non_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_tool_schemas;
+    use super::{convert_messages, sanitize_tool_schemas};
+    use share::message::{
+        ContentBlock, ImageSource, Message, MessageMetadata, MessageSource, Role,
+    };
 
     #[test]
     fn strips_data_schema_and_keeps_allowed_fields() {
@@ -299,5 +371,129 @@ mod tests {
     fn handles_empty_schemas() {
         let result = sanitize_tool_schemas(&[]);
         assert!(result.is_empty());
+    }
+
+    // --- convert_messages tests ---
+
+    #[test]
+    fn convert_messages_strips_metadata() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "hi".to_string(),
+            }],
+            metadata: Some(MessageMetadata {
+                source: MessageSource::SystemGenerated,
+            }),
+        };
+        let result = convert_messages(&[msg]);
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].get("metadata").is_none(),
+            "metadata must be stripped"
+        );
+        assert_eq!(result[0]["role"], "user");
+    }
+
+    #[test]
+    fn convert_messages_text_block() {
+        let msg = Message::user("hello world");
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+        assert_eq!(block["type"], "text");
+        assert_eq!(block["text"], "hello world");
+    }
+
+    #[test]
+    fn convert_messages_image_strips_placeholder() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::Image {
+                source: ImageSource::Base64 {
+                    media_type: "image/png".to_string(),
+                    data: "abc123".to_string(),
+                },
+                placeholder: Some("[Image #1]".to_string()),
+            }],
+            metadata: None,
+        };
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+        assert_eq!(block["type"], "image");
+        assert_eq!(block["source"]["type"], "base64");
+        assert_eq!(block["source"]["media_type"], "image/png");
+        assert_eq!(block["source"]["data"], "abc123");
+        assert!(
+            block.get("placeholder").is_none(),
+            "placeholder must be stripped"
+        );
+    }
+
+    #[test]
+    fn convert_messages_tool_use() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "tu_1".to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path": "/tmp/a"}),
+            }],
+            metadata: None,
+        };
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+        assert_eq!(block["type"], "tool_use");
+        assert_eq!(block["id"], "tu_1");
+        assert_eq!(block["name"], "Read");
+        assert_eq!(block["input"]["file_path"], "/tmp/a");
+    }
+
+    #[test]
+    fn convert_messages_tool_result_strips_text_field() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "tu_1".to_string(),
+                content: serde_json::json!("done"),
+                is_error: false,
+                text: Some("done".to_string()),
+            }],
+            metadata: None,
+        };
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], "tu_1");
+        assert_eq!(block["content"], "done");
+        assert_eq!(block["is_error"], false);
+        assert!(block.get("text").is_none(), "text field must be stripped");
+    }
+
+    #[test]
+    fn convert_messages_thinking_block() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Thinking {
+                thinking: "let me think".to_string(),
+            }],
+            metadata: None,
+        };
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+        assert_eq!(block["type"], "thinking");
+        assert_eq!(block["thinking"], "let me think");
+    }
+
+    #[test]
+    fn convert_messages_assistant_role() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::Text {
+                text: "ok".to_string(),
+            }],
+            metadata: None,
+        };
+        let result = convert_messages(&[msg]);
+        assert_eq!(result[0]["role"], "assistant");
     }
 }
