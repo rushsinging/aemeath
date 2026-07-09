@@ -9,6 +9,39 @@ use crate::business::types::{
 use crate::core::provider::StreamHandler;
 
 // ---------------------------------------------------------------------------
+// Tool schema sanitize — strip internal-only fields (data_schema etc.)
+// before sending to the Anthropic Messages API. Only spec-allowed keys
+// survive: name, description, input_schema, cache_control, type.
+// ---------------------------------------------------------------------------
+
+/// Anthropic Messages API tool spec 允许的字段白名单。
+const ANTHROPIC_TOOL_ALLOWED_KEYS: &[&str] = &[
+    "name",
+    "description",
+    "input_schema",
+    "cache_control",
+    "type",
+];
+
+/// 将内部 tool schema（含 `data_schema` 等扩展字段）清洗为 Anthropic
+/// Messages API 兼容格式，只保留白名单字段。
+pub(crate) fn sanitize_tool_schemas(tool_schemas: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let empty = serde_json::Map::new();
+    tool_schemas
+        .iter()
+        .map(|schema| {
+            let obj = schema.as_object().unwrap_or(&empty);
+            let filtered: serde_json::Map<String, serde_json::Value> = obj
+                .iter()
+                .filter(|(k, _)| ANTHROPIC_TOOL_ALLOWED_KEYS.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            serde_json::Value::Object(filtered)
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // TrackingHandler – wraps a StreamHandler to detect if any user-visible
 // content (text / tool_use / thinking) was emitted.
 // ---------------------------------------------------------------------------
@@ -89,7 +122,7 @@ pub(crate) async fn send_message_non_stream(
         params.effort,
         system.to_vec(),
         api_messages,
-        tool_schemas.to_vec(),
+        sanitize_tool_schemas(tool_schemas),
         false,
     );
 
@@ -215,4 +248,56 @@ pub(crate) async fn send_message_non_stream(
         usage,
         stop_reason: StopReason::parse(stop_reason_str),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_tool_schemas;
+
+    #[test]
+    fn strips_data_schema_and_keeps_allowed_fields() {
+        let schemas = vec![serde_json::json!({
+            "name": "Read",
+            "description": "Read a file",
+            "input_schema": {"type": "object"},
+            "data_schema": {"type": "object"},
+            "cache_control": {"type": "ephemeral"}
+        })];
+        let result = sanitize_tool_schemas(&schemas);
+        assert_eq!(result.len(), 1);
+        let tool = &result[0];
+        assert!(tool.get("name").is_some());
+        assert!(tool.get("description").is_some());
+        assert!(tool.get("input_schema").is_some());
+        assert!(tool.get("cache_control").is_some());
+        assert!(
+            tool.get("data_schema").is_none(),
+            "data_schema must be stripped"
+        );
+    }
+
+    #[test]
+    fn preserves_input_schema_content_intact() {
+        let input = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"}
+            },
+            "required": ["file_path"]
+        });
+        let schemas = vec![serde_json::json!({
+            "name": "Read",
+            "description": "Read",
+            "input_schema": input.clone(),
+            "data_schema": {"type": "object"},
+        })];
+        let result = sanitize_tool_schemas(&schemas);
+        assert_eq!(result[0].get("input_schema").unwrap(), &input);
+    }
+
+    #[test]
+    fn handles_empty_schemas() {
+        let result = sanitize_tool_schemas(&[]);
+        assert!(result.is_empty());
+    }
 }
