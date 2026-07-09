@@ -323,7 +323,9 @@ mod started_tests {
             },
         };
 
-        let mapping = map_agent_event(&ev);
+        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
+            crate::tui::render::output::tool_display::format_subagent_tool_header(name, input, None)
+        });
         match &mapping.conversation[0] {
             ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
                 assert_eq!(message, "→ Read /repo/src/main.rs 10:12\n");
@@ -358,12 +360,14 @@ mod started_tests {
             },
         };
 
-        let mapping = map_agent_event(&ev);
+        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
+            crate::tui::render::output::tool_display::format_subagent_tool_header(name, input, None)
+        });
         match &mapping.conversation[0] {
             ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
                 assert_eq!(
                     message,
-                    "→ Find apps/**/*.rs\n→ Search /activity_lines/, path=apps/cli/src\n"
+                    "→ Find apps/**/*.rs\n→ Search /activity_lines/ in apps/cli/src\n"
                 );
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),

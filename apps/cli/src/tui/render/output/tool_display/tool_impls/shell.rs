@@ -27,6 +27,13 @@ impl ToolDisplay for BashDisplay {
             format!("{} {}", self.display_name(), truncate_ellipsis(cmd, 80))
         }
     }
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
+    }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
         let cmd = str_arg(input, "command", "");
         if cmd.is_empty() {

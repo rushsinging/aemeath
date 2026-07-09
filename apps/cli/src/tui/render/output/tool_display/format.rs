@@ -28,6 +28,28 @@ pub fn result_render_kind(name: &str) -> ResultRender {
     }
 }
 
+/// Format a tool call for sub-agent progress: header only, no result/details.
+pub fn format_subagent_tool_header(
+    name: &str,
+    input: &serde_json::Value,
+    workspace_root: Option<&Path>,
+) -> String {
+    lookup_display(name)
+        .map(|display| display.header_for_subagent(input, workspace_root))
+        .unwrap_or_else(|| {
+            let raw = match input {
+                serde_json::Value::String(s) => s.clone(),
+                value => value.to_string(),
+            };
+            let preview = truncate_json(&raw);
+            if preview.is_empty() {
+                tool_display_name(name).to_string()
+            } else {
+                format!("{} {preview}", tool_display_name(name))
+            }
+        })
+}
+
 /// Format a tool call for human-friendly display.
 pub fn format_tool_call(
     name: &str,

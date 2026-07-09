@@ -27,6 +27,32 @@ pub struct AgentEventMapping {
     pub effects: Vec<Effect>,
 }
 
+fn default_subagent_tool_header(name: &str, input: &serde_json::Value) -> String {
+    let raw = match input {
+        serde_json::Value::String(s) => s.clone(),
+        value => value.to_string(),
+    };
+    if raw.is_empty() {
+        crate::tui::view_model::tool_name::tool_display_name(name).to_string()
+    } else {
+        format!(
+            "{} {}",
+            crate::tui::view_model::tool_name::tool_display_name(name),
+            truncate_agent_progress_json(&raw)
+        )
+    }
+}
+
+fn truncate_agent_progress_json(raw: &str) -> String {
+    const MAX_CHARS: usize = 100;
+    if raw.chars().count() <= MAX_CHARS {
+        return raw.to_string();
+    }
+    let mut output: String = raw.chars().take(MAX_CHARS.saturating_sub(3)).collect();
+    output.push_str("...");
+    output
+}
+
 fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus {
     match status {
         sdk::ToolCallStatusView::PendingArgs => ToolCallStatus::PendingArgs,
@@ -36,6 +62,16 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
 }
 
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
+    map_agent_event_with_tool_header(event, default_subagent_tool_header)
+}
+
+pub fn map_agent_event_with_tool_header<F>(
+    event: &UiEvent,
+    mut format_subagent_tool_header: F,
+) -> AgentEventMapping
+where
+    F: FnMut(&str, &serde_json::Value) -> String,
+{
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
         UiEvent::Text { context, text } => {
@@ -172,7 +208,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                     chat_id: context.chat_id.clone(),
                     turn_id: context.turn_id.clone(),
                     tool_id: tool_id.clone(),
-                    message: format_agent_progress(&event),
+                    message: format_agent_progress(&event, &mut format_subagent_tool_header),
                 },
             )),
         },

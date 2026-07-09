@@ -26,6 +26,13 @@ impl ToolDisplay for GlobDisplay {
             format!("{} {pattern}", self.display_name())
         }
     }
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
+    }
     /// result 到达后，从 `GlobResult.count` 反序列化读取匹配文件数。
     fn format_header_line_with_result(
         &self,
@@ -82,6 +89,13 @@ impl ToolDisplay for GrepDisplay {
         } else {
             format!("{} /{pattern}/ in {display_path}", self.display_name())
         }
+    }
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
     }
     fn format_header_line_with_result(
         &self,

@@ -5,6 +5,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::path::Path;
 
+use super::common::truncate_json;
 use super::policy::ToolRenderPolicy;
 
 /// Trait for customizing how a tool call is displayed in the TUI output area.
@@ -19,6 +20,26 @@ pub trait ToolDisplay: Send + Sync {
 
     /// Format the header line as plain string.
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String;
+
+    /// Format a one-line header for sub-agent progress.
+    ///
+    /// This is header-only: never render result payloads, detail lines, or ToolResult blocks.
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        _workspace_root: Option<&Path>,
+    ) -> String {
+        let raw = match input {
+            serde_json::Value::String(s) => s.clone(),
+            value => value.to_string(),
+        };
+        let preview = truncate_json(&raw);
+        if preview.is_empty() {
+            self.display_name().to_string()
+        } else {
+            format!("{} {preview}", self.display_name())
+        }
+    }
 
     /// Format the header line as styled `Line`。
     fn format_header_line(
