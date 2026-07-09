@@ -44,6 +44,14 @@ impl BlockComponent for OutputBlockKind {
             OutputBlockKind::ThinkingMessage(text) => {
                 blocks::thinking::render_thinking(block_id, text, ctx)
             }
+            OutputBlockKind::ModelStreamPlaceholder(placeholder) => {
+                blocks::thinking_placeholder::render_model_stream_placeholder(
+                    block_id,
+                    placeholder,
+                    ctx,
+                    0,
+                )
+            }
             OutputBlockKind::UserMessage(text) => {
                 blocks::user_message::render_user_message(block_id, text, ctx)
             }

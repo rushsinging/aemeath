@@ -47,6 +47,15 @@ where
         let mut results = Vec::with_capacity(hooks.len());
 
         for hook in hooks {
+            log::debug!(target: LOG_TARGET,
+                "hook timing start: event={} tool_name={:?} matcher={:?} command={} workspace_root={}",
+                event_name,
+                tool_name,
+                non_empty_text(&hook.matcher),
+                hook.command,
+                workspace_root.display(),
+            );
+            let started_at = std::time::Instant::now();
             let _ = self
                 .sink
                 .send_event(RuntimeStreamEvent::HookEvent(runtime_hook_event_running(
@@ -55,9 +64,22 @@ where
                 .await;
 
             let result = runner.execute_hook(hook, &input, workspace_root).await;
+            let elapsed_ms = started_at.elapsed().as_millis();
             let json_output = result.parse_json_output();
+            let status = runtime_hook_event_status(&result, &json_output);
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
+            log::debug!(target: LOG_TARGET,
+                "hook timing finish: event={} tool_name={:?} matcher={:?} status={:?} blocked={} exit_code={:?} elapsed_ms={} should_break={}",
+                event_name,
+                tool_name,
+                non_empty_text(&hook.matcher),
+                status,
+                result.blocked,
+                result.exit_code,
+                elapsed_ms,
+                should_break,
+            );
 
             let _ = self
                 .sink

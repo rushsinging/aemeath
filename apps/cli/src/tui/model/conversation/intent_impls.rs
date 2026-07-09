@@ -199,6 +199,18 @@ impl ConversationUpdate for AppendSystemMessage {
     }
 }
 
+impl ConversationUpdate for UpsertModelStreamPlaceholder {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.upsert_model_stream_placeholder(self.placeholder)
+    }
+}
+
+impl ConversationUpdate for ClearModelStreamPlaceholder {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.clear_model_stream_placeholder()
+    }
+}
+
 impl ConversationUpdate for AppendHookNotice {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.append_hook_notice(self.content)
@@ -536,6 +548,8 @@ impl ConversationUpdate for ConversationIntent {
             Self::ToolCallUpdate(s) => s.update(model),
             Self::ToolResult(s) => s.update(model),
             Self::AppendSystemMessage(s) => s.update(model),
+            Self::UpsertModelStreamPlaceholder(s) => s.update(model),
+            Self::ClearModelStreamPlaceholder(s) => s.update(model),
             Self::AppendHookNotice(s) => s.update(model),
             Self::AppendError(s) => s.update(model),
             Self::QueueSubmission(s) => s.update(model),

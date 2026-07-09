@@ -153,6 +153,15 @@ pub(crate) fn runtime_event_to_sdk_event(
         crate::business::chat::RuntimeStreamEvent::SystemMessage(msg) => {
             ChatEvent::SystemMessage(msg)
         }
+        crate::business::chat::RuntimeStreamEvent::ModelStreamWaiting {
+            context,
+            elapsed_secs,
+            phase,
+        } => ChatEvent::ModelStreamWaiting {
+            context: turn_context_to_sdk(context),
+            elapsed_secs,
+            phase,
+        },
         crate::business::chat::RuntimeStreamEvent::Error(msg) => ChatEvent::Error(msg),
         crate::business::chat::RuntimeStreamEvent::Usage {
             input,

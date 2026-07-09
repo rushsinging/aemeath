@@ -185,9 +185,12 @@ impl App {
                     name: "system_message".to_string(),
                 });
             }
-            UiEvent::ReminderRecap(_line) => {
-                // ReminderRecap 已由 map_agent_event -> AppendSystemMessage 注入
-                // ConversationModel，无需在此重复写入。
+            UiEvent::ModelStreamWaiting { .. } => {
+                // Transient placeholder 已由 map_agent_event 注入 ConversationModel。
+                self.mark_output_dirty();
+            }
+            UiEvent::ReminderRecap(_line) => { // ReminderRecap 已由 map_agent_event -> AppendSystemMessage 注入
+                 // ConversationModel，无需在此重复写入。
             }
             UiEvent::MemoryList(reminders) => {
                 self.handle_memory_list(&reminders);

@@ -12,17 +12,22 @@ fn ctx() -> UiTurnContext {
 }
 
 fn first_observation(mapping: &AgentEventMapping) -> Option<&ConversationIntent> {
-    mapping.conversation.first()
+    mapping
+        .conversation
+        .iter()
+        .find(|intent| !matches!(intent, ConversationIntent::ClearModelStreamPlaceholder(_)))
 }
 
 fn assert_no_runtime_bind_prelude(mapping: &AgentEventMapping) {
-    assert_eq!(
-        mapping.conversation.len(),
-        1,
-        "runtime observations must carry context inline and emit exactly one conversation intent"
+    assert!(
+        matches!(
+            mapping.conversation.as_slice(),
+            [ConversationIntent::ClearModelStreamPlaceholder(_), _] | [_]
+        ),
+        "runtime observations must carry context inline and emit at most one placeholder clear plus one payload intent: {:?}",
+        mapping.conversation
     );
 }
-
 #[test]
 fn test_map_agent_event_runtime_observations_do_not_emit_bind_runtime_turn() {
     let context = ctx();
@@ -116,6 +121,53 @@ fn test_map_agent_event_thinking_sets_thinking_phase_with_text_update() {
     assert!(matches!(
         first_observation(&mapping),
         Some(ConversationIntent::ThinkingText(ThinkingText { text, .. })) if text == "reason"
+    ));
+}
+
+#[test]
+fn test_model_stream_waiting_maps_to_placeholder() {
+    let mapping = map_agent_event(&UiEvent::ModelStreamWaiting {
+        context: ctx(),
+        elapsed_secs: 10,
+        phase: "thinking".to_string(),
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder {
+            placeholder
+        })] if placeholder.elapsed_secs == 10 && placeholder.phase == "thinking"
+    ));
+}
+
+#[test]
+fn test_text_clears_model_stream_placeholder_before_payload() {
+    let mapping = map_agent_event(&UiEvent::Text {
+        context: ctx(),
+        text: "hello".to_string(),
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::ClearModelStreamPlaceholder(_), ConversationIntent::AssistantText(AssistantText { text, .. })]
+            if text == "hello"
+    ));
+}
+
+#[test]
+fn test_tool_call_start_clears_model_stream_placeholder_before_payload() {
+    let mapping = map_agent_event(&UiEvent::ToolCallStart {
+        context: ctx(),
+        id: sdk::ids::ToolCallId::new("tool-1"),
+        provider_id: Some("provider-1".to_string()),
+        name: "Write".to_string(),
+        index: 0,
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::ClearModelStreamPlaceholder(_), ConversationIntent::ToolCallStart(ToolCallStart { name, .. })]
+            if name == "Write"
     ));
 }
 

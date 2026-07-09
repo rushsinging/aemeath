@@ -75,14 +75,14 @@ where
     match event {
         // ── Runtime observations → ConversationIntent (inlined from ToolFlowProjector) ──
         UiEvent::Text { context, text } => {
-            conversation(ConversationIntent::AssistantText(AssistantText {
+            clear_placeholder_then(ConversationIntent::AssistantText(AssistantText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
             }))
         }
         UiEvent::Thinking { context, text } => {
-            conversation(ConversationIntent::ThinkingText(ThinkingText {
+            clear_placeholder_then(ConversationIntent::ThinkingText(ThinkingText {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 text: text.clone(),
@@ -110,7 +110,7 @@ where
                 name,
                 index,
             );
-            conversation(ConversationIntent::ToolCallStart(ToolCallStart {
+            clear_placeholder_then(ConversationIntent::ToolCallStart(ToolCallStart {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: id.clone(),
@@ -142,7 +142,7 @@ where
                 index,
                 args.as_ref().map(|s| s.len()).unwrap_or(0),
             );
-            conversation(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+            clear_placeholder_then(ConversationIntent::ToolCallUpdate(ToolCallUpdate {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: id.clone(),
@@ -177,7 +177,7 @@ where
                 is_error,
                 images.len(),
             );
-            conversation(ConversationIntent::ToolResult(ToolResult {
+            clear_placeholder_then(ConversationIntent::ToolResult(ToolResult {
                 chat_id: context.chat_id.clone(),
                 turn_id: context.turn_id.clone(),
                 id: id.clone(),
@@ -269,6 +269,19 @@ where
         UiEvent::SystemMessage(text) | UiEvent::ReminderRecap(text) => conversation(
             ConversationIntent::AppendSystemMessage(AppendSystemMessage { text: text.clone() }),
         ),
+        UiEvent::ModelStreamWaiting {
+            context,
+            elapsed_secs,
+            phase,
+        } => conversation(ConversationIntent::UpsertModelStreamPlaceholder(
+            UpsertModelStreamPlaceholder {
+                placeholder: crate::tui::app::event::ModelStreamWaitingView {
+                    context: context.clone(),
+                    elapsed_secs: *elapsed_secs,
+                    phase: phase.clone(),
+                },
+            },
+        )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
         | UiEvent::StopHookBlocked { messages }
@@ -316,6 +329,16 @@ fn map_status_context(update: &StatusContextUpdate) -> AgentEventMapping {
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — AgentEventMapping constructors
 // ════════════════════════════════════════════════════════════════════
+
+fn clear_placeholder_then(intent: ConversationIntent) -> AgentEventMapping {
+    AgentEventMapping {
+        conversation: vec![
+            ConversationIntent::ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
+            intent,
+        ],
+        ..AgentEventMapping::default()
+    }
+}
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {
