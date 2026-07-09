@@ -13,7 +13,9 @@ use crate::business::stream::parse_stream;
 use crate::business::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
 
-use message_conversion::{send_message_non_stream, RequestParams, TrackingHandler};
+use message_conversion::{
+    sanitize_tool_schemas, send_message_non_stream, RequestParams, TrackingHandler,
+};
 
 pub struct AnthropicProvider {
     api_key: String,
@@ -116,10 +118,11 @@ impl LlmProvider for AnthropicProvider {
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
 
-        // 为 tools 数组最后一个元素添加 cache_control 断点，让 Anthropic
-        // 缓存整个 tools schema（≈6K tokens）。后续 turn 命中 cache 后
-        // 固定开销成本降至约 1/10。Anthropic 原生支持 tools 数组缓存。
-        let mut cached_tools = tool_schemas.to_vec();
+        // 先清洗 tool schema（移除 data_schema 等内部扩展字段），再为
+        // 最后一个 tool 追加 cache_control 断点，让 Anthropic 缓存整个
+        // tools schema（≈6K tokens）。后续 turn 命中 cache 后固定开销
+        // 成本降至约 1/10。Anthropic 原生支持 tools 数组缓存。
+        let mut cached_tools = sanitize_tool_schemas(tool_schemas);
         if let Some(last_tool) = cached_tools.last_mut() {
             if let Some(obj) = last_tool.as_object_mut() {
                 obj.insert(
