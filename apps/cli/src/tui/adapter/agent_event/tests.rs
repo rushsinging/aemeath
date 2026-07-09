@@ -423,4 +423,25 @@ mod started_tests {
             other => panic!("expected RecordAgentProgress, got {other:?}"),
         }
     }
+
+    #[test]
+    fn test_agent_progress_tool_output_is_not_rendered_as_activity() {
+        let ev = UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: ToolCallId::new("tool-1"),
+            event: AgentProgressEventView {
+                sequence: 2,
+                kind: AgentProgressKindView::ToolOutput {
+                    tool_name: "Bash".to_string(),
+                    text: "stdout should stay hidden".to_string(),
+                },
+            },
+        };
+        let mapping = map_agent_event(&ev);
+        assert!(
+            mapping.conversation.is_empty(),
+            "ToolOutput 不应进入 conversation activity，实际: {:?}",
+            mapping.conversation
+        );
+    }
 }

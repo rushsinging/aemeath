@@ -275,7 +275,9 @@ async fn test_bash_streams_stdout_via_progress_tx() {
     let all_text: String = events
         .iter()
         .filter_map(|ev| match &ev.kind {
-            AgentProgressKind::Message { text } => Some(text.as_str()),
+            AgentProgressKind::ToolOutput { tool_name, text } if tool_name == "Bash" => {
+                Some(text.as_str())
+            }
             _ => None,
         })
         .collect();
@@ -288,7 +290,8 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 
     // No event should contain the internal CWD marker
     for ev in &events {
-        if let AgentProgressKind::Message { text } = &ev.kind {
+        if let AgentProgressKind::ToolOutput { tool_name, text } = &ev.kind {
+            assert_eq!(tool_name, "Bash");
             assert!(
                 !text.contains("__AEMEATH_CWD__"),
                 "progress event must not contain __AEMEATH_CWD__ marker: {}",

@@ -12,6 +12,7 @@ where
     match &event.kind {
         AgentProgressKindView::Started { .. } => String::new(),
         AgentProgressKindView::Message { text } => complete_progress_message(text),
+        AgentProgressKindView::ToolOutput { .. } => String::new(),
         AgentProgressKindView::ToolCalls { calls } => {
             if calls.is_empty() {
                 return String::new();

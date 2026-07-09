@@ -32,7 +32,8 @@ pub(super) async fn read_stdout(
                 // Best-effort: drop chunks if channel is full/closed.
                 let _ = $tx.try_send(AgentProgressEvent {
                     sequence: $seq,
-                    kind: AgentProgressKind::Message {
+                    kind: AgentProgressKind::ToolOutput {
+                        tool_name: "Bash".to_string(),
                         text: $text.to_string(),
                     },
                 });

@@ -203,6 +203,7 @@ where
                     model: model.clone(),
                 }))
             }
+            sdk::AgentProgressKindView::ToolOutput { .. } => AgentEventMapping::default(),
             _ => conversation(ConversationIntent::RecordAgentProgress(
                 RecordAgentProgress {
                     chat_id: context.chat_id.clone(),

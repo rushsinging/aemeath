@@ -421,6 +421,9 @@ pub(super) fn agent_progress_event_to_sdk(
                 })
                 .collect(),
         },
+        share::tool::AgentProgressKind::ToolOutput { tool_name, text } => {
+            AgentProgressKindView::ToolOutput { tool_name, text }
+        }
         share::tool::AgentProgressKind::Message { text } => AgentProgressKindView::Message { text },
         share::tool::AgentProgressKind::Started { role, model } => {
             AgentProgressKindView::Started { role, model }
