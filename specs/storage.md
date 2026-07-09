@@ -14,14 +14,15 @@
 
 改落盘格式或路径时，**MUST** 兼顾已有数据的可读性，避免破坏现有 `~/.agents/` 下的用户数据。
 
-## Session 落盘策略（#636）
+## Session 落盘策略（#636 / #680）
 
 会话状态由 `agent/features/runtime/src/business/session/` 管理（注意：session 不在 `agent/features/storage/**` 下）。落盘策略如下：
 
-- **turn-level save（核心）**：每轮 turn 完成进入 Idle 前，同步调用 `save_session()`，保证已完成 turn 立即落盘。即使进程被 `kill -TERM` 或意外退出，最多丢失正在跑的那一轮。
-- **loop-exit save（兜底）**：常驻 loop 退出（通道关闭、用户 exit）时，再触发一次同步 save，防止极端情况下 turn-level save 失败。
+- **turn-level save（核心）**：每轮 turn 完成进入 Idle 前，同步调用 `save_chain(&chain)`，保证已完成 turn 立即落盘。即使进程被 `kill -TERM` 或意外退出，最多丢失正在跑的那一轮。
+- **loop-exit save（兜底）**：`process_chat_loop` 返回最终 chain → spawn task 写回 `current_chain` → `save_session_from_handle` 落盘。
 - **SIGTERM/SIGHUP graceful shutdown**：TUI 主 loop（`apps/cli/src/tui/app/run_loop.rs`）与非交互模式（`apps/cli/src/chat/no_tui.rs`）注册了 `tokio::signal::unix` 监听 SIGTERM/SIGHUP，收到信号后设置 `should_exit`，让主 loop 走正常 cleanup 路径，触发最后一次 save。
 - **失败日志**：`save_session()` 失败时记录 `error!` 日志，不再静默忽略。
+- **MUST** 落盘忠实序列化 `ChatChain` 的 `active_segments()`（真实 segment 边界），**NEVER** 从扁平 messages 反构造单段。
 
 ## SessionLoadError 错误分类（#636 D2）
 

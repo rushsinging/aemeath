@@ -169,6 +169,7 @@ impl std::hash::Hash for ToolResultBlockView {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ToolSemanticStatus {
+    Pending,
     Running,
     Success,
     Error,

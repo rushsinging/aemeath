@@ -9,6 +9,7 @@ pub const STATIC_SYSTEM_PROMPT_EN: &str = r#"You are an interactive agent that h
 # System
  - All text you output outside of tool use is displayed to the user.
  - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel.
+ - When tool descriptions mark a tool as `parallel-safe`, independent calls to that tool MUST be issued in the same response so they can run concurrently. NEVER only say you will run tools in parallel while calling them one by one across turns. Use sequential calls only when there are data dependencies, required ordering, or conflicting side effects.
  - Do NOT use the Bash to run commands when a relevant dedicated tool is provided:
   - To read files use Read instead of cat, head, tail, or sed
   - To edit files use Edit instead of sed or awk
@@ -76,6 +77,7 @@ pub const STATIC_SYSTEM_PROMPT_ZH: &str = r#"你是一个交互式 agent，帮�
 # System
  - All text you output outside of tool use is displayed to the user.
  - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel.
+ - When tool descriptions mark a tool as `parallel-safe`, independent calls to that tool MUST be issued in the same response so they can run concurrently. NEVER only say you will run tools in parallel while calling them one by one across turns. Use sequential calls only when there are data dependencies, required ordering, or conflicting side effects.
  - Do NOT use the Bash to run commands when a relevant dedicated tool is provided:
   - To read files use Read instead of cat, head, tail, or sed
   - To edit files use Edit instead of sed or awk
@@ -185,6 +187,16 @@ mod tests {
         assert_eq!(date_label("xx"), en);
         for s in [zh, en] {
             assert!(s.contains("{date}"));
+        }
+    }
+
+    #[test]
+    fn static_system_prompt_requires_independent_parallel_safe_tools_in_same_response() {
+        for s in [static_system_prompt("zh"), static_system_prompt("en")] {
+            assert!(s.contains("parallel-safe"));
+            assert!(s.contains("same response"));
+            assert!(s.contains("NEVER only say"));
+            assert!(s.contains("data dependencies"));
         }
     }
 }

@@ -190,9 +190,10 @@ fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {
 
 fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus, SemanticStyle) {
     match status {
-        ToolCallStatus::PendingArgs | ToolCallStatus::Ready | ToolCallStatus::Running => {
-            ("●", ToolSemanticStatus::Running, SemanticStyle::Running)
+        ToolCallStatus::PendingArgs | ToolCallStatus::Ready => {
+            ("○", ToolSemanticStatus::Pending, SemanticStyle::Muted)
         }
+        ToolCallStatus::Running => ("●", ToolSemanticStatus::Running, SemanticStyle::Running),
         ToolCallStatus::Success => ("✓", ToolSemanticStatus::Success, SemanticStyle::Success),
         ToolCallStatus::Error => ("✗", ToolSemanticStatus::Error, SemanticStyle::Error),
         ToolCallStatus::Cancelled => ("–", ToolSemanticStatus::Cancelled, SemanticStyle::Muted),

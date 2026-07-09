@@ -1,11 +1,15 @@
 use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
 use crate::business::agent::Agent;
-use crate::business::chat::looping::apply_gate;
-use crate::business::chat::looping::compact::{auto_compact, manual_compact, CompactOutcome};
+use crate::business::chat::looping::compact::{auto_compact, manual_compact};
+use crate::business::chat::looping::compact_outcome::apply_compact_outcome;
 use crate::business::chat::looping::finalize::{
     finish_completed_loop, run_stop_hook_before_finish, stop_hook_block_limit_reached,
 };
 use crate::business::chat::looping::hook_ui::HookUi;
+use crate::business::chat::looping::idle_lifecycle::{
+    cancel_to_idle, current_cancel_token, execute_set_thinking, has_pending_user_turn,
+    idle_until_resume_or_shutdown, is_new_user_turn_message, IdleResult,
+};
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::business::chat::looping::loop_helpers::{
     drain_and_apply_gate, is_user_cancelled_provider_error,
@@ -25,147 +29,14 @@ use crate::business::chat::looping::{
     InputEventDrainPort, PendingCommand, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
     RuntimeStreamHandler, RuntimeTurnContext,
 };
-use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
-use crate::business::session::ChatChain;
+use crate::business::reasoning_graph::GraphSignal;
 use crate::LOG_TARGET;
 use provider::api::StopReason;
 use sdk::ids::{ChatId, ChatTurnId};
 use share::message::Message;
-use share::message::Role;
 use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
-use tools::api::ToolRegistry;
 
-/// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
-/// `(LlmClient, ModelSwitchResult)` 或 `String` 错误。
-pub type SwitchClientFn = Arc<
-    dyn Fn(
-            &str,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = std::result::Result<
-                            (provider::api::LlmClient, sdk::ModelSwitchResult),
-                            String,
-                        >,
-                    > + Send,
-            >,
-        > + Send
-        + Sync,
->;
-
-/// 单次 chat loop 的完整执行状态。
-///
-/// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
-/// 函数内解构消费。持有 session 级不变配置 + loop 专属可变状态（messages、cancel 等）。
-pub struct ChatLoopContext<S, Q, I>
-where
-    S: ChatEventSink,
-    Q: QueueDrainPort,
-    I: InputEventDrainPort,
-{
-    pub sink: S,
-    pub queue: Q,
-    pub input_events: I,
-    pub client: Arc<provider::api::LlmClient>,
-    pub registry: Arc<ToolRegistry>,
-    pub system_blocks: Vec<provider::api::SystemBlock>,
-    pub system_prompt_text: String,
-    pub user_context: String,
-    pub chain: crate::business::session::ChatChain,
-    pub context_size: usize,
-    pub workspace: Arc<project::api::WorkspaceService>,
-    pub session_id: String,
-    pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
-    pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
-    pub allow_all: bool,
-    /// 会话级取消令牌槽（常驻 actor 可重建）。
-    ///
-    /// loop 在每个回合开始时从该槽读取「当前 token」用于本回合的 LLM 调用、
-    /// tool 执行；外部（`cancel_impl`）锁该槽对当前 token 调 `cancel()` 触发取消。
-    /// 处理完一次取消后，loop 把槽**重置为新 token** 供下个回合，避免常驻 loop
-    /// 中被取消的 token 永久污染后续回合。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
-    pub cancel: Arc<std::sync::Mutex<CancellationToken>>,
-    pub task_store: Arc<storage::api::TaskStore>,
-    pub max_tool_concurrency: usize,
-    pub max_agent_concurrency: usize,
-    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
-    pub hook_runner: hook::api::HookRunner,
-    pub memory_config: share::config::MemoryConfig,
-    pub language: String,
-    /// Reasoning Graph 实例。`None` = 未启用（零行为变更）；`Some` = 启用，
-    /// loop 在 4 个集成点调 transition 调节 effort。
-    pub reasoning_graph: Option<ReasoningGraph>,
-    /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    pub frozen_chats: Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
-    /// 活跃链的 compact summary（走 system 通道注入）。
-    pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
-    /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。
-    /// idle 分支收到 `SwitchModel` 事件时调用，从 config 解析 selection 字符串，
-    /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
-    pub build_switched_client: SwitchClientFn,
-    /// 会话保存闭包（#688）。由 core 层注入，直接接受 chain 引用保存。
-    pub save_chain: Arc<
-        dyn Fn(
-                &crate::business::session::ChatChain,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>,
-            > + Send
-            + Sync,
-    >,
-    /// 运行 reflection（#567）。由 core 层注入。
-    pub run_reflection_on_demand: Arc<
-        dyn Fn() -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<sdk::ReflectionOutputView, sdk::SdkError>,
-                        > + Send,
-                >,
-            > + Send
-            + Sync,
-    >,
-    /// 应用 reflection 结果（#567）。由 core 层注入。
-    pub apply_reflection_on_demand: Arc<
-        dyn Fn(
-                sdk::ReflectionOutputView,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<String, sdk::SdkError>> + Send>,
-            > + Send
-            + Sync,
-    >,
-    /// 查询模型列表（#567）。由 core 层注入。
-    pub list_models: Arc<
-        dyn Fn() -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<Output = Result<Vec<sdk::ModelSummary>, sdk::SdkError>>
-                        + Send,
-                >,
-            > + Send
-            + Sync,
-    >,
-    /// 查询提醒列表（#567）。由 core 层注入。
-    pub list_reminders: Arc<
-        dyn Fn() -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<Output = Result<Vec<sdk::ReminderView>, sdk::SdkError>>
-                        + Send,
-                >,
-            > + Send
-            + Sync,
-    >,
-    /// 查询会话列表（#567 S14）。由 core 层注入。
-    pub list_sessions: Arc<
-        dyn Fn() -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<
-                            Output = Result<Vec<sdk::SessionSummary>, sdk::SdkError>,
-                        > + Send,
-                >,
-            > + Send
-            + Sync,
-    >,
-}
+use super::loop_context::ChatLoopContext;
 
 /// Background task: runs the agent loop and sends UI events via sink.
 pub async fn process_chat_loop<S, Q, I>(
@@ -263,8 +134,8 @@ where
     let mut stall_detector = StallDetector::new();
     let mut stop_hook_block_count: usize = 0;
     let mut pending_input = PendingInputBuffer::default();
-    /// busy 阶段（LLM 调用中）排队的用户输入。
-    /// idle 门开启时 drain 进 pending_input → apply_gate。
+    // busy 阶段（LLM 调用中）排队的用户输入。
+    // idle 门开启时 drain 进 pending_input → apply_gate。
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let mut tool_call_fuse = ToolCallFuse::new();
@@ -280,264 +151,224 @@ where
     // 避免 completion arm Resumed 后 continue 回 loop-top 的 double-idle 死锁。
     let mut first_loop_top = true;
 
-    /// 处理 idle 期收到的 `PendingCommand`。
-    ///
-    /// **单一真相**：消除 #628 之前 loop_runner.rs 中 6 处复制粘贴的
-    /// `IdleResult::CommandRequested(cmd) => match cmd { ... }` match 臂。
-    ///
-    /// #628 根因：9 个纯查询 / 动作命令变体漏了 `continue`，处理完后掉进
-    /// `execute_tool_round` 跑一轮无新输入的幽灵 LLM turn。本 macro 统一语义：
-    /// 所有 12 个变体处理完一律 `continue` 回 loop 顶部（回 idle 等下一条输入），
-    /// **绝不**掉进 turn。
-    ///
-    /// ## 参数
-    /// - `$cmd`：待处理的 `PendingCommand` 值
-    /// - `$needs_resume`：bool 表达式。为 `true` 时（区间 4：turn 完成 → Idle 后
-    ///   收到命令），所有命令分支在 `continue` 前先把 FSM 从 `Idle` 切回 `Running`；
-    ///   其余 5 处 idle 上下文（`cancel_to_idle` 等）传 `false`
-    ///
-    /// macro 在调用点原位展开，直接引用周围作用域的局部变量
-    /// （`sink` / `client` / `chain` / `loop_fsm` / 各 `Arc<dyn Fn>` 闭包等），
-    /// 可使用 `continue` / `.await`，无需 `CommandContext` 参数爆炸。
+    // 处理 idle 期收到的 `PendingCommand`。
+    // 单一真相：消除 #628 之前 loop_runner.rs 中 6 处复制粘贴的
+    // IdleResult::CommandRequested(cmd) => match cmd { ... } match 臂。
+    // #628 根因：9 个纯查询 / 动作命令变体漏了 continue，处理完后掉进
+    // execute_tool_round 跑一轮无新输入的幽灵 LLM turn。本 macro 统一语义：
+    // 所有 12 个变体处理完一律 continue 回 loop 顶部（回 idle 等下一条输入）。
+    //
+    // 参数：
+    // - $cmd：待处理的 PendingCommand 值
+    // - $needs_resume：bool 表达式。为 true 时（区间 4：turn 完成 → Idle 后
+    //   收到命令），所有命令分支在 continue 前先把 FSM 从 Idle 切回 Running；
+    //   其余 5 处 idle 上下文（cancel_to_idle 等）传 false
     macro_rules! handle_pending_command {
-    ($cmd:expr, $needs_resume:expr) => {
-        match $cmd {
-            PendingCommand::Compact => {
-                if let Some(outcome) = manual_compact(
-                    &sink,
-                    &hook_ui,
-                    &hook_runner,
-                    turn_count,
-                    &chain.messages_flat(),
-                    &system_prompt_text,
-                    context_size,
-                    &memory_config,
-                    &memory_cwd,
-                    &client,
-                    &language,
-                    &cwd,
-                )
-                .await
-                {
-                    apply_compact_outcome(
+        ($cmd:expr, $needs_resume:expr) => {
+            match $cmd {
+                PendingCommand::Compact => {
+                    if let Some(outcome) = manual_compact(
                         &sink,
-                        outcome,
-                        &mut chain,
-                        &frozen_chats,
-                        &mut active_summary,
-                        &active_summary_arc,
+                        &hook_ui,
+                        &hook_runner,
+                        turn_count,
+                        &chain.messages_flat(),
+                        &system_prompt_text,
+                        context_size,
+                        &memory_config,
+                        &memory_cwd,
+                        &client,
+                        &language,
+                        &cwd,
                     )
-                    .await;
-                }
-                // compact 后回到 loop 顶重新检查 idle（无新用户消息则继续等待）
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::SwitchModel { selection } => {
-                match (build_switched_client)(&selection).await {
-                    Ok((new_client, result)) => {
-                        client = Arc::new(new_client);
-                        context_size = result.context_window;
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ModelSwitched { result })
-                            .await;
+                    .await
+                    {
+                        apply_compact_outcome(
+                            &sink,
+                            outcome,
+                            &mut chain,
+                            &frozen_chats,
+                            &mut active_summary,
+                            &active_summary_arc,
+                        )
+                        .await;
                     }
-                    Err(msg) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: msg,
-                                is_error: true,
-                            })
-                            .await;
+                    if $needs_resume {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     }
+                    continue;
                 }
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::SetThinking { desired } => {
-                execute_set_thinking(&client, &sink, desired).await;
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::InitProject { force } => {
-                let cwd_str = cwd.display().to_string();
-                let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
-                let _ = sink
-                    .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                    .await;
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::ManageSession { args } => {
-                let trimmed = args.trim();
-                // #567 S14: list/空 args 发结构化 SessionList 事件
-                if trimmed.is_empty() || trimmed == "list" {
-                    match list_sessions().await {
-                        Ok(sessions) => {
+                PendingCommand::SwitchModel { selection } => {
+                    match (build_switched_client)(&selection).await {
+                        Ok((new_client, result)) => {
+                            client = Arc::new(new_client);
+                            context_size = result.context_window;
                             let _ = sink
-                                .send_event(RuntimeStreamEvent::SessionList { sessions })
+                                .send_event(RuntimeStreamEvent::ModelSwitched { result })
                                 .await;
                         }
-                        Err(e) => {
+                        Err(msg) => {
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: format!("List sessions failed: {e}"),
+                                    text: msg,
                                     is_error: true,
                                 })
                                 .await;
                         }
                     }
-                } else {
-                    let (text, is_error) =
-                        super::idle_commands::execute_session(&args, &session_id).await;
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText {
-                            text,
-                            is_error,
-                        })
-                        .await;
-                }
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::ManageMemory { args } => {
-                let (text, is_error) = super::idle_commands::execute_memory(
-                    &args,
-                    &memory_cwd.display().to_string(),
-                    &memory_config,
-                )
-                .await;
-                let _ = sink
-                    .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                    .await;
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::ResumeSession { id } => {
-                match crate::business::session::load_session(&id).await {
-                    Ok(snapshot) => {
-                        // 统一通过 SessionRestore 提取活跃链运行时状态（与 trait_session::load_session_impl 共享）
-                        // 修复 #636：旧实现读 snapshot.messages（PR #643 后永远空），导致 resume 看不到历史
-                        let restore =
-                            crate::business::session::SessionRestore::from_session(&snapshot);
-                        if restore.trimmed > 0 || restore.repaired > 0 {
-                            log::info!(
-                                target: "aemeath:agent:runtime",
-                                "resume {}: trimmed={} repaired={}",
-                                id,
-                                restore.trimmed,
-                                restore.repaired
-                            );
-                        }
-                        chain = restore.active_chain;
-                        active_summary = restore.active_summary.clone();
-                        if let Ok(mut guard) = active_summary_arc.lock() {
-                            *guard = restore.active_summary;
-                        }
-                        if let Ok(mut guard) = frozen_chats.lock() {
-                            *guard = restore.frozen_chats;
-                        }
-                        // TODO #636: SessionResumed.created_at 当前为 u64，
-                        // 需从 restore.created_at (ISO 8601) 转 unix timestamp；暂保持 0。
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::SessionResumed {
-                                messages: chain.messages_flat(),
-                                session_id: id.clone(),
-                                created_at: 0u64,
-                            })
-                            .await;
-                        if restore.trimmed > 0 || restore.repaired > 0 {
-                            log::info!(
-                                target: "aemeath:agent:runtime",
-                                "resume {}: trimmed={} repaired={}",
-                                id,
-                                restore.trimmed,
-                                restore.repaired
-                            );
-                        }
+                    if $needs_resume {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     }
-                    Err(e) => {
-                        use crate::business::session::SessionLoadError;
-                        use sdk::SessionResumeFailureKind;
-                        let (kind, message) = match &e {
-                            SessionLoadError::NotFound { .. } => (
-                                SessionResumeFailureKind::NotFound,
-                                format!("Session {id} 不存在，可用 `/sessions` 查看可用会话"),
-                            ),
-                            SessionLoadError::Corrupt {
-                                parse_err,
-                                corrupt_path,
-                                ..
-                            } => (
-                                SessionResumeFailureKind::Corrupt,
-                                format!(
-                                    "Session {id} 损坏（{parse_err}），原文件已转存到 {}",
-                                    corrupt_path.display()
-                                ),
-                            ),
-                            SessionLoadError::Io { source, .. } => (
-                                SessionResumeFailureKind::Io,
-                                format!("读取 session {id} 失败: {source}"),
-                            ),
-                        };
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::SessionResumeFailed {
-                                kind,
-                                id: id.clone(),
-                                message,
-                            })
-                            .await;
+                    continue;
+                }
+                PendingCommand::SetThinking { desired } => {
+                    execute_set_thinking(&client, &sink, desired).await;
+                    if $needs_resume {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     }
+                    continue;
                 }
-                if $needs_resume {
-                    loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                }
-                continue;
-            }
-            PendingCommand::RunReflection => match run_reflection_on_demand().await {
-                Ok(view) => {
+                PendingCommand::InitProject { force } => {
+                    let cwd_str = cwd.display().to_string();
+                    let (text, is_error) = super::idle_commands::execute_init(&cwd_str, force);
                     let _ = sink
-                        .send_event(RuntimeStreamEvent::ReflectionResult {
-                            output: Box::new(view),
-                        })
+                        .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                         .await;
                     if $needs_resume {
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     }
                     continue;
                 }
-                Err(e) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText {
-                            text: format!("Reflection failed: {e}"),
-                            is_error: true,
-                        })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-            },
-            PendingCommand::ApplyReflection { output } => {
-                match apply_reflection_on_demand(output).await {
-                    Ok(msg) => {
+                PendingCommand::ManageSession { args } => {
+                    let trimmed = args.trim();
+                    if trimmed.is_empty() || trimmed == "list" {
+                        match list_sessions().await {
+                            Ok(sessions) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::SessionList { sessions })
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = sink
+                                    .send_event(RuntimeStreamEvent::CommandResultText {
+                                        text: format!("List sessions failed: {e}"),
+                                        is_error: true,
+                                    })
+                                    .await;
+                            }
+                        }
+                    } else {
+                        let (text, is_error) =
+                            super::idle_commands::execute_session(&args, &session_id).await;
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: msg,
-                                is_error: false,
+                                text,
+                                is_error,
+                            })
+                            .await;
+                    }
+                    if $needs_resume {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                    }
+                    continue;
+                }
+                PendingCommand::ManageMemory { args } => {
+                    let (text, is_error) = super::idle_commands::execute_memory(
+                        &args,
+                        &memory_cwd.display().to_string(),
+                        &memory_config,
+                    )
+                    .await;
+                    let _ = sink
+                        .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                        .await;
+                    if $needs_resume {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                    }
+                    continue;
+                }
+                PendingCommand::ResumeSession { id } => {
+                    match crate::business::session::load_session(&id).await {
+                        Ok(snapshot) => {
+                            let restore =
+                                crate::business::session::SessionRestore::from_session(&snapshot);
+                            if restore.trimmed > 0 || restore.repaired > 0 {
+                                log::info!(
+                                    target: "aemeath:agent:runtime",
+                                    "resume {}: trimmed={} repaired={}",
+                                    id,
+                                    restore.trimmed,
+                                    restore.repaired
+                                );
+                            }
+                            chain = restore.active_chain;
+                            active_summary = restore.active_summary.clone();
+                            if let Ok(mut guard) = active_summary_arc.lock() {
+                                *guard = restore.active_summary;
+                            }
+                            if let Ok(mut guard) = frozen_chats.lock() {
+                                *guard = restore.frozen_chats;
+                            }
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::SessionResumed {
+                                    messages: chain.messages_flat(),
+                                    session_id: id.clone(),
+                                    created_at: 0u64,
+                                })
+                                .await;
+                            if restore.trimmed > 0 || restore.repaired > 0 {
+                                log::info!(
+                                    target: "aemeath:agent:runtime",
+                                    "resume {}: trimmed={} repaired={}",
+                                    id,
+                                    restore.trimmed,
+                                    restore.repaired
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            use crate::business::session::SessionLoadError;
+                            use sdk::SessionResumeFailureKind;
+                            let (kind, message) = match &e {
+                                SessionLoadError::NotFound { .. } => (
+                                    SessionResumeFailureKind::NotFound,
+                                    format!("Session {id} 不存在，可用 `/sessions` 查看可用会话"),
+                                ),
+                                SessionLoadError::Corrupt {
+                                    parse_err,
+                                    corrupt_path,
+                                    ..
+                                } => (
+                                    SessionResumeFailureKind::Corrupt,
+                                    format!(
+                                        "Session {id} 损坏（{parse_err}），原文件已转存到 {}",
+                                        corrupt_path.display()
+                                    ),
+                                ),
+                                SessionLoadError::Io { source, .. } => (
+                                    SessionResumeFailureKind::Io,
+                                    format!("读取 session {id} 失败: {source}"),
+                                ),
+                            };
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::SessionResumeFailed {
+                                    kind,
+                                    id: id.clone(),
+                                    message,
+                                })
+                                .await;
+                        }
+                    }
+                    if $needs_resume {
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                    }
+                    continue;
+                }
+                PendingCommand::RunReflection => match run_reflection_on_demand().await {
+                    Ok(view) => {
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ReflectionResult {
+                                output: Box::new(view),
                             })
                             .await;
                         if $needs_resume {
@@ -548,7 +379,7 @@ where
                     Err(e) => {
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Apply reflection failed: {e}"),
+                                text: format!("Reflection failed: {e}"),
                                 is_error: true,
                             })
                             .await;
@@ -557,57 +388,84 @@ where
                         }
                         continue;
                     }
+                },
+                PendingCommand::ApplyReflection { output } => {
+                    match apply_reflection_on_demand(output).await {
+                        Ok(msg) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: msg,
+                                    is_error: false,
+                                })
+                                .await;
+                            if $needs_resume {
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                            }
+                            continue;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("Apply reflection failed: {e}"),
+                                    is_error: true,
+                                })
+                                .await;
+                            if $needs_resume {
+                                loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                            }
+                            continue;
+                        }
+                    }
                 }
+                PendingCommand::ListModels => match list_models().await {
+                    Ok(models) => {
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ModelList { models })
+                            .await;
+                        if $needs_resume {
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                text: format!("List models failed: {e}"),
+                                is_error: true,
+                            })
+                            .await;
+                        if $needs_resume {
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        }
+                        continue;
+                    }
+                },
+                PendingCommand::ListReminders => match list_reminders().await {
+                    Ok(reminders) => {
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::ReminderList { reminders })
+                            .await;
+                        if $needs_resume {
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        let _ = sink
+                            .send_event(RuntimeStreamEvent::CommandResultText {
+                                text: format!("List reminders failed: {e}"),
+                                is_error: true,
+                            })
+                            .await;
+                        if $needs_resume {
+                            loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        }
+                        continue;
+                    }
+                },
             }
-            PendingCommand::ListModels => match list_models().await {
-                Ok(models) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::ModelList { models })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-                Err(e) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText {
-                            text: format!("List models failed: {e}"),
-                            is_error: true,
-                        })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-            },
-            PendingCommand::ListReminders => match list_reminders().await {
-                Ok(reminders) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::ReminderList { reminders })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-                Err(e) => {
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText {
-                            text: format!("List reminders failed: {e}"),
-                            is_error: true,
-                        })
-                        .await;
-                    if $needs_resume {
-                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
-                    }
-                    continue;
-                }
-            },
-        }
-    };
-}
+        };
+    }
 
     loop {
         // ── loop 顶部空闲门（Task 4，位于回合头之前）──
@@ -1584,317 +1442,4 @@ where
     // api-error break 发送 `ApiError` 事件作为 turn 结束信号。
     // 新增异常终止 break 路径时 MUST 遵守此契约并补充对应测试。
     chain
-}
-
-/// idle 分支执行 `/think`：读当前 reasoning level，按 desired 设置新 level，
-/// 发 `ThinkingChanged` + `SystemMessage`。
-async fn execute_set_thinking<S>(client: &provider::api::LlmClient, sink: &S, desired: Option<bool>)
-where
-    S: ChatEventSink,
-{
-    use provider::api::ReasoningLevel;
-    let current = client.current_reasoning_level();
-    let new_state = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
-    let level = if new_state {
-        ReasoningLevel::Medium
-    } else {
-        ReasoningLevel::Off
-    };
-    client.set_reasoning_level(level);
-    let label = if new_state { "ON" } else { "OFF" };
-    let _ = sink
-        .send_event(RuntimeStreamEvent::ThinkingChanged { enabled: new_state })
-        .await;
-    let _ = sink
-        .send_event(RuntimeStreamEvent::SystemMessage(format!(
-            "[thinking mode: {}]",
-            label
-        )))
-        .await;
-}
-
-/// idle 分支执行 `/context`：用 loop 内部 messages + system_prompt 估算 token 占用，
-/// 发 `ContextEstimated` 事件（TUI 据此显示）。
-async fn execute_estimate_context<S>(
-    messages: &[share::message::Message],
-    system_prompt_text: &str,
-    context_size: usize,
-    sink: &S,
-) where
-    S: ChatEventSink,
-{
-    let estimated_tokens = crate::business::compact::estimate_messages_tokens(messages)
-        + crate::business::compact::estimate_tokens(system_prompt_text);
-    let system_tokens = crate::business::compact::estimate_tokens(system_prompt_text);
-    let usage_percentage = if context_size > 0 {
-        estimated_tokens as f64 * 100.0 / context_size as f64
-    } else {
-        0.0
-    };
-    let estimate = sdk::ContextEstimate {
-        estimated_tokens,
-        system_tokens,
-        context_size,
-        usage_percentage,
-    };
-    let _ = sink
-        .send_event(RuntimeStreamEvent::ContextEstimated {
-            estimate,
-            message_count: messages.len(),
-        })
-        .await;
-}
-
-/// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或待执行命令。
-enum IdleResult {
-    /// 收到新用户消息，已 append 到 chain。携带本 turn 的 segment ID。
-    Resumed(String),
-    Shutdown,
-    /// idle gate 收到待执行命令（Compact / SwitchModel / …，#497 泛化载体）。
-    CommandRequested(PendingCommand),
-}
-
-/// 检查当前 messages 是否有「待 assistant 响应的用户回合」：
-/// 最后一条消息是 User 角色 → 有待答回合（true）；
-/// 否则（空、末尾是 assistant / tool / system）→ 无待答回合（false）。
-///
-/// 用于 loop 顶部空闲门的后续迭代检查（#672 后仅首次迭代无条件 idle）：
-/// completion arm Resumed 后 continue 回 loop-top 时，messages 已含 user tail，
-/// 本函数返回 true → 不 double-idle。
-fn has_pending_user_turn(messages: &[Message]) -> bool {
-    matches!(messages.last(), Some(m) if m.role == Role::User)
-}
-
-/// 判断「本回合是否由一条真正的新用户消息开启」（#390 A1 跨回合泄漏修复用）。
-///
-/// 返回 `true` 仅当 `last` 是一条**真正的新用户输入**：
-/// - role = User，且
-/// - 不是工具结果消息（工具结果 role 虽为 User，但 `has_tool_results()` 为真——
-///   这对应回合内的工具轮次再迭代，NEVER 视为新回合），且
-/// - 不是 system-generated 用户消息（stop-hook 阻断注入的反馈，回合仍在继续）。
-///
-/// 用于在新 USER 回合边界（且仅在该边界）重置 `stall_detector` / `turn_start`，
-/// 既消除跨回合泄漏，又保留单个回合内的 stall 检测能力。
-pub(super) fn is_new_user_turn_message(last: Option<&Message>) -> bool {
-    matches!(
-        last,
-        Some(m)
-            if m.role == Role::User
-                && !m.has_tool_results()
-                && m.source() != share::message::MessageSource::SystemGenerated
-    )
-}
-
-/// 回合完成后阻塞等待下一条输入：
-/// - 收到事件 → push 进 `pending` 缓冲，返回 `Resumed`（由调用方经 gate 处理）。
-/// - `None`（通道关闭）→ 返回 `Shutdown`，调用方退出常驻 loop。
-async fn await_idle_input<I: InputEventDrainPort>(
-    input_events: &I,
-    pending: &mut PendingInputBuffer,
-) -> IdleResult {
-    match input_events.recv_next_input().await {
-        Some(event) => {
-            // [loop_debug] 空闲态被唤醒：记录到底是什么事件把 loop 从 idle 拉起来。
-            // 若用户没输入却出现此日志，说明有事件被送进 input 通道（关键线索）。
-            // DEBUG 级：默认不输出，排查 loop 自跑类问题时拉高级别可见。
-            log::debug!(
-                target: LOG_TARGET,
-                "[loop_debug] await_idle_input WOKEN by event kind={}",
-                super::event_kind_name(&event)
-            );
-            pending.push(event);
-            IdleResult::Resumed(String::new())
-        }
-        None => {
-            log::debug!(target: LOG_TARGET, "[loop_debug] await_idle_input channel closed → Shutdown");
-            IdleResult::Shutdown
-        }
-    }
-}
-
-/// 读取共享槽里「当前回合 token」的 clone。
-///
-/// 锁仅在 clone 期间持有后立即释放（`std::sync::Mutex`，NEVER 跨 `.await`）。
-/// `CancellationToken::clone` 共享内部取消状态：外部 `cancel_impl` 锁同一槽对
-/// 当前 token 调 `cancel()` 后，本回合持有的 clone 同样变为已取消，从而被观测到。
-fn current_cancel_token(slot: &std::sync::Mutex<CancellationToken>) -> CancellationToken {
-    slot.lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
-}
-
-/// 将共享槽重置为一个全新的、未取消的 token。
-///
-/// 常驻 loop 处理完一次取消后调用：被取消的旧 token 已永久处于 cancelled 状态，
-/// 若不替换，则下个回合从槽读到的仍是 cancelled token，会立即「胎死腹中」。
-/// 替换为新 token 后，下回合 `current_cancel_token` 读到干净 token；同时 `cancel_impl`
-/// 之后再触发取消会作用在这个新 token 上（针对的是「新一轮」工作，语义正确）。
-fn reset_cancel(slot: &std::sync::Mutex<CancellationToken>) {
-    let fresh = CancellationToken::new();
-    match slot.lock() {
-        Ok(mut guard) => *guard = fresh,
-        Err(poisoned) => *poisoned.into_inner() = fresh,
-    }
-}
-
-/// 进入空闲态：阻塞等待下一条「真正的新用户消息」，期间忽略不产生用户消息的事件。
-///
-/// 返回 `Resumed` 表示已有新用户消息 append 进 `messages`，调用方应恢复跑回合；
-/// 返回 `Shutdown` 表示输入通道关闭，调用方应退出常驻 loop。
-///
-/// 空闲期语义：
-/// - 单独 `ControlCommand`（/save、/model…）/ `Cancel` / `/clear` 都 append 0 条用户
-///   消息 → 保持空闲，继续等下一条，NEVER 在陈旧历史上跑空回合。
-///
-/// `cancel_slot` 参数统一了两种调用场景（DRY，消除两个近乎相同的空闲函数）：
-/// - `Some(slot)`：**回合完成 / cancel 后的空闲**。此时 loop 已经跑过 LLM/tool，
-///   `cancel_impl` 可能已取消「当前槽里的 token」。为避免这枚 stale-cancelled token
-///   污染随后真正恢复的回合，在「收到新用户消息恢复运行前」以及「空闲期观测到
-///   abort/cancel 决策时」都 `reset_cancel`，保证新回合必从干净 token 起步。
-/// - `None`：**loop 顶部首回合前置等待**。此时 loop 尚未开始任何 LLM 调用，
-///   且 loop 体的 `cancel` clone 在本函数返回**之后**才从槽读取，故**不能** `reset_cancel`
-///   ——重置会丢弃外部已经持有引用的 token，破坏首回合的外部 cancel 能力。
-async fn idle_until_resume_or_shutdown<I, S>(
-    input_events: &I,
-    sink: &S,
-    pending: &mut PendingInputBuffer,
-    chain: &mut ChatChain,
-    task_store: &storage::api::TaskStore,
-    cancel_slot: Option<&std::sync::Mutex<CancellationToken>>,
-) -> IdleResult
-where
-    I: InputEventDrainPort,
-    S: ChatEventSink,
-{
-    loop {
-        match await_idle_input(input_events, pending).await {
-            IdleResult::Resumed(_) => {
-                // 生成新 segment ID（新 turn）
-                let segment_id = sdk::ids::ChatId::new_v7().to_string();
-                let gate = apply_gate(
-                    GateKind::BeforeLlm,
-                    pending,
-                    sink,
-                    chain,
-                    &segment_id,
-                    &task_store,
-                    true,
-                )
-                .await;
-                if let Some(cmd) = gate.pending_command {
-                    return IdleResult::CommandRequested(cmd);
-                }
-                if gate.appended_user_messages > 0 {
-                    // 收到真正的新用户消息（已 append 进 messages）：恢复运行。
-                    // 并发兜底：空闲期间外部可能对槽里的 token 直接调过 cancel()
-                    // （`cancel_impl`，无对应输入事件经过本臂），使其变为已取消。
-                    // 若不处理，下个真实回合会读到这枚 stale-cancelled token 而被误取消。
-                    // 因此在恢复运行前无条件重置为干净 token（仅 `Some` 场景；首回合前置
-                    // 等待 `None` 不重置——见函数文档）。
-                    if let Some(slot) = cancel_slot {
-                        reset_cancel(slot);
-                    }
-                    return IdleResult::Resumed(segment_id);
-                }
-                if matches!(
-                    gate.decision,
-                    GateDecision::AbortCurrentLoop | GateDecision::CancelCurrentLoop
-                ) {
-                    // 空闲期取消（经输入通道的 Cancel/`/clear` 事件）：重置 token，
-                    // 防止这枚已取消的 token 污染下一个真实回合（仅 `Some` 场景）。
-                    if let Some(slot) = cancel_slot {
-                        reset_cancel(slot);
-                    }
-                }
-                // 0 append（命令 / 取消 / 空）→ 留在空闲，继续等下一条输入。
-                continue;
-            }
-            IdleResult::Shutdown => return IdleResult::Shutdown,
-            // `await_idle_input` 只返回 Resumed/Shutdown，CommandRequested 不可能到达。
-            IdleResult::CommandRequested(cmd) => return IdleResult::CommandRequested(cmd),
-        }
-    }
-}
-
-/// 中止当前回合并回到空闲（常驻 actor 的取消语义）。
-///
-/// 取消不再退出 loop：本函数回滚本回合产生的消息、发出 `Cancelled`、**重置取消令牌**，
-/// 然后经空闲机制阻塞等待下一条输入。返回 `Resumed`（收到新用户消息，调用方 `continue`
-/// 跑新回合）或 `Shutdown`（输入通道关闭，调用方 `break` 退出 loop）。
-///
-/// 并发要点：必须在进入空闲*之前* `reset_cancel`，使下个回合从槽读到干净 token。
-/// 重置后到进入空闲之间若发生 stale 的二次取消（外部对新 token 调 cancel），由空闲臂
-/// （`idle_until_resume_or_shutdown` 中的 abort/cancel 决策分支）再次 reset 兜底。
-#[allow(clippy::too_many_arguments)]
-async fn cancel_to_idle<I, S>(
-    sink: &S,
-    input_events: &I,
-    loop_fsm: &mut ChatLoopFsm,
-    chain: &mut ChatChain,
-    pending_input: &mut PendingInputBuffer,
-    task_store: &storage::api::TaskStore,
-    cancel_slot: &std::sync::Mutex<CancellationToken>,
-    rollback_baseline: usize,
-    turn_context: &RuntimeTurnContext,
-) -> IdleResult
-where
-    I: InputEventDrainPort,
-    S: ChatEventSink,
-{
-    // 回滚到本回合基线（per-turn）：仅截掉当前回合产生的 assistant/tool 输出，
-    // 保留本回合用户消息与所有先前已完成回合的消息，再同步给消费者。
-    chain.truncate_flat(rollback_baseline);
-    let flat = chain.messages_flat();
-    sink.send_event(RuntimeStreamEvent::CompactRollback { messages: flat })
-        .await;
-    sink.send_event(RuntimeStreamEvent::Cancelled {
-        context: turn_context.clone(),
-    })
-    .await;
-    // 重置取消令牌：被取消的旧 token 已永久 cancelled，必须换新 token 供下个回合。
-    reset_cancel(cancel_slot);
-    // FSM：回合中止 → 经 Stopping 进入 Idle（与回合完成后的空闲态共用 Idle 状态）。
-    loop_fsm.transition(ChatLoopTransition::TryStop);
-    loop_fsm.transition(ChatLoopTransition::Idle);
-    loop_fsm.assert_state(ChatLoopState::Idle, "cancel aborts turn then idles");
-    idle_until_resume_or_shutdown(
-        input_events,
-        sink,
-        pending_input,
-        chain,
-        task_store,
-        Some(cancel_slot),
-    )
-    .await
-}
-
-/// 应用 compact 结果到 loop 状态：冻结旧链 → 替换 messages → 设 summary → 发 CompactFinished。
-async fn apply_compact_outcome<S>(
-    sink: &S,
-    outcome: CompactOutcome,
-    chain: &mut crate::business::session::ChatChain,
-    frozen_chats: &Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
-    active_summary: &mut Option<String>,
-    active_summary_arc: &Arc<std::sync::Mutex<Option<String>>>,
-) where
-    S: ChatEventSink,
-{
-    // 1. 冻结旧链：把当前活跃段全部冻结
-    let old_segments: Vec<crate::business::session::ChatSegment> = chain.active_segments().to_vec();
-    if let Ok(mut guard) = frozen_chats.lock() {
-        guard.extend(old_segments);
-    }
-
-    // 2. 用 compact 结果（summary + recent tail）替换活跃链
-    chain.compact(outcome.summary.clone(), outcome.messages);
-
-    // 3. 设 summary
-    *active_summary = Some(outcome.summary);
-    if let Ok(mut guard) = active_summary_arc.lock() {
-        *guard = active_summary.clone();
-    }
-    sink.send_event(RuntimeStreamEvent::CompactFinished {
-        messages: chain.messages_flat(),
-    })
-    .await;
 }
