@@ -1151,7 +1151,7 @@ where
                     )
                     .await;
                     // [loop_debug] 关键分叉：Stop hook 放行 (None) 还是阻断 (Some)。
-                    log::debug!(target: crate::LOG_TARGET,
+                    log::info!(target: crate::LOG_TARGET,
                         "[loop_debug] turn {} completed → stop_hook {}",
                         turn_count,
                         if stop_feedback.is_some() { "BLOCKED (will inject reminder + continue)" } else { "PASSED (→ Idle)" }
@@ -1184,6 +1184,10 @@ where
                         loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                         loop_fsm
                             .assert_state(ChatLoopState::Running, "stop hook blocked resumes loop");
+                        log::info!(target: crate::LOG_TARGET,
+                            "[loop_debug] turn {} Stop hook blocked → loop resumed Running, NOT entering Idle",
+                            turn_count
+                        );
                         continue;
                     }
                     let gate = drain_and_apply_gate(
@@ -1208,7 +1212,7 @@ where
                     }
                     // 回合完成、stop hook 放行：发出 Done，但不退出常驻 loop。
                     // 进入空闲态阻塞等待下一条输入；通道关闭才 shutdown 退出。
-                    log::debug!(target: crate::LOG_TARGET,
+                    log::info!(target: crate::LOG_TARGET,
                         "[loop_debug] turn {} → entering Idle (等待用户输入)", turn_count);
                     finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
                     // #636 D1: turn-level save —— 每轮 turn 完成立即落盘，避免进程被
