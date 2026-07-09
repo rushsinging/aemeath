@@ -150,41 +150,48 @@ pub async fn parse_stream(
             }
             StreamEvent::ContentBlockStop { .. } => {
                 if !current_tool_id.is_empty() {
-                    let input: serde_json::Value = match serde_json::from_str(&current_tool_json) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            // 截断恢复：尝试补全被切在字符串字面量中间的 arguments JSON。
-                            if let Some(recovered) =
-                                crate::business::json_recovery::try_complete_truncated_json(
-                                    &current_tool_json,
-                                )
-                            {
-                                log::warn!(
-                                    target: "aemeath:agent:provider",
-                                    "Anthropic 流式 tool_call JSON 解析失败但启发式恢复成功（{} bytes → {} bytes）",
-                                    current_tool_json.len(),
-                                    serde_json::to_string(&recovered).map(|s| s.len()).unwrap_or(0),
-                                );
-                                recovered
-                            } else {
-                                let head_preview: String =
-                                    current_tool_json.chars().take(200).collect();
-                                let tail_preview: String = current_tool_json
-                                    .chars()
-                                    .rev()
-                                    .take(200)
-                                    .collect::<String>()
-                                    .chars()
-                                    .rev()
-                                    .collect();
-                                return Err(crate::LlmError::StreamTruncated {
-                                    tool_call_id: current_tool_id.clone(),
-                                    tool_call_name: current_tool_name.clone(),
-                                    accumulated_bytes: current_tool_json.len(),
-                                    delta_count: 0,
-                                    head_preview,
-                                    tail_preview,
-                                });
+                    // 无参数工具（如 TaskListComplete、TaskList）不会产生
+                    // InputJsonDelta，current_tool_json 为空字符串。此时应
+                    // 视为空对象 {}，而非流截断错误。
+                    let input: serde_json::Value = if current_tool_json.is_empty() {
+                        serde_json::Value::Object(serde_json::Map::new())
+                    } else {
+                        match serde_json::from_str(&current_tool_json) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                // 截断恢复：尝试补全被切在字符串字面量中间的 arguments JSON。
+                                if let Some(recovered) =
+                                    crate::business::json_recovery::try_complete_truncated_json(
+                                        &current_tool_json,
+                                    )
+                                {
+                                    log::warn!(
+                                        target: "aemeath:agent:provider",
+                                        "Anthropic 流式 tool_call JSON 解析失败但启发式恢复成功（{} bytes → {} bytes）",
+                                        current_tool_json.len(),
+                                        serde_json::to_string(&recovered).map(|s| s.len()).unwrap_or(0),
+                                    );
+                                    recovered
+                                } else {
+                                    let head_preview: String =
+                                        current_tool_json.chars().take(200).collect();
+                                    let tail_preview: String = current_tool_json
+                                        .chars()
+                                        .rev()
+                                        .take(200)
+                                        .collect::<String>()
+                                        .chars()
+                                        .rev()
+                                        .collect();
+                                    return Err(crate::LlmError::StreamTruncated {
+                                        tool_call_id: current_tool_id.clone(),
+                                        tool_call_name: current_tool_name.clone(),
+                                        accumulated_bytes: current_tool_json.len(),
+                                        delta_count: 0,
+                                        head_preview,
+                                        tail_preview,
+                                    });
+                                }
                             }
                         }
                     };
