@@ -20,7 +20,7 @@ fn reflection_prompt_template(lang: &str) -> &'static str {
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
 - outdated_memories 使用已有 memory id。
-- 没有内容时输出空数组或 null。
+- 没有内容时输出空数组。
 
 JSON 格式：
 {{
@@ -44,7 +44,7 @@ Requirements:
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
 - outdated_memories uses existing memory ids.
-- Output empty arrays or null when there is nothing.
+- Output empty arrays when there is nothing.
 
 JSON format:
 {{
