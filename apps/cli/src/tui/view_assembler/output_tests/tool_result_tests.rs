@@ -328,6 +328,60 @@ fn test_output_assembler_tool_arguments_delta_updates_header_before_result() {
 }
 
 #[test]
+fn test_output_assembler_write_arguments_delta_updates_realtime_bytes_header() {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "write file".to_string(),
+    });
+    conversation.apply(ToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Write".to_string(),
+        index: 0,
+    });
+    conversation.apply(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-1"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-1"),
+        id: ToolCallId::new("tool-1"),
+        provider_id: None,
+        name: "Write".to_string(),
+        index: 0,
+        arguments: Some(
+            r#"{"file_path":"out.rs","content":"hello world","content_bytes":11}"#.to_string(),
+        ),
+        status: ToolCallStatus::Ready,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    let tool = vm
+        .roots
+        .iter()
+        .find_map(|block| match &block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("tool block");
+    let rendered = OutputBlockKind::ToolCall(tool.clone())
+        .component()
+        .render_self("tool-1", &RenderCtx { text_width: 80 });
+
+    assert!(
+        rendered
+            .lines
+            .iter()
+            .any(|line| line.plain.contains("11 bytes")),
+        "Write running header 应显示 realtime content_bytes，实际: {:?}",
+        rendered
+            .lines
+            .iter()
+            .map(|line| line.plain.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_output_assembler_pending_tool_has_no_result_child() {
     // 边界：未产出结果（仅 ToolCallStart，无 ToolResult）的工具不附结果子块。
     let mut conversation = ConversationModel::default();
@@ -367,9 +421,9 @@ fn test_output_assembler_pending_tool_has_no_result_child() {
 }
 
 #[test]
-fn test_output_assembler_hides_activity_summary_when_tool_completed() {
-    // 回归：Agent 工具完成后，子代理最终输出同时出现在 activity_summary（ToolCall 内）
-    // 和 ToolResult 子块中，造成重复。完成后应隐藏 activity_summary，让位给结果子块。
+fn test_output_assembler_hides_activity_lines_when_tool_completed() {
+    // 回归：Agent 工具完成后，子代理最终输出同时出现在 activity 行（ToolCall 内）
+    // 和 ToolResult 子块中，造成重复。完成后应隐藏 activity_lines，让位给结果子块。
     let mut conversation = ConversationModel::default();
     conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
@@ -423,9 +477,9 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
         .expect("tool block");
 
     assert!(
-        tool.activity_summary.is_none(),
-        "工具完成后不应显示 activity_summary（结果已在 ToolResult 子块），实际: {:?}",
-        tool.activity_summary
+        tool.activity_lines.is_empty(),
+        "工具完成后不应显示 activity_lines（结果已在 ToolResult 子块），实际: {:?}",
+        tool.activity_lines
     );
     assert_eq!(
         tool.result_summary.as_deref(),
@@ -435,8 +489,8 @@ fn test_output_assembler_hides_activity_summary_when_tool_completed() {
 }
 
 #[test]
-fn test_output_assembler_shows_activity_summary_while_tool_running() {
-    // 运行中（未完成）的工具仍应显示 activity_summary 作为实时进度。
+fn test_output_assembler_shows_activity_lines_while_tool_running() {
+    // 运行中（未完成）的工具仍应显示 activity_lines 作为实时进度。
     let mut conversation = ConversationModel::default();
     conversation.apply(StartChat {
         submission: "run sub-agent".to_string(),
@@ -476,8 +530,8 @@ fn test_output_assembler_shows_activity_summary_while_tool_running() {
         })
         .expect("tool block");
 
-    assert!(
-        tool.activity_summary.is_some(),
-        "运行中工具应显示 activity_summary 作为进度指示"
+    assert_eq!(
+        tool.activity_lines,
+        vec!["Agent turn 1/200, messages: 2, est_tokens: 500"]
     );
 }

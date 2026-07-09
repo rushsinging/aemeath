@@ -73,6 +73,13 @@ impl ToolDisplay for ReadDisplay {
             format!("{} {display_path} {range}", self.display_name())
         }
     }
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
+    }
     fn format_header_line(
         &self,
         input: &serde_json::Value,
@@ -149,6 +156,13 @@ impl ToolDisplay for WriteDisplay {
             .map(|s| s.len())
             .unwrap_or(0);
         format!("{} {display_path} {bytes} bytes", self.display_name())
+    }
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
     }
     /// 当 result 到达后，使用实际写入的字节数更新 header。
     /// 从 `WriteResult.bytes_written` 反序列化读取；缺失时回退到 regex 解析。
@@ -238,6 +252,13 @@ impl ToolDisplay for EditDisplay {
             "{} {display_path} Changed {old_len} -> {new_len} chars",
             self.display_name()
         )
+    }
+    fn header_for_subagent(
+        &self,
+        input: &serde_json::Value,
+        workspace_root: Option<&Path>,
+    ) -> String {
+        self.format_header(input, workspace_root)
     }
     fn format_header_line_with_result(
         &self,

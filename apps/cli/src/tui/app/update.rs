@@ -13,11 +13,12 @@ mod ui_event;
 pub(crate) use key::CTRL_C_TIMEOUT_SECS;
 
 use super::event::UiEvent;
-use crate::tui::adapter::agent_event::map_agent_event;
+use crate::tui::adapter::agent_event::map_agent_event_with_tool_header;
 use crate::tui::effect::effect::{Effect, SpawnAgentChatEffect};
 use crate::tui::effect::session::processing::SpawnContextRefs;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
+use crate::tui::render::output::tool_display::format_subagent_tool_header;
 use crate::tui::render::output_area::SCROLLBAR_RESERVE_COLS;
 use crate::tui::update::msg::TuiMsg;
 use crate::tui::update::root_reducer::{reduce_agent_event, TuiUpdateResult};
@@ -242,7 +243,17 @@ impl App {
         ui_tx: &mpsc::Sender<UiEvent>,
         spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
-        let mapping = map_agent_event(&ev);
+        let workspace_root = self
+            .model
+            .conversation
+            .runtime
+            .workspace
+            .workspace_root
+            .as_deref()
+            .map(std::path::Path::new);
+        let mapping = map_agent_event_with_tool_header(&ev, |name, input| {
+            format_subagent_tool_header(name, input, workspace_root)
+        });
         crate::tui::log_trace!(
             "tui.agent_event mapped event={} conversation_intents={} diagnostic_intents={} session_intents={} effects={}",
             ui_event_name(&ev),

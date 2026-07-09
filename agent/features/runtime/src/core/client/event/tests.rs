@@ -131,6 +131,28 @@ fn test_agent_progress_event_to_sdk_started_preserves_sequence() {
     assert_eq!(view.sequence, 42);
 }
 
+#[test]
+fn test_agent_progress_event_to_sdk_tool_output() {
+    let ev = share::tool::AgentProgressEvent {
+        sequence: 9,
+        kind: share::tool::AgentProgressKind::ToolOutput {
+            tool_name: "Bash".into(),
+            text: "stdout".into(),
+        },
+    };
+
+    let view = agent_progress_event_to_sdk(ev);
+
+    assert_eq!(view.sequence, 9);
+    match view.kind {
+        AgentProgressKindView::ToolOutput { tool_name, text } => {
+            assert_eq!(tool_name, "Bash");
+            assert_eq!(text, "stdout");
+        }
+        other => panic!("expected ToolOutput, got {other:?}"),
+    }
+}
+
 fn test_turn_context() -> RuntimeTurnContext {
     RuntimeTurnContext::new(
         sdk::ids::ChatId::new("chat-test"),

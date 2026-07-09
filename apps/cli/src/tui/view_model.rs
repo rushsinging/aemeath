@@ -42,7 +42,7 @@ mod tests {
             semantic_status: ToolSemanticStatus::Success,
             style: SemanticStyle::Success,
             args_preview: Some("src/main.rs".to_string()),
-            activity_summary: None,
+            activity_lines: Vec::new(),
             result_summary: None,
             result_payload: None,
             workspace_root: None,
