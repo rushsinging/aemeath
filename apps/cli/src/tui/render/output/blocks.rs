@@ -6,6 +6,7 @@ pub mod diagnostic;
 pub mod edit_diff;
 pub mod separator;
 pub mod thinking;
+pub mod thinking_placeholder;
 pub mod tool_call;
 pub mod tool_result;
 pub mod user_message;

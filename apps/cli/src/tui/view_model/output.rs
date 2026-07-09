@@ -33,6 +33,7 @@ pub enum OutputBlockKind {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
+    ModelStreamPlaceholder(ModelStreamPlaceholderBlockView),
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
     HookNotice(HookNoticeBlockView),
@@ -80,6 +81,13 @@ pub struct TextBlockView {
     pub key: String,
     pub text: String,
     pub style: SemanticStyle,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ModelStreamPlaceholderBlockView {
+    pub key: String,
+    pub elapsed_secs: u64,
+    pub phase: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

@@ -51,7 +51,6 @@ mod tests {
         for marker in [
             "map tool_call_start",
             "model observe tool_call_start",
-            "assemble tool_call_view",
             "render tool_call block_id",
             "render tool_result block_id",
             "[SPINNER_DEBUG] spinner_phase",

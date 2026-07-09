@@ -12,7 +12,10 @@
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ PreToolUse（Edit/Write）                                    │
-│   └─ reject-main-edit.sh    拦截在 main 工作区直接改代码     │
+│   └─ reject-main-edit.sh    拦截在主工作区直接改代码；对不   │
+│                             存在父目录向上解析最近祖先，区分 │
+│                             主工作区 / worktree / git 上下文 │
+│                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
 │   └─ check-architecture-guards.sh    串行执行 22 个守卫       │

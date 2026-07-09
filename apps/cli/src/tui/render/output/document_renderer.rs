@@ -108,6 +108,10 @@ impl OutputDocumentRenderer {
             {
                 Some(animation_frame / gutter::TOOL_MARKER_BLINK_DIVISOR)
             }
+            crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(_) => Some(
+                animation_frame
+                    / crate::tui::render::output::blocks::thinking_placeholder::THINKING_DOT_FRAME_DIVISOR,
+            ),
             _ => None,
         };
         let gkey = GuttedKey {
@@ -134,13 +138,33 @@ impl OutputDocumentRenderer {
             .set(self.gutted_render_count.get() + 1);
 
         let key = CacheKey {
-            version: node.block_version,
+            version: match marker_frame {
+                Some(frame)
+                    if matches!(
+                        node.kind,
+                        crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(_)
+                    ) =>
+                {
+                    node.block_version ^ frame
+                }
+                _ => node.block_version,
+            },
             text_width,
         };
         let mut rendered = self.cache.get_or_render(&node.block_id, key, |ctx| {
             #[cfg(test)]
             self.render_count.set(self.render_count.get() + 1);
-            node.kind.component().render_self(&node.block_id, ctx)
+            match &node.kind {
+                crate::tui::view_model::output::OutputBlockKind::ModelStreamPlaceholder(
+                    placeholder,
+                ) => crate::tui::render::output::blocks::thinking_placeholder::render_model_stream_placeholder(
+                    &node.block_id,
+                    placeholder,
+                    ctx,
+                    animation_frame,
+                ),
+                kind => kind.component().render_self(&node.block_id, ctx),
+            }
         });
         if matches!(
             node.kind,

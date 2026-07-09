@@ -5,8 +5,8 @@ use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
-    TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
+    OutputViewModel, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
 };
 use std::collections::HashMap;
 
@@ -297,6 +297,17 @@ impl OutputViewAssembler {
                 }
             }
         }
+        if let Some(placeholder) = &conversation.model_stream_placeholder {
+            roots.push(leaf(
+                "model-stream-placeholder".to_string(),
+                OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
+                    key: "model-stream-placeholder".to_string(),
+                    elapsed_secs: placeholder.elapsed_secs,
+                    phase: placeholder.phase.clone(),
+                }),
+            ));
+        }
+
         OutputViewModel {
             roots,
             version,

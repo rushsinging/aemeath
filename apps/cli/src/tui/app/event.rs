@@ -27,6 +27,13 @@ pub struct StatusContextUpdate {
     pub workspace: sdk::WorkspaceContextView,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ModelStreamWaitingView {
+    pub context: UiTurnContext,
+    pub elapsed_secs: u64,
+    pub phase: String,
+}
+
 /// Events sent from background task to UI
 #[derive(Debug)]
 pub enum AppEvent {
@@ -133,6 +140,11 @@ pub enum AppEvent {
     LiveTps(f64),
     ClipboardImage(sdk::ClipboardImageView),
     SystemMessage(String),
+    ModelStreamWaiting {
+        context: UiTurnContext,
+        elapsed_secs: u64,
+        phase: String,
+    },
     /// session reminder recap 行（每轮结束后由 run_loop 异步获取并回传）。
     ReminderRecap(String),
     /// /memory 命令的 reminder 列表回传。

@@ -7,6 +7,7 @@ use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::status_notice::StatusNotice;
 use super::tool_call::ToolCallStatus;
 use super::workspace::WorktreeKind;
+use crate::tui::app::event::ModelStreamWaitingView;
 use std::time::Instant;
 
 // ════════════════════════════════════════════════════════════════════
@@ -100,6 +101,14 @@ pub struct ToolResult {
 pub struct AppendSystemMessage {
     pub text: String,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpsertModelStreamPlaceholder {
+    pub placeholder: ModelStreamWaitingView,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClearModelStreamPlaceholder;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppendHookNotice {
@@ -322,6 +331,8 @@ pub enum ConversationIntent {
     ToolCallUpdate(ToolCallUpdate),
     ToolResult(ToolResult),
     AppendSystemMessage(AppendSystemMessage),
+    UpsertModelStreamPlaceholder(UpsertModelStreamPlaceholder),
+    ClearModelStreamPlaceholder(ClearModelStreamPlaceholder),
     AppendHookNotice(AppendHookNotice),
     AppendError(AppendError),
     QueueSubmission(QueueSubmission),

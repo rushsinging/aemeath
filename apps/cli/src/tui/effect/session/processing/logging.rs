@@ -87,6 +87,18 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         sdk::ChatEvent::SystemMessage(message) => {
             crate::tui::log_trace!("{} system_message len={}", stage, message.len())
         }
+        sdk::ChatEvent::ModelStreamWaiting {
+            context,
+            elapsed_secs,
+            phase,
+        } => crate::tui::log_trace!(
+            "{} model_stream_waiting chat_id={} turn_id={} elapsed_secs={} phase={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            elapsed_secs,
+            phase
+        ),
         sdk::ChatEvent::Error(message) => {
             crate::tui::log_trace!("{} error len={}", stage, message.len())
         }

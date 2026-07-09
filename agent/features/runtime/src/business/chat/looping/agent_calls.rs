@@ -88,6 +88,14 @@ async fn execute_one_agent<S>(
 where
     S: ChatEventSink,
 {
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing start: kind=agent tool_name={} runtime_id={} provider_id={} index={} input_len={}",
+        call.name,
+        call.id,
+        call.provider_id,
+        call.index,
+        call.input.to_string().len(),
+    );
     let pre_results = hook_ui
         .run_plain(
             &hook_runner,
@@ -103,18 +111,37 @@ where
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+        log::debug!(target: crate::LOG_TARGET,
+            "pretooluse timing blocked: kind=agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
+            call.name,
+            call.id,
+            call.provider_id,
+            blocked_result.exit_code,
+            blocked_result.error.as_ref().is_some_and(|value| !value.is_empty()),
+        );
         let error_detail = blocked_result
             .error
             .as_deref()
             .unwrap_or("Blocked by PreToolUse hook");
         let result = ToolExecution::new(&call, ToolOutcome::error(error_detail));
-        send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Running).await;
         send_tool_result(&sink, context, &result).await;
         return vec![result];
     }
-
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing approved: kind=agent tool_name={} runtime_id={} provider_id={} hook_count={}",
+        call.name,
+        call.id,
+        call.provider_id,
+        pre_results.len(),
+    );
     send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Ready).await;
     send_tool_call_status(&sink, context, &call, RuntimeToolCallStatus::Running).await;
+    log::debug!(target: crate::LOG_TARGET,
+        "tool execution timing running_sent: kind=agent tool_name={} runtime_id={} provider_id={}",
+        call.name,
+        call.id,
+        call.provider_id,
+    );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
     ag_ctx.progress_tx = Some(prog_tx);

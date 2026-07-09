@@ -118,6 +118,11 @@ pub enum RuntimeStreamEvent {
         images: Vec<ImageData>,
     },
     SystemMessage(String),
+    ModelStreamWaiting {
+        context: RuntimeTurnContext,
+        elapsed_secs: u64,
+        phase: String,
+    },
     Error(String),
     Usage {
         input: u32,

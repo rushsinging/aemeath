@@ -55,10 +55,21 @@ fn test_stream_handler_keeps_runtime_tool_ids_unique_across_handlers() {
 }
 
 #[test]
-fn test_stream_handler_emits_block_complete_between_thinking_and_tool_call() {
+fn test_stream_handler_progress_snapshot_tracks_waiting_phases() {
     let sink = RecordingSink::default();
     let mut handler = RuntimeStreamHandler::new(sink.clone());
 
+    assert_eq!(handler.progress_snapshot().phase, "waiting_model_response");
+    handler.on_thinking("thinking");
+    assert_eq!(handler.progress_snapshot().phase, "thinking");
+    handler.on_tool_use_start("Write", Some("provider-tool"), 0);
+    assert_eq!(handler.progress_snapshot().phase, "waiting_model_output");
+}
+
+#[test]
+fn test_stream_handler_emits_block_complete_between_thinking_and_tool_call() {
+    let sink = RecordingSink::default();
+    let mut handler = RuntimeStreamHandler::new(sink.clone());
     handler.on_thinking("first thought");
     handler.on_tool_use_start("Read", Some("provider-tool"), 0);
     handler.on_thinking("second thought");

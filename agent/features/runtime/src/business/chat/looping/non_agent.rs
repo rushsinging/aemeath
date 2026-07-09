@@ -220,6 +220,14 @@ where
         index: call.index,
         input: call.input.clone(),
     };
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing start: kind=non_agent tool_name={} runtime_id={} provider_id={} index={} input_len={}",
+        owned_call.name,
+        owned_call.id,
+        owned_call.provider_id,
+        owned_call.index,
+        owned_call.input.to_string().len(),
+    );
     let pre_results = hook_ui
         .run_plain(
             hook_runner,
@@ -235,22 +243,41 @@ where
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+        log::debug!(target: crate::LOG_TARGET,
+            "pretooluse timing blocked: kind=non_agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
+            owned_call.name,
+            owned_call.id,
+            owned_call.provider_id,
+            blocked_result.exit_code,
+            blocked_result.error.as_ref().is_some_and(|value| !value.is_empty()),
+        );
         let default_blocked = match language {
             "zh" => "被 PreToolUse hook 阻止",
             _ => "Blocked by PreToolUse hook",
         };
         let error_detail = blocked_result.error.as_deref().unwrap_or(default_blocked);
         let result = ToolExecution::new(&owned_call, ToolOutcome::error(error_detail));
-        send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
         send_tool_result(sink, context, &result).await;
         return vec![result];
     }
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing approved: kind=non_agent tool_name={} runtime_id={} provider_id={} hook_count={}",
+        owned_call.name,
+        owned_call.id,
+        owned_call.provider_id,
+        pre_results.len(),
+    );
+    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Ready).await;
+    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
+    log::debug!(target: crate::LOG_TARGET,
+        "tool execution timing running_sent: kind=non_agent tool_name={} runtime_id={} provider_id={}",
+        owned_call.name,
+        owned_call.id,
+        owned_call.provider_id,
+    );
     // Only Bash supports stdout streaming via progress_tx. For other tools,
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = owned_call.name == "Bash";
-
-    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Ready).await;
-    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
 
     let exec_results = if is_bash {
         // Set up progress channel for stdout streaming (mirrors agent_calls.rs

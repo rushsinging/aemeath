@@ -859,6 +859,7 @@ where
 
         let api_start = std::time::Instant::now();
         let response = {
+            let progress_handle = handler.progress_handle();
             let stream_fut = client.stream_message(
                 &effective_system_blocks,
                 &messages_for_api,
@@ -866,8 +867,32 @@ where
                 &mut handler,
                 &cancel,
             );
+            let waiting_sink = sink.clone();
+            let waiting_context = turn_context.clone();
+            let request_started_at = tokio::time::Instant::now();
+            let waiting_task = tokio::spawn(async move {
+                let mut next_waiting_at = request_started_at + std::time::Duration::from_secs(10);
+                loop {
+                    tokio::time::sleep_until(next_waiting_at).await;
+                    let elapsed_secs = request_started_at.elapsed().as_secs();
+                    let snapshot = progress_handle.lock().unwrap().snapshot();
+                    log::debug!(target: LOG_TARGET,
+                        "runtime idle watcher fired: elapsed_secs={} phase={} visible_seen={} turn_id={}",
+                        elapsed_secs,
+                        snapshot.phase,
+                        snapshot.first_visible_event_seen,
+                        waiting_context.turn_id,
+                    );
+                    waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
+                        context: waiting_context.clone(),
+                        elapsed_secs,
+                        phase: snapshot.phase.to_string(),
+                    });
+                    next_waiting_at += std::time::Duration::from_secs(10);
+                }
+            });
             tokio::pin!(stream_fut);
-            loop {
+            let result = loop {
                 tokio::select! {
                     response = &mut stream_fut => {
                         break response;
@@ -903,7 +928,9 @@ where
                         }
                     }
                 }
-            }
+            };
+            waiting_task.abort();
+            result
         };
         let api_elapsed = api_start.elapsed().as_secs_f64();
         log::debug!(target: LOG_TARGET,
