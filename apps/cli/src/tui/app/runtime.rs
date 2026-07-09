@@ -25,9 +25,7 @@ impl App {
             .apply(SetStatusNotice(StatusNotice::ready()));
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
-        // #567 S5：sync_current_messages / clear_tasks 已下沉到 runtime gate
-        //（Reset 事件 idle 分支）。loop 未运行时 current_messages 会在下次 start_chat
-        // 时被覆写，task_store 不影响新对话。
+        // Reset 事件由 runtime gate 处理（清 chain + clear_tasks）。
         self.model.conversation.apply(UpdateTaskLines(Vec::new()));
     }
     /// Set loaded skills for slash command alias lookup
