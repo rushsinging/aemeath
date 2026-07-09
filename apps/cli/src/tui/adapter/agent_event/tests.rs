@@ -155,6 +155,20 @@ fn test_text_clears_model_stream_placeholder_before_payload() {
 }
 
 #[test]
+fn test_thinking_clears_model_stream_placeholder_before_payload() {
+    let mapping = map_agent_event(&UiEvent::Thinking {
+        context: ctx(),
+        text: "reason".to_string(),
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::ClearModelStreamPlaceholder(_), ConversationIntent::ThinkingText(ThinkingText { text, .. })]
+            if text == "reason"
+    ));
+}
+
+#[test]
 fn test_tool_call_start_clears_model_stream_placeholder_before_payload() {
     let mapping = map_agent_event(&UiEvent::ToolCallStart {
         context: ctx(),

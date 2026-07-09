@@ -1,4 +1,4 @@
-use super::stream_handler::RuntimeStreamHandler;
+use super::stream_handler::{should_emit_model_stream_waiting, RuntimeStreamHandler};
 use super::tool_identity::ToolIdentityRegistry;
 use super::{ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext};
 use provider::api::StreamHandler;
@@ -59,11 +59,43 @@ fn test_stream_handler_progress_snapshot_tracks_waiting_phases() {
     let sink = RecordingSink::default();
     let mut handler = RuntimeStreamHandler::new(sink.clone());
 
-    assert_eq!(handler.progress_snapshot().phase, "waiting_model_response");
+    let initial = handler.progress_snapshot();
+    assert_eq!(initial.phase, "waiting_model_response");
+    assert_eq!(initial.visible_progress_version, 0);
     handler.on_thinking("thinking");
-    assert_eq!(handler.progress_snapshot().phase, "thinking");
+    let thinking = handler.progress_snapshot();
+    assert_eq!(thinking.phase, "thinking");
+    assert_eq!(thinking.visible_progress_version, 1);
     handler.on_tool_use_start("Write", Some("provider-tool"), 0);
-    assert_eq!(handler.progress_snapshot().phase, "waiting_model_output");
+    let waiting = handler.progress_snapshot();
+    assert_eq!(waiting.phase, "waiting_model_output");
+    assert_eq!(waiting.visible_progress_version, 2);
+}
+
+#[test]
+fn test_stream_handler_progress_version_advances_for_continuous_thinking() {
+    let sink = RecordingSink::default();
+    let mut handler = RuntimeStreamHandler::new(sink.clone());
+
+    handler.on_thinking("first");
+    let first = handler.progress_snapshot();
+    handler.on_thinking("second");
+    let second = handler.progress_snapshot();
+
+    assert_eq!(first.phase, "thinking");
+    assert_eq!(second.phase, "thinking");
+    assert!(
+        second.visible_progress_version > first.visible_progress_version,
+        "持续 thinking delta 必须刷新可见进展版本，避免 idle watcher 误发等待占位"
+    );
+    assert!(should_emit_model_stream_waiting(
+        Some(first.visible_progress_version),
+        &first
+    ));
+    assert!(
+        !should_emit_model_stream_waiting(Some(first.visible_progress_version), &second),
+        "两次 watcher 检查之间出现新的 thinking delta 时，不应发送 ModelStreamWaiting 占位"
+    );
 }
 
 #[test]
