@@ -303,6 +303,103 @@ mod started_tests {
     }
 
     #[test]
+    fn test_agent_progress_tool_calls_use_tool_display_headers() {
+        let ev = UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: ToolCallId::new("agent-tool"),
+            event: AgentProgressEventView {
+                sequence: 1,
+                kind: AgentProgressKindView::ToolCalls {
+                    calls: vec![sdk::AgentToolCallProgressView {
+                        id: sdk::ids::ToolCallId::new("read-1"),
+                        name: "Read".to_string(),
+                        input: serde_json::json!({
+                            "file_path": "/repo/src/main.rs",
+                            "offset": 9,
+                            "limit": 3
+                        }),
+                    }],
+                },
+            },
+        };
+
+        let mapping = map_agent_event(&ev);
+        match &mapping.conversation[0] {
+            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
+                assert_eq!(message, "→ Read /repo/src/main.rs 10:12\n");
+                assert!(!message.contains("file_path"));
+                assert!(!message.contains('{'));
+            }
+            other => panic!("expected RecordAgentProgress, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_agent_progress_tool_calls_keep_each_tool_on_separate_line() {
+        let ev = UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: ToolCallId::new("agent-tool"),
+            event: AgentProgressEventView {
+                sequence: 1,
+                kind: AgentProgressKindView::ToolCalls {
+                    calls: vec![
+                        sdk::AgentToolCallProgressView {
+                            id: sdk::ids::ToolCallId::new("glob-1"),
+                            name: "Glob".to_string(),
+                            input: serde_json::json!({"pattern":"apps/**/*.rs"}),
+                        },
+                        sdk::AgentToolCallProgressView {
+                            id: sdk::ids::ToolCallId::new("grep-1"),
+                            name: "Grep".to_string(),
+                            input: serde_json::json!({"pattern":"activity_lines","path":"apps/cli/src"}),
+                        },
+                    ],
+                },
+            },
+        };
+
+        let mapping = map_agent_event(&ev);
+        match &mapping.conversation[0] {
+            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
+                assert_eq!(
+                    message,
+                    "→ Find apps/**/*.rs\n→ Search /activity_lines/, path=apps/cli/src\n"
+                );
+            }
+            other => panic!("expected RecordAgentProgress, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_agent_progress_unknown_tool_fallback_truncates_json_and_ends_with_newline() {
+        let ev = UiEvent::AgentProgress {
+            context: ctx(),
+            tool_id: ToolCallId::new("agent-tool"),
+            event: AgentProgressEventView {
+                sequence: 1,
+                kind: AgentProgressKindView::ToolCalls {
+                    calls: vec![sdk::AgentToolCallProgressView {
+                        id: sdk::ids::ToolCallId::new("unknown-1"),
+                        name: "UnknownTool".to_string(),
+                        input: serde_json::json!({"very_long_key":"x".repeat(200)}),
+                    }],
+                },
+            },
+        };
+
+        let mapping = map_agent_event(&ev);
+        match &mapping.conversation[0] {
+            ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
+                assert!(message.starts_with("→ UnknownTool "));
+                assert!(message.ends_with("\n"));
+                assert!(message.contains("..."));
+                assert!(message.len() < 140);
+            }
+            other => panic!("expected RecordAgentProgress, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_non_started_event_maps_to_record_agent_progress() {
         let ev = UiEvent::AgentProgress {
             context: ctx(),
@@ -317,7 +414,7 @@ mod started_tests {
         let mapping = map_agent_event(&ev);
         match &mapping.conversation[0] {
             ConversationIntent::RecordAgentProgress(RecordAgentProgress { message, .. }) => {
-                assert_eq!(message, "working");
+                assert_eq!(message, "working\n");
             }
             other => panic!("expected RecordAgentProgress, got {other:?}"),
         }

@@ -165,6 +165,6 @@ fn test_agent_progress_preview_limits_activity_lines() {
     let activities = tool_call(&model, &chat_id, &turn_id, &tool_id)
         .map(|call| call.activities.clone())
         .unwrap_or_default();
-    assert_eq!(activities, vec!["one", "two", "three", "four", "five"]);
+    assert_eq!(activities, vec!["two", "three", "four", "five", "six"]);
 }
 

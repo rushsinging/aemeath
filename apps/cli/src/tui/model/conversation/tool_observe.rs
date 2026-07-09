@@ -10,7 +10,7 @@ const STREAM_CAP: usize = 4 * 1024;
 fn push_streaming_preview_activity(call: &mut ToolCall, message: &str) {
     let policy = match call.name.as_str() {
         "Bash" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
-        "Agent" => ToolStreamingPreviewPolicy::new(5, false, STREAM_CAP),
+        "Agent" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
         _ => return,
     };
     let buffer = call
