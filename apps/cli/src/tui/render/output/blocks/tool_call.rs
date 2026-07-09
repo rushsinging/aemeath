@@ -52,7 +52,7 @@ pub fn render_tool_call(
         view.args_preview.as_ref().map(|value| value.len()).unwrap_or(0),
                 view.result_summary.as_ref().map(|value| value.len()).unwrap_or(0),
         detail_lines.len(),
-        view.activity_summary.is_some(),
+        view.activity_lines.len(),
     );
     // issue #361：header / detail / activity 三部分均消费 ctx.text_width 做 wrap（Word
     // 模式），避免窄终端下行宽超出 output_document_width 被 ratatui 截断。marker 由 gutter
@@ -81,9 +81,9 @@ pub fn render_tool_call(
             .map(|line| line.with_style(detail_style)),
         );
     }
-    // 渲染 activity_summary：Agent 等长时间工具执行过程中显示当前进度（如子 agent 当前操作），
+    // 渲染 activity_lines：Bash/Agent 等长时间工具执行过程中显示当前进度，
     // 嵌套在 ToolCall block 内而非根级 DiagnosticNotice 泄露到对话流中。
-    if let Some(activity) = &view.activity_summary {
+    for activity in &view.activity_lines {
         lines.extend(
             wrap_spans_with_prefix(
                 vec![Span::styled(activity.clone(), detail_style)],
@@ -155,7 +155,7 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: Some("/foo/".into()),
-            activity_summary: None,
+            activity_lines: Vec::new(),
             result_summary: None,
             result_payload: None,
             workspace_root: None,
@@ -308,13 +308,13 @@ mod tests {
 
     #[test]
     fn test_tool_call_wraps_long_activity_summary_to_text_width() {
-        // Agent 等长任务的 activity_summary 在窄终端应 wrap 而非溢出。
+        // Agent 等长任务的 activity 行在窄终端应 wrap 而非溢出。
         let mut view = tool(ToolSemanticStatus::Running);
         view.title = "Bash".into();
         view.args_preview = Some(r#"{"command":"ls"}"#.into());
-        view.activity_summary = Some(
+        view.activity_lines = vec![
             "子任务正在执行一个非常长的操作描述文本用于测试窄终端下 activity 行的换行行为".into(),
-        );
+        ];
 
         let block = render_tool_call("t1", &view, &RenderCtx { text_width: 30 });
 
@@ -326,6 +326,23 @@ mod tests {
                 line.plain
             );
         }
+    }
+
+    #[test]
+    fn test_tool_call_renders_multiple_activity_lines() {
+        let mut view = tool(ToolSemanticStatus::Running);
+        view.title = "Bash".into();
+        view.args_preview = Some(r#"{\"command\":\"seq 1 6\"}"#.into());
+        view.activity_lines = vec!["2".into(), "3".into(), "4".into(), "5".into(), "6".into()];
+
+        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+        let rendered: Vec<_> = block.lines.iter().map(|line| line.plain.as_str()).collect();
+
+        assert!(rendered.contains(&"2"));
+        assert!(rendered.contains(&"3"));
+        assert!(rendered.contains(&"4"));
+        assert!(rendered.contains(&"5"));
+        assert!(rendered.contains(&"6"));
     }
 
     #[test]
