@@ -17,6 +17,7 @@ fn test_config() -> ModelsConfig {
                 context_window: 200_000,
                 max_tokens: 32_000,
                 reasoning: Some(false),
+                reasoning_effort: None,
             }],
         },
     );

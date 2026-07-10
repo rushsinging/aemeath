@@ -49,19 +49,29 @@ pub fn build_llm_client(
     });
 
     // CLI / env 指定的上限（优先级 CLI > env），clamp 到 provider 能力上限。
-    let max_level = max_reasoning.and_then(parse_level).or_else(|| {
+    let max_level = max_reasoning.and_then(ReasoningLevel::parse).or_else(|| {
         std::env::var("AEMEATH_MAX_REASONING")
             .ok()
-            .and_then(|s| parse_level(&s))
+            .and_then(|s| ReasoningLevel::parse(&s))
     });
 
-    // reasoning: bool → ReasoningLevel 映射：
-    // true  → Medium（用户未指定档位时的合理默认）
-    // false → Off
-    let desired = if runtime_settings.reasoning {
-        ReasoningLevel::Medium
-    } else {
-        ReasoningLevel::Off
+    // 期望档位来源优先级：
+    // 1) 模型配置的 reasoning_effort（显式档位，视为开启思考）
+    // 2) reasoning: bool → Medium / Off
+    // 无论走哪条，最终都会被 max_level 上限与 provider 能力上限 clamp。
+    let desired = match runtime_settings
+        .reasoning_effort
+        .as_deref()
+        .and_then(ReasoningLevel::parse)
+    {
+        Some(level) => level,
+        None => {
+            if runtime_settings.reasoning {
+                ReasoningLevel::Medium
+            } else {
+                ReasoningLevel::Off
+            }
+        }
     };
     let final_level = match max_level {
         Some(cap) => desired.min(cap).min(client.max_reasoning_level()),
@@ -70,18 +80,6 @@ pub fn build_llm_client(
     client.set_reasoning_level(final_level);
 
     client
-}
-
-fn parse_level(s: &str) -> Option<ReasoningLevel> {
-    match s.trim().to_lowercase().as_str() {
-        "off" => Some(ReasoningLevel::Off),
-        "low" => Some(ReasoningLevel::Low),
-        "medium" => Some(ReasoningLevel::Medium),
-        "high" => Some(ReasoningLevel::High),
-        "xhigh" => Some(ReasoningLevel::Xhigh),
-        "max" => Some(ReasoningLevel::Max),
-        _ => None,
-    }
 }
 
 fn provider_driver_api_key_from_env(
