@@ -152,9 +152,12 @@ impl App {
                 self.mark_output_dirty();
             }
             UiEvent::ApiError { messages: _, error } => {
-                // Provider API 调用失败：stop spinner + 显示错误。
+                // #749：ApiError 退化为纯展示——仅追加错误 notice + stop spinner。
+                // processing 状态收口统一交给随后 runtime 发出的 DoneWithDuration
+                // （handle_done → stop_processing），避免各终止路径各自清理导致漏清。
+                // NOT 在此 stop_processing，保持与 Done 单一收口点一致。
                 crate::tui::log_info!(
-                    "[SPINNER_DEBUG] UiEvent::ApiError → spinner_stop error={}",
+                    "[SPINNER_DEBUG] UiEvent::ApiError → spinner_stop（processing 收口交给 Done）error={}",
                     error
                 );
                 self.spinner_stop();

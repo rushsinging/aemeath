@@ -1432,9 +1432,10 @@ where
                     }
                 }
 
+                // #749：API 错误路径 NOT 再发 `RuntimeStreamEvent::Error`。
+                // 其唯一去向是 TUI 渲染通道（convert.rs），会与下方 `ApiError`
+                // 造成同一错误双渲染。gate/hook 不消费该 stream 事件，删除安全。
                 let error_msg = e.to_string();
-                sink.send_event(RuntimeStreamEvent::Error(error_msg.clone()))
-                    .await;
                 let gate = drain_and_apply_gate(
                     GateKind::BeforeFinish,
                     &mut pending_input,
@@ -1450,7 +1451,10 @@ where
                     loop_fsm.transition(ChatLoopTransition::ResumeRunning);
                     continue;
                 }
-                // API error 不走 stop hook，直接发送 ApiError 事件并结束 turn。
+                // API error 不走 stop hook：先发 ApiError（携带错误供展示，保留
+                // 已完成的 tool 轮次消息），再统一经 `finish_completed_loop` 发出
+                // DoneWithDuration 作为 turn 结束信号，让 TUI 与正常完成路径一致地
+                // 收口 processing 状态（#749）。
                 sink.send_event(RuntimeStreamEvent::ApiError {
                     messages: chain.messages_flat(),
                     error: error_msg.clone(),
@@ -1465,20 +1469,61 @@ where
                         "api-error save_chain failed: {e} — 下次 exit 时仍会兜底 save"
                     );
                 }
-                loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                // 统一 turn 结束信号：发出 DoneWithDuration（TUI 据此 stop_processing）。
+                let outcome = AgentRunOutcome {
+                    status: AgentRunStatus::ApiError(error_msg.clone()),
+                    turns: turn_count,
+                    duration: turn_start.elapsed(),
+                    role: None,
+                    model: client.model_name().to_string(),
+                };
+                log_agent_outcome(&outcome, &session_id);
+                finish_completed_loop(&outcome, &sink, &turn_context, &task_store).await;
+                // FSM：API 错误 turn 中止 → 经合法路径 TryStop → Idle 进入空闲态
+                // （常驻 loop 不退出），等待下一条输入或通道关闭。替代原先从 Running
+                // 直接 StopSucceeded → Done 的非法转换 + break 退出常驻 loop（#749）。
+                loop_fsm.transition(ChatLoopTransition::TryStop);
+                loop_fsm.transition(ChatLoopTransition::Idle);
                 loop_fsm.assert_state(
-                    ChatLoopState::Done,
-                    "api-error finalizes loop without stop hooks",
+                    ChatLoopState::Idle,
+                    "api-error turn idles without stop hooks",
                 );
-                break;
+                let idle_result = idle_until_resume_or_shutdown(
+                    &input_events,
+                    &sink,
+                    &mut pending_input,
+                    &mut chain,
+                    &task_store,
+                    Some(&cancel_slot),
+                )
+                .await;
+                match idle_result {
+                    IdleResult::Shutdown => {
+                        loop_fsm.transition(ChatLoopTransition::StopSucceeded);
+                        loop_fsm.assert_state(
+                            ChatLoopState::Done,
+                            "api-error idle shuts down on channel close",
+                        );
+                        break;
+                    }
+                    IdleResult::Resumed(seg) => {
+                        segment_id = seg;
+                        loop_fsm.transition(ChatLoopTransition::ResumeRunning);
+                        continue;
+                    }
+                    IdleResult::CommandRequested(cmd) => {
+                        handle_pending_command!(cmd, false);
+                    }
+                }
             }
         }
     }
     // #604 维护契约：所有"turn 异常终止后退出 loop"的 break 路径，
     // MUST 在 break 前调用 `finish_completed_loop` 发出 `DoneWithDuration`，
     // 否则 TUI spinner 永不停。已覆盖：stop hook blocked 上限（stall + 正常完成）、
-    // stall 放行退出。channel-close 类 break（用户取消/关闭）由 TUI 端处理；
-    // api-error break 发送 `ApiError` 事件作为 turn 结束信号。
+    // stall 放行退出。channel-close 类 break（用户取消/关闭）由 TUI 端处理。
+    // API 错误路径（#749）改为回 idle 保持常驻 loop，收口时经 `finish_completed_loop`
+    // 发出 `DoneWithDuration` 作为统一 turn 结束信号，仅在通道关闭时才 break shutdown。
     // 新增异常终止 break 路径时 MUST 遵守此契约并补充对应测试。
     chain
 }
