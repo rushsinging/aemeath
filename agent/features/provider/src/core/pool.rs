@@ -200,6 +200,7 @@ mod tests {
                     context_window: 128_000,
                     max_tokens,
                     reasoning: None,
+                    reasoning_effort: None,
                 }],
             },
         );

@@ -3,6 +3,8 @@ use share::config::models::ModelEntryConfig;
 pub struct ModelRuntimeSettings {
     pub max_tokens: u32,
     pub reasoning: bool,
+    /// 模型配置的固定推理档位（"off".."max"）。None 时沿用 reasoning bool 映射。
+    pub reasoning_effort: Option<String>,
 }
 
 pub fn resolve_model_runtime_settings(
@@ -15,6 +17,7 @@ pub fn resolve_model_runtime_settings(
     ModelRuntimeSettings {
         max_tokens: resolved_max_tokens,
         reasoning,
+        reasoning_effort: model.reasoning_effort.clone(),
     }
 }
 
@@ -31,6 +34,7 @@ mod tests {
             context_window: 128_000,
             max_tokens: 16_000,
             reasoning,
+            reasoning_effort: None,
         }
     }
 
@@ -59,5 +63,24 @@ mod tests {
         let result = resolve_model_runtime_settings(8_192, &model, true);
 
         assert!(result.reasoning);
+    }
+
+    #[test]
+    fn test_resolve_model_runtime_settings_passes_through_reasoning_effort() {
+        let mut model = model_entry(Some(true));
+        model.reasoning_effort = Some("xhigh".to_string());
+
+        let result = resolve_model_runtime_settings(8_192, &model, true);
+
+        assert_eq!(result.reasoning_effort.as_deref(), Some("xhigh"));
+    }
+
+    #[test]
+    fn test_resolve_model_runtime_settings_reasoning_effort_none_by_default() {
+        let model = model_entry(Some(true));
+
+        let result = resolve_model_runtime_settings(8_192, &model, true);
+
+        assert_eq!(result.reasoning_effort, None);
     }
 }

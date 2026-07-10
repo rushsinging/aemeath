@@ -22,6 +22,7 @@ fn resolved_model(
             context_window: 128_000,
             max_tokens: 16_000,
             reasoning: None,
+            reasoning_effort: None,
         },
         driver: driver.as_str().to_string(),
     }
@@ -31,6 +32,15 @@ fn runtime_settings(reasoning: bool) -> ModelRuntimeSettings {
     ModelRuntimeSettings {
         max_tokens: 16_000,
         reasoning,
+        reasoning_effort: None,
+    }
+}
+
+fn runtime_settings_with_effort(reasoning: bool, effort: &str) -> ModelRuntimeSettings {
+    ModelRuntimeSettings {
+        max_tokens: 16_000,
+        reasoning,
+        reasoning_effort: Some(effort.to_string()),
     }
 }
 
@@ -261,6 +271,72 @@ fn test_build_llm_client_reasoning_false_sets_off() {
     let settings = runtime_settings(false);
     let client = build_llm_client(
         ProviderDriverKind::OpenAI,
+        "key".to_string(),
+        None,
+        "model-id".to_string(),
+        &resolved,
+        &settings,
+        None,
+    );
+
+    assert_eq!(
+        client.current_reasoning_level(),
+        provider::contract::ReasoningLevel::Off
+    );
+}
+
+#[test]
+fn test_build_llm_client_reasoning_effort_overrides_bool_default() {
+    // Zhipu 上限为 Max，xhigh 不会被 clamp，验证 effort 覆盖了 bool→Medium 默认。
+    let resolved = resolved_model(ProviderDriverKind::Zhipu, "", "", "Zhipu");
+
+    let settings = runtime_settings_with_effort(true, "xhigh");
+    let client = build_llm_client(
+        ProviderDriverKind::Zhipu,
+        "key".to_string(),
+        None,
+        "model-id".to_string(),
+        &resolved,
+        &settings,
+        None,
+    );
+
+    assert_eq!(
+        client.current_reasoning_level(),
+        provider::contract::ReasoningLevel::Xhigh
+    );
+}
+
+#[test]
+fn test_build_llm_client_reasoning_effort_clamped_to_provider_ceiling() {
+    // OpenAI 上限为 High，配置 max 会被 clamp 到 High。
+    let resolved = resolved_model(ProviderDriverKind::OpenAI, "", "", "OpenAI");
+
+    let settings = runtime_settings_with_effort(true, "max");
+    let client = build_llm_client(
+        ProviderDriverKind::OpenAI,
+        "key".to_string(),
+        None,
+        "model-id".to_string(),
+        &resolved,
+        &settings,
+        None,
+    );
+
+    assert_eq!(
+        client.current_reasoning_level(),
+        provider::contract::ReasoningLevel::High
+    );
+}
+
+#[test]
+fn test_build_llm_client_reasoning_effort_off_disables_thinking() {
+    // reasoning=true 但 effort="off" 时，显式档位优先，最终为 Off。
+    let resolved = resolved_model(ProviderDriverKind::Zhipu, "", "", "Zhipu");
+
+    let settings = runtime_settings_with_effort(true, "off");
+    let client = build_llm_client(
+        ProviderDriverKind::Zhipu,
         "key".to_string(),
         None,
         "model-id".to_string(),
