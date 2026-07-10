@@ -27,7 +27,7 @@ pub struct ToolsConfig {
     pub settings: HashMap<String, serde_json::Value>,
 
     /// Maximum number of concurrent tool executions (default: 10)
-    #[serde(default = "default_max_tool_concurrency", rename = "maxConcurrency")]
+    #[serde(default = "default_max_tool_concurrency", alias = "maxConcurrency")]
     pub max_concurrency: usize,
 }
 
@@ -50,7 +50,7 @@ pub struct AgentRoleConfig {
     pub description: String,
 
     /// Appended to the sub-agent system prompt for role-specific instructions.
-    #[serde(default, rename = "systemSuffix")]
+    #[serde(default, alias = "systemSuffix")]
     pub system_suffix: Option<String>,
 
     /// Reasoning / thinking mode for sub-agents using this role.
@@ -75,7 +75,7 @@ pub struct AgentRoleConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     /// Maximum number of concurrent sub-agent executions (default: 4)
-    #[serde(default = "default_max_agent_concurrency", rename = "maxConcurrency")]
+    #[serde(default = "default_max_agent_concurrency", alias = "maxConcurrency")]
     pub max_concurrency: usize,
 
     /// Named agent roles, each optionally bound to a different LLM.
@@ -88,7 +88,7 @@ pub struct AgentsConfig {
 
     /// Default LLM for sub-agents when no model is specified.
     /// Format: "<source>/<model>". Falls back to the main agent's client if empty.
-    #[serde(default, rename = "defaultModel")]
+    #[serde(default, alias = "defaultModel")]
     pub default_model: String,
 }
 
@@ -139,5 +139,51 @@ mod tests {
     fn test_agent_role_config_max_tokens_camel_case_alias() {
         let config: AgentRoleConfig = serde_json::from_str(r#"{ "maxTokens": 4096 }"#).unwrap();
         assert_eq!(config.max_tokens, Some(4096));
+    }
+
+    #[test]
+    fn test_tools_config_uses_snake_case_and_accepts_legacy_alias() {
+        let snake: ToolsConfig = serde_json::from_str(r#"{ "max_concurrency": 7 }"#).unwrap();
+        let legacy: ToolsConfig = serde_json::from_str(r#"{ "maxConcurrency": 8 }"#).unwrap();
+
+        assert_eq!(snake.max_concurrency, 7);
+        assert_eq!(legacy.max_concurrency, 8);
+        assert_eq!(
+            serde_json::to_value(snake).unwrap()["max_concurrency"],
+            serde_json::json!(7)
+        );
+    }
+
+    #[test]
+    fn test_agents_config_uses_snake_case_and_accepts_legacy_aliases() {
+        let snake: AgentsConfig = serde_json::from_str(
+            r#"{ "max_concurrency": 7, "default_model": "snake/model", "roles": { "coder": { "system_suffix": "snake" } } }"#,
+        )
+        .unwrap();
+        let legacy: AgentsConfig = serde_json::from_str(
+            r#"{ "maxConcurrency": 8, "defaultModel": "legacy/model", "roles": { "coder": { "systemSuffix": "legacy" } } }"#,
+        )
+        .unwrap();
+
+        assert_eq!(snake.max_concurrency, 7);
+        assert_eq!(snake.default_model, "snake/model");
+        assert_eq!(snake.roles["coder"].system_suffix.as_deref(), Some("snake"));
+        assert_eq!(legacy.max_concurrency, 8);
+        assert_eq!(legacy.default_model, "legacy/model");
+        assert_eq!(
+            legacy.roles["coder"].system_suffix.as_deref(),
+            Some("legacy")
+        );
+
+        let serialized = serde_json::to_value(snake).unwrap();
+        assert_eq!(serialized["max_concurrency"], serde_json::json!(7));
+        assert_eq!(
+            serialized["default_model"],
+            serde_json::json!("snake/model")
+        );
+        assert_eq!(
+            serialized["roles"]["coder"]["system_suffix"],
+            serde_json::json!("snake")
+        );
     }
 }
