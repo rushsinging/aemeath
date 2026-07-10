@@ -77,7 +77,7 @@ impl<'a> SubAgentRun<'a> {
         }
 
         for turn in 0..self.max_turns {
-            let mut turn_number = turn + 1;
+            let turn_number = turn + 1;
             if self.ctx.cancel.is_cancelled() {
                 log::debug!(target: LOG_TARGET,
                     "sub-agent cancel detected before turn {turn_number} (turn-boundary check)"
@@ -148,7 +148,6 @@ impl<'a> SubAgentRun<'a> {
                         ));
                         if tool_calls.is_empty() {
                             // tool_calls 为空说明截断在文本生成阶段，不当 completed，继续下一轮让 LLM 重试
-                            turn_number += 1;
                             continue;
                         }
                         // tool_calls 不为空（截断在 tool call 阶段但部分有效），继续执行 tool

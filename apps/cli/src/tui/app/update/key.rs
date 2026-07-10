@@ -64,7 +64,7 @@ impl App {
     pub(super) fn update_key(
         &mut self,
         key: crossterm::event::KeyEvent,
-        spawn_refs: &SpawnContextRefs,
+        _spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
             return UpdateResult::none();

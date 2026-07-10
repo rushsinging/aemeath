@@ -226,10 +226,8 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         | sdk::ChatEvent::ReminderList { .. }
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
-        | sdk::ChatEvent::CostUpdate { .. } => return UiEvent::SystemMessage(String::new()),
-        sdk::ChatEvent::TasksSnapshot { tasks } => {
-            return UiEvent::TaskStatusChanged(*tasks);
-        }
+        | sdk::ChatEvent::CostUpdate { .. } => UiEvent::SystemMessage(String::new()),
+        sdk::ChatEvent::TasksSnapshot { tasks } => UiEvent::TaskStatusChanged(*tasks),
     }
 }
 
@@ -559,7 +557,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
-         | sdk::ChatEvent::TasksSnapshot { .. }
          | sdk::ChatEvent::CostUpdate { .. }
          | sdk::ChatEvent::SessionResumeFailed { .. } => {}
     }

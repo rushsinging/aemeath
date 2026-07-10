@@ -5,10 +5,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
+#[allow(dead_code)]
 pub(super) struct BlockingReflectionClient {
+    #[allow(dead_code)]
     pub(super) started_tx: Mutex<Option<oneshot::Sender<()>>>,
+    #[allow(dead_code)]
     pub(super) finish_rx: Mutex<Option<oneshot::Receiver<()>>>,
+    #[allow(dead_code)]
     pub(super) apply_reflection_calls: AtomicUsize,
+    #[allow(dead_code)]
     pub(super) apply_reflection_should_fail: std::sync::atomic::AtomicBool,
 }
 
@@ -316,7 +321,7 @@ async fn test_apply_reflection_success_keeps_new_pending_created_while_in_flight
 
 #[tokio::test]
 async fn test_clear_command_clears_task_store_and_task_window() {
-    let (mut app, _started_rx, finish_tx, client) = app_with_blocking_reflection_client_handle();
+    let (mut app, _started_rx, finish_tx, _client) = app_with_blocking_reflection_client_handle();
     app.model
         .conversation
         .apply(crate::tui::model::conversation::intent::UpdateTaskLines(

@@ -1,5 +1,6 @@
 //! Tests for `loop_runner`, extracted into a dedicated module to keep the
 //! runner file focused on the production code path.
+#![allow(clippy::type_complexity)]
 
 use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
@@ -2311,7 +2312,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         .expect("应有 Cancelled 事件");
     // cancel_to_idle 先发 CompactRollback（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
     // CompactRollback 对应的快照即「取消回滚后的 messages」。
-    let syncs = sink.synced_messages();
+    let _syncs = sink.synced_messages();
     // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 CompactRollback。
     let messages_sync_count_before_cancel = events[..cancelled_idx]
         .iter()

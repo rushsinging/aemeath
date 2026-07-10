@@ -7,7 +7,7 @@ use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::text::safe_str_slice_by_char;
-use sdk::{AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView};
+use sdk::{AgentProgressEventView, AgentProgressKindView};
 use serde_json::{Map, Value};
 
 #[derive(Debug, Default, PartialEq)]
@@ -163,7 +163,7 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
                     chat_id: context.chat_id.clone(),
                     turn_id: context.turn_id.clone(),
                     tool_id: tool_id.clone(),
-                    message: format_agent_progress(&event),
+                    message: format_agent_progress(event),
                 },
             )),
         },
@@ -220,9 +220,9 @@ pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
         }
 
         // ── System messages ──
-        UiEvent::SystemMessage(text) | UiEvent::ReminderRecap(text) => conversation(
-            ConversationIntent::AppendSystemMessage(AppendSystemMessage { text: text.clone() }),
-        ),
+        UiEvent::SystemMessage(text) => conversation(ConversationIntent::AppendSystemMessage(
+            AppendSystemMessage { text: text.clone() },
+        )),
         UiEvent::TurnStarted { messages }
         | UiEvent::MicrocompactDone { messages, .. }
         | UiEvent::StopHookBlocked { messages }

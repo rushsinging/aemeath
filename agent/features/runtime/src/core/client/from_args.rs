@@ -104,7 +104,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 10. Tooling
     let task_store = Arc::new(TaskStore::new());
-    let task_store_before = task_store.clone();
     let skills_map = load_configured_skills(&cwd, config_file.as_ref().map(|c| &c.skills));
     if !skills_map.is_empty() {
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
@@ -119,7 +118,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 11. Hook runner
     let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
-    let hook_runner_before = hook_runner.clone();
 
     // 12. Session
     let session_id = start_session(args.resume.clone());
@@ -233,7 +231,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     };
 
     // 19. 构建 handle
-    let (change_tx, change_rx) = watch::channel(ChangeSet::empty());
+    let (change_tx, _) = watch::channel(ChangeSet::empty());
     let current_client = context.resources.client.clone();
     let workspace = project::api::WorkspaceService::new(cwd.clone());
     let handle = RuntimeHandle {
@@ -252,9 +250,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         skip_first_pending_turn: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         workspace,
         change_tx,
-        change_rx,
-        hook_runner: Some(hook_runner_before.clone()),
-        task_store: Some(task_store_before.clone()),
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::new(),
         )),

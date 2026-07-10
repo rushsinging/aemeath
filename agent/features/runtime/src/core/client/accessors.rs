@@ -2,12 +2,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use sdk::{ChangeSet, ConfigView};
+use sdk::ChangeSet;
 use tokio::sync::watch;
 
 use crate::core::port::ChatRuntimeContext;
 use share::config::models::ResolvedModel;
-use storage::api::TaskStore;
 use tools::api::McpConnectionManager;
 
 // ─── 结构体定义 ───
@@ -55,23 +54,11 @@ pub struct RuntimeHandle {
     pub(crate) skip_first_pending_turn: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
-    pub(crate) change_rx: watch::Receiver<ChangeSet>,
 
     // ─── SDK 业务对象 ───
-    /// HookRunner（clone，供 SDK 通知 hook）
-    pub(crate) hook_runner: Option<hook::api::HookRunner>,
-    /// TaskStore（Arc，供 SDK 恢复任务）
-    pub(crate) task_store: Option<std::sync::Arc<TaskStore>>,
     /// Session reminders（供 SDK 增删改查）
     pub(crate) session_reminders:
         std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
-}
-
-impl AgentClientImpl {
-    pub fn notify_change(&self, set: ChangeSet) {
-        let previous = *self.inner.change_tx.borrow();
-        let _ = self.inner.change_tx.send(previous | set);
-    }
 }
 
 // ─── 公共访问器（CLI runtime.rs 需要） ───
@@ -137,36 +124,4 @@ impl AgentClientImpl {
             workspace_root: self.inner.cwd.clone(),
         }
     }
-}
-
-pub async fn config_view_impl(this: &super::AgentClientImpl) -> Result<ConfigView, sdk::SdkError> {
-    let resolved = this.resolved_model();
-    let ctx = this.context();
-    let model_display = super::mapping::model_display(
-        &resolved.source_key,
-        &resolved.model.name,
-        &resolved.model.id,
-    );
-    let api_key = resolved.source_config.api_key.as_str();
-    Ok(ConfigView {
-        model_name: model_display,
-        provider: Some(resolved.source_key.clone()),
-        has_api_key: !api_key.is_empty(),
-        api_key_preview: if api_key.len() >= 8 {
-            Some(api_key[..8].to_string())
-        } else if !api_key.is_empty() {
-            Some(api_key.to_string())
-        } else {
-            None
-        },
-        permission_mode: if ctx.resources.allow_all {
-            "allow_all".into()
-        } else {
-            "ask".into()
-        },
-        markdown: true,
-        verbose: ctx.verbose,
-        context_size: ctx.resources.context_size,
-        logging_level: String::new(),
-    })
 }

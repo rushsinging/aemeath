@@ -1,4 +1,4 @@
-use crate::business::agent::runner::{log_agent_outcome, AgentRunOutcome, AgentRunStatus};
+use crate::business::agent::runner::AgentRunOutcome;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::{
     ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, RuntimeStreamEvent,
@@ -14,79 +14,6 @@ const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
 /// Stop hook 连续阻断的最大次数，超过后强制停止以避免无限循环（#372）。
 pub(crate) const MAX_STOP_HOOK_BLOCKS: usize = 5;
-
-/// Run stop/failure hooks and return feedback if the loop should continue.
-///
-/// **Bug #49 note**: input queue draining happens *before* this function is
-/// called (in `stream.rs`). If queued input exists, the loop `continue`s
-/// without reaching here. When a stop hook blocks the stop, the returned
-/// feedback is injected as a system-reminder and the loop `continue`s — the
-/// next iteration will again drain the queue first.
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)] // #590: API error 不再走 stop hook，此函数暂时未被调用
-pub(crate) async fn finalize_main_loop<S>(
-    outcome: &AgentRunOutcome,
-    sink: &S,
-    hook_ui: &HookUi<S>,
-    hook_runner: &HookRunner,
-    session_id: &str,
-    context: &RuntimeTurnContext,
-    _task_store: &TaskStore,
-    language: &str,
-    workspace_root: &Path,
-) -> Option<String>
-where
-    S: ChatEventSink,
-{
-    log_agent_outcome(outcome, session_id);
-
-    match &outcome.status {
-        AgentRunStatus::Completed | AgentRunStatus::MaxTurns => {
-            run_stop_hook_before_finish(
-                outcome,
-                sink,
-                hook_ui,
-                hook_runner,
-                session_id,
-                language,
-                workspace_root,
-            )
-            .await
-        }
-        AgentRunStatus::Cancelled => {
-            let _ = sink
-                .send_event(RuntimeStreamEvent::Done {
-                    context: context.clone(),
-                })
-                .await;
-            None
-        }
-        AgentRunStatus::ApiError(_) | AgentRunStatus::TimedOut => {
-            let failure_results = hook_ui
-                .run_json(
-                    hook_runner,
-                    HookEvent::StopFailure,
-                    None,
-                    HookData::Stop(StopHookData {
-                        turns: outcome.turns,
-                    }),
-                    workspace_root,
-                )
-                .await;
-            // #372: StopFailure hook 阻断时回流反馈，让 loop 有机会恢复
-            if let Some(feedback) = stop_hook_feedback(&failure_results, session_id, language).await
-            {
-                return Some(feedback);
-            }
-            let _ = sink
-                .send_event(RuntimeStreamEvent::Done {
-                    context: context.clone(),
-                })
-                .await;
-            None
-        }
-    }
-}
 
 pub(crate) async fn run_stop_hook_before_finish<S>(
     outcome: &AgentRunOutcome,

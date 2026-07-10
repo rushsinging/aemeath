@@ -56,6 +56,7 @@ pub type SwitchClientFn = Arc<
 ///
 /// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
 /// 函数内解构消费。持有 session 级不变配置 + loop 专属可变状态（messages、cancel 等）。
+#[allow(clippy::type_complexity)]
 pub struct ChatLoopContext<S, Q, I>
 where
     S: ChatEventSink,
@@ -259,8 +260,8 @@ where
     let mut stall_detector = StallDetector::new();
     let mut stop_hook_block_count: usize = 0;
     let mut pending_input = PendingInputBuffer::default();
-    /// busy 阶段（LLM 调用中）排队的用户输入。
-    /// idle 门开启时 drain 进 pending_input → apply_gate。
+    // busy 阶段（LLM 调用中）排队的用户输入。
+    // idle 门开启时 drain 进 pending_input → apply_gate。
     let mut loop_fsm = ChatLoopFsm::default();
     let tool_identity = crate::business::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let chat_id = ChatId::new_v7();
@@ -1592,38 +1593,6 @@ where
         .await;
 }
 
-/// idle 分支执行 `/context`：用 loop 内部 messages + system_prompt 估算 token 占用，
-/// 发 `ContextEstimated` 事件（TUI 据此显示）。
-async fn execute_estimate_context<S>(
-    messages: &[share::message::Message],
-    system_prompt_text: &str,
-    context_size: usize,
-    sink: &S,
-) where
-    S: ChatEventSink,
-{
-    let estimated_tokens = crate::business::compact::estimate_messages_tokens(messages)
-        + crate::business::compact::estimate_tokens(system_prompt_text);
-    let system_tokens = crate::business::compact::estimate_tokens(system_prompt_text);
-    let usage_percentage = if context_size > 0 {
-        estimated_tokens as f64 * 100.0 / context_size as f64
-    } else {
-        0.0
-    };
-    let estimate = sdk::ContextEstimate {
-        estimated_tokens,
-        system_tokens,
-        context_size,
-        usage_percentage,
-    };
-    let _ = sink
-        .send_event(RuntimeStreamEvent::ContextEstimated {
-            estimate,
-            message_count: messages.len(),
-        })
-        .await;
-}
-
 /// 空闲等待结果：收到下一条输入（恢复运行）、通道关闭（shutdown）或待执行命令。
 enum IdleResult {
     Resumed,
@@ -1751,7 +1720,7 @@ where
                     pending,
                     sink,
                     messages,
-                    &task_store,
+                    task_store,
                     true,
                 )
                 .await;

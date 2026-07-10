@@ -235,7 +235,7 @@ mod tests {
     async fn test_watch_and_update() {
         let dir = test_dir("watch_update");
         let svc = test_svc(&dir);
-        let mut rx = svc.watch().await;
+        let rx = svc.watch().await;
 
         svc.update(|c| c.model.name = "watch-test".into())
             .await

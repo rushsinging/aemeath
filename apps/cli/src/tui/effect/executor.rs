@@ -79,7 +79,7 @@ impl App {
         if !notify && self.chat.messages.is_empty() {
             return;
         }
-        let Some(ac) = self.agent_client.clone() else {
+        let Some(_ac) = self.agent_client.clone() else {
             if notify {
                 let tx = ui_tx.clone();
                 crate::tui::effect::spawn_guard::spawn_guarded("save_session", async move {
