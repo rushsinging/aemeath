@@ -1457,6 +1457,15 @@ where
                     error: error_msg.clone(),
                 })
                 .await;
+                // API error 也需落盘（与正常完成路径行 1220 对齐），否则
+                // tokio::spawn 的 auto-save 可能被 TUI 端 drop race 掉，
+                // 导致失败 turn 的消息（含已完成的 tool 轮次）丢失。
+                if let Err(e) = save_chain(&chain).await {
+                    log::error!(
+                        target: crate::LOG_TARGET,
+                        "api-error save_chain failed: {e} — 下次 exit 时仍会兜底 save"
+                    );
+                }
                 loop_fsm.transition(ChatLoopTransition::StopSucceeded);
                 loop_fsm.assert_state(
                     ChatLoopState::Done,
