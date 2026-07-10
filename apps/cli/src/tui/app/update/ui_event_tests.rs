@@ -19,7 +19,6 @@ fn test_app() -> App {
 #[test]
 fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
     let mut app = test_app();
-    app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     let echo_id = sdk::InputId::new_v7();
     app.enqueue_submission_echo(echo_id.clone(), "[Copied Text 1]");
     let messages = vec![
@@ -35,8 +34,7 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
         &spawn_refs,
     );
 
-    // 镜像成功：chat.messages 更新到新的 msgs
-    assert_eq!(app.chat.messages.len(), 2);
+    // chat.messages 已删除，不再断言镜像数量
 
     // 不产生任何 UserMessage 回显块（退出 display）
     assert!(app.model.conversation.timeline.items().iter().all(|item| {
@@ -54,7 +52,6 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
 #[test]
 fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let mut app = test_app();
-    app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
     let messages = vec![
         sdk::ChatMessage::user_text("first"),
@@ -78,7 +75,7 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
 ///
 /// 场景：存在一条占位（id_a="hello"），收到包含 user_text("hello") 的同步事件。
 /// 期望：
-/// - handler 后 self.chat.messages == msgs（镜像成功）
+/// - handler 后 PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
 /// - 不产生任何 UserMessage 回显块（退出 display）
 /// - 占位未被清除（清占位归 UserMessagesAdopted 负责）
 #[test]
@@ -102,12 +99,8 @@ fn test_post_tool_sync_no_display() {
         &spawn_refs,
     );
 
-    // 镜像成功
-    assert_eq!(
-        app.chat.messages.len(),
-        1,
-        "消息同步后 chat.messages 应镜像"
-    );
+    // PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
+    // 不产生 UserMessage 回显块
 
     // 不产生 UserMessage 回显块
     let user_echo_count = app

@@ -5,7 +5,57 @@ use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::conversation::model::ConversationModel;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
-use crate::tui::view_model::{OutputBlockKind, SemanticStyle};
+use crate::tui::view_model::{OutputBlockKind, SemanticStyle, ToolSemanticStatus};
+
+fn tool_status_view(status: ToolCallStatus) -> crate::tui::view_model::ToolCallBlockView {
+    let mut conversation = ConversationModel::default();
+    conversation.apply(StartChat {
+        submission: "run command".to_string(),
+    });
+    conversation.apply(ToolCallStart {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-status"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-status"),
+        id: ToolCallId::new("tool-status"),
+        provider_id: None,
+        name: "Bash".to_string(),
+        index: 0,
+    });
+    conversation.apply(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("session-status"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-status"),
+        provider_id: Some("provider-status".to_string()),
+        id: ToolCallId::new("tool-status"),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: Some(r#"{"command":"sleep 1"}"#.to_string()),
+        status,
+    });
+
+    let vm = OutputViewAssembler::assemble_from_conversation(&conversation, 1, None);
+    vm.roots
+        .into_iter()
+        .find_map(|block| match block.kind {
+            OutputBlockKind::ToolCall(tool) => Some(tool),
+            _ => None,
+        })
+        .expect("tool block")
+}
+
+#[test]
+fn test_ready_tool_call_projects_pending_not_running() {
+    let tool = tool_status_view(ToolCallStatus::Ready);
+
+    assert_eq!(tool.semantic_status, ToolSemanticStatus::Pending);
+    assert_eq!(tool.style, SemanticStyle::Muted);
+}
+
+#[test]
+fn test_running_tool_call_projects_running() {
+    let tool = tool_status_view(ToolCallStatus::Running);
+
+    assert_eq!(tool.semantic_status, ToolSemanticStatus::Running);
+    assert_eq!(tool.style, SemanticStyle::Running);
+}
 
 #[test]
 fn test_orphan_read_result_shows_summary_not_full_content() {

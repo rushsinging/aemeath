@@ -95,15 +95,15 @@ pub(super) fn find_tool_view(
         semantic_status,
         style,
         args_preview: (!call.args_preview.is_empty()).then(|| call.args_preview.clone()),
-        // 工具已完成时不再显示 activity_summary（结果已在 ToolResult 子块展示，
+        // 工具已完成时不再显示 activity_lines（结果已在 ToolResult 子块展示，
         // 避免子代理最终输出同时出现在 activity 行和 result 子块中造成重复）。
-        activity_summary: if matches!(
+        activity_lines: if matches!(
             call.status,
             ToolCallStatus::Success | ToolCallStatus::Error | ToolCallStatus::Cancelled
         ) {
-            None
+            Vec::new()
         } else {
-            call.activities.last().cloned()
+            call.activities.clone()
         },
         // result 子块展示实际工具 output（供渲染层 format_result_lines 按
         // result_max_lines 截断成前 N 行预览）；完整内容不刷屏由渲染层截断 + id
@@ -190,9 +190,10 @@ fn default_tool_result_summary(tool_name: &str, is_error: bool) -> Vec<String> {
 
 fn map_tool_status(status: ToolCallStatus) -> (&'static str, ToolSemanticStatus, SemanticStyle) {
     match status {
-        ToolCallStatus::PendingArgs | ToolCallStatus::Ready | ToolCallStatus::Running => {
-            ("●", ToolSemanticStatus::Running, SemanticStyle::Running)
+        ToolCallStatus::PendingArgs | ToolCallStatus::Ready => {
+            ("○", ToolSemanticStatus::Pending, SemanticStyle::Muted)
         }
+        ToolCallStatus::Running => ("●", ToolSemanticStatus::Running, SemanticStyle::Running),
         ToolCallStatus::Success => ("✓", ToolSemanticStatus::Success, SemanticStyle::Success),
         ToolCallStatus::Error => ("✗", ToolSemanticStatus::Error, SemanticStyle::Error),
         ToolCallStatus::Cancelled => ("–", ToolSemanticStatus::Cancelled, SemanticStyle::Muted),

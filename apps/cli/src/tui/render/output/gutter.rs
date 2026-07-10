@@ -26,6 +26,7 @@ pub fn marker_glyph(kind: &OutputBlockKind) -> &'static str {
 pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'static str {
     match kind {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
+            ToolSemanticStatus::Pending => "○",
             ToolSemanticStatus::Success => "✓",
             ToolSemanticStatus::Error => "✗",
             ToolSemanticStatus::Cancelled => "–",
@@ -42,7 +43,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
         OutputBlockKind::UserMessage(_) => ">",
         OutputBlockKind::AssistantMessage(_) => "●",
         // 💭 顶格作 thinking marker（宽字符占满 2 列 marker 槽，无尾空格）。
-        OutputBlockKind::ThinkingMessage(_) => "💭",
+        OutputBlockKind::ThinkingMessage(_) | OutputBlockKind::ModelStreamPlaceholder(_) => "💭",
         // ⎿ 圆角连接到父 ToolCall header，表示这是工具结果子块。
         OutputBlockKind::ToolResult(_) => "⎿",
         OutputBlockKind::HookNotice(h) => match h.kind {
@@ -57,6 +58,7 @@ pub fn animated_marker_glyph(kind: &OutputBlockKind, animation_frame: u64) -> &'
 fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
     match kind {
         OutputBlockKind::ToolCall(t) => match t.semantic_status {
+            ToolSemanticStatus::Pending => theme::TEXT_MUTED,
             ToolSemanticStatus::Success => theme::SUCCESS,
             ToolSemanticStatus::Error => theme::ERROR,
             ToolSemanticStatus::Running => theme::TOOL_RUNNING,
@@ -65,7 +67,9 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
         },
         OutputBlockKind::UserMessage(_) => theme::USER,
         OutputBlockKind::AssistantMessage(_) => theme::ASSISTANT,
-        OutputBlockKind::ThinkingMessage(_) => theme::THINKING,
+        OutputBlockKind::ThinkingMessage(_) | OutputBlockKind::ModelStreamPlaceholder(_) => {
+            theme::THINKING
+        }
         OutputBlockKind::ToolResult(_) => theme::TEXT_MUTED,
         OutputBlockKind::HookNotice(h) => match h.kind {
             HookNoticeSemanticKind::Blocked | HookNoticeSemanticKind::Failed => theme::ERROR,
@@ -170,7 +174,7 @@ mod tests {
             semantic_status: status,
             style: SemanticStyle::Running,
             args_preview: None,
-            activity_summary: None,
+            activity_lines: Vec::new(),
             result_summary: None,
             result_payload: None,
             workspace_root: None,
@@ -182,6 +186,7 @@ mod tests {
 
     #[test]
     fn test_marker_glyph_for_tool_status() {
+        assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Pending)), "○");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Success)), "✓");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Error)), "✗");
         assert_eq!(marker_glyph(&tool(ToolSemanticStatus::Running)), "●");

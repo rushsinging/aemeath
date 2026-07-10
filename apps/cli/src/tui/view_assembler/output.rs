@@ -5,8 +5,8 @@ use crate::tui::model::conversation::tool_call::ToolCall;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 use crate::tui::view_model::{
     allowed_child, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, SemanticStyle,
-    TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
+    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
+    OutputViewModel, SemanticStyle, TextBlockView, ToolResultBlockView, MAX_BLOCK_DEPTH,
 };
 use std::collections::HashMap;
 
@@ -209,7 +209,7 @@ impl OutputViewAssembler {
                     // 排队输入不再作为 document block 渲染，改为在 spinner 上方固定显示。
                 }
                 OutputTimelineItem::AgentProgress { id, message, .. } => {
-                    // 当前无 mutation 推此 timeline 项；agent 进度内联于 tool_calls[].activities（activity_summary）。误接入会重现 A4.2 双显示回归。
+                    // 当前无 mutation 推此 timeline 项；agent 进度内联于 tool_calls[].activities（activity_lines）。误接入会重现 A4.2 双显示回归。
                     roots.push(leaf(
                         id.clone(),
                         OutputBlockKind::DiagnosticNotice(TextBlockView {
@@ -297,6 +297,17 @@ impl OutputViewAssembler {
                 }
             }
         }
+        if let Some(placeholder) = &conversation.model_stream_placeholder {
+            roots.push(leaf(
+                "model-stream-placeholder".to_string(),
+                OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
+                    key: "model-stream-placeholder".to_string(),
+                    elapsed_secs: placeholder.elapsed_secs,
+                    phase: placeholder.phase.clone(),
+                }),
+            ));
+        }
+
         OutputViewModel {
             roots,
             version,

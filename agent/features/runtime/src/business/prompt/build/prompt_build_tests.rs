@@ -192,10 +192,9 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let hook_runner = HookRunner::empty();
-    let memory_config = MemoryConfig::default();
     let context = PromptContext::new(&cwd, Some("deepseek"), Some("deepseek-chat"));
 
-    let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config, "en").await;
+    let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
 
     // cleanup 失败不应让测试 FAIL（cwd 可能被外部环境清理，见 #637）
     let _ = std::fs::remove_dir_all(&cwd);

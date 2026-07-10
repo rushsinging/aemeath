@@ -14,8 +14,8 @@ pub use live_status::{LiveStatusViewModel, SpinnerLineView};
 pub use nesting::{allowed_child, MAX_BLOCK_DEPTH};
 pub use output::{
     AgentMetaView, AskUserBatchBlockView, AskUserPhaseView, AskUserSlotView, BlockNode,
-    HookNoticeBlockView, HookNoticeSemanticKind, OutputBlockKind, OutputViewModel, TextBlockView,
-    ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
+    HookNoticeBlockView, HookNoticeSemanticKind, ModelStreamPlaceholderBlockView, OutputBlockKind,
+    OutputViewModel, TextBlockView, ToolCallBlockView, ToolResultBlockView, ToolSemanticStatus,
 };
 pub use status::{
     StatusContextViewModel, StatusLineViewModel, StatusNoticeViewKind, StatusNoticeViewModel,
@@ -42,7 +42,7 @@ mod tests {
             semantic_status: ToolSemanticStatus::Success,
             style: SemanticStyle::Success,
             args_preview: Some("src/main.rs".to_string()),
-            activity_summary: None,
+            activity_lines: Vec::new(),
             result_summary: None,
             result_payload: None,
             workspace_root: None,

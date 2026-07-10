@@ -38,32 +38,44 @@ impl AgentRunner for CliAgentRunner {
 
         // Determine reasoning for this sub-agent: role config > model config > default
         let role_reasoning = role.and_then(|r| r.reasoning);
-        let model_reasoning = resolved_spec
-            .as_deref()
-            .and_then(|spec| {
-                // Try find_model to get the ModelEntryConfig for reasoning lookup
-                let query = if spec.contains('/') {
-                    spec.to_string()
-                } else {
-                    format!("{}/{}", self.client.provider_name(), spec)
-                };
-                self.models_config.find_model(&query)
-            })
+        let model_entry = resolved_spec.as_deref().and_then(|spec| {
+            // Try find_model to get the ModelEntryConfig for reasoning lookup
+            let query = if spec.contains('/') {
+                spec.to_string()
+            } else {
+                format!("{}/{}", self.client.provider_name(), spec)
+            };
+            self.models_config.find_model(&query)
+        });
+        let model_reasoning = model_entry
+            .as_ref()
             .and_then(|(_, _, entry)| entry.reasoning);
+        // 模型配置的固定推理档位（"off".."max"），优先级高于 reasoning bool。
+        let model_effort = model_entry
+            .as_ref()
+            .and_then(|(_, _, entry)| entry.reasoning_effort.as_deref())
+            .and_then(provider::api::ReasoningLevel::parse);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
-        let level = if reasoning {
-            provider::contract::ReasoningLevel::Medium
-        } else {
-            provider::contract::ReasoningLevel::Off
+        // effort 存在时取显式档位（clamp 到 provider 上限），否则沿用 bool→Medium/Off。
+        let level = match model_effort {
+            Some(effort) => effort.clamped_to(client.max_reasoning_level()),
+            None => {
+                if reasoning {
+                    provider::api::ReasoningLevel::Medium
+                } else {
+                    provider::api::ReasoningLevel::Off
+                }
+            }
         };
         client.set_reasoning_level(level);
         log::info!(target: LOG_TARGET,
-            "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, default={})",
+            "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
             reasoning,
             level,
             max_tokens_override,
             role_reasoning,
             model_reasoning,
+            model_effort,
             self.reasoning
         );
 

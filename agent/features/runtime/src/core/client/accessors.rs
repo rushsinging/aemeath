@@ -42,7 +42,10 @@ pub struct RuntimeHandle {
     /// 以免常驻 loop 中被取消的 token 永久污染后续回合。`cancel_impl` 锁此槽对当前
     /// token 调 `cancel()` 触发取消。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
     pub(crate) current_cancel: Arc<Mutex<tokio_util::sync::CancellationToken>>,
-    pub(crate) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
+    /// 会话历史唯一活跃真相——按 user turn 分段的 `ChatChain` 聚合。
+    ///
+    /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。
+    pub(crate) current_chain: Arc<Mutex<crate::business::session::ChatChain>>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
     pub(crate) frozen_chats: Arc<Mutex<Vec<crate::business::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
@@ -50,8 +53,6 @@ pub struct RuntimeHandle {
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
-    /// 而非自动恢复被中断的对话（#503）。
-    pub(crate) skip_first_pending_turn: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
 

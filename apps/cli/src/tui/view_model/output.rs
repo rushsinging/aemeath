@@ -34,6 +34,7 @@ pub enum OutputBlockKind {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),
     ThinkingMessage(TextBlockView),
+    ModelStreamPlaceholder(ModelStreamPlaceholderBlockView),
     ToolCall(ToolCallBlockView),
     ToolResult(ToolResultBlockView),
     HookNotice(HookNoticeBlockView),
@@ -83,6 +84,13 @@ pub struct TextBlockView {
     pub style: SemanticStyle,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ModelStreamPlaceholderBlockView {
+    pub key: String,
+    pub elapsed_secs: u64,
+    pub phase: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum HookNoticeSemanticKind {
     Blocked,
@@ -111,7 +119,7 @@ pub struct ToolCallBlockView {
     pub semantic_status: ToolSemanticStatus,
     pub style: SemanticStyle,
     pub args_preview: Option<String>,
-    pub activity_summary: Option<String>,
+    pub activity_lines: Vec<String>,
     pub result_summary: Option<String>,
     /// Owned structured payload of the tool result (output/content/is_error/image_count).
     /// 用于 TUI Display 从 typed 字段渲染 header（line_count/bytes_written/diff 等），
@@ -170,6 +178,7 @@ impl std::hash::Hash for ToolResultBlockView {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ToolSemanticStatus {
+    Pending,
     Running,
     Success,
     Error,

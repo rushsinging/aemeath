@@ -87,6 +87,14 @@ pub enum AgentProgressKindView {
     ToolCalls {
         calls: Vec<AgentToolCallProgressView>,
     },
+    /// Output streamed by a tool running inside a sub-agent.
+    ///
+    /// This is distinct from human-readable sub-agent progress and should not
+    /// be rendered as a normal activity line by default.
+    ToolOutput {
+        tool_name: String,
+        text: String,
+    },
 }
 
 impl std::fmt::Display for AgentProgressKindView {
@@ -97,6 +105,7 @@ impl std::fmt::Display for AgentProgressKindView {
                 None => write!(f, "{model}"),
             },
             Self::Message { text } => write!(f, "{text}"),
+            Self::ToolOutput { tool_name, text } => write!(f, "{tool_name}: {text}"),
             Self::ToolCalls { calls } => {
                 for (i, call) in calls.iter().enumerate() {
                     if i > 0 {
@@ -175,7 +184,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_progress_view_supports_message_and_tool_calls() {
+    fn test_agent_progress_view_supports_message_tool_calls_and_tool_output() {
         let message = AgentProgressEventView {
             sequence: 1,
             kind: AgentProgressKindView::Message {
@@ -192,6 +201,13 @@ mod tests {
                 }],
             },
         };
+        let tool_output = AgentProgressEventView {
+            sequence: 3,
+            kind: AgentProgressKindView::ToolOutput {
+                tool_name: "Bash".to_string(),
+                text: "stdout".to_string(),
+            },
+        };
 
         assert_eq!(message.sequence, 1);
         match message.kind {
@@ -205,8 +221,14 @@ mod tests {
             }
             other => panic!("unexpected kind: {other:?}"),
         }
+        match tool_output.kind {
+            AgentProgressKindView::ToolOutput { tool_name, text } => {
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(text, "stdout");
+            }
+            other => panic!("unexpected kind: {other:?}"),
+        }
     }
-
     #[test]
     fn test_agent_progress_display_tool_calls() {
         let event = AgentProgressEventView {
@@ -238,6 +260,18 @@ mod tests {
             },
         };
         assert_eq!(format!("{event}"), "分析完成");
+    }
+
+    #[test]
+    fn test_agent_progress_display_tool_output() {
+        let event = AgentProgressEventView {
+            sequence: 3,
+            kind: AgentProgressKindView::ToolOutput {
+                tool_name: "Bash".to_string(),
+                text: "stdout".to_string(),
+            },
+        };
+        assert_eq!(format!("{event}"), "Bash: stdout");
     }
 
     #[test]

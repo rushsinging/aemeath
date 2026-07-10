@@ -4,11 +4,38 @@ use crate::business::chat::looping::events::{
 use crate::business::chat::looping::tool_identity::ToolIdentityRegistry;
 use crate::LOG_TARGET;
 use provider::api::StreamHandler;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StreamingBlockKind {
     Text,
     Thinking,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StreamProgressSnapshot {
+    pub first_visible_event_seen: bool,
+    pub phase: &'static str,
+}
+
+#[derive(Debug, Default)]
+pub struct StreamProgressState {
+    first_visible_event_seen: bool,
+    active_streaming_block: Option<StreamingBlockKind>,
+}
+
+impl StreamProgressState {
+    pub fn snapshot(&self) -> StreamProgressSnapshot {
+        StreamProgressSnapshot {
+            first_visible_event_seen: self.first_visible_event_seen,
+            phase: match self.active_streaming_block {
+                Some(StreamingBlockKind::Text) => "writing",
+                Some(StreamingBlockKind::Thinking) => "thinking",
+                None if self.first_visible_event_seen => "waiting_model_output",
+                None => "waiting_model_response",
+            },
+        }
+    }
 }
 
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
@@ -19,7 +46,7 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     pub last_tps_update: std::time::Instant,
     pub tool_identity: ToolIdentityRegistry,
     pub context: RuntimeTurnContext,
-    active_streaming_block: Option<StreamingBlockKind>,
+    progress: Arc<Mutex<StreamProgressState>>,
 }
 
 impl<S: ChatEventSink> RuntimeStreamHandler<S> {
@@ -43,8 +70,12 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
             last_tps_update: std::time::Instant::now(),
             tool_identity,
             context,
-            active_streaming_block: None,
+            progress: Arc::new(Mutex::new(StreamProgressState::default())),
         }
+    }
+
+    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
+        self.progress.clone()
     }
 
     pub fn runtime_tool_id(&self, index: usize, provider_id: Option<&str>) -> sdk::ids::ToolCallId {
@@ -52,17 +83,49 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
     }
 
     fn begin_streaming_block(&mut self, kind: StreamingBlockKind) {
-        if self
-            .active_streaming_block
-            .is_some_and(|active| active != kind)
-        {
-            self.complete_active_streaming_block();
+        let should_complete = {
+            let mut progress = self.progress.lock().unwrap();
+            let should_complete = progress
+                .active_streaming_block
+                .is_some_and(|active| active != kind);
+            progress.active_streaming_block = Some(kind);
+            should_complete
+        };
+        if should_complete {
+            self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
+                context: self.context.clone(),
+                text: String::new(),
+            });
         }
-        self.active_streaming_block = Some(kind);
     }
 
-    fn complete_active_streaming_block(&mut self) {
-        if self.active_streaming_block.take().is_some() {
+    fn mark_visible_event(&mut self, kind: &str, detail: impl FnOnce() -> String) {
+        let first = {
+            let mut progress = self.progress.lock().unwrap();
+            let first = !progress.first_visible_event_seen;
+            progress.first_visible_event_seen = true;
+            first
+        };
+        if first {
+            log::debug!(target: LOG_TARGET,
+                "model stream first visible event: kind={} {} turn_id={}",
+                kind,
+                detail(),
+                self.context.turn_id,
+            );
+        }
+    }
+
+    pub fn progress_snapshot(&self) -> StreamProgressSnapshot {
+        self.progress.lock().unwrap().snapshot()
+    }
+
+    pub fn complete_active_streaming_block(&mut self) {
+        let had_active = {
+            let mut progress = self.progress.lock().unwrap();
+            progress.active_streaming_block.take().is_some()
+        };
+        if had_active {
             self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
                 context: self.context.clone(),
                 text: String::new(),
@@ -73,6 +136,7 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
 
 impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     fn on_text(&mut self, text: &str) {
+        self.mark_visible_event("text", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Text);
         self.sink.try_send_event(RuntimeStreamEvent::Text {
             context: self.context.clone(),
@@ -98,6 +162,12 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
+        self.mark_visible_event("tool_use_start", || {
+            format!(
+                "name={} provider_id={:?} index={}",
+                name, provider_id, index
+            )
+        });
         log::debug!(target: LOG_TARGET,
             "on_tool_use_start: name={} provider_id={:?} index={} turn_id={}",
             name, provider_id, index, self.context.turn_id,
@@ -122,7 +192,10 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_block_complete(&mut self, text: &str) {
-        self.active_streaming_block = None;
+        {
+            let mut progress = self.progress.lock().unwrap();
+            progress.active_streaming_block = None;
+        }
         self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
             context: self.context.clone(),
             text: text.to_string(),
@@ -130,6 +203,7 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     }
 
     fn on_thinking(&mut self, text: &str) {
+        self.mark_visible_event("thinking", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Thinking);
         self.sink.try_send_event(RuntimeStreamEvent::Thinking {
             context: self.context.clone(),
@@ -144,6 +218,15 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
         provider_id: Option<&str>,
         partial_args: &str,
     ) {
+        self.mark_visible_event("tool_args", || {
+            format!(
+                "name={} provider_id={:?} index={} bytes={}",
+                name,
+                provider_id,
+                index,
+                partial_args.len()
+            )
+        });
         self.complete_active_streaming_block();
         let id = self.runtime_tool_id(index, provider_id);
         self.sink

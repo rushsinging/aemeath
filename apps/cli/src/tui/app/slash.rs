@@ -73,7 +73,10 @@ impl super::App {
             }
             "/context" => {
                 // #567: EstimateContext 变体已删除，改为本地渲染消息计数。
-                self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
+                self.append_system_notice(format!(
+                    "Messages: {}",
+                    self.model.conversation.timeline.items().len()
+                ));
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
@@ -204,7 +207,7 @@ Build info:
                 let usage = &self.model.conversation.runtime.usage;
                 self.append_system_notice(format!(
                     "Messages: {} | API calls: {} | Tokens: {} total",
-                    self.chat.messages.len(),
+                    self.model.conversation.timeline.items().len(),
                     usage.api_calls,
                     sdk::format_tokens(usage.input_tokens + usage.output_tokens)
                 ));
@@ -285,7 +288,6 @@ Arguments: {args}"
     /// `SessionReset` 事件回来后经 `Effect::ResetRuntimeState` 再做完整清理
     ///（sync agent_client + clear_tasks）；loop 不再被 drop，保持存活。
     async fn clear_conversation(&mut self) {
-        self.chat.messages.clear();
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         self.output_area.clear();
         if self.chat.input_event_tx.is_some() {

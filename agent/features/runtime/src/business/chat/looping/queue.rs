@@ -1,4 +1,5 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
+use crate::business::session::ChatChain;
 use share::message::Message;
 use std::future::Future;
 use std::pin::Pin;
@@ -9,7 +10,12 @@ pub trait QueueDrainPort: Clone + Send + Sync + 'static {
     fn drain_queued_input<'a>(&'a self) -> QueueFuture<'a>;
 }
 
-pub async fn append_queued_input<Q, S>(queue: &Q, sink: &S, messages: &mut Vec<Message>) -> bool
+pub async fn append_queued_input<Q, S>(
+    queue: &Q,
+    sink: &S,
+    chain: &mut ChatChain,
+    segment_id: &str,
+) -> bool
 where
     Q: QueueDrainPort,
     S: ChatEventSink,
@@ -22,11 +28,11 @@ where
     }
 
     for input in queued {
-        messages.push(Message::user(input));
+        chain.push(Message::user(input), segment_id);
     }
 
     sink.send_event(RuntimeStreamEvent::PostToolExecutionSync {
-        messages: messages.clone(),
+        messages: chain.messages_flat(),
     })
     .await;
     true
@@ -81,14 +87,14 @@ mod tests {
             "queued two".to_string(),
         ]));
         let sink = TestEventSink::default();
-        let mut messages = vec![Message::user("first")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("first")]);
 
-        let appended = append_queued_input(&queue, &sink, &mut messages).await;
+        let appended = append_queued_input(&queue, &sink, &mut chain, "seg1").await;
 
         assert!(appended);
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[1].text_content(), "queued one");
-        assert_eq!(messages[2].text_content(), "queued two");
+        assert_eq!(chain.messages_flat().len(), 3);
+        assert_eq!(chain.messages_flat()[1].text_content(), "queued one");
+        assert_eq!(chain.messages_flat()[2].text_content(), "queued two");
 
         let events = sink.events.lock().unwrap();
         assert_eq!(events.len(), 1);
@@ -107,12 +113,12 @@ mod tests {
     async fn append_queued_input_empty_vec_returns_false() {
         let queue = TestQueueDrainPort::new(Some(Vec::new()));
         let sink = TestEventSink::default();
-        let mut messages = vec![Message::user("first")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("first")]);
 
-        let appended = append_queued_input(&queue, &sink, &mut messages).await;
+        let appended = append_queued_input(&queue, &sink, &mut chain, "seg1").await;
 
         assert!(!appended);
-        assert_eq!(messages.len(), 1);
+        assert_eq!(chain.messages_flat().len(), 1);
         assert!(sink.events.lock().unwrap().is_empty());
     }
 
@@ -120,12 +126,12 @@ mod tests {
     async fn append_queued_input_none_returns_false() {
         let queue = TestQueueDrainPort::new(None);
         let sink = TestEventSink::default();
-        let mut messages = vec![Message::user("first")];
+        let mut chain = ChatChain::from_flat_messages(vec![Message::user("first")]);
 
-        let appended = append_queued_input(&queue, &sink, &mut messages).await;
+        let appended = append_queued_input(&queue, &sink, &mut chain, "seg1").await;
 
         assert!(!appended);
-        assert_eq!(messages.len(), 1);
+        assert_eq!(chain.messages_flat().len(), 1);
         assert!(sink.events.lock().unwrap().is_empty());
     }
 }

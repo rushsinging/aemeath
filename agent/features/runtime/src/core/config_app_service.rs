@@ -67,7 +67,7 @@ impl ConfigAppService {
     }
 
     /// Load from all sources, building the priority chain.
-    pub async fn load(&self) -> Result<Config, String> {
+    pub async fn load(&self) -> Result<(), String> {
         let inner = self.inner.read().await;
 
         let mut chain = PriorityChain::new();
@@ -125,11 +125,11 @@ impl ConfigAppService {
         let snapshot = ConfigSnapshot::new(config.clone());
 
         let mut writer = self.inner.write().await;
-        writer.config = config.clone();
+        writer.config = config;
         drop(writer);
 
         self.tx.send_replace(snapshot);
-        Ok(config)
+        Ok(())
     }
 
     /// Reload from all sources.
@@ -163,11 +163,6 @@ impl ConfigAppService {
         let snapshot = ConfigSnapshot::new(config);
         self.tx.send_replace(snapshot);
         Ok(())
-    }
-
-    /// Get current config (backward compat).
-    pub async fn get(&self) -> Config {
-        self.inner.read().await.config.clone()
     }
 }
 
@@ -227,8 +222,8 @@ mod tests {
     async fn test_default_load() {
         let dir = test_dir("default_load");
         let svc = test_svc(&dir);
-        let config = svc.load().await.unwrap();
-        assert_eq!(config.model.context_size, 0);
+        svc.load().await.unwrap();
+        assert_eq!(svc.snapshot().await.context_size(), 0);
     }
 
     #[tokio::test]

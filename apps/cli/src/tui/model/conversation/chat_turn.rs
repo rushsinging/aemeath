@@ -1,5 +1,5 @@
 use super::ids::{ChatId, ChatTurnId, ToolCallId, ToolStreamKey};
-use super::tool_call::{ToolCall, ToolCallStatus};
+use super::tool_call::{ToolCall, ToolCallChange, ToolCallStatus};
 use super::tool_result_payload::ToolResultPayload;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,12 +39,12 @@ impl ChatTurn {
         id: &str,
         arguments: Option<String>,
         status: ToolCallStatus,
-    ) -> Option<String> {
+    ) -> Option<(String, Vec<ToolCallChange>)> {
         let call = self
             .tool_calls
             .iter_mut()
             .find(|call| call.id.as_ref().map(AsRef::as_ref) == Some(id))?;
-        call.update(arguments, status);
+        let changes = call.update(arguments, status);
         self.status = match status {
             ToolCallStatus::PendingArgs | ToolCallStatus::Ready => {
                 if self.status == ChatTurnStatus::Completed {
@@ -59,7 +59,7 @@ impl ChatTurn {
             | ToolCallStatus::Cancelled
             | ToolCallStatus::Orphaned => self.status,
         };
-        Some(call.args_preview.clone())
+        Some((call.args_preview.clone(), changes))
     }
     pub fn bind_tool(&mut self, id: &str) -> Option<String> {
         let call = self

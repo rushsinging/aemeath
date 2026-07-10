@@ -2,7 +2,23 @@ use super::agent_progress::AgentProgressEntry;
 use super::change::ConversationChange;
 use super::ids::{ChatId, ChatTurnId, ToolCallId};
 use super::model::ConversationModel;
-use super::tool_call::{AgentMeta, ToolCallStatus};
+use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
+use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
+
+const STREAM_CAP: usize = 4 * 1024;
+
+fn push_streaming_preview_activity(call: &mut ToolCall, message: &str) {
+    let policy = match call.name.as_str() {
+        "Bash" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
+        "Agent" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
+        _ => return,
+    };
+    let buffer = call
+        .streaming_preview
+        .get_or_insert_with(|| ToolStreamingPreviewBuffer::new(policy));
+    buffer.push_chunk(message);
+    call.activities = buffer.display_lines();
+}
 
 pub(super) struct ToolCallUpdateObservation {
     pub(super) chat_id: ChatId,
@@ -71,11 +87,15 @@ impl ConversationModel {
         let mut bound_id = id.clone();
         let mut args_preview = arguments.clone().unwrap_or_default();
         let mut bound = false;
+        let mut running = false;
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             for candidate_id in candidate_ids.into_iter().flatten() {
-                if let Some(preview) = turn.update_tool(&candidate_id, arguments.clone(), status) {
+                if let Some((preview, changes)) =
+                    turn.update_tool(&candidate_id, arguments.clone(), status)
+                {
                     args_preview = preview;
                     bound_id = ToolCallId::from_legacy_or_new(&candidate_id);
+                    running = changes.contains(&ToolCallChange::Running);
 
                     bound = true;
                     break;
@@ -85,7 +105,9 @@ impl ConversationModel {
         if !bound {
             if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
                 turn.observe_tool_start(id.clone(), chat_id.clone(), name.clone(), index);
-                let _ = turn.update_tool(id.as_ref(), arguments.clone(), status);
+                running = turn
+                    .update_tool(id.as_ref(), arguments.clone(), status)
+                    .is_some_and(|(_, changes)| changes.contains(&ToolCallChange::Running));
                 bound_id = id.clone();
             }
         }
@@ -121,6 +143,7 @@ impl ConversationModel {
             ConversationChange::ToolCallBound {
                 id: bound_id.to_string(),
                 name,
+                running,
             },
             ConversationChange::OutputDirty,
         ]
@@ -138,26 +161,14 @@ impl ConversationModel {
         const STREAM_CAP: usize = 4 * 1024;
 
         // 查找匹配的 ToolCall，将进度信息写入其 activities（供 ToolCallBlock 渲染
-        // activity_summary），而不是作为独立根级 AgentProgress block 泄露到对话流中。
+        // activity_lines），而不是作为独立根级 AgentProgress block 泄露到对话流中。
         if let Some(turn) = self.runtime_turn_mut(&chat_id, &turn_id) {
             if let Some(call) = turn.tool_calls.iter_mut().find(|c| {
                 c.id.as_ref()
                     .is_some_and(|id| id.as_ref() == tool_id.to_string())
             }) {
-                // For Bash streaming stdout: accumulate into a single activity
-                // entry so the TUI shows the full live output (up to STREAM_CAP)
-                // rather than just the latest chunk. Other tools (e.g. sub-agent
-                // status messages) use per-message push as before.
-                if call.name == "Bash" {
-                    if let Some(last) = call.activities.last_mut() {
-                        last.push_str(&message);
-                        // Trim oldest content if over cap (keep the tail).
-                        if last.len() > STREAM_CAP {
-                            *last = sdk::slice_tail(last, STREAM_CAP).to_string();
-                        }
-                    } else {
-                        call.activities.push(message.clone());
-                    }
+                if call.name == "Bash" || call.name == "Agent" {
+                    push_streaming_preview_activity(call, &message);
                 } else {
                     call.activities.push(message.clone());
                 }

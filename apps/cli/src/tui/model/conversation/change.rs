@@ -30,6 +30,7 @@ pub enum ConversationChange {
     ToolCallBound {
         id: String,
         name: String,
+        running: bool,
     },
     ToolCallCompleted {
         id: String,

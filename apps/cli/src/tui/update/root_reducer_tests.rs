@@ -3,6 +3,66 @@ use crate::tui::model::conversation::intent::{
     ConversationIntent, SetCompactProgress, StartChat, ToolCallStart, ToolCallUpdate,
 };
 
+use crate::tui::model::conversation::runtime_state::RuntimeState;
+use crate::tui::model::conversation::spinner::SpinnerPhase;
+
+fn tool_update(
+    status: crate::tui::model::conversation::tool_call::ToolCallStatus,
+) -> ConversationIntent {
+    ConversationIntent::ToolCallUpdate(ToolCallUpdate {
+        chat_id: crate::tui::model::conversation::ids::ChatId::new("chat-lifecycle"),
+        turn_id: crate::tui::model::conversation::ids::ChatTurnId::new("turn-lifecycle"),
+        id: crate::tui::model::conversation::ids::ToolCallId::new("tool-lifecycle"),
+        provider_id: Some("provider-lifecycle".to_string()),
+        name: "Bash".to_string(),
+        index: 0,
+        arguments: Some(r#"{"command":"pwd"}"#.to_string()),
+        status,
+    })
+}
+
+#[test]
+fn test_ready_tool_update_does_not_start_runtime_tool_spinner() {
+    let mut model = TuiModel::default();
+
+    reduce_agent_event(
+        &mut model,
+        AgentEventMapping {
+            conversation: vec![tool_update(
+                crate::tui::model::conversation::tool_call::ToolCallStatus::Ready,
+            )],
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(
+        model.conversation.runtime,
+        RuntimeState::default(),
+        "Ready 只表示参数已完整/可绑定，不能触发运行态 spinner"
+    );
+}
+
+#[test]
+fn test_running_tool_update_starts_runtime_tool_spinner() {
+    let mut model = TuiModel::default();
+
+    reduce_agent_event(
+        &mut model,
+        AgentEventMapping {
+            conversation: vec![tool_update(
+                crate::tui::model::conversation::tool_call::ToolCallStatus::Running,
+            )],
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(model.conversation.runtime.spinner.running_tool_count, 1);
+    assert_eq!(
+        model.conversation.runtime.spinner.phase,
+        Some(SpinnerPhase::CallingTool("Bash".to_string()))
+    );
+}
+
 #[test]
 fn test_reduce_agent_event_tool_call_updates_conversation() {
     let mut model = TuiModel::default();

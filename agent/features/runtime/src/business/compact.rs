@@ -34,4 +34,4 @@ pub use summary::{
 pub use restore::sanitize_tool_pairs;
 
 // microcompact 模块
-pub use microcompact::{microcompact_messages, EXPLORATORY_TOOLS};
+pub use microcompact::{microcompact_chain, microcompact_messages, EXPLORATORY_TOOLS};

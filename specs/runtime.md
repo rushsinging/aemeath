@@ -5,6 +5,15 @@
 **次触发**：改暂停 / 恢复 / 重试逻辑；改成本追踪；新增 slash 命令。
 **配套**：`Tool` trait / `ToolRegistry` / MCP 主体在 `tools.md`；provider 调用在 `provider.md`。
 
+## 会话历史唯一真相（#680）
+
+- **MUST** 会话历史唯一可变真相 = `RuntimeHandle.current_chain: Arc<Mutex<ChatChain>>`。
+- **MUST** segment 边界由 loop turn 开始时生成 segment_id，`chain.push(msg, &segment_id)` 指定段追加。
+- **NEVER** 在 loop 外部（TUI / SDK / storage）持有可变消息副本或回写权威态。
+- **MUST** save 完全是 runtime 自身职责（turn-level + loop-exit auto-save），TUI `/save` 仅 UX 反馈。
+- **MUST** `ChatRequest` 只传增量 `user_input`，**NEVER** 传全量消息历史。
+- microcompact 按 segment 边界保护最近 3 个大 loop（`microcompact_chain`）。
+
 ## Tool 执行编排
 
 - 执行流程：LLM 返回 tool_use → Agent 收集 → 并发执行 → 结果注入回消息。

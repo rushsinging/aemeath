@@ -5,13 +5,14 @@ use tokio::sync::watch;
 
 use crate::business::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::core::config_app_service::ConfigAppService;
+use crate::core::config_port::ConfigReader;
 use crate::core::port::ChatRuntimeContext;
 use crate::core::port::ProviderInfoPort;
 use crate::utils::adapter::LlmClientAdapter;
 use crate::utils::bootstrap::{
     self, apply_config_permission_mode, build_agent_runner, build_hook_runner, init_logging,
-    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_context_size,
-    resolve_model_runtime_settings, spawn_mcp_connect,
+    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
+    spawn_mcp_connect,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
 use prompt::api::skill::{load_all_skills, Skill};
@@ -39,29 +40,21 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     // 3. 加载配置
-    let config_file = ConfigAppService::new(Some(&cwd)).load().await.ok();
+    let svc = ConfigAppService::new(Some(&cwd));
+    svc.load().await.ok();
+    let snapshot = svc.snapshot().await;
 
     // 4. 日志初始化
-    init_logging(
-        config_file
-            .as_ref()
-            .map(|c| &c.logging)
-            .unwrap_or(&share::config::LoggingConfig::default()),
-    );
+    init_logging(snapshot.logging());
 
     // 5. 权限模式
-    apply_config_permission_mode(&mut args, config_file.as_ref());
+    apply_config_permission_mode(&mut args, snapshot.allow_all());
 
-    // 6. 模型选择 — 直接使用 ModelsConfig::select_for_run
-    let config = config_file.as_ref().ok_or_else(|| {
-        SdkError::Init(
-            "未指定模型。请使用 --model <来源>/<模型>，或在 ~/.agents/aemeath.json 配置 models.default".to_string(),
-        )
-    })?;
-    let resolved_model = config
-        .models
-        .select_for_run(args.model.as_deref())
+    // 6. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
+    let runtime_model = snapshot
+        .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
         .map_err(|e| SdkError::Init(e.to_string()))?;
+    let resolved_model = runtime_model.resolved_model().clone();
     let driver =
         ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
     // 7. API key
@@ -75,12 +68,10 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let base_url = resolve_base_url(args.base_url.clone(), &resolved_model);
     let model = resolved_model.model.id.clone();
     let runtime_settings = resolve_model_runtime_settings(
-        args.max_tokens,
+        runtime_model.max_tokens(),
         &resolved_model.model,
-        config_file.as_ref(),
         !args.no_think,
-    )
-    .map_err(|e| SdkError::Init(e.to_string()))?;
+    );
 
     log::info!(target: LOG_TARGET,
         "[main] source={} api={} model={} reasoning={} args.no_think={}",
@@ -104,7 +95,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 10. Tooling
     let task_store = Arc::new(TaskStore::new());
-    let skills_map = load_configured_skills(&cwd, config_file.as_ref().map(|c| &c.skills));
+    let task_store_before = task_store.clone();
+    let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
@@ -117,7 +109,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
 
     // 11. Hook runner
-    let hook_runner = build_hook_runner(config_file.as_ref(), &cwd);
+    let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
+    let hook_runner_before = hook_runner.clone();
 
     // 12. Session
     let session_id = start_session(args.resume.clone());
@@ -125,39 +118,28 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 13. Agent runner
     let agent_runner = build_agent_runner(
-        config_file.as_ref(),
+        Some(snapshot.models()),
+        Some(snapshot.agents()),
         client.clone(),
         hook_runner.clone(),
         runtime_settings.reasoning,
     );
 
     // 15. Prompt bundle
-    let prompt_memory_config = config_file
-        .as_ref()
-        .map(|c| c.memory.clone())
-        .unwrap_or_default();
     let client_adapter = LlmClientAdapter::new(client.clone());
     let prompt_context = PromptContext::new(
         &cwd,
         Some(client_adapter.provider_name()),
         Some(client_adapter.model_name()),
     );
-    let prompt_parts = build_system_prompt_parts(
-        &prompt_context,
-        &hook_runner,
-        &prompt_memory_config,
-        config_file
-            .as_ref()
-            .map(|c| c.language.as_str())
-            .unwrap_or("en"),
-    )
-    .await;
+    let prompt_parts =
+        build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language()).await;
 
     let static_prompt = crate::business::prompt::prompt_build_ext::build_static_prompt(
         &cwd,
         &model,
         runtime_settings.reasoning,
-        config_file.as_ref(),
+        Some(&snapshot),
         &hook_runner,
         prompt_parts.clone(),
         &skills,
@@ -177,7 +159,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
-        config_file.as_ref(),
+        snapshot.max_tool_concurrency(),
+        snapshot.max_agent_concurrency(),
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,
@@ -187,24 +170,16 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     );
 
     // 17. context_size / verbose 合并
-    let snapshot_context_size = config_file
-        .as_ref()
-        .map(|c| c.model.context_size)
-        .unwrap_or(0);
-    let context_size = resolve_context_size(
-        args.context_size,
-        snapshot_context_size,
-        resolved_model.model.context_window,
-    );
+    let context_size =
+        snapshot.resolve_context_size(Some(args.context_size), resolved_model.model.context_window);
 
     // 18. 组装 context
-    let memory_config = config_file
-        .as_ref()
-        .map(|c| c.memory.clone())
-        .unwrap_or_default();
-    let reasoning_graph_config = config_file.as_ref().map(|c| {
-        crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(&c.reasoning_graph)
-    });
+    let memory_config = snapshot.memory().clone();
+    let reasoning_graph_config = Some(
+        crate::business::reasoning_graph::GraphRuntimeConfig::from_shared(
+            snapshot.reasoning_graph(),
+        ),
+    );
     let context = ChatRuntimeContext {
         resources: crate::core::resources::RuntimeResources {
             client,
@@ -220,10 +195,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
             agent_semaphore,
             allow_all: args.allow_all,
             context_size,
-            language: config_file
-                .as_ref()
-                .map(|c| c.language.clone())
-                .unwrap_or_else(|| "en".to_string()),
+            language: snapshot.language().to_string(),
             reasoning_graph_config,
         },
         verbose: args.verbose,
@@ -244,10 +216,9 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
         current_cancel: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
-        current_messages: Arc::new(Mutex::new(Vec::new())),
+        current_chain: Arc::new(Mutex::new(crate::business::session::ChatChain::default())),
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
-        skip_first_pending_turn: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         workspace,
         change_tx,
         session_reminders: Arc::new(std::sync::RwLock::new(

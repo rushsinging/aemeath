@@ -37,7 +37,8 @@ impl TypedTool for TaskListCreateTool {
     }
 
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Mutates the active task list; must remain ordered with task writes.
+        false
     }
 
     fn timeout_secs(&self) -> u64 {

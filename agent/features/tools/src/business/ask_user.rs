@@ -29,7 +29,8 @@ impl TypedTool for AskUserQuestionTool {
         true
     }
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Waits for user interaction and updates conversation flow state.
+        false
     }
 
     async fn call(

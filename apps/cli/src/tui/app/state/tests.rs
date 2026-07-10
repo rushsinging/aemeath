@@ -13,12 +13,6 @@ mod tests {
     // === ChatState ===
 
     #[test]
-    fn test_chat_state_default_messages_empty() {
-        let state = ChatState::default();
-        assert!(state.messages.is_empty());
-    }
-
-    #[test]
     fn test_chat_state_default_not_processing() {
         let state = ChatState::default();
         assert!(!state.is_processing);
@@ -158,7 +152,13 @@ mod tests {
             std::path::PathBuf::from("/tmp/aemeath"),
             "gpt-test".to_string(),
         );
-        app.chat.messages.push(sdk::ChatMessage::user_text("late"));
+        app.model.conversation.apply(
+            crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+                crate::tui::model::conversation::intent::ResumeConversation {
+                    messages: vec![sdk::ChatMessage::user_text("late")],
+                },
+            ),
+        );
 
         assert_eq!(app.model.session.message_count, 0);
     }

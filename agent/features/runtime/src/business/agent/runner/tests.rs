@@ -99,7 +99,9 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
             assert_eq!(calls[1].name, "Grep");
             // 所有 tool 的 summary 为空，TUI 层自己组装
         }
-        AgentProgressKind::Message { .. } | AgentProgressKind::Started { .. } => {
+        AgentProgressKind::Message { .. }
+        | AgentProgressKind::Started { .. }
+        | AgentProgressKind::ToolOutput { .. } => {
             panic!("expected ToolCalls event")
         }
     }
@@ -119,7 +121,9 @@ fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_le
         AgentProgressKind::ToolCalls { calls: _ } => {
             // 所有 tool 的 summary 为空
         }
-        AgentProgressKind::Message { .. } | AgentProgressKind::Started { .. } => {
+        AgentProgressKind::Message { .. }
+        | AgentProgressKind::Started { .. }
+        | AgentProgressKind::ToolOutput { .. } => {
             panic!("expected ToolCalls event")
         }
     }
