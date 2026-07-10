@@ -224,7 +224,6 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
-            RuntimeStreamEvent::Error(message) => format!("Error:{message}"),
             RuntimeStreamEvent::Cancelled { .. } => "Cancelled".to_string(),
             RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),
@@ -3005,5 +3004,198 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     assert!(
         !events.iter().any(|e| e.contains("hi there")),
         "messages 末尾 User + pending_input 空 → 应 idle 等待，不应触发 LLM: {events:?}"
+    );
+}
+
+/// 首次 LLM 调用返回普通 API 错误（`LlmError::Stream`，模拟
+/// "stream error: stream interrupted..."），后续调用正常完成。
+/// 用于验证 API 错误 turn 终止收口（#749）。
+#[derive(Clone)]
+struct ApiErrorThenNormalProvider {
+    calls: Arc<Mutex<usize>>,
+}
+
+impl ApiErrorThenNormalProvider {
+    fn new() -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ApiErrorThenNormalProvider {
+    async fn stream_message(
+        &self,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+        _cancel: &CancellationToken,
+    ) -> Result<StreamResponse, provider::LlmError> {
+        let call_index = {
+            let mut guard = self.calls.lock().unwrap();
+            let idx = *guard;
+            *guard += 1;
+            idx
+        };
+        if call_index == 0 {
+            // 回合 1：模拟 provider 流中断（非取消类 API 错误）。
+            return Err(provider::api::LlmError::Stream(
+                "stream interrupted after partial output: error decoding response body".to_string(),
+            ));
+        }
+        let text = "recovered final response";
+        handler.on_text(text);
+        Ok(StreamResponse {
+            assistant_message: Message {
+                role: Role::Assistant,
+                content: vec![share::message::ContentBlock::Text {
+                    text: text.to_string(),
+                }],
+                metadata: None,
+            },
+            usage: Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+                total_tokens: None,
+            },
+            stop_reason: StopReason::EndTurn,
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+
+    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+
+    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+        provider::contract::ReasoningLevel::Off
+    }
+}
+
+/// #749：provider 流中断后，API 错误 turn 终止必须收口 ——
+/// 1. 发出 `ApiError`（携带错误供展示）；
+/// 2. 紧随发出 `DoneWithDuration` 作为统一 turn 结束信号（TUI 据此清 processing）；
+/// 3. NOT 再发 `Error`（消除 TUI 双渲染）；
+/// 4. loop 回到 idle，后续新输入能正常触发下一回合。
+#[tokio::test]
+async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+
+    // 首条输入触发回合 1（会命中 API 错误）。
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let driver_sink = sink.clone();
+    let driver = tokio::spawn(async move {
+        // 等回合 1 的 API 错误收口（出现 DoneWithDuration）。
+        loop {
+            if driver_sink.events().iter().any(|e| e == "DoneWithDuration") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        // 投递新用户消息：验证 API 错误后 loop 回到 idle、能正常开启回合 2。
+        input_tx
+            .send(sdk::ChatInputEvent::user_message("retry", Vec::new()))
+            .unwrap();
+        loop {
+            if driver_sink
+                .events()
+                .iter()
+                .any(|e| e.contains("recovered final response"))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        drop(input_tx); // 关闭通道 → shutdown
+    });
+
+    let provider = ApiErrorThenNormalProvider::new();
+    let ctx = ChatLoopContext {
+        sink: sink.clone(),
+        queue: SequenceQueueDrainPort::new(vec![]),
+        input_events,
+        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        registry: Arc::new(ToolRegistry::new()),
+        system_blocks: Vec::new(),
+        system_prompt_text: String::new(),
+        user_context: String::new(),
+        chain: ChatChain::from_flat_messages(vec![]),
+        context_size: 200_000,
+        workspace: project::api::WorkspaceService::new(std::env::current_dir().unwrap()),
+        session_id: "test-api-error-finalize".to_string(),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
+        agent_runner: None,
+        allow_all: false,
+        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        task_store: Arc::new(storage::api::TaskStore::new()),
+        max_tool_concurrency: 1,
+        max_agent_concurrency: 1,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        hook_runner: test_hook_runner(),
+        memory_config: share::config::MemoryConfig::default(),
+        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        reasoning_graph: None,
+        build_switched_client: Arc::new(test_build_switched_client),
+        save_chain: test_save_chain(),
+        language: "en".to_string(),
+        run_reflection_on_demand: test_run_reflection(),
+        apply_reflection_on_demand: test_apply_reflection(),
+        list_models: test_list_models(),
+        list_reminders: test_list_reminders(),
+        list_sessions: test_list_sessions(),
+    };
+
+    tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
+        .await
+        .expect("process_chat_loop 应在 shutdown 后返回");
+    driver.await.unwrap();
+
+    let events = sink.events();
+
+    // 1. API 错误路径发出 ApiError 事件（携带错误文本供展示）。
+    let api_error = events
+        .iter()
+        .position(|e| e.starts_with("ApiError:") && e.contains("stream interrupted"))
+        .expect("API 错误应发出 ApiError 事件");
+
+    // 2. ApiError 之后紧随 DoneWithDuration，统一 turn 结束信号。
+    let done_after_error = events
+        .iter()
+        .skip(api_error)
+        .position(|e| e == "DoneWithDuration")
+        .expect("API 错误后应发出 DoneWithDuration 作为 turn 结束信号");
+    assert!(
+        done_after_error > 0,
+        "DoneWithDuration 应在 ApiError 之后: {events:?}"
+    );
+
+    // 3. NOT 再发 Error 事件（消除 TUI 双渲染）。
+    assert!(
+        !events.iter().any(|e| e.starts_with("Error:")),
+        "API 错误路径不应再发 Error 事件（避免 TUI 双渲染）: {events:?}"
+    );
+
+    // 4. API 错误后 loop 回 idle，新输入正常触发回合 2。
+    assert!(
+        events
+            .iter()
+            .any(|e| e.contains("recovered final response")),
+        "API 错误后应能正常开启下一回合: {events:?}"
     );
 }

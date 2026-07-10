@@ -155,7 +155,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
                 eprintln!("[tool:{tool_name}] {output}");
             }
         }
-        sdk::ChatEvent::SystemMessage(message) | sdk::ChatEvent::Error(message) => {
+        sdk::ChatEvent::SystemMessage(message) => {
             eprintln!("{message}");
         }
         sdk::ChatEvent::Result(result) => {
