@@ -224,7 +224,6 @@ impl RecordingSink {
             RuntimeStreamEvent::Text { text, .. } => format!("Text:{text}"),
             RuntimeStreamEvent::Done { .. } => "Done".to_string(),
             RuntimeStreamEvent::SystemMessage(message) => format!("SystemMessage:{message}"),
-            RuntimeStreamEvent::Error(message) => format!("Error:{message}"),
             RuntimeStreamEvent::Cancelled { .. } => "Cancelled".to_string(),
             RuntimeStreamEvent::Thinking { .. } => "Thinking".to_string(),
             RuntimeStreamEvent::BlockComplete { .. } => "BlockComplete".to_string(),

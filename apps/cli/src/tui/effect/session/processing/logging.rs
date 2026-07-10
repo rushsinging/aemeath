@@ -99,9 +99,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             elapsed_secs,
             phase
         ),
-        sdk::ChatEvent::Error(message) => {
-            crate::tui::log_trace!("{} error len={}", stage, message.len())
-        }
         sdk::ChatEvent::Usage {
             input,
             output,

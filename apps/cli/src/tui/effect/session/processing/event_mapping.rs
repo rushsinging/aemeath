@@ -76,7 +76,6 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             elapsed_secs,
             phase,
         },
-        sdk::ChatEvent::Error(msg) => UiEvent::Error(msg),
         sdk::ChatEvent::Usage {
             input,
             output,

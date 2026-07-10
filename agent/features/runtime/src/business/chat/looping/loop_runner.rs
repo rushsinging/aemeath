@@ -1433,8 +1433,9 @@ where
                 }
 
                 // #749：API 错误路径 NOT 再发 `RuntimeStreamEvent::Error`。
-                // 其唯一去向是 TUI 渲染通道（convert.rs），会与下方 `ApiError`
-                // 造成同一错误双渲染。gate/hook 不消费该 stream 事件，删除安全。
+                // 该变体原本会经 convert.rs 映射为 `ChatEvent::Error` 进入 TUI 渲染
+                // 通道，与下方 `ApiError` 造成同一错误双渲染。变体链路已随本次退役
+                // 整体删除，错误内容统一由 `ApiError` 承载。
                 let error_msg = e.to_string();
                 let gate = drain_and_apply_gate(
                     GateKind::BeforeFinish,

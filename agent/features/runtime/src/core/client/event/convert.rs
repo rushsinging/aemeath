@@ -162,7 +162,6 @@ pub(crate) fn runtime_event_to_sdk_event(
             elapsed_secs,
             phase,
         },
-        crate::business::chat::RuntimeStreamEvent::Error(msg) => ChatEvent::Error(msg),
         crate::business::chat::RuntimeStreamEvent::Usage {
             input,
             output,

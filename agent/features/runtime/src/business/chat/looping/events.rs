@@ -123,7 +123,6 @@ pub enum RuntimeStreamEvent {
         elapsed_secs: u64,
         phase: String,
     },
-    Error(String),
     Usage {
         input: u32,
         output: u32,

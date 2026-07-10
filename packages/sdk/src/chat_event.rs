@@ -83,8 +83,6 @@ pub enum ChatEvent {
         elapsed_secs: u64,
         phase: String,
     },
-    /// Chat 出错。
-    Error(String),
     /// 用量统计。
     Usage {
         input: u32,
