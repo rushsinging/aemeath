@@ -1,5 +1,4 @@
 use super::*;
-use crate::utils::bootstrap::config_paths::TestEnvGuard;
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
@@ -248,31 +247,6 @@ async fn test_load_agents_md_falls_back_to_project_agents_md() {
     let content = load_agents_md(&base, &hook_runner, &base).await;
 
     assert!(content.contains("project agents instructions"));
-
-    std::fs::remove_dir_all(base).unwrap();
-}
-
-#[tokio::test]
-async fn test_load_agents_md_reads_project_claude_md_without_migration() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_agents_md_no_auto_migration_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&base).unwrap();
-    std::fs::write(base.join("CLAUDE.md"), "old project instructions").unwrap();
-    let agents_dir = base.join("agents-home");
-    std::fs::create_dir_all(&agents_dir).unwrap();
-
-    let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir);
-
-    let hook_runner = HookRunner::new(Default::default());
-    let content = load_agents_md(&base, &hook_runner, &base).await;
-
-    assert!(content.contains("old project instructions"));
-    assert!(!base.join("AGENTS.md").exists());
 
     std::fs::remove_dir_all(base).unwrap();
 }

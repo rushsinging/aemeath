@@ -33,6 +33,7 @@ pub type SwitchClientFn = Arc<
 ///
 /// 由 `chat_impl()` 从 `RuntimeHandle` 构造，按值传入 `process_chat_loop()`，
 /// 函数内解构消费。持有 session 级不变配置 + loop 专属可变状态（messages、cancel 等）。
+#[allow(clippy::type_complexity)]
 pub struct ChatLoopContext<S, Q, I>
 where
     S: ChatEventSink,

@@ -2,9 +2,9 @@ use crate::tui::render::dialog::Dialog;
 
 impl super::super::App {
     pub(super) fn open_model_selection_dialog(&mut self) -> Option<String> {
-        // 读取启动期预取的模型缓存（refresh_model_cache），保持纯函数、避免 block_on。
+        // #567：模型列表走事件流（ListModels），缓存尚未接入。暂传空列表。
         let current = self.session.current_model_display.clone();
-        let (options, keys) = build_model_dialog_options(self.session.cached_models(), &current);
+        let (options, keys) = build_model_dialog_options(&[], &current);
         if options.is_empty() {
             self.append_system_notice("No models configured. Add models to ~/.aemeath/config.json");
             return None;

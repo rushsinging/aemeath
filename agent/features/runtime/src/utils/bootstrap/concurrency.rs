@@ -6,16 +6,14 @@ pub fn resolve_concurrency_limits(
 ) -> (usize, usize) {
     let max_tool_concurrency = cli_max_tool_concurrency
         .filter(|&value| value > 0)
-        .or_else(|| if snap_tool > 0 { Some(snap_tool) } else { None })
+        .or(if snap_tool > 0 { Some(snap_tool) } else { None })
         .unwrap_or(10);
     let max_agent_concurrency = cli_max_agent_concurrency
         .filter(|&value| value > 0)
-        .or_else(|| {
-            if snap_agent > 0 {
-                Some(snap_agent)
-            } else {
-                None
-            }
+        .or(if snap_agent > 0 {
+            Some(snap_agent)
+        } else {
+            None
         })
         .unwrap_or(4);
 

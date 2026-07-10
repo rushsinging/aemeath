@@ -1,5 +1,6 @@
 //! Tests for `loop_runner`, extracted into a dedicated module to keep the
 //! runner file focused on the production code path.
+#![allow(clippy::type_complexity)]
 
 use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
@@ -141,19 +142,6 @@ impl SequenceQueueDrainPort {
 impl QueueDrainPort for SequenceQueueDrainPort {
     fn drain_queued_input<'a>(&'a self) -> crate::business::chat::looping::QueueFuture<'a> {
         Box::pin(async move { self.responses.lock().unwrap().pop_front().flatten() })
-    }
-}
-
-#[derive(Clone, Default)]
-struct EmptyInputEvents;
-
-impl InputEventDrainPort for EmptyInputEvents {
-    fn drain_input_events<'a>(&'a self) -> crate::business::chat::looping::InputEventFuture<'a> {
-        Box::pin(async { Vec::new() })
-    }
-
-    fn recv_next_input<'a>(&'a self) -> crate::business::chat::looping::InputEventOptFuture<'a> {
-        Box::pin(async { None })
     }
 }
 
@@ -2494,7 +2482,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         .expect("应有 Cancelled 事件");
     // cancel_to_idle 先发 CompactRollback（回滚后）再发 Cancelled；取 Cancelled 之前最近一次
     // CompactRollback 对应的快照即「取消回滚后的 messages」。
-    let syncs = sink.synced_messages();
+    let _syncs = sink.synced_messages();
     // 找到「取消回滚」那次 sync：它是 events 中 Cancelled 之前最后一个 CompactRollback。
     let messages_sync_count_before_cancel = events[..cancelled_idx]
         .iter()
@@ -2962,7 +2950,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     let messages = ChatChain::from_flat_messages(vec![Message::user("hello")]);
 
     // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
-    let driver_sink = sink.clone();
+    let _driver_sink = sink.clone();
     let driver = tokio::spawn(async move {
         // 给 loop 充分时间进入 idle
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

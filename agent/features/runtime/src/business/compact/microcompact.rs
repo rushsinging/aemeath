@@ -518,7 +518,7 @@ mod tests {
     fn test_microcompact_chain_preserves_non_exploratory() {
         // segment 中只有 Edit 结果 → 不折叠
         use crate::business::session::{ChatChain, ChatSegment, SegmentKind};
-        let mut seg1 = ChatSegment {
+        let seg1 = ChatSegment {
             id: "seg-0".to_string(),
             parent_id: None,
             kind: SegmentKind::Normal,
@@ -533,7 +533,7 @@ mod tests {
         let mut parent = Some(seg1.id.clone());
         let mut segs = vec![seg1];
         for s in 1..5 {
-            let mut seg = ChatSegment {
+            let seg = ChatSegment {
                 id: format!("seg-{s}"),
                 parent_id: parent.clone(),
                 kind: SegmentKind::Normal,

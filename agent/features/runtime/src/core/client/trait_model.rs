@@ -73,7 +73,7 @@ pub(crate) async fn build_llm_client_for_switch(
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
     let svc = ConfigAppService::new(Some(&me.inner.cwd));
-    let _ = svc.load().await.map_err(SdkError::Init)?;
+    svc.load().await.map_err(SdkError::Init)?;
     let snapshot = svc.snapshot().await;
     Ok(snapshot
         .list_models()

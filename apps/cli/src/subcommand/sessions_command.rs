@@ -12,7 +12,6 @@ async fn wait_for_session_list(stream: &mut sdk::ChatStream) -> Option<Vec<sdk::
 }
 
 /// 处理 `aemeath sessions` 子命令
-
 pub(crate) async fn run_sessions_command(
     client: Arc<dyn sdk::AgentClient>,
     delete: Option<String>,

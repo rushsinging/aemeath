@@ -24,7 +24,9 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub use event::{StatusContextUpdate, UiEvent, UiTurnContext};
+#[cfg(test)]
+use event::StatusContextUpdate;
+pub use event::{UiEvent, UiTurnContext};
 
 /// `refresh_output_document_from_model` 的 assemble 产物 memo。
 pub(crate) struct OutputViewCache {
@@ -137,6 +139,7 @@ pub(crate) fn status_context_for_paths(path_base: &Path, workspace_root: &Path) 
     })
 }
 
+#[cfg(test)]
 pub(crate) fn status_context_for_workspace(workspace: sdk::WorkspaceContextView) -> UiEvent {
     let path_base = workspace.path_base.clone();
     let workspace_root = workspace.workspace_root.clone();
@@ -186,8 +189,6 @@ impl App {
                 session_id,
                 cwd,
                 session_created_at: None,
-                cached_sessions: Vec::new(),
-                cached_models: Vec::new(),
                 current_model_display: model,
                 memory_config: sdk::MemoryConfigView::default(),
                 pending_resume_id: None,

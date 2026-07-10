@@ -61,40 +61,6 @@ impl App {
             kind,
         });
     }
-
-    /// Refresh the cached session list for /resume autocomplete.
-    ///
-    /// #567：list_sessions 已从 trait 删除。改为通过 input_event 通道发送
-    /// ManageSession 事件，结果通过 SessionList 事件回传（由 run_loop 处理）。
-    pub async fn refresh_session_cache(&mut self) {
-        if self.chat.input_event_tx.is_some() {
-            self.chat
-                .push_input_event(sdk::ChatInputEvent::ManageSession {
-                    args: String::new(),
-                });
-        }
-    }
-
-    /// Refresh the cached model list for /model dialog and completion suggestions.
-    ///
-    /// 模型列表为配置派生、会话期内基本不变的静态数据，启动期预取后由 UI 同步读取，
-    /// 消除 dialog/suggestions 在纯路径内的 block_on。
-    ///
-    /// #567：list_models 已从 trait 删除。改为通过 input_event 通道发送
-    /// ListModels 事件，结果通过 ModelList 事件回传（由 run_loop 处理）。
-    pub async fn refresh_model_cache(&mut self) {
-        if self.chat.input_event_tx.is_some() {
-            self.chat.push_input_event(sdk::ChatInputEvent::ListModels);
-        }
-    }
-}
-
-fn empty_to_none(value: String) -> Option<String> {
-    if value.trim().is_empty() {
-        None
-    } else {
-        Some(value)
-    }
 }
 
 #[cfg(test)]

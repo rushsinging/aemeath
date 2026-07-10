@@ -1,6 +1,6 @@
 //! Chat 输入 / 请求类型与重导出。
 
-use crate::{ChatInputEventPort, ChatMessage, QueueDrainPort};
+use crate::{ChatInputEventPort, QueueDrainPort};
 
 pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
 pub use crate::chat_result::{

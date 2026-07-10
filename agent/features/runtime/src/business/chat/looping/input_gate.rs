@@ -32,7 +32,6 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ApplyReflection { .. } => "ApplyReflection",
         ChatInputEvent::ListModels => "ListModels",
         ChatInputEvent::ListReminders => "ListReminders",
-        _ => "Other",
     }
 }
 
@@ -460,10 +459,6 @@ where
                 } else {
                     buffer.push(ChatInputEvent::ListReminders);
                 }
-            }
-            _ => {
-                // 其他事件（已迁移到 TUI 层处理或事件流处理的事件）
-                // RunReflection / ApplyReflection / ListModels / ListReminders 走 idle 分支
             }
         }
     }

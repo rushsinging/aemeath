@@ -189,24 +189,8 @@ impl App {
                 // Transient placeholder 已由 map_agent_event 注入 ConversationModel。
                 self.mark_output_dirty();
             }
-            UiEvent::ReminderRecap(_line) => { // ReminderRecap 已由 map_agent_event -> AppendSystemMessage 注入
-                 // ConversationModel，无需在此重复写入。
-            }
-            UiEvent::MemoryList(reminders) => {
-                self.handle_memory_list(&reminders);
-            }
             UiEvent::SessionSaved { id } => {
                 self.append_system_notice(format!("[session saved: {id}]"));
-            }
-            UiEvent::SlashCommandFailed { message } => {
-                self.append_error_notice(message);
-            }
-            UiEvent::ReflectionStarted => {
-                self.spinner_phase(SpinnerPhase::Reflecting);
-                self.chat.start_processing();
-            }
-            UiEvent::ReflectionUsage => {
-                // token/api 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
             }
             UiEvent::ReflectionDone { output } => {
                 // ...

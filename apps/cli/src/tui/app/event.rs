@@ -145,24 +145,16 @@ pub enum AppEvent {
         elapsed_secs: u64,
         phase: String,
     },
-    /// session reminder recap 行（每轮结束后由 run_loop 异步获取并回传）。
-    ReminderRecap(String),
-    /// /memory 命令的 reminder 列表回传。
-    MemoryList(Vec<sdk::ReminderView>),
     /// /save 命令保存成功后回传（携带 session id），用于推送 `[session saved: id]` 反馈行。
     SessionSaved {
         id: String,
     },
-    /// slash 命令副作用失败的反馈（如 /save、/memory），推送错误提示行。
-    SlashCommandFailed {
-        message: String,
-    },
-    ReflectionStarted,
-    ReflectionUsage,
+    #[allow(dead_code)]
     ReflectionDone {
         output: sdk::ReflectionOutputView,
     },
     /// Reflection apply 完成/失败结果。携带提交时的 output，用于只清理对应 in-flight。
+    #[allow(dead_code)]
     ReflectionApplyDone {
         output: sdk::ReflectionOutputView,
         result: Result<String, String>,

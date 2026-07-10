@@ -73,26 +73,6 @@ async fn test_save_session_effect_no_client_emits_saved() {
     );
 }
 
-/// A3：/memory 经 `Effect::FetchMemoryList` 拉取 reminder 列表，结果经
-/// `UiEvent::MemoryList` 回灌（mock 返回空列表仍回灌）。
-#[tokio::test]
-#[ignore = "#567: 迁移到事件流后需要重写测试"]
-async fn test_fetch_memory_list_effect_emits_memory_list() {
-    let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-    app.execute_effect(Effect::FetchMemoryList, &tx).await;
-
-    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let event = rx.try_recv().expect("/memory 应回灌 MemoryList 事件");
-    assert!(
-        matches!(event, UiEvent::MemoryList(ref list) if list.is_empty()),
-        "应回灌 MemoryList 事件，实际: {event:?}"
-    );
-}
-
 /// A3 边界：无 agent client 时 /memory 不回灌任何事件（静默）。
 #[tokio::test]
 async fn test_fetch_memory_list_effect_no_client_is_silent() {

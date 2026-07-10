@@ -29,6 +29,7 @@ pub struct BlockNode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[allow(clippy::large_enum_variant)]
 pub enum OutputBlockKind {
     UserMessage(TextBlockView),
     AssistantMessage(TextBlockView),

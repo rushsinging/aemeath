@@ -288,7 +288,7 @@ mod tests {
             verbose: false,
             resume: None,
         };
-        let (change_tx, change_rx) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
+        let (change_tx, _) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
         let handle = super::super::accessors::RuntimeHandle {
             context,
             cwd,
@@ -315,9 +315,6 @@ mod tests {
             active_summary: Arc::new(std::sync::Mutex::new(None)),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),
             change_tx,
-            change_rx,
-            hook_runner: None,
-            task_store: None,
             session_reminders: Arc::new(std::sync::RwLock::new(
                 share::memory::SessionReminders::new(),
             )),
