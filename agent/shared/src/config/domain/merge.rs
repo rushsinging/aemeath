@@ -140,17 +140,17 @@ pub struct ToolsConfigPatch {
     pub disabled: Option<Vec<String>>,
     #[serde(default)]
     pub settings: Option<HashMap<String, Value>>,
-    #[serde(default)]
+    #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AgentsConfigPatch {
-    #[serde(default)]
+    #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
     #[serde(default)]
     pub roles: Option<HashMap<String, AgentRoleConfig>>,
-    #[serde(default)]
+    #[serde(default, alias = "defaultModel")]
     pub default_model: Option<String>,
 }
 
@@ -688,5 +688,53 @@ impl PriorityChain {
     /// the final [`Config`].
     pub fn merge(self, base: Config) -> Config {
         self.patches.into_iter().fold(base, apply_patch)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::domain::snapshot::ConfigSnapshot;
+
+    #[test]
+    fn test_config_patch_snake_case_concurrency_reaches_snapshot() {
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+                "tools": { "max_concurrency": 9 },
+                "agents": {
+                    "max_concurrency": 6,
+                    "default_model": "snake/model",
+                    "roles": { "coder": { "system_suffix": "snake" } }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
+
+        assert_eq!(snapshot.max_tool_concurrency(), 9);
+        assert_eq!(snapshot.max_agent_concurrency(), 6);
+        assert_eq!(snapshot.agents().default_model, "snake/model");
+        assert_eq!(
+            snapshot.agents().roles["coder"].system_suffix.as_deref(),
+            Some("snake")
+        );
+    }
+
+    #[test]
+    fn test_config_patch_accepts_legacy_agent_and_tool_aliases() {
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+                "tools": { "maxConcurrency": 8 },
+                "agents": { "maxConcurrency": 5, "defaultModel": "legacy/model" }
+            }"#,
+        )
+        .unwrap();
+
+        let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
+
+        assert_eq!(snapshot.max_tool_concurrency(), 8);
+        assert_eq!(snapshot.max_agent_concurrency(), 5);
+        assert_eq!(snapshot.agents().default_model, "legacy/model");
     }
 }

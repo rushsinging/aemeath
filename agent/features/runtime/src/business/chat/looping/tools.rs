@@ -33,7 +33,6 @@ pub(crate) async fn execute_tool_round<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    max_agent_concurrency: usize,
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &Path,
@@ -101,7 +100,6 @@ where
         sink,
         hook_ui,
         hook_runner,
-        max_agent_concurrency,
         cancel,
         workspace_root,
     )
@@ -492,7 +490,6 @@ mod tests {
             &sink,
             &hook_ui,
             &hook_runner,
-            4,
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,

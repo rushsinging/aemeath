@@ -1269,7 +1269,6 @@ where
                         &sink,
                         &hook_ui,
                         &hook_runner,
-                        max_agent_concurrency,
                         &cancel,
                         &language,
                         &cwd,
