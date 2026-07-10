@@ -98,9 +98,24 @@ fn convert_block(block: &ContentBlock) -> serde_json::Value {
             tool_use_id,
             content,
             is_error,
-            ..
+            text,
         } => {
-            // 丢弃 text（内部 text-first 字段，to_llm_view 已降级到 content）
+            // Anthropic 仅接受字符串或 content block 数组；优先使用 text-first 输出，
+            // 并将旧会话中遗留的对象/标量 JSON 序列化为文本，避免非法请求出站。
+            let content = text
+                .clone()
+                .map(serde_json::Value::String)
+                .unwrap_or_else(|| {
+                    if content.is_object()
+                        || content.is_number()
+                        || content.is_boolean()
+                        || content.is_null()
+                    {
+                        serde_json::Value::String(content.to_string())
+                    } else {
+                        content.clone()
+                    }
+                });
             serde_json::json!({
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
@@ -467,6 +482,46 @@ mod tests {
         assert_eq!(block["content"], "done");
         assert_eq!(block["is_error"], false);
         assert!(block.get("text").is_none(), "text field must be stripped");
+    }
+
+    #[test]
+    fn convert_messages_tool_result_with_structured_content_uses_text_first() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "tu_1".to_string(),
+                content: serde_json::json!({"stdout": "structured output"}),
+                is_error: false,
+                text: Some("plain output".to_string()),
+            }],
+            metadata: None,
+        };
+
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+
+        assert_eq!(block["content"], "plain output");
+        assert!(block["content"].is_string());
+    }
+
+    #[test]
+    fn convert_messages_legacy_object_tool_result_serializes_content() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "tu_1".to_string(),
+                content: serde_json::json!({"stdout": "legacy output"}),
+                is_error: false,
+                text: None,
+            }],
+            metadata: None,
+        };
+
+        let result = convert_messages(&[msg]);
+        let block = &result[0]["content"][0];
+
+        assert_eq!(block["content"], r#"{"stdout":"legacy output"}"#);
+        assert!(block["content"].is_string());
     }
 
     #[test]
