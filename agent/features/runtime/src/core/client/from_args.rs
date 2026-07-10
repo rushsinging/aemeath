@@ -95,7 +95,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 10. Tooling
     let task_store = Arc::new(TaskStore::new());
-    let task_store_before = task_store.clone();
+    let _task_store_before = task_store.clone();
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
@@ -110,7 +110,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 11. Hook runner
     let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
-    let hook_runner_before = hook_runner.clone();
+    let _hook_runner_before = hook_runner.clone();
 
     // 12. Session
     let session_id = start_session(args.resume.clone());

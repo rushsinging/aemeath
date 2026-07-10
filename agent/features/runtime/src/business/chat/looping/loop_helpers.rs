@@ -13,6 +13,7 @@ pub(crate) fn is_user_cancelled_provider_error(error: &provider::api::LlmError) 
 }
 
 /// 排空输入队列并应用 gate 决策。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn drain_and_apply_gate<Q, I, S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,

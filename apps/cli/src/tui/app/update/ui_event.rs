@@ -192,9 +192,6 @@ impl App {
             UiEvent::SessionSaved { id } => {
                 self.append_system_notice(format!("[session saved: {id}]"));
             }
-            UiEvent::SlashCommandFailed { message } => {
-                self.append_error_notice(message);
-            }
             UiEvent::ReflectionDone { output } => {
                 // ...
                 self.append_system_notice(output.content.clone());

@@ -27,6 +27,7 @@ pub struct AgentEventMapping {
     pub effects: Vec<Effect>,
 }
 
+#[cfg(test)]
 fn default_subagent_tool_header(name: &str, input: &serde_json::Value) -> String {
     let raw = match input {
         serde_json::Value::String(s) => s.clone(),
@@ -43,6 +44,7 @@ fn default_subagent_tool_header(name: &str, input: &serde_json::Value) -> String
     }
 }
 
+#[cfg(test)]
 fn truncate_agent_progress_json(raw: &str) -> String {
     const MAX_CHARS: usize = 100;
     if raw.chars().count() <= MAX_CHARS {
@@ -61,6 +63,7 @@ fn tool_call_status_from_sdk(status: sdk::ToolCallStatusView) -> ToolCallStatus 
     }
 }
 
+#[cfg(test)]
 pub fn map_agent_event(event: &UiEvent) -> AgentEventMapping {
     map_agent_event_with_tool_header(event, default_subagent_tool_header)
 }
@@ -209,7 +212,7 @@ where
                     chat_id: context.chat_id.clone(),
                     turn_id: context.turn_id.clone(),
                     tool_id: tool_id.clone(),
-                    message: format_agent_progress(&event, &mut format_subagent_tool_header),
+                    message: format_agent_progress(event, &mut format_subagent_tool_header),
                 },
             )),
         },

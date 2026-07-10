@@ -53,7 +53,6 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SystemMessage(_) => "SystemMessage",
         UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
-        UiEvent::SlashCommandFailed { .. } => "SlashCommandFailed",
         UiEvent::ReflectionDone { .. } => "ReflectionDone",
         UiEvent::ReflectionApplyDone { .. } => "ReflectionApplyDone",
         UiEvent::AskUserBatch { .. } => "AskUserBatch",

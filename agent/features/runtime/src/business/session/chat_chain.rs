@@ -273,19 +273,6 @@ mod tests {
         }
     }
 
-    fn tool_result_msg() -> Message {
-        Message {
-            role: Role::User,
-            content: vec![ContentBlock::ToolResult {
-                tool_use_id: "t1".to_string(),
-                content: serde_json::Value::String("result".to_string()),
-                is_error: false,
-                text: Some("result".to_string()),
-            }],
-            metadata: None,
-        }
-    }
-
     #[test]
     fn test_segment_kind_default_is_normal() {
         assert_eq!(SegmentKind::default(), SegmentKind::Normal);

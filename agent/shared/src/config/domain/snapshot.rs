@@ -534,8 +534,10 @@ mod tests {
     #[test]
     fn test_snapshot_language() {
         // Arrange
-        let mut config = Config::default();
-        config.language = "zh".to_string();
+        let config = Config {
+            language: "zh".to_string(),
+            ..Config::default()
+        };
         let snap = ConfigSnapshot::new(config);
 
         // Act & Assert

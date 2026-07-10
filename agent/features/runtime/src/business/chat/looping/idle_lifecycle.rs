@@ -181,7 +181,7 @@ where
                     sink,
                     chain,
                     &segment_id,
-                    &task_store,
+                    task_store,
                     true,
                 )
                 .await;

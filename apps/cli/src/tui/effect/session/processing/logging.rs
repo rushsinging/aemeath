@@ -286,7 +286,6 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
          | sdk::ChatEvent::ReminderList { .. }
          | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
-         | sdk::ChatEvent::TasksSnapshot { .. }
          | sdk::ChatEvent::CostUpdate { .. }
          | sdk::ChatEvent::SessionResumeFailed { .. } => {}
     }

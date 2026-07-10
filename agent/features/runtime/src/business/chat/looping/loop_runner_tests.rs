@@ -146,19 +146,6 @@ impl QueueDrainPort for SequenceQueueDrainPort {
 }
 
 #[derive(Clone, Default)]
-struct EmptyInputEvents;
-
-impl InputEventDrainPort for EmptyInputEvents {
-    fn drain_input_events<'a>(&'a self) -> crate::business::chat::looping::InputEventFuture<'a> {
-        Box::pin(async { Vec::new() })
-    }
-
-    fn recv_next_input<'a>(&'a self) -> crate::business::chat::looping::InputEventOptFuture<'a> {
-        Box::pin(async { None })
-    }
-}
-
-#[derive(Clone, Default)]
 struct RecordingSink {
     events: Arc<Mutex<Vec<String>>>,
     messages_syncs: Arc<Mutex<Vec<Vec<Message>>>>,
@@ -2963,7 +2950,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     let messages = ChatChain::from_flat_messages(vec![Message::user("hello")]);
 
     // driver：等待 200ms 后关闭通道（不应有 LLM 响应产生）
-    let driver_sink = sink.clone();
+    let _driver_sink = sink.clone();
     let driver = tokio::spawn(async move {
         // 给 loop 充分时间进入 idle
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;

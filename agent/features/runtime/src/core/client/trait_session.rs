@@ -7,10 +7,6 @@ use sdk::{SdkError, SessionSummary};
 use super::accessors::{AgentClientImpl, RuntimeHandle};
 use super::mapping;
 
-pub(super) async fn save_current_session_impl(me: &AgentClientImpl) -> Result<(), SdkError> {
-    save_session_from_handle(&me.inner).await
-}
-
 /// 从 chain + handle 数据保存 session。
 /// loop 内部直接传入 chain（无需经过 inner.current_chain）。
 pub(super) async fn save_chain_to_handle(

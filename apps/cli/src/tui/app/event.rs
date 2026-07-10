@@ -149,10 +149,6 @@ pub enum AppEvent {
     SessionSaved {
         id: String,
     },
-    /// slash 命令副作用失败的反馈（如 /save、/memory），推送错误提示行。
-    SlashCommandFailed {
-        message: String,
-    },
     #[allow(dead_code)]
     ReflectionDone {
         output: sdk::ReflectionOutputView,
