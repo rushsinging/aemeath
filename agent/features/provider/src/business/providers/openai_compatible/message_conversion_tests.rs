@@ -12,6 +12,7 @@ fn provider_with_reasoning() -> OpenAICompatibleProvider {
         8192,
         true,
         Some(ReasoningConfig::Bool(true)),
+        30,
     )
 }
 
@@ -24,6 +25,7 @@ fn provider_without_reasoning() -> OpenAICompatibleProvider {
         8192,
         false,
         Some(ReasoningConfig::Bool(false)),
+        30,
     )
 }
 

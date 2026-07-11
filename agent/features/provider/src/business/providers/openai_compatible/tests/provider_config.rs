@@ -10,6 +10,7 @@ fn minimax_provider_uses_max_completion_tokens_field() {
         32000,
         true,
         None,
+        30,
     );
 
     provider.set_max_tokens(8192);
@@ -30,6 +31,7 @@ fn minimax_provider_keeps_v1_base_url_suffix() {
         32000,
         true,
         None,
+        30,
     );
 
     assert_eq!(
@@ -49,6 +51,7 @@ fn mimo_provider_keeps_v1_base_url_suffix() {
         8192,
         true,
         None,
+        30,
     );
 
     assert_eq!(
@@ -264,6 +267,7 @@ fn agnes_provider_keeps_v1_base_url_suffix() {
         4096,
         true,
         None,
+        30,
     );
 
     assert_eq!(
@@ -324,6 +328,7 @@ fn openai_provider_set_max_tokens_updates_request_body() {
         32000,
         false,
         None,
+        30,
     );
 
     provider.set_max_tokens(8192);
@@ -343,6 +348,7 @@ fn openai_provider_set_max_tokens_zero_is_ignored() {
         32000,
         false,
         None,
+        30,
     );
 
     provider.set_max_tokens(0);
@@ -362,6 +368,7 @@ fn volcengine_provider_uses_max_output_tokens_field() {
         32000,
         false,
         None,
+        30,
     );
 
     provider.set_max_tokens(8192);
@@ -371,8 +378,8 @@ fn volcengine_provider_uses_max_output_tokens_field() {
 }
 
 #[test]
-fn openai_streaming_http_client_has_no_total_timeout() {
-    let debug = format!("{:?}", provider::build_streaming_http_client_builder());
+fn openai_streaming_http_client_has_total_timeout() {
+    let debug = format!("{:?}", provider::build_streaming_http_client_builder(30));
 
-    assert!(!debug.contains("timeout:"), "{debug}");
+    assert!(debug.contains("timeout"), "{debug}");
 }
