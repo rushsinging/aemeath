@@ -61,7 +61,7 @@ impl TypedTool for TaskListTool {
 
         let priority_filter = args.priority.as_deref().and_then(TaskPriority::parse);
 
-        let session_filter = args.sessionId.as_deref();
+        let session_filter = args.session_id.as_deref();
 
         // Get tasks with filters
         let mut tasks = self.store.list().await;

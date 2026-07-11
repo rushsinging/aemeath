@@ -45,7 +45,7 @@ impl TypedTool for TaskGetTool {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
-        let input_id = args.taskId.as_str();
+        let input_id = args.task_id.as_str();
 
         if input_id.is_empty() {
             return TypedToolResult::error("Task ID is required");
