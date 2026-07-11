@@ -39,17 +39,17 @@
 
 ## 4. 单状态机原则
 
-- **MUST** 全系统只有一个领域状态机：`AgentRun`（Agent Execution 内），**内存态、不持久化、崩溃从头开始**。
-- **MUST NOT** 为 Session 建状态机——Session 是数据聚合（对话历史容器），其"状态"是 AgentRun 状态的投影或 IO 动作，无独立领域不变量。
+- **MUST** 全系统只有一个领域状态机：`Run`（Agent Runtime 内），**内存态、不持久化、崩溃从头开始**。
+- **MUST NOT** 为 Session 建状态机——Session 是数据聚合（对话历史容器），其"状态"是 Run 状态的投影或 IO 动作，无独立领域不变量。
 - **MUST NOT** 引入 durable model invocation checkpoint 链（人在环 CLI 由"人 + 文件系统真实状态"兜底副作用一致性）。
-- Reasoning Node 状态机（Workflow）是 **effort 调节机**，与 AgentRun **执行状态机**职责分离，NEVER 混淆。
+- Reasoning Node 状态机（Workflow）是 **effort 调节机**，与 Run **执行状态机**职责分离，NEVER 混淆。
 
 ## 5. Future 演进的依赖约束
 
 | 演进 | 约束 |
 |---|---|
 | Server 化 | 传输层（WS / 进程拓扑）NEVER 进核心；`AgentClient` 保持传输透明 |
-| Workflow（v0.2.0） | 编排器经"触发源"抽象驱动 AgentRun，NEVER 让 Agent Execution 反向依赖编排器内部 |
+| Workflow（v0.2.0） | 编排器经"触发源"抽象驱动 Run，NEVER 让 Agent Runtime 反向依赖编排器内部 |
 
 ## 6. 守卫映射
 
@@ -68,3 +68,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：依赖方向总则、7 条依赖铁律、COLA 重定位、单状态机原则 | #760 |
 | 2026-07-11 | 违反示例通用化（移除具体现有类型名）、COLA 表去"现状"列、文档引用链接化、新增修改历史 | #760 |
+| 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |

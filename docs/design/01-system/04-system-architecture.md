@@ -25,7 +25,7 @@
                                       │ 入站端口 AgentClient
                                       ▼
         ╔══════════════════ 应用核心（业务） ══════════════════╗
-        ║  核心域：Agent Execution · Workflow                   ║
+        ║  核心域：Agent Runtime · Workflow                   ║
         ║  支撑域：Context Mgmt · Memory · Task · Project ·      ║
         ║          Policy · Audit · Tool&Skill&Command          ║
         ║  （领域模型 + 应用服务，纯业务、依赖向内）              ║
@@ -56,7 +56,7 @@
 |---|---|
 | 入站适配器 | CLI + TUI + REPL |
 | 组合根 | 唯一装配 |
-| 核心 / 支撑 BC | 各业务能力（Agent Execution / Workflow / Context Management / Memory / Task / Project / Policy / Audit / Tool&Skill&Command / Provider / Hook / Storage / Application Version Control 等） |
+| 核心 / 支撑 BC | 各业务能力（Agent Runtime / Workflow / Context Management / Memory / Task / Project / Policy / Audit / Tool&Skill&Command / Provider / Hook / Storage / Application Version Control 等） |
 | 横切 / 共享内核 | Config、共享类型、最小内核 |
 | 契约 | 入站端口 + Published Language（SDK） |
 | 通用 | 日志、通用工具 |
@@ -65,13 +65,13 @@
 - 一个 crate 可含多个 BC 的落点；一个 BC 可跨多个 crate（如 Context Management 跨核心与 prompt 能力；Task 跨类型定义、持久化与工具适配）。
 - **判据**：先在单 crate 内用模块（`mod`）稳定 BC 边界，只有当语言 / 不变量 / 生命周期确实独立时，才升格为独立 crate。
 
-## 5. Agent Execution 内部模块（战术拆分）
+## 5. Agent Runtime 内部模块（战术拆分）
 
 核心域最复杂，内部按关注点拆分：
 
 ```
-Agent Execution
-├── AgentRun 聚合 + 状态机     # 唯一状态机，内存态
+Agent Runtime
+├── Run 聚合 + 状态机     # 唯一状态机，内存态
 ├── Loop Engine                # ReAct 循环骨架 + 停止条件（Main/SubAgent 共用）
 ├── Model Invocation 协调       # 调 ProviderPort，组装流式响应
 ├── Tool Coordination          # 双 ID 映射、并发执行、结果回收 → ToolPort
@@ -85,7 +85,7 @@ Agent Execution
 ## 6. 传输透明原则（Server 化预留）
 
 - **MUST** 核心域对传输层透明：`AgentClient` 既可进程内直调（TUI），也可经 WS 远程（Server），核心不改。
-- **MUST NOT** 让 Agent Execution 感知 WS / 进程拓扑 / 序列化细节。
+- **MUST NOT** 让 Agent Runtime 感知 WS / 进程拓扑 / 序列化细节。
 - Server 化时新增独立的协议 crate 与 server 应用（控制面 + worker），均为适配器，不进核心。
 
 ## 7. 相关文档
@@ -104,3 +104,4 @@ Agent Execution
 |---|---|---|
 | 2026-07-11 | 初稿：架构决策、六边形形态、组合根、crate 映射、内部模块、传输透明 | #760 |
 | 2026-07-11 | 移除组合根现状 / TODO 描述改为目标态、crate 映射去"当前"措辞、文档引用链接化、新增修改历史 | #760 |
+| 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |

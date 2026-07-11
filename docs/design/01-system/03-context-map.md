@@ -2,7 +2,7 @@
 
 > 层级：01-system（系统级总体设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0
-> 本文定义 15 个 Bounded Context 之间的集成关系、方向、端口与防腐边界。以核心域 **Agent Execution** 为中心组织（hub-and-spoke）。**只描述目标态集成关系，不记录当前代码位置。**
+> 本文定义 15 个 Bounded Context 之间的集成关系、方向、端口与防腐边界。以核心域 **Agent Runtime** 为中心组织（hub-and-spoke）。**只描述目标态集成关系，不记录当前代码位置。**
 
 ## 1. 集成模式图例
 
@@ -25,10 +25,10 @@
                                         │  AgentClient（入站端口 = OHS + PL，所有权属核心域）
                                         ▼
    ┌──────────────────────────  核心域  ──────────────────────────┐
-   │   Agent Execution  ──(触发源抽象)──▶  Workflow/Orchestration │
-   │   （唯一状态机 AgentRun）              （reasoning graph；v0.2.0 扩展）│
+   │   Agent Runtime  ──(触发源抽象)──▶  Workflow/Orchestration   │
+   │   （唯一状态机 Run）                （reasoning graph；v0.2.0 扩展）│
    └───────┬───────────────────────────────────────────────────────┘
-           │ 出站端口（C/S，AE 是 Customer）
+           │ 出站端口（C/S，Runtime 是 Customer）
    ┌───────┼─────────┬─────────┬────────┬────────┬────────┬─────────┐
    ▼       ▼         ▼         ▼        ▼        ▼        ▼         ▼
  Context  Provider  Tool     Policy   Memory   Task    Project   Hook
@@ -46,32 +46,32 @@
 
 | 上游 | 下游 | 模式 | 端口 / 契约 |
 |---|---|---|---|
-| CLI / TUI | Agent Execution | C/S + **PL** + **ACL**(TUI) | 入站端口 `AgentClient`；TUI 用 `AgentEventMapper` 把领域事件转 Model |
-| REPL | Agent Execution | C/S + **PL** | 旧交互模式（退役方向） |
-| Server | Agent Execution | C/S + **PL** | 同 `AgentClient`，WSS 透传，worker 内核心不改 |
+| CLI / TUI | Agent Runtime | C/S + **PL** + **ACL**(TUI) | 入站端口 `AgentClient`；TUI 用 `AgentEventMapper` 把领域事件转 Model |
+| REPL | Agent Runtime | C/S + **PL** | 旧交互模式（退役方向） |
+| Server | Agent Runtime | C/S + **PL** | 同 `AgentClient`，WSS 透传，worker 内核心不改 |
 
-> `AgentClient` trait + `ChatEvent / Command / Snapshot / Error` = **入站 Published Language**，**所有权属 Agent Execution 核心域**；独立成 SDK 契约 crate 仅为依赖倒置（clients 依赖契约而非核心实现）。
+> `AgentClient` trait + `ChatEvent / Command / Snapshot / Error` = **入站 Published Language**，**所有权属 Agent Runtime 核心域**；独立成 SDK 契约 crate 仅为依赖倒置（clients 依赖契约而非核心实现）。
 
-## 4. 核心出站：Agent Execution → 各 BC
+## 4. 核心出站：Agent Runtime → 各 BC
 
 | 下游 BC | 模式 | 出站端口 | 说明 |
 |---|---|---|---|
-| Context Management | C/S | `ContextPort` | AE 请求"构建本轮 Context Window"（取历史 + compact + 注入 + prompt），CM 提供 OHS |
-| Provider | C/S + **ACL**(在 Provider 内) | `ProviderPort` | Provider 内部 ACL 吸收各家 LLM 差异，对 AE 暴露统一调用 + 流 |
+| Context Management | C/S | `ContextPort` | Runtime 请求"构建本轮 Context Window"（取历史 + compact + 注入 + prompt），CM 提供 OHS |
+| Provider | C/S + **ACL**(在 Provider 内) | `ProviderPort` | Provider 内部 ACL 吸收各家 LLM 差异，对 Runtime 暴露统一调用 + 流 |
 | Tool & Skill & Command | C/S | `ToolPort` | `Tool` trait + registry 作 OHS；含 MCP / skill / command |
 | Policy | C/S | `PolicyPort` | 工具执行前的权限判断（Interaction approval gate 上游） |
 | Memory | C/S | `MemoryPort` | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
-| Task Management | C/S | `TaskPort` | AE 读写 Task 规划自身工作；Task 拥有状态机 + 依赖图不变量 |
+| Task Management | C/S | `TaskPort` | Runtime 读写 Task 规划自身工作；Task 拥有状态机 + 依赖图不变量 |
 | Project / Workspace | C/S | `WorkspacePort` | worktree 进出、git 上下文供给（含 git context 注入的数据源） |
 | Hook | C/S | `HookPort` | 生命周期点触发 hook |
-| Audit | **Pub/Sub**（AE 是 Supplier of events） | `AuditSink` | AE 发执行 / 成本事件，Audit 顺从消费（含 Cost / Usage） |
+| Audit | **Pub/Sub**（Runtime 是 Supplier of events） | `AuditSink` | Runtime 发执行 / 成本事件，Audit 顺从消费（含 Cost / Usage） |
 
-## 5. 核心内部：Agent Execution ↔ Workflow
+## 5. 核心内部：Agent Runtime ↔ Workflow
 
 | 关系 | 模式 | 说明 |
 |---|---|---|
-| Agent Execution → Workflow | C/S | AE 向 Workflow 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）。Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。 |
-| （v0.2.0）Workflow → Agent Execution | C/S | 未来编排器通过"触发源"驱动多个 AgentRun。AgentRun 的触发源必须抽象（用户输入 / 父 AgentRun / 编排器）。 |
+| Agent Runtime → Workflow | C/S | Runtime 向 Workflow 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）。Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。 |
+| （v0.2.0）Workflow → Agent Runtime | C/S | 未来编排器通过"触发源"驱动多个 Run。Run 的触发源必须抽象（用户输入 / 父 Run / 编排器）。 |
 
 ## 6. 全局上游：Config → 所有 BC
 
@@ -89,7 +89,7 @@
 
 | 共享内核 | 参与 BC | 风险控制 |
 |---|---|---|
-| `Message`（对话消息类型） | Agent Execution / Context Management / Provider | 最小化，只放稳定核心类型 |
+| `Message`（对话消息类型） | Agent Runtime / Context Management / Provider | 最小化，只放稳定核心类型 |
 | `ID`（UUIDv7 newtype） | 全域 | 纯标识，无行为 |
 | `Task` 类型 | 实为 **Task BC 的 Published Language**（非 SK），其他 BC 引用其发布类型 | 不变量由 Task BC 独占 |
 
@@ -104,12 +104,12 @@
 | 演进 | 版本 | 地图影响 |
 |---|---|---|
 | **Server 化** | v0.1.0 之后 | Server 作为入站适配器接 `AgentClient`；**核心域对传输层透明**（进程内直调 / WS 远程二选一，核心不改）。 |
-| **Workflow Graph MVP** | v0.2.0 | Workflow BC 从"reasoning graph 雏形"扩展为多-agent 图编排；依赖 AgentRun 触发源抽象已就位。 |
+| **Workflow Graph MVP** | v0.2.0 | Workflow BC 从"reasoning graph 雏形"扩展为多-agent 图编排；依赖 Run 触发源抽象已就位。 |
 
 ## 11. 三条 Context Map 决策
 
-1. **Audit = Pub/Sub 单向事件**：AE 只管 emit，不依赖 Audit，Audit 不影响 AE。
-2. **Interaction 不成 BC**：ask_user / 权限审批 / plan mode / pause-resume 是 AE 的用例族，经 `InteractionPort` + `PolicyPort` 协作，由不同触发源（tool / policy / user）复用。
+1. **Audit = Pub/Sub 单向事件**：Runtime 只管 emit，不依赖 Audit，Audit 不影响 Runtime。
+2. **Interaction 不成 BC**：ask_user / 权限审批 / plan mode / pause-resume 是 Runtime 的用例族，经 `InteractionPort` + `PolicyPort` 协作，由不同触发源（tool / policy / user）复用。
 3. **Task 类型 = Task BC 的 Published Language**（非 Shared Kernel）：由 Task BC 独占不变量，其他 BC 引用其发布类型。
 
 ## 12. 相关文档
@@ -126,3 +126,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：集成模式、入站 / 出站边、Shared Kernel、ACL、Future 预留 | #760 |
 | 2026-07-11 | 清理 crate 路径引用改为纯目标态、文档引用链接化、新增修改历史 | #760 |
+| 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、缩写 AE→Runtime | #760 |

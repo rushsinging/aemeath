@@ -10,7 +10,7 @@
 
 | 目标文档 | 内容 |
 |---|---|
-| runtime（Agent Execution + Workflow） | AgentRun 聚合 + 状态机、Loop Engine、各 Coordinator、reasoning graph |
+| runtime（Agent Runtime + Workflow） | Run 聚合 + 状态机、Loop Engine、各 Coordinator、reasoning graph |
 | context-management | Session 聚合、compact 家族、token budget、注入、prompt |
 | memory / task / project / policy / audit / tools | 各支撑 BC 战术设计 |
 | provider | Provider ACL、driver 映射 |
@@ -34,3 +34,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：承接说明 + 规划模块清单 | #760 |
 | 2026-07-11 | 改为纯目标态（移除"承接现有文档"迁移列）、链接化、新增修改历史 | #760 |
+| 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
