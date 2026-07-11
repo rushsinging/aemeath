@@ -35,8 +35,9 @@ pub struct OllamaProvider {
     pub(crate) timeout_secs: u64,
 }
 
-/// Stream idle timeout: abort if no data for 3 minutes (Ollama may stall during generation)
-pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+/// Stream idle timeout（单一真相源：`business::OLLAMA_STREAM_IDLE_TIMEOUT_SECS`）
+pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(crate::business::OLLAMA_STREAM_IDLE_TIMEOUT_SECS);
 
 impl OllamaProvider {
     pub fn new(
@@ -63,7 +64,9 @@ impl OllamaProvider {
             )),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(timeout_secs))
+                .connect_timeout(std::time::Duration::from_secs(
+                    crate::business::CONNECT_TIMEOUT_SECS,
+                ))
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,
@@ -83,7 +86,9 @@ impl OllamaProvider {
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self.http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(secs))
+            .connect_timeout(std::time::Duration::from_secs(
+                crate::business::CONNECT_TIMEOUT_SECS,
+            ))
             .build()
             .expect("failed to create HTTP client with custom timeout");
         self

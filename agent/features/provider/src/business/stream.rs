@@ -34,8 +34,10 @@ pub async fn parse_stream(
     };
     let mut stop_reason = StopReason::EndTurn;
 
-    const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
-    const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
+    const STREAM_IDLE_TIMEOUT: std::time::Duration =
+        std::time::Duration::from_secs(crate::business::ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS);
+    const STALL_THRESHOLD: std::time::Duration =
+        std::time::Duration::from_secs(crate::business::STALL_THRESHOLD_SECS);
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
     let mut current_signature: String = String::new();

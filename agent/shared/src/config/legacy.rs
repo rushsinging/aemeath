@@ -53,7 +53,10 @@ pub(crate) fn default_user_agent() -> String {
 }
 
 pub(crate) fn default_timeout() -> u64 {
-    300
+    // 保持与 provider 层 DEFAULT_TIMEOUT_SECS 一致。
+    // shared crate 无法引用 provider 常量（依赖方向不允许），此处为镜像值。
+    // 权威来源：agent/features/provider/src/business.rs
+    1800
 }
 
 pub(crate) fn default_retries() -> u32 {
