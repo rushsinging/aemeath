@@ -116,7 +116,10 @@ pub async fn parse_stream(
                         tool_index += 1;
                     }
                     ContentBlockPayload::Thinking { thinking } => {
-                        current_thinking = thinking;
+                        current_thinking = thinking.clone();
+                        if !thinking.is_empty() {
+                            handler.on_thinking(&thinking);
+                        }
                     }
                     ContentBlockPayload::Unknown => {
                         // ignore unknown block types
@@ -142,6 +145,7 @@ pub async fn parse_stream(
                     }
                     DeltaPayload::ThinkingDelta { thinking } => {
                         current_thinking.push_str(&thinking);
+                        handler.on_thinking(&thinking);
                     }
                     DeltaPayload::SignatureDelta { .. } | DeltaPayload::Unknown => {
                         // ignored
