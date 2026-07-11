@@ -49,6 +49,10 @@ impl ConfigSnapshot {
         self.0.api.provider.as_deref()
     }
 
+    pub fn api_timeout_secs(&self) -> u64 {
+        self.0.api.timeout
+    }
+
     // ── Model ────────────────────────────────────────────────
 
     pub fn model_name(&self) -> &str {

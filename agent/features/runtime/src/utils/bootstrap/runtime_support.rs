@@ -35,9 +35,10 @@ pub fn build_agent_runner(
     client: Arc<LlmClient>,
     hook_runner: HookRunner,
     reasoning: bool,
+    timeout_secs: u64,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
-    let pool = build_llm_client_pool(agents, client.clone(), models_config.clone());
+    let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
     let agents_config = Arc::new(agents.cloned().unwrap_or_default());
 
     Arc::new(agent_runner::CliAgentRunner {
@@ -54,6 +55,7 @@ fn build_llm_client_pool(
     agents: Option<&AgentsConfig>,
     client: Arc<LlmClient>,
     models_config: Arc<share::config::ModelsConfig>,
+    timeout_secs: u64,
 ) -> Option<Arc<provider::api::LlmClientPool>> {
     if !has_multi_provider_or_agent_roles(agents, &models_config) {
         return None;
@@ -62,6 +64,7 @@ fn build_llm_client_pool(
     Some(Arc::new(provider::api::LlmClientPool::new(
         client,
         models_config,
+        timeout_secs,
     )))
 }
 

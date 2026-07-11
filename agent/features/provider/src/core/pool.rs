@@ -21,6 +21,7 @@ pub struct LlmClientPool {
     clients: tokio::sync::Mutex<HashMap<String, Arc<LlmClient>>>,
     default_client: Arc<LlmClient>,
     models_config: Arc<ModelsConfig>,
+    timeout_secs: u64,
 }
 
 impl LlmClientPool {
@@ -29,11 +30,17 @@ impl LlmClientPool {
     /// * `default_client` — the client used when no model spec is provided.
     /// * `models_config`   — used to resolve `"provider/model_id"` strings and
     ///   build new clients dynamically.
-    pub fn new(default_client: Arc<LlmClient>, models_config: Arc<ModelsConfig>) -> Self {
+    /// * `timeout_secs`    — HTTP timeout for dynamically created clients.
+    pub fn new(
+        default_client: Arc<LlmClient>,
+        models_config: Arc<ModelsConfig>,
+        timeout_secs: u64,
+    ) -> Self {
         Self {
             clients: tokio::sync::Mutex::new(HashMap::new()),
             default_client,
             models_config,
+            timeout_secs,
         }
     }
 
@@ -170,6 +177,7 @@ impl LlmClientPool {
                 reasoning,
                 reasoning_config: None,
                 openai_config,
+                timeout_secs: self.timeout_secs,
             },
         ))
     }
@@ -226,13 +234,18 @@ mod tests {
                     ProviderDriverKind::Zhipu,
                     "zhipu",
                 )),
+                timeout_secs: crate::business::DEFAULT_TIMEOUT_SECS,
             },
         ))
     }
 
     #[tokio::test]
     async fn test_llm_client_pool_uses_model_max_tokens() {
-        let pool = LlmClientPool::new(default_client(), Arc::new(models_config(16_000)));
+        let pool = LlmClientPool::new(
+            default_client(),
+            Arc::new(models_config(16_000)),
+            crate::business::DEFAULT_TIMEOUT_SECS,
+        );
 
         let client = pool.get_client(Some("zhipu/glm-5.2")).await;
 
@@ -241,7 +254,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_llm_client_pool_model_zero_uses_default_max_tokens() {
-        let pool = LlmClientPool::new(default_client(), Arc::new(models_config(0)));
+        let pool = LlmClientPool::new(
+            default_client(),
+            Arc::new(models_config(0)),
+            crate::business::DEFAULT_TIMEOUT_SECS,
+        );
 
         let client = pool.get_client(Some("zhipu/glm-5.2")).await;
 
