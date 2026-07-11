@@ -214,6 +214,7 @@ fn test_build_llm_client_ollama_constructs_ollama_provider() {
         &resolved,
         &settings,
         None,
+        30,
     );
 
     assert_eq!(client.provider_name(), "ollama");
@@ -256,6 +257,7 @@ fn test_build_llm_client_sets_reasoning_level() {
         &resolved,
         &settings,
         None,
+        30,
     );
 
     assert_eq!(
@@ -277,6 +279,7 @@ fn test_build_llm_client_reasoning_false_sets_off() {
         &resolved,
         &settings,
         None,
+        30,
     );
 
     assert_eq!(
@@ -299,6 +302,7 @@ fn test_build_llm_client_reasoning_effort_overrides_bool_default() {
         &resolved,
         &settings,
         None,
+        30,
     );
 
     assert_eq!(
@@ -321,6 +325,7 @@ fn test_build_llm_client_reasoning_effort_clamped_to_provider_ceiling() {
         &resolved,
         &settings,
         None,
+        30,
     );
 
     assert_eq!(
@@ -343,6 +348,7 @@ fn test_build_llm_client_reasoning_effort_off_disables_thinking() {
         &resolved,
         &settings,
         None,
+        30,
     );
 
     assert_eq!(
