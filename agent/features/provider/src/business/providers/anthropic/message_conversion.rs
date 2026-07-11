@@ -62,7 +62,12 @@ fn convert_message(msg: &Message) -> serde_json::Value {
         Role::User => "user",
         Role::Assistant => "assistant",
     };
-    let content: Vec<serde_json::Value> = msg.content.iter().map(convert_block).collect();
+    let content: Vec<serde_json::Value> = msg
+        .content
+        .iter()
+        .map(convert_block)
+        .filter(|v| !v.is_null())
+        .collect();
     serde_json::json!({
         "role": role,
         "content": content,
@@ -123,10 +128,22 @@ fn convert_block(block: &ContentBlock) -> serde_json::Value {
                 "is_error": is_error,
             })
         }
-        ContentBlock::Thinking { thinking } => serde_json::json!({
-            "type": "thinking",
-            "thinking": thinking,
-        }),
+        ContentBlock::Thinking {
+            thinking,
+            signature,
+        } => {
+            // Anthropic 要求后续请求中 thinking block 必须带 signature，
+            // 否则返回 400 (`thinking.signature: Field required`)。
+            // 有 signature → 回传；无 signature（旧 session / 非 Anthropic 来源）→ 剥离。
+            match signature {
+                Some(sig) => serde_json::json!({
+                    "type": "thinking",
+                    "thinking": thinking,
+                    "signature": sig,
+                }),
+                None => serde_json::Value::Null,
+            }
+        }
     }
 }
 
@@ -525,11 +542,34 @@ mod tests {
     }
 
     #[test]
-    fn convert_messages_thinking_block() {
+    fn convert_messages_thinking_block_without_signature_is_stripped() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Thinking {
+                    thinking: "let me think".to_string(),
+                    signature: None,
+                },
+                ContentBlock::Text {
+                    text: "answer".to_string(),
+                },
+            ],
+            metadata: None,
+        };
+        let result = convert_messages(&[msg]);
+        let content = result[0]["content"].as_array().unwrap();
+        // 无 signature 的 thinking block 被剥离，只保留 text
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "text");
+    }
+
+    #[test]
+    fn convert_messages_thinking_block_with_signature_preserved() {
         let msg = Message {
             role: Role::Assistant,
             content: vec![ContentBlock::Thinking {
                 thinking: "let me think".to_string(),
+                signature: Some("sig_abc".to_string()),
             }],
             metadata: None,
         };
@@ -537,6 +577,7 @@ mod tests {
         let block = &result[0]["content"][0];
         assert_eq!(block["type"], "thinking");
         assert_eq!(block["thinking"], "let me think");
+        assert_eq!(block["signature"], "sig_abc");
     }
 
     #[test]

@@ -306,7 +306,7 @@ impl LlmClient {
                     let s = content.to_string();
                     serde_json::json!({"type":"tool_result","is_error":is_error,"preview":truncate_preview(&s,300)})
                 }
-                share::message::ContentBlock::Thinking { thinking } => {
+                share::message::ContentBlock::Thinking { thinking, .. } => {
                     serde_json::json!({"type":"thinking","preview":truncate_preview(thinking,200)})
                 }
                 share::message::ContentBlock::Image { .. } => {
@@ -325,7 +325,7 @@ impl LlmClient {
             .flat_map(|m| m.content.iter())
             .map(|b| match b {
                 share::message::ContentBlock::Text { text } => text.len(),
-                share::message::ContentBlock::Thinking { thinking } => thinking.len(),
+                share::message::ContentBlock::Thinking { thinking, .. } => thinking.len(),
                 share::message::ContentBlock::ToolUse { input, .. } => input.to_string().len(),
                 share::message::ContentBlock::ToolResult { content, .. } => {
                     content.to_string().len()
@@ -362,7 +362,7 @@ impl LlmClient {
                 .content
                 .iter()
                 .filter_map(|block| {
-                    if let share::message::ContentBlock::Thinking { thinking } = block {
+                    if let share::message::ContentBlock::Thinking { thinking, .. } = block {
                         let lines: Vec<&str> = thinking.lines().collect();
                         let mut dup_lines = 0;
                         for i in 1..lines.len() {

@@ -106,6 +106,12 @@ pub enum ContentBlock {
     Thinking {
         #[serde(default)]
         thinking: String,
+        /// Anthropic extended-thinking 签名。后续请求中 thinking block 必须回传此签名，
+        /// 否则 API 返回 400 (`thinking.signature: Field required`)。
+        /// 仅 Anthropic provider 写入；其它 provider 为 None。
+        /// 旧 session 没有 signature 时 deserialize 为 None。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
     },
 }
 
@@ -303,5 +309,45 @@ mod to_llm_view_tests {
         let block = ContentBlock::Text { text: "hi".into() };
         let view = block.to_llm_view();
         assert!(matches!(view, ContentBlock::Text { text } if text == "hi"));
+    }
+
+    #[test]
+    fn test_thinking_with_signature_roundtrip() {
+        let block = ContentBlock::Thinking {
+            thinking: "reasoning".into(),
+            signature: Some("sig_abc".into()),
+        };
+        let json = serde_json::to_value(&block).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type":"thinking","thinking":"reasoning","signature":"sig_abc"})
+        );
+        let back: ContentBlock = serde_json::from_value(json).unwrap();
+        match back {
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => {
+                assert_eq!(thinking, "reasoning");
+                assert_eq!(signature.as_deref(), Some("sig_abc"));
+            }
+            _ => panic!("expected Thinking"),
+        }
+    }
+
+    #[test]
+    fn test_thinking_legacy_json_default_signature() {
+        let json = serde_json::json!({"type":"thinking","thinking":"old"});
+        let block: ContentBlock = serde_json::from_value(json).unwrap();
+        match block {
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => {
+                assert_eq!(thinking, "old");
+                assert!(signature.is_none());
+            }
+            _ => panic!("expected Thinking"),
+        }
     }
 }

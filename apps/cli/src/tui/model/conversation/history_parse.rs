@@ -84,7 +84,7 @@ fn parse_history_assistant(
             sdk::ContentBlock::Text { text } => {
                 parsed.push(HistoryAssistantBlock::Text(text.clone()));
             }
-            sdk::ContentBlock::Thinking { thinking } => {
+            sdk::ContentBlock::Thinking { thinking, .. } => {
                 parsed.push(HistoryAssistantBlock::Thinking(thinking.clone()));
             }
             sdk::ContentBlock::ToolUse { id, name, input } => {
@@ -251,6 +251,7 @@ mod tests {
     fn thinking_block(s: &str) -> sdk::ContentBlock {
         sdk::ContentBlock::Thinking {
             thinking: s.to_string(),
+            signature: None,
         }
     }
 
