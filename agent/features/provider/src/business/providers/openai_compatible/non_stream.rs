@@ -97,6 +97,7 @@ impl OpenAICompatibleProvider {
                             handler.on_thinking(reasoning);
                             content_blocks.push(ContentBlock::Thinking {
                                 thinking: reasoning.to_string(),
+                                signature: None,
                             });
                         }
                     }

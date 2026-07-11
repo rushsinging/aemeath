@@ -38,6 +38,7 @@ pub async fn parse_stream(
     const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
+    let mut current_signature: String = String::new();
 
     let byte_stream = response.bytes_stream().map(|r| r.map_err(io::Error::other));
     let reader = StreamReader::new(byte_stream);
@@ -117,6 +118,7 @@ pub async fn parse_stream(
                     }
                     ContentBlockPayload::Thinking { thinking } => {
                         current_thinking = thinking.clone();
+                        current_signature.clear();
                         if !thinking.is_empty() {
                             handler.on_thinking(&thinking);
                         }
@@ -147,7 +149,10 @@ pub async fn parse_stream(
                         current_thinking.push_str(&thinking);
                         handler.on_thinking(&thinking);
                     }
-                    DeltaPayload::SignatureDelta { .. } | DeltaPayload::Unknown => {
+                    DeltaPayload::SignatureDelta { signature } => {
+                        current_signature.push_str(&signature);
+                    }
+                    DeltaPayload::Unknown => {
                         // ignored
                     }
                 }
@@ -206,8 +211,14 @@ pub async fn parse_stream(
                     });
                     current_tool_json.clear();
                 } else if !current_thinking.is_empty() {
+                    let signature = if current_signature.is_empty() {
+                        None
+                    } else {
+                        Some(std::mem::take(&mut current_signature))
+                    };
                     content_blocks.push(ContentBlock::Thinking {
                         thinking: std::mem::take(&mut current_thinking),
+                        signature,
                     });
                 } else if !current_text.is_empty() {
                     handler.on_block_complete(&current_text);

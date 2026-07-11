@@ -230,7 +230,7 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
                 _ => estimate_tokens(&content.to_string()),
             },
             ContentBlock::Image { .. } => 85, // ~85 tokens overhead for image reference
-            ContentBlock::Thinking { thinking } => estimate_tokens(thinking),
+            ContentBlock::Thinking { thinking, .. } => estimate_tokens(thinking),
         })
         .sum::<usize>()
 }

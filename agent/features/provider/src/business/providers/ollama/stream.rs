@@ -177,6 +177,7 @@ pub(crate) async fn parse_ollama_stream(
         );
         content_blocks.push(ContentBlock::Thinking {
             thinking: reasoning_normalizer.accumulated().to_string(),
+            signature: None,
         });
     }
     if !current_text.is_empty() {

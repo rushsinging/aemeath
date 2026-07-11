@@ -35,6 +35,7 @@ fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
         content: vec![
             ContentBlock::Thinking {
                 thinking: "需要读取文件".to_string(),
+                signature: None,
             },
             ContentBlock::ToolUse {
                 id: "call_1".to_string(),
@@ -65,6 +66,7 @@ fn test_convert_messages_preserves_real_reasoning_content_even_when_reasoning_di
         content: vec![
             ContentBlock::Thinking {
                 thinking: "已有推理内容".to_string(),
+                signature: None,
             },
             ContentBlock::Text {
                 text: "结论".to_string(),
@@ -114,6 +116,7 @@ fn test_convert_messages_drops_reasoning_only_assistant() {
         role: Role::Assistant,
         content: vec![ContentBlock::Thinking {
             thinking: "只有推理，没有可见内容".to_string(),
+            signature: None,
         }],
         metadata: None,
     }];
@@ -143,6 +146,7 @@ fn test_convert_messages_preserves_all_historical_thinking() {
             content: vec![
                 ContentBlock::Thinking {
                     thinking: "We need to compute 1+1. The answer is two.".to_string(),
+                    signature: None,
                 },
                 ContentBlock::Text {
                     text: "two".to_string(),
@@ -162,6 +166,7 @@ fn test_convert_messages_preserves_all_historical_thinking() {
             content: vec![
                 ContentBlock::Thinking {
                     thinking: "Now compute 2+2. The answer is four.".to_string(),
+                    signature: None,
                 },
                 ContentBlock::Text {
                     text: "four".to_string(),
@@ -207,6 +212,7 @@ fn test_convert_messages_preserves_historical_thinking_with_tool_calls() {
             content: vec![
                 ContentBlock::Thinking {
                     thinking: "需要读取文件".to_string(),
+                    signature: None,
                 },
                 ContentBlock::ToolUse {
                     id: "call_1".to_string(),
@@ -228,6 +234,7 @@ fn test_convert_messages_preserves_historical_thinking_with_tool_calls() {
             content: vec![
                 ContentBlock::Thinking {
                     thinking: "当前轮推理".to_string(),
+                    signature: None,
                 },
                 ContentBlock::Text {
                     text: "done".to_string(),
@@ -274,6 +281,7 @@ fn test_convert_messages_current_turn_without_thinking_keeps_historical() {
             content: vec![
                 ContentBlock::Thinking {
                     thinking: "历史推理内容".to_string(),
+                    signature: None,
                 },
                 ContentBlock::Text {
                     text: "two".to_string(),
