@@ -366,6 +366,10 @@ mod tests {
             Some(&serde_json::json!("adaptive"))
         );
         assert_eq!(
+            value.get("thinking").unwrap().get("display"),
+            Some(&serde_json::json!("summarized"))
+        );
+        assert_eq!(
             value.get("output_config").unwrap().get("effort"),
             Some(&serde_json::json!("medium"))
         );

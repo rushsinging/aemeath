@@ -85,11 +85,13 @@ impl CreateMessageRequest {
                 }
             }
             Some(effort) => {
-                // Has effort → thinking adaptive + output_config.effort
+                // Has effort → thinking adaptive + output_config.effort.
+                // display:"summarized" 让 Opus 4.7+ 返回 thinking_delta 明文
+                // （这些模型 display 默认 omitted，只发 signature_delta）。
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert(
                         "thinking".to_string(),
-                        serde_json::json!({"type": "adaptive"}),
+                        serde_json::json!({"type": "adaptive", "display": "summarized"}),
                     );
                     obj.insert(
                         "output_config".to_string(),
