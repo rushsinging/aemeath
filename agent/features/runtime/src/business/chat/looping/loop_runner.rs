@@ -21,6 +21,7 @@ use crate::business::chat::looping::memory_inject::build_memory_block;
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
 use crate::business::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
 use crate::business::chat::looping::stall::StallDetector;
+use crate::business::chat::looping::stream_handler::should_emit_model_stream_waiting;
 use crate::business::chat::looping::task_reminder::TaskReminderState;
 use crate::business::chat::looping::tool_fuse::ToolCallFuse;
 use crate::business::chat::looping::tools::{execute_tool_round, tool_results_for_api};
@@ -872,22 +873,30 @@ where
             let request_started_at = tokio::time::Instant::now();
             let waiting_task = tokio::spawn(async move {
                 let mut next_waiting_at = request_started_at + std::time::Duration::from_secs(10);
+                let mut last_waiting_progress_version = None;
                 loop {
                     tokio::time::sleep_until(next_waiting_at).await;
                     let elapsed_secs = request_started_at.elapsed().as_secs();
                     let snapshot = progress_handle.lock().unwrap().snapshot();
+                    let unchanged_since_last_check =
+                        should_emit_model_stream_waiting(last_waiting_progress_version, &snapshot);
                     log::debug!(target: LOG_TARGET,
-                        "runtime idle watcher fired: elapsed_secs={} phase={} visible_seen={} turn_id={}",
+                        "runtime idle watcher fired: elapsed_secs={} phase={} visible_seen={} progress_version={} unchanged={} turn_id={}",
                         elapsed_secs,
                         snapshot.phase,
                         snapshot.first_visible_event_seen,
+                        snapshot.visible_progress_version,
+                        unchanged_since_last_check,
                         waiting_context.turn_id,
                     );
-                    waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                        context: waiting_context.clone(),
-                        elapsed_secs,
-                        phase: snapshot.phase.to_string(),
-                    });
+                    if unchanged_since_last_check {
+                        waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
+                            context: waiting_context.clone(),
+                            elapsed_secs,
+                            phase: snapshot.phase.to_string(),
+                        });
+                    }
+                    last_waiting_progress_version = Some(snapshot.visible_progress_version);
                     next_waiting_at += std::time::Duration::from_secs(10);
                 }
             });
