@@ -51,7 +51,9 @@ impl AnthropicProvider {
             reasoning_level: Arc::new(AtomicU8::new(reasoning_level.as_u8())),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(timeout_secs))
+                .connect_timeout(std::time::Duration::from_secs(
+                    crate::business::CONNECT_TIMEOUT_SECS,
+                ))
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,
@@ -72,7 +74,9 @@ impl AnthropicProvider {
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self.http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(secs))
+            .connect_timeout(std::time::Duration::from_secs(
+                crate::business::CONNECT_TIMEOUT_SECS,
+            ))
             .build()
             .expect("failed to create HTTP client with custom timeout");
         self

@@ -15,8 +15,11 @@ pub mod gateway;
 
 pub use contract::ProviderDriverKind;
 
-/// 默认 HTTP 请求超时（秒）。
-pub use business::DEFAULT_TIMEOUT_SECS;
+/// Provider HTTP 超时常量（单一真相源，见 `business` 模块）。
+pub use business::{
+    ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS, CONNECT_TIMEOUT_SECS, DEFAULT_TIMEOUT_SECS,
+    OLLAMA_STREAM_IDLE_TIMEOUT_SECS, OPENAI_STREAM_IDLE_TIMEOUT_SECS, STALL_THRESHOLD_SECS,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {

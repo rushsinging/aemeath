@@ -20,8 +20,10 @@ pub struct OpenAICompatibleProvider {
     pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
 }
 
-pub(crate) fn build_streaming_http_client_builder(timeout_secs: u64) -> reqwest::ClientBuilder {
-    reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs))
+pub(crate) fn build_streaming_http_client_builder(_timeout_secs: u64) -> reqwest::ClientBuilder {
+    reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(
+        crate::business::CONNECT_TIMEOUT_SECS,
+    ))
 }
 
 impl OpenAICompatibleProvider {
