@@ -221,7 +221,7 @@ impl LlmProvider for OllamaProvider {
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
                 log::debug!(target: LOG_TARGET, "[ollama stream] 5xx body: {}",
-                    if error_body.len() > 200 { format!("{}…", &error_body.chars().take(200).collect::<String>()) } else { error_body.clone() });
+                    if error_body.len() > 200 { format!("{}…", error_body.chars().take(200).collect::<String>()) } else { error_body.clone() });
                 last_error = Some(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: error_body,
@@ -232,7 +232,7 @@ impl LlmProvider for OllamaProvider {
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
                 log::debug!(target: LOG_TARGET, "[ollama stream] non-success body: {}",
-                    if body.len() > 200 { format!("{}…", &body.chars().take(200).collect::<String>()) } else { body.clone() });
+                    if body.len() > 200 { format!("{}…", body.chars().take(200).collect::<String>()) } else { body.clone() });
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: body,

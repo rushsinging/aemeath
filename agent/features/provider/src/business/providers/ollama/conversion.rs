@@ -106,7 +106,6 @@ impl OllamaProviderConversion for OllamaProvider {
                     ContentBlock::ToolResult {
                         tool_use_id: _,
                         content,
-                        is_error: _,
                         ..
                     } => {
                         let text = match content {
