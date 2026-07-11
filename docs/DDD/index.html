@@ -921,16 +921,31 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
         <p class="tl-desc">把边界翻译成端口关系与目录结构。</p>
         <ul class="tl-list">
           <li>集成关系：<b>C/S · ACL · Pub/Sub · OHS · PL · SK</b></li>
-          <li>交付层（clients）+ Future 预留（<b>Server 传输透明 · v0.2.0 Workflow</b>）</li>
+          <li>交付层（clients）+ Future 预留（<b>Server 传输透明</b>）；Workflow 降为支撑域</li>
           <li>落 docs/design 三层：<b>01-system</b> 总体 → <b>02-modules</b> 模块 → <b>03-engineering</b> 横切</li>
         </ul>
-        <pre class="bp-code"><span class="tag">CONTEXT MAP · 出站端口（AE 是 Customer）</span><span class="d">Agent Execution</span>（唯一状态机 AgentRun）
+        <pre class="bp-code"><span class="tag">CONTEXT MAP · 出站端口（Runtime 是 Customer）</span><span class="d">Agent Runtime</span>（唯一状态机 Run）
   ├─ <span class="d">ContextPort</span>   → Context Management  <span class="m">// C/S</span>
   ├─ <span class="d">ProviderPort</span>  → Provider（内部 ACL）   <span class="m">// C/S + ACL</span>
   ├─ <span class="d">ToolPort</span>      → Tool &amp; Skill &amp; Command
   ├─ <span class="d">PolicyPort</span>    → Policy
   └─ <span class="d">AuditSink</span>     → Audit               <span class="m">// Pub/Sub 单向</span></pre>
         <div class="tl-out">产出 · 一张<b>上下文地图</b> + 五篇 01-system 设计文档</div>
+      </div>
+    </div>
+
+    <!-- 阶段六 -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">VI</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>迭代与修正 · 边界不是一次画对</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
+        <p class="tl-desc">真实项目里，命名和边界都要反复用判据检验、推倒重来——初稿不是终稿。</p>
+        <ul class="tl-list">
+          <li>命名三次迭代：Chat → AgentRun → <b>Run</b>（对齐 OpenAI <b>Thread / Run / Run Step</b>）</li>
+          <li>BC 归类修正：Workflow 一度进核心域，再用判据降为<b>支撑域</b>（复杂度 / 概念 ≠ 核心）</li>
+          <li>只写目标态：删掉所有「当前代码落点」，避免代码演进后文档过时造成混淆</li>
+        </ul>
+        <div class="tl-out">产出 · <b>15 BC 定稿</b>（1 核心 + 8 支撑 + 6 通用），单状态机 Run</div>
       </div>
     </div>
   </div>
