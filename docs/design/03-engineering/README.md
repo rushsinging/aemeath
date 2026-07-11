@@ -1,26 +1,34 @@
 # 03-engineering · 横切工程
 
 > 层级：03-engineering（横切工程关注点）
-> 状态：占位承接（S1 建立，S2+ 填充）｜Milestone：v0.1.0
-> 本层承载**跨模块的横切关注点**：架构守卫、agent 工程方法论、reasoning graph、可观测性、迁移治理等。不属于单一 BC 的知识落在这里。
+> 状态：Target｜Milestone：v0.1.0（S2+ 填充实质内容）
+> 本层承载**跨模块的横切关注点**：架构守卫、agent 工程方法论、reasoning graph、可观测性、迁移治理等。不属于单一 BC 的知识落在这里。**设计类文档只描述目标态；迁移治理文档专门承载过渡期的 Current→Target 追踪。**
 
-## 承接范围
+## 规划的横切文档
 
-| 计划文档 | 承接现有文档 | 内容 |
-|---|---|---|
-| `architecture-guards` | `../02-architecture-guards.md`（S1 保持原位，S2/S7 再迁） | 守卫注册表、17 guard 脚本、依赖铁律拦截 |
-| `agent-engineering` | `../05-agent-orchestration.md` | Agent 工程五主线（Context/Harness/Loop/Workflow/Graph）、现状评估、演进决策框架 |
-| `reasoning-graph` | `../06-agent-reasoning-graph.md` | reasoning effort 阶段调节、ReasoningLevel、provider 映射（归 Workflow BC 的工程侧） |
-| `observability` | — | 日志 schema、target 路由、诊断 |
-| `migration-governance` | — | Current→Target 迁移治理、退役清单 |
+| 目标文档 | 内容 |
+|---|---|
+| architecture-guards | 守卫注册表、依赖铁律拦截 |
+| agent-engineering | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
+| reasoning-graph | reasoning effort 阶段调节、ReasoningLevel、provider 映射 |
+| observability | 日志 schema、target 路由、诊断 |
+| migration-governance | Current→Target 迁移追踪、旧文档去向、退役清单（**所有过渡期状态集中于此，避免污染设计文档**） |
 
-## 待处理事项（迁移时解决）
+## 编写原则
 
-- **`02-architecture-guards.md` 迁移时机**：CLAUDE.md 触发表当前引用该路径，S1 **保持原位**，S2/S7 迁移时同步更新触发表，避免断链。
-- **`06-reasoning-graph` 的 doc-vs-code 分歧**：文档 §2.5 定稿为"runtime 信号检测"，代码实为"LLM 声明 phase"——迁移前 MUST 对齐（以哪个为准由 S2 决策）。
-- **`06` README 状态滞后**：标"草案（代码未实现）"，实际 reasoning graph 已落地，迁移时修正为"演进中 / 已落地"。
+- 设计类文档只描述目标态，带"相关文档"链接与"修改历史"。
+- **迁移治理**是唯一允许记录 Current 状态的文档，用于追踪旧路径 / 死代码 / 待退役项。
 
 ## 相关文档
 
-- 系统级总体设计：`../01-system/`
-- 模块级设计：`../02-modules/`
+- 系统级总体设计：[../01-system/](../01-system/)
+- 模块级设计：[../02-modules/README.md](../02-modules/README.md)
+- 架构守卫注册表：[../02-architecture-guards.md](../02-architecture-guards.md)
+- 目录总览：[../README.md](../README.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-11 | 初稿：承接说明 + 待处理事项 | #760 |
+| 2026-07-11 | 移除 current 迁移问题描述、把过渡状态收敛到 migration-governance、链接化、新增修改历史 | #760 |
