@@ -28,8 +28,8 @@ pub struct AnthropicProvider {
     http: reqwest::Client,
     /// Maximum retry attempts (default 3)
     max_retries: u32,
-    /// Request timeout in seconds (default 60)
-    /// 仅由未消费的 builder `with_timeout_secs` 写入，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    /// Request timeout in seconds — stored for diagnostics; the value is applied
+    /// to the reqwest client at construction time.
     #[allow(dead_code)]
     timeout_secs: u64,
 }
@@ -41,6 +41,7 @@ impl AnthropicProvider {
         model: Option<String>,
         max_tokens: u32,
         reasoning_level: crate::core::provider::ReasoningLevel,
+        timeout_secs: u64,
     ) -> Self {
         Self {
             api_key,
@@ -50,11 +51,11 @@ impl AnthropicProvider {
             reasoning_level: Arc::new(AtomicU8::new(reasoning_level.as_u8())),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(timeout_secs))
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,
-            timeout_secs: 120,
+            timeout_secs,
         }
     }
 
@@ -66,8 +67,7 @@ impl AnthropicProvider {
         self
     }
 
-    /// Set request timeout in seconds
-    /// builder 方法当前无调用点，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    /// Set request timeout in seconds (builder 旋钮，当前无外部调用点).
     #[allow(dead_code)]
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;

@@ -113,6 +113,7 @@ pub struct LlmProviderOptions {
     pub max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
+    pub timeout_secs: u64,
 }
 
 pub struct LlmConfigOptions {
@@ -124,6 +125,7 @@ pub struct LlmConfigOptions {
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
     pub openai_config: Option<OpenAIProviderConfig>,
+    pub timeout_secs: u64,
 }
 
 pub struct LlmClient {
@@ -146,6 +148,7 @@ impl LlmClient {
             max_tokens: 8192,
             reasoning: false,
             reasoning_config: None,
+            timeout_secs: crate::business::DEFAULT_TIMEOUT_SECS,
         })
     }
 
@@ -158,6 +161,7 @@ impl LlmClient {
                     options.model,
                     options.max_tokens,
                     crate::core::provider::ReasoningLevel::Off,
+                    options.timeout_secs,
                 ))
             }
             ProviderDriverKind::Ollama => {
@@ -167,6 +171,7 @@ impl LlmClient {
                     options.model,
                     options.max_tokens,
                     options.reasoning,
+                    options.timeout_secs,
                 ))
             }
             ProviderDriverKind::OpenAI
@@ -187,6 +192,7 @@ impl LlmClient {
                     options.max_tokens,
                     options.reasoning,
                     options.reasoning_config,
+                    options.timeout_secs,
                 ))
             }
         };
@@ -195,6 +201,7 @@ impl LlmClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_openai_config(
         config: OpenAIProviderConfig,
         api_key: String,
@@ -203,6 +210,7 @@ impl LlmClient {
         max_tokens: u32,
         reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
+        timeout_secs: u64,
     ) -> Self {
         let provider_impl: Arc<dyn LlmProvider> =
             Arc::new(crate::business::providers::OpenAICompatibleProvider::new(
@@ -213,6 +221,7 @@ impl LlmClient {
                 max_tokens,
                 reasoning,
                 reasoning_config,
+                timeout_secs,
             ));
         Self {
             provider: provider_impl,
@@ -229,6 +238,7 @@ impl LlmClient {
                 options.max_tokens,
                 options.reasoning,
                 options.reasoning_config,
+                options.timeout_secs,
             )
         } else {
             Self::with_provider(LlmProviderOptions {
@@ -239,6 +249,7 @@ impl LlmClient {
                 max_tokens: options.max_tokens,
                 reasoning: options.reasoning,
                 reasoning_config: options.reasoning_config,
+                timeout_secs: options.timeout_secs,
             })
         }
     }

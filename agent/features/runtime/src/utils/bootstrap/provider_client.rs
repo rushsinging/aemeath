@@ -28,6 +28,7 @@ pub fn resolve_base_url(
     cli_base_url.or_else(|| non_empty_string(&resolved_model.source_config.base_url))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_llm_client(
     driver: ProviderDriverKind,
     api_key: String,
@@ -36,6 +37,7 @@ pub fn build_llm_client(
     resolved_model: &ResolvedModel,
     runtime_settings: &ModelRuntimeSettings,
     max_reasoning: Option<&str>,
+    timeout_secs: u64,
 ) -> LlmClient {
     let client = LlmClient::from_config(LlmConfigOptions {
         driver,
@@ -46,6 +48,7 @@ pub fn build_llm_client(
         reasoning: runtime_settings.reasoning,
         reasoning_config: None,
         openai_config: openai_config(driver, &resolved_model.source_key),
+        timeout_secs,
     });
 
     // CLI / env 指定的上限（优先级 CLI > env），clamp 到 provider 能力上限。

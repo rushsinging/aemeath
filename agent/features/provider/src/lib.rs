@@ -15,6 +15,9 @@ pub mod gateway;
 
 pub use contract::ProviderDriverKind;
 
+/// 默认 HTTP 请求超时（秒）。
+pub use business::DEFAULT_TIMEOUT_SECS;
+
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
     #[error("network error: {0}")]

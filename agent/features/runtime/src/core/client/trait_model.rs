@@ -53,6 +53,7 @@ pub(crate) async fn build_llm_client_for_switch(
         &resolved_model,
         &runtime_settings,
         None,
+        provider::DEFAULT_TIMEOUT_SECS,
     );
 
     let display_name = if resolved_model.model.name.is_empty() {

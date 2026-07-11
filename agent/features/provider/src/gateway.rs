@@ -30,6 +30,7 @@ pub trait LlmProviderGateway: Send + Sync {
         &self,
         default_client: Arc<LlmClient>,
         models_config: Arc<ModelsConfig>,
+        timeout_secs: u64,
     ) -> LlmClientPool;
 
     async fn stream_message(
@@ -65,8 +66,9 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
         &self,
         default_client: Arc<LlmClient>,
         models_config: Arc<ModelsConfig>,
+        timeout_secs: u64,
     ) -> LlmClientPool {
-        LlmClientPool::new(default_client, models_config)
+        LlmClientPool::new(default_client, models_config, timeout_secs)
     }
 
     async fn stream_message(

@@ -91,6 +91,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         &resolved_model,
         &runtime_settings,
         args.max_reasoning.as_deref(),
+        snapshot.api_timeout_secs(),
     ));
 
     // 10. Tooling
@@ -123,6 +124,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         client.clone(),
         hook_runner.clone(),
         runtime_settings.reasoning,
+        snapshot.api_timeout_secs(),
     );
 
     // 15. Prompt bundle

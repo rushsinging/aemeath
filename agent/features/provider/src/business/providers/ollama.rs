@@ -35,8 +35,6 @@ pub struct OllamaProvider {
     pub(crate) timeout_secs: u64,
 }
 
-/// Default request timeout for Ollama (5 minutes) — model loading can be slow
-pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 300;
 /// Stream idle timeout: abort if no data for 3 minutes (Ollama may stall during generation)
 pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
@@ -47,6 +45,7 @@ impl OllamaProvider {
         model: Option<String>,
         max_tokens: u32,
         reasoning: bool,
+        timeout_secs: u64,
     ) -> Self {
         Self {
             base_url: {
@@ -64,11 +63,11 @@ impl OllamaProvider {
             )),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+                .timeout(std::time::Duration::from_secs(timeout_secs))
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,
-            timeout_secs: DEFAULT_TIMEOUT_SECS,
+            timeout_secs,
         }
     }
 
