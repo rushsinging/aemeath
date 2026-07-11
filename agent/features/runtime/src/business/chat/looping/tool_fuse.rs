@@ -171,7 +171,7 @@ fn normalize_json(value: &Value) -> String {
         ),
         Value::Object(map) => {
             let mut entries = map.iter().collect::<Vec<_>>();
-            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            entries.sort_by_key(|(left, _)| *left);
             format!(
                 "{{{}}}",
                 entries
