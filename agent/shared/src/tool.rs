@@ -257,9 +257,33 @@ mod tests {
         // 不同变体不相等
         let d = AgentProgressKind::Message { text: "x".into() };
         assert_ne!(a, d);
+
+        let e = AgentProgressKind::ToolOutput {
+            tool_name: "Bash".into(),
+            text: "stdout".into(),
+        };
+        assert_ne!(a, e);
+    }
+
+    #[test]
+    fn test_agent_progress_tool_output_carries_tool_name_and_text() {
+        let ev = AgentProgressEvent {
+            sequence: 1,
+            kind: AgentProgressKind::ToolOutput {
+                tool_name: "Bash".into(),
+                text: "hello".into(),
+            },
+        };
+
+        match &ev.kind {
+            AgentProgressKind::ToolOutput { tool_name, text } => {
+                assert_eq!(tool_name, "Bash");
+                assert_eq!(text, "hello");
+            }
+            other => panic!("expected ToolOutput, got {other:?}"),
+        }
     }
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentProgressEvent {
     /// Monotonic sequence for internal ordering/replacement. UI does not display it by default.
@@ -278,6 +302,14 @@ pub enum AgentProgressKind {
     },
     ToolCalls {
         calls: Vec<AgentToolCallProgress>,
+    },
+    /// Output streamed by a tool running inside a sub-agent.
+    ///
+    /// TUI may use this for diagnostics or future expandable views, but it
+    /// must not be rendered as normal sub-agent progress activity.
+    ToolOutput {
+        tool_name: String,
+        text: String,
     },
     Message {
         text: String,

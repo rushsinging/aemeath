@@ -73,7 +73,10 @@ impl super::App {
             }
             "/context" => {
                 // #567: EstimateContext 变体已删除，改为本地渲染消息计数。
-                self.append_system_notice(format!("Messages: {}", self.chat.messages.len()));
+                self.append_system_notice(format!(
+                    "Messages: {}",
+                    self.model.conversation.timeline.items().len()
+                ));
             }
             cmd if cmd == format!("/{}", cmd::REFLECT) => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
@@ -123,7 +126,7 @@ impl super::App {
                 self.model.input.document.remove_all_images();
                 self.append_system_notice("[pending images cleared]");
             }
-            cmd if cmd == "/version" => {
+            "/version" => {
                 let info = format!(
                     "aemeath v{}
 
@@ -135,7 +138,7 @@ Build info:
                 );
                 self.append_system_notice(&info);
             }
-            cmd if cmd == "/doctor" => {
+            "/doctor" => {
                 let view = &self.config_view;
                 let home = dirs::home_dir();
                 let info = format!(
@@ -158,13 +161,13 @@ Build info:
                 );
                 self.append_system_notice(&info);
             }
-            cmd if cmd == "/rewind" => {
+            "/rewind" => {
                 // /rewind <N> → 触发 compact（保留 N 条消息的语义通过 compact 实现）
                 if self.chat.input_event_tx.is_some() {
                     self.chat.push_input_event(sdk::ChatInputEvent::Compact);
                 }
             }
-            cmd if cmd == "/cost" => {
+            "/cost" => {
                 // #567: QueryCost 变体已删除，改为本地从 model 状态渲染。
                 let usage = &self.model.conversation.runtime.usage;
                 let total = usage.input_tokens + usage.output_tokens;
@@ -176,7 +179,7 @@ Build info:
                     sdk::format_tokens(total)
                 ));
             }
-            cmd if cmd == "/status" => {
+            "/status" => {
                 // #567: QueryStatus 变体已删除，改为本地渲染状态信息。
                 let view = &self.config_view;
                 self.append_system_notice(format!(
@@ -184,7 +187,7 @@ Build info:
                     view.model_name, view.permission_mode, self.chat.is_processing,
                 ));
             }
-            cmd if cmd == "/config" => {
+            "/config" => {
                 // #567: QueryConfig 变体已删除，改为本地从 config_view 渲染。
                 let view = &self.config_view;
                 self.append_system_notice(format!(
@@ -199,31 +202,31 @@ Build info:
                     view.logging_level,
                 ));
             }
-            cmd if cmd == "/stats" => {
+            "/stats" => {
                 // #567: QueryStats 变体已删除，改为本地从 model 状态渲染。
                 let usage = &self.model.conversation.runtime.usage;
                 self.append_system_notice(format!(
                     "Messages: {} | API calls: {} | Tokens: {} total",
-                    self.chat.messages.len(),
+                    self.model.conversation.timeline.items().len(),
                     usage.api_calls,
                     sdk::format_tokens(usage.input_tokens + usage.output_tokens)
                 ));
             }
-            cmd if cmd == "/init" => {
+            "/init" => {
                 let force = parts.get(1).map(|p| *p == "force").unwrap_or(false);
                 if self.chat.input_event_tx.is_some() {
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::InitProject { force });
                 }
             }
-            cmd if cmd == "/session" => {
+            "/session" => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
                 if self.chat.input_event_tx.is_some() {
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::ManageSession { args });
                 }
             }
-            cmd if cmd == "/resume" => {
+            "/resume" => {
                 if let Some(id) = parts.get(1) {
                     if self.chat.input_event_tx.is_some() {
                         self.chat
@@ -242,7 +245,7 @@ Build info:
             }
             // /memory 的 remind 子命令已被上面截胡
             // 非 remind 子命令走事件流
-            cmd if cmd == "/memory" => {
+            "/memory" => {
                 let args = parts.get(1..).map(|p| p.join(" ")).unwrap_or_default();
                 // 排除 remind 子命令（已被上面截胡）
                 let first_arg = parts.get(1).copied().unwrap_or("");
@@ -285,7 +288,6 @@ Arguments: {args}"
     /// `SessionReset` 事件回来后经 `Effect::ResetRuntimeState` 再做完整清理
     ///（sync agent_client + clear_tasks）；loop 不再被 drop，保持存活。
     async fn clear_conversation(&mut self) {
-        self.chat.messages.clear();
         self.handle_input_intent(crate::tui::model::input::intent::InputIntent::Clear);
         self.output_area.clear();
         if self.chat.input_event_tx.is_some() {

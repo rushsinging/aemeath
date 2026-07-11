@@ -352,6 +352,7 @@ pub(crate) async fn parse_openai_stream(
         );
         content_blocks.push(ContentBlock::Thinking {
             thinking: current_reasoning,
+            signature: None,
         });
     }
     if !current_text.is_empty() {

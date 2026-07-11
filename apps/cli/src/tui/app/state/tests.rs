@@ -13,12 +13,6 @@ mod tests {
     // === ChatState ===
 
     #[test]
-    fn test_chat_state_default_messages_empty() {
-        let state = ChatState::default();
-        assert!(state.messages.is_empty());
-    }
-
-    #[test]
     fn test_chat_state_default_not_processing() {
         let state = ChatState::default();
         assert!(!state.is_processing);
@@ -47,8 +41,6 @@ mod tests {
             session_id: "sess-1".into(),
             cwd: std::path::PathBuf::from("/tmp"),
             session_created_at: None,
-            cached_sessions: vec![],
-            cached_models: vec![],
             current_model_display: "gpt-4".into(),
             memory_config: make_memory_config(),
             pending_resume_id: None,
@@ -58,47 +50,11 @@ mod tests {
     }
 
     #[test]
-    fn test_session_state_cached_sessions_default_empty() {
-        let state = SessionState {
-            session_id: "sess-1".into(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            session_created_at: None,
-            cached_sessions: vec![],
-            cached_models: vec![],
-            current_model_display: "".into(),
-            memory_config: make_memory_config(),
-            pending_resume_id: None,
-        };
-        assert!(state.cached_sessions().is_empty());
-    }
-
-    #[test]
-    fn test_session_state_cache_sessions_replaces_entries() {
-        let mut state = SessionState {
-            session_id: "sess-1".into(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            session_created_at: None,
-            cached_sessions: vec![],
-            cached_models: vec![],
-            current_model_display: "".into(),
-            memory_config: make_memory_config(),
-            pending_resume_id: None,
-        };
-        state.cache_sessions(vec![("s2".to_string(), "summary".to_string())]);
-        assert_eq!(
-            state.cached_sessions(),
-            &[("s2".to_string(), "summary".to_string())]
-        );
-    }
-
-    #[test]
     fn test_session_state_rename_session_updates_id() {
         let mut state = SessionState {
             session_id: "sess-1".into(),
             cwd: std::path::PathBuf::from("/tmp"),
             session_created_at: None,
-            cached_sessions: vec![],
-            cached_models: vec![],
             current_model_display: "".into(),
             memory_config: make_memory_config(),
             pending_resume_id: None,
@@ -196,7 +152,13 @@ mod tests {
             std::path::PathBuf::from("/tmp/aemeath"),
             "gpt-test".to_string(),
         );
-        app.chat.messages.push(sdk::ChatMessage::user_text("late"));
+        app.model.conversation.apply(
+            crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+                crate::tui::model::conversation::intent::ResumeConversation {
+                    messages: vec![sdk::ChatMessage::user_text("late")],
+                },
+            ),
+        );
 
         assert_eq!(app.model.session.message_count, 0);
     }

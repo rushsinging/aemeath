@@ -15,10 +15,8 @@ pub struct AgentResult {
 /// Typed input for the `agent` tool (sub-agent dispatch).
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
-/// 字段标识符即 JSON property 名（build.rs 使用标识符，忽略 serde rename），
-/// 因此 `taskId` 必须保留 camelCase 标识符并 `#[allow(non_snake_case)]`。
+/// 字段标识符即 JSON property 名（build.rs 使用标识符，忽略 serde rename）。
 #[derive(Debug, Clone, Deserialize, Default)]
-#[allow(non_snake_case)]
 pub struct AgentInput {
     /// The task for the agent to perform
     pub prompt: String,
@@ -30,6 +28,33 @@ pub struct AgentInput {
     pub model: Option<String>,
     /// Maximum number of tool-call rounds (max 1000)
     pub max_turns: Option<u64>,
-    /// Task ID from TaskCreate. OPTIONAL — only pass when you want the dispatcher to auto-manage task status (InProgress on start, Completed on success, Pending on failure). Free-form exploration or ad-hoc agent calls do NOT need a taskId.
-    pub taskId: Option<String>,
+    /// Task ID from TaskCreate. OPTIONAL — only pass when you want the dispatcher to auto-manage task status (InProgress on start, Completed on success, Pending on failure). Free-form exploration or ad-hoc agent calls do NOT need a task_id.
+    #[serde(alias = "taskId")]
+    pub task_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snake_case_input() {
+        let json = serde_json::json!({"prompt": "p", "description": "d", "task_id": "42"});
+        let input: AgentInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.task_id.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn legacy_camel_case_alias() {
+        let json = serde_json::json!({"prompt": "p", "description": "d", "taskId": "42"});
+        let input: AgentInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.task_id.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn task_id_optional() {
+        let json = serde_json::json!({"prompt": "p", "description": "d"});
+        let input: AgentInput = serde_json::from_value(json).unwrap();
+        assert!(input.task_id.is_none());
+    }
 }

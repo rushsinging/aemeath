@@ -32,7 +32,7 @@ impl TypedTool for TaskCreateTool {
            3. Then create tasks one by one with TaskCreate\n\
            4. Use TaskUpdate to set dependencies and assign agents\n\n\
            After creating tasks, use TaskUpdate to:\n\
-           - Set dependencies (addBlockedBy/addBlocks) between tasks\n\
+           - Set dependencies (add_blocked_by/add_blocks) between tasks\n\
            - Mark as in_progress before starting work\n\
            - Mark as completed when done — the system will show which tasks are unblocked\n\n\
            Use TaskList to discover pending tasks with no unresolved dependencies.\n\
@@ -53,7 +53,8 @@ impl TypedTool for TaskCreateTool {
         false
     }
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Mutates persistent task state; keep ordered with related task operations.
+        false
     }
 
     async fn call(
@@ -77,7 +78,7 @@ impl TypedTool for TaskCreateTool {
 
         let subject = args.subject;
         let description = args.description;
-        let active_form = args.activeForm;
+        let active_form = args.active_form;
 
         // Parse priority
         let priority = args
@@ -93,7 +94,7 @@ impl TypedTool for TaskCreateTool {
             .await;
 
         // Set additional fields if provided
-        if let Some(session_id) = args.sessionId {
+        if let Some(session_id) = args.session_id {
             self.store
                 .update(&task.id, |t| t.session_id = Some(session_id))
                 .await;

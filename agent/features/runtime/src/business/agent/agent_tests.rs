@@ -1,9 +1,10 @@
 use crate::business::agent::{Agent, ToolCall};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, Notify};
 use tools::api::{
     Tool, ToolExecutionContext, ToolRegistry, TypedTool, TypedToolAdapter, TypedToolResult,
 };
@@ -32,6 +33,9 @@ impl TypedTool for TimedTool {
     }
     fn is_concurrency_safe(&self) -> bool {
         self.safe
+    }
+    fn timeout_secs(&self) -> u64 {
+        5
     }
     async fn call(
         &self,
@@ -188,6 +192,39 @@ async fn test_call_tool_with_timeout_accepts_valid_input() {
     assert!(called.load(Ordering::SeqCst), "call() 应被正常调用");
 }
 
+#[test]
+fn test_typed_tool_defaults_to_not_concurrency_safe() {
+    struct DefaultConcurrencyTool;
+
+    #[async_trait]
+    impl TypedTool for DefaultConcurrencyTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "default_concurrency"
+        }
+        fn description(&self) -> &str {
+            "default concurrency test tool"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            TypedToolResult::success("ok", Value::Null)
+        }
+    }
+
+    let tool: Arc<dyn Tool> = Arc::new(TypedToolAdapter::new(DefaultConcurrencyTool));
+    assert!(
+        !tool.is_concurrency_safe(),
+        "tools must opt in to concurrent execution"
+    );
+}
+
 #[tokio::test]
 async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     let start_times = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -252,6 +289,124 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
         diff < 100,
         "expected both tools to start within 100ms, got {diff}ms apart"
     );
+}
+
+#[tokio::test]
+async fn test_execute_tools_concurrency_window_backfills_without_exceeding_limit() {
+    struct ActiveGuard(Arc<AtomicUsize>);
+    impl Drop for ActiveGuard {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, AtomicOrdering::SeqCst);
+        }
+    }
+
+    struct ControlledTool {
+        started: mpsc::UnboundedSender<String>,
+        gates: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl TypedTool for ControlledTool {
+        type Output = Value;
+        fn name(&self) -> &str {
+            "controlled"
+        }
+        fn description(&self) -> &str {
+            "controlled concurrency-safe test tool"
+        }
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type":"object"})
+        }
+        fn is_concurrency_safe(&self) -> bool {
+            true
+        }
+        async fn call(
+            &self,
+            input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            let label = input["label"].as_str().unwrap().to_string();
+            let active = self.active.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+            self.max_active.fetch_max(active, AtomicOrdering::SeqCst);
+            let _guard = ActiveGuard(self.active.clone());
+            let gate = self.gates.lock().unwrap()[&label].clone();
+            self.started.send(label.clone()).unwrap();
+            gate.notified().await;
+            TypedToolResult::success(label, Value::Null)
+        }
+    }
+
+    let labels = ["first", "slow", "next"];
+    let gates: Arc<Mutex<HashMap<String, Arc<Notify>>>> = Arc::new(Mutex::new(
+        labels
+            .iter()
+            .map(|label| ((*label).to_string(), Arc::new(Notify::new())))
+            .collect(),
+    ));
+    let active = Arc::new(AtomicUsize::new(0));
+    let max_active = Arc::new(AtomicUsize::new(0));
+    let (started_tx, mut started_rx) = mpsc::unbounded_channel();
+    let registry = ToolRegistry::new();
+    registry.register(ControlledTool {
+        started: started_tx,
+        gates: gates.clone(),
+        active,
+        max_active: max_active.clone(),
+    });
+    let mut ctx = test_ctx();
+    ctx.max_tool_concurrency = 2;
+    let agent = Agent {
+        registry: &registry,
+        ctx,
+    };
+    let calls = labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| ToolCall {
+            provider_id: format!("provider-{label}"),
+            id: sdk::ids::ToolCallId::from_legacy_or_new(&format!("call-{label}")),
+            name: "controlled".to_string(),
+            index,
+            input: serde_json::json!({"label": label}),
+        })
+        .collect::<Vec<_>>();
+
+    let execution = agent.execute_tools(&calls);
+    tokio::pin!(execution);
+    let first = tokio::select! {
+        started = started_rx.recv() => started.unwrap(),
+        _ = &mut execution => panic!("tools completed before gates opened"),
+    };
+    let second = tokio::select! {
+        started = started_rx.recv() => started.unwrap(),
+        _ = &mut execution => panic!("tools completed before gates opened"),
+    };
+    assert!([first.as_str(), second.as_str()].contains(&"first"));
+    assert!([first.as_str(), second.as_str()].contains(&"slow"));
+    gates.lock().unwrap()["first"].notify_one();
+    let next = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::select! {
+            started = started_rx.recv() => started.unwrap(),
+            _ = &mut execution => panic!("tools completed before remaining gates opened"),
+        }
+    })
+    .await
+    .expect("next Tool should start as soon as one permit is free");
+    assert_eq!(next, "next");
+    gates.lock().unwrap()["slow"].notify_one();
+    gates.lock().unwrap()["next"].notify_one();
+
+    let results = execution.await;
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result.provider_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["provider-first", "provider-slow", "provider-next"]
+    );
+    assert_eq!(max_active.load(AtomicOrdering::SeqCst), 2);
 }
 
 #[tokio::test]

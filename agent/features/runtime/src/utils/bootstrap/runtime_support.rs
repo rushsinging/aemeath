@@ -4,15 +4,16 @@ use crate::utils::bootstrap::config_paths;
 use crate::LOG_TARGET;
 use hook::api::HookRunner;
 use provider::api::LlmClient;
-use share::config::Config;
+use share::config::hooks::HooksConfig;
+use share::config::{AgentsConfig, ModelsConfig};
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub fn build_hook_runner(config_file: Option<&Config>, _cwd: &Path) -> HookRunner {
-    let runner = match config_file {
-        Some(config) => HookRunner::from_config(config),
+pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner {
+    let runner = match hooks {
+        Some(h) => HookRunner::new(h.clone()),
         None => HookRunner::empty(),
     };
     log::info!(target: LOG_TARGET,
@@ -29,22 +30,16 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
 }
 
 pub fn build_agent_runner(
-    config_file: Option<&Config>,
+    models: Option<&ModelsConfig>,
+    agents: Option<&AgentsConfig>,
     client: Arc<LlmClient>,
     hook_runner: HookRunner,
     reasoning: bool,
+    timeout_secs: u64,
 ) -> Arc<agent_runner::CliAgentRunner> {
-    let models_config = Arc::new(
-        config_file
-            .map(|config| config.models.clone())
-            .unwrap_or_default(),
-    );
-    let pool = build_llm_client_pool(config_file, client.clone(), models_config.clone());
-    let agents_config = Arc::new(
-        config_file
-            .map(|config| config.agents.clone())
-            .unwrap_or_default(),
-    );
+    let models_config = Arc::new(models.cloned().unwrap_or_default());
+    let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
+    let agents_config = Arc::new(agents.cloned().unwrap_or_default());
 
     Arc::new(agent_runner::CliAgentRunner {
         client,
@@ -57,32 +52,31 @@ pub fn build_agent_runner(
 }
 
 fn build_llm_client_pool(
-    config_file: Option<&Config>,
+    agents: Option<&AgentsConfig>,
     client: Arc<LlmClient>,
     models_config: Arc<share::config::ModelsConfig>,
+    timeout_secs: u64,
 ) -> Option<Arc<provider::api::LlmClientPool>> {
-    if !has_multi_provider_or_agent_roles(config_file, &models_config) {
+    if !has_multi_provider_or_agent_roles(agents, &models_config) {
         return None;
     }
 
     Some(Arc::new(provider::api::LlmClientPool::new(
         client,
         models_config,
+        timeout_secs,
     )))
 }
 
 fn has_multi_provider_or_agent_roles(
-    config_file: Option<&Config>,
+    agents: Option<&AgentsConfig>,
     models_config: &share::config::ModelsConfig,
 ) -> bool {
-    models_config.providers.len() > 1
-        || !config_file
-            .map(|config| config.agents.roles.is_empty())
-            .unwrap_or(true)
+    models_config.providers.len() > 1 || agents.map(|a| !a.roles.is_empty()).unwrap_or(false)
 }
 
 #[cfg(test)]
-fn resolve_role_logs_dir(config_file: Option<&Config>) -> PathBuf {
+fn resolve_role_logs_dir(config_file: Option<&share::config::Config>) -> PathBuf {
     config_file
         .and_then(|config| config.logging.logs_dir.as_ref())
         .map(|dir| expand_tilde_path(dir))
@@ -104,7 +98,7 @@ mod tests {
     use super::*;
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use share::config::models::ProviderModelsConfig;
-    use share::config::{AgentRoleConfig, Config, LoggingConfig, ModelsConfig};
+    use share::config::{AgentRoleConfig, AgentsConfig, Config, LoggingConfig, ModelsConfig};
     use std::collections::HashMap;
 
     fn config_with_logging(role_logs_enabled: bool, logs_dir: Option<&str>) -> Config {
@@ -127,7 +121,6 @@ mod tests {
 
     #[test]
     fn test_build_hook_runner_uses_config_hooks() {
-        let mut config = Config::default();
         let mut events = HashMap::new();
         events.insert(
             HookEvent::PreToolUse,
@@ -137,9 +130,9 @@ mod tests {
                 timeout: 60,
             }],
         );
-        config.hooks = HooksConfig { events };
+        let hooks = HooksConfig { events };
 
-        let hook_runner = build_hook_runner(Some(&config), Path::new("project-root"));
+        let hook_runner = build_hook_runner(Some(&hooks), Path::new("project-root"));
 
         assert_eq!(hook_runner.hook_count(), 1);
     }
@@ -207,8 +200,8 @@ mod tests {
 
     #[test]
     fn test_has_multi_provider_or_agent_roles_detects_agent_roles() {
-        let mut config = Config::default();
-        config.agents.roles.insert(
+        let mut agents = AgentsConfig::default();
+        agents.roles.insert(
             "reviewer".to_string(),
             AgentRoleConfig {
                 description: "reviews code".to_string(),
@@ -217,17 +210,17 @@ mod tests {
             },
         );
 
-        let result = has_multi_provider_or_agent_roles(Some(&config), &ModelsConfig::default());
+        let result = has_multi_provider_or_agent_roles(Some(&agents), &ModelsConfig::default());
 
         assert!(result);
     }
 
     #[test]
     fn test_has_multi_provider_or_agent_roles_returns_false_for_single_provider_without_roles() {
-        let config = Config::default();
+        let agents = AgentsConfig::default();
         let models_config = models_config_with_provider_count(1);
 
-        let result = has_multi_provider_or_agent_roles(Some(&config), &models_config);
+        let result = has_multi_provider_or_agent_roles(Some(&agents), &models_config);
 
         assert!(!result);
     }

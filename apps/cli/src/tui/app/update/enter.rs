@@ -120,7 +120,7 @@ mod tests {
         assert!(result.effects.is_empty());
         assert!(result.spawn_effect.is_none());
         assert!(result.pending_slash.is_none());
-        assert_eq!(app.chat.messages.len(), 0);
+        assert!(!app.chat.is_processing);
     }
 
     #[test]

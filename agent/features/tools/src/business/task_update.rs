@@ -46,7 +46,8 @@ impl TypedTool for TaskUpdateTool {
         false
     }
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Mutates persistent task state; keep ordered with related task operations.
+        false
     }
 
     async fn call(
@@ -59,7 +60,7 @@ impl TypedTool for TaskUpdateTool {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
-        let input_id = args.taskId.clone();
+        let input_id = args.task_id.clone();
 
         // Resolve display number (batch-local id) to global task id
         let task_id = match self.store.resolve_display_id(&input_id).await {
@@ -68,12 +69,12 @@ impl TypedTool for TaskUpdateTool {
         };
 
         // Pre-resolve dependency display numbers to global ids (must be async)
-        let resolved_blocked_by = if let Some(display_ids) = args.addBlockedBy.as_deref() {
+        let resolved_blocked_by = if let Some(display_ids) = args.add_blocked_by.as_deref() {
             self.store.resolve_display_ids(display_ids).await
         } else {
             Vec::new()
         };
-        let resolved_blocks = if let Some(display_ids) = args.addBlocks.as_deref() {
+        let resolved_blocks = if let Some(display_ids) = args.add_blocks.as_deref() {
             self.store.resolve_display_ids(display_ids).await
         } else {
             Vec::new()
@@ -100,7 +101,7 @@ impl TypedTool for TaskUpdateTool {
                 if let Some(desc) = args.description {
                     task.description = desc;
                 }
-                if let Some(af) = args.activeForm {
+                if let Some(af) = args.active_form {
                     task.active_form = Some(af);
                 }
                 if let Some(owner) = args.owner {
@@ -118,7 +119,7 @@ impl TypedTool for TaskUpdateTool {
                 if let Some(progress) = args.progress {
                     task.progress = progress.min(100);
                 }
-                if let Some(msg) = args.progressMessage {
+                if let Some(msg) = args.progress_message {
                     task.progress_message = Some(msg);
                 }
 
@@ -135,12 +136,12 @@ impl TypedTool for TaskUpdateTool {
                 }
 
                 // Tag updates
-                if let Some(add_tags) = args.addTags {
+                if let Some(add_tags) = args.add_tags {
                     for tag in add_tags {
                         task.add_tag(tag, now);
                     }
                 }
-                if let Some(remove_tags) = args.removeTags {
+                if let Some(remove_tags) = args.remove_tags {
                     for tag in remove_tags {
                         task.remove_tag(&tag, now);
                     }

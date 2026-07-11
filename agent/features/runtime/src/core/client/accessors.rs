@@ -2,12 +2,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use sdk::{ChangeSet, ConfigView};
+use sdk::ChangeSet;
 use tokio::sync::watch;
 
 use crate::core::port::ChatRuntimeContext;
 use share::config::models::ResolvedModel;
-use storage::api::TaskStore;
 use tools::api::McpConnectionManager;
 
 // ─── 结构体定义 ───
@@ -43,7 +42,10 @@ pub struct RuntimeHandle {
     /// 以免常驻 loop 中被取消的 token 永久污染后续回合。`cancel_impl` 锁此槽对当前
     /// token 调 `cancel()` 触发取消。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
     pub(crate) current_cancel: Arc<Mutex<tokio_util::sync::CancellationToken>>,
-    pub(crate) current_messages: Arc<Mutex<Vec<share::message::Message>>>,
+    /// 会话历史唯一活跃真相——按 user turn 分段的 `ChatChain` 聚合。
+    ///
+    /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。
+    pub(crate) current_chain: Arc<Mutex<crate::business::session::ChatChain>>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
     pub(crate) frozen_chats: Arc<Mutex<Vec<crate::business::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
@@ -51,27 +53,13 @@ pub struct RuntimeHandle {
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
-    /// 而非自动恢复被中断的对话（#503）。
-    pub(crate) skip_first_pending_turn: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
     pub(crate) change_tx: watch::Sender<ChangeSet>,
-    pub(crate) change_rx: watch::Receiver<ChangeSet>,
 
     // ─── SDK 业务对象 ───
-    /// HookRunner（clone，供 SDK 通知 hook）
-    pub(crate) hook_runner: Option<hook::api::HookRunner>,
-    /// TaskStore（Arc，供 SDK 恢复任务）
-    pub(crate) task_store: Option<std::sync::Arc<TaskStore>>,
     /// Session reminders（供 SDK 增删改查）
     pub(crate) session_reminders:
         std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
-}
-
-impl AgentClientImpl {
-    pub fn notify_change(&self, set: ChangeSet) {
-        let previous = *self.inner.change_tx.borrow();
-        let _ = self.inner.change_tx.send(previous | set);
-    }
 }
 
 // ─── 公共访问器（CLI runtime.rs 需要） ───
@@ -137,36 +125,4 @@ impl AgentClientImpl {
             workspace_root: self.inner.cwd.clone(),
         }
     }
-}
-
-pub async fn config_view_impl(this: &super::AgentClientImpl) -> Result<ConfigView, sdk::SdkError> {
-    let resolved = this.resolved_model();
-    let ctx = this.context();
-    let model_display = super::mapping::model_display(
-        &resolved.source_key,
-        &resolved.model.name,
-        &resolved.model.id,
-    );
-    let api_key = resolved.source_config.api_key.as_str();
-    Ok(ConfigView {
-        model_name: model_display,
-        provider: Some(resolved.source_key.clone()),
-        has_api_key: !api_key.is_empty(),
-        api_key_preview: if api_key.len() >= 8 {
-            Some(api_key[..8].to_string())
-        } else if !api_key.is_empty() {
-            Some(api_key.to_string())
-        } else {
-            None
-        },
-        permission_mode: if ctx.resources.allow_all {
-            "allow_all".into()
-        } else {
-            "ask".into()
-        },
-        markdown: true,
-        verbose: ctx.verbose,
-        context_size: ctx.resources.context_size,
-        logging_level: String::new(),
-    })
 }

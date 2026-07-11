@@ -6,7 +6,6 @@ use crate::tui::update::msg::TuiMsg;
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use sdk::ChangeSet;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -32,12 +31,6 @@ pub(crate) fn tui_msg_name(msg: &TuiMsg) -> &'static str {
 }
 
 impl App {
-    /// #567: config_view() 方法已从 AgentClient trait 移除。
-    /// config_view 现在由本地配置加载维护，此方法保留为 no-op 占位。
-    async fn refresh_config_view(&mut self) {
-        // config_view 在 App 初始化时由本地配置填充，不再从 runtime 拉取。
-    }
-
     /// #390 A1：建立常驻 chat() 处理回路（启动一次 + `/clear` 后自愈重建）。
     ///
     /// 经 `build_spawn_context` 建一条新的 input_events 通道（sender 存入

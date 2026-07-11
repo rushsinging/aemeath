@@ -80,6 +80,14 @@ pub struct ModelEntryConfig {
     /// - `Some(false)` — force disable thinking
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<bool>,
+
+    /// 固定推理档位（"off"/"low"/"medium"/"high"/"xhigh"/"max"）。
+    /// - `None`（默认）— 沿用 `reasoning` bool 映射（true→Medium）
+    /// - `Some(level)` — 视为开启思考并取该档位，优先级高于 `reasoning`
+    ///
+    /// 最终档位仍会被全局 max_reasoning 上限与各 provider 能力上限双重 clamp。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ModelEntryConfig {

@@ -134,7 +134,7 @@ async fn test_agent_tool_task_id_success_completes_task() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "taskId": task.id,
+                "task_id": task.id,
             }),
             &test_ctx(),
         )
@@ -160,7 +160,7 @@ async fn test_agent_tool_task_id_failure_resets_pending() {
             serde_json::json!({
                 "prompt": "Sub-agent error: failed",
                 "description": "run task",
-                "taskId": task.id,
+                "task_id": task.id,
             }),
             &test_ctx(),
         )
@@ -181,7 +181,7 @@ async fn test_agent_tool_task_id_missing_task_errors() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "taskId": "missing",
+                "task_id": "missing",
             }),
             &test_ctx(),
         )
@@ -241,42 +241,6 @@ async fn test_agent_tool_allows_missing_task_id_without_active_list() {
 
     assert!(!result.is_error);
     assert_eq!(*runner.run_count.lock().unwrap(), 1);
-}
-
-#[test]
-fn test_analyze_task_scope_numbered_list_has_no_warning() {
-    let prompt =
-        "请按以下步骤执行：\n1. 读取文件\n2. 分析问题\n3. 修改代码\n4. 运行测试\n5. 汇报结果";
-
-    let result = analyze_task_scope(prompt, &PathBuf::from("."));
-
-    assert_eq!(result.level, ScopeLevel::Ok);
-    assert!(result.warnings.is_empty());
-}
-
-#[test]
-fn test_analyze_task_scope_large_task_pattern_no_longer_blocks() {
-    // LARGE_TASK_PATTERNS is now empty — broad task keywords no longer trigger
-    // Block or any warning. The calling agent decides scope appropriateness.
-    let prompt = "review all files in the entire codebase";
-
-    let result = analyze_task_scope(prompt, &PathBuf::from("."));
-
-    assert_eq!(result.level, ScopeLevel::Ok);
-    assert!(result.warnings.is_empty());
-}
-
-#[test]
-fn test_analyze_task_scope_simple_task_still_warns() {
-    let prompt = "read the file and summarize it";
-
-    let result = analyze_task_scope(prompt, &PathBuf::from("."));
-
-    assert_eq!(result.level, ScopeLevel::Warn);
-    assert!(result
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("simple task")));
 }
 
 #[test]

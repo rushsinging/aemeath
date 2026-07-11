@@ -11,7 +11,6 @@ use crate::tui::effect::effect::Effect;
 #[ignore = "#567: SaveSession 正在迁移到事件流，Effect 路径将被删除"]
 async fn test_save_session_effect_notify_emits_session_saved() {
     let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
-    app.chat.messages.push(sdk::ChatMessage::user_text("hello"));
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
@@ -44,45 +43,33 @@ async fn test_save_session_effect_silent_when_not_notify_and_empty() {
 
 /// A2 错误路径：无 agent client 时 /save 回灌 SlashCommandFailed 反馈。
 #[tokio::test]
-async fn test_save_session_effect_no_client_emits_failure() {
+async fn test_save_session_effect_no_client_emits_saved() {
+    // #688: /save 不再发 ChatInputEvent::SaveSession（runtime 有 turn-level auto-save）。
+    // 无 client 时仍直接返回 SessionSaved UX 反馈。
     let mut app = super::App::new(
         "test-session".to_string(),
         std::env::temp_dir(),
         "test-model".to_string(),
     );
-    app.chat.messages.push(sdk::ChatMessage::user_text("hi"));
+    app.model.conversation.apply(
+        crate::tui::model::conversation::intent::ConversationIntent::ResumeConversation(
+            crate::tui::model::conversation::intent::ResumeConversation {
+                messages: vec![sdk::ChatMessage::user_text("hi")],
+            },
+        ),
+    );
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(8);
     app.execute_effect(Effect::SaveSession { notify: true }, &tx)
         .await;
 
-    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
+    // spawn_guarded 后台执行，需 yield 让后台任务完成。
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-    let event = rx.try_recv().expect("/save 无 client 应回灌失败事件");
+    let event = rx.try_recv().expect("/save 应回灌 SessionSaved 事件");
     assert!(
-        matches!(event, UiEvent::SlashCommandFailed { ref message } if message.contains("Failed to save session")),
-        "应回灌保存失败反馈，实际: {event:?}"
-    );
-}
-
-/// A3：/memory 经 `Effect::FetchMemoryList` 拉取 reminder 列表，结果经
-/// `UiEvent::MemoryList` 回灌（mock 返回空列表仍回灌）。
-#[tokio::test]
-#[ignore = "#567: 迁移到事件流后需要重写测试"]
-async fn test_fetch_memory_list_effect_emits_memory_list() {
-    let (mut app, _started_rx, _finish_tx) = app_with_blocking_reflection_client();
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-    app.execute_effect(Effect::FetchMemoryList, &tx).await;
-
-    // #497：spawn_guarded 后台执行，需 yield 让后台任务完成。
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-    let event = rx.try_recv().expect("/memory 应回灌 MemoryList 事件");
-    assert!(
-        matches!(event, UiEvent::MemoryList(ref list) if list.is_empty()),
-        "应回灌 MemoryList 事件，实际: {event:?}"
+        matches!(event, UiEvent::SessionSaved { ref id } if id == "test-session"),
+        "应回灌 SessionSaved，实际: {event:?}"
     );
 }
 

@@ -2,6 +2,7 @@ use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
 use crate::core::config_app_service::ConfigAppService;
+use crate::core::config_port::ConfigReader;
 
 type Result<T> = std::result::Result<T, SdkError>;
 
@@ -19,12 +20,14 @@ pub(crate) async fn build_llm_client_for_switch(
     };
     use provider::api::ProviderDriverKind;
 
-    let config = ConfigAppService::new(Some(cwd)).load().await?;
+    let svc = ConfigAppService::new(Some(cwd));
+    svc.load().await?;
+    let snapshot = svc.snapshot().await;
 
-    let resolved_model = config
-        .models
-        .resolve_model_selection(selection)
+    let runtime_model = snapshot
+        .resolve_runtime_model(Some(selection), None)
         .map_err(|e| e.to_string())?;
+    let resolved_model = runtime_model.resolved_model().clone();
 
     let driver =
         ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
@@ -40,8 +43,7 @@ pub(crate) async fn build_llm_client_for_switch(
     let model_id = resolved_model.model.id.clone();
 
     let runtime_settings =
-        resolve_model_runtime_settings(None, &resolved_model.model, Some(&config), true)
-            .map_err(|e| e.to_string())?;
+        resolve_model_runtime_settings(runtime_model.max_tokens(), &resolved_model.model, true);
 
     let new_client = build_llm_client(
         driver,
@@ -51,6 +53,7 @@ pub(crate) async fn build_llm_client_for_switch(
         &resolved_model,
         &runtime_settings,
         None,
+        provider::DEFAULT_TIMEOUT_SECS,
     );
 
     let display_name = if resolved_model.model.name.is_empty() {
@@ -70,12 +73,10 @@ pub(crate) async fn build_llm_client_for_switch(
 }
 
 pub(super) async fn list_models_impl(me: &AgentClientImpl) -> Result<Vec<ModelSummary>> {
-    let config = ConfigAppService::new(Some(&me.inner.cwd))
-        .load()
-        .await
-        .map_err(SdkError::Init)?;
-    Ok(config
-        .models
+    let svc = ConfigAppService::new(Some(&me.inner.cwd));
+    svc.load().await.map_err(SdkError::Init)?;
+    let snapshot = svc.snapshot().await;
+    Ok(snapshot
         .list_models()
         .into_iter()
         .map(|(provider, model)| ModelSummary {

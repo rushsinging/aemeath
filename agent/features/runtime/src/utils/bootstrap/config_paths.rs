@@ -85,45 +85,6 @@ pub async fn ensure_agents_dirs() -> Result<(), String> {
 }
 
 #[cfg(test)]
-pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(test)]
-pub(crate) struct TestEnvGuard {
-    key: &'static str,
-    old: Option<std::ffi::OsString>,
-    _guard: std::sync::MutexGuard<'static, ()>,
-}
-
-#[cfg(test)]
-impl TestEnvGuard {
-    pub(crate) fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-        let guard = TEST_ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let old = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self {
-            key,
-            old,
-            _guard: guard,
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for TestEnvGuard {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(old) = &self.old {
-                std::env::set_var(self.key, old);
-            } else {
-                std::env::remove_var(self.key);
-            }
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;

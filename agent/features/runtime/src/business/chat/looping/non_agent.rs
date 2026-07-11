@@ -1,6 +1,8 @@
 use crate::business::agent::{Agent, ToolCall, ToolExecution};
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
+use crate::business::chat::looping::{
+    ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+};
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
 use share::tool::ToolOutcome;
@@ -8,7 +10,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::tools::{
-    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_result,
+    emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_call_status,
+    send_tool_result,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -217,6 +220,14 @@ where
         index: call.index,
         input: call.input.clone(),
     };
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing start: kind=non_agent tool_name={} runtime_id={} provider_id={} index={} input_len={}",
+        owned_call.name,
+        owned_call.id,
+        owned_call.provider_id,
+        owned_call.index,
+        owned_call.input.to_string().len(),
+    );
     let pre_results = hook_ui
         .run_plain(
             hook_runner,
@@ -232,6 +243,14 @@ where
         )
         .await;
     if let Some(blocked_result) = pre_results.iter().find(|r| r.blocked) {
+        log::debug!(target: crate::LOG_TARGET,
+            "pretooluse timing blocked: kind=non_agent tool_name={} runtime_id={} provider_id={} exit_code={:?} error_present={}",
+            owned_call.name,
+            owned_call.id,
+            owned_call.provider_id,
+            blocked_result.exit_code,
+            blocked_result.error.as_ref().is_some_and(|value| !value.is_empty()),
+        );
         let default_blocked = match language {
             "zh" => "被 PreToolUse hook 阻止",
             _ => "Blocked by PreToolUse hook",
@@ -241,6 +260,21 @@ where
         send_tool_result(sink, context, &result).await;
         return vec![result];
     }
+    log::debug!(target: crate::LOG_TARGET,
+        "pretooluse timing approved: kind=non_agent tool_name={} runtime_id={} provider_id={} hook_count={}",
+        owned_call.name,
+        owned_call.id,
+        owned_call.provider_id,
+        pre_results.len(),
+    );
+    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Ready).await;
+    send_tool_call_status(sink, context, &owned_call, RuntimeToolCallStatus::Running).await;
+    log::debug!(target: crate::LOG_TARGET,
+        "tool execution timing running_sent: kind=non_agent tool_name={} runtime_id={} provider_id={}",
+        owned_call.name,
+        owned_call.id,
+        owned_call.provider_id,
+    );
     // Only Bash supports stdout streaming via progress_tx. For other tools,
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = owned_call.name == "Bash";
@@ -383,5 +417,170 @@ async fn run_task_hooks<S>(
                 .await,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use serde_json::Value;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+
+    struct ConcurrencyFlagTool {
+        name: &'static str,
+        safe: bool,
+    }
+
+    #[async_trait]
+    impl TypedTool for ConcurrencyFlagTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn description(&self) -> &str {
+            "concurrency classification test tool"
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        fn is_concurrency_safe(&self) -> bool {
+            self.safe
+        }
+
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            TypedToolResult::success("ok", Value::Null)
+        }
+    }
+
+    fn test_ctx() -> ToolExecutionContext {
+        let cwd = std::env::current_dir().unwrap();
+        ToolExecutionContext {
+            resources: tools::api::ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
+            workspace: project::api::WorkspaceService::new(cwd),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            session_reminders: None,
+            plan_mode: None,
+            max_tool_concurrency: 10,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        }
+    }
+
+    fn call(name: &str, index: usize) -> ToolCall {
+        ToolCall {
+            provider_id: "provider-test".to_string(),
+            id: sdk::ids::ToolCallId::from_legacy_or_new(&format!("call-{index}")),
+            name: name.to_string(),
+            index,
+            input: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn test_partition_calls_routes_concurrency_safe_tools_to_concurrent() {
+        let registry = ToolRegistry::new();
+        registry.register(ConcurrencyFlagTool {
+            name: "safe_a",
+            safe: true,
+        });
+        registry.register(ConcurrencyFlagTool {
+            name: "safe_b",
+            safe: true,
+        });
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("safe_a", 0), call("safe_b", 1)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert_eq!(concurrent, vec![0, 1]);
+        assert!(sequential.is_empty());
+    }
+
+    #[test]
+    fn test_partition_calls_routes_non_concurrency_safe_tools_to_sequential() {
+        let registry = ToolRegistry::new();
+        registry.register(ConcurrencyFlagTool {
+            name: "unsafe_a",
+            safe: false,
+        });
+        registry.register(ConcurrencyFlagTool {
+            name: "unsafe_b",
+            safe: false,
+        });
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("unsafe_a", 0), call("unsafe_b", 1)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert!(concurrent.is_empty());
+        assert_eq!(sequential, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_partition_calls_preserves_mixed_positions() {
+        let registry = ToolRegistry::new();
+        registry.register(ConcurrencyFlagTool {
+            name: "safe",
+            safe: true,
+        });
+        registry.register(ConcurrencyFlagTool {
+            name: "unsafe",
+            safe: false,
+        });
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("safe", 0), call("unsafe", 1), call("safe", 2)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert_eq!(concurrent, vec![0, 2]);
+        assert_eq!(sequential, vec![1]);
+    }
+
+    #[test]
+    fn test_partition_calls_routes_unknown_tools_to_sequential() {
+        let registry = ToolRegistry::new();
+        let agent = Agent {
+            registry: &registry,
+            ctx: test_ctx(),
+        };
+        let calls = [call("missing", 0)];
+        let refs = calls.iter().collect::<Vec<_>>();
+
+        let (concurrent, sequential) = partition_calls(&agent, &refs);
+
+        assert!(concurrent.is_empty());
+        assert_eq!(sequential, vec![0]);
     }
 }

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
 
 use hook::api::HookRunner;
-use share::config::{paths, MemoryConfig};
+use share::config::paths;
 use share::i18n::prompt::commit::commit_guidance_template;
 use share::i18n::prompt::system::{date_label, static_system_prompt};
 
@@ -76,7 +76,6 @@ fn build_commit_guidance(
 pub async fn build_system_prompt_parts(
     context: &PromptContext,
     hook_runner: &HookRunner,
-    _memory_config: &MemoryConfig,
     lang: &str,
 ) -> SystemPromptParts {
     let cwd = &context.cwd;

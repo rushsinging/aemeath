@@ -17,26 +17,29 @@ pub struct TaskUpdateResult {
 /// Typed input for the `task_update` tool.
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
-/// camelCase 属性名（`taskId`、`activeForm`、`progressMessage`、`addBlockedBy`、
-/// `addBlocks`、`addTags`、`removeTags`）通过 camelCase 字段名直接产出，
-/// 与现有手写 schema 完全一致。
 #[derive(Debug, Clone, Deserialize, Default)]
-#[allow(non_snake_case)]
 pub struct TaskUpdateInput {
     /// The ID of the task to update
-    pub taskId: String,
+    #[serde(alias = "taskId")]
+    pub task_id: String,
     pub status: Option<String>,
     pub subject: Option<String>,
     pub description: Option<String>,
-    pub activeForm: Option<String>,
+    #[serde(alias = "activeForm")]
+    pub active_form: Option<String>,
     pub owner: Option<String>,
     pub priority: Option<String>,
     /// Progress percentage (0-100)
     pub progress: Option<u8>,
     /// Progress status message
-    pub progressMessage: Option<String>,
-    pub addBlockedBy: Option<Vec<String>>,
-    pub addBlocks: Option<Vec<String>>,
-    pub addTags: Option<Vec<String>>,
-    pub removeTags: Option<Vec<String>>,
+    #[serde(alias = "progressMessage")]
+    pub progress_message: Option<String>,
+    #[serde(alias = "addBlockedBy")]
+    pub add_blocked_by: Option<Vec<String>>,
+    #[serde(alias = "addBlocks")]
+    pub add_blocks: Option<Vec<String>>,
+    #[serde(alias = "addTags")]
+    pub add_tags: Option<Vec<String>>,
+    #[serde(alias = "removeTags")]
+    pub remove_tags: Option<Vec<String>>,
 }

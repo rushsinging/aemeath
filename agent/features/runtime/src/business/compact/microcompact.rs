@@ -3,14 +3,12 @@
 //! 在 auto-compact（LLM 摘要）之前、budget reduction 之后运行。
 //! 纯规则判断，不调用 LLM，运行成本接近零。
 //!
-//! 策略：
-//! 1. 扫描 messages，建立 tool_use_id → tool_name 映射。
-//! 2. 以 User message 为分界，最近 `PROTECT_RECENT_TURNS` 轮内的 ToolResult 保护不动。
-//! 3. 保护轮之外的探索类工具（Read/Grep/Glob/Bash/WebFetch/WebSearch 等）结果
-//!    替换为占位符 `[Old tool result cleared (was N chars)]`。
-//! 4. 非白名单工具（Edit/Write/TaskCreate 等）不受影响。
+//! 两种入口：
+//! - **主循环**：`microcompact_chain(&mut ChatChain)` — 按 segment 边界保护最近 3 个大 loop。
+//! - **sub-agent**：`microcompact_messages(&mut [Message])` — 按 User turn 保护最近 2 轮。
 
-use share::message::{ContentBlock, Message, Role};
+use crate::business::session::ChatChain;
+use share::message::{ContentBlock, Message, MessageSource, Role};
 use std::collections::HashMap;
 
 /// 探索类/只读工具白名单——这些工具的结果"过期"后不再有参考价值。
@@ -25,64 +23,41 @@ pub const EXPLORATORY_TOOLS: &[&str] = &[
     "ToolSearch",
 ];
 
-/// 保护最近 N 轮的 ToolResult 不被清理。
-/// "轮"以 User message 为分界（连续两个 User message 之间为 1 轮）。
+/// 主循环：保护最近 N 个 segment 的探索类 ToolResult 不被清理。
+const PROTECT_RECENT_SEGMENTS: usize = 3;
+
+/// Sub-agent：保护最近 N 轮的 ToolResult 不被清理。
+/// "轮"以真实 User message 为分界（排除 ToolResult / 系统注入）。
 const PROTECT_RECENT_TURNS: usize = 2;
 
 /// 占位符模板。
 const PLACEHOLDER_TEMPLATE: &str = "[Old tool result cleared (was {n} chars)]";
 
-/// 对 messages 执行 microcompact：原地替换陈旧探索类 tool result 为占位符。
+// ── 主循环入口 ──────────────────────────────────────
+
+/// 对 ChatChain 执行 microcompact：保护最近 `PROTECT_RECENT_SEGMENTS` 个 segment，
+/// 折叠更早 segment 中的探索类 ToolResult 为占位符。
 ///
-/// 返回被清理的 ToolResult 数量。调用方可据此判断是否需要日志 / 事件通知。
-/// 不改变 messages 的长度（不删除消息，只替换 content）。
-pub fn microcompact_messages(messages: &mut [Message]) -> usize {
-    if messages.len() <= 4 {
+/// 返回被清理的 ToolResult 数量。
+pub fn microcompact_chain(chain: &mut ChatChain) -> usize {
+    let segments = chain.active_segments();
+    if segments.len() <= PROTECT_RECENT_SEGMENTS {
         return 0;
     }
 
-    // 建立 tool_use_id → tool_name 映射
-    let tool_names = build_tool_name_map(messages);
-
-    // 计算保护边界：最近 PROTECT_RECENT_TURNS 轮的起始 message index
-    let protect_from = protect_from_index(messages);
+    // 建立 tool_use_id → tool_name 映射（全链扫描）
+    let tool_names = build_tool_name_map_flat(chain);
 
     let mut cleared = 0;
-    for (i, msg) in messages.iter_mut().enumerate() {
-        // protect_from 及之后的消息属于最近轮次，保护不动
-        if i >= protect_from {
+    let protect_from_seg = segments.len() - PROTECT_RECENT_SEGMENTS;
+
+    for (seg_idx, seg) in chain.active_segments_mut().iter_mut().enumerate() {
+        if seg_idx >= protect_from_seg {
             break;
         }
-        for block in msg.content.iter_mut() {
-            if let ContentBlock::ToolResult {
-                tool_use_id,
-                content,
-                text,
-                ..
-            } = block
-            {
-                // 通过 tool_use_id 查工具名
-                let tool_name = tool_names.get(tool_use_id.as_str());
-                if let Some(name) = tool_name {
-                    if !is_exploratory(name) {
-                        continue;
-                    }
-                } else {
-                    // 未知工具名，保守保留
-                    continue;
-                }
-
-                // 计算原始大小
-                let original_size = tool_result_size(content, text.as_deref());
-                if original_size == 0 {
-                    continue;
-                }
-
-                // 替换为占位符
-                let placeholder = PLACEHOLDER_TEMPLATE.replace("{n}", &original_size.to_string());
-                *content = serde_json::Value::String(placeholder.clone());
-                *text = Some(placeholder);
-                cleared += 1;
+        for msg in &mut seg.messages {
+            for block in &mut msg.content {
+                cleared += clear_if_exploratory(block, &tool_names);
             }
         }
     }
@@ -90,9 +65,94 @@ pub fn microcompact_messages(messages: &mut [Message]) -> usize {
     cleared
 }
 
+// ── sub-agent 入口 ──────────────────────────────────
+
+/// 对扁平 messages 执行 microcompact（供 sub-agent 使用）。
+///
+/// 修复 turn 检测：用 `is_real_user_turn` 替代裸 `Role::User` 计数，
+/// 避免 ToolResult / 系统注入被误判为 turn 边界。
+///
+/// 返回被清理的 ToolResult 数量。不改变 messages 的长度。
+pub fn microcompact_messages(messages: &mut [Message]) -> usize {
+    if messages.len() <= 4 {
+        return 0;
+    }
+
+    let tool_names = build_tool_name_map(messages);
+    let protect_from = protect_from_index(messages);
+
+    let mut cleared = 0;
+    for (i, msg) in messages.iter_mut().enumerate() {
+        if i >= protect_from {
+            break;
+        }
+        for block in &mut msg.content {
+            cleared += clear_if_exploratory(block, &tool_names);
+        }
+    }
+
+    cleared
+}
+
+// ── 共享逻辑 ──────────────────────────────────────
+
 /// 判断工具是否属于探索类（可被 microcompact 清理）。
 fn is_exploratory(tool_name: &str) -> bool {
     EXPLORATORY_TOOLS.contains(&tool_name)
+}
+
+/// 判断一条消息是否为真实用户 turn（排除 ToolResult 批次和系统注入）。
+fn is_real_user_turn(msg: &Message) -> bool {
+    if !matches!(msg.role, Role::User) {
+        return false;
+    }
+    if msg
+        .content
+        .iter()
+        .all(|b| matches!(b, ContentBlock::ToolResult { .. }))
+    {
+        return false;
+    }
+    if msg
+        .metadata
+        .as_ref()
+        .map(|m| m.source == MessageSource::SystemGenerated)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    true
+}
+
+/// 如果 block 是探索类 ToolResult，替换为占位符，返回 1；否则返回 0。
+fn clear_if_exploratory(block: &mut ContentBlock, tool_names: &HashMap<String, String>) -> usize {
+    let ContentBlock::ToolResult {
+        tool_use_id,
+        content,
+        text,
+        ..
+    } = block
+    else {
+        return 0;
+    };
+
+    let tool_name = tool_names.get(tool_use_id.as_str());
+    let Some(name) = tool_name else {
+        return 0; // 未知工具名，保守保留
+    };
+    if !is_exploratory(name) {
+        return 0; // 非探索类，保留
+    }
+
+    let original_size = tool_result_size(content, text.as_deref());
+    if original_size == 0 {
+        return 0;
+    }
+
+    let placeholder = PLACEHOLDER_TEMPLATE.replace("{n}", &original_size.to_string());
+    *content = serde_json::Value::String(placeholder.clone());
+    *text = Some(placeholder);
+    1
 }
 
 /// 从所有消息中建立 tool_use_id → tool_name 映射（owned，避免借用冲突）。
@@ -108,21 +168,35 @@ fn build_tool_name_map(messages: &[Message]) -> HashMap<String, String> {
     map
 }
 
-/// 计算保护边界的 message index：该 index 及之后的 ToolResult 不被清理。
+/// 从 ChatChain 全部 segment 建立 tool_use_id → tool_name 映射。
+fn build_tool_name_map_flat(chain: &ChatChain) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for seg in chain.active_segments() {
+        for msg in &seg.messages {
+            for block in &msg.content {
+                if let ContentBlock::ToolUse { id, name, .. } = block {
+                    map.insert(id.clone(), name.clone());
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 计算保护边界的 message index（sub-agent 用）。
 ///
-/// 从末尾向前数 PROTECT_RECENT_TURNS 个 User message，最后一个 User message
-/// 的 index 就是保护边界。该 User message 及之后的所有结果都保留。
+/// 从末尾向前数 `PROTECT_RECENT_TURNS` 个真实 user turn，
+/// 最后一个 real user turn 的 index 就是保护边界。
 fn protect_from_index(messages: &[Message]) -> usize {
     let mut user_count = 0;
     for (i, msg) in messages.iter().enumerate().rev() {
-        if matches!(msg.role, Role::User) {
+        if is_real_user_turn(msg) {
             user_count += 1;
             if user_count == PROTECT_RECENT_TURNS {
                 return i;
             }
         }
     }
-    // 不足 PROTECT_RECENT_TURNS 轮，保护全部
     0
 }
 
@@ -372,5 +446,106 @@ mod tests {
         if let ContentBlock::ToolResult { text, .. } = &msgs[4].content[0] {
             assert!(text.as_ref().unwrap().contains("cleared"));
         }
+    }
+
+    // ── microcompact_messages 修复后的 turn 检测 ──────────
+
+    #[test]
+    fn test_tool_result_not_counted_as_turn_boundary() {
+        // 修复前：ToolResult 是 Role::User，被误算为 turn → 保护边界偏移。
+        // 修复后：is_real_user_turn 排除纯 ToolResult，保护边界正确。
+        let mut msgs = vec![
+            user_msg("turn1"),                 // 0 — real user turn
+            tool_use_msg("t1", "Read"),        // 1
+            tool_result_msg("t1", "content1"), // 2 — User but NOT a turn
+            tool_use_msg("t2", "Read"),        // 3
+            tool_result_msg("t2", "content2"), // 4 — User but NOT a turn
+            assistant_msg("ok"),               // 5
+            user_msg("turn2"),                 // 6 — real user turn
+            assistant_msg("done"),             // 7
+        ];
+        // PROTECT_RECENT_TURNS=2 → protect_from = 倒数第 2 个 real user turn
+        // 倒数第 2 个 real user turn = index 0 (turn1)
+        // 所以 protect_from = 0 → 全部保护
+        let cleared = microcompact_messages(&mut msgs);
+        assert_eq!(cleared, 0);
+    }
+
+    // ── microcompact_chain ──────────────────────────────
+
+    fn make_chain(num_segments: usize, tool_per_seg: usize) -> ChatChain {
+        use crate::business::session::ChatSegment;
+        let mut segments = Vec::new();
+        let mut parent = None;
+        for s in 0..num_segments {
+            let mut seg = ChatSegment {
+                id: format!("seg-{s}"),
+                parent_id: parent.clone(),
+                kind: crate::business::session::SegmentKind::Normal,
+                summary: None,
+                messages: vec![user_msg(&format!("turn{s}")), assistant_msg("reply")],
+            };
+            for t in 0..tool_per_seg {
+                let id = format!("tu-{s}-{t}");
+                seg.messages.push(tool_use_msg(&id, "Read"));
+                seg.messages
+                    .push(tool_result_msg(&id, &format!("file content {s}-{t}")));
+            }
+            parent = Some(seg.id.clone());
+            segments.push(seg);
+        }
+        ChatChain::from_segments(segments)
+    }
+
+    #[test]
+    fn test_microcompact_chain_protects_recent_3_segments() {
+        // 5 segments, each with 1 Read result
+        let mut chain = make_chain(5, 1);
+        let cleared = microcompact_chain(&mut chain);
+        // 最近 3 个保护，前 2 个折叠
+        assert_eq!(cleared, 2);
+    }
+
+    #[test]
+    fn test_microcompact_chain_noop_with_few_segments() {
+        let mut chain = make_chain(3, 1);
+        let cleared = microcompact_chain(&mut chain);
+        // 仅 3 个 segment，全部保护
+        assert_eq!(cleared, 0);
+    }
+
+    #[test]
+    fn test_microcompact_chain_preserves_non_exploratory() {
+        // segment 中只有 Edit 结果 → 不折叠
+        use crate::business::session::{ChatChain, ChatSegment, SegmentKind};
+        let seg1 = ChatSegment {
+            id: "seg-0".to_string(),
+            parent_id: None,
+            kind: SegmentKind::Normal,
+            summary: None,
+            messages: vec![
+                user_msg("turn0"),
+                tool_use_msg("e1", "Edit"),
+                tool_result_msg("e1", "diff content"),
+                assistant_msg("ok"),
+            ],
+        };
+        let mut parent = Some(seg1.id.clone());
+        let mut segs = vec![seg1];
+        for s in 1..5 {
+            let seg = ChatSegment {
+                id: format!("seg-{s}"),
+                parent_id: parent.clone(),
+                kind: SegmentKind::Normal,
+                summary: None,
+                messages: vec![user_msg(&format!("turn{s}")), assistant_msg("reply")],
+            };
+            parent = Some(seg.id.clone());
+            segs.push(seg);
+        }
+        let mut chain = ChatChain::from_segments(segs);
+        let cleared = microcompact_chain(&mut chain);
+        // Edit 不在探索类白名单 → 0
+        assert_eq!(cleared, 0);
     }
 }

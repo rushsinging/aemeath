@@ -25,9 +25,7 @@ impl App {
             .apply(SetStatusNotice(StatusNotice::ready()));
         self.input.ask_user_reply_tx = None;
         self.input.ask_user_state = None;
-        // #567 S5：sync_current_messages / clear_tasks 已下沉到 runtime gate
-        //（Reset 事件 idle 分支）。loop 未运行时 current_messages 会在下次 start_chat
-        // 时被覆写，task_store 不影响新对话。
+        // Reset 事件由 runtime gate 处理（清 chain + clear_tasks）。
         self.model.conversation.apply(UpdateTaskLines(Vec::new()));
     }
     /// Set loaded skills for slash command alias lookup
@@ -62,40 +60,6 @@ impl App {
             branch: None,
             kind,
         });
-    }
-
-    /// Refresh the cached session list for /resume autocomplete.
-    ///
-    /// #567：list_sessions 已从 trait 删除。改为通过 input_event 通道发送
-    /// ManageSession 事件，结果通过 SessionList 事件回传（由 run_loop 处理）。
-    pub async fn refresh_session_cache(&mut self) {
-        if self.chat.input_event_tx.is_some() {
-            self.chat
-                .push_input_event(sdk::ChatInputEvent::ManageSession {
-                    args: String::new(),
-                });
-        }
-    }
-
-    /// Refresh the cached model list for /model dialog and completion suggestions.
-    ///
-    /// 模型列表为配置派生、会话期内基本不变的静态数据，启动期预取后由 UI 同步读取，
-    /// 消除 dialog/suggestions 在纯路径内的 block_on。
-    ///
-    /// #567：list_models 已从 trait 删除。改为通过 input_event 通道发送
-    /// ListModels 事件，结果通过 ModelList 事件回传（由 run_loop 处理）。
-    pub async fn refresh_model_cache(&mut self) {
-        if self.chat.input_event_tx.is_some() {
-            self.chat.push_input_event(sdk::ChatInputEvent::ListModels);
-        }
-    }
-}
-
-fn empty_to_none(value: String) -> Option<String> {
-    if value.trim().is_empty() {
-        None
-    } else {
-        Some(value)
     }
 }
 

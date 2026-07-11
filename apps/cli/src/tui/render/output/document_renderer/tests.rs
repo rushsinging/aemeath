@@ -1,7 +1,9 @@
 use super::*;
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::RenderedLine;
-use crate::tui::view_model::output::{BlockNode, OutputBlockKind, OutputViewModel, TextBlockView};
+use crate::tui::view_model::output::{
+    BlockNode, ModelStreamPlaceholderBlockView, OutputBlockKind, OutputViewModel, TextBlockView,
+};
 use crate::tui::view_model::style::SemanticStyle;
 
 fn visible_line_width(line: &RenderedLine) -> usize {
@@ -45,6 +47,34 @@ fn vm_with_roots(roots: Vec<BlockNode>) -> OutputViewModel {
         version: 1,
         follow_tail_hint: true,
     }
+}
+
+fn placeholder_node() -> BlockNode {
+    let kind = OutputBlockKind::ModelStreamPlaceholder(ModelStreamPlaceholderBlockView {
+        key: "model-stream-placeholder".into(),
+        elapsed_secs: 10,
+        phase: "waiting_first_model_delta".into(),
+    });
+    BlockNode {
+        block_id: "model-stream-placeholder".into(),
+        block_version: kind.cache_version(),
+        kind,
+        children: Vec::new(),
+    }
+}
+
+#[test]
+fn test_model_stream_placeholder_header_animates_dots() {
+    let vm = vm_with_roots(vec![placeholder_node()]);
+    let mut renderer = OutputDocumentRenderer::default();
+
+    let doc0 = renderer.render_tree_with_animation_frame(&vm, 80, 0);
+    let doc1 = renderer.render_tree_with_animation_frame(&vm, 80, 4);
+    let doc2 = renderer.render_tree_with_animation_frame(&vm, 80, 8);
+
+    assert_eq!(doc0.blocks[0].lines[1].plain, "Thinking.");
+    assert_eq!(doc1.blocks[0].lines[1].plain, "Thinking..");
+    assert_eq!(doc2.blocks[0].lines[1].plain, "Thinking...");
 }
 
 #[test]
@@ -102,7 +132,7 @@ fn test_render_tree_tool_result_fence_does_not_leak_to_sibling_root() {
         semantic_status: ToolSemanticStatus::Success,
         style: SemanticStyle::Success,
         args_preview: None,
-        activity_summary: None,
+        activity_lines: Vec::new(),
         result_summary: Some("```\ncode\n```".into()),
         result_payload: None,
         workspace_root: None,
@@ -409,7 +439,7 @@ fn test_render_tree_depth_one_full_width_assistant_does_not_exceed_outer_width()
         semantic_status: ToolSemanticStatus::Success,
         style: SemanticStyle::Normal,
         args_preview: None,
-        activity_summary: None,
+        activity_lines: Vec::new(),
         result_summary: None,
         result_payload: None,
         workspace_root: None,

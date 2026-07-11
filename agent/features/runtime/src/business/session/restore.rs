@@ -23,6 +23,8 @@ use share::message::Message;
 pub struct SessionRestore {
     /// 经过 sanitize + deep_clean 修剪后的活跃链消息。
     pub active_messages: Vec<Message>,
+    /// 按 user turn 分段的活跃链（从 `active_messages` 用 `from_flat_messages` 构造）。
+    pub active_chain: ChatChain,
     /// 冻结的历史 chat 段（最后一个 Compact 段之前的全部段；若无 Compact 段则为空）。
     pub frozen_chats: Vec<ChatSegment>,
     /// 活跃链的 compact 摘要（活跃链首个 Compact 段的 summary），无则 None。
@@ -73,7 +75,8 @@ impl SessionRestore {
         };
 
         Self {
-            active_messages: messages,
+            active_messages: messages.clone(),
+            active_chain: ChatChain::from_flat_messages(messages),
             frozen_chats,
             active_summary: summary,
             created_at: session.created_at.clone(),
@@ -133,6 +136,8 @@ mod tests {
         assert!(restore.active_summary.is_none());
         assert_eq!(restore.created_at, "2025-01-01T00:00:00Z");
         assert!(restore.skip_first_pending_turn);
+        // active_chain 从扁平消息重建：1 个真实 user turn → 1 segment
+        assert_eq!(restore.active_chain.active_segments().len(), 1);
     }
 
     #[test]
@@ -185,5 +190,32 @@ mod tests {
         let restore = SessionRestore::from_session(&session);
 
         assert_eq!(restore.active_messages.len(), 2);
+    }
+
+    #[test]
+    fn active_chain_from_legacy_single_segment_is_single_segment() {
+        // 旧 session：3 个 user turn 被存在单个 Normal segment 中。
+        // from_flat_messages 不猜测边界，恢复为单段。
+        // 运行时后续 start_new_segment() 会在新 user turn 时创建正确边界。
+        let chats = vec![segment(
+            None,
+            SegmentKind::Normal,
+            vec![
+                Message::user("turn1"),
+                Message::placeholder(Role::Assistant),
+                Message::user("turn2"),
+                Message::placeholder(Role::Assistant),
+                Message::user("turn3"),
+                Message::placeholder(Role::Assistant),
+            ],
+        )];
+        let session = empty_session_with_chats(chats);
+
+        let restore = SessionRestore::from_session(&session);
+
+        assert_eq!(restore.active_messages.len(), 6);
+        // from_flat_messages 不切分段——单段保留
+        assert_eq!(restore.active_chain.active_segments().len(), 1);
+        assert_eq!(restore.active_chain.messages().len(), 6);
     }
 }

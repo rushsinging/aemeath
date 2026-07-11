@@ -123,9 +123,8 @@ impl App {
                 self.model.conversation.sync_queued_from_runtime(&queued);
                 self.mark_output_dirty();
             }
-            UiEvent::TurnStarted { messages } => {
-                // Turn 启动：同步消息 + 启动 spinner(Thinking)。
-                self.chat.messages = messages;
+            UiEvent::TurnStarted { messages: _ } => {
+                // Turn 启动：启动 spinner(Thinking)。
                 crate::tui::log_info!(
                     "[SPINNER_DEBUG] UiEvent::TurnStarted → spinner_phase(Thinking)"
                 );
@@ -133,49 +132,46 @@ impl App {
                 self.mark_output_dirty();
             }
             UiEvent::MicrocompactDone {
-                messages,
+                messages: _,
                 cleared_count,
             } => {
-                // Microcompact 清理陈旧 tool result，turn 仍在进行。只同步消息。
-                self.chat.messages = messages;
+                // Microcompact 清理陈旧 tool result，turn 仍在进行。
                 crate::tui::log_info!(
                     "[SPINNER_DEBUG] UiEvent::MicrocompactDone cleared={} (spinner 不动)",
                     cleared_count
                 );
                 self.mark_output_dirty();
             }
-            UiEvent::StopHookBlocked { messages } => {
-                // Stop hook 阻止 turn 结束，追加 reminder 后继续。只同步消息。
-                self.chat.messages = messages;
+            UiEvent::StopHookBlocked { messages: _ } => {
+                // Stop hook 阻止 turn 结束，追加 reminder 后继续。
                 crate::tui::log_info!("[SPINNER_DEBUG] UiEvent::StopHookBlocked (spinner 不动)");
                 self.mark_output_dirty();
             }
-            UiEvent::PostToolExecutionSync { messages } => {
-                // Tool 执行完成后同步消息。只同步消息。
-                self.chat.messages = messages;
+            UiEvent::PostToolExecutionSync { messages: _ } => {
+                // Tool 执行完成后同步消息。
                 self.mark_output_dirty();
             }
-            UiEvent::ApiError { messages, error } => {
-                // Provider API 调用失败：同步消息 + stop spinner + 显示错误。
-                self.chat.messages = messages;
+            UiEvent::ApiError { messages: _, error } => {
+                // #749：ApiError 退化为纯展示——仅追加错误 notice + stop spinner。
+                // processing 状态收口统一交给随后 runtime 发出的 DoneWithDuration
+                // （handle_done → stop_processing），避免各终止路径各自清理导致漏清。
+                // NOT 在此 stop_processing，保持与 Done 单一收口点一致。
                 crate::tui::log_info!(
-                    "[SPINNER_DEBUG] UiEvent::ApiError → spinner_stop error={}",
+                    "[SPINNER_DEBUG] UiEvent::ApiError → spinner_stop（processing 收口交给 Done）error={}",
                     error
                 );
                 self.spinner_stop();
                 self.append_system_notice(&error);
                 self.mark_output_dirty();
             }
-            UiEvent::CompactRollback { messages } => {
-                // Compact 失败回滚：同步消息，不动 spinner（turn 仍在进行）。
-                self.chat.messages = messages;
+            UiEvent::CompactRollback { messages: _ } => {
+                // Compact 失败回滚：不动 spinner（turn 仍在进行）。
                 self.model.conversation.runtime.clear_compact_runtime();
                 self.mark_output_dirty();
             }
-            UiEvent::CompactFinished { messages } => {
-                // Compact 成功完成：同步消息 + 清 compact 状态。
+            UiEvent::CompactFinished { messages: _ } => {
+                // Compact 成功完成：清 compact 状态。
                 // 不停 spinner——compact 后 turn 仍在进行，LLM 会继续生成。
-                self.chat.messages = messages;
                 self.model.conversation.runtime.clear_compact_runtime();
                 self.mark_output_dirty();
             }
@@ -192,25 +188,12 @@ impl App {
                     name: "system_message".to_string(),
                 });
             }
-            UiEvent::ReminderRecap(_line) => {
-                // ReminderRecap 已由 map_agent_event -> AppendSystemMessage 注入
-                // ConversationModel，无需在此重复写入。
-            }
-            UiEvent::MemoryList(reminders) => {
-                self.handle_memory_list(&reminders);
+            UiEvent::ModelStreamWaiting { .. } => {
+                // Transient placeholder 已由 map_agent_event 注入 ConversationModel。
+                self.mark_output_dirty();
             }
             UiEvent::SessionSaved { id } => {
                 self.append_system_notice(format!("[session saved: {id}]"));
-            }
-            UiEvent::SlashCommandFailed { message } => {
-                self.append_error_notice(message);
-            }
-            UiEvent::ReflectionStarted => {
-                self.spinner_phase(SpinnerPhase::Reflecting);
-                self.chat.start_processing();
-            }
-            UiEvent::ReflectionUsage => {
-                // token/api 真相归 RuntimeModel，经 StatusViewAssembler + adapter 单向写回 status_bar。
             }
             UiEvent::ReflectionDone { output } => {
                 // ...

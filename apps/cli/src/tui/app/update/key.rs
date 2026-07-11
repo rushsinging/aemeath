@@ -64,7 +64,7 @@ impl App {
     pub(super) fn update_key(
         &mut self,
         key: crossterm::event::KeyEvent,
-        spawn_refs: &SpawnContextRefs,
+        _spawn_refs: &SpawnContextRefs,
     ) -> UpdateResult {
         if key.kind != KeyEventKind::Press {
             return UpdateResult::none();
@@ -131,22 +131,20 @@ impl App {
                     }
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Tab) if !self.chat.is_processing => {
+            (KeyModifiers::NONE, KeyCode::Tab) => {
                 if completion_visible {
                     self.apply_current_suggestion();
                 } else {
                     self.update_suggestions();
                 }
             }
-            (KeyModifiers::NONE, KeyCode::Esc) if !self.chat.is_processing => {
-                if completion_visible {
-                    self.handle_input_intent(InputIntent::SetCompletions {
-                        query: String::new(),
-                        items: Vec::new(),
-                    });
-                }
+            (KeyModifiers::NONE, KeyCode::Esc) if completion_visible => {
+                self.handle_input_intent(InputIntent::SetCompletions {
+                    query: String::new(),
+                    items: Vec::new(),
+                });
             }
-            (KeyModifiers::NONE, KeyCode::Esc) => {
+            (KeyModifiers::NONE, KeyCode::Esc) if self.chat.is_processing => {
                 // Esc during processing: interrupt current LLM turn + tool calls
                 // #639：cancel 触发 runtime CancellationToken（即时），NEVER 用 abort()。
                 if let Some(h) = &self.chat.processing_handle {
@@ -206,15 +204,11 @@ impl App {
                     c
                 };
                 self.handle_input_intent(InputIntent::InsertChar(ch));
-                if !self.chat.is_processing {
-                    self.update_suggestions();
-                }
+                self.update_suggestions();
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 self.handle_input_intent(InputIntent::DeleteBackward);
-                if !self.chat.is_processing {
-                    self.update_suggestions();
-                }
+                self.update_suggestions();
             }
             (KeyModifiers::NONE, KeyCode::Left) => {
                 self.handle_input_intent(InputIntent::MoveCursorLeft);

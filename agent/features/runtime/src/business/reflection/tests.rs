@@ -26,6 +26,22 @@ fn test_parse_output_valid_json() {
 }
 
 #[test]
+fn test_parse_output_null_arrays_as_empty() {
+    let json = r#"{
+            "deviations": null,
+            "suggested_memories": null,
+            "outdated_memories": null,
+            "user_alert": null
+        }"#;
+    let output = ReflectionEngine::parse_output(json).unwrap();
+
+    assert!(output.deviations.is_empty());
+    assert!(output.suggested_memories.is_empty());
+    assert!(output.outdated_memories.is_empty());
+    assert!(output.user_alert.is_none());
+}
+
+#[test]
 fn test_parse_output_reason_optional() {
     let json = r#"{
             "suggested_memories": [{"category":"pattern","content":"测试"}]

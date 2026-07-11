@@ -114,7 +114,7 @@ pub(crate) fn default_model() -> String {
 }
 
 pub(crate) fn default_max_tokens() -> u32 {
-    200000
+    8192
 }
 
 pub(crate) fn default_context_size() -> usize {

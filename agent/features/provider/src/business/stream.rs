@@ -38,6 +38,7 @@ pub async fn parse_stream(
     const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
+    let mut current_signature: String = String::new();
 
     let byte_stream = response.bytes_stream().map(|r| r.map_err(io::Error::other));
     let reader = StreamReader::new(byte_stream);
@@ -116,7 +117,11 @@ pub async fn parse_stream(
                         tool_index += 1;
                     }
                     ContentBlockPayload::Thinking { thinking } => {
-                        current_thinking = thinking;
+                        current_thinking = thinking.clone();
+                        current_signature.clear();
+                        if !thinking.is_empty() {
+                            handler.on_thinking(&thinking);
+                        }
                     }
                     ContentBlockPayload::Unknown => {
                         // ignore unknown block types
@@ -142,49 +147,60 @@ pub async fn parse_stream(
                     }
                     DeltaPayload::ThinkingDelta { thinking } => {
                         current_thinking.push_str(&thinking);
+                        handler.on_thinking(&thinking);
                     }
-                    DeltaPayload::SignatureDelta { .. } | DeltaPayload::Unknown => {
+                    DeltaPayload::SignatureDelta { signature } => {
+                        current_signature.push_str(&signature);
+                    }
+                    DeltaPayload::Unknown => {
                         // ignored
                     }
                 }
             }
             StreamEvent::ContentBlockStop { .. } => {
                 if !current_tool_id.is_empty() {
-                    let input: serde_json::Value = match serde_json::from_str(&current_tool_json) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            // 截断恢复：尝试补全被切在字符串字面量中间的 arguments JSON。
-                            if let Some(recovered) =
-                                crate::business::json_recovery::try_complete_truncated_json(
-                                    &current_tool_json,
-                                )
-                            {
-                                log::warn!(
-                                    target: "aemeath:agent:provider",
-                                    "Anthropic 流式 tool_call JSON 解析失败但启发式恢复成功（{} bytes → {} bytes）",
-                                    current_tool_json.len(),
-                                    serde_json::to_string(&recovered).map(|s| s.len()).unwrap_or(0),
-                                );
-                                recovered
-                            } else {
-                                let head_preview: String =
-                                    current_tool_json.chars().take(200).collect();
-                                let tail_preview: String = current_tool_json
-                                    .chars()
-                                    .rev()
-                                    .take(200)
-                                    .collect::<String>()
-                                    .chars()
-                                    .rev()
-                                    .collect();
-                                return Err(crate::LlmError::StreamTruncated {
-                                    tool_call_id: current_tool_id.clone(),
-                                    tool_call_name: current_tool_name.clone(),
-                                    accumulated_bytes: current_tool_json.len(),
-                                    delta_count: 0,
-                                    head_preview,
-                                    tail_preview,
-                                });
+                    // 无参数工具（如 TaskListComplete、TaskList）不会产生
+                    // InputJsonDelta，current_tool_json 为空字符串。此时应
+                    // 视为空对象 {}，而非流截断错误。
+                    let input: serde_json::Value = if current_tool_json.is_empty() {
+                        serde_json::Value::Object(serde_json::Map::new())
+                    } else {
+                        match serde_json::from_str(&current_tool_json) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                // 截断恢复：尝试补全被切在字符串字面量中间的 arguments JSON。
+                                if let Some(recovered) =
+                                    crate::business::json_recovery::try_complete_truncated_json(
+                                        &current_tool_json,
+                                    )
+                                {
+                                    log::warn!(
+                                        target: "aemeath:agent:provider",
+                                        "Anthropic 流式 tool_call JSON 解析失败但启发式恢复成功（{} bytes → {} bytes）",
+                                        current_tool_json.len(),
+                                        serde_json::to_string(&recovered).map(|s| s.len()).unwrap_or(0),
+                                    );
+                                    recovered
+                                } else {
+                                    let head_preview: String =
+                                        current_tool_json.chars().take(200).collect();
+                                    let tail_preview: String = current_tool_json
+                                        .chars()
+                                        .rev()
+                                        .take(200)
+                                        .collect::<String>()
+                                        .chars()
+                                        .rev()
+                                        .collect();
+                                    return Err(crate::LlmError::StreamTruncated {
+                                        tool_call_id: current_tool_id.clone(),
+                                        tool_call_name: current_tool_name.clone(),
+                                        accumulated_bytes: current_tool_json.len(),
+                                        delta_count: 0,
+                                        head_preview,
+                                        tail_preview,
+                                    });
+                                }
                             }
                         }
                     };
@@ -195,8 +211,14 @@ pub async fn parse_stream(
                     });
                     current_tool_json.clear();
                 } else if !current_thinking.is_empty() {
+                    let signature = if current_signature.is_empty() {
+                        None
+                    } else {
+                        Some(std::mem::take(&mut current_signature))
+                    };
                     content_blocks.push(ContentBlock::Thinking {
                         thinking: std::mem::take(&mut current_thinking),
+                        signature,
                     });
                 } else if !current_text.is_empty() {
                     handler.on_block_complete(&current_text);

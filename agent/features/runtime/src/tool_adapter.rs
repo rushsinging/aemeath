@@ -8,7 +8,7 @@ use share::tool::types::{
     AgentResult, AskUserQuestionResult, BashResult, BriefResult, EditResult, EnterWorktreeResult,
     ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult, LspResult,
     McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult,
-    ReadResult, SkillResult, SleepResult, TaskCreateResult, TaskGetResult, TaskListCompleteResult,
+    ReadResult, SkillResult, TaskCreateResult, TaskGetResult, TaskListCompleteResult,
     TaskListCreateResult, TaskListResult, TaskStopResult, TaskUpdateResult, ToolSearchResult,
     WebFetchResult, WebSearchResult, WriteResult,
 };
@@ -34,7 +34,6 @@ impl ToolResultAdapter for GrepResult {}
 impl ToolResultAdapter for WebFetchResult {}
 impl ToolResultAdapter for WebSearchResult {}
 impl ToolResultAdapter for BashResult {}
-impl ToolResultAdapter for SleepResult {}
 impl ToolResultAdapter for AgentResult {}
 impl ToolResultAdapter for AskUserQuestionResult {}
 impl ToolResultAdapter for EnterWorktreeResult {}

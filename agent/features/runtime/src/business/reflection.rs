@@ -14,7 +14,14 @@ pub use types::{
 impl ReflectionEngine {
     pub fn parse_output(json: &str) -> ReflectionResult<ReflectionOutput> {
         let source = Self::extract_json_object(json).unwrap_or(json);
-        Ok(serde_json::from_str(source)?)
+        serde_json::from_str(source).map_err(|e| {
+            let preview: String = source.chars().take(200).collect();
+            log::warn!(
+                target: "aemeath:agent:runtime",
+                "reflection JSON parse failed: {e}, first 200 chars: {preview}"
+            );
+            ReflectionError::Parse(e)
+        })
     }
 
     pub fn extract_json_object(text: &str) -> Option<&str> {

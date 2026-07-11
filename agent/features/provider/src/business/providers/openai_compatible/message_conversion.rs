@@ -99,7 +99,7 @@ impl OpenAICompatibleProvider {
                             // 错误已包含在大多数 provider 的 content 中
                         }
                     }
-                    ContentBlock::Thinking { thinking } => {
+                    ContentBlock::Thinking { thinking, .. } => {
                         // 完整保留所有轮的 thinking 作为 reasoning_content。
                         // DeepSeek-R1 thinking 模式要求 assistant 消息带 reasoning_content
                         // 字段（非空），否则触发 HTTP 400。

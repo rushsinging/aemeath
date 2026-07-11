@@ -70,7 +70,10 @@ async fn run_single_turn(
 ) -> Result<(), sdk::SdkError> {
     let mut stream = client
         .chat(sdk::ChatRequest {
-            messages: vec![sdk::ChatMessage::user_text(text)],
+            user_input: Some(sdk::UserInput {
+                text,
+                images: Vec::new(),
+            }),
             queue_drain: None,
             input_events: None,
         })
@@ -103,6 +106,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::Token { text, .. } => print_stdout(&text)?,
         sdk::ChatEvent::BlockComplete { .. } => {}
         sdk::ChatEvent::Thinking { .. }
+        | sdk::ChatEvent::ModelStreamWaiting { .. }
         | sdk::ChatEvent::TurnStarted { .. }
         | sdk::ChatEvent::MicrocompactDone { .. }
         | sdk::ChatEvent::StopHookBlocked { .. }
@@ -151,7 +155,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
                 eprintln!("[tool:{tool_name}] {output}");
             }
         }
-        sdk::ChatEvent::SystemMessage(message) | sdk::ChatEvent::Error(message) => {
+        sdk::ChatEvent::SystemMessage(message) => {
             eprintln!("{message}");
         }
         sdk::ChatEvent::Result(result) => {

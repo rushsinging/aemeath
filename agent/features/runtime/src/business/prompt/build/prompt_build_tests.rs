@@ -1,5 +1,4 @@
 use super::*;
-use crate::utils::bootstrap::config_paths::TestEnvGuard;
 
 #[test]
 fn test_static_prompt_requires_task_update_for_direct_tools() {
@@ -7,7 +6,7 @@ fn test_static_prompt_requires_task_update_for_direct_tools() {
 
     assert!(text.contains("BEFORE starting work on a task yourself"));
     assert!(text.contains("Read/Grep/Glob/Bash/Edit/Write"));
-    assert!(text.contains("TaskUpdate(taskId, status=\"in_progress\")"));
+    assert!(text.contains("TaskUpdate(task_id, status=\"in_progress\")"));
     assert!(text.contains("AFTER completing a task yourself"));
     assert!(text.contains("TaskListCreate before TaskCreate"));
     assert!(text.contains("TaskListComplete"));
@@ -17,8 +16,8 @@ fn test_static_prompt_requires_task_update_for_direct_tools() {
 fn test_static_prompt_delegates_agent_task_status_to_task_id() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
-    assert!(text.contains("pass `taskId` to the Agent tool"));
-    assert!(text.contains("taskId is NOT required"));
+    assert!(text.contains("pass `task_id` to the Agent tool"));
+    assert!(text.contains("task_id is NOT required"));
     assert!(!text.contains("TaskUpdate(id2, in_progress) → Agent"));
 }
 
@@ -193,10 +192,9 @@ async fn test_build_system_prompt_parts_includes_commit_guidance() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let hook_runner = HookRunner::empty();
-    let memory_config = MemoryConfig::default();
     let context = PromptContext::new(&cwd, Some("deepseek"), Some("deepseek-chat"));
 
-    let parts = build_system_prompt_parts(&context, &hook_runner, &memory_config, "en").await;
+    let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
 
     // cleanup 失败不应让测试 FAIL（cwd 可能被外部环境清理，见 #637）
     let _ = std::fs::remove_dir_all(&cwd);
@@ -249,31 +247,6 @@ async fn test_load_agents_md_falls_back_to_project_agents_md() {
     let content = load_agents_md(&base, &hook_runner, &base).await;
 
     assert!(content.contains("project agents instructions"));
-
-    std::fs::remove_dir_all(base).unwrap();
-}
-
-#[tokio::test]
-async fn test_load_agents_md_reads_project_claude_md_without_migration() {
-    let base = std::env::temp_dir().join(format!(
-        "aemeath_agents_md_no_auto_migration_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&base).unwrap();
-    std::fs::write(base.join("CLAUDE.md"), "old project instructions").unwrap();
-    let agents_dir = base.join("agents-home");
-    std::fs::create_dir_all(&agents_dir).unwrap();
-
-    let _guard = TestEnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir);
-
-    let hook_runner = HookRunner::new(Default::default());
-    let content = load_agents_md(&base, &hook_runner, &base).await;
-
-    assert!(content.contains("old project instructions"));
-    assert!(!base.join("AGENTS.md").exists());
 
     std::fs::remove_dir_all(base).unwrap();
 }

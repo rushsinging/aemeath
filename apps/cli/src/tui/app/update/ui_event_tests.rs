@@ -19,7 +19,6 @@ fn test_app() -> App {
 #[test]
 fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
     let mut app = test_app();
-    app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     let echo_id = sdk::InputId::new_v7();
     app.enqueue_submission_echo(echo_id.clone(), "[Copied Text 1]");
     let messages = vec![
@@ -35,8 +34,7 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
         &spawn_refs,
     );
 
-    // 镜像成功：chat.messages 更新到新的 msgs
-    assert_eq!(app.chat.messages.len(), 2);
+    // chat.messages 已删除，不再断言镜像数量
 
     // 不产生任何 UserMessage 回显块（退出 display）
     assert!(app.model.conversation.timeline.items().iter().all(|item| {
@@ -54,7 +52,6 @@ fn test_update_ui_post_tool_sync_only_mirrors_no_echo() {
 #[test]
 fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
     let mut app = test_app();
-    app.chat.messages.push(sdk::ChatMessage::user_text("first"));
     let reminder = "<system-reminder>\nStop hook blocked stopping.\n</system-reminder>";
     let messages = vec![
         sdk::ChatMessage::user_text("first"),
@@ -78,7 +75,7 @@ fn test_update_ui_post_tool_sync_does_not_echo_system_generated_user_message() {
 ///
 /// 场景：存在一条占位（id_a="hello"），收到包含 user_text("hello") 的同步事件。
 /// 期望：
-/// - handler 后 self.chat.messages == msgs（镜像成功）
+/// - handler 后 PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
 /// - 不产生任何 UserMessage 回显块（退出 display）
 /// - 占位未被清除（清占位归 UserMessagesAdopted 负责）
 #[test]
@@ -102,12 +99,8 @@ fn test_post_tool_sync_no_display() {
         &spawn_refs,
     );
 
-    // 镜像成功
-    assert_eq!(
-        app.chat.messages.len(),
-        1,
-        "消息同步后 chat.messages 应镜像"
-    );
+    // PostToolExecutionSync 不再镜像 chat.messages（字段已删除）
+    // 不产生 UserMessage 回显块
 
     // 不产生 UserMessage 回显块
     let user_echo_count = app
@@ -350,4 +343,94 @@ fn test_messages_sync_clears_compact_runtime_state() {
         app.view_state.dirty.output,
         "MessagesSync 必须 mark_output_dirty 触发进度条消失渲染"
     );
+}
+
+/// #749：ApiError 退化为纯展示 —— 追加一次错误 notice，NOT 自行清 processing
+/// （收口统一交给随后的 DoneWithDuration）。
+#[test]
+fn test_api_error_appends_notice_and_defers_processing_to_done() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+
+    // 模拟 turn 进行中
+    app.chat.start_processing();
+    assert!(app.chat.is_processing);
+
+    let error = "stream error: stream interrupted after partial output".to_string();
+    app.update_ui(
+        UiEvent::ApiError {
+            messages: vec![],
+            error: error.clone(),
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    // 错误 notice 已注入（供用户可见），且只出现一次
+    let error_hits = system_notice_texts(&app)
+        .iter()
+        .filter(|t| t.contains("stream interrupted after partial output"))
+        .count();
+    assert_eq!(error_hits, 1, "ApiError 应追加恰好一次错误 notice");
+
+    // ApiError 本身不清 processing —— 收口交给 DoneWithDuration
+    assert!(
+        app.chat.is_processing,
+        "ApiError 不应自行清 processing，收口交给 Done"
+    );
+}
+
+/// #749 核心回归：API 错误 turn 终止序列（ApiError → DoneWithDuration）后，
+/// is_processing 必须回到 false，下一条输入才能正常开启新 turn（不进 queue）。
+#[test]
+fn test_api_error_then_done_clears_processing() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+
+    app.chat.start_processing();
+    assert!(app.chat.is_processing);
+
+    // runtime 端 API 错误路径：先 ApiError 后 DoneWithDuration。
+    app.update_ui(
+        UiEvent::ApiError {
+            messages: vec![],
+            error: "stream error: boom".to_string(),
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
+    app.update_ui(
+        UiEvent::DoneWithDuration {
+            context: crate::tui::app::event::UiTurnContext {
+                chat_id: sdk::ids::ChatId::new("chat-test"),
+                turn_id: sdk::ids::ChatTurnId::new("turn-test"),
+            },
+            duration: std::time::Duration::from_secs(1),
+        },
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    assert!(
+        !app.chat.is_processing,
+        "API 错误 turn 收口后 is_processing 必须为 false（下一条输入不进 queue）"
+    );
+}
+
+/// 收集 System notice timeline 文本（`append_system_notice` 写入 System 块）。
+fn system_notice_texts(app: &App) -> Vec<&str> {
+    app.model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } => {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
 }

@@ -1,5 +1,4 @@
 use crate::tui::app::App;
-use crate::tui::effect::session::resume::apply_resume_input_history;
 use crate::tui::effect::session::terminal_guard::TerminalGuard;
 use futures::FutureExt;
 use std::io;
@@ -11,7 +10,7 @@ impl App {
     /// `agent_client` 是唯一的 runtime 注入点；`resume_id` 由 CLI 启动参数决定。
     pub async fn run(
         &mut self,
-        agent_client: Arc<dyn sdk::AgentClient>,
+        _agent_client: Arc<dyn sdk::AgentClient>,
         resume_id: Option<String>,
     ) -> io::Result<()> {
         // #567：resume 走事件流。启动时存储 resume_id，

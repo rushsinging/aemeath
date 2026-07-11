@@ -1,6 +1,6 @@
 //! Chat 输入 / 请求类型与重导出。
 
-use crate::{ChatInputEventPort, ChatMessage, QueueDrainPort};
+use crate::{ChatInputEventPort, QueueDrainPort};
 
 pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
 pub use crate::chat_result::{
@@ -89,9 +89,6 @@ pub enum ChatInputEvent {
     /// 恢复指定会话。由 `/resume <id>` 触发。
     /// 需要走 idle gate（替换 loop messages）。
     ResumeSession { id: String },
-    /// 保存当前会话。由 `/save` 触发，走 runtime 事件流。
-    /// runtime idle 分支执行 save，结果通过 `CommandResultText` 事件回传 TUI。
-    SaveSession,
     /// 运行 reflection。由 `/reflect` 或自动触发。
     RunReflection,
     /// 应用 reflection 结果。由 TUI 在 reflection UI 确认后触发。
@@ -133,10 +130,21 @@ impl ChatInputEvent {
     }
 }
 
+/// 初始用户输入（首次 `chat()` 时传入）。
+///
+/// 常驻 loop 后续用户输入走 `ChatInputEvent::UserMessage`，
+/// 不再通过 `ChatRequest` 传递全量历史。
+#[derive(Debug, Clone)]
+pub struct UserInput {
+    pub text: String,
+    pub images: Vec<ChatInputImage>,
+}
+
 /// TUI 发起的一次 Chat 请求。
 #[derive(Clone)]
 pub struct ChatRequest {
-    pub messages: Vec<ChatMessage>,
+    /// 初始 user input（首次 chat 时传入；常驻 loop 后续走 input_events）。
+    pub user_input: Option<UserInput>,
     pub queue_drain: Option<std::sync::Arc<dyn QueueDrainPort>>,
     pub input_events: Option<std::sync::Arc<dyn ChatInputEventPort>>,
 }
@@ -146,18 +154,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_chat_request_keeps_message_order() {
+    fn test_chat_request_carries_user_input() {
         let request = ChatRequest {
-            messages: vec![
-                ChatMessage::user_text("one"),
-                ChatMessage::assistant_text("two"),
-            ],
+            user_input: Some(UserInput {
+                text: "hello".to_string(),
+                images: Vec::new(),
+            }),
             queue_drain: None,
             input_events: None,
         };
 
-        assert_eq!(request.messages[0].role, "user");
-        assert_eq!(request.messages[1].role, "assistant");
+        assert_eq!(request.user_input.as_ref().unwrap().text, "hello");
         assert!(request.queue_drain.is_none());
         assert!(request.input_events.is_none());
     }

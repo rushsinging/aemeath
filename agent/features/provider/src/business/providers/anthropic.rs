@@ -13,7 +13,10 @@ use crate::business::stream::parse_stream;
 use crate::business::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
 
-use message_conversion::{send_message_non_stream, RequestParams, TrackingHandler};
+use message_conversion::{
+    convert_messages, sanitize_tool_schemas, send_message_non_stream, RequestParams,
+    TrackingHandler,
+};
 
 pub struct AnthropicProvider {
     api_key: String,
@@ -25,8 +28,8 @@ pub struct AnthropicProvider {
     http: reqwest::Client,
     /// Maximum retry attempts (default 3)
     max_retries: u32,
-    /// Request timeout in seconds (default 60)
-    /// 仅由未消费的 builder `with_timeout_secs` 写入，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    /// Request timeout in seconds — stored for diagnostics; the value is applied
+    /// to the reqwest client at construction time.
     #[allow(dead_code)]
     timeout_secs: u64,
 }
@@ -38,6 +41,7 @@ impl AnthropicProvider {
         model: Option<String>,
         max_tokens: u32,
         reasoning_level: crate::core::provider::ReasoningLevel,
+        timeout_secs: u64,
     ) -> Self {
         Self {
             api_key,
@@ -47,11 +51,11 @@ impl AnthropicProvider {
             reasoning_level: Arc::new(AtomicU8::new(reasoning_level.as_u8())),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(timeout_secs))
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,
-            timeout_secs: 120,
+            timeout_secs,
         }
     }
 
@@ -63,8 +67,7 @@ impl AnthropicProvider {
         self
     }
 
-    /// Set request timeout in seconds
-    /// builder 方法当前无调用点，收窄可见性后暴露为孤儿，保留备用（refs #61 D3）。
+    /// Set request timeout in seconds (builder 旋钮，当前无外部调用点).
     #[allow(dead_code)]
     pub fn with_timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
@@ -111,15 +114,13 @@ impl LlmProvider for AnthropicProvider {
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let api_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .filter_map(|m| serde_json::to_value(m).ok())
-            .collect();
+        let api_messages = convert_messages(messages);
 
-        // 为 tools 数组最后一个元素添加 cache_control 断点，让 Anthropic
-        // 缓存整个 tools schema（≈6K tokens）。后续 turn 命中 cache 后
-        // 固定开销成本降至约 1/10。Anthropic 原生支持 tools 数组缓存。
-        let mut cached_tools = tool_schemas.to_vec();
+        // 先清洗 tool schema（移除 data_schema 等内部扩展字段），再为
+        // 最后一个 tool 追加 cache_control 断点，让 Anthropic 缓存整个
+        // tools schema（≈6K tokens）。后续 turn 命中 cache 后固定开销
+        // 成本降至约 1/10。Anthropic 原生支持 tools 数组缓存。
+        let mut cached_tools = sanitize_tool_schemas(tool_schemas);
         if let Some(last_tool) = cached_tools.last_mut() {
             if let Some(obj) = last_tool.as_object_mut() {
                 obj.insert(
@@ -363,6 +364,10 @@ mod tests {
         assert_eq!(
             value.get("thinking").unwrap().get("type"),
             Some(&serde_json::json!("adaptive"))
+        );
+        assert_eq!(
+            value.get("thinking").unwrap().get("display"),
+            Some(&serde_json::json!("summarized"))
         );
         assert_eq!(
             value.get("output_config").unwrap().get("effort"),

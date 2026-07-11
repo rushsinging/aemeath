@@ -33,7 +33,8 @@ impl TypedTool for TaskStopTool {
         false
     }
     fn is_concurrency_safe(&self) -> bool {
-        true
+        // Mutates persistent task state; keep ordered with related task operations.
+        false
     }
 
     async fn call(
@@ -45,7 +46,7 @@ impl TypedTool for TaskStopTool {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
-        let input_id = args.taskId.as_str();
+        let input_id = args.task_id.as_str();
 
         if input_id.is_empty() {
             return TypedToolResult::error("Task ID is required");

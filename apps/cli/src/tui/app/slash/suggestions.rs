@@ -7,22 +7,8 @@ impl super::super::App {
         let input = self.model.input.document.buffer.clone();
         let cursor_offset = self.model.input.document.cursor;
 
-        // 读取启动期预取的模型缓存（refresh_model_cache），保持纯路径、避免每次按键 block_on。
-        let models: Vec<(String, String)> = self
-            .session
-            .cached_models()
-            .iter()
-            .map(|m| {
-                (
-                    m.provider.clone(),
-                    if m.name.is_empty() {
-                        m.id.clone()
-                    } else {
-                        m.name.clone()
-                    },
-                )
-            })
-            .collect();
+        // #567：模型列表走事件流（ListModels），缓存尚未接入。暂传空列表。
+        let models: Vec<(String, String)> = Vec::new();
 
         let skills: Vec<(String, String, Vec<String>)> = self
             .skills
@@ -45,7 +31,7 @@ impl super::super::App {
             models,
             skills,
             commands,
-            sessions: self.session.cached_sessions().to_vec(),
+            sessions: Vec::new(),
         };
 
         let suggestions = generate_suggestions(&ctx);

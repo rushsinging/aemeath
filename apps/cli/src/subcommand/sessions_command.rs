@@ -12,7 +12,6 @@ async fn wait_for_session_list(stream: &mut sdk::ChatStream) -> Option<Vec<sdk::
 }
 
 /// 处理 `aemeath sessions` 子命令
-
 pub(crate) async fn run_sessions_command(
     client: Arc<dyn sdk::AgentClient>,
     delete: Option<String>,
@@ -24,7 +23,7 @@ pub(crate) async fn run_sessions_command(
         crate::tui::effect::session::processing::TuiInputEventPort::channel();
     let mut stream = client
         .chat(sdk::ChatRequest {
-            messages: Vec::new(),
+            user_input: None,
             queue_drain: None,
             input_events: Some(std::sync::Arc::new(input_port)),
         })

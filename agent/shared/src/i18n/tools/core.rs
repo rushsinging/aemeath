@@ -3,8 +3,8 @@
 /// Agent description。
 pub fn agent(lang: &str) -> &'static str {
     match lang {
-        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每个子代理有自己的上下文（约 128K token，默认 200 轮）并可使用所有工具。同一响应中的多个 Agent 调用并发执行。传 `taskId` 可绑定到被跟踪的任务以自动管理状态。",
-        _ => "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, default 200 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `taskId` to bind to a tracked task for automatic status management.",
+        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每个子代理有自己的上下文（约 128K token，默认 200 轮）并可使用所有工具。同一响应中的多个 Agent 调用并发执行。传 `task_id` 可绑定到被跟踪的任务以自动管理状态。",
+        _ => "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, default 200 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `task_id` to bind to a tracked task for automatic status management.",
     }
 }
 

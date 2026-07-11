@@ -2,7 +2,7 @@ use super::logging::{
     build_json_logger_input_data, build_json_logger_tool_call_data,
     build_json_logger_tool_result_data,
 };
-use super::progress::{build_tool_calls_progress_event, format_grouped_tool_summaries};
+use super::progress::build_tool_calls_progress_event;
 use super::*;
 use async_trait::async_trait;
 use provider::api::{LlmError, LlmProvider, StreamResponse, SystemBlock};
@@ -12,6 +12,32 @@ use share::tool::AgentProgressKind;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext};
+
+fn format_grouped_tool_summaries(tool_calls: &[crate::business::agent::ToolCall]) -> String {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for call in tool_calls {
+        if let Some(entry) = counts
+            .iter_mut()
+            .find(|(name, _)| *name == call.name.as_str())
+        {
+            entry.1 += 1;
+        } else {
+            counts.push((call.name.as_str(), 1));
+        }
+    }
+
+    counts
+        .into_iter()
+        .map(|(name, count)| {
+            if count > 1 {
+                format!("{name} ×{count}")
+            } else {
+                name.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
 
 #[test]
 fn test_role_max_tokens_override() {
@@ -73,7 +99,9 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
             assert_eq!(calls[1].name, "Grep");
             // 所有 tool 的 summary 为空，TUI 层自己组装
         }
-        AgentProgressKind::Message { .. } | AgentProgressKind::Started { .. } => {
+        AgentProgressKind::Message { .. }
+        | AgentProgressKind::Started { .. }
+        | AgentProgressKind::ToolOutput { .. } => {
             panic!("expected ToolCalls event")
         }
     }
@@ -93,7 +121,9 @@ fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_le
         AgentProgressKind::ToolCalls { calls: _ } => {
             // 所有 tool 的 summary 为空
         }
-        AgentProgressKind::Message { .. } | AgentProgressKind::Started { .. } => {
+        AgentProgressKind::Message { .. }
+        | AgentProgressKind::Started { .. }
+        | AgentProgressKind::ToolOutput { .. } => {
             panic!("expected ToolCalls event")
         }
     }

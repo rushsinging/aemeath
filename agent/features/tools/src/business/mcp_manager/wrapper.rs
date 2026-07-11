@@ -86,8 +86,8 @@ impl TypedTool for McpToolWrapper {
     }
 
     fn is_concurrency_safe(&self) -> bool {
-        // MCP tools are generally concurrency safe
-        true
+        // MCP tool side effects are server-defined; keep serial until capabilities say otherwise.
+        false
     }
 
     async fn call(

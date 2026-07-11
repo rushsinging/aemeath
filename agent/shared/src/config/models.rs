@@ -9,12 +9,17 @@
 mod deserialize;
 mod error;
 mod resolve;
+mod runtime;
 mod types;
 
 // 类型
 pub use types::*;
 // 错误类型
 pub use error::ModelResolveError;
+pub use runtime::{
+    MaxTokensSource, ResolvedRuntimeModel, RuntimeModelRequest, RuntimeModelResolutionError,
+    RuntimeModelResolver, DEFAULT_MAX_TOKENS,
+};
 
 #[cfg(test)]
 #[path = "models/tests.rs"]

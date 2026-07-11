@@ -1,6 +1,6 @@
 use sdk::{
-    ClipboardImageView, MemoryConfigView, ReflectionConfigView, ReflectionMemorySuggestionView,
-    ReflectionOutputView, SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
+    MemoryConfigView, ReflectionConfigView, ReflectionMemorySuggestionView, ReflectionOutputView,
+    SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
 };
 
 use prompt::api::skill::Skill;
@@ -26,19 +26,6 @@ pub(crate) fn skill_to_sdk(skill: Skill) -> SkillView {
         description: Some(skill.description),
         content: skill.content,
         source: Some(skill.source_path.display().to_string()),
-    }
-}
-
-pub(crate) fn processed_image_to_sdk(
-    image: crate::utils::image::ProcessedImage,
-) -> ClipboardImageView {
-    ClipboardImageView {
-        base64: image.base64,
-        media_type: image.media_type,
-        final_size: image.final_size,
-        display_path: None,
-        width: None,
-        height: None,
     }
 }
 

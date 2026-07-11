@@ -20,11 +20,12 @@ pub struct OpenAICompatibleProvider {
     pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
 }
 
-pub(crate) fn build_streaming_http_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
+pub(crate) fn build_streaming_http_client_builder(timeout_secs: u64) -> reqwest::ClientBuilder {
+    reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs))
 }
 
 impl OpenAICompatibleProvider {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: OpenAIProviderConfig,
         api_key: String,
@@ -33,6 +34,7 @@ impl OpenAICompatibleProvider {
         max_tokens: u32,
         reasoning: bool,
         reasoning_config: Option<ReasoningConfig>,
+        timeout_secs: u64,
     ) -> Self {
         let driver = driver_for_provider_driver(config.driver);
         let raw_base_url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
@@ -57,7 +59,7 @@ impl OpenAICompatibleProvider {
             api_key,
             max_tokens: Arc::new(AtomicU32::new(max_tokens)),
             user_agent: format!("aemeath/{}", share::version()),
-            http: build_streaming_http_client_builder()
+            http: build_streaming_http_client_builder(timeout_secs)
                 .build()
                 .expect("failed to create HTTP client"),
             max_retries: 10,

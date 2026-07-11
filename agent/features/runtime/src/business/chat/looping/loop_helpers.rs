@@ -5,7 +5,7 @@ use crate::business::chat::looping::{
     QueueDrainPort,
 };
 use crate::business::chat::GateOutcome;
-use share::message::Message;
+use crate::business::session::ChatChain;
 
 /// 判断 provider 错误是否为用户主动取消。
 pub(crate) fn is_user_cancelled_provider_error(error: &provider::api::LlmError) -> bool {
@@ -13,13 +13,15 @@ pub(crate) fn is_user_cancelled_provider_error(error: &provider::api::LlmError) 
 }
 
 /// 排空输入队列并应用 gate 决策。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn drain_and_apply_gate<Q, I, S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,
     queue: &Q,
     input_events: &I,
     sink: &S,
-    messages: &mut Vec<Message>,
+    chain: &mut ChatChain,
+    segment_id: &str,
     task_store: &storage::api::TaskStore,
 ) -> GateOutcome
 where
@@ -28,5 +30,5 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, messages, task_store, false).await
+    apply_gate(kind, buffer, sink, chain, segment_id, task_store, false).await
 }

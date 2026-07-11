@@ -5,6 +5,9 @@ use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::evaluate_calls;
+use crate::business::chat::looping::tool_fuse::{
+    blocked_tool_execution, ToolCallFuse, ToolFuseDecision,
+};
 use crate::business::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
@@ -30,10 +33,10 @@ pub(crate) async fn execute_tool_round<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    max_agent_concurrency: usize,
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &Path,
+    tool_call_fuse: &mut ToolCallFuse,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -51,23 +54,23 @@ where
     let denied_results =
         deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
-    // 发送所有 approved calls 的 ToolCall UI 事件，让 pending 占位行尽早原地更新
-    for call in &approved {
-        let _ = sink
-            .send_event(RuntimeStreamEvent::ToolCallUpdate {
-                context: context.clone(),
-                id: call.id.clone(),
-                provider_id: Some(call.provider_id.clone()),
-                name: call.name.clone(),
-                index: call.index,
-                arguments_delta: None,
-                arguments: Some(call.input.clone()),
-                status: RuntimeToolCallStatus::Ready,
-            })
-            .await;
+    let mut fused_results = Vec::new();
+    let mut fuse_allowed = Vec::new();
+    for call in approved {
+        match tool_call_fuse.inspect(&call) {
+            ToolFuseDecision::Allow => fuse_allowed.push(call),
+            ToolFuseDecision::SoftBlock { reason } | ToolFuseDecision::HardPause { reason } => {
+                send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Ready).await;
+                send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Running).await;
+                let execution = blocked_tool_execution(&call, &reason);
+                send_tool_result(sink, context, &execution).await;
+                fused_results.push(execution);
+            }
+        }
     }
+
     let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
-        approved.into_iter().partition(|c| c.name == "Agent");
+        fuse_allowed.into_iter().partition(|c| c.name == "Agent");
 
     let ask_user_results = ask_user(
         context,
@@ -97,7 +100,6 @@ where
         sink,
         hook_ui,
         hook_runner,
-        max_agent_concurrency,
         cancel,
         workspace_root,
     )
@@ -107,6 +109,7 @@ where
         .into_iter()
         .chain(non_agent_results)
         .chain(agent_results)
+        .chain(fused_results)
         .chain(denied_results)
         .collect()
 }
@@ -255,6 +258,28 @@ pub(crate) async fn emit_json_hook_context<S>(
     }
 }
 
+pub(crate) async fn send_tool_call_status<S>(
+    sink: &S,
+    context: &RuntimeTurnContext,
+    call: &ToolCall,
+    status: RuntimeToolCallStatus,
+) where
+    S: ChatEventSink,
+{
+    let _ = sink
+        .send_event(RuntimeStreamEvent::ToolCallUpdate {
+            context: context.clone(),
+            id: call.id.clone(),
+            provider_id: Some(call.provider_id.clone()),
+            name: call.name.clone(),
+            index: call.index,
+            arguments_delta: None,
+            arguments: Some(call.input.clone()),
+            status,
+        })
+        .await;
+}
+
 pub(crate) async fn send_tool_result<S>(
     sink: &S,
     context: &RuntimeTurnContext,
@@ -319,12 +344,173 @@ pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, 
 
 #[cfg(test)]
 mod tests {
-    use super::tool_results_for_api;
-    use crate::business::agent::ToolExecution;
-    use sdk::ids::ToolCallId;
+    use super::{execute_tool_round, tool_results_for_api};
+    use crate::business::agent::{Agent, ToolCall, ToolExecution};
+    use crate::business::chat::looping::hook_ui::HookUi;
+    use crate::business::chat::looping::tool_fuse::ToolCallFuse;
+    use crate::business::chat::looping::{
+        ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
+    };
+    use async_trait::async_trait;
+    use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
+    use serde_json::Value;
     use share::message::ContentBlock;
     use share::tool::ToolOutcome;
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
     use storage::api::MAX_TOOL_RESULT_CHARS;
+    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+
+    #[derive(Clone, Default)]
+    struct RecordingSink {
+        events: Arc<Mutex<Vec<RuntimeStreamEvent>>>,
+    }
+
+    impl RecordingSink {
+        fn lifecycle_events(&self) -> Vec<(String, String)> {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|event| match event {
+                    RuntimeStreamEvent::ToolCallUpdate { id, status, .. } => {
+                        Some((id.to_string(), format!("{status:?}")))
+                    }
+                    RuntimeStreamEvent::ToolResult { id, .. } => {
+                        Some((id.to_string(), "Result".to_string()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    impl ChatEventSink for RecordingSink {
+        fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+            Box::pin(async move {
+                self.events.lock().unwrap().push(event);
+            })
+        }
+
+        fn try_send_event(&self, event: RuntimeStreamEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    struct UnsafeLifecycleTool;
+
+    #[async_trait]
+    impl TypedTool for UnsafeLifecycleTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "UnsafeLifecycle"
+        }
+
+        fn description(&self) -> &str {
+            "non-concurrency-safe lifecycle test tool"
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type":"object"})
+        }
+
+        fn is_concurrency_safe(&self) -> bool {
+            false
+        }
+
+        async fn call(
+            &self,
+            input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            TypedToolResult::success(
+                input.get("label").and_then(Value::as_str).unwrap_or("ok"),
+                Value::Null,
+            )
+        }
+    }
+
+    fn test_tool_context() -> ToolExecutionContext {
+        let cwd = std::env::current_dir().unwrap();
+        ToolExecutionContext {
+            resources: tools::api::ToolResources {
+                agent_runner: None,
+                registry: None,
+                memory_config: share::config::MemoryConfig::default(),
+                lang: "en".to_string(),
+                allow_all: true,
+            },
+            workspace: project::api::WorkspaceService::new(cwd),
+            cancel: tokio_util::sync::CancellationToken::new(),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            session_reminders: None,
+            plan_mode: None,
+            max_tool_concurrency: 10,
+            max_agent_concurrency: 4,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+            progress_tx: None,
+            parent_session_id: None,
+        }
+    }
+
+    fn lifecycle_call(index: usize) -> ToolCall {
+        ToolCall {
+            id: ToolCallId::from_legacy_or_new(&format!("call-{index}")),
+            provider_id: format!("provider-{index}"),
+            name: "UnsafeLifecycle".to_string(),
+            index,
+            input: serde_json::json!({"label": format!("call-{index}")}),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_non_concurrency_safe_tools_emit_running_after_previous_result() {
+        let registry = Arc::new(ToolRegistry::new());
+        registry.register(UnsafeLifecycleTool);
+        let ctx = test_tool_context();
+        let agent = Agent {
+            registry: registry.as_ref(),
+            ctx,
+        };
+        let sink = RecordingSink::default();
+        let hook_ui = HookUi::new(sink.clone());
+        let hook_runner = hook::api::HookRunner::new(Default::default());
+        let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
+        let workspace_root = std::env::current_dir().unwrap();
+        let calls = vec![lifecycle_call(0), lifecycle_call(1)];
+        let mut fuse = ToolCallFuse::new();
+
+        let _ = execute_tool_round(
+            &context,
+            &calls,
+            &registry,
+            true,
+            &agent,
+            &sink,
+            &hook_ui,
+            &hook_runner,
+            &tokio_util::sync::CancellationToken::new(),
+            "en",
+            &workspace_root,
+            &mut fuse,
+        )
+        .await;
+
+        let lifecycle = sink.lifecycle_events();
+
+        assert_eq!(
+            lifecycle,
+            vec![
+                (calls[0].id.to_string(), "Ready".to_string()),
+                (calls[0].id.to_string(), "Running".to_string()),
+                (calls[0].id.to_string(), "Result".to_string()),
+                (calls[1].id.to_string(), "Ready".to_string()),
+                (calls[1].id.to_string(), "Running".to_string()),
+                (calls[1].id.to_string(), "Result".to_string()),
+            ]
+        );
+    }
 
     #[test]
     fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
