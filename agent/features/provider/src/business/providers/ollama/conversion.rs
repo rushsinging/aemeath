@@ -103,11 +103,7 @@ impl OllamaProviderConversion for OllamaProvider {
                             }
                         }));
                     }
-                    ContentBlock::ToolResult {
-                        tool_use_id: _,
-                        content,
-                        ..
-                    } => {
+                    ContentBlock::ToolResult { content, .. } => {
                         let text = match content {
                             serde_json::Value::String(s) => s.clone(),
                             serde_json::Value::Array(parts) => parts
