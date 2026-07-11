@@ -25,9 +25,9 @@
                                       │ 入站端口 AgentClient
                                       ▼
         ╔══════════════════ 应用核心（业务） ══════════════════╗
-        ║  核心域：Agent Runtime · Workflow                   ║
+        ║  核心域：Agent Runtime                               ║
         ║  支撑域：Context Mgmt · Memory · Task · Project ·      ║
-        ║          Policy · Audit · Tool&Skill&Command          ║
+        ║          Policy · Audit · Tool&Skill&Command · Workflow║
         ║  （领域模型 + 应用服务，纯业务、依赖向内）              ║
         ╚═══════════════════════════┬══════════════════════════╝
                                      │ 出站端口 *Port
@@ -105,3 +105,4 @@ Agent Runtime
 | 2026-07-11 | 初稿：架构决策、六边形形态、组合根、crate 映射、内部模块、传输透明 | #760 |
 | 2026-07-11 | 移除组合根现状 / TODO 描述改为目标态、crate 映射去"当前"措辞、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
+| 2026-07-11 | Workflow 从核心域挪到支撑域（六边形图） | #760 |

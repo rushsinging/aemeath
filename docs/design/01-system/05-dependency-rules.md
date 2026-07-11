@@ -49,7 +49,7 @@
 | 演进 | 约束 |
 |---|---|
 | Server 化 | 传输层（WS / 进程拓扑）NEVER 进核心；`AgentClient` 保持传输透明 |
-| Workflow（v0.2.0） | 编排器经"触发源"抽象驱动 Run，NEVER 让 Agent Runtime 反向依赖编排器内部 |
+| 单 main + 多 sub（v0.2.0） | 由 Agent Runtime 的 SubAgent 能力承担（多个子 Run），不属编排、不新增 BC；无多-agent 图编排的长期计划 |
 
 ## 6. 守卫映射
 
@@ -69,3 +69,4 @@
 | 2026-07-11 | 初稿：依赖方向总则、7 条依赖铁律、COLA 重定位、单状态机原则 | #760 |
 | 2026-07-11 | 违反示例通用化（移除具体现有类型名）、COLA 表去"现状"列、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
+| 2026-07-11 | Future 约束去"编排器"表述，改为 SubAgent 承担 v0.2.0 单 main + 多 sub | #760 |

@@ -14,7 +14,7 @@
 
 | 术语 | 定义 |
 |---|---|
-| **Run** | 一次由用户输入（或父 Run / 编排器）触发的**一轮 agent 执行**，包含多个 Run Step，直到完成 / 失败 / 取消 / 等待用户。系统唯一的领域状态机，**内存态、不持久化**。标识 `RunId`。 |
+| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step，直到完成 / 失败 / 取消 / 等待用户。系统唯一的领域状态机，**内存态、不持久化**。标识 `RunId`。 |
 | **Run Step** | Run 内的一次「模型调用 → 应用响应 →（可选）工具执行」往返。 |
 | **Model Invocation** | 一次具体的 LLM 调用（请求 + 流式响应 + usage）。 |
 | **Tool Call** | 一次工具调用。双 ID：领域 `ToolCallId`（UUIDv7）+ provider 边界标识。 |
@@ -35,13 +35,14 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 
 > 崩溃后不恢复中间状态；用户重新发起即新建 Run。
 
-## 2. Workflow / Orchestration（核心域）
+## 2. Workflow（支撑域）
+
+> 仅承载 reasoning effort 调节，经端口被 Agent Runtime 消费；不做多-agent 图编排（无此长期计划）。
 
 | 术语 | 定义 |
 |---|---|
 | **Reasoning Node** | reasoning graph 的阶段节点：IDLE / EXPLORE / PLAN / EXECUTE / VERIFY，用于调节 effort。 |
 | **Reasoning Level** | 统一的推理强度抽象：Off / Low / Medium / High / Xhigh / Max，经三层 clamp（graph.desired ∩ provider.max ∩ user.max）。静态阈值归 Config。 |
-| **Workflow Graph** | 多-agent 图编排（node / edge / state / checkpoint），v0.2.0 目标。 |
 
 ## 3. Context Management（支撑域）
 
@@ -118,3 +119,4 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 2026-07-11 | 初稿：核心术语表、AgentRun 状态机、术语辨析 | #760 |
 | 2026-07-11 | 改为纯目标态（移除"当前代码命名 / 迁移说明"列）、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、Turn→Run Step；补 Main Agent 与 SubAgent 对照 | #760 |
+| 2026-07-11 | Workflow 降为支撑域（第 2 节标题），移除不做的 Workflow Graph 编排术语 | #760 |
