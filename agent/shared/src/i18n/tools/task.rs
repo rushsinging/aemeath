@@ -17,7 +17,7 @@ pub fn task_create(lang: &str) -> &'static str {
 4. 用 TaskUpdate 设置依赖并分配代理
 
 创建任务后，用 TaskUpdate：
-- 在任务间设置依赖（addBlockedBy/addBlocks）
+- 在任务间设置依赖（add_blocked_by/add_blocks）
 - 开始工作前标记为 in_progress
 - 完成后标记为 completed——系统会显示哪些任务已解除阻塞
 
@@ -45,7 +45,7 @@ IMPORTANT workflow when task management is actually needed:
 4. Use TaskUpdate to set dependencies and assign agents
 
 After creating tasks, use TaskUpdate to:
-- Set dependencies (addBlockedBy/addBlocks) between tasks
+- Set dependencies (add_blocked_by/add_blocks) between tasks
 - Mark as in_progress before starting work
 - Mark as completed when done — the system will show which tasks are unblocked
 

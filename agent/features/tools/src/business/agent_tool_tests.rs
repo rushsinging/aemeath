@@ -134,7 +134,7 @@ async fn test_agent_tool_task_id_success_completes_task() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "taskId": task.id,
+                "task_id": task.id,
             }),
             &test_ctx(),
         )
@@ -160,7 +160,7 @@ async fn test_agent_tool_task_id_failure_resets_pending() {
             serde_json::json!({
                 "prompt": "Sub-agent error: failed",
                 "description": "run task",
-                "taskId": task.id,
+                "task_id": task.id,
             }),
             &test_ctx(),
         )
@@ -181,7 +181,7 @@ async fn test_agent_tool_task_id_missing_task_errors() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "taskId": "missing",
+                "task_id": "missing",
             }),
             &test_ctx(),
         )

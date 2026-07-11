@@ -6,7 +6,7 @@ fn test_static_prompt_requires_task_update_for_direct_tools() {
 
     assert!(text.contains("BEFORE starting work on a task yourself"));
     assert!(text.contains("Read/Grep/Glob/Bash/Edit/Write"));
-    assert!(text.contains("TaskUpdate(taskId, status=\"in_progress\")"));
+    assert!(text.contains("TaskUpdate(task_id, status=\"in_progress\")"));
     assert!(text.contains("AFTER completing a task yourself"));
     assert!(text.contains("TaskListCreate before TaskCreate"));
     assert!(text.contains("TaskListComplete"));
@@ -16,8 +16,8 @@ fn test_static_prompt_requires_task_update_for_direct_tools() {
 fn test_static_prompt_delegates_agent_task_status_to_task_id() {
     let text = static_system_prompt_for_test("/tmp/project", true, "en");
 
-    assert!(text.contains("pass `taskId` to the Agent tool"));
-    assert!(text.contains("taskId is NOT required"));
+    assert!(text.contains("pass `task_id` to the Agent tool"));
+    assert!(text.contains("task_id is NOT required"));
     assert!(!text.contains("TaskUpdate(id2, in_progress) → Agent"));
 }
 

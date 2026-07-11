@@ -9,7 +9,7 @@ use tokio::process::Command;
 pub struct LspTool;
 
 const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "filePath",
+    field: "file_path",
     kind: PathKind::File,
 }];
 
@@ -54,7 +54,7 @@ impl TypedTool for LspTool {
             Err(e) => return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("invalid input: {e}"), "data": null}).to_string()),
         };
         let operation = args.operation.as_str();
-        let file_path = args.filePath.as_str();
+        let file_path = args.file_path.as_str();
 
         let language = args
             .language

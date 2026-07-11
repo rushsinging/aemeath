@@ -20,7 +20,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, up to 1000 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `taskId` to bind to a tracked task for automatic status management."
+        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, up to 1000 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `task_id` to bind to a tracked task for automatic status management."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -86,7 +86,7 @@ impl TypedTool for AgentTool {
         // If `taskId` is provided, automatically manage its lifecycle:
         //   Pending → InProgress (before run_agent)
         //   InProgress → Completed (on success) or Pending (on failure)
-        let task_id = args.taskId.clone();
+        let task_id = args.task_id.clone();
 
         if let Some(ref tid) = task_id {
             if self.store.get(tid).await.is_none() {
