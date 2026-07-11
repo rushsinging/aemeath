@@ -15,6 +15,10 @@ use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
 use tools::api::ToolExecutionContext;
 
+pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
+    messages.iter().map(Message::to_llm_view).collect()
+}
+
 #[allow(clippy::type_complexity)]
 pub(super) struct SubAgentRun<'a> {
     pub prompt: &'a str,
@@ -110,11 +114,12 @@ impl<'a> SubAgentRun<'a> {
                 }
             }
 
+            let messages_for_api = messages_for_llm(&self.messages);
             let response = self
                 .client
                 .stream_message(
                     &effective_blocks,
-                    &self.messages,
+                    &messages_for_api,
                     &self.sub_schemas,
                     &mut self.handler,
                     &self.ctx.cancel,
@@ -334,5 +339,46 @@ impl<'a> SubAgentRun<'a> {
                 (call.id.clone(), (call.name.clone(), input_short))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::messages_for_llm;
+    use share::message::{ContentBlock, Message, Role};
+
+    #[test]
+    fn messages_for_llm_converts_structured_tool_result_to_text() {
+        let messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "tool_1".to_string(),
+                content: serde_json::json!({"stdout": "structured output"}),
+                is_error: false,
+                text: Some("plain output".to_string()),
+            }],
+            metadata: None,
+        }];
+
+        let api_messages = messages_for_llm(&messages);
+
+        let ContentBlock::ToolResult { content, text, .. } = &api_messages[0].content[0] else {
+            panic!("expected tool result");
+        };
+        assert_eq!(content, "plain output");
+        assert!(text.is_none());
+        let ContentBlock::ToolResult {
+            content: original_content,
+            text: original_text,
+            ..
+        } = &messages[0].content[0]
+        else {
+            panic!("expected original tool result");
+        };
+        assert_eq!(
+            original_content,
+            &serde_json::json!({"stdout": "structured output"})
+        );
+        assert_eq!(original_text.as_deref(), Some("plain output"));
     }
 }
