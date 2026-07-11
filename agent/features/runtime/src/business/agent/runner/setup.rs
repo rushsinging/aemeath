@@ -252,7 +252,7 @@ impl AgentRunner for CliAgentRunner {
             agent,
             max_turns: max_turns_override as usize,
             start_time: std::time::Instant::now(),
-            max_duration: std::time::Duration::from_secs(1800),
+            max_duration: std::time::Duration::from_secs(10800),
             session_id,
             role_name_for_log,
             model_name_for_log,
