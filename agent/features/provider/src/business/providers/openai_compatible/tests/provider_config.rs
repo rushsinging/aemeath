@@ -378,8 +378,8 @@ fn volcengine_provider_uses_max_output_tokens_field() {
 }
 
 #[test]
-fn openai_streaming_http_client_has_total_timeout() {
+fn openai_streaming_http_client_uses_connect_timeout() {
     let debug = format!("{:?}", provider::build_streaming_http_client_builder(30));
 
-    assert!(debug.contains("timeout"), "{debug}");
+    assert!(debug.contains("connect_timeout"), "{debug}");
 }

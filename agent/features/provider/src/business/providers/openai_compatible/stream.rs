@@ -11,10 +11,12 @@ use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
-/// 流空闲超时：180 秒无数据则中止
-pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
-/// 停滞检测阈值：超过 30 秒无数据则记录警告
-pub(crate) const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(30);
+/// 流空闲超时（单一真相源：`business::OPENAI_STREAM_IDLE_TIMEOUT_SECS`）
+pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(crate::business::OPENAI_STREAM_IDLE_TIMEOUT_SECS);
+/// 流停滞检测阈值（单一真相源：`business::STALL_THRESHOLD_SECS`）
+pub(crate) const STALL_THRESHOLD: std::time::Duration =
+    std::time::Duration::from_secs(crate::business::STALL_THRESHOLD_SECS);
 
 // 截断 JSON 恢复函数已提取到 `provider::business::json_recovery`，
 // 由 stream / non_stream / Anthropic 路径共享。
