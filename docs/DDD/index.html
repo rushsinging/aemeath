@@ -464,8 +464,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     <a href="#hex"><span class="dot" style="background:var(--cyan)"></span>六边形</a>
     <a href="#clean"><span class="dot" style="background:var(--coral)"></span>整洁架构</a>
     <a href="#map"><span class="dot" style="background:linear-gradient(90deg,var(--amber),var(--coral))"></span>三位一体</a>
-    <a href="#example"><span class="dot" style="background:linear-gradient(90deg,var(--cyan),var(--coral))"></span>Example</a>
-    <a href="#example-aemeath"><span class="dot" style="background:linear-gradient(90deg,var(--sage),var(--cyan))"></span>aemeath 实战</a>
+    <a href="#example"><span class="dot" style="background:linear-gradient(90deg,var(--sage),var(--cyan))"></span>aemeath 实战</a>
     <a href="#disambig"><span class="dot" style="background:var(--sage)"></span>辨析</a>
   </div>
 </nav>
@@ -845,104 +844,6 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 <section class="blk" id="example">
   <div class="sec-head rev">
     <span class="sec-idx" style="color:var(--cyan)">06</span>
-    <span class="sec-kick">Worked Example · 电商实例</span>
-  </div>
-  <h2 class="sec-title rev d1">从边界到代码：一条「下单」流水线<small>PLACE&nbsp;ORDER · END-TO-END</small></h2>
-  <p class="sec-intro rev d2">
-    把三种架构合到<b>同一个真实功能</b>上——电商「下单」。四个阶段依次回答：
-    <b>建什么模型</b>（DDD）、<b>核心如何与外界插拔对话</b>（六边形）、<b>分几层、依赖朝哪</b>（整洁架构）。
-  </p>
-
-  <div class="timeline">
-    <!-- 阶段一 -->
-    <div class="tl-item p-ddd rev d2">
-      <div class="tl-rail"><div class="tl-node">I</div></div>
-      <div class="tl-card">
-        <div class="tl-top"><h3>战略设计 · 先画边界</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
-        <p class="tl-desc">写任何代码前，搞清业务由哪些世界组成。</p>
-        <ul class="tl-list">
-          <li>事件风暴提炼<b>统一语言</b>：已下单 → 已支付 → 已发货</li>
-          <li>划<b>子域</b>：核心 Ordering / 支撑 Inventory·Fulfillment / 通用 Payment·Notification</li>
-          <li>划<b>限界上下文</b>：Catalog · Ordering · Inventory · Payment</li>
-          <li>上下文映射：对 Payment 建<b>防腐层 ACL</b>，隔离外部模型</li>
-        </ul>
-        <div class="tl-out">产出 · <b>一张上下文地图</b>：谁是核心、谁与谁集成</div>
-      </div>
-    </div>
-
-    <!-- 阶段二 -->
-    <div class="tl-item p-ddd rev d2">
-      <div class="tl-rail"><div class="tl-node">II</div></div>
-      <div class="tl-card">
-        <div class="tl-top"><h3>战术建模 · 立起领域模型</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
-        <p class="tl-desc">只在 Ordering 上下文内，把模型雕出来。</p>
-        <ul class="tl-list">
-          <li>聚合根 <b>Order</b>，内部实体 <b>OrderItem</b>（外部只能经根操作）</li>
-          <li>值对象 <b>Money · Address · Quantity</b>（不可变、按值相等）</li>
-          <li>不变量：订单总额 = 各项之和；已支付订单不可改项</li>
-          <li>领域服务 <b>PricingService</b>；领域事件 <b>OrderPlaced · OrderPaid</b></li>
-          <li>仓储接口 <b>OrderRepository</b>——只声明接口，不碰 SQL</li>
-        </ul>
-        <div class="tl-out">产出 · <b>纯业务、零依赖</b>的领域模型</div>
-      </div>
-    </div>
-
-    <!-- 阶段三 -->
-    <div class="tl-item p-mix rev d2">
-      <div class="tl-rail"><div class="tl-node">III</div></div>
-      <div class="tl-card">
-        <div class="tl-top"><h3>架构落地 · 定端口与依赖方向</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
-        <p class="tl-desc">把领域包进端口，技术细节挂外侧、可插拔。</p>
-        <ul class="tl-list">
-          <li>驱动端口（入口）：<b>PlaceOrderUseCase</b></li>
-          <li>被驱动端口（出口）：<b>OrderRepository · PaymentGateway · InventoryPort · EventPublisher</b></li>
-          <li>主动适配器：<b>OrderController(REST) · CLI · Test</b></li>
-          <li>被动适配器：<b>JpaOrderRepository · StripeAdapter · KafkaEventPublisher</b></li>
-          <li>依赖倒置：接口写在内层，实现留在外层</li>
-        </ul>
-        <pre class="bp-code"><span class="tag">USE CASE · 编排</span><span class="k">class</span> PlaceOrderService : PlaceOrderUseCase {
-  <span class="k">fun</span> place(cmd): OrderId {
-    <span class="d">inventoryPort</span>.reserve(cmd.items)          <span class="m">// 出口端口</span>
-    <span class="k">val</span> order = <span class="d">Order</span>.place(cmd, pricing)      <span class="m">// 领域 + 不变量</span>
-    <span class="d">paymentGateway</span>.charge(order.total)         <span class="m">// 出口端口</span>
-    <span class="d">orderRepository</span>.save(order)               <span class="m">// 出口端口</span>
-    <span class="d">eventPublisher</span>.publish(OrderPlaced(order)) <span class="m">// 出口端口</span>
-    <span class="k">return</span> order.id
-  }
-}</pre>
-        <div class="tl-out">产出 · <b>可插拔、依赖一律向内</b>的骨架</div>
-      </div>
-    </div>
-
-    <!-- 阶段四 -->
-    <div class="tl-item p-mix rev d2">
-      <div class="tl-rail"><div class="tl-node">IV</div></div>
-      <div class="tl-card">
-        <div class="tl-top"><h3>落盘与验证 · 让结构自证</h3><span class="tl-badge badge-cln">Clean · 验证</span></div>
-        <p class="tl-desc">包结构直接反映架构，依赖只能自外向内指。</p>
-        <pre class="bp-code"><span class="tag">PACKAGE · 目录结构</span>ordering/
-├─ <span class="d">domain/</span>          <span class="m"># Entity·VO·Aggregate·Event·Repository接口</span>  <span class="r">← 零依赖</span>
-├─ <span class="d">application/</span>     <span class="m"># PlaceOrderUseCase · Service · 出口端口</span>
-├─ <span class="d">adapters/</span>
-│  ├─ <span class="d">in/</span>           <span class="m"># OrderController(REST) · CLI</span>      <span class="k">(Driving)</span>
-│  └─ <span class="d">out/</span>          <span class="m"># JpaRepository · StripeAdapter</span>     <span class="k">(Driven)</span>
-└─ <span class="d">infrastructure/</span>  <span class="m"># 框架装配 · 依赖注入</span>              <span class="r">← 最易变</span></pre>
-        <ul class="tl-list" style="margin-top:16px">
-          <li>测试：<b>domain</b> 纯单测 · <b>application</b> 用假端口 · <b>adapters</b> 才做集成测</li>
-          <li>依赖自检：<b>domain</b> 里若 import 出现 spring / jpa / stripe——即违规</li>
-        </ul>
-        <div class="tl-out">产出 · 一个能用<b>纯单元测试</b>验证业务规则的系统</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="rule"></div>
-
-<!-- ============ 06B · AEMEATH WORKED EXAMPLE ============ -->
-<section class="blk" id="example-aemeath">
-  <div class="sec-head rev">
-    <span class="sec-idx" style="color:var(--sage)">06+</span>
     <span class="sec-kick">Worked Example · aemeath 实战</span>
   </div>
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
