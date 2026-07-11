@@ -12,7 +12,7 @@
 | agent-engineering | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
 | reasoning-graph | reasoning effort 阶段调节、ReasoningLevel、provider 映射 |
 | observability | 日志 schema、target 路由、诊断 |
-| migration-governance | Current→Target 迁移追踪、旧文档去向、退役清单（**所有过渡期状态集中于此，避免污染设计文档**） |
+| [migration-governance.md](migration-governance.md) ✅ S2 | Current→Target 迁移追踪、Runtime 现状缺口(R1-R10)、死代码退役清单（**所有过渡期状态集中于此，避免污染设计文档**） |
 
 ## 编写原则
 
@@ -32,3 +32,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：承接说明 + 待处理事项 | #760 |
 | 2026-07-11 | 移除 current 迁移问题描述、把过渡状态收敛到 migration-governance、链接化、新增修改历史 | #760 |
+| 2026-07-11 | S2 建 migration-governance.md（承接 Runtime 现状缺口），规划表改链接 | #761 |
