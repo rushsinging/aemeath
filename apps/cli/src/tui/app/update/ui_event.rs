@@ -31,22 +31,13 @@ impl App {
             UiEvent::BlockComplete { context, text } => {
                 let _ = (context, text);
             }
-            UiEvent::ToolCallStart {
-                name: _, index: _, ..
-            } => {
+            UiEvent::ToolCallStart { .. } => {
                 self.chat.start_tool_activity();
             }
-            UiEvent::ToolCallUpdate { name: _, id, .. } => {
+            UiEvent::ToolCallUpdate { id, .. } => {
                 self.chat.register_tool_call(id.clone());
             }
-            UiEvent::ToolResult {
-                id,
-                tool_name: _,
-                output: _,
-                is_error: _,
-                images: _,
-                ..
-            } => {
+            UiEvent::ToolResult { id, .. } => {
                 let _had_active_id = self.chat.has_active_tool_call(&id);
                 let _remaining = self.chat.finish_tool_call(&id);
             }
