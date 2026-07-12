@@ -14,11 +14,11 @@
 
 | 文档 | 角色 |
 |---|---|
-| [01-product-and-domain.md](01-system/01-product-and-domain.md) | 产品目标、核心问题、子域三分类、15 BC 清单、关键约束 |
+| [01-product-and-domain.md](01-system/01-product-and-domain.md) | 产品目标、核心问题、子域三分类、15 BC 责任章程与判断规则 |
 | [02-ubiquitous-language.md](01-system/02-ubiquitous-language.md) | 统一语言术语表、术语辨析 |
 | [03-context-map.md](01-system/03-context-map.md) | 15 BC 集成关系（C/S · ACL · Pub/Sub · OHS · PL · SK）、交付层、Future 预留 |
 | [04-system-architecture.md](01-system/04-system-architecture.md) | 模块化单体 + Hexagonal + 组合根 + crate 映射 + 传输透明 |
-| [05-dependency-rules.md](01-system/05-dependency-rules.md) | Clean 依赖方向、7 条依赖铁律、COLA 重定位、单状态机原则 |
+| [05-dependency-rules.md](01-system/05-dependency-rules.md) | Clean 依赖方向、7 条依赖铁律、COLA 重定位、Agent 执行生命周期状态机原则 |
 
 ## 旧文档过渡说明
 
@@ -34,6 +34,7 @@
 | 理解 aemeath 是什么、怎么划分 BC | [01-product-and-domain.md](01-system/01-product-and-domain.md) |
 | 查术语精确定义 | [02-ubiquitous-language.md](01-system/02-ubiquitous-language.md) |
 | 理解 BC 之间怎么集成 / 端口 | [03-context-map.md](01-system/03-context-map.md) |
+| 理解 Tool/Skill/Command、Scope/Profile 与 MCP 边界 | [02-modules/tools/](02-modules/tools/README.md) |
 | 理解依赖方向 / 六边形 | [04-system-architecture.md](01-system/04-system-architecture.md) + [05-dependency-rules.md](01-system/05-dependency-rules.md) |
 | 新增 / 调整架构守卫、Stop 钩子失败排查 | [02-architecture-guards.md](02-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
@@ -57,3 +58,5 @@
 |---|---|---|
 | 2026-07-11 | 重写为三层信息架构导航 + 迁移地图 + 四态约定 | #760 |
 | 2026-07-11 | 迁移地图收敛为过渡说明（迁移追踪归 migration-governance）、状态约定改为纯目标态、新增修改历史 | #760 |
+| 2026-07-12 | 阅读路径新增 Tool/Skill/Command 战术设计入口 | #787 |
+| 2026-07-12 | 系统导航补充 15 BC 责任章程，并精确状态机原则命名 | #743 / #787 |

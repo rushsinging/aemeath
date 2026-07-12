@@ -2,7 +2,7 @@ use super::*;
 use crate::api::{AgentRunRequest, AgentRunTerminal, AgentRunner, ToolResources};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -57,8 +57,7 @@ fn test_ctx() -> ToolExecutionContext {
 
 #[tokio::test]
 async fn test_agent_tool_uses_finite_default_timeout() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -86,8 +85,7 @@ async fn test_agent_tool_uses_finite_default_timeout() {
 
 #[tokio::test]
 async fn test_agent_tool_caps_timeout_at_three_hours() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -111,9 +109,7 @@ async fn test_agent_tool_caps_timeout_at_three_hours() {
 
 #[test]
 fn test_agent_tool_schema_describes_timeout_without_max_turns() {
-    let tool = AgentTool {
-        store: Arc::new(TaskStore::new()),
-    };
+    let tool = AgentTool;
 
     let schema = tool.input_schema().to_string();
     let description = tool.description();
@@ -124,131 +120,8 @@ fn test_agent_tool_schema_describes_timeout_without_max_turns() {
 }
 
 #[tokio::test]
-async fn test_agent_tool_task_id_success_completes_task() {
-    let store = Arc::new(TaskStore::new());
-    let task = store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
-        .await;
-    let tool = AgentTool {
-        store: store.clone(),
-    };
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "finished",
-                "description": "run task",
-                "task_id": task.id,
-            }),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(!result.is_error);
-    let updated = store.get(&task.id).await.expect("task exists");
-    assert_eq!(updated.status, TaskStatus::Completed);
-}
-
-#[tokio::test]
-async fn test_agent_tool_task_id_failure_resets_pending() {
-    struct FailedRunner;
-    #[async_trait::async_trait]
-    impl AgentRunner for FailedRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> AgentRunTerminal {
-            AgentRunTerminal::Failed {
-                error: "failed".to_string(),
-            }
-        }
-
-        async fn complete(
-            &self,
-            _prompt: &str,
-            _system: &str,
-            _ctx: &ToolExecutionContext,
-        ) -> String {
-            String::new()
-        }
-    }
-
-    let store = Arc::new(TaskStore::new());
-    let task = store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
-        .await;
-    let tool = AgentTool {
-        store: store.clone(),
-    };
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "ordinary user data",
-                "description": "run task",
-                "task_id": task.id,
-            }),
-            &test_ctx_with_runner(Arc::new(FailedRunner)),
-        )
-        .await;
-
-    assert!(!result.is_error);
-    let updated = store.get(&task.id).await.expect("task exists");
-    assert_eq!(updated.status, TaskStatus::Pending);
-}
-
-#[tokio::test]
-async fn test_agent_tool_task_id_missing_task_errors() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "finished",
-                "description": "run task",
-                "task_id": "missing",
-            }),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(result.is_error);
-    assert!(result.text.contains("task not found"));
-}
-
-#[tokio::test]
-async fn test_agent_tool_allows_missing_task_id_even_with_active_list() {
-    let store = Arc::new(TaskStore::new());
-    store
-        .create_list("request".to_string(), "complex request".to_string())
-        .await;
-    store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
-        .await;
-    let tool = AgentTool {
-        store: store.clone(),
-    };
-    let runner = Arc::new(StubRunner::default());
-    let ctx = test_ctx_with_runner(runner.clone());
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "finished",
-                "description": "run task",
-            }),
-            &ctx,
-        )
-        .await;
-
-    // Free-form agent calls without taskId should succeed even when an active
-    // task list has incomplete tasks.
-    assert!(!result.is_error);
-    assert_eq!(*runner.run_count.lock().unwrap(), 1);
-}
-
-#[tokio::test]
-async fn test_agent_tool_allows_missing_task_id_without_active_list() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+async fn test_agent_tool_runs_without_task_id() {
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -264,24 +137,6 @@ async fn test_agent_tool_allows_missing_task_id_without_active_list() {
 
     assert!(!result.is_error);
     assert_eq!(*runner.run_count.lock().unwrap(), 1);
-}
-
-#[test]
-fn test_is_agent_failure_detects_known_markers() {
-    assert!(is_agent_failure(&AgentRunTerminal::Cancelled));
-    assert!(is_agent_failure(&AgentRunTerminal::Failed {
-        error: "connection refused".to_string(),
-    }));
-}
-
-#[test]
-fn test_is_agent_failure_normal_result_is_not_failure() {
-    assert!(!is_agent_failure(&AgentRunTerminal::Completed {
-        result: "Successfully refactored the module.".to_string(),
-    }));
-    assert!(!is_agent_failure(&AgentRunTerminal::Completed {
-        result: String::new(),
-    }));
 }
 
 /// 回归：子 agent 的 workspace 必须从父快照派生为独立实例（继承位置、空栈、独立 Arc/锁），
@@ -337,8 +192,7 @@ fn sub_agent_workspace_isolated() {
 /// 子代理有产出时，text 必须等于产出（父 LLM 能看到）。
 #[tokio::test]
 async fn test_agent_tool_text_contains_subagent_output() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+    let tool = AgentTool;
     let ctx = test_ctx(); // StubRunner 返回 prompt 作为 output
 
     let result = tool
@@ -377,8 +231,7 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
         }
     }
 
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+    let tool = AgentTool;
     let ctx = test_ctx_with_runner(Arc::new(EmptyRunner));
 
     let result = tool

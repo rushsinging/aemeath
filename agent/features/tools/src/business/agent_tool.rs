@@ -3,15 +3,11 @@ use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::agent::{AgentInput, AgentResult};
-use std::sync::Arc;
-use storage::api::{TaskStatus, TaskStore};
 
 const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 1800;
 const SUB_AGENT_TIMEOUT_CAP_SECS: u64 = 10800;
 
-pub struct AgentTool {
-    pub store: Arc<TaskStore>,
-}
+pub struct AgentTool;
 
 #[async_trait]
 impl TypedTool for AgentTool {
@@ -21,7 +17,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens), wall-clock timeout, and StuckGuard protection. Multiple Agent calls in the SAME response run concurrently. Pass `task_id` to bind to a tracked task for automatic status management."
+        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens), wall-clock timeout, and StuckGuard protection. Multiple Agent calls in the SAME response run concurrently."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -75,30 +71,10 @@ impl TypedTool for AgentTool {
 
         let cwd_str = cwd.to_string_lossy();
 
-        // Resolve role and model:
-        //   - `model` takes precedence: a direct "provider/model_id" spec
-        //   - `role` is resolved by CliAgentRunner via AgentsConfig::roles
-        //   - If neither is set, the runner uses the default model
-        let role = args.role.as_deref();
-        let model = args.model.as_deref();
-        let model_spec = if model.is_some() { model } else { role };
+        // `role` is resolved by CliAgentRunner via AgentsConfig::roles.
+        // If not set, the runner uses the default model.
+        let model_spec = args.role.as_deref();
 
-        // --- Task status management ---
-        // If `taskId` is provided, automatically manage its lifecycle:
-        //   Pending → InProgress (before run_agent)
-        //   InProgress → Completed (on success) or Pending (on failure)
-        let task_id = args.task_id.clone();
-
-        if let Some(ref tid) = task_id {
-            if self.store.get(tid).await.is_none() {
-                return TypedToolResult::error(format!("task not found: {tid}"));
-            }
-            self.store
-                .update(tid, |t| {
-                    t.status = TaskStatus::InProgress;
-                })
-                .await;
-        }
         let system = format!(
             r#"You are a sub-agent performing a specific task. You have access to tools for running commands, reading and editing files, and searching codebases.
 
@@ -131,20 +107,6 @@ Instructions:- Complete the task described in the user message
             })
             .await;
 
-        // Update task status from the typed Run terminal event, never from result text.
-        if let Some(ref tid) = task_id {
-            let is_failure = is_agent_failure(&terminal);
-            self.store
-                .update(tid, |t| {
-                    t.status = if is_failure {
-                        TaskStatus::Pending
-                    } else {
-                        TaskStatus::Completed
-                    };
-                })
-                .await;
-        }
-
         let final_output = terminal.output();
         // text → 父 LLM：必须包含子代理实际产出，否则父 agent 无法基于结果决策。
         // data → TUI：结构化展示（AgentResult.output 同步保留）。
@@ -155,8 +117,7 @@ Instructions:- Complete the task described in the user message
         };
         log::debug!(
             target: LOG_TARGET,
-            "agent final output: task_id={:?}, output_bytes={}, text_bytes={}, output_preview={:?}",
-            task_id,
+            "agent final output: output_bytes={}, text_bytes={}, output_preview={:?}",
             final_output.len(),
             text.len(),
             truncate_debug_preview(&final_output, 500)
@@ -164,19 +125,10 @@ Instructions:- Complete the task described in the user message
         TypedToolResult::success(
             text,
             AgentResult {
-                task_id,
                 output: final_output,
             },
         )
     }
-}
-
-/// Run failure classification is structural; result text is user data and is never parsed.
-fn is_agent_failure(result: &crate::api::AgentRunTerminal) -> bool {
-    matches!(
-        result,
-        crate::api::AgentRunTerminal::Failed { .. } | crate::api::AgentRunTerminal::Cancelled
-    )
 }
 
 fn truncate_debug_preview(value: &str, max_chars: usize) -> String {

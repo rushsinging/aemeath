@@ -97,8 +97,8 @@ struct RunSpec {
     model: ModelId,
     system_prompt: SystemPromptSpec,  // 基础 prompt + guidance 选择键
 
-    // —— 能力（交互能力 = 是否含 ask_user 工具）——
-    tools: ToolSelection,             // 允许的工具集（全集 / 白名单）
+    // —— 能力（交互能力 = Scope/Profile 是否装配并允许 user interaction）——
+    tools: ToolAccessSpec,              // Registry Scope + 只能收缩的 Tool Profile
 
     // —— 执行约束 ——
     timeout: Duration,                // 墙钟上限；**0 = 无限**（Main 默认 0，Sub 可配有限值）
@@ -131,7 +131,8 @@ enum TaskMode      { Shared, Isolated }
 struct RuntimeContext {
     context:   Arc<dyn ContextPort>,    // Sub: 独立 context manager
     provider:  Arc<dyn ProviderPort>,   // 按 spec.model 选定；**Sub 持独立 client 副本**(避免共享踩踏)
-    tools:     Arc<dyn ToolPort>,       // 按 spec.tools 装配的受限 registry
+    tool_catalog:   Arc<dyn ToolCatalogPort>,   // 按 Registry Scope/Profile 投影 schemas
+    tool_execution: Arc<dyn ToolExecutionPort>, // 不暴露 Tool/Registry，实现单次函数调用
     policy:    Arc<dyn PolicyPort>,     // Sub: DelegatedApproval 装饰器(设计)
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
     task:      Arc<dyn TaskPort>,       // Sub: 独立实例
@@ -158,7 +159,7 @@ struct RuntimeContext {
 | `hooks` | Full | BoundaryOnly | per-tool / 仅 start-stop |
 | `reasoning` | GraphDriven | EffortOnly/Inherit | 全 graph / 仅 effort（无设置继承父）|
 | `task` | Shared | Isolated | 独立 `TaskStore` |
-| `tools` | 全集 | 白名单 | 受限 registry |
+| `tools` | Main Scope + 完整基线 Profile | Sub Scope + 收缩 Profile | Scope 决定装配资源，Profile 只按 capability 收缩 |
 | `cancel` | 新建 per-Run scope | 从父 scope 派生 | 父取消传播到子 Run；各 Run 独立终态收口 |
 
 ## 7. SubAgent 派生：控制权矩阵 + 安全铁律
@@ -168,7 +169,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 ### 安全铁律
 > **Sub 的权限/能力 NEVER 超过 Main 授予的范围。Main 只能"削弱或平移"，NEVER 让 Sub 越权。**
 
-作为 RunSpec 派生不变量：派生时 tools 只能收缩不能扩张；policy 不可放宽；workspace 强制隔离。
+作为 RunSpec 派生不变量：Registry Scope 只能移除工具/资源，Tool Profile 的 allowed capabilities 只能收缩；policy 不可放宽；workspace 强制隔离。
 
 ### 控制权矩阵
 
@@ -180,7 +181,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | **memory** | 🟢 main 可控（默认 off）| `share_memory` 参数，main 决定是否给 sub 注入 |
 | **system_suffix** | 🟡 role 预设 | 角色人设 |
 | **reasoning effort** | 🟡 role 预设 + 继承父 | role>model>继承父进程 |
-| **tools** | 🔴 固定受限，**不可扩大** | 安全：防 sub 获得 main 没给的能力 |
+| **tools** | 🔴 Scope/Profile 固定受限，**不可扩大** | 安全：Scope 只移除资源，Profile capability 集只收缩 |
 | **workspace** | 🔴 固定独立 | 安全：隔离，防改父目录 |
 | **policy** | 🔴 固定继承，**不可放宽** | 安全铁律 |
 | **hooks** | 🔴 固定 BoundaryOnly | 一致性/安全 |
@@ -191,7 +192,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | 项 | Main | Sub |
 |---|---|---|
 | context | 共享 Session | 独立 |
-| tools | 全集 | 受限白名单 |
+| tools | Main Scope + 基线 Profile | Sub Scope + capability 收缩 Profile |
 | workspace | Inherit | 独立快照（改目录不回写父）|
 | task | 共享 | 独立 |
 | memory | 读写 + reflection | **不读不写**（可由 main 开启注入）|
@@ -224,3 +225,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | 2026-07-11 | output/result 定案：统一经 EventSink，result 为 RunCompleted 载荷（无独立 RunResult），靠终态事件识别 | #761 |
 | 2026-07-11 | 领域事件补终态族对称载荷（RunFailed{error} / RunCancelled）+ ModelInvocationRetrying | #761 |
 | 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |
+| 2026-07-12 | RuntimeContext 的 ToolPort 拆为 Catalog/Execution；RunSpec tools 改为 Registry Scope + capability Profile | #787 |

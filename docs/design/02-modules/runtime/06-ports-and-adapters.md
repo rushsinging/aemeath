@@ -2,7 +2,7 @@
 
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）
-> 本文定义 Agent Runtime 的入站端口、12 个出站端口、RuntimeContext 装配与 Composition Root。**只描述目标态**；现状端口缺口（12 个只有 4 个有 trait）记入 `03-engineering/migration-governance`。
+> 本文定义 Agent Runtime 的入站端口、出站端口、RuntimeContext 装配与 Composition Root。**只描述目标态**；实现缺口记入 `03-engineering/migration-governance`。
 
 ## 1. 入站端口（OHS + Published Language）
 
@@ -30,7 +30,7 @@ enum CancelRunOutcome {
 - 返回 `Accepted` 只确认取消请求已即时生效；取消完成由 `RunCancelled` 事件异步确认。
 - 对未带 `run_id` 的旧 `ChatInputEvent::Cancel`，迁移期只能映射到同一个 `cancel_run(active_run_id)`，完成 SDK 迁移后退役，NEVER 保留第二套语义。
 
-## 2. 出站端口清单（12 个，签名草案）
+## 2. 出站端口清单（签名草案）
 
 ```rust
 trait ContextPort {                                  // Context Management BC
@@ -43,11 +43,16 @@ trait ProviderPort {                                 // Provider BC（内部 ACL
               cancel: &RunCancellationScope)
         -> Stream<InvocationDelta>;                       // 流式
 }
-trait ToolPort {                                     // Tool & Skill & Command BC
-    fn execute(&self, calls: Vec<ToolCall>, cancel: &RunCancellationScope)
-        -> Vec<ToolResult>;
-    fn schemas(&self) -> Vec<ToolSchema>;                 // 受限 registry 的可用工具
+trait ToolCatalogPort {                              // Tool BC：只读目录投影
+    fn snapshot(&self, scope: RegistryScopeName, profile: ToolProfileName)
+        -> ToolCatalogSnapshot;
 }
+trait ToolExecutionPort {                            // Tool BC：单次函数调用
+    fn execute(&self, invocation: ToolInvocation, cancellation: &dyn CancellationSignal)
+        -> ToolOutcome;
+}
+// SkillCatalogPort / SkillMaterializationPort 面向 Context Management；
+// CommandCatalogPort / CommandRouterPort 面向 CLI/TUI/Server，不进入 RuntimeContext 的 Tool 执行路径。
 trait PolicyPort {                                   // Policy BC
     fn check(&self, call: &ToolCall) -> PolicyDecision;   // Allowed/Denied/NeedAsk
 }
@@ -82,7 +87,7 @@ trait EventSink {                                    // 事件出口（Main→TU
 
 ## 3. RuntimeContext 装配
 
-`RuntimeContext` 持有以上 12 个端口的**活实例**（Config/Event 除外为快照/sink）。装配规则由 `RunSpec` 驱动：
+`RuntimeContext` 持有以上出站端口的**活实例**（Config 为快照、Event/Audit 为 sink）。装配规则由 `RunSpec` 驱动：
 
 ```rust
 fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionRoot)
@@ -91,7 +96,8 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
     RuntimeContext {
         context:   root.context_for(spec.context),        // Isolated → 独立 manager
         provider:  root.provider_for(&spec.model, spec),  // Sub → 独立 client 副本
-        tools:     root.tools_for(&spec.tools),           // 受限 registry（只收缩）
+        tool_catalog:   root.tool_catalog_for(&spec.tools),   // Scope ∩ capability Profile
+        tool_execution: root.tool_execution_for(&spec.tools), // 不暴露 Registry/Tool 实例
         policy:    match spec.policy {
                        Direct => root.policy(),
                        DelegatedApproval => Delegated::new(root.policy(), parent), // 设计态
@@ -113,7 +119,7 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 }
 ```
 
-**安全铁律落地**（见 [01-domain-model.md](01-domain-model.md) §7）：`tools_for` 只能收缩不能扩张；`policy` 不放宽；`workspace` 强制 `seed_isolated`。
+**安全铁律落地**（见 [01-domain-model.md](01-domain-model.md) §7）：Registry Scope 只能移除 Tool/Resource，Tool Profile 的 capability 集只能收缩；`policy` 不放宽；`workspace` 强制 `seed_isolated`。
 
 ## 4. Composition Root
 
@@ -132,7 +138,7 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 
 | 目标端口 | 现状 | 迁移动作（S5）|
 |---|---|---|
-| ContextPort / ToolPort / PolicyPort / MemoryPort / WorkspacePort / ReasoningPort | ❌ 无 trait，具体类型直调 | 抽 trait，实现移到适配器 |
+| ContextPort / ToolCatalogPort / ToolExecutionPort / PolicyPort / MemoryPort / WorkspacePort / ReasoningPort | ❌ 无目标 trait，具体类型直调 | 抽端口，实现移到 adapter；Runtime 不再持有 ToolRegistry / Tool 实例 |
 | AuditSink | ❌ 完全无 | 新建（Pub/Sub） |
 | ProviderPort | ⚠️ 仅 `ProviderInfoPort`（只读元数据）| 补 invoke 方法 |
 | HookPort | ⚠️ 仅 `HookNotificationPort` | 补 per-tool run |
@@ -152,6 +158,7 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-11 | 初稿：入站端口、12 出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、现状缺口 | #761 |
+| 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
 | 2026-07-12 | 定义同步幂等 `cancel_run(run_id)`、per-Run cancellation scope 及 Provider/Tool/Compact/Hook 传播边界 | #700 |
+| 2026-07-12 | ToolPort 拆为 Catalog/Execution 双端口，补 Skill/Command 独立端口边界与 Scope/Profile 装配 | #787 |
