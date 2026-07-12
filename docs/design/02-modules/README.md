@@ -23,7 +23,9 @@
 | [storage/](storage/README.md) | 原子读写、backup/quarantine、路径安全及数据所有权边界 | ✅ S2 摘要 |
 | [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink/rotation 与 Audit 分离 | ✅ S2 摘要 |
 | [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 | ✅ S2 摘要 |
-| policy / audit | 各支撑 BC 战术设计 | 规划 |
+| [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 | ✅ S2 |
+| [hook/](hook/README.md) | 单 HookPort、类型化协议、3 次执行重试与 Stop/Run 15 次阻断语义 | ✅ S2 |
+| [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink/Query 与独立 JSONL 存储 | ✅ S2 |
 | [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑 | ⏸ 占位（#794 暂缓） |
 
 ## 编写原则
@@ -57,3 +59,4 @@
 | 2026-07-12 | 新增 tui/ 战术设计：八层 TEA 管线、三条信息流、3+1 Context、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 | #795 |
 | 2026-07-12 | 新增 tui/02-model：3+3 Context 完整字段、投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束 | #796 |
 | 2026-07-12 | 新增 tui/03-event-flow-and-acl：事件流两层转换 ACL、SDK DTO 边界、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6 | #797 |
+| 2026-07-12 | 新增 policy/hook/audit 战术设计：AllowAll-only、Hook 3/15 两层重试、Usage-only Audit MVP | #790 |
