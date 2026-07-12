@@ -32,10 +32,10 @@
 - **不持有** RuntimeContext（作为参数流转），**不直接调 Port**（经 loop_engine + coordinators）
 
 ### loop_engine（Main/Sub 共用）
-- **职责**：ReAct 循环骨架（推理→行动→观察）+ 停止条件 + 步进 + 门禁 `InputSource.drain`（纳入追问）
+- **职责**：ReAct 循环骨架（推理→行动→观察）+ 停止条件 + 步进 + 门禁 `InputBuffer.drain`（纳入追问）
 - **内置 StuckGuard**（4 层防 stuck，见 `04-stuck-prevention`）——Main/Sub 统一获得保护
 - **零分支**：Main/Sub 差异全在传入的 `RuntimeContext` + `RunSpec`
-- 消费：入站 `InputSource`（drain 输入）、`HookPort`（Stop hook 时机——**判定归 Hook，重试编排归本模块**）
+- 消费：入站 `InputBuffer`（drain 输入）、`HookPort`（Stop hook 时机——**判定归 Hook，重试编排归本模块**）
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
@@ -64,7 +64,7 @@
 - 消费：`EventSink`、`AuditSink`（成本/审计事件）
 
 ### api（入站适配器实现）
-- **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputSource`）；SubAgent 派生时装配子 RuntimeContext
+- **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputBuffer`）；SubAgent 派生时装配子 RuntimeContext
 - **注**：真正的生产装配收敛在 Composition Root（见 `06-ports-and-adapters`），api 模块只做 Runtime 内的接线
 
 ### Runtime / Hook 边界（跨模块）
@@ -87,7 +87,7 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 | ToolCall 双 ID 映射表 | tool_coordination | 运行时映射 |
 | Context Window（临时）| context_coordination | 每轮构建 |
 | RuntimeContext（活资源）| 由 api/派生逻辑装配，**流经各模块作参数** | 不属任何模块的持久状态 |
-| InputSource 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
+| InputBuffer 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
 
 ## 4. 依赖方向（Clean）
 
@@ -117,4 +117,4 @@ event_projection：被各模块调用（emit），不反向依赖业务
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：8 个内部模块划分、状态所有权、依赖方向、收敛方向 | #761 |
-| 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputSource 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputSource 状态、Runtime/Hook 边界子节 | #761 |
+| 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputBuffer 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputBuffer 状态、Runtime/Hook 边界子节 | #761 |
