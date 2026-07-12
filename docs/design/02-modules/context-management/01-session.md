@@ -74,12 +74,12 @@ Session（对话历史容器，跨多次输入）
 ```
 
 - **一个 Session 含多个 Run 的对话产出**（Main 每次用户输入 → 一个 Run → 追加一个 Normal 段）
-- **Run 读写 Session**：经 `ContextPort` 读历史构建 Context Window；Run 完成后对话追加回 Session
+- **Run 读写 Session**：经 `ContextPort` 读历史构建 Context Window；每个 RunStep 结束后对话追加并落盘到 Session
 - Run 是内存态执行；Session 是持久化数据——两者生命周期不同（Run 短、Session 长）
 
 ## 6. 恢复边界
 
-- **落盘**：ChatChain（turn 级快照）+ 内嵌 Task/Workspace 快照
+- **落盘**：ChatChain（每个 RunStep 结束后落盘）+ 内嵌 Task/Workspace 快照
 - **不落盘**：Run 执行状态（内存态）
 - **恢复语义**：加载 Session 恢复**对话历史**，新输入开**全新 Run**（从头开始）——见 [../runtime/05-recovery-semantics.md](../runtime/05-recovery-semantics.md)
 
@@ -91,6 +91,10 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 
 - Run 聚合（读写 Session）：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - 恢复语义：[../runtime/05-recovery-semantics.md](../runtime/05-recovery-semantics.md)
+- Compact 家族（ContextPort OHS）：[02-compact.md](02-compact.md)
+- Token Budget：[03-token-budget.md](03-token-budget.md)
+- Prompt & Guidance：[04-prompt-guidance.md](04-prompt-guidance.md)
+- Memory 注入：[05-memory-injection.md](05-memory-injection.md)
 - 上下文地图（Session 属 Context Management）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言（Session/ChatChain/ChatSegment）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 
@@ -99,3 +103,4 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：Session 聚合、ChatChain/ChatSegment、跨 BC 快照组装、与 Run 关系、恢复边界 | #761 |
+| 2026-07-12 | 补充 ContextPort 相关文档交叉引用 | #786 |
