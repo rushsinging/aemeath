@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>。
+      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>。
   </p>
 
   <div class="timeline">
@@ -1263,6 +1263,35 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 
 <span class="m">// 暂缓项都有明确的重启条件，不是遗忘</span></pre>
       <div class="tl-out">产出 · 暂缓项<b>条件化追踪</b>，不遗忘不盲启</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十二：领域模型极简 + 命名直觉 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域模型极简 · LLM 驱动系统的每个字段都是 token 成本</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Task BC 战术设计中发现：<code>progress</code> / <code>progress_message</code> 字段要求 LLM 每步更新，纯费 token 无消费方——直接砍掉。同轮中 <code>seed_isolated</code> 重命名为 <code>fork</code>：自造术语不如 Unix 语义直觉。</p>
+      <ul class="tl-list">
+        <li><b>字段存活判据</b>：每个字段必须回答"谁消费它"——TUI 不渲染、Runtime 不读取、快照不依赖的字段直接移除。LLM 驱动的领域模型尤其要极简，多余字段 = 每轮浪费 token</li>
+        <li><b>Batch 是领域服务非聚合根</b>：Batch 管理 Task 集合的分组与生命周期（Active / Paused / Archived），但无独立状态机——lifecycle 检测是纯函数，归档动作由调用方执行。不是每个"管理一组东西"的概念都需要是聚合根</li>
+        <li><b>Published Language 所有权</b>：Task 类型定义所有权属 Task BC，其他 BC 引用其发布类型经端口翻译——<b>NEVER</b> 自行定义副本。当前类型在 shared/tool/types 下（build.rs 生成 Schema 需要），目标迁移到 Task BC 所有权下</li>
+        <li><b>命名直觉化</b>：<code>seed_isolated</code> → <code>fork</code>——Unix fork 语义（继承父状态 + 独立可变）比自造术语更直觉，跨团队沟通成本更低</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">字段存活判据 · 谁消费它？</span><span class="d">Task.subject</span>        → TUI 渲染、用户可读          <span class="m">// 留</span>
+<span class="d">Task.status</span>         → Runtime 决策、TUI 渲染        <span class="m">// 留</span>
+<span class="d">Task.blocked_by</span>     → is_blocked 判定              <span class="m">// 留</span>
+<span class="d">Task.progress</span>       → ??? 无消费方                  <span class="m">// 砍</span>
+<span class="d">Task.progress_message</span> → ??? 无消费方                <span class="m">// 砍</span>
+
+<span class="tag">Batch · 领域服务非聚合根</span><span class="d">detect_batch_all_completed</span>(tasks) → Option&lt;batch_id&gt;  <span class="m">// 纯函数</span>
+<span class="d">detect_interrupted_batch</span>(tasks) → Option&lt;Info&gt;      <span class="m">// 纯函数</span>
+<span class="m">// 检测无副作用；归档动作由调用方执行</span>
+
+<span class="tag">fork · Unix 语义替代自造术语</span><span class="d">fn fork(&amp;self) -> Arc&lt;Self&gt;</span>
+  <span class="m">// 继承 root + path_base + initial_cwd</span>
+  <span class="m">// 空栈 + 独立锁 + 共享 git 端口</span></pre>
+      <div class="tl-out">产出 · Task 聚合砍掉 2 字段 / 1 不变量 / 1 事件；Batch 定位为领域服务；<code>fork</code> 替代 <code>seed_isolated</code></div>
     </div>
   </div>
 </section>
