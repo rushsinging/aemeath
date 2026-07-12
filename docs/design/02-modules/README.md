@@ -15,6 +15,8 @@
 | [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
 | memory / task / project / policy / audit | 各支撑 BC 战术设计 | 规划 |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
+| [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
+| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | ✅ S2 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
 | server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
 
@@ -40,3 +42,4 @@
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
+| 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
