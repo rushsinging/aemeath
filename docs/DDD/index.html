@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>。
+      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>。
   </p>
 
   <div class="timeline">
@@ -1188,6 +1188,81 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 
 <span class="m">// 判据：用户是否在等结果？否 → 异步；是 → 同步</span></pre>
       <div class="tl-out">产出 · 主循环零阻塞，<b>Reflection 在后台跑</b>，结果延迟到下一轮 emit</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十九：ACL 两层防腐 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>ACL 两层防腐 · 格式检测 + 语义翻译</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">兼容 Claude Code 的 settings.json 时，初稿只做格式检测——review 后指出 config 内容翻译也要防腐。外部 CLI 的字段语义和内部模型不对等，<b>不是字段名 1:1 直通</b>。</p>
+      <ul class="tl-list">
+        <li><b>第一层·格式检测防腐</b>：运行时检测文件格式（文件名 + 内容特征），未识别格式跳过 + 日志，不报错中断</li>
+        <li><b>第二层·内容语义翻译防腐</b>：外部字段经语义映射后产出 <code>ConfigPatch</code>——外部结构<b>不泄漏</b>到 Config domain</li>
+        <li>Claude <code>permissions.allow/deny</code> 规则列表 → <code>PermissionMode</code> 枚举（<b>聚合判断</b>，不是直通）</li>
+        <li>Claude <code>apiKeyHelper</code> 脚本 → 无法执行，<b>降级跳过 + warn</b>（不是塞原始结构进去）</li>
+        <li>新增外部 CLI 格式只加 translator（<code>ConfigTranslator</code> trait），不改 adapter / AppService / 分层</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">ACL 两层防腐</span><span class="d">CompatibilityAdapter</span>
+├─ <span class="m">// 第一层：格式检测</span>
+│   detect_format(path, content) → ConfigFormat
+│   未识别 → skip + log（不中断）
+│
+└─ <span class="m">// 第二层：语义翻译</span>
+    ClaudeTranslator::translate(content) → ConfigPatch
+      permissions  → PermissionMode（聚合判断）
+      env          → env 映射（过滤专有变量）
+      apiKeyHelper → skip + warn（降级）
+<span class="m">// 外部结构不泄漏到 Config domain</span></pre>
+      <div class="tl-out">产出 · <b>CompatibilityAdapter + ConfigTranslator trait</b>，两层防腐，外部格式可扩展</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十：clamp 统一 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>clamp 统一 · 3 处分散 → 1 个入口</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">ReasoningLevel 的 clamp 发生在 3 个时机（bootstrap / per-API-call / sub-agent setup），各自独立 clamp，导致 <code>max_reasoning</code> 配置已解析但从未生效，<code>current_reasoning_level()</code> 报告的值和实际发送给 provider 的值不一致（declared vs effective drift）。</p>
+      <ul class="tl-list">
+        <li><b>问题</b>：3 处 clamp 各拿各的上限——bootstrap 拿 user_cap，per-call 只拿 provider_max，<code>max_reasoning</code> 被跳过</li>
+        <li><b>目标</b>：<code>ReasoningPort.set_level()</code> 是<b>唯一 clamp 点</b>——内部 clamp <code>min(user_max, provider_max)</code></li>
+        <li>bootstrap / per-call / sub-agent 只调 <code>set_level</code>，不自行 clamp</li>
+        <li><code>current_level()</code> 返回<b>已 clamp 的有效值</b>——消除 declared vs effective drift</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">clamp 统一 · 唯一入口</span><span class="d">ReasoningPort::set_level</span>(desired)
+│  clamped = desired
+│      .min(user_max_reasoning)        <span class="m">// 用户配置上限</span>
+│      .min(provider.max_level())      <span class="m">// provider 模型上限</span>
+└─ inner.set_reasoning_level(clamped)
+
+<span class="m">// bootstrap / per-call / sub-agent 只调 set_level，不自行 clamp</span></pre>
+      <div class="tl-out">产出 · <b>ReasoningPort</b> 统一 clamp，<code>max_reasoning</code> 接入，drift 消除</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十一：暂缓条件明确 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>暂缓不是不做了 · 写明条件和远期规划</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">Workflow Engine（Phase 3 控制流编排）标记为暂缓——但"暂缓"不是"不做了"，设计文档中必须写明<b>暂缓原因</b>和<b>启动条件</b>，让后续开发者知道何时该重新评估。</p>
+      <ul class="tl-list">
+        <li><b>暂缓原因</b>：ReasoningGraph 已满足当前需求；Loop Engine 已是事实上的控制流；缺乏真实场景驱动</li>
+        <li><b>启动条件</b>（全部满足）：ReasoningGraph 稳定 + 出现 Loop Engine 无法表达的控制流需求 + 至少 2 个真实场景验证</li>
+        <li><b>远期方向</b>：与 ReasoningGraph 并存不替代——一个调 effort，一个调控制流；不修改 ChatChain（读模型层）</li>
+        <li>同理：<code>/think</code> 完整 6 级、L4 Context Collapse 等暂缓项都写明原因和条件</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">暂缓 ≠ 不做 · 写明条件</span><span class="d">Workflow Engine</span>  暂缓
+├─ 原因：ReasoningGraph 够用 + Loop Engine 事实控制流 + 无场景驱动
+└─ 启动条件（全部满足）：
+     1. ReasoningGraph 稳定
+     2. Loop Engine 无法表达的需求出现
+     3. ≥ 2 个真实场景验证
+
+<span class="m">// 暂缓项都有明确的重启条件，不是遗忘</span></pre>
+      <div class="tl-out">产出 · 暂缓项<b>条件化追踪</b>，不遗忘不盲启</div>
     </div>
   </div>
 </section>
