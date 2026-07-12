@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>。
+      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXVI</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>。
   </p>
 
   <div class="timeline">
@@ -1292,6 +1292,95 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <span class="m">// 继承 root + path_base + initial_cwd</span>
   <span class="m">// 空栈 + 独立锁 + 共享 git 端口</span></pre>
       <div class="tl-out">产出 · Task 聚合砍掉 2 字段 / 1 不变量 / 1 事件；Batch 定位为领域服务；<code>fork</code> 替代 <code>seed_isolated</code></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十三：3+1 Context · 不拆但内聚子模块 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>3+1 Context · 不拆但内聚子模块</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">设计文档定 4 Context（Conversation / Input / Runtime / Diagnostic），代码把 RuntimeState 合并进 Conversation——review 时面临矛盾：不拆则 Conversation 臃肿，拆则跨 Context 通信开销大。<b>最终决策：不拆，通过内聚子模块 + 字段私有化控制臃肿。</b></p>
+      <ul class="tl-list">
+        <li>RuntimeState 与 chat 生命周期紧密耦合——chat 启动 → spinner 开始，chat 完成 → spinner 停止</li>
+        <li>拆成独立 Context 会增加跨 Context Intent/Change 通信开销，收益不明确</li>
+        <li><b>内聚子模块</b>：RuntimeState 作为 Conversation 的私有子模块，字段全私有，只经业务方法操作</li>
+        <li><b>臃肿通过封装控制</b>，不通过拆 Context 控制——"大但内聚"优于"小但耦合"</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">3+1 Context · 不拆但内聚</span><span class="d">ConversationModel</span>
+├─ chats: Vec&lt;Chat&gt;            <span class="m">// 对话结构</span>
+├─ timeline: OutputTimelineModel
+├─ <span class="d">runtime: RuntimeState</span>        <span class="m">// 内聚子模块，字段私有</span>
+│    ├─ spinner / usage / workspace
+│    └─ task_status / compact_progress
+└─ ask_user: AskUserState
+
+<span class="m">// "大但内聚" &gt; "小但耦合"</span></pre>
+      <div class="tl-out">产出 · <b>3+1 Context 定型</b>——不强行拆分，用封装控制复杂度</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十四：SDK DTO 从 runtime auto-gen ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>SDK DTO 从 runtime auto-gen · 别两边维护</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">SDK ↔ Runtime 类型同步存在三种方式：tool result 用 re-export（✅）、ChatEvent 用 444 行手工 match（⚠️ 已 5 处漂移）、ContentBlock 用 JSON round-trip（⚠️ 加变体静默降级）。<b>原则：Runtime 是类型定义唯一来源，SDK 不应两边维护。</b></p>
+      <ul class="tl-list">
+        <li><b>ChatEvent 漂移</b>：<code>DoneWithDuration { Duration }</code> → <code>DoneWithDurationMs { u64 }</code>（重命名+改类型）；<code>GraphPhaseChanged { ReasoningNode }</code> → <code>{ String }</code>（类型擦除）</li>
+        <li><b>ContentBlock 脆弱</b>：JSON round-trip 无编译期保证——加变体静默降级为空 Vec</li>
+        <li><b>目标</b>：ChatEvent 删除 444 行手工 match，ContentBlock 删 JSON round-trip，统一为 re-export</li>
+        <li>tool result 的 <code>pub use</code> re-export 模式是正确范例——其他两类应跟进</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">SDK DTO · 单一来源</span><span class="d">tool_result</span>    pub use → ✅ 单一来源，零漂移
+<span class="d">ChatEvent</span>       444 行手工 match → ⚠️ 5 处漂移 → 删 convert.rs
+<span class="d">ContentBlock</span>    JSON round-trip → ⚠️ 静默降级 → pub use share
+
+<span class="m">// Runtime 是唯一来源，SDK re-export，不两边维护</span></pre>
+      <div class="tl-out">产出 · <b>SDK DTO 收口目标态</b>——三类全走 re-export，加 CI shape 守卫</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十五：reducer 纯化 · 副作用隔离 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>reducer 纯化 · 副作用隔离到 Effect</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TEA 架构要求 Model update 是纯函数——但 <code>root_reducer</code> 直接调 <code>runtime.start_chat()</code> 等副作用方法。设计文档说"Model 不执行 IO"，代码违反。<b>目标态：reducer 只产出 Change，Coordinator 消费 Change 生成 Effect，Effect 执行副作用。</b></p>
+      <ul class="tl-list">
+        <li><b>当前</b>：<code>root_reducer → apply_change → runtime.start_chat()</code>（reducer 直接调副作用）</li>
+        <li><b>目标</b>：<code>root_reducer → apply_change → 产出 Change → Coordinator 消费 → 生成 Effect → EffectExecutor 执行</code></li>
+        <li>RuntimeState 字段私有化（当前全 <code>pub</code>，TODO 已标注）——副作用经业务方法，不经直接字段写</li>
+        <li>v0.1.0 只设计目标态，实现由后续 issue 承接</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">reducer 纯化 · 副作用隔离</span><span class="d">当前</span>  reducer → apply_change → runtime.start_chat()  <span class="m">// 副作用！</span>
+<span class="d">目标</span>  reducer → apply_change → Change
+      Coordinator → consume(Change) → Effect
+      EffectExecutor → execute(Effect)         <span class="m">// 副作用隔离在此</span>
+
+<span class="m">// reducer 只管状态转换，副作用归 Effect</span></pre>
+      <div class="tl-out">产出 · <b>reducer 纯化目标态</b>——Change → Effect 两段式，副作用隔离</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十六：死代码不是无害的 ===== -->
+  <div class="tl-item p-cln rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>死代码不是无害的 · allow 掩盖真相</h3><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI 代码走查发现：7 个 Msg 变体从未产生、4 个 Effect 变体 no-op、<code>coordinator.rs</code> 整个模块无调用方、4 个模块根级 <code>#![allow(dead_code)]</code> 掩盖一切。<b>死代码不是无害的——它误导后续开发者以为这些路径存在。</b></p>
+      <ul class="tl-list">
+        <li><b>7 个 Msg 变体</b>：<code>TimerTick</code> / <code>RenderTick</code> / <code>EffectCompleted</code> / <code>TerminalKey</code> / <code>TerminalMouse</code> / <code>TerminalResize</code> / <code>AgentEvent</code>——定义但从未产生</li>
+        <li><b>4 个 Effect 变体</b>：<code>StartTimer</code> / <code>StopTimer</code> / <code>RunHook</code> / <code>SetCurrentTurn</code>——no-op</li>
+        <li><b>4 个 <code>#![allow(dead_code)]</code></b>：model / update / effect / view_state 模块根级——掩盖真实死代码</li>
+        <li><b>分类处理</b>：删除（确认无用）/ 设计预留（标注 "reserved"）/ 待移除 allow（先暴露再清理）</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">死代码 · 分类处理</span><span class="d">删除</span>        7 Msg + 4 Effect + coordinator.rs + EffectResult
+<span class="d">设计预留</span>     标注 reserved（如有明确未来用途）
+<span class="d">待移除 allow</span>  移除 #![allow(dead_code)] → 暴露 → 逐个清理
+
+<span class="m">// allow(dead_code) 不是宽容，是掩盖</span></pre>
+      <div class="tl-out">产出 · <b>死代码清单 + 分类处理策略</b>——不让 allow 掩盖真相</div>
     </div>
   </div>
 </section>
