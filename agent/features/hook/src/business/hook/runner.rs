@@ -382,3 +382,39 @@ fn non_empty_text(text: &str) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_execute_hook_with_cancel_interrupts_running_process() {
+        let runner = HookRunner::empty();
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: "sleep 30".to_string(),
+            timeout: 60,
+        };
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(crate::business::hook::data::StopHookData { turns: 1 }),
+        };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_task = cancel.clone();
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel_task.cancel();
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            runner.execute_hook_with_cancel(&hook, &input, Path::new("."), &cancel),
+        )
+        .await
+        .expect("取消必须中断在途 Hook 进程");
+
+        canceller.await.unwrap();
+        assert!(result.error.is_some_and(|error| error.contains("已取消")));
+        assert_eq!(result.exit_code, None);
+    }
+}

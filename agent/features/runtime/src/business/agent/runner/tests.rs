@@ -210,6 +210,52 @@ fn test_sub_run_cancellation_scope_is_one_way() {
 }
 
 #[tokio::test]
+async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
+    let calls = Arc::new(std::sync::Mutex::new(0usize));
+    let registry = Arc::new(crate::core::active_run::ActiveRunRegistry::default());
+    let mut runner = test_runner_with_blocking_provider(calls.clone());
+    runner.active_run = registry.clone();
+    let ctx = test_ctx();
+
+    let driver_registry = registry.clone();
+    let driver_calls = calls.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            if *driver_calls.lock().unwrap() >= 1 {
+                let ids = driver_registry.active_ids();
+                if let Some(run_id) = ids.first() {
+                    assert_eq!(
+                        driver_registry.cancel(run_id),
+                        sdk::CancelRunOutcome::Accepted
+                    );
+                    return;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            ctx: &ctx,
+            timeout: std::time::Duration::from_secs(30),
+            model_spec: None,
+            progress_tx: None,
+        })
+        .await;
+
+    driver.await.unwrap();
+    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
+    assert!(
+        !ctx.cancel.is_cancelled(),
+        "按 Sub Run ID 取消不得反向取消父 Run token"
+    );
+    assert!(registry.active_ids().is_empty());
+}
+
+#[tokio::test]
 async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
     let runner = test_runner(LlmError::Cancelled);
     let ctx = test_ctx();
@@ -267,6 +313,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
             allow_all: true,
         },
         workspace: project::api::WorkspaceService::new(cwd),
+        run_id: sdk::RunId::new_v7().to_string(),
         cancel: cancel.clone(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         session_reminders: None,
@@ -480,6 +527,7 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
         ))),
         pool: None,
         shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         agents_config: Arc::new(share::config::AgentsConfig::default()),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
@@ -494,6 +542,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
         ))),
         pool: None,
         shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         agents_config: Arc::new(share::config::AgentsConfig::default()),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
@@ -551,6 +600,7 @@ fn test_ctx() -> ToolExecutionContext {
             allow_all: true,
         },
         workspace: project::api::WorkspaceService::new(cwd),
+        run_id: sdk::RunId::new_v7().to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         session_reminders: None,

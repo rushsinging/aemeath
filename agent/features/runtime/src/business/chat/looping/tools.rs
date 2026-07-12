@@ -19,7 +19,7 @@ use share::tool::ToolOutcome;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::api::ToolRegistry;
+use tools::api::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -190,16 +190,18 @@ pub(crate) async fn run_post_tool_hooks<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
-    output: &str,
-    is_error: bool,
+    execution: &ToolExecution,
     workspace_root: &Path,
+    ctx: &ToolExecutionContext,
 ) where
     S: ChatEventSink,
 {
+    let output = &execution.outcome.text;
+    let is_error = execution.outcome.is_error;
     emit_json_hook_context(
         sink,
         hook_ui
-            .run_json(
+            .run_json_with_cancel(
                 hook_runner,
                 HookEvent::PostToolUse,
                 Some(&call.name),
@@ -210,6 +212,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                     is_error: Some(is_error),
                 }),
                 workspace_root,
+                &ctx.cancel,
             )
             .await,
     )
@@ -218,7 +221,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
         emit_json_hook_context(
             sink,
             hook_ui
-                .run_json(
+                .run_json_with_cancel(
                     hook_runner,
                     HookEvent::PostToolUseFailure,
                     Some(&call.name),
@@ -229,6 +232,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                         is_error: Some(is_error),
                     }),
                     workspace_root,
+                    &ctx.cancel,
                 )
                 .await,
         )
@@ -446,6 +450,7 @@ mod tests {
                 allow_all: true,
             },
             workspace: project::api::WorkspaceService::new(cwd),
+            run_id: sdk::RunId::new_v7().to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
             session_reminders: None,

@@ -18,12 +18,12 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 22 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 23 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 22 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 23 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
 
 ## 守卫索引
 
@@ -49,8 +49,9 @@
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)` |
-| 22 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
+| 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
+| 23 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
 

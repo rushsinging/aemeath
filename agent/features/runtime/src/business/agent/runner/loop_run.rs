@@ -19,7 +19,29 @@ use share::message::Message;
 use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
-use tools::api::{AgentRunTerminal, ToolExecutionContext};
+use tools::api::AgentRunTerminal;
+
+struct ActiveRunRegistration {
+    active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
+    run_id: sdk::RunId,
+}
+
+impl ActiveRunRegistration {
+    fn new(
+        active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
+        run_id: sdk::RunId,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        active_run.activate(run_id.clone(), cancel);
+        Self { active_run, run_id }
+    }
+}
+
+impl Drop for ActiveRunRegistration {
+    fn drop(&mut self) {
+        self.active_run.clear(&self.run_id);
+    }
+}
 
 pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
     messages.iter().map(Message::to_llm_view).collect()
@@ -29,7 +51,6 @@ pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
 pub(super) struct SubAgentRun<'a> {
     pub prompt: &'a str,
     pub system: String,
-    pub ctx: &'a ToolExecutionContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
     pub _shared_client_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
@@ -44,9 +65,12 @@ pub(super) struct SubAgentRun<'a> {
     pub turn_count: usize,
     pub last_api_input_tokens: u64,
     pub last_api_output_tokens: u64,
+    pub active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
     pub terminal: Option<AgentRunTerminal>,
     pub start_time: std::time::Instant,
     pub session_id: String,
+    pub run_id: sdk::RunId,
+    pub parent_run_id: Option<sdk::RunId>,
     pub role_name_for_log: String,
     pub model_name_for_log: String,
     pub resolved_spec: Option<String>,
@@ -60,11 +84,17 @@ pub(super) struct SubAgentRun<'a> {
 impl<'a> SubAgentRun<'a> {
     /// Runs a sub-agent through the same loop engine used by every agent run.
     pub async fn run_loop(mut self) -> AgentRunTerminal {
-        let mut run = Run::new(
-            RunSpec::new(self.role_name_for_log.clone(), self.timeout),
-            None,
+        let mut run = Run::with_id(
+            self.run_id.clone(),
+            RunSpec::sub(self.role_name_for_log.clone(), self.timeout),
+            self.parent_run_id.clone(),
         );
-        let cancel = self.ctx.cancel.clone();
+        let cancel = self.agent.ctx.cancel.clone();
+        let _registration = ActiveRunRegistration::new(
+            self.active_run.clone(),
+            self.run_id.clone(),
+            cancel.clone(),
+        );
         let loop_result = shared_run_loop(&mut run, &cancel, &mut self).await;
 
         // A normal terminal path is recorded by `emit` from the authoritative
@@ -105,7 +135,7 @@ impl<'a> SubAgentRun<'a> {
             role: Some(self.role_name_for_log.clone()),
             model: self.model_name_for_log.clone(),
         };
-        let workspace_root = self.ctx.workspace_read().current_workspace_root();
+        let workspace_root = self.agent.ctx.workspace_read().current_workspace_root();
         let output = terminal.output();
         finalize_sub_agent(
             &outcome,
@@ -239,6 +269,25 @@ impl<'a> SubAgentRun<'a> {
     }
 }
 
+fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal> {
+    match event {
+        RunDomainEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
+            result: result.clone(),
+        }),
+        RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
+            error: error.clone(),
+        }),
+        RunDomainEvent::Cancelled { .. } => Some(AgentRunTerminal::Cancelled),
+        RunDomainEvent::Started { .. }
+        | RunDomainEvent::StepStarted { .. }
+        | RunDomainEvent::StepCompleted { .. }
+        | RunDomainEvent::CancellationRequested { .. }
+        | RunDomainEvent::AwaitingUser { .. }
+        | RunDomainEvent::Resumed { .. }
+        | RunDomainEvent::StuckDetected { .. } => None,
+    }
+}
+
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
     async fn drain_input(
@@ -267,7 +316,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         let input = self.last_api_input_tokens;
         let output = self.last_api_output_tokens;
         self.compact_if_needed(input, output, self.turn_count).await;
-        if !self.ctx.cancel.is_cancelled() {
+        if !self.agent.ctx.cancel.is_cancelled() {
             self.last_api_input_tokens = 0;
             self.last_api_output_tokens = 0;
         }
@@ -288,8 +337,8 @@ impl RunLoopPort for SubAgentRun<'_> {
 
         // Memory is queried dynamically on every turn, matching the main loop.
         let mut effective_blocks = self.system_blocks.clone();
-        let memory_root = self.ctx.workspace_read().initial_cwd();
-        let mc = &self.ctx.resources.memory_config;
+        let memory_root = self.agent.ctx.workspace_read().initial_cwd();
+        let mc = &self.agent.ctx.resources.memory_config;
         if mc.enabled && mc.inject_count > 0 {
             if let Some(block) = crate::business::chat::looping::memory_inject::build_memory_block(
                 &memory_root,
@@ -307,17 +356,17 @@ impl RunLoopPort for SubAgentRun<'_> {
                 &messages_for_api,
                 &self.sub_schemas,
                 &mut self.handler,
-                &self.ctx.cancel,
+                &self.agent.ctx.cancel,
             )
             .await;
 
         let resp = match response {
             Ok(resp) => resp,
-            Err(error) if error.is_cancelled() || self.ctx.cancel.is_cancelled() => {
+            Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
                 // The shared engine recognizes cancellation through the run's
                 // cancellation token. Provider-originated cancellation joins
                 // that same path rather than creating an adapter-only terminal.
-                self.ctx.cancel.cancel();
+                self.agent.ctx.cancel.cancel();
                 return Err(LoopEngineError::Cancelled);
             }
             Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),
@@ -404,7 +453,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         }
 
         let mut executed = tokio::select! {
-            _ = self.ctx.cancel.cancelled() => {
+            _ = self.agent.ctx.cancel.cancelled() => {
                 return Err(LoopEngineError::Cancelled);
             }
             executed = self.agent.execute_tools(&allowed) => executed,
@@ -433,28 +482,29 @@ impl RunLoopPort for SubAgentRun<'_> {
         Ok(())
     }
 
+    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_terminal(run_id)
+    }
+
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_cancellation(run_id)
+    }
+
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
         for event in events {
-            match event {
-                RunDomainEvent::Completed { result, .. } => {
-                    (self.progress)(Some(self.turn_count), "Agent completed");
-                    self.terminal = Some(AgentRunTerminal::Completed { result });
+            if let Some(terminal) = terminal_from_domain_event(&event) {
+                match &terminal {
+                    AgentRunTerminal::Completed { .. } => {
+                        (self.progress)(Some(self.turn_count), "Agent completed");
+                    }
+                    AgentRunTerminal::Failed { error } => {
+                        (self.progress)(Some(self.turn_count), &format!("Agent error: {error}"));
+                    }
+                    AgentRunTerminal::Cancelled => {
+                        (self.progress)(Some(self.turn_count), "Agent cancelled by user");
+                    }
                 }
-                RunDomainEvent::Failed { error, .. } => {
-                    (self.progress)(Some(self.turn_count), &format!("Agent error: {error}"));
-                    self.terminal = Some(AgentRunTerminal::Failed { error });
-                }
-                RunDomainEvent::Cancelled { .. } => {
-                    (self.progress)(Some(self.turn_count), "Agent cancelled by user");
-                    self.terminal = Some(AgentRunTerminal::Cancelled);
-                }
-                RunDomainEvent::Started { .. }
-                | RunDomainEvent::StepStarted { .. }
-                | RunDomainEvent::StepCompleted { .. }
-                | RunDomainEvent::CancellationRequested { .. }
-                | RunDomainEvent::AwaitingUser { .. }
-                | RunDomainEvent::Resumed { .. }
-                | RunDomainEvent::StuckDetected { .. } => {}
+                self.terminal = Some(terminal);
             }
         }
         Ok(())
@@ -463,8 +513,96 @@ impl RunLoopPort for SubAgentRun<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::messages_for_llm;
+    use super::{messages_for_llm, terminal_from_domain_event, ActiveRunRegistration};
+    use crate::business::agent_run::{ActiveRunPort, RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
+
+    #[derive(Default)]
+    struct RecordingActiveRunPort {
+        active: std::sync::Mutex<std::collections::HashSet<RunId>>,
+    }
+
+    impl ActiveRunPort for RecordingActiveRunPort {
+        fn activate(&self, run_id: RunId, _cancel: tokio_util::sync::CancellationToken) {
+            self.active.lock().unwrap().insert(run_id);
+        }
+
+        fn claim_terminal(&self, _run_id: &RunId) -> bool {
+            true
+        }
+
+        fn claim_cancellation(&self, _run_id: &RunId) -> bool {
+            true
+        }
+
+        fn clear(&self, run_id: &RunId) {
+            self.active.lock().unwrap().remove(run_id);
+        }
+    }
+
+    #[test]
+    fn active_run_registration_clears_registry_when_dropped() {
+        let registry = std::sync::Arc::new(RecordingActiveRunPort::default());
+        let run_id = RunId::new_v7();
+        {
+            let _registration = ActiveRunRegistration::new(
+                registry.clone(),
+                run_id.clone(),
+                tokio_util::sync::CancellationToken::new(),
+            );
+            assert!(registry.active.lock().unwrap().contains(&run_id));
+        }
+        assert!(registry.active.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn terminal_domain_events_project_to_all_agent_terminal_variants() {
+        let run_id = RunId::new_v7();
+        let parent_run_id = Some(RunId::new_v7());
+        let cases = [
+            (
+                RunDomainEvent::Completed {
+                    run_id: run_id.clone(),
+                    parent_run_id: parent_run_id.clone(),
+                    result: "done".to_string(),
+                },
+                Some(tools::api::AgentRunTerminal::Completed {
+                    result: "done".to_string(),
+                }),
+            ),
+            (
+                RunDomainEvent::Failed {
+                    run_id: run_id.clone(),
+                    parent_run_id: parent_run_id.clone(),
+                    error: "boom".to_string(),
+                },
+                Some(tools::api::AgentRunTerminal::Failed {
+                    error: "boom".to_string(),
+                }),
+            ),
+            (
+                RunDomainEvent::Cancelled {
+                    run_id,
+                    parent_run_id,
+                },
+                Some(tools::api::AgentRunTerminal::Cancelled),
+            ),
+        ];
+
+        for (event, expected) in cases {
+            assert_eq!(terminal_from_domain_event(&event), expected);
+        }
+    }
+
+    #[test]
+    fn nonterminal_domain_event_does_not_create_agent_terminal() {
+        let event = RunDomainEvent::Started {
+            run_id: RunId::new_v7(),
+            parent_run_id: Some(RunId::new_v7()),
+        };
+
+        assert_eq!(terminal_from_domain_event(&event), None);
+    }
 
     #[test]
     fn messages_for_llm_converts_structured_tool_result_to_text() {

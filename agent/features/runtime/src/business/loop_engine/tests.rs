@@ -18,6 +18,8 @@ struct ScriptedPort {
     input_batches: VecDeque<Vec<LoopInput>>,
     cancelled_during_model: bool,
     block_model_forever: bool,
+    block_compact_until_cancelled: bool,
+    needs_compaction: bool,
     fail_emit_once: bool,
 }
 
@@ -30,11 +32,15 @@ impl RunLoopPort for ScriptedPort {
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
         self.calls.push("needs_compaction");
-        Ok(false)
+        Ok(self.needs_compaction)
     }
 
-    async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {
+    async fn compact(&mut self, cancel: &CancellationToken) -> Result<(), LoopEngineError> {
         self.calls.push("compact");
+        if self.block_compact_until_cancelled {
+            cancel.cancelled().await;
+            return Err(LoopEngineError::Cancelled);
+        }
         Ok(())
     }
 
@@ -196,6 +202,12 @@ async fn engine_completes_text_only_run_through_the_run_fsm() {
     run_loop(&mut run, &cancel, &mut port).await.unwrap();
 
     assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(run.steps().len(), 1);
+    assert_eq!(
+        run.steps()[0].invocation().unwrap().response(),
+        "done",
+        "the shared engine must record the model invocation in the Run aggregate"
+    );
     assert_eq!(
         port.calls,
         vec!["emit", "input", "needs_compaction", "emit", "model", "emit"]
@@ -235,6 +247,13 @@ async fn engine_executes_tools_then_reenters_the_same_loop() {
         port.calls.iter().filter(|call| **call == "tools").count(),
         1
     );
+    let first_step = &run.steps()[0];
+    assert_eq!(first_step.tool_calls().len(), 1);
+    assert_eq!(
+        first_step.tool_calls()[0].status(),
+        crate::business::agent_run::ToolCallStatus::Success,
+        "the shared engine must own the tool-call lifecycle"
+    );
 }
 
 #[tokio::test]
@@ -254,6 +273,34 @@ async fn engine_pauses_for_user_without_completing_the_run() {
 
     assert_eq!(directive, LoopDirective::AwaitUser);
     assert_eq!(run.status(), RunStatus::AwaitingUser);
+}
+
+#[tokio::test]
+async fn engine_cancels_in_flight_compaction_and_emits_terminal_ack() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedPort {
+        needs_compaction: true,
+        block_compact_until_cancelled: true,
+        ..Default::default()
+    };
+    let cancel_for_task = cancel.clone();
+    let canceller = tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        cancel_for_task.cancel();
+    });
+
+    let directive = run_loop(&mut run, &cancel, &mut port).await.unwrap();
+    canceller.await.unwrap();
+
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Cancelled);
+    assert!(port.calls.contains(&"compact"));
+    assert!(port
+        .events
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Cancelled { .. })));
+    assert!(!port.calls.contains(&"model"));
 }
 
 #[tokio::test]

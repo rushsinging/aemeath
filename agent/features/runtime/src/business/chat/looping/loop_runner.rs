@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use sdk::ids::{ChatId, ChatTurnId};
 use tokio_util::sync::CancellationToken;
@@ -456,7 +456,7 @@ where
         .await;
 
         let cancel = CancellationToken::new();
-        let mut run = Run::new(RunSpec::new("main", Duration::ZERO), None);
+        let mut run = Run::new(RunSpec::main(), None);
         let run_id = run.id().clone();
         active_run.activate(run_id.clone(), cancel.clone());
         let mut port = MainRunPort {

@@ -1,186 +1,14 @@
 use std::time::{Duration, Instant};
 
-use uuid::Uuid;
+use crate::business::agent::ToolCall;
 
-pub use sdk::RunId;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RunStepId(Uuid);
-
-impl RunStepId {
-    fn new_v7() -> Self {
-        Self(Uuid::now_v7())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunSpec {
-    pub name: String,
-    pub timeout: Duration,
-}
-
-impl RunSpec {
-    pub fn new(name: impl Into<String>, timeout: Duration) -> Self {
-        Self {
-            name: name.into(),
-            timeout,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunStatus {
-    Created,
-    PreparingContext,
-    InvokingModel,
-    ApplyingResponse,
-    AwaitingToolApproval,
-    ExecutingTools,
-    AwaitingUser,
-    Compacting,
-    Finishing,
-    Cancelling,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-impl RunStatus {
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunStepStatus {
-    Invoking,
-    Applying,
-    ToolPhase,
-    Done,
-    Failed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunStep {
-    id: RunStepId,
-    status: RunStepStatus,
-}
-
-impl RunStep {
-    pub fn id(&self) -> &RunStepId {
-        &self.id
-    }
-
-    pub fn status(&self) -> RunStepStatus {
-        self.status
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunTransition {
-    Start,
-    BeginCompaction,
-    CompactionCompleted,
-    ContextPrepared,
-    ModelInvoked,
-    ResponseWithTools,
-    ResponseWithoutTools,
-    ContinueAfterResponse,
-    ToolsApproved,
-    AwaitUser,
-    UserResumed,
-    ToolsCompleted,
-    Finish,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum RunTransitionError {
-    #[error("illegal Run transition: {from:?} --{transition:?}-->")]
-    IllegalTransition {
-        from: RunStatus,
-        transition: RunTransition,
-    },
-    #[error("Run is not active: {0:?}")]
-    RunNotActive(RunStatus),
-    #[error("Run step not found")]
-    StepNotFound,
-    #[error("Run step is not active")]
-    StepNotActive,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunCancellationRequest {
-    Accepted,
-    AlreadyCancelling,
-    AlreadyTerminal,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RunDomainEvent {
-    Started {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
-    StepStarted {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        step_id: RunStepId,
-    },
-    StepCompleted {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        step_id: RunStepId,
-    },
-    CancellationRequested {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
-    AwaitingUser {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
-    Resumed {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
-    StuckDetected {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        reason: String,
-    },
-    Completed {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        result: String,
-    },
-    Failed {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-        error: String,
-    },
-    Cancelled {
-        run_id: RunId,
-        parent_run_id: Option<RunId>,
-    },
-}
-
-impl RunDomainEvent {
-    pub fn parent_run_id(&self) -> Option<&RunId> {
-        match self {
-            Self::Started { parent_run_id, .. }
-            | Self::StepStarted { parent_run_id, .. }
-            | Self::StepCompleted { parent_run_id, .. }
-            | Self::CancellationRequested { parent_run_id, .. }
-            | Self::AwaitingUser { parent_run_id, .. }
-            | Self::Resumed { parent_run_id, .. }
-            | Self::StuckDetected { parent_run_id, .. }
-            | Self::Completed { parent_run_id, .. }
-            | Self::Failed { parent_run_id, .. }
-            | Self::Cancelled { parent_run_id, .. } => parent_run_id.as_ref(),
-        }
-    }
-}
+use super::event::{RunDomainEvent, RunId};
+use super::spec::RunSpec;
+use super::state::{
+    RunCancellationRequest, RunStatus, RunStep, RunStepId, RunStepStatus, RunTransition,
+    RunTransitionError,
+};
+use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
 #[derive(Debug)]
 pub struct Run {
@@ -195,8 +23,12 @@ pub struct Run {
 
 impl Run {
     pub fn new(spec: RunSpec, parent_id: Option<RunId>) -> Self {
+        Self::with_id(RunId::new_v7(), spec, parent_id)
+    }
+
+    pub fn with_id(id: RunId, spec: RunSpec, parent_id: Option<RunId>) -> Self {
         Self {
-            id: RunId::new_v7(),
+            id,
             spec,
             parent_id,
             status: RunStatus::Created,
@@ -270,6 +102,14 @@ impl Run {
         &mut self,
         transition: RunTransition,
     ) -> Result<RunStatus, RunTransitionError> {
+        if self.status == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
+            let Some(step) = self.steps.iter().find(|step| step.is_active()) else {
+                return Err(RunTransitionError::StepIncomplete);
+            };
+            if step.invocation().is_none() {
+                return Err(RunTransitionError::StepIncomplete);
+            }
+        }
         let next = match (self.status, transition) {
             (RunStatus::Created, RunTransition::Start) => RunStatus::PreparingContext,
             (RunStatus::PreparingContext, RunTransition::BeginCompaction) => RunStatus::Compacting,
@@ -278,6 +118,10 @@ impl Run {
             }
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
                 RunStatus::InvokingModel
+            }
+            (RunStatus::InvokingModel, RunTransition::RetryModel) => RunStatus::InvokingModel,
+            (RunStatus::InvokingModel, RunTransition::ModelContextExceeded) => {
+                RunStatus::Compacting
             }
             (RunStatus::InvokingModel, RunTransition::ModelInvoked) => RunStatus::ApplyingResponse,
             (RunStatus::ApplyingResponse, RunTransition::ResponseWithTools) => {
@@ -299,6 +143,7 @@ impl Run {
                 RunStatus::PreparingContext
             }
             (RunStatus::Finishing, RunTransition::Finish) => RunStatus::Completed,
+            (RunStatus::Cancelling, RunTransition::CancellationFinished) => RunStatus::Cancelled,
             (from, transition) => {
                 return Err(RunTransitionError::IllegalTransition { from, transition });
             }
@@ -329,10 +174,15 @@ impl Run {
         if self.status != RunStatus::InvokingModel {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
+        if self.steps.iter().any(RunStep::is_active) {
+            return Err(RunTransitionError::ActiveStepAlreadyExists);
+        }
         let step_id = RunStepId::new_v7();
         self.steps.push(RunStep {
             id: step_id.clone(),
             status: RunStepStatus::Invoking,
+            invocation: None,
+            tool_calls: Vec::new(),
         });
         self.events.push(RunDomainEvent::StepStarted {
             run_id: self.id.clone(),
@@ -340,6 +190,75 @@ impl Run {
             step_id: step_id.clone(),
         });
         Ok(step_id)
+    }
+
+    pub fn record_model_invocation(
+        &mut self,
+        step_id: &RunStepId,
+        invocation: ModelInvocation,
+    ) -> Result<(), RunTransitionError> {
+        self.ensure_accepts_step_work()?;
+        let step = self.active_step_mut(step_id)?;
+        if step.invocation.is_some() {
+            return Err(RunTransitionError::InvocationAlreadyRecorded);
+        }
+        step.invocation = Some(invocation);
+        step.status = RunStepStatus::Applying;
+        Ok(())
+    }
+
+    pub fn add_tool_call(
+        &mut self,
+        step_id: &RunStepId,
+        call: ToolCall,
+    ) -> Result<(), RunTransitionError> {
+        self.ensure_accepts_step_work()?;
+        let step = self.active_step_mut(step_id)?;
+        step.tool_calls.push(RunToolCall::new(call));
+        step.status = RunStepStatus::ToolPhase;
+        Ok(())
+    }
+
+    pub fn advance_tool_call(
+        &mut self,
+        step_id: &RunStepId,
+        call_id: &sdk::ids::ToolCallId,
+        status: ToolCallStatus,
+    ) -> Result<(), RunTransitionError> {
+        self.ensure_accepts_step_work()?;
+        let step = self.active_step_mut(step_id)?;
+        let call = step
+            .tool_calls
+            .iter_mut()
+            .find(|call| call.id() == call_id)
+            .ok_or(RunTransitionError::ToolCallNotFound)?;
+        let from = call.status();
+        if !call.advance(status) {
+            return Err(RunTransitionError::IllegalToolCallTransition { from, to: status });
+        }
+        Ok(())
+    }
+
+    fn ensure_accepts_step_work(&self) -> Result<(), RunTransitionError> {
+        if self.status.is_terminal() || self.status == RunStatus::Cancelling {
+            return Err(RunTransitionError::RunNotActive(self.status));
+        }
+        Ok(())
+    }
+
+    fn active_step_mut(&mut self, step_id: &RunStepId) -> Result<&mut RunStep, RunTransitionError> {
+        let step = self
+            .steps
+            .iter_mut()
+            .find(|step| &step.id == step_id)
+            .ok_or(RunTransitionError::StepNotFound)?;
+        if matches!(
+            step.status,
+            RunStepStatus::Done | RunStepStatus::Failed | RunStepStatus::Cancelled
+        ) {
+            return Err(RunTransitionError::StepNotActive);
+        }
+        Ok(step)
     }
 
     pub fn complete_step(&mut self, step_id: &RunStepId) -> Result<(), RunTransitionError> {
@@ -351,8 +270,11 @@ impl Run {
             .iter_mut()
             .find(|step| &step.id == step_id)
             .ok_or(RunTransitionError::StepNotFound)?;
-        if step.status == RunStepStatus::Done {
+        if !step.is_active() {
             return Err(RunTransitionError::StepNotActive);
+        }
+        if !step.is_complete() {
+            return Err(RunTransitionError::StepIncomplete);
         }
         step.status = RunStepStatus::Done;
         self.events.push(RunDomainEvent::StepCompleted {
@@ -376,6 +298,9 @@ impl Run {
     }
 
     pub fn complete(&mut self, result: impl Into<String>) -> Result<(), RunTransitionError> {
+        if self.steps.iter().any(RunStep::is_active) {
+            return Err(RunTransitionError::StepIncomplete);
+        }
         self.transition(RunTransition::Finish)?;
         self.events.push(RunDomainEvent::Completed {
             run_id: self.id.clone(),
@@ -401,10 +326,7 @@ impl Run {
     }
 
     pub fn finish_cancellation(&mut self) -> Result<(), RunTransitionError> {
-        if self.status != RunStatus::Cancelling {
-            return Err(RunTransitionError::RunNotActive(self.status));
-        }
-        self.status = RunStatus::Cancelled;
+        self.transition(RunTransition::CancellationFinished)?;
         self.close_active_steps(RunStepStatus::Cancelled);
         self.events.push(RunDomainEvent::Cancelled {
             run_id: self.id.clone(),

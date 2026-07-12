@@ -2,7 +2,6 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveRun {
-    pub run_id: sdk::RunId,
     pub cancel: CancellationToken,
     pub cancelling: bool,
     pub terminal: bool,
@@ -10,7 +9,7 @@ pub(crate) struct ActiveRun {
 
 #[derive(Debug, Default)]
 pub(crate) struct ActiveRunRegistry {
-    active: std::sync::Mutex<Option<ActiveRun>>,
+    active: std::sync::Mutex<std::collections::HashMap<sdk::RunId, ActiveRun>>,
 }
 
 impl crate::business::agent_run::ActiveRunPort for ActiveRunRegistry {
@@ -19,12 +18,14 @@ impl crate::business::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        *guard = Some(ActiveRun {
-            run_id,
-            cancel,
-            cancelling: false,
-            terminal: false,
-        });
+        guard.insert(
+            run_id.clone(),
+            ActiveRun {
+                cancel,
+                cancelling: false,
+                terminal: false,
+            },
+        );
     }
 
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
@@ -32,13 +33,28 @@ impl crate::business::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.as_mut() else {
+        let Some(active) = guard.get_mut(run_id) else {
             return false;
         };
-        if &active.run_id != run_id || active.cancelling || active.terminal {
+        if active.cancelling || active.terminal {
             return false;
         }
         active.terminal = true;
+        true
+    }
+
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        let mut guard = self
+            .active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(active) = guard.get_mut(run_id) else {
+            return false;
+        };
+        if active.terminal {
+            return false;
+        }
+        active.cancelling = true;
         true
     }
 
@@ -47,12 +63,7 @@ impl crate::business::agent_run::ActiveRunPort for ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if guard
-            .as_ref()
-            .is_some_and(|active| &active.run_id == run_id)
-        {
-            *guard = None;
-        }
+        guard.remove(run_id);
     }
 }
 
@@ -62,12 +73,9 @@ impl ActiveRunRegistry {
             .active
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(active) = guard.as_mut() else {
+        let Some(active) = guard.get_mut(run_id) else {
             return sdk::CancelRunOutcome::NotFound;
         };
-        if &active.run_id != run_id {
-            return sdk::CancelRunOutcome::NotFound;
-        }
         if active.terminal {
             return sdk::CancelRunOutcome::AlreadyTerminal;
         }
@@ -81,11 +89,18 @@ impl ActiveRunRegistry {
 
     #[cfg(test)]
     pub fn active_id(&self) -> Option<sdk::RunId> {
+        let ids = self.active_ids();
+        (ids.len() == 1).then(|| ids[0].clone())
+    }
+
+    #[cfg(test)]
+    pub fn active_ids(&self) -> Vec<sdk::RunId> {
         self.active
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .as_ref()
-            .map(|active| active.run_id.clone())
+            .keys()
+            .cloned()
+            .collect()
     }
 }
 
@@ -93,6 +108,33 @@ impl ActiveRunRegistry {
 mod tests {
     use super::*;
     use crate::business::agent_run::ActiveRunPort;
+
+    #[test]
+    fn registry_tracks_parent_and_multiple_sub_runs_independently() {
+        let registry = ActiveRunRegistry::default();
+        let parent = sdk::RunId::new_v7();
+        let sub_a = sdk::RunId::new_v7();
+        let sub_b = sdk::RunId::new_v7();
+        let parent_token = CancellationToken::new();
+        let sub_a_token = parent_token.child_token();
+        let sub_b_token = parent_token.child_token();
+
+        registry.activate(parent.clone(), parent_token.clone());
+        registry.activate(sub_a.clone(), sub_a_token.clone());
+        registry.activate(sub_b.clone(), sub_b_token.clone());
+
+        assert_eq!(registry.active_ids().len(), 3);
+        assert_eq!(registry.cancel(&sub_a), sdk::CancelRunOutcome::Accepted);
+        assert!(sub_a_token.is_cancelled());
+        assert!(!parent_token.is_cancelled());
+        assert!(!sub_b_token.is_cancelled());
+
+        registry.clear(&sub_a);
+        assert_eq!(registry.active_ids().len(), 2);
+        assert_eq!(registry.cancel(&parent), sdk::CancelRunOutcome::Accepted);
+        assert!(parent_token.is_cancelled());
+        assert!(sub_b_token.is_cancelled());
+    }
 
     #[test]
     fn cancel_is_synchronous_and_id_scoped() {
@@ -131,6 +173,16 @@ mod tests {
     }
 
     #[test]
+    fn terminal_claim_blocks_late_cancellation_claim() {
+        let registry = ActiveRunRegistry::default();
+        let run_id = sdk::RunId::new_v7();
+        registry.activate(run_id.clone(), CancellationToken::new());
+
+        assert!(registry.claim_terminal(&run_id));
+        assert!(!registry.claim_cancellation(&run_id));
+    }
+
+    #[test]
     fn cancellation_wins_over_terminal_claim() {
         let registry = ActiveRunRegistry::default();
         let run_id = sdk::RunId::new_v7();
@@ -148,8 +200,8 @@ mod tests {
         registry.activate(run_id.clone(), CancellationToken::new());
 
         registry.clear(&other);
-        assert_eq!(registry.active_id(), Some(run_id.clone()));
+        assert_eq!(registry.active_ids(), vec![run_id.clone()]);
         registry.clear(&run_id);
-        assert_eq!(registry.active_id(), None);
+        assert!(registry.active_ids().is_empty());
     }
 }

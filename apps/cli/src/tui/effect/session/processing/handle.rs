@@ -15,11 +15,16 @@ pub(crate) struct SpawnContext {
     pub fallback_context: UiTurnContext,
 }
 
+pub(crate) enum RunCancelState {
+    Idle,
+    AwaitingStart { cancel_requested: bool },
+    Active(sdk::RunId),
+}
+
 pub(crate) struct ProcessingHandle {
     pub(super) join: tokio::task::JoinHandle<()>,
     pub(super) agent_client: Arc<dyn sdk::AgentClient>,
-    pub(super) active_run_id: Arc<std::sync::Mutex<Option<sdk::RunId>>>,
-    pub(super) pending_cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) run_cancel_state: Arc<std::sync::Mutex<RunCancelState>>,
 }
 
 impl std::fmt::Debug for ProcessingHandle {
@@ -31,19 +36,34 @@ impl std::fmt::Debug for ProcessingHandle {
 }
 
 impl ProcessingHandle {
-    pub(crate) fn cancel_current_run(&self) -> sdk::CancelRunOutcome {
-        let run_id = self
-            .active_run_id
+    pub(crate) fn expect_run_start(&self) {
+        *self
+            .run_cancel_state
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
-        if let Some(run_id) = run_id.as_ref() {
-            self.agent_client.cancel_run(run_id)
-        } else {
-            self.pending_cancel
-                .store(true, std::sync::atomic::Ordering::Release);
-            sdk::CancelRunOutcome::Accepted
-        }
+            .unwrap_or_else(|error| error.into_inner()) = RunCancelState::AwaitingStart {
+            cancel_requested: false,
+        };
+    }
+
+    pub(crate) fn cancel_current_run(&self) -> sdk::CancelRunOutcome {
+        let run_id = {
+            let mut state = self
+                .run_cancel_state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            match &mut *state {
+                RunCancelState::Active(run_id) => Some(run_id.clone()),
+                RunCancelState::AwaitingStart { cancel_requested } => {
+                    *cancel_requested = true;
+                    None
+                }
+                RunCancelState::Idle => return sdk::CancelRunOutcome::NotFound,
+            }
+        };
+        run_id
+            .as_ref()
+            .map(|run_id| self.agent_client.cancel_run(run_id))
+            .unwrap_or(sdk::CancelRunOutcome::Accepted)
     }
 
     pub(crate) fn abort(&self) {

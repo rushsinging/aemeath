@@ -16,6 +16,11 @@ if [ ! -f "$CLIENT_RS" ]; then
   exit 0
 fi
 
+if grep -RIn --include='*.rs' 'ChatInputEvent::Cancel' agent packages apps; then
+  echo '{"decision":"block","reason":"旧 ChatInputEvent::Cancel 入口禁止恢复；取消必须只走同步 cancel_run(run_id)。"}'
+  exit 2
+fi
+
 python3 - "$CLIENT_RS" <<'PY'
 import re, sys
 

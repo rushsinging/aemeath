@@ -16,6 +16,7 @@ impl AgentRunner for CliAgentRunner {
         let system = request.system;
         let ctx = request.ctx;
         let timeout = request.timeout;
+        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(&ctx.run_id));
         let model_spec = request.model_spec;
         let progress_tx = request.progress_tx;
         // Resolve role and model
@@ -204,6 +205,7 @@ impl AgentRunner for CliAgentRunner {
                 serde_json::to_string(&latest).unwrap_or_default(),
             );
         };
+        let sub_run_id = sdk::RunId::new_v7();
         let sub_ctx = ToolExecutionContext {
             resources: tools::api::ToolResources {
                 agent_runner: None, // No nested agents
@@ -215,6 +217,7 @@ impl AgentRunner for CliAgentRunner {
             // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
             // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
             workspace: ctx.workspace.seed_isolated(),
+            run_id: sub_run_id.to_string(),
             cancel: ctx.cancel.child_token(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -253,7 +256,6 @@ impl AgentRunner for CliAgentRunner {
         SubAgentRun {
             prompt,
             system,
-            ctx,
             progress_tx,
             client,
             _shared_client_guard: shared_client_guard,
@@ -268,9 +270,12 @@ impl AgentRunner for CliAgentRunner {
             turn_count: 0,
             last_api_input_tokens: 0,
             last_api_output_tokens: 0,
+            active_run: self.active_run.clone(),
             terminal: None,
             start_time: std::time::Instant::now(),
             session_id,
+            run_id: sub_run_id,
+            parent_run_id,
             role_name_for_log,
             model_name_for_log,
             resolved_spec,
@@ -278,7 +283,7 @@ impl AgentRunner for CliAgentRunner {
             previous_reasoning_level,
             restore_max_tokens,
             progress: Box::new(progress),
-            ctx_context_size: context_size as usize,
+            ctx_context_size: context_size,
         }
         .run_loop()
         .await

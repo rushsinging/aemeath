@@ -55,7 +55,7 @@ where
 
     // PreCompact hook
     let pre_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PreCompact,
             None,
@@ -66,6 +66,7 @@ where
                 was_compacted: false,
             }),
             workspace_root,
+            cancel,
         )
         .await;
     let pre_compact_blocked = pre_compact_results.iter().any(|(_, result, json)| {
@@ -156,7 +157,7 @@ where
 
     // PostCompact hook
     let post_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PostCompact,
             None,
@@ -167,6 +168,7 @@ where
                 was_compacted: true,
             }),
             workspace_root,
+            cancel,
         )
         .await;
     for (_entry, _result, json_output) in &post_compact_results {
@@ -243,9 +245,11 @@ where
         return None;
     }
 
+    // Manual compact is an idle command outside an active Run, so it owns its command scope.
+    let manual_cancel = tokio_util::sync::CancellationToken::new();
     // PreCompact hook
     let pre_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PreCompact,
             None,
@@ -256,6 +260,7 @@ where
                 was_compacted: false,
             }),
             workspace_root,
+            &manual_cancel,
         )
         .await;
     let pre_compact_blocked = pre_compact_results.iter().any(|(_, result, json)| {
@@ -328,7 +333,7 @@ where
 
     // PostCompact hook
     let post_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PostCompact,
             None,
@@ -339,6 +344,7 @@ where
                 was_compacted: true,
             }),
             workspace_root,
+            &manual_cancel,
         )
         .await;
     for (_entry, _result, json_output) in &post_compact_results {

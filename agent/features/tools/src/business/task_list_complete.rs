@@ -65,6 +65,7 @@ mod tests {
     fn test_ctx() -> ToolExecutionContext {
         ToolExecutionContext {
             workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
+            run_id: "test-run".to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),

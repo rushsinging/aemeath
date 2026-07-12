@@ -112,14 +112,14 @@ impl<'a> SubAgentRun<'a> {
 
         let old_len = self.messages.len();
         let result = tokio::select! {
-            _ = self.ctx.cancel.cancelled() => None,
+            _ = self.agent.ctx.cancel.cancelled() => None,
             result = crate::business::compact::compact_messages_with_llm(
                 &self.messages,
                 &self.system,
                 self.ctx_context_size,
                 Some(&self.client),
                 None,
-                &self.ctx.cancel,
+                &self.agent.ctx.cancel,
             ) => result,
         };
 

@@ -30,7 +30,8 @@ use crate::business::chat::looping::{
     RuntimeStreamHandler, RuntimeTurnContext,
 };
 use crate::business::loop_engine::{
-    LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision, ToolStep,
+    split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
+    ToolStep,
 };
 use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::business::session::ChatChain;
@@ -155,6 +156,7 @@ where
         max_agent_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
+        run_id: &sdk::RunId,
     ) -> Agent<'b> {
         Agent {
             registry,
@@ -167,6 +169,7 @@ where
                     allow_all,
                 },
                 workspace: workspace.clone(),
+                run_id: run_id.to_string(),
                 cancel: cancel.clone(),
                 read_files: read_files.clone(),
                 session_reminders: Some(session_reminders.clone()),
@@ -503,11 +506,13 @@ where
                     .map(|text| sdk::ChatInputEvent::classify_text(text, Vec::new())),
             );
         }
-        let mut inputs = Vec::new();
+        let batch = split_input_events(events.clone());
+        let inputs = batch
+            .user_inputs
+            .into_iter()
+            .map(|input| LoopInput { text: input.text })
+            .collect();
         for event in events {
-            if let sdk::ChatInputEvent::UserMessage { text, .. } = &event {
-                inputs.push(LoopInput { text: text.clone() });
-            }
             self.queue_busy_event(event).await;
         }
         Ok(inputs)
@@ -559,6 +564,7 @@ where
             self.max_agent_concurrency,
             self.agent_semaphore,
             self.session_id,
+            &self.run_id,
         );
         let all_results = execute_tool_round(
             &self.turn_context,
@@ -657,6 +663,11 @@ where
     fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
         debug_assert_eq!(run_id, &self.run_id);
         self.active_run.claim_terminal(run_id)
+    }
+
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        debug_assert_eq!(run_id, &self.run_id);
+        self.active_run.claim_cancellation(run_id)
     }
 
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {

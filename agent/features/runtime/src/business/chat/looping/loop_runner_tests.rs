@@ -2081,9 +2081,9 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
     // **回到空闲**（不退 loop）；随后投递新 UserMessage → 新回合正常完成；
     // 最后 drop 发送端关闭通道 → loop shutdown 退出。
     //
-    // 取消令牌生命周期（并发关键）：cancel 槽改为 Arc<Mutex<CancellationToken>>，
-    // 外部（模拟 cancel_impl）锁槽 .cancel() 当前 token；loop 处理 cancel 后
-    // 将槽重置为新 token 供下回合。若未重置，回合 2 的 LLM 调用会立即 Cancelled。
+    // 取消令牌生命周期（并发关键）：每个 Run 在 ActiveRunRegistry 中独占 token，
+    // cancel_run(run_id) 只取消目标 Run；Session 回到 idle 后创建新 Run 和新 token。
+    // 若错误复用已取消 token，回合 2 的 LLM 调用会立即 Cancelled。
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
     // Active Run registry：模拟 RuntimeHandle.active_run 的同步 cancel_run 入口。

@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 struct StubRunner {
     captured_timeout: Mutex<std::time::Duration>,
     captured_system: Mutex<String>,
+    captured_parent_run_id: Mutex<Option<String>>,
     run_count: Mutex<usize>,
 }
 
@@ -18,6 +19,7 @@ impl AgentRunner for StubRunner {
     async fn run_agent(&self, request: AgentRunRequest<'_>) -> AgentRunTerminal {
         *self.captured_timeout.lock().unwrap() = request.timeout;
         *self.captured_system.lock().unwrap() = request.system.to_string();
+        *self.captured_parent_run_id.lock().unwrap() = Some(request.ctx.run_id.clone());
         *self.run_count.lock().unwrap() += 1;
         AgentRunTerminal::Completed {
             result: request.prompt.to_string(),
@@ -32,6 +34,7 @@ impl AgentRunner for StubRunner {
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
         workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
+        run_id: "01900000-0000-7000-8000-000000000001".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -117,6 +120,29 @@ fn test_agent_tool_schema_describes_timeout_without_max_turns() {
     assert!(schema.contains("timeout"));
     assert!(!schema.contains("max_turns"));
     assert!(!description.contains("1000 rounds"));
+}
+
+#[tokio::test]
+async fn test_agent_tool_passes_parent_run_id_to_sub_agent_request() {
+    let tool = AgentTool;
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(
+        runner.captured_parent_run_id.lock().unwrap().as_ref(),
+        Some(&ctx.run_id)
+    );
 }
 
 #[tokio::test]

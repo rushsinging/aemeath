@@ -7,17 +7,17 @@ use crate::tui::app::event::UiEvent;
 use std::sync::Arc;
 
 pub(crate) use event_mapping::sdk_event_to_ui_event;
-pub(crate) use handle::{shutdown_and_save, ProcessingHandle, SpawnContext, SpawnContextRefs};
+pub(crate) use handle::{
+    shutdown_and_save, ProcessingHandle, RunCancelState, SpawnContext, SpawnContextRefs,
+};
 pub(crate) use input_port::TuiInputEventPort;
 pub(crate) use logging::log_sdk_event;
 
 use logging::log_ui_tool_event;
 
 pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
-    let active_run_id = Arc::new(std::sync::Mutex::new(None));
-    let active_run_id_for_task = active_run_id.clone();
-    let pending_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let pending_cancel_for_task = pending_cancel.clone();
+    let run_cancel_state = Arc::new(std::sync::Mutex::new(RunCancelState::Idle));
+    let run_cancel_state_for_task = run_cancel_state.clone();
     let agent_client = ctx.agent_client.clone();
     let agent_client_for_task = agent_client.clone();
     let join = tokio::spawn(async move {
@@ -46,25 +46,35 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
         while let Some(event) = stream.recv().await {
             match &event {
                 sdk::ChatEvent::RunStarted { run_id, .. } => {
-                    *active_run_id_for_task
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner()) = Some(run_id.clone());
-                    if pending_cancel_for_task.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                    let cancel_requested = {
+                        let mut state = run_cancel_state_for_task
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        let requested = matches!(
+                            &*state,
+                            RunCancelState::AwaitingStart {
+                                cancel_requested: true
+                            }
+                        );
+                        *state = RunCancelState::Active(run_id.clone());
+                        requested
+                    };
+                    if cancel_requested {
                         let _ = agent_client_for_task.cancel_run(run_id);
                     }
                 }
                 sdk::ChatEvent::RunCancelled { run_id } => {
-                    let mut guard = active_run_id_for_task
+                    let mut state = run_cancel_state_for_task
                         .lock()
                         .unwrap_or_else(|error| error.into_inner());
-                    if guard.as_ref() == Some(run_id) {
-                        *guard = None;
+                    if matches!(&*state, RunCancelState::Active(active) if active == run_id) {
+                        *state = RunCancelState::Idle;
                     }
                 }
                 sdk::ChatEvent::Done { .. } | sdk::ChatEvent::DoneWithDurationMs { .. } => {
-                    *active_run_id_for_task
+                    *run_cancel_state_for_task
                         .lock()
-                        .unwrap_or_else(|error| error.into_inner()) = None;
+                        .unwrap_or_else(|error| error.into_inner()) = RunCancelState::Idle;
                 }
                 _ => {}
             }
@@ -79,8 +89,7 @@ pub(crate) fn spawn_processing(ctx: SpawnContext) -> ProcessingHandle {
     ProcessingHandle {
         join,
         agent_client,
-        active_run_id,
-        pending_cancel,
+        run_cancel_state,
     }
 }
 
@@ -238,27 +247,59 @@ mod tests {
         let handle = ProcessingHandle {
             join: tokio::spawn(async {}),
             agent_client: client.clone(),
-            active_run_id: Arc::new(std::sync::Mutex::new(Some(run_id.clone()))),
-            pending_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            run_cancel_state: Arc::new(std::sync::Mutex::new(RunCancelState::Active(
+                run_id.clone(),
+            ))),
         };
 
         assert_eq!(handle.cancel_current_run(), sdk::CancelRunOutcome::Accepted);
-        assert_eq!(client.cancelled.lock().unwrap().as_slice(), &[run_id]);
+        assert_eq!(
+            client.cancelled.lock().unwrap().as_slice(),
+            std::slice::from_ref(&run_id)
+        );
+        assert_eq!(handle.cancel_current_run(), sdk::CancelRunOutcome::Accepted);
+        assert_eq!(
+            client.cancelled.lock().unwrap().as_slice(),
+            &[run_id.clone(), run_id]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_processing_handle_idle_cancel_does_not_arm_next_run() {
+        let client = Arc::new(DoneOnlyAgentClient::default());
+        let run_cancel_state = Arc::new(std::sync::Mutex::new(RunCancelState::Idle));
+        let handle = ProcessingHandle {
+            join: tokio::spawn(async {}),
+            agent_client: client,
+            run_cancel_state: run_cancel_state.clone(),
+        };
+
+        assert_eq!(handle.cancel_current_run(), sdk::CancelRunOutcome::NotFound);
+        assert!(matches!(
+            &*run_cancel_state.lock().unwrap(),
+            RunCancelState::Idle
+        ));
     }
 
     #[tokio::test]
     async fn test_processing_handle_buffers_cancel_before_run_started() {
         let client = Arc::new(DoneOnlyAgentClient::default());
-        let pending_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let run_cancel_state = Arc::new(std::sync::Mutex::new(RunCancelState::AwaitingStart {
+            cancel_requested: false,
+        }));
         let handle = ProcessingHandle {
             join: tokio::spawn(async {}),
             agent_client: client,
-            active_run_id: Arc::new(std::sync::Mutex::new(None)),
-            pending_cancel: pending_cancel.clone(),
+            run_cancel_state: run_cancel_state.clone(),
         };
 
         assert_eq!(handle.cancel_current_run(), sdk::CancelRunOutcome::Accepted);
-        assert!(pending_cancel.load(std::sync::atomic::Ordering::Acquire));
+        assert!(matches!(
+            &*run_cancel_state.lock().unwrap(),
+            RunCancelState::AwaitingStart {
+                cancel_requested: true
+            }
+        ));
     }
 
     #[tokio::test]

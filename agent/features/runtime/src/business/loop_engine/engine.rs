@@ -6,7 +6,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::business::agent::ToolCall;
 use crate::business::agent_run::{
-    Run, RunCancellationRequest, RunDomainEvent, RunStatus, RunTransition, RunTransitionError,
+    ModelInvocation, Run, RunCancellationRequest, RunDomainEvent, RunStatus, RunTransition,
+    RunTransitionError, ToolCallStatus,
 };
 
 use super::{StuckDecision, StuckGuard};
@@ -68,6 +69,9 @@ pub trait RunLoopPort: Send {
     ) -> Result<ToolStep, LoopEngineError>;
     async fn on_stuck(&mut self, decision: &StuckDecision) -> Result<(), LoopEngineError>;
     fn claim_terminal(&self, _run_id: &sdk::RunId) -> bool {
+        true
+    }
+    fn claim_cancellation(&self, _run_id: &sdk::RunId) -> bool {
         true
     }
     async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError>;
@@ -191,6 +195,7 @@ where
         if handle_interrupt(run, cancel, port).await? {
             return Ok(LoopDirective::Terminal);
         }
+        run.record_model_invocation(&step_id, model_invocation(&model_step))?;
         run.transition(RunTransition::ModelInvoked)?;
 
         match model_step {
@@ -264,6 +269,7 @@ where
                 run.transition(RunTransition::ResponseWithTools)?;
                 let mut guarded_calls = Vec::with_capacity(calls.len());
                 for call in calls {
+                    run.add_tool_call(&step_id, call.clone())?;
                     match guard.inspect_tool(&call) {
                         StuckDecision::SoftBlock { reason } => {
                             record_stuck(
@@ -293,7 +299,19 @@ where
                         }
                     }
                 }
+                for (call, decision) in &guarded_calls {
+                    let status = match decision {
+                        ToolGuardDecision::Allow => ToolCallStatus::Ready,
+                        ToolGuardDecision::SoftBlock { .. } => ToolCallStatus::Cancelled,
+                    };
+                    run.advance_tool_call(&step_id, &call.id, status)?;
+                }
                 run.transition(RunTransition::ToolsApproved)?;
+                for (call, decision) in &guarded_calls {
+                    if matches!(decision, ToolGuardDecision::Allow) {
+                        run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Running)?;
+                    }
+                }
                 let tool_step = match await_interruptible(
                     run,
                     cancel,
@@ -319,6 +337,11 @@ where
                 if handle_interrupt(run, cancel, port).await? {
                     return Ok(LoopDirective::Terminal);
                 }
+                for (call, decision) in &guarded_calls {
+                    if matches!(decision, ToolGuardDecision::Allow) {
+                        run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Success)?;
+                    }
+                }
                 match tool_step {
                     ToolStep::Continue => {
                         run.complete_step(&step_id)?;
@@ -334,6 +357,16 @@ where
             }
         }
     }
+}
+
+fn model_invocation(step: &ModelStep) -> ModelInvocation {
+    let response = match step {
+        ModelStep::Complete { text }
+        | ModelStep::Continue { text }
+        | ModelStep::StopHookBlocked { text }
+        | ModelStep::Tools { text, .. } => text.clone(),
+    };
+    ModelInvocation::new("", response)
 }
 
 async fn record_stuck<P>(
@@ -405,6 +438,9 @@ where
     P: RunLoopPort,
 {
     if run.status() != RunStatus::Cancelling {
+        if !port.claim_cancellation(run.id()) {
+            return Ok(());
+        }
         match run.request_cancellation() {
             RunCancellationRequest::Accepted | RunCancellationRequest::AlreadyCancelling => {}
             RunCancellationRequest::AlreadyTerminal => return Ok(()),
