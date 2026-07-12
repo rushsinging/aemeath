@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>。
+    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>。
   </p>
 
   <div class="timeline">
@@ -1040,6 +1040,90 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
         </ul>
         <div class="tl-out">产出 · runtime 战术设计定稿，<b>健壮性完整</b></div>
       </div>
+    </div>
+
+  <!-- ===== 阶段十二：Context Management 实战经验 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>读模型 vs 持久层 · 同一 BC 内的两种作用层</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Context Management 的 compact 家族五级管线（L1-L5），初稿把 L3 microcompact 设计为修改 ChatChain 的独立端口方法——review 后推翻：<b>只有 L5 auto-compact 修改 ChatChain</b>，L1-L4 全是读模型变换。</p>
+      <ul class="tl-list">
+        <li>L1 budget reduction 在 tool 出站时截断（入 ChatChain 前），不入 build_window</li>
+        <li>L2 snip / L3 microcompact / L4 context collapse 都是 <b>build_window 内部读模型变换</b>——只影响 ContextWindow.messages，ChatChain 原始数据不变</li>
+        <li>L5 auto-compact 是<b>唯一修改 ChatChain</b>的策略（创建 Compact segment，冻结旧链）</li>
+        <li>端口签名从 4 方法收敛为 3 方法：<b>microcompact 内聚到 build_window</b>，Runtime 不感知内部策略分层</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">读模型 vs 持久层 · compact 管线</span><span class="d">build_window</span>  L2 snip → L3 microcompact → L4 collapse    <span class="m">// 读模型，不改 ChatChain</span>
+<span class="d">compact</span>       L5 auto-compact                              <span class="m">// 持久层，创建 Compact segment</span>
+
+<span class="m">// 五级管线是 ContextPort 实现细节，Runtime 只调 3 个方法</span></pre>
+      <div class="tl-out">产出 · ContextPort 3 方法签名定稿，<b>读模型与持久层职责分离</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十三：cacheable 判据 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>cacheable 不是按类型分 · 是按变化频率分</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">初稿把系统提示分为 static_part（cacheable）/ dynamic_part（non-cacheable）——user_guidance、skills、memory 被归入 dynamic 不 cache。review 后推翻：<b>它们变化频率低，不变时应 cache</b>，变化时 miss 重算一次后恢复。</p>
+      <ul class="tl-list">
+        <li><b>错误分法</b>：按"静态/动态"类型分组 → user_guidance / skills / memory 被错误排除出 cache</li>
+        <li><b>正确分法</b>：按<b>内容是否变化</b>判定——每部分独立检测（mtime / fingerprint / hash 比对）</li>
+        <li>cacheable_prefix 纳入 user_guidance / skills / memory / active_summary；uncached_suffix 只留 current_date / git_context / task_reminder</li>
+        <li>memory 通过 <b>entry fingerprint</b> 检测变化——reflection 写入时 miss 一次，下一轮恢复命中</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">cacheable_prefix · 低频变化内容</span><span class="d">discipline + guidance + skills + roles</span>
+<span class="d">user_guidance + memory + active_summary</span>     <span class="m">// mtime / fingerprint 检测变化</span>
+↓ cache_control 断点
+<span class="tag">uncached_suffix · 每轮可能变</span><span class="d">current_date + git_context + task_reminder</span></pre>
+      <div class="tl-out">产出 · cache 命中率从"每轮 miss"提升到<b>"不变即命中"</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十四：组合加载 vs fallback ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>组合加载 vs fallback · 别用 break 杀掉信息</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">guidance 文件和 user_guidance（AGENTS.md / CLAUDE.md）初稿都设计为"取第一个存在的就 break"——review 后改为<b>组合加载</b>：所有匹配的文件都追加，从通用到具体逐层叠加。</p>
+      <ul class="tl-list">
+        <li><b>model guidance</b>：_default.md 总是加载 + 所有前缀匹配的 {prefix}.md 都追加（短前缀→长前缀）+ _reasoning.md（is_reasoning 时）</li>
+        <li><b>user guidance</b>：全局 ~/.agents/AGENTS.md + ~/.claude/CLAUDE.md + 项目从远到近每层 AGENTS.md / CLAUDE.md 都加载</li>
+        <li>每段带<b>路径信息</b>：<code>&lt;guidance source="~/.agents/guidance/Zhipu.md"&gt;...&lt;/guidance&gt;</code></li>
+        <li>命名收敛：CLAUDE.md / AGENTS.md 统称 <b>user_guidance</b>；cwd → <b>project_root</b></li>
+      </ul>
+      <pre class="bp-code"><span class="tag">组合加载 · 从通用到具体</span><span class="d">_default.md</span>          <span class="m">// 系统通用</span>
+<span class="d">Zhipu.md</span>             <span class="m">// 厂商通用</span>
+<span class="d">Zhipu/glm.md</span>        <span class="m">// 模型系列</span>
+<span class="d">Zhipu/glm-5.md</span>      <span class="m">// 版本特定</span>
+<span class="d">_reasoning.md</span>       <span class="m">// reasoning 模式</span>
+
+<span class="m">// fallback 会丢掉更具体的 guidance；组合加载才完整</span></pre>
+      <div class="tl-out">产出 · guidance 和 user_guidance <b>同策略组合加载</b>，每段带路径溯源</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十五：正交关注点不混入 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>正交关注点不混入 · reasoning 与常量收口</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">两个看似无关的问题，本质同一：关注点越界——一个混入了不该属于该层的参数，一个散落在三个文件里没有单一真相。</p>
+      <ul class="tl-list">
+        <li><b>reasoning 正交性</b>：<code>is_reasoning</code> 是 guidance 层开关（加载 _reasoning.md），与 provider API 参数（<code>reasoning_effort</code> / <code>thinking.budget_tokens</code>）正交——LLM 不需要"知道"自己开了 reasoning</li>
+        <li><b>常量收口</b>：8192 / 13000 / 20000 三个魔法常量散落在 <code>token_estimation.rs</code> 三处，<b>max_output_tokens 硬编码 8192 忽略模型真实 max_tokens</b> → 统一到 <b>TokenBudgetConfig</b>，max_output 从 ProviderPort 获取</li>
+        <li><b>幂等决策（#550）</b>：<code>needs_compaction</code> 是纯函数，但 PreCompact hook 每轮无条件触发破坏幂等 → <b>CompactionFingerprint</b> 不变时跳过 hook</li>
+        <li><b>circuit breaker 死代码</b>：<code>AutoCompactState</code> 完整实现但从未接入主循环 → 设计中明确接入点</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">正交关注点 · 不混入</span><span class="d">PromptPort</span>  is_reasoning → 加载 _reasoning.md guidance  <span class="m">// guidance 层</span>
+<span class="d">ProviderPort</span> reasoning_effort → API 参数              <span class="m">// provider 层</span>
+<span class="m">// 两者正交，不互相注入</span>
+
+<span class="tag">常量收口 · 单一真相</span><span class="d">TokenBudgetConfig</span>  max_summary_output / buffer / safety_factor
+<span class="d">ProviderPort</span>        max_output_tokens(model)  <span class="m">// 替代硬编码 8192</span></pre>
+      <div class="tl-out">产出 · 四个关注点各归其位：<b>guidance / API 参数 / 预算常量 / 幂等指纹</b></div>
     </div>
   </div>
 </section>
