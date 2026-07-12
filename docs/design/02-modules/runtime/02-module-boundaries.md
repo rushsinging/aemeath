@@ -19,7 +19,8 @@
  model_invocation  tool_coordination  context_coord.   interaction
         │            │                     │              │
         ▼            ▼                     ▼              ▼
-   ProviderPort   ToolPort           ContextPort   InteractionPort/PolicyPort
+   ProviderPort   ToolCatalogPort +  ContextPort   InteractionPort/PolicyPort
+                  ToolExecutionPort
         │            │                     │              │
         └────────────┴─── event_projection（横切：领域事件 → SDK ChatEvent）
 ```
@@ -44,9 +45,10 @@
 - 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`ReasoningPort`（取 effort）
 
 ### tool_coordination
-- **职责**：ToolCall 双 ID 映射（领域 `ToolCallId` ↔ provider_id）、并发执行、结果回收
+- **职责**：ToolCall 双 ID 映射（领域 `ToolCallId` ↔ provider_id）、Policy/Hook/审批、timeout/cancellation、多调用并发、结果回收与 Run Step 写入
 - **内置 ToolLoopGuard**（工具循环熔断，StuckGuard L2）
-- 消费：`ToolPort`（受限 registry）、`HookPort`（PreToolCall / PostToolCall 时机）
+- 消费：`ToolCatalogPort`（schemas + Scope/Profile 投影）、`ToolExecutionPort`（单次函数调用）、`PolicyPort`、`HookPort`
+- Tool BC 在执行边界复核 Scope/Profile/schema；Runtime 保留调用编排控制权
 - SubAgent 派生工具 → 触发 agent_run 的 `derive_sub_run`
 
 ### context_coordination
@@ -120,3 +122,4 @@ event_projection：被各模块调用（emit），不反向依赖业务
 | 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputBuffer 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputBuffer 状态、Runtime/Hook 边界子节 | #761 |
 | 2026-07-11 | model_invocation 补错误重试职责（Retryable 退避 / context 超限 compact / Fatal fail）+ ModelInvocationRetrying | #761 |
 | 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
+| 2026-07-12 | tool_coordination 对齐 Catalog/Execution 双端口及 Runtime/Tool BC 职责分工 | #787 |

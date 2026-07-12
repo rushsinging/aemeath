@@ -25,7 +25,7 @@
                                         │  AgentClient（入站端口 = OHS + PL，所有权属核心域）
                                         ▼
    ┌──────────────────────────  核心域  ──────────────────────────┐
-   │   Agent Runtime（唯一状态机 Run；派生 / 执行 SubAgent）         │
+   │   Agent Runtime（唯一 Agent 执行生命周期状态机 Run；派生 / 执行 SubAgent） │
    └───────┬───────────────────────────────────────────────────────┘
            │ 出站端口（C/S，Runtime 是 Customer）
    ┌───────┼────────┬────────┬────────┬───────┬───────┬───────┬────────┐
@@ -58,7 +58,7 @@
 | Context Management | C/S | `ContextPort` | Runtime 请求"构建本轮 Context Window"（取历史 + compact + 注入 + prompt），CM 提供 OHS |
 | Workflow | C/S | `ReasoningPort` | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器 |
 | Provider | C/S + **ACL**(在 Provider 内) | `ProviderPort` | Provider 内部 ACL 吸收各家 LLM 差异，对 Runtime 暴露统一调用 + 流 |
-| Tool & Skill & Command | C/S | `ToolPort` | `Tool` trait + registry 作 OHS；含 MCP / skill / command |
+| Tool & Skill & Command | C/S | `ToolCatalogPort` + `ToolExecutionPort`；Skill/Command 独立端口 | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；MCP 是 Tool adapter |
 | Policy | C/S | `PolicyPort` | 工具执行前的权限判断（Interaction approval gate 上游） |
 | Memory | C/S | `MemoryPort` | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | `TaskPort` | Runtime 读写 Task 规划自身工作；Task 拥有状态机 + 依赖图不变量 |
@@ -123,3 +123,5 @@
 | 2026-07-11 | 清理 crate 路径引用改为纯目标态、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、缩写 AE→Runtime | #760 |
 | 2026-07-11 | Workflow 降为支撑域：移出核心框、并入 §4 出站端口表（ReasoningPort）、删原"核心内部"节、Future 去多-agent 编排 | #760 |
+| 2026-07-12 | Tool BC 出站契约拆为 Catalog/Execution 双端口；Skill 与 Command 使用独立端口，MCP 定位为 Tool adapter | #787 |
+| 2026-07-12 | 将 Run 限定为唯一 Agent 执行生命周期状态机，与各 BC 局部聚合状态机区分 | #743 / #787 |

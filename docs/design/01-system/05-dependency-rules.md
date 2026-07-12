@@ -37,11 +37,12 @@
 - **MUST NOT** 因为存在 `contract / gateway / business` 目录，就认为它天然对应六边形的端口 / 适配器 / 领域分层。COLA 是目录模板，不是 DDD 概念。
 - **目标方向**：按 BC 边界组织，用 Screaming Architecture 的能力命名表达业务；出站端口 trait 显式化、领域模型下沉为纯业务、适配器外置。
 
-## 4. 单状态机原则
+## 4. Agent 执行生命周期状态机原则
 
-- **MUST** 全系统只有一个领域状态机：`Run`（Agent Runtime 内），**内存态、不持久化、崩溃从头开始**。
-- **MUST NOT** 为 Session 建状态机——Session 是数据聚合（对话历史容器），其"状态"是 Run 状态的投影或 IO 动作，无独立领域不变量。
-- **MUST NOT** 引入 durable model invocation checkpoint 链（人在环 CLI 由"人 + 文件系统真实状态"兜底副作用一致性）。
+- **MUST** `Run` 是全系统唯一的 **Agent 执行生命周期状态机**，位于 Agent Runtime 内，且**内存态、不持久化、崩溃从头开始**。
+- **MAY** 其他 BC 为自身局部聚合定义状态机（例如 Task 状态迁移、Workflow effort 调节、MCP Connection 生命周期），但这些状态机 **MUST NOT** 复制、驱动或替代 Run 的执行生命周期。
+- **MUST NOT** 为 Session 建状态机——Session 是数据聚合（对话历史容器），其“状态”是 Run 状态的投影或 IO 动作，无独立执行生命周期不变量。
+- **MUST NOT** 引入 durable model invocation checkpoint 链（人在环 CLI 由“人 + 文件系统真实状态”兜底副作用一致性）。
 - Reasoning Node 状态机（Workflow）是 **effort 调节机**，与 Run **执行状态机**职责分离，NEVER 混淆。
 
 ## 5. Future 演进的依赖约束
@@ -70,3 +71,4 @@
 | 2026-07-11 | 违反示例通用化（移除具体现有类型名）、COLA 表去"现状"列、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
 | 2026-07-11 | Future 约束去"编排器"表述，改为 SubAgent 承担 v0.2.0 单 main + 多 sub | #760 |
+| 2026-07-12 | 将“全系统单状态机”精确化为“Run 是唯一 Agent 执行生命周期状态机”，允许各 BC 局部聚合状态机 | #743 / #787 |
