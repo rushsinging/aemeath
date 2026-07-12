@@ -1190,6 +1190,35 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
       <div class="tl-out">产出 · 主循环零阻塞，<b>Reflection 在后台跑</b>，结果延迟到下一轮 emit</div>
     </div>
   </div>
+
+  <!-- ===== 阶段十九：领域模型极简 + 命名直觉 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域模型极简 · LLM 驱动系统的每个字段都是 token 成本</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Task BC 战术设计中发现：<code>progress</code> / <code>progress_message</code> 字段要求 LLM 每步更新，纯费 token 无消费方——直接砍掉。同轮中 <code>seed_isolated</code> 重命名为 <code>fork</code>：自造术语不如 Unix 语义直觉。</p>
+      <ul class="tl-list">
+        <li><b>字段存活判据</b>：每个字段必须回答"谁消费它"——TUI 不渲染、Runtime 不读取、快照不依赖的字段直接移除。LLM 驱动的领域模型尤其要极简，多余字段 = 每轮浪费 token</li>
+        <li><b>Batch 是领域服务非聚合根</b>：Batch 管理 Task 集合的分组与生命周期（Active / Paused / Archived），但无独立状态机——lifecycle 检测是纯函数，归档动作由调用方执行。不是每个"管理一组东西"的概念都需要是聚合根</li>
+        <li><b>Published Language 所有权</b>：Task 类型定义所有权属 Task BC，其他 BC 引用其发布类型经端口翻译——<b>NEVER</b> 自行定义副本。当前类型在 shared/tool/types 下（build.rs 生成 Schema 需要），目标迁移到 Task BC 所有权下</li>
+        <li><b>命名直觉化</b>：<code>seed_isolated</code> → <code>fork</code>——Unix fork 语义（继承父状态 + 独立可变）比自造术语更直觉，跨团队沟通成本更低</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">字段存活判据 · 谁消费它？</span><span class="d">Task.subject</span>        → TUI 渲染、用户可读          <span class="m">// 留</span>
+<span class="d">Task.status</span>         → Runtime 决策、TUI 渲染        <span class="m">// 留</span>
+<span class="d">Task.blocked_by</span>     → is_blocked 判定              <span class="m">// 留</span>
+<span class="d">Task.progress</span>       → ??? 无消费方                  <span class="m">// 砍</span>
+<span class="d">Task.progress_message</span> → ??? 无消费方                <span class="m">// 砍</span>
+
+<span class="tag">Batch · 领域服务非聚合根</span><span class="d">detect_batch_all_completed</span>(tasks) → Option&lt;batch_id&gt;  <span class="m">// 纯函数</span>
+<span class="d">detect_interrupted_batch</span>(tasks) → Option&lt;Info&gt;      <span class="m">// 纯函数</span>
+<span class="m">// 检测无副作用；归档动作由调用方执行</span>
+
+<span class="tag">fork · Unix 语义替代自造术语</span><span class="d">fn fork(&amp;self) -> Arc&lt;Self&gt;</span>
+  <span class="m">// 继承 root + path_base + initial_cwd</span>
+  <span class="m">// 空栈 + 独立锁 + 共享 git 端口</span></pre>
+      <div class="tl-out">产出 · Task 聚合砍掉 2 字段 / 1 不变量 / 1 事件；Batch 定位为领域服务；<code>fork</code> 替代 <code>seed_isolated</code></div>
+    </div>
+  </div>
 </section>
 
 <div class="rule"></div>
