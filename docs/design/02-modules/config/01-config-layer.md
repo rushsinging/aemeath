@@ -52,7 +52,10 @@ trait ConfigWriter: Send + Sync {
 ```
 Config::default()           ← 内置默认值
   ↓ apply_patch
-ClaudeSettingsAdapter       ← ~/.claude/settings.json（兼容 Claude Code）
+CompatibilityAdapter        ← 外部 CLI 配置兼容层（ACL）
+  │  ├─ Claude Code:    ~/.claude/settings.json, .claude/settings.json
+  │  ├─ <其他 CLI>:     ~/.<cli>/config.json, .<cli>/config.json（远期）
+  │  └─ 自动检测格式，翻译为 ConfigPatch
   ↓ apply_patch
 FileAdapter (global)        ← ~/.agents/aemeath.json
   ↓ apply_patch
@@ -169,27 +172,25 @@ struct ConfigAppService {
 ```rust
 async fn load(&self) -> Result<()> {
     let mut base = Config::default();
+    let mut patches = Vec::new();
 
-    // 1. 编排 adapter（目标：fs IO 在 adapter 内部，不在 AppService）
-    if let Some(patch) = ClaudeSettingsAdapter::read(&global_claude_path).await? {
-        base = merge_config(base, vec![patch]);
-    }
-    if let Some(patch) = FileAdapter::read(&global_config_path).await? {
-        base = merge_config(base, vec![patch]);
-    }
-    if let Some(patch) = FileAdapter::read(&project_config_path).await? {
-        base = merge_config(base, vec![patch]);
-    }
-    if let Some(patch) = EnvAdapter::read() {
-        base = merge_config(base, vec![patch]);
-    }
-    let cli = self.cli_patch.read().unwrap().clone();
-    base = merge_config(base, vec![cli]);
+    // 1. 外部 CLI 配置兼容层（ACL）——在寻找 aemeath.json 时同时寻找外部 CLI 配置
+    patches.extend(CompatibilityAdapter::read_global().await?);
+    patches.extend(CompatibilityAdapter::read_project(&project_root).await?);
 
-    // 2. 后处理
+    // 2. aemeath 原生配置
+    if let Some(p) = FileAdapter::read(&global_config_path).await? { patches.push(p); }
+    if let Some(p) = FileAdapter::read(&project_config_path).await? { patches.push(p); }
+
+    // 3. env + cli
+    if let Some(p) = EnvAdapter::read() { patches.push(p); }
+    patches.push(self.cli_patch.read().unwrap().clone());
+
+    // 4. 合并 + 后处理
+    base = merge_config(base, patches);
     resolve_provider_api_keys(&mut base);
 
-    // 3. 写入 + push
+    // 5. 写入 + push
     *self.config.write().unwrap() = base.clone();
     self.push_snapshot(base);
 
@@ -226,6 +227,8 @@ where F: FnOnce(&mut Config)
 
 ## 6. adapter 接入
 
+## 6. Adapter 接入与兼容层 ACL
+
 ### 6.1 当前问题
 
 三个 adapter 是 stub，`ConfigAppService.load()` 直接调 `tokio::fs` 绕过 adapter：
@@ -235,22 +238,195 @@ where F: FnOnce(&mut Config)
 | `EnvAdapter` | ✅ 完整实现 | 无 |
 | `FileAdapter` | ❌ stub | `load()` 直接读文件，不调 `FileAdapter::read()` |
 | `CliArgsAdapter` | ❌ stub | `load()` 用 `cli_patch` RwLock，不调 `CliArgsAdapter::read()` |
-| `ClaudeSettingsAdapter` | ❌ stub | `load()` 直接读文件，不调 `ClaudeSettingsAdapter::read()` |
+| `ClaudeSettingsAdapter` | ❌ stub | `load()` 直接读文件，不调 adapter |
 
-### 6.2 目标
+### 6.2 CompatibilityAdapter — 外部 CLI 配置兼容层（ACL）
 
-- `FileAdapter::read(path)` — 接收路径，读文件 → 反序列化 `ConfigPatch`
-- `ClaudeSettingsAdapter::read(path)` — 读 Claude settings.json → 转换为 `ConfigPatch`
+外部 CLI 配置兼容不是简单的文件读取——它需要**检测格式 + 翻译**，是一层防腐蚀层（ACL）。
+
+#### 设计
+
+```rust
+/// 外部 CLI 配置兼容层——检测格式并翻译为 ConfigPatch
+struct CompatibilityAdapter;
+
+impl CompatibilityAdapter {
+    /// 全局级：~/.claude/settings.json, ~/.<其他cli>/config.json
+    async fn read_global() -> Result<Vec<ConfigPatch>> {
+        let mut patches = Vec::new();
+        // 在寻找 aemeath.json 的同目录下寻找外部 CLI 配置
+        for path in discover_external_configs(&paths::global_config_dir()).await? {
+            if let Some(patch) = Self::read_one(&path).await? {
+                patches.push(patch);
+            }
+        }
+        Ok(patches)
+    }
+
+    /// 项目级：从 project_root 向上 N 级寻找 .claude/settings.json 等
+    async fn read_project(project_root: &Path) -> Result<Vec<ConfigPatch>> {
+        let mut patches = Vec::new();
+        for dir in paths::project_config_dirs(project_root) {
+            for path in discover_external_configs(&dir).await? {
+                if let Some(patch) = Self::read_one(&path).await? {
+                    patches.push(patch);
+                }
+            }
+        }
+        Ok(patches)
+    }
+
+    /// 读取单个文件，自动检测格式并翻译
+    async fn read_one(path: &Path) -> Result<Option<ConfigPatch>> {
+        let content = match tokio::fs::read_to_string(path).await {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+        let format = Self::detect_format(path, &content)?;
+        match format {
+            ConfigFormat::ClaudeCode => Ok(Some(ClaudeTranslator::translate(&content)?)),
+            ConfigFormat::Cursor    => Ok(Some(CursorTranslator::translate(&content)?)),   // 远期
+            ConfigFormat::Other(cli) => {
+                log::info!(target: "aemeath:shared", "未支持的外部配置格式: {} ({})", cli, path.display());
+                Ok(None)
+            }
+        }
+    }
+
+    /// 根据文件名 + 内容特征检测格式
+    fn detect_format(path: &Path, content: &str) -> Result<ConfigFormat> {
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        // 按文件名 + 结构特征判断
+        match name {
+            "settings.json" if path.to_string_lossy().contains(".claude") => Ok(ConfigFormat::ClaudeCode),
+            "settings.json" => {
+                // 内容特征：Claude settings 有特定字段（permissions, env, model 等）
+                if ClaudeTranslator::looks_like(&content) {
+                    Ok(ConfigFormat::ClaudeCode)
+                } else {
+                    Ok(ConfigFormat::Other("unknown".into()))
+                }
+            }
+            "config.json" if path.to_string_lossy().contains(".cursor") => Ok(ConfigFormat::Cursor),
+            _ => Ok(ConfigFormat::Other(name.into())),
+        }
+    }
+}
+
+enum ConfigFormat {
+    ClaudeCode,
+    Cursor,         // 远期
+    Other(String),  // 未识别格式
+}
+```
+
+#### Translator trait
+
+每种外部 CLI 格式实现一个 translator，将外部格式**语义翻译**为 `ConfigPatch`。翻译不只是格式转换——外部 CLI 的字段语义和 aemeath 内部模型不对等，translator 要做完整的语义映射：
+
+```rust
+trait ConfigTranslator {
+    /// 快速判断内容是否属于此格式
+    fn looks_like(content: &str) -> bool;
+    /// 语义翻译为 ConfigPatch
+    fn translate(content: &str) -> Result<ConfigPatch>;
+}
+```
+
+#### ACL 防腐的两层含义
+
+**第一层：格式检测防腐**——运行时检测文件格式，不假设输入是某种已知格式。未识别格式跳过并记录日志，不报错中断。
+
+**第二层：内容语义翻译防腐**——外部 CLI 的字段语义和 aemeath 内部模型不对等，translator 要做完整的语义映射，而不是字段名 1:1 直通：
+
+| 外部字段 | 内部字段 | 翻译逻辑（不是直通） |
+|---|---|---|
+| Claude `permissions.allow` / `permissions.deny` | `permission_mode` | Claude 的细粒度 allow/deny 规则列表 → aemeath 的 `PermissionMode` 枚举（需聚合判断） |
+| Claude `env` | `env` | Claude 的 env 注入规则（含 `CLAUDE_PROJECT_DIR` 等）→ aemeath 的 env 映射（可能需过滤/重命名） |
+| Claude `model` | `model_name` | Claude 的 model 别名 → aemeath 的 model ID（可能需映射表） |
+| Claude `apiKeyHelper` | `providers[*].api_key` | Claude 的 key helper 脚本 → aemeath 的静态 key（语义降级，无法执行脚本时跳过） |
+
+> **关键**：translator 的产出是 `ConfigPatch`——aemeath 内部模型。外部格式中的字段名、值类型、语义结构**不泄漏**到 Config domain。如果某个外部字段无法翻译（如 Claude 的 `apiKeyHelper` 脚本），translator 决定是降级还是跳过，而不是把原始结构塞进去。
+
+```rust
+struct ClaudeTranslator;
+impl ConfigTranslator for ClaudeTranslator {
+    fn looks_like(content: &str) -> bool {
+        // Claude settings 有 permissions / env / model 等特征字段
+        content.contains("\"permissions\"") || content.contains("\"env\"")
+    }
+    fn translate(content: &str) -> Result<ConfigPatch> {
+        let claude: ClaudeSettings = serde_json::from_str(content)?;
+        let mut patch = ConfigPatch::default();
+
+        // model 别名 → model ID（不是直通）
+        if let Some(model) = claude.model {
+            patch.model_name = Some(map_claude_model_alias(&model));
+        }
+
+        // permissions 规则列表 → PermissionMode 枚举（聚合判断）
+        if let Some(perms) = claude.permissions {
+            patch.permission_mode = Some(translate_claude_permissions(&perms));
+        }
+
+        // env 注入规则 → env 映射（过滤 Claude 专有变量）
+        if let Some(env) = claude.env {
+            patch.env = Some(translate_claude_env(&env));
+        }
+
+        // apiKeyHelper 脚本 → 无法执行，降级跳过 + warn
+        if let Some(helper) = claude.api_key_helper {
+            log::warn!(
+                target: "aemeath:shared",
+                "Claude apiKeyHelper 无法翻译（脚本执行不支持），已跳过: {}", helper
+            );
+        }
+
+        Ok(patch)
+    }
+}
+```
+
+#### 为什么是 ACL 而非普通 adapter
+
+| 维度 | 普通 adapter | CompatibilityAdapter（ACL） |
+|---|---|---|
+| 职责 | 读文件 → 反序列化 | 读文件 → **检测格式** → **语义翻译** |
+| 输入 | 已知格式 | 未知格式，需运行时检测 |
+| 扩展性 | 新格式 = 新 adapter | 新格式 = 新 translator，adapter 不变 |
+| 格式防腐 | 无——外部格式直接映射 | 有——运行时检测，未识别格式跳过 |
+| 内容防腐 | 无——字段 1:1 直通 | 有——字段语义完整翻译，外部结构不泄漏 |
+
+#### 寻址规则
+
+在寻找 `aemeath.json` 时同时寻找外部 CLI 配置：
+
+```
+全局级：
+  ~/.agents/aemeath.json        ← 原生
+  ~/.claude/settings.json       ← Claude Code 兼容
+  ~/.<其他cli>/config.json       ← 远期
+
+项目级（从 project_root 向上 N 级）：
+  .agents/aemeath.json          ← 原生
+  .claude/settings.json         ← Claude Code 兼容
+  .<其他cli>/config.json         ← 远期
+```
+
+### 6.3 其他 adapter 目标
+
+- `FileAdapter::read(path)` — 接收路径，读 aemeath.json → 反序列化 `ConfigPatch`
 - `CliArgsAdapter::read(args)` — 从 CLI 参数构造 `ConfigPatch`
 - `ConfigAppService.load()` 只编排 adapter + 合并，不做 fs IO
 
-### 6.3 迁移动作
+### 6.4 迁移动作
 
-1. 实现 `FileAdapter::read(path) -> Option<ConfigPatch>`（从 AppService 的内联 fs IO 提取）
-2. 实现 `ClaudeSettingsAdapter::read(path) -> Option<ConfigPatch>`（从 AppService 的内联 Claude 适配提取）
+1. 实现 `CompatibilityAdapter`（提取现有 Claude 适配逻辑到 `ClaudeTranslator`）
+2. 实现 `FileAdapter::read(path) -> Option<ConfigPatch>`（从 AppService 的内联 fs IO 提取）
 3. 实现 `CliArgsAdapter::read(args) -> ConfigPatch`（从 `cli_patch` RwLock 提取）
 4. `ConfigAppService.load()` 改为调 adapter
 5. 删除 AppService 中的内联 `tokio::fs::read_to_string`
+6. 新增外部 CLI 格式时只加 translator，不改 adapter / AppService / 分层
 
 ## 7. reasoning 静态阈值
 
@@ -311,8 +487,10 @@ fn resolve_provider_api_keys(config: &mut Config) {
 
 | 目标 | 现状 | 迁移动作 |
 |---|---|---|
-| adapter 接入调用链 | ⚠️ 三个 stub 未接入 | 实现 FileAdapter / ClaudeSettingsAdapter / CliArgsAdapter，AppService 改为调 adapter |
+| `CompatibilityAdapter`（ACL） | ❌ 不存在，Claude 适配散落在 AppService 内联 | 新建 CompatibilityAdapter + ConfigTranslator trait + ClaudeTranslator |
+| adapter 接入调用链 | ⚠️ 三个 stub 未接入 | 实现 FileAdapter / CliArgsAdapter，AppService 改为调 adapter |
 | fs IO 移到 adapter | ⚠️ AppService 内联 `tokio::fs` | 从 AppService 提取 fs IO 到 adapter |
+| 外部 CLI 格式可扩展 | ❌ 硬编码 Claude | 新格式只加 translator，不改 adapter / AppService / 分层 |
 | `max_reasoning` 接入 clamp | ⚠️ 已解析未生效 | 接入 ReasoningPort clamp 链 |
 | `update()` 写整份 Config | ⚠️ 不分 patch | 后续可改为写 patch + 全量 fallback |
 | `LOG_TARGET` 未使用 | ⚠️ dead_code | S2 logging 合流时启用 |
