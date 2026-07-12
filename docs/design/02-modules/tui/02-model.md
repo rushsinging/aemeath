@@ -47,8 +47,8 @@ struct TuiModel {
 ```rust
 struct ConversationModel {
     // ── 对话内容 ──
-    pub chats: Vec<Chat>,
-    pub active_chat_id: Option<ChatId>,
+    pub chats: Vec<Chat>,                    // 目标态: runs: Vec<RunProjection>
+    pub active_chat_id: Option<ChatId>,      // 目标态: active_run_id: Option<RunId>
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
     pub agent_progress: Vec<AgentProgressEntry>,
@@ -56,9 +56,9 @@ struct ConversationModel {
     next_block_sequence: usize,             // private
     revision: u64,                          // private — memo 版本号
     pub(super) active_text_block_id: Option<String>,
-    pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
+    pub(super) active_text_context: Option<(RunId, RunStepId)>,       // 现状: ChatId, ChatTurnId
     pub(super) active_thinking_block_id: Option<String>,
-    pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
+    pub(super) active_thinking_context: Option<(RunId, RunStepId)>,  // 现状: ChatId, ChatTurnId
     pub model_stream_placeholder: Option<ModelStreamWaitingView>,
     // ── 运行态 ──
     pub runtime: RuntimeState,
@@ -67,8 +67,8 @@ struct ConversationModel {
 
 | 字段 | 可见性 | 说明 |
 |---|---|---|
-| `chats` | pub | Chat 聚合根列表 |
-| `active_chat_id` | pub | 当前活跃 chat |
+| `chats` | pub | Run 投影列表（现状 `chats: Vec<Chat>`，目标态 `runs: Vec<RunProjection>`） |
+| `active_chat_id` | pub | 当前活跃 run（现状 `active_chat_id`，目标态 `active_run_id`） |
 | `timeline` | pub | 渲染用扁平时间线（与 chats 双重表示，见 §3.5） |
 | `queued_submissions` | pub | 排队中的用户输入 |
 | `agent_progress` | pub | sub-agent 进度条目 |
@@ -79,53 +79,87 @@ struct ConversationModel {
 | `model_stream_placeholder` | pub | model stream 等待占位 |
 | `runtime` | pub | RuntimeState 子模块 |
 
-### 3.2 Chat 与 ChatStatus 状态机
+### 3.2 Run 投影与 RunStatus 状态机
+
+> **术语对齐**：TUI Model 是 Runtime 的投影层，统一使用 Runtime 领域语言。现状代码中 `Chat` / `ChatTurn` 对应 Runtime 的 `Run` / `RunStep`。本文使用目标态术语，现状代码名在括号内标注。
 
 ```rust
-struct Chat {
-    pub id: ChatId,
+// 投影自 Runtime Run 聚合根（现状代码: Chat）
+struct RunProjection {
+    pub id: RunId,                        // 现状: ChatId
     pub user_submission: String,
-    pub status: ChatStatus,
-    pub turns: Vec<ChatTurn>,
+    pub status: RunProjectionStatus,     // 现状: ChatStatus
+    pub steps: Vec<RunStepProjection>,   // 现状: turns: Vec<ChatTurn>
 }
-enum ChatStatus { Created, Running, Completing, Completed, Failed, Cancelled }
+
+// Run 状态机的 TUI 投影（简化自 Runtime RunStatus）
+// Runtime 完整态见 runtime/03-loop-and-state-machine.md
+enum RunProjectionStatus {
+    Created,          // 初始态
+    Running,          // 运行中（合并 PreparingContext/InvokingModel/ApplyingResponse/ExecutingTools）
+    AwaitingUser,     // 暂停等待用户输入（ask_user / approval）
+    Completing,       // 收到 CompleteChat，正在收尾
+    Completed,        // 正常完成
+    Failed,           // 异常终止
+    Cancelled,        // 用户取消
+}
 ```
 
-**ChatStatus 状态转换图**：
+> **投影简化规则**：Runtime `RunStatus` 有 11 个状态，TUI 投影合并为 7 个——spinner phase 负责细粒度展示（Thinking / Generating / CallingTool 等），RunProjectionStatus 只需区分"运行中 / 等待用户 / 完成 / 失败 / 取消"。
+
+**RunProjectionStatus 状态转换图**：
 
 ```
-Created ──StartChat──→ Running ──CompleteChat──→ Completing ──→ Completed
-                          │                        │
-                          ├──AbortChat──→ Failed    ├──异常──→ Failed
-                          └──Cancel──→ Cancelled
+Created ──StartRun──→ Running ──CompleteRun──→ Completing ──→ Completed
+                         │                        │
+                         ├──AbortRun──→ Failed     ├──异常──→ Failed
+                         │
+                         ├──AskUser──→ AwaitingUser ──Resume──→ Running
+                         │
+                         └──Cancel──→ Cancelled
 
 ResumeConversation ──→ Completed（恢复已结束会话，不触发 spinner）
 ```
 
 | 转换 | 触发 Intent | 方法 | 说明 |
 |---|---|---|---|
-| → Running | `StartChat` | `start_chat()` | 创建 Chat + 初始 turn |
-| → Completed | `ResumeConversation` | `ensure_runtime_turn()` | 恢复历史会话，chat 保持已完成态，不触发 spinner |
+| → Running | `StartChat` | `start_chat()` | 创建 Run + 初始 step |
+| → Completed | `ResumeConversation` | `ensure_runtime_turn()` | 恢复历史会话，run 保持已完成态，不触发 spinner |
+| Running → AwaitingUser | `ShowAskUserBatch` | `show_ask_user_batch()` | Runtime 进入 AwaitingUser 态 |
+| AwaitingUser → Running | `ConfirmAskUserBatch` / `DismissAskUserBatch` | — | 用户应答后 resume |
 | Running → Completing | `CompleteChat` | `complete_chat()` | 清理 active block 追踪 |
 | → Failed | 异常 / AbortChat | — | Runtime 报告异常 |
 | → Cancelled | 用户取消 | — | — |
 
 > **已知 bug**：`ensure_runtime_turn()` 当前将 `chat.status` 设为 `Running`，但恢复的历史会话已结束，正确状态应为 `Completed`。目标态修正为 Completed。
 
-### 3.3 ChatTurn 与 ChatTurnStatus 状态机
+> **术语迁移**：代码现状使用 `Chat` / `ChatId` / `ChatStatus` / `ChatTurn` / `ChatTurnId` / `ChatTurnStatus`，目标态统一改为 `Run` / `RunId` / `RunStatus` / `RunStep` / `RunStepId` / `RunStepStatus`（见 §10 缺口 #4）。
+
+### 3.3 RunStep 投影与 RunStepStatus 状态机
 
 ```rust
-struct ChatTurn {
-    pub id: ChatTurnId,
+// 投影自 Runtime RunStep 实体（现状代码: ChatTurn）
+struct RunStepProjection {
+    pub id: RunStepId,                    // 现状: ChatTurnId
     pub sequence: usize,
-    pub status: ChatTurnStatus,
+    pub status: RunStepProjectionStatus,  // 现状: ChatTurnStatus
     pub assistant_stream: String,
     pub tool_calls: Vec<ToolCall>,
 }
-enum ChatTurnStatus { Streaming, ToolCalling, ToolExecuting, Completing, Completed, Failed }
+
+// RunStep 状态机的 TUI 投影（简化自 Runtime RunStepStatus）
+// Runtime 原始态: Pending/Invoking/Applying/ToolPhase/Done/Failed
+enum RunStepProjectionStatus {
+    Streaming,       // 对应 Runtime Invoking/Applying（assistant 文本流中）
+    ToolCalling,     // 对应 Runtime ToolPhase 前期（参数收集中）
+    ToolExecuting,   // 对应 Runtime ToolPhase 后期（执行中）
+    Completing,      // 对应 Runtime Finishing
+    Completed,       // 对应 Runtime Done
+    Failed,          // 对应 Runtime Failed
+}
 ```
 
-**ChatTurnStatus 状态转换图**：
+**RunStepProjectionStatus 状态转换图**：
 
 ```
 Streaming ──ToolCallStart──→ ToolExecuting
@@ -145,7 +179,7 @@ Streaming ──ToolCallStart──→ ToolExecuting
 
 | 转换 | 触发 | 方法 | 说明 |
 |---|---|---|---|
-| → Streaming | `ChatTurn::new()` | — | 初始态 |
+| → Streaming | `RunStepProjection::new()`（现状 `ChatTurn::new()`） | — | 初始态 |
 | → ToolExecuting | `ToolCallStart` | `observe_tool_start()` | push 占位 ToolCall |
 | → ToolCalling | `ToolCallUpdate(PendingArgs/Ready)` | `update_tool()` | 参数就绪 |
 | → ToolExecuting | `ToolCallUpdate(Running)` / `bind_tool()` | `update_tool()` / `bind_tool()` | 开始执行 |
@@ -194,7 +228,7 @@ ConversationModel 维护两套对话表示：
 
 | 表示 | 类型 | 用途 |
 |---|---|---|
-| 结构化 | `chats: Vec<Chat>` | chat/turn/tool_call 层级结构，业务逻辑操作 |
+| 结构化 | `chats: Vec<Chat>`（目标态 `runs: Vec<RunProjection>`） | run/step/tool_call 层级结构，业务逻辑操作 |
 | 扁平化 | `timeline: OutputTimelineModel` | 渲染用有序块列表，ViewAssembler 消费 |
 
 **OutputTimelineItem 变体**：
@@ -399,7 +433,7 @@ trait ConversationUpdate {
 每个 Intent 是独立 struct，`impl ConversationUpdate` 逻辑在 `intent_impls.rs`。`ConversationIntent` enum 仅做传输容器，含 48 个 variant（27 conversation + 14 runtime + 7 ask_user）。
 
 **ConversationChange** 含 30+ variant，覆盖：
-- 对话生命周期：`ChatStarted` / `ChatTurnStarted` / `ChatCompleting` / `ChatCompleted`
+- 对话生命周期：`ChatStarted` / `ChatTurnStarted` / `ChatCompleting` / `ChatCompleted`（目标态：`RunStarted` / `RunStepStarted` / `RunCompleting` / `RunCompleted`）
 - 内容追加：`UserMessageAppended` / `AssistantTextAppended` / `ThinkingTextAppended` / `SystemMessageAppended` / `ErrorAppended`
 - 工具追踪：`ToolCallObserved` / `ToolCallBound` / `ToolCallCompleted` / `OrphanToolResultObserved`
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
@@ -655,10 +689,10 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 
 | 状态机 | 权威位置 | Model 中的角色 |
 |---|---|---|
-| ChatStatus | Runtime AgentRun | 投影——从 SDK 事件推导 |
-| ChatTurnStatus | Runtime AgentRun | 投影——从 SDK 事件推导 |
-| ToolCallStatus | Runtime ToolExecutor | 投影——从 SDK 事件推导 |
-| SpinnerPhase | 派生——从 chat/tool 生命周期 | Model 内部推导 |
+| RunProjectionStatus（现状 `ChatStatus`） | Runtime `RunStatus` | 投影——从 SDK 事件推导，简化合并 11 态为 7 态 |
+| RunStepProjectionStatus（现状 `ChatTurnStatus`） | Runtime `RunStepStatus` | 投影——从 SDK 事件推导 |
+| ToolCallStatus | Runtime ToolCallStatus | 投影——从 SDK 事件推导 |
+| SpinnerPhase | 派生——从 run/tool 生命周期 | Model 内部推导 |
 | AskUserPhase | Runtime（AskUserQuestion tool） | 投影——从 SDK 事件 + 用户输入推导 |
 | SessionSaveStatus | Runtime StorageService | 投影——从 SDK 事件推导 |
 
@@ -672,7 +706,7 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 ### 7.2 状态终态保护
 
 - `ToolCallStatus::Success` / `Error` 为终态，`update()` 中 **MUST NOT** 覆盖已终态的 ToolCall
-- `ChatStatus::Completed` / `Failed` / `Cancelled` 为终态
+- `RunProjectionStatus::Completed` / `Failed` / `Cancelled`（现状 `ChatStatus`）为终态
 - `AskUserPhase::Confirmed` 为终态（block 等待 dismiss）
 
 ## 8. 单一真相规则
@@ -763,6 +797,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | 6 | RuntimeState 字段全 pub | TODO 标注 | 逐步私有化 | #795 §10.1 |
 | 7 | `model.rs` / `update.rs` / `effect.rs` / `view_state.rs` 的 `#![allow(dead_code)]` | 遮蔽真实死代码 | 移除 allow，逐个清理 | #795 §10.2 |
 | 8 | `ensure_runtime_turn()` 将 chat.status 设为 Running | 恢复历史会话后应为 Completed | 修正为 Completed | #796 |
+| 9 | 术语未对齐 Runtime 统一语言 | 代码用 `Chat`/`ChatTurn`/`ChatStatus`/`ChatTurnStatus` | 改为 `Run`/`RunStep`/`RunStatus`/`RunStepStatus`，TUI 投影类型加 `*Projection` 后缀 | #796 |
 
 ## 11. 相关文档
 
@@ -777,3 +812,4 @@ Model 层 `MUST NOT` import 以下 crate：
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：3+1 Context 完整字段、ChatStatus/ChatTurnStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 状态机、RuntimeState 8 子模块、单一真相规则、Model 纯净性约束、现状缺口 | #796 |
+| 2026-07-12 | 术语对齐 Runtime 统一语言：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus；新增 AwaitingUser 投影态；补充术语迁移缺口 #9 | #796 |
