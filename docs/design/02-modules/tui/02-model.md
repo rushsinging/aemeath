@@ -882,7 +882,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | `tokio` | 异步运行时——Model 不执行 async 操作 |
 | `std::process::Command` | 子进程——Model 不执行 IO |
 | `crate::tui::render::*` | 渲染层——方向反了 |
-| `sdk::AgentClient` | 出站端口——Model 不直接调 Runtime |
+| `sdk::AgentClient` trait | 出站端口接口——Model 不直接调 Runtime，Controller 通过依赖注入选择适配器（见 §13） |
 
 ### 11.2 禁止操作
 
@@ -925,12 +925,89 @@ Model 层 `MUST NOT` import 以下 crate：
 | 8 | `ensure_runtime_turn()` 将 chat.status 设为 Running | 恢复历史会话后应为 Completed | 修正为 Completed | #796 |
 | 9 | 术语未对齐 Runtime 统一语言 | 代码用 `Chat`/`ChatTurn`/`ChatStatus`/`ChatTurnStatus` | 改为 `Run`/`RunStep`/`RunStatus`/`RunStepStatus`，TUI 投影类型加 `*Projection` 后缀 | #796 |
 | 10 | RuntimeState 杂物箱混 4 个 BC 投影 | provider/model_id（Config）、workspace（Project）、task_status（Task）混在 RuntimeState 中 | 拆为 RunRuntimeState（9 字段）+ ConfigProjection + WorkspaceProjection，task_status 移到 SessionModel | #796 |
+| 11 | TUI→Runtime 绑死 LocalAgentClient | Controller 直接依赖 `AgentClientImpl`，无端口适配器抽象 | 抽 `AgentClient` trait 为端口接口，实现 `LocalAgentClient`（现状）+ `WssAgentClient`（#794），组合根注入 | #796 |
 
-## 13. 相关文档
+## 13. 出站端口适配器
+
+> **设计原则**：TUI → Runtime 的通信 **MUST NOT** 绑死在单一 trait 实现上。`AgentClient` 是端口接口（trait），**MUST** 支持多个适配器实现——本地直连和 WSS 远程连接。
+
+### 13.1 端口定义
+
+```rust
+/// TUI 出站端口（SDK 定义）
+/// TUI 通过此端口与 Runtime 通信，不关心 Runtime 在本地还是远端
+trait AgentClient: Send + Sync {
+    async fn start_chat(&self, req: ChatRequest) -> Result<ChatStream>;
+    async fn cancel_chat(&self, chat_id: ChatId) -> Result<()>;
+    async fn submit_tool_approval(&self, ...) -> Result<()>;
+    async fn submit_ask_user_answer(&self, ...) -> Result<()>;
+    async fn execute_slash_command(&self, ...) -> Result<...>;
+    // ...
+}
+```
+
+### 13.2 适配器实现
+
+| 适配器 | 场景 | 传输方式 | 状态 |
+|---|---|---|---|
+| `LocalAgentClient` | TUI 与 Runtime 同进程（现状） | 直接函数调用 + channel | ✅ 已实现 |
+| `WssAgentClient` | TUI 通过 Server 远程连接 Runtime（#794） | WebSocket Secure 帧 | ❌ 待实现（#794 启动后） |
+
+```
+┌─ TUI ─────────────────────────────────┐
+│  Controller / Effect Handler          │
+│  依赖 trait AgentClient（端口接口）     │
+└──────────┬────────────────────────────┘
+           │
+     ┌─────┴─────┐
+     │ 依赖注入   │
+     └─────┬─────┘
+           │
+    ┌──────┴──────┐
+    │             │
+    ▼             ▼
+┌──────────┐  ┌──────────────┐
+│ Local    │  │ Wss          │
+│ Agent    │  │ Agent        │
+│ Client   │  │ Client       │
+│ (直连)   │  │ (WSS 远程)   │
+└────┬─────┘  └──────┬───────┘
+     │               │ WebSocket Frame
+     │ channel       │ (Call/Resp 协议)
+     ▼               ▼
+┌──────────┐  ┌──────────────┐
+│ Runtime  │  │ Server       │
+│ (同进程) │  │ (控制面+worker)│
+└──────────┘  └──────────────┘
+```
+
+### 13.3 协议契约
+
+无论本地还是远程，TUI 与 Runtime 之间的通信 **MUST** 遵循同一套协议契约（SDK Published Language）：
+
+- **请求**：`ChatRequest` / `CancelRequest` / `ApprovalRequest` / `AskUserAnswer` / `SlashCommand`
+- **响应流**：`ChatStream`（`Stream<Item = ChatEvent>`）
+- **事件类型**：`ChatEvent` 枚举（TextDelta / ToolCallStart / ToolCallUpdate / CompleteChat 等）
+
+`LocalAgentClient` 直接传递内存对象；`WssAgentClient` 序列化为 `Call`/`Resp` 帧传输（协议定义见 [07-server-design.md](../../07-server-design.md)），但 **MUST** 保证两端看到的 DTO 类型一致。
+
+### 13.4 设计约束
+
+1. **MUST** Controller / Effect Handler 只依赖 `AgentClient` trait，**NEVER** 直接依赖 `LocalAgentClient` 或 `WssAgentClient` 具体类型。
+2. **MUST** 适配器选择在组合根（composition root）通过依赖注入完成，**NEVER** 在 TUI 业务代码中硬编码。
+3. **MUST** `WssAgentClient` 的 `ChatStream` 实现与 `LocalAgentClient` 行为一致——同样的事件顺序、同样的错误语义。远程断连 **MUST** 映射为 `ChatEvent::Error`，**NEVER** panic。
+4. **SHOULD** `WssAgentClient` 支持自动重连 + 断线期间事件缓冲，避免网络抖动导致 UI 状态丢失。
+5. **MUST** Model 层 **NEVER** 知道当前使用哪个适配器——端口透明性是投影层的前提。
+
+> **与 #794 的关系**：Server 模块（#794）的 `WsProxy` 双向透传 + `Call`/`Resp` 帧协议是 `WssAgentClient` 的传输基础。#794 启动后同步实现 `WssAgentClient`。
+
+## 14. 相关文档
 
 - TUI 架构与数据流：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
 - 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
 - Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Server 模块（WssAgentClient 传输基础）：[../server/README.md](../server/README.md)
+- Server 设计草案（Call/Resp 帧协议）：[../../07-server-design.md](../../07-server-design.md)
 - SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 
@@ -942,3 +1019,4 @@ Model 层 `MUST NOT` import 以下 crate：
 | 2026-07-12 | 术语对齐 Runtime 统一语言：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus；新增 AwaitingUser 投影态；补充术语迁移缺口 #9 | #796 |
 | 2026-07-12 | SpinnerPhase 从独立状态机改为派生函数：`derive_spinner_phase(run_status, step_status, spinner)`，映射表标注每个变体的 Runtime 派生来源；移除 Reflecting（无对应 Runtime 状态）；chat_active 改为派生 | #796 |
 | 2026-07-12 | RuntimeState 按投影来源拆分：RunRuntimeState（9 字段，Run 耦合）+ ConfigProjection（provider/model_id，Config BC）+ WorkspaceProjection（cwd/worktree，Project BC），task_status 移到 SessionModel（Task BC）；3+1→3+3 Context | #796 |
+| 2026-07-12 | 新增 §13 出站端口适配器：AgentClient trait 为端口接口，LocalAgentClient（直连）+ WssAgentClient（远程，#794）；Controller 依赖 trait 不绑死实现，组合根注入 | #796 |
