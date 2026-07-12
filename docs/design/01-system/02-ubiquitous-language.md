@@ -14,7 +14,7 @@
 
 | 术语 | 定义 |
 |---|---|
-| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step，直到完成 / 失败 / 取消 / 等待用户。系统唯一的领域状态机，**内存态、不持久化**。标识 `RunId`。 |
+| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step，直到完成 / 失败 / 取消 / 等待用户。全系统唯一的 **Agent 执行生命周期状态机**，**内存态、不持久化**。标识 `RunId`。 |
 | **Run Step** | Run 内的一次「模型调用 → 应用响应 →（可选）工具执行」往返。 |
 | **Model Invocation** | 一次具体的 LLM 调用（请求 + 流式响应 + usage）。 |
 | **Tool Call** | 一次工具调用。双 ID：领域 `ToolCallId`（UUIDv7）+ provider 边界标识。 |
@@ -138,3 +138,4 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、Turn→Run Step；补 Main Agent 与 SubAgent 对照 | #760 |
 | 2026-07-11 | Workflow 降为支撑域（第 2 节标题），移除不做的 Workflow Graph 编排术语 | #760 |
 | 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
+| 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |

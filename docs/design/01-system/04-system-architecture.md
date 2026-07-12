@@ -71,7 +71,7 @@
 
 ```
 Agent Runtime
-├── Run 聚合 + 状态机     # 唯一状态机，内存态
+├── Run 聚合 + 状态机     # 唯一 Agent 执行生命周期状态机，内存态
 ├── Loop Engine                # ReAct 循环骨架 + 停止条件（Main/SubAgent 共用）
 ├── Model Invocation 协调       # 调 ProviderPort，组装流式响应
 ├── Tool Coordination          # 双 ID、Policy/Hook/审批、timeout/并发、结果回收 → ToolCatalogPort + ToolExecutionPort
@@ -107,3 +107,4 @@ Agent Runtime
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
 | 2026-07-11 | Workflow 从核心域挪到支撑域（六边形图） | #760 |
 | 2026-07-12 | Tool Coordination 对齐 Catalog/Execution 双端口及 Runtime 编排职责 | #787 |
+| 2026-07-12 | Run 状态机表述限定为 Agent 执行生命周期，允许其他 BC 局部聚合状态机 | #743 / #787 |
