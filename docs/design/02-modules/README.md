@@ -16,7 +16,7 @@
 | memory / task / project / policy / audit | 各支撑 BC 战术设计 | 规划 |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
-| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | ✅ S2 |
+| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
 | server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
 
