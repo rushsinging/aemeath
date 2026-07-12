@@ -39,7 +39,7 @@
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
-- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 `Usage`；**错误重试**：Retryable(超时/5xx/429)按 `max_retries` 指数退避重试，context 超限触发 compact 重跑，仅 Fatal(4xx)/耗尽才 `RunFailed`
+- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 `Usage`；**梯度重试**：T0 即时→T1 退避→T2 降级(降 effort/token/compact)→T3 故障转移(pool)→T4 放弃，Fatal(4xx) 直跳 T4（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
 - 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`ReasoningPort`（取 effort）
 
