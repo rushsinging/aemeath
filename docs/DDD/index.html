@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>。
+    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XII</b> 盘点代码落地聚合与端口——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>重试必须分层计数</b>。
   </p>
 
   <div class="timeline">
@@ -930,8 +930,8 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
  ├─ <span class="d">ProviderPort</span>       → Provider（内部 ACL）   <span class="m">// C/S + ACL</span>
  ├─ <span class="d">ToolCatalogPort</span>    → Tool &amp; Skill &amp; Command
  ├─ <span class="d">ToolExecutionPort</span>  → Tool &amp; Skill &amp; Command
- ├─ <span class="d">PolicyPort</span>         → Policy
- └─ <span class="d">AuditSink</span>          → Audit               <span class="m">// Pub/Sub 单向</span></pre>
+ ├─ <span class="d">PolicyPort</span>         → Policy              <span class="m">// v0.1.0 AllowAll-only</span>
+ └─ <span class="d">UsageSink</span>          → Audit               <span class="m">// Pub/Sub 非阻塞</span></pre>
         <div class="tl-out">产出 · 一张<b>上下文地图</b> + 五篇 01-system 设计文档</div>
       </div>
     </div>
@@ -1034,11 +1034,36 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
         <div class="tl-top"><h3>统一的红利 · review 收敛</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
         <p class="tl-desc">统一内核不只优雅，还自动补齐能力；设计在 review 中反复收敛。</p>
         <ul class="tl-list">
-          <li>统一 loop 的红利：Sub <b>自动获得</b> 防 stuck(4 层) + 重试（现状 Sub 裸奔）</li>
+          <li>统一 loop 的红利：Sub <b>自动获得</b>防 stuck + 重试能力</li>
           <li>review 反复收敛：InputSource→<b>InputBuffer</b>、梯度重试 <b>T0-T4→T0-T1</b>、output 统一经 EventSink</li>
           <li>判据一以贯之：<b>Memory 独立 BC</b>（跨会话）vs <b>Session 归 Context</b>（会话本体）</li>
         </ul>
         <div class="tl-out">产出 · runtime 战术设计定稿，<b>健壮性完整</b></div>
+      </div>
+    </div>
+
+    <!-- 阶段十二 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XII</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>控制范围 + 双层重试 · 让扩展点不反客为主</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+        <p class="tl-desc">接口可以为未来留形状，但实现必须诚实；跨 BC 重试必须按各自不变量分层计数。</p>
+        <ul class="tl-list">
+          <li><b>Policy</b>：PL 保留 Allow / Deny / RequireApproval，本期生产实现只有 AllowAll；不为尚不存在的审批流过度设计</li>
+          <li><b>Hook</b>：先用一个类型化 HookPort；只有不同沙箱、一致性或失败策略真实出现时再拆端口</li>
+          <li><b>双层重试</b>：Hook 命令执行故障最多 3 次（Hook BC）；Stop 阻断同一 Run 最多 15 次（Runtime）</li>
+          <li>第 16 次 Stop Block → <b>RunFailed</b>，不能为了防死循环伪造 Completed</li>
+          <li><b>Audit MVP</b>：只存 Usage metadata；非阻塞 enqueue，按 SessionId 分区到独立 Audit JSONL，不并入 Session</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">RETRY OWNERSHIP · 两个计数器</span><span class="d">Hook BC</span>   max_attempts = 3
+└─ 处理单条命令 spawn / timeout / protocol failure
+
+<span class="d">Runtime</span>   max_stop_hook_blocks = 15
+└─ 处理同一 Run 的 Stop 协议不收敛 → 第 16 次 RunFailed
+
+<span class="tag">AUDIT MVP</span>Runtime --try_record--▶ UsageSink --AppendLogPort--▶ ~/.agents/audit/usage/{session}.jsonl
+<span class="m">// SessionId 是分区键，不是聚合所有权</span></pre>
+        <div class="tl-out">产出 · <b>最小但可实施</b>的 Policy / Hook / Audit 边界与失败语义</div>
       </div>
     </div>
   </div>

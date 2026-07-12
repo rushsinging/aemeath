@@ -30,8 +30,8 @@ trait ToolExecutionPort {                            // Tool BC：单次函数�
 }
 // SkillCatalogPort / SkillMaterializationPort 面向 Context Management；
 // CommandCatalogPort / CommandRouterPort 面向 CLI/TUI/Server，不进入 RuntimeContext 的 Tool 执行路径。
-trait PolicyPort {                                   // Policy BC
-    fn check(&self, call: &ToolCall) -> PolicyDecision;   // Allowed/Denied/NeedAsk
+trait PolicyPort {                                   // Policy BC（v0.1.0: AllowAllPolicy）
+    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision;
 }
 trait MemoryPort {                                   // Memory BC（Sub: NoOp）
     fn retrieve(&self, query: &MemoryQuery) -> Vec<MemoryEntry>;
@@ -46,14 +46,14 @@ trait WorkspacePort {                                // Project BC（Sub: 独立
     fn current_frame(&self) -> WorkspaceFrame;
     fn seed_isolated(&self) -> WorkspaceFrame;            // 快照父 frame
 }
-trait HookPort {                                     // Hook BC（Sub: BoundaryOnly）
-    fn run(&self, point: HookPoint, ctx: HookContext) -> HookOutcome;
+trait HookPort {                                     // Hook BC：一个类型化端口
+    fn dispatch(&self, invocation: HookInvocation) -> HookOutcome;
 }
 trait ReasoningPort {                                // Workflow BC（Sub: EffortOnly）
     fn effort(&self, run: &Run) -> ReasoningLevel;
 }
-trait AuditSink {                                    // Audit BC（Pub/Sub，新增）
-    fn emit(&self, event: AuditEvent);                    // 执行/成本事件
+trait UsageSink {                                    // Audit BC（MVP Pub/Sub）
+    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
 }
 trait EventSink {                                    // 事件出口（Main→TUI / Sub→父）
     fn emit(&self, events: Vec<DomainEvent>);
@@ -74,19 +74,16 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
         provider:  root.provider_for(&spec.model, spec),  // Sub → 独立 client 副本
         tool_catalog:   root.tool_catalog_for(&spec.tools),   // Scope ∩ capability Profile
         tool_execution: root.tool_execution_for(&spec.tools), // 不暴露 Registry/Tool 实例
-        policy:    match spec.policy {
-                       Direct => root.policy(),
-                       DelegatedApproval => Delegated::new(root.policy(), parent), // 设计态
-                   },
+        policy:    root.allow_all_policy(),              // v0.1.0 唯一生产实现
         memory:    match spec.memory { Enabled => root.memory(), Disabled => NoOpMemory },
         task:      match spec.task { Shared => root.task(), Isolated => TaskStore::new().into() },
         workspace: match spec.workspace {
                        Inherit => parent_or_root_frame(),
                        Snapshot => root.workspace().seed_isolated(),
                    },
-        hooks:     match spec.hooks { Full => root.hooks(), BoundaryOnly => Boundary::new(root.hooks()), Disabled => NoOpHooks },
+        hooks:     root.hooks(),                         // 单 HookPort；RunSpec 过滤由 adapter 内 metadata 完成
         reasoning: match spec.reasoning { GraphDriven => root.reasoning(), EffortOnly => Effort::new(inherit(parent)), Inherit => parent_effort() },
-        audit:     root.audit(),
+        usage:     root.usage_sink(),                    // 非阻塞 try_record，Audit MVP 仅 Usage
         config:    root.config_snapshot(),                // 共享
         input:     match spec.name.as_ref() { "main" => root.tui_input(), _ => FixedQueue::new(spec.initial_prompt) }, // 入站
         events:    match spec.name.as_ref() { "main" => root.tui_sink(), _ => ParentRunSink::new(parent) },
@@ -114,9 +111,9 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 目标端口 | 现状 | 迁移动作（S5）|
 |---|---|---|
 | ContextPort / ToolCatalogPort / ToolExecutionPort / PolicyPort / MemoryPort / WorkspacePort / ReasoningPort | ❌ 无目标 trait，具体类型直调 | 抽端口，实现移到 adapter；Runtime 不再持有 ToolRegistry / Tool 实例 |
-| AuditSink | ❌ 完全无 | 新建（Pub/Sub） |
+| UsageSink | ❌ Audit crate 为空壳，Usage/Cost 混在 Runtime | 新建非阻塞 UsageSink + Audit worker；Cost/Pricing 不进入 MVP |
 | ProviderPort | ⚠️ 仅 `ProviderInfoPort`（只读元数据）| 补 invoke 方法 |
-| HookPort | ⚠️ 仅 `HookNotificationPort` | 补 per-tool run |
+| HookPort | ⚠️ 具体 HookRunner + 通知端口并存 | 收敛为一个类型化 dispatch；Runtime 拥有触发时机和状态解释 |
 | TaskPort / ConfigSnapshot / EventSink | ✅ `TaskStorePort`/`ConfigReader`/`ChatEventSink` | 沿用 |
 | EventSink agent_id | ⚠️ 事件仅 chat_id/turn_id | 补 agent_id（#612）|
 
@@ -134,3 +131,4 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
 | 2026-07-12 | ToolPort 拆为 Catalog/Execution 双端口，补 Skill/Command 独立端口边界与 Scope/Profile 装配 | #787 |
+| 2026-07-12 | Policy 装配收缩为 AllowAll；Hook 收敛单 dispatch；Audit 出站收缩为非阻塞 UsageSink | #790 |

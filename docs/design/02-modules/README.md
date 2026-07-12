@@ -13,7 +13,10 @@
 | [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 | ✅ S2 |
 | [context-management/](context-management/01-session.md) | Session 聚合（已填充）；compact 家族 / token budget / prompt 待补 | 🚧 部分 |
 | [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
-| memory / task / project / policy / audit | 各支撑 BC 战术设计 | 规划 |
+| [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 | ✅ S2 |
+| [hook/](hook/README.md) | 单 HookPort、类型化协议、执行重试与 Stop/Run Loop 协作 | ✅ S2 |
+| [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink、查询及独立 JSONL 存储 | ✅ S2 |
+| memory / task / project | 各支撑 BC 战术设计 | 规划 |
 | provider | Provider ACL、driver 映射 | 规划 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
 | server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
@@ -38,3 +41,4 @@
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
 | 2026-07-11 | S2 填充 runtime/（7 篇）与 context-management/session.md，规划表改链接 | #761 |
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
+| 2026-07-12 | 新增 policy/hook/audit 战术设计：AllowAll-only、Hook 3/15 重试、Usage-only Audit MVP | #790 |

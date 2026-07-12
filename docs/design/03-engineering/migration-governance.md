@@ -9,12 +9,12 @@
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
 | R1 | **两套 loop** | `process_chat_loop`(~1539行,Main) + `SubAgentRun::run_loop`(~209行,Sub) 各自实现 | 单一 `loop_engine`，Main/Sub 零分支 | S3/S5 |
-| R2 | **RuntimeContext 三层重叠**（#456）| `ChatRuntimeContext` + `RuntimeResources` + `ChatLoopContext` + `TuiLaunchContext` 字段大量重复复制 | 单一 `RuntimeContext`（12 端口 + config + event） | S5 |
+| R2 | **RuntimeContext 三层重叠**（#456）| `ChatRuntimeContext` + `RuntimeResources` + `ChatLoopContext` + `TuiLaunchContext` 字段大量重复复制 | 单一 `RuntimeContext`（出站端口 + config + event） | S5 |
 | R3 | **无 Run 聚合** | 一次执行 = `ChatLoopContext` 临时值 + 局部 `ChatLoopFsm`，无 `RunId`、崩溃即丢 | 显式 `Run` 聚合 + `RunId` + 单状态机 | S3 |
-| R4 | **Runtime 出站端口不完整** | 有：`TaskStorePort`/`ConfigReader`/`ChatEventSink`/`ProviderInfoPort`(只读)/`HookNotificationPort`(只通知) | 补 ContextPort、ToolCatalogPort、ToolExecutionPort、PolicyPort、MemoryPort、WorkspacePort、ReasoningPort + `AuditSink` + ProviderPort.invoke + HookPort.run | S5 |
+| R4 | **Runtime 出站端口不完整** | 有：`TaskStorePort`/`ConfigReader`/`ChatEventSink`/`ProviderInfoPort`(只读)/`HookNotificationPort`(只通知) | 补 ContextPort、ToolCatalogPort、ToolExecutionPort、PolicyPort、MemoryPort、WorkspacePort、ReasoningPort + `UsageSink` + ProviderPort.invoke + HookPort.dispatch | S5 |
 | R5 | **Sub loop 无 stall/fuse 保护**（最大安全缺口）| Sub 无 StallDetector、无 ToolCallFuse，仅 3h timeout 兜底 | StuckGuard 内置 loop_engine，Main/Sub 统一 | S3 |
 | R6 | **共享 `Arc<LlmClient>` 隐患** | Sub 改 `reasoning_level`/`max_tokens` 靠 finalize 手动恢复，**并发 sub 互相踩踏** | Sub 装配独立 client 副本 | S3/S5 |
-| R7 | **Sub 绕过 policy/ask_user** | Sub tool 执行无 PolicyEngine gating，继承 `allow_all` | `DelegatedApproval`（受限转发）——**S2 只设计不实现**，当前保持 allow_all | 设计态（未定实现版本）|
+| R7 | **Sub 绕过统一 PolicyPort** | Sub tool 执行直接继承 `allow_all` bool，无统一决策入口 | v0.1.0 Main/Sub 都调用 AllowAllPolicy；Future Deny/Approval 另行设计 | S3/S5 |
 | R8 | **事件无 agent_id** | 事件上下文仅 `chat_id/turn_id`，无 main/sub 区分 | event_projection 补 `agent_id` + 路由 | #612 / S3 |
 | R9 | **RunSpec 配置散 4 处** | `AgentRoleConfig` + `AgentTool` 硬编码 system + 名称排除型 `ToolProfile::SubAgent` + `ModelEntryConfig`(effort) | 收敛为声明式 `RunSpec`，Tool 部分采用 Registry Scope + capability Profile | S3/S5 |
 | R10 | **Session `messages`/`chats` 双轨** | 旧扁平 `messages` + 新链 `chats` 并存，加载迁移 | 只保留 `chats`，旧 `messages` 退役 | S5/S7 |
@@ -36,7 +36,28 @@
 | T11 | **MCP Tool Catalog 一致性不足** | disconnect 后目录撤销、动态上下线、annotations capability 映射及事件通知未形成统一契约 | MCP ACL 转 Tool PL；CatalogChanged 通知重新拉取 Snapshot；连接/投影一致 | MCP Ready 后 |
 | T12 | **MCP 稳定身份与版本未定** | 动态工具尚未形成可验证的稳定 ID、schema 版本和 Catalog revision 协议 | MCP 正式接线时单独设计 ToolId、rename、版本与 in-flight 兼容；当前不预设 | MCP Ready 后 |
 
-## 3. 死代码 / 退役清单
+## 3. Policy / Hook / Audit 现状缺口（S2 代码盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| PHA1 | **Policy 无统一端口** | 路径 helper、content warning、allow_all bool 分散；无 PolicyRequest/Decision | v0.1.0 建 PolicyPort + AllowAllPolicy；Deny/RequireApproval 只保留 PL | S3/S5 |
+| PHA2 | **`--yolo` 泄漏为业务 bool** | Runtime/ToolContext 直接传播 allow_all | CLI/Config 映射 PolicyMode::AllowAll，Runtime 只依赖 PolicyPort | S5 |
+| PHA3 | **安全 guard 冒充 Policy 风险** | path security、bash safety、content scan 各自调用 | 作为独立 Current guard 保留；未形成共同不变量前不并入 Policy Engine | S5/S7 |
+| PHA4 | **Hook 公开面膨胀且结果分裂** | HookRunner 具体类型 + 多个 on_xxx / run_plain / run_json / blocking 入口 | 一个类型化 HookPort.dispatch + HookOutcome | S5 |
+| PHA5 | **阻断协议不一致** | 部分路径只看 result.blocked 或 continue=false，没有统一消费 decision=block | exit 0/2/other + JSON directive 统一解析，主动 Block 与 ExecutionFailed 分离 | S5 |
+| PHA6 | **非零 exit 语义冲突** | 配置注释称 exit 2 阻断；执行器把所有非零视为 blocked | exit 2=主动 Block；其他非零=ExecutionFailed | S5 |
+| PHA7 | **Hook 失败无统一重试/回收** | spawn/timeout/wait 失败 fail-open；timeout 可能未 kill/wait 子进程 | 单 Hook 执行故障最多 3 次；timeout 必须回收旧进程 | S5 |
+| PHA8 | **Stop Hook 上限伪造完成** | 连续阻断超过 5 次后强制 Done/Completed | Runtime 上限改 15；第 16 次 RunFailed(StopHookRetryExhausted) | S3/S5 |
+| PHA9 | **Main/Sub Hook 行为不统一** | Stop/Hook 路径主要存在 Main loop，Sub 未复用 | 单 Loop Engine + 同一 HookPort；Main/Sub 同规则 | S3 |
+| PHA10 | **Hook input/context mutation 未完整消费** | JSON schema 有 updatedInput/additionalContext，但调用链未统一应用 | HookOutcome 类型化 directive；调用方重新 schema/Policy 校验后应用 | S5 |
+| PHA11 | **Audit crate 为空壳** | 只有 AuditApiMarker / empty gateway | MVP 建 UsageRecord、UsageSink、UsageQueryPort、worker | S5 |
+| PHA12 | **Usage/Cost/Pricing 混在 Runtime** | CostTracker 同时记录 usage、计算 cost、读写全量 cost_history.json | Audit MVP 只迁 raw Usage；Cost/Pricing 保留 Future，不进入目标实现 | S5/S7 |
+| PHA13 | **Usage 缺统一关联 ID** | 记录主要含 session/model/tokens/cost，无 Run/Step/Invocation | 使用 SessionId + RunId + RunStepId + ModelInvocationId | S3/S5 |
+| PHA14 | **Usage 写入阻塞且全量重写** | Runtime 直接 fs read/write JSON 数组 | 非阻塞 bounded UsageSink；worker 经 Storage AppendLogPort 写 JSONL | S5 |
+| PHA15 | **Usage 与 Session 存储边界不清** | cost_history 为全局混合文件，缺独立 Audit 分区语义 | `~/.agents/audit/usage/{session_id}.jsonl`；Session 删除不级联 | S5 |
+| PHA16 | **Audit/Logging 混淆风险** | Usage/Hook 信息依赖诊断日志展示，无事实查询端口 | Logging 只做诊断；UsageQueryPort 读取 Audit 事实，不解析日志 | S5 |
+
+## 4. 死代码 / 退役清单
 
 | 项 | 现状 | 处理 | 阶段 |
 |---|---|---|---|
@@ -48,20 +69,27 @@
 | `SkillTool` 伪执行入口 | 只报告 loaded/path，内容在 prompt 路径物化 | SkillMaterializationPort 接线后退役 | S5/S7 |
 | Runtime `idle_commands` 命令聚合 | 三种 Slash 机制混在 Runtime idle 流程 | Command Router 接线后拆除旧生产入口 | S5/S7 |
 | MCP 旧 wrapper / diff 孤立路径 | 多套 wrapper、diff/refresh/health check 未形成完整生命周期 | MCP Ready 后统一至 McpConnection + ACL；无消费者代码删除 | MCP Ready 后 |
+| `AuditApiMarker` / `gateway::__empty` | Audit BC 仅物理占位，无领域契约 | UsageSink/Query 接线后删除占位类型 | S5/S7 |
+| Runtime `CostTracker` / `pricing` / `CostSummary` | Usage、Cost、Pricing、持久化混合，且不符合 Usage-only MVP | 迁移 raw Usage 后退役；Cost/Pricing 作为 Future 另行设计 | S5/S7 |
+| `cost_history.json` 全量写路径 | 每次保存重写数组，记录含派生 cost 且缺 Run IDs | 后续 importer 只迁可验证 raw token；旧路径有计划退役 | S5/S7 |
+| Stop Hook 超限强制 Done | Stop 未放行却伪造 Completed | 改为第 16 次 RunFailed 后删除旧 helper | S3/S5 |
 
-## 4. 已正确隔离（可作参考范式）
+## 5. 已正确隔离（可作参考范式）
 
 | 项 | 现状 | 说明 |
 |---|---|---|
 | **Workspace 隔离** | `seed_isolated()`：继承 cwd/root，空栈+新锁，子 worktree 进出不影响父 | ✅ 子资源隔离范式 |
 | **Task 隔离** | Sub 用全新 `TaskStore::new()` | ✅ |
 
-## 5. 相关文档
+## 6. 相关文档
 
 - 领域模型（目标态）：[../02-modules/runtime/01-domain-model.md](../02-modules/runtime/01-domain-model.md)
 - 模块边界：[../02-modules/runtime/02-module-boundaries.md](../02-modules/runtime/02-module-boundaries.md)
 - 端口缺口：[../02-modules/runtime/06-ports-and-adapters.md](../02-modules/runtime/06-ports-and-adapters.md)
 - Tool & Skill & Command 目标设计：[../02-modules/tools/README.md](../02-modules/tools/README.md)
+- Policy 目标设计：[../02-modules/policy/README.md](../02-modules/policy/README.md)
+- Hook 目标设计：[../02-modules/hook/README.md](../02-modules/hook/README.md)
+- Audit Usage 目标设计：[../02-modules/audit/README.md](../02-modules/audit/README.md)
 - 横切工程总览：[README.md](README.md)
 
 ## 修改历史
@@ -70,3 +98,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：S2 盘点的 Runtime 现状缺口(R1-R10)、死代码退役清单、已隔离参考范式 | #761 |
 | 2026-07-12 | 新增 Tool/Skill/Command 缺口 T1-T12 与旧 Profile、SkillTool、idle_commands、MCP 路径退役项 | #787 |
+| 2026-07-12 | 新增 Policy/Hook/Audit 缺口 PHA1-PHA16 与 Audit/Cost/Stop Hook 退役项 | #790 |

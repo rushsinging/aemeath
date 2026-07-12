@@ -96,7 +96,7 @@ struct RunSpec {
     // —— 资源模式：驱动 RuntimeContext 装配 ——
     context:   ContextMode,           // SharedSession | Isolated
     workspace: WorkspaceMode,         // Inherit | Snapshot
-    policy:    PolicyMode,            // Direct | DelegatedApproval
+    policy:    PolicyMode,            // v0.1.0: AllowAll
     memory:    MemoryMode,            // Enabled | Disabled(不读不写/不 reflection)
     hooks:     HookMode,              // Full | BoundaryOnly | Disabled
     reasoning: ReasoningMode,         // GraphDriven | EffortOnly | Inherit
@@ -105,7 +105,7 @@ struct RunSpec {
 
 enum ContextMode   { SharedSession, Isolated }
 enum WorkspaceMode { Inherit, Snapshot }              // Snapshot: 快照父 frame，改目录不回写
-enum PolicyMode    { Direct, DelegatedApproval }      // Delegated: 需确认时转发父（S2 设计，暂不实现）
+enum PolicyMode    { AllowAll }                         // CLI --yolo 的领域映射；Future 再扩规则模式
 enum MemoryMode    { Enabled, Disabled }
 enum HookMode      { Full, BoundaryOnly, Disabled }   // BoundaryOnly: 仅 start/stop
 enum ReasoningMode { GraphDriven, EffortOnly, Inherit } // Main: GraphDriven; Sub: EffortOnly/Inherit
@@ -123,13 +123,13 @@ struct RuntimeContext {
     provider:  Arc<dyn ProviderPort>,   // 按 spec.model 选定；**Sub 持独立 client 副本**(避免共享踩踏)
     tool_catalog:   Arc<dyn ToolCatalogPort>,   // 按 Registry Scope/Profile 投影 schemas
     tool_execution: Arc<dyn ToolExecutionPort>, // 不暴露 Tool/Registry，实现单次函数调用
-    policy:    Arc<dyn PolicyPort>,     // Sub: DelegatedApproval 装饰器(设计)
+    policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
     task:      Arc<dyn TaskPort>,       // Sub: 独立实例
     workspace: Arc<dyn WorkspacePort>,  // Sub: 独立快照 frame
     hooks:     Arc<dyn HookPort>,       // Sub: BoundaryOnly
     reasoning: Arc<dyn ReasoningPort>,  // Sub: EffortOnly/Inherit
-    audit:     Arc<dyn AuditSink>,
+    usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
     config:    ConfigSnapshot,          // Main/Sub 共享
     input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
     events:    Arc<dyn EventSink>,      // 出站：Main→TUI ; Sub→父 Run
@@ -143,7 +143,7 @@ struct RuntimeContext {
 | `context` | SharedSession | Isolated | `ContextPort` 实例 |
 | `provider` | 共享 client | **独立副本** | 避免并发 sub 踩踏 reasoning/max_tokens |
 | `workspace` | Inherit | Snapshot | 快照父 frame，改目录不回写 |
-| `policy` | Direct | DelegatedApproval | 转发装饰器（设计态）|
+| `policy` | AllowAll | AllowAll | v0.1.0 同一 PolicyPort；Future 模式另行设计 |
 | `memory` | Enabled | Disabled | 真实 / `NoOpMemory` |
 | `hooks` | Full | BoundaryOnly | per-tool / 仅 start-stop |
 | `reasoning` | GraphDriven | EffortOnly/Inherit | 全 graph / 仅 effort（无设置继承父）|
@@ -185,7 +185,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | task | 共享 | 独立 |
 | memory | 读写 + reflection | **不读不写**（可由 main 开启注入）|
 | hooks | Full | BoundaryOnly（start/stop）|
-| policy | Direct | DelegatedApproval（设计态；当前仍 allow_all）|
+| policy | AllowAll | AllowAll |
 | reasoning | GraphDriven | EffortOnly（无 graph，无设置继承父）|
 | provider client | 共享 | **独立副本** |
 | timeout | 默认 0（无限）| 可配有限值 |
