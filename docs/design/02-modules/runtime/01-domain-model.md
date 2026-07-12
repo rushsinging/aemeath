@@ -72,6 +72,8 @@ struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 
 
 `RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCompleted/Failed/Cancelled`
 
+> **`RunCompleted{ result }` 携带载荷**（最后 assistant 文本/结构）——这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；Sub→父 Run，父从 `RunCompleted` 提取 result 继续。**靠终态领域事件识别 result，不靠遍历 message**。
+
 > Event Projection adapter 按 Main/Sub 路由与命名（Main→TUI，Sub→父 Run，详见 #612）。
 
 ## 5. RunSpec —— 声明式规格
@@ -207,3 +209,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 |---|---|---|
 | 2026-07-11 | 初稿：Run 聚合 + RunSpec + RuntimeContext 三元组、不变量、领域事件、控制权矩阵、安全铁律、差异矩阵 | #761 |
 | 2026-07-11 | RuntimeContext 补入站端口 input（InputBuffer）；澄清 result 不进 RuntimeContext | #761 |
+| 2026-07-11 | output/result 定案：统一经 EventSink，result 为 RunCompleted 载荷（无独立 RunResult），靠终态事件识别 | #761 |
