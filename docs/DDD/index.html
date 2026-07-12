@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    八个阶段贯穿五条经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>同一 BC 不等于共享执行抽象</b>、<b>只在需求成熟时设计兼容协议</b>。
+    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>。
   </p>
 
   <div class="timeline">
@@ -951,9 +951,24 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
       </div>
     </div>
 
-    <!-- 阶段七 -->
-    <div class="tl-item p-mix rev d2">
+    <!-- 阶段七（战术前置：盘点驱动）-->
+    <div class="tl-item p-ddd rev d2">
       <div class="tl-rail"><div class="tl-node">VII</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战术前置 · 盘点驱动</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+        <p class="tl-desc">战略可推演，战术 <b>必须读代码</b>——否则聚合是空想。</p>
+        <ul class="tl-list">
+          <li>多个 agent 并行深读核心 crate（runtime <b>144 文件</b>）</li>
+          <li>摸清现状：<b>两套 loop</b>、三层 Context 重叠、<b>无 Run 聚合</b>、12 端口只 4 个有 trait</li>
+          <li>现状缺口集中到 <b>migration-governance</b>（设计文档只写目标态）</li>
+        </ul>
+        <div class="tl-out">产出 · 现状缺口矩阵 <b>R1-R10</b>，战术的事实地基</div>
+      </div>
+    </div>
+
+    <!-- 阶段八 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">VIII</div></div>
       <div class="tl-card">
         <div class="tl-top"><h3>责任章程 + 战术验证 · 从名词清单到可判断边界</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
         <p class="tl-desc">列出 BC 名称不等于边界成立；真正可复用的是每个 BC 的正负责任判断，以及跨界时谁拥有不变量。</p>
@@ -973,11 +988,11 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
       </div>
     </div>
 
-    <!-- 阶段八 -->
+    <!-- 阶段九 -->
     <div class="tl-item p-mix rev d2">
-      <div class="tl-rail"><div class="tl-node">VIII</div></div>
+      <div class="tl-rail"><div class="tl-node">IX</div></div>
       <div class="tl-card">
-        <div class="tl-top"><h3>战术设计 · 同一 BC，不强造统一执行抽象</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+        <div class="tl-top"><h3>战术设计 · 同一 BC，不强造统一执行抽象（异构不硬统一）</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
         <p class="tl-desc">Tool、Skill、Slash Command 共享“可发现能力”的语言，但执行机制不同；统一名词不意味着统一 trait。</p>
         <ul class="tl-list">
           <li><b>Tool</b> 调函数：Catalog / Execution 双端口；不向 Runtime 暴露 Registry 或 Tool 实例</li>
@@ -992,6 +1007,38 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 
 <span class="m">// BC 统一语言；端口尊重真实业务语义</span></pre>
         <div class="tl-out">产出 · 一个避免<b>伪统一抽象</b>与<b>内部细节泄漏</b>的战术案例</div>
+      </div>
+    </div>
+
+    <!-- 阶段十（对照 IX：同构才统一）-->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">X</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>声明 vs 装配 · 同构才零分支统一</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+        <p class="tl-desc">与 IX 对照：Tools 异构不硬统一，Runtime 的 Main/Sub <b>同构</b>——反而应该零分支统一。判据是同构 vs 异构。</p>
+        <ul class="tl-list">
+          <li><b>RunSpec</b>（声明式规格）→ 装配 → <b>RuntimeContext</b>（活资源）→ Run</li>
+          <li>消解伪概念：ExecutionPolicy 拆开——静态归 RunSpec、动态归运行时绑定，<b>概念消失</b></li>
+          <li>Loop Engine <b>零分支</b>：Main/Sub 差异 100% 在 RunSpec + RuntimeContext + event adapter</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">同构 vs 异构 · 何时统一</span><span class="d">Runtime</span> Main/Sub 同构   → 零分支统一（差异在装配）
+<span class="d">Tools</span>   Tool/Skill/Cmd 异构 → 不硬统一（端口尊重语义）</pre>
+        <div class="tl-out">产出 · <b>一套引擎跑 Main/Sub</b>；与 IX 合成"同构才统一"的判据</div>
+      </div>
+    </div>
+
+    <!-- 阶段十一 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XI</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>统一的红利 · review 收敛</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+        <p class="tl-desc">统一内核不只优雅，还自动补齐能力；设计在 review 中反复收敛。</p>
+        <ul class="tl-list">
+          <li>统一 loop 的红利：Sub <b>自动获得</b> 防 stuck(4 层) + 重试（现状 Sub 裸奔）</li>
+          <li>review 反复收敛：InputSource→<b>InputBuffer</b>、梯度重试 <b>T0-T4→T0-T1</b>、output 统一经 EventSink</li>
+          <li>判据一以贯之：<b>Memory 独立 BC</b>（跨会话）vs <b>Session 归 Context</b>（会话本体）</li>
+        </ul>
+        <div class="tl-out">产出 · runtime 战术设计定稿，<b>健壮性完整</b></div>
       </div>
     </div>
   </div>
