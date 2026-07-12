@@ -98,17 +98,43 @@ fn should_run_reflection(mode: ReflectionRunMode, config: &MemoryConfig) -> bool
 
 ### 三种触发时机
 
-| 时机 | 模式 | 触发者 | 说明 |
-|---|---|---|---|
-| **轮次间隔** | `Interval` | Runtime loop | 每 `interval_turns`（默认 10）轮结束时触发；有 tool_calls 且非 EndTurn 时跳过 |
-| **用户强制** | `Forced` | 用户 `/reflection` | 用户主动请求反思 |
-| **Pre-compact** | `Forced` | Runtime compact 前 | compact 压缩历史前先跑 reflection，避免有价值的信息被压缩丢失 |
+| 时机 | 模式 | 执行方式 | 触发者 | 说明 |
+|---|---|---|---|---|
+| **轮次间隔** | `Interval` | **异步 spawn** | Runtime loop | 每 `interval_turns`（默认 10）轮结束时触发；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
+| **Pre-compact** | `Forced` | **异步 spawn** | Runtime compact 前 | compact 前抓 messages 快照交给后台 reflection，compact 立即继续不等待；reflection 用快照跑，结果通过 channel 回传 |
+| **用户强制** | `Forced` | **同步 await** | 用户 `/reflection` | 用户主动请求反思，需等待结果展示 |
+
+### 异步执行模型
+
+Interval 和 Pre-compact 触发的 Reflection **不阻塞主循环**——Runtime `tokio::spawn` 后台任务，主循环继续执行。后台任务完成后通过 `mpsc::channel` 回传结果，主循环在下一轮 `select!` 分支接收并 emit。
+
+```text
+Interval / Pre-compact 触发:
+  Runtime 判定 should_run → spawn 后台任务（携带 messages 快照）
+    │ (主循环不等待，继续处理 outcome / compact / 下一轮)
+    ▼
+  后台任务: build_prompt → call_llm → parse → apply
+    │
+    ▼
+  后台任务完成 → mpsc::Sender 发 ReflectionResult
+    │
+    ▼
+  主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
+```
+
+### 并发控制
+
+- **单一后台 slot**：同一时间最多一个后台 Reflection 任务（Interval 或 Pre-compact 共享一个 slot）。
+- **前一个未完成时跳过**：新触发时若 slot 被占用，跳过本次（log debug），不排队。
+- **Forced 不受限**：`/reflection` 是同步执行，不经过后台 slot，可与后台任务并发（但实际场景几乎不会同时发生）。
+- **Run 结束时 drain**：Run 结束时若后台任务仍在执行，等待其完成或超时后丢弃（避免孤儿任务）。
 
 ### 间隔触发的跳过条件
 
 - `before_finish_gate_continue`（Run 还在门禁续行中）
 - 有 tool_calls 且 `stop_reason != EndTurn`（工具调用中途不反思）
 - `config.enabled = false` 或 `config.reflection.enabled = false`
+- 后台 slot 被占用（前一个 Reflection 未完成）
 
 ## 5. Prompt 构建（纯函数）
 
@@ -248,15 +274,53 @@ struct ReflectionApplyResult {
 
 ## 8. 完整编排流程（Runtime 侧）
 
-Memory BC 提供纯领域逻辑，Runtime 负责编排：
+Memory BC 提供纯领域逻辑，Runtime 负责编排。Interval 和 Pre-compact 走异步路径，Forced 走同步路径。
+
+### 8.1 异步路径（Interval / Pre-compact）
 
 ```text
 Runtime 判定 should_run_reflection
+  │  └─ 检查后台 slot 是否空闲（非空闲 → skip + log debug）
+  │
+  ▼
+Runtime: spawn 后台任务（携带 messages 快照 / clone）
+  │ (主循环不等待，继续处理 outcome / compact / 下一轮)
+  │
+  ▼
+后台任务:
+  Memory BC: build_reflection_prompt(project_memory, recent_summary, lang)
+    └─ Memory BC: memory_summary(store.list(Project))
+    └─ Memory BC: recent_messages_summary(messages_snapshot)
+  │
+  ▼
+  Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
+  │
+  ▼
+  Memory BC: parse_output(llm_response)
+  │
+  ▼
+  Memory BC: format_output(output, lang)  ──→ formatted_content
+  │
+  ▼
+  if auto_apply:
+    Memory BC: apply_output(output, &mut store)
+      └─ apply_suggestions → add_with_eviction_retry
+      └─ apply_outdated → mark_outdated
+  │
+  ▼
+  后台任务完成 → mpsc::Sender 发 ReflectionResult
+  │
+  ▼
+主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
+```
+
+### 8.2 同步路径（Forced / `/reflection`）
+
+```text
+Runtime 处理 /reflection 命令
   │
   ▼
 Memory BC: build_reflection_prompt(project_memory, recent_summary, lang)
-  │  └─ Memory BC: memory_summary(store.list(Project))
-  │  └─ Memory BC: recent_messages_summary(messages)
   │
   ▼
 Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
@@ -265,17 +329,23 @@ Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
 Memory BC: parse_output(llm_response)
   │
   ▼
-Memory BC: format_output(output, lang)  ──→ formatted_content（给 TUI 展示）
+Memory BC: format_output(output, lang)  ──→ formatted_content
   │
   ▼
 if auto_apply:
   Memory BC: apply_output(output, &mut store)
-    └─ apply_suggestions → add_with_eviction_retry
-    └─ apply_outdated → mark_outdated
   │
   ▼
 Runtime: emit ReflectionResult{output, formatted_content, tokens, auto_applied}
 ```
+
+### 8.3 Pre-compact 快照语义
+
+Pre-compact 触发时，Runtime 在 compact 前把 `messages` clone 一份交给后台任务。后台任务用这份快照构建 `recent_messages_summary`。compact 正常执行不等待。
+
+- **快照时机**：compact 函数入口处，`messages` 尚未被压缩时。
+- **快照内容**：`messages_selected_for_precompact_memory(messages)` 的结果（与现状一致，只取 compact 会丢掉的消息）。
+- **结果回传**：后台任务完成后通过 channel 回传，主循环在后续轮次 emit。用户可能在 compact 后才看到 reflection 结果——这是可接受的 trade-off。
 
 ## 9. model 覆盖
 
@@ -303,3 +373,4 @@ struct ReflectionConfig {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：ReflectionEngine 领域服务、MemorySuggestion、触发条件、prompt/output/apply、职责边界 | #789 |
+| 2026-07-12 | 补充：Interval 和 Pre-compact 改为异步 spawn，Forced 保持同步；并发控制和快照语义 | #789 |
