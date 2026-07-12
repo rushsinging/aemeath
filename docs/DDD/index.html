@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXVI</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理，<b>通用域篇 XXVII-XXIX</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXX</b> 做实现范围收缩、双层重试与独立事实流——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>。
+      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXX</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器，<b>通用域篇 XXXI-XXXIII</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXIV</b> 做实现范围收缩、双层重试与独立事实流——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>。
   </p>
 
   <div class="timeline">
@@ -1383,9 +1383,110 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
       <div class="tl-out">产出 · <b>死代码清单 + 分类处理策略</b>——不让 allow 掩盖真相</div>
     </div>
   </div>
-  <!-- ===== 阶段二十七：机制不等于语义 ===== -->
-  <div class="tl-item p-mix rev d2">
+
+  <!-- ===== 阶段二十七：投影层不自创术语 ===== -->
+  <div class="tl-item p-ddd rev d2">
     <div class="tl-rail"><div class="tl-node">XXVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影层不自创术语 · 对齐权威层统一语言</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI Model 是 Runtime 的投影层，但代码自创了一套术语——<code>Chat</code> / <code>ChatTurn</code> / <code>ChatStatus</code>，与 Runtime 的 <code>Run</code> / <code>RunStep</code> / <code>RunStatus</code> 不一致。<b>投影层不能自造词汇，MUST 对齐权威层统一语言。</b></p>
+      <ul class="tl-list">
+        <li><b>术语映射</b>：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus</li>
+        <li><b>投影类型加 <code>*Projection</code> 后缀</b>：明确这是投影而非权威——<code>RunProjection</code> / <code>RunStepProjection</code></li>
+        <li><b>投影简化规则</b>：Runtime RunStatus 有 11 态，TUI 投影合并为 7 态——细粒度展示交给 SpinnerPhase 派生函数</li>
+        <li><b>恢复历史会话的 bug</b>：<code>ensure_runtime_turn()</code> 把 status 设为 Running，但恢复的会话已结束——正确应为 Completed。术语不一致让这个 bug 更难发现</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">投影层术语 · 对齐权威</span><span class="d">权威 (Runtime)</span>    Run / RunStep / RunStatus
+<span class="d">投影 (TUI)</span>       RunProjection / RunStepProjection / RunProjectionStatus
+<span class="d">现状代码</span>         Chat / ChatTurn / ChatStatus  → ← 目标态统一
+
+<span class="m">// 投影层不能自造词汇，加 *Projection 后缀明示身份</span></pre>
+      <div class="tl-out">产出 · <b>投影层术语对齐</b>——TUI Model 不自创术语，对齐 Runtime 统一语言</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十八：投影状态从权威派生 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影状态从权威派生 · 不自建状态机</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">SpinnerPhase 有 <code>start_chat()</code> / <code>generate()</code> / <code>think()</code> 等自驱动转换方法——<b>投影层自建状态机是设计缺陷</b>。两套状态机需要手动同步，spinner 状态三处同步的根因就在于此。</p>
+      <ul class="tl-list">
+        <li><b>根因</b>：SpinnerPhase 是独立状态机，与 RunStatus 脱耦——需要手动同步，三处副本（model + view_state + animation）</li>
+        <li><b>目标态</b>：<code>derive_spinner_phase(run_status, step_status, spinner)</code> 纯函数——从 RunProjectionStatus + RunStepProjectionStatus 派生</li>
+        <li><b>chat_active 也可派生</b>：<code>run_status ∈ {Running, AwaitingUser}</code>——NEVER 独立维护 bool</li>
+        <li><b>Reflecting 移除</b>：无对应 Runtime 状态，是自己造的——需要区分 reasoning 模式应从 RunSpec.reasoning_level 派生</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">SpinnerPhase · 从派生函数替代状态机</span><span class="d">现状</span>  SpinnerPhase 独立状态机  →  start_chat() / generate() / think()
+                         ↓ 手动同步 ↓
+                model + view_state + animation  <span class="m">// 三处副本</span>
+
+<span class="d">目标</span>  derive_spinner_phase(run_status, step_status, ctx)
+       → Option&lt;SpinnerPhase&gt;  <span class="m">// 纯函数，零同步</span>
+
+<span class="m">// 投影状态从权威派生，不自建状态机</span></pre>
+      <div class="tl-out">产出 · <b>SpinnerPhase 改为派生函数</b>——根因消除，三处同步问题自动消失</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十九：投影按来源拆分不混 BC ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影按来源拆分不混 BC · 杂物箱按 BC 拆开</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">RuntimeState 13 字段混了 4 个不同 BC 的投影——provider/model_id（Config）、workspace（Project）、task_status（Task）、其余才是 Run 耦合。<b>不同更新路径的投影混在一起 = 杂物箱</b>，改一个 BC 的投影会误触其他 BC 的 revision。</p>
+      <ul class="tl-list">
+        <li><b>拆分判据</b>：字段的更新路径是否与 Run 生命周期耦合？不耦合就拆出去</li>
+        <li><b>RunRuntimeState（9 字段）</b>：spinner / thinking / graph_phase / compact_progress / processing_jobs / usage / live_tps / status_notice / transient_notice_expiry——与 Run 耦合</li>
+        <li><b>ConfigProjection（2 字段）</b>：provider / model_id——用户切 model 时不触发 Conversation revision</li>
+        <li><b>WorkspaceProjection（6 字段）</b>：cwd / worktree / path_base——进出 worktree 不影响 Conversation</li>
+        <li><b>task_status 移到 SessionModel</b>——投影自 Task BC，与 Session 关联</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RuntimeState 拆分 · 按投影来源</span><span class="d">原</span> RuntimeState (13 字段杂物箱)
+  ├─ provider / model_id     <span class="m">// → ConfigProjection</span>
+  ├─ workspace (6 字段)       <span class="m">// → WorkspaceProjection</span>
+  ├─ task_status              <span class="m">// → SessionModel</span>
+  └─ spinner / usage / ...   <span class="m">// → RunRuntimeState (9 字段)</span>
+
+<span class="d">拆后</span> TuiModel  3+1 → 3+3 Context
+  ├─ conversation.run_runtime    <span class="m">// Run 耦合</span>
+  ├─ config                      <span class="m">// Config BC</span>
+  ├─ workspace                   <span class="m">// Project BC</span>
+  └─ session.task_status         <span class="m">// Task BC</span>
+
+<span class="m">// 不同更新路径的投影不混在一起</span></pre>
+      <div class="tl-out">产出 · <b>3+1→3+3 Context</b>——每个投影来源独立 Context，更新路径互不干扰</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十：端口不绑死实现 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>端口不绑死实现 · trait + 多适配器注入</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI→Runtime 通信绑死在 <code>AgentClientImpl</code> 上——Controller 直接依赖具体实现而非 trait 接口。<b>端口接口（trait）必须支持多个适配器实现</b>：本地直连和 WSS 远程连接。</p>
+      <ul class="tl-list">
+        <li><b>LocalAgentClient</b>：TUI 与 Runtime 同进程，直接函数调用 + channel（现状已实现）</li>
+        <li><b>WssAgentClient</b>：TUI 远程连接 Server，WebSocket Secure 帧传输（#794 启动后实现）</li>
+        <li><b>Controller 依赖 trait</b>，NEVER 直接依赖具体适配器——适配器选择在组合根通过依赖注入完成</li>
+        <li><b>Model 层端口透明</b>：NEVER 知道当前使用哪个适配器——远程断连映射为 ChatEvent::Error，NEVER panic</li>
+        <li><b>协议契约统一</b>：无论本地还是远程，请求/响应流/事件类型 MUST 遵循同一套 SDK Published Language</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">端口适配器 · 不绑死实现</span><span class="d">trait</span>  AgentClient                    <span class="m">// 端口接口</span>
+ ├─ <span class="d">LocalAgentClient</span>   直连 + channel  <span class="m">// 现状</span>
+ └─ <span class="d">WssAgentClient</span>     WSS 远程帧      <span class="m">// #794</span>
+
+<span class="d">Controller</span>  depends on trait    <span class="m">// 不依赖具体类型</span>
+<span class="d">组合根</span>      inject adapter       <span class="m">// 依赖注入选择</span>
+<span class="d">Model</span>       port-transparent    <span class="m">// 不知道用哪个</span>
+
+<span class="m">// trait 是端口接口，不是绑死的实现</span></pre>
+      <div class="tl-out">产出 · <b>出站端口适配器设计</b>——Local + WSS 双适配器，组合根注入，端口透明</div>
+    </div>
+  </div>
+  <!-- ===== 阶段三十一：机制不等于语义 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXI</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>机制不等于语义 · Storage 只保证 bytes，不判断领域合法</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
       <p class="tl-desc">Storage 初稿想直接返回 <code>RecoveredFromBackup</code>，却又坚持不依赖 Session / Memory schema——review 后发现契约无法实现：<b>只搬运 opaque bytes 的通用域，不可能知道数据在领域上是否可解析</b>。</p>
@@ -1405,9 +1506,9 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     </div>
   </div>
 
-  <!-- ===== 阶段二十八：全局资源不等于全局状态 ===== -->
+  <!-- ===== 阶段三十二：全局资源不等于全局状态 ===== -->
   <div class="tl-item p-mix rev d2">
-    <div class="tl-rail"><div class="tl-node">XXVIII</div></div>
+    <div class="tl-rail"><div class="tl-node">XXXII</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>全局资源不等于全局状态 · Logger 单例，调用上下文 scope-local</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
       <p class="tl-desc">Logging 的 facade / sink 可以进程级共享，但 <code>CURRENT_REQUEST_ID</code> / model / provider / role 不能是进程级可变值。Main 与多个 Sub 并发时，<b>共享基础设施资源和共享请求状态是两回事</b>。</p>
@@ -1426,9 +1527,9 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     </div>
   </div>
 
-  <!-- ===== 阶段二十九：安全承诺类型化 ===== -->
+  <!-- ===== 阶段三十三：安全承诺类型化 ===== -->
   <div class="tl-item p-ddd rev d2">
-    <div class="tl-rail"><div class="tl-node">XXIX</div></div>
+    <div class="tl-rail"><div class="tl-node">XXXIII</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>安全承诺类型化 · 让 installer 只接受 VerifiedUpdatePlan</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
       <p class="tl-desc">自更新若只约定“先校验、再下载、再替换”，任何调用方都可能绕过顺序。review 后把已验证事实固化为不透明值对象：<b>后一步只能接收前一步验证完成后才能构造的类型</b>。</p>
@@ -1452,9 +1553,9 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     </div>
   </div>
 
-  <!-- ===== 阶段三十：Policy/Hook/Audit 最小范围 + 双层重试 ===== -->
+  <!-- ===== 阶段三十四：Policy/Hook/Audit 最小范围 + 双层重试 ===== -->
   <div class="tl-item p-mix rev d2">
-    <div class="tl-rail"><div class="tl-node">XXX</div></div>
+    <div class="tl-rail"><div class="tl-node">XXXIV</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>控制范围 + 双层重试 · 让扩展点不反客为主</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
       <p class="tl-desc">接口可以为未来留形状，但实现必须诚实；跨 BC 重试必须按各自不变量分层计数。</p>
