@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    五个阶段贯穿三条经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用领域本质回答"要不要状态机"</b>。
+    八个阶段贯穿五条经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>同一 BC 不等于共享执行抽象</b>、<b>只在需求成熟时设计兼容协议</b>。
   </p>
 
   <div class="timeline">
@@ -905,11 +905,12 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
         <div class="tl-top"><h3>战略设计 · 简化与收敛</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
         <p class="tl-desc">每个「要不要状态机 / 要不要 durable」都用领域本质回答。</p>
         <ul class="tl-list">
-          <li>Session 的「状态」全是<b>投影或 IO 动作</b> → 单状态机，只留 <b>AgentRun（内存态）</b></li>
+          <li>Session 的「状态」全是<b>投影或 IO 动作</b> → 不建 Session 状态机，只保留 <b>Run（内存态）</b> 作为 Agent 执行生命周期状态机</li>
+          <li>Task、Workflow、MCP Connection 可以有<b>局部聚合状态机</b>，但不能复制、驱动或替代 Run</li>
           <li>Session 主体是<b>对话历史</b> → 并入 Context Management，不独立</li>
           <li>人在环 CLI <b>崩溃从头开始</b> → 去掉 durable invocation</li>
         </ul>
-        <div class="tl-out">产出 · 从 14 BC + 双状态机 <b>收敛为 15 BC + 单状态机</b></div>
+        <div class="tl-out">产出 · BC 候选经增删与归类修正后<b>定稿为 15 个</b>，执行生命周期收敛为唯一 Run</div>
       </div>
     </div>
 
@@ -924,12 +925,13 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
           <li>交付层（clients）+ Future 预留（<b>Server 传输透明</b>）；Workflow 降为支撑域</li>
           <li>落 docs/design 三层：<b>01-system</b> 总体 → <b>02-modules</b> 模块 → <b>03-engineering</b> 横切</li>
         </ul>
-        <pre class="bp-code"><span class="tag">CONTEXT MAP · 出站端口（Runtime 是 Customer）</span><span class="d">Agent Runtime</span>（唯一状态机 Run）
-  ├─ <span class="d">ContextPort</span>   → Context Management  <span class="m">// C/S</span>
-  ├─ <span class="d">ProviderPort</span>  → Provider（内部 ACL）   <span class="m">// C/S + ACL</span>
-  ├─ <span class="d">ToolPort</span>      → Tool &amp; Skill &amp; Command
-  ├─ <span class="d">PolicyPort</span>    → Policy
-  └─ <span class="d">AuditSink</span>     → Audit               <span class="m">// Pub/Sub 单向</span></pre>
+        <pre class="bp-code"><span class="tag">CONTEXT MAP · 出站端口（Runtime 是 Customer）</span><span class="d">Agent Runtime</span>（唯一 Agent 执行生命周期状态机 Run）
+ ├─ <span class="d">ContextPort</span>        → Context Management  <span class="m">// C/S</span>
+ ├─ <span class="d">ProviderPort</span>       → Provider（内部 ACL）   <span class="m">// C/S + ACL</span>
+ ├─ <span class="d">ToolCatalogPort</span>    → Tool &amp; Skill &amp; Command
+ ├─ <span class="d">ToolExecutionPort</span>  → Tool &amp; Skill &amp; Command
+ ├─ <span class="d">PolicyPort</span>         → Policy
+ └─ <span class="d">AuditSink</span>          → Audit               <span class="m">// Pub/Sub 单向</span></pre>
         <div class="tl-out">产出 · 一张<b>上下文地图</b> + 五篇 01-system 设计文档</div>
       </div>
     </div>
@@ -943,9 +945,53 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
         <ul class="tl-list">
           <li>命名三次迭代：Chat → AgentRun → <b>Run</b>（对齐 OpenAI <b>Thread / Run / Run Step</b>）</li>
           <li>BC 归类修正：Workflow 一度进核心域，再用判据降为<b>支撑域</b>（复杂度 / 概念 ≠ 核心）</li>
-          <li>只写目标态：删掉所有「当前代码落点」，避免代码演进后文档过时造成混淆</li>
+          <li>只写目标态：Current 与 Migration 另处维护，避免代码演进污染长期边界</li>
         </ul>
-        <div class="tl-out">产出 · <b>15 BC 定稿</b>（1 核心 + 8 支撑 + 6 通用），单状态机 Run</div>
+        <div class="tl-out">产出 · <b>15 BC 定稿</b>（1 核心 + 8 支撑 + 6 通用），Run 是唯一 Agent 执行生命周期状态机</div>
+      </div>
+    </div>
+
+    <!-- 阶段七 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">VII</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>责任章程 + 战术验证 · 从名词清单到可判断边界</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+        <p class="tl-desc">列出 BC 名称不等于边界成立；真正可复用的是每个 BC 的正负责任判断，以及跨界时谁拥有不变量。</p>
+        <ul class="tl-list">
+          <li>为 15 个 BC 逐一写<b>负责什么 / 不负责什么</b>：命中不负责时，必须通过 Port 找真正所有者</li>
+          <li>判断顺序：<b>状态所有权 → 策略/机制 → 编排/能力 → Snapshot PL/物理存储</b></li>
+          <li>实例：Provider 只提取 raw usage；Audit 拥有 Cost/Pricing 聚合；Logging sink 不等于审计 sink</li>
+          <li>一项能力找不到明确所有者时，<b>先停设计</b>，更新责任章程与 Context Map 后再写代码</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">RESPONSIBILITY CHARTER · 最小模板</span><span class="d">Bounded Context</span>
+ ├─ 负责：拥有模型、定义合法迁移、守护不变量
+ ├─ 不负责：只参与集成，不拥有策略与状态
+ └─ 跨界：Port + Published Language / Event
+
+<span class="m">// 观察状态 ≠ 拥有状态；持久化 Snapshot ≠ 拥有聚合</span></pre>
+        <div class="tl-out">产出 · 一张可供后续设计评审使用的<b> BC 责任矩阵</b></div>
+      </div>
+    </div>
+
+    <!-- 阶段八 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">VIII</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战术设计 · 同一 BC，不强造统一执行抽象</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+        <p class="tl-desc">Tool、Skill、Slash Command 共享“可发现能力”的语言，但执行机制不同；统一名词不意味着统一 trait。</p>
+        <ul class="tl-list">
+          <li><b>Tool</b> 调函数：Catalog / Execution 双端口；不向 Runtime 暴露 Registry 或 Tool 实例</li>
+          <li><b>Skill</b> 物化 PromptFragment：Context Management 决定注入位置、预算与缓存</li>
+          <li><b>Slash Command</b> 按 PromptInjection / SnapshotQuery / ApplicationControl 三种机制路由</li>
+          <li><b>Registry Scope ∩ capability Profile</b>：Scope 决定装配了什么，Profile 只负责收缩权限</li>
+          <li>MCP 是 Tool adapter；尚未接线时<b>延迟 ToolId / version / revision</b>，不为假设中的兼容问题过度设计</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">ONE BC · THREE SEMANTICS</span><span class="d">Tool</span>    → ToolCatalogPort + ToolExecutionPort
+<span class="d">Skill</span>   → SkillCatalogPort + SkillMaterializationPort
+<span class="d">Command</span> → parse + route（不共享 execute / result 基类）
+
+<span class="m">// BC 统一语言；端口尊重真实业务语义</span></pre>
+        <div class="tl-out">产出 · 一个避免<b>伪统一抽象</b>与<b>内部细节泄漏</b>的战术案例</div>
       </div>
     </div>
   </div>
