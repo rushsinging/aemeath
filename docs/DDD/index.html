@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXVI</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>。
+      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXVI</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理，<b>通用域篇 XXVII-XXIX</b> 做机制/语义、全局资源/scope 状态与安全计划类型化——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>。
   </p>
 
   <div class="timeline">
@@ -1383,6 +1383,75 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
       <div class="tl-out">产出 · <b>死代码清单 + 分类处理策略</b>——不让 allow 掩盖真相</div>
     </div>
   </div>
+  <!-- ===== 阶段二十七：机制不等于语义 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>机制不等于语义 · Storage 只保证 bytes，不判断领域合法</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Storage 初稿想直接返回 <code>RecoveredFromBackup</code>，却又坚持不依赖 Session / Memory schema——review 后发现契约无法实现：<b>只搬运 opaque bytes 的通用域，不可能知道数据在领域上是否可解析</b>。</p>
+      <ul class="tl-list">
+        <li><b>Storage 拥有机械 OHS</b>：<code>AtomicBlobPort</code> 只处理 StorageKey、Primary / Previous 代际、原子提交、commit marker、promote 与 quarantine</li>
+        <li><b>数据 BC 拥有窄端口</b>：SessionSnapshotStore / MemorySnapshotStore 定义 schema、decoder、migration、retention 与恢复决策</li>
+        <li><b>恢复流程反转</b>：机械读取 Primary → 数据 BC 验证 → 必要时读 Previous → 数据 BC 显式请求 promote / quarantine</li>
+        <li><b>策略不下沉</b>：Tool Result 阈值、preview、级联删除、archive / eviction 不属于 Storage；持久化 Snapshot 也不等于拥有聚合</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">机制域 vs 数据域 · 谁能判断合法？</span><span class="d">Storage</span>  read(Primary)  → opaque bytes           <span class="m">// 物理机制</span>
+<span class="d">Data BC</span>  decode(bytes)  → valid / invalid        <span class="m">// 领域语义</span>
+<span class="d">Storage</span>  read(Previous) → opaque bytes
+<span class="d">Data BC</span>  decode + decide → promote / quarantine  <span class="m">// 恢复决策</span>
+
+<span class="m">// 判据：谁能判断数据是否合法，谁就拥有恢复决策</span></pre>
+      <div class="tl-out">产出 · Storage 收敛为<b>机械持久化通用域</b>，schema / migration / retention 回归数据 BC</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十八：全局资源不等于全局状态 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>全局资源不等于全局状态 · Logger 单例，调用上下文 scope-local</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Logging 的 facade / sink 可以进程级共享，但 <code>CURRENT_REQUEST_ID</code> / model / provider / role 不能是进程级可变值。Main 与多个 Sub 并发时，<b>共享基础设施资源和共享请求状态是两回事</b>。</p>
+      <ul class="tl-list">
+        <li><b>可全局共享</b>：boot_ts / pid / version、TargetCatalog、文件 sink、rotation policy——构造后只读或内部同步</li>
+        <li><b>必须 scope-local</b>：session / chat / turn / request_id / model / provider / role——随异步任务传播并自动恢复</li>
+        <li><b>Patch 三态</b>：<code>Inherit / Set / Clear</code> 区分继承父值、覆盖新值和显式清空；普通 <code>Option</code> 表达不了这个语义</li>
+        <li><b>诊断 ≠ 审计</b>：Logging best-effort、失败降级 stderr；Audit Event 不得通过 target 文件路由伪装成审计交付</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">共享资源 vs scope-local 状态</span><span class="d">Global Logger</span>   TargetCatalog + Sink + Rotation      <span class="m">// 可共享</span>
+<span class="d">LogContextPatch</span> Inherit | Set(value) | Clear         <span class="m">// 每个执行 scope</span>
+<span class="d">spawn child</span>     capture(parent) → instrument(task)   <span class="m">// 显式传播</span>
+
+<span class="m">// 单例是资源生命周期；scope 是业务关联生命周期</span></pre>
+      <div class="tl-out">产出 · Main/Sub 日志上下文从进程全局改为<b>capture + instrument 的 scope-local 传播</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十九：安全承诺类型化 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>安全承诺类型化 · 让 installer 只接受 VerifiedUpdatePlan</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">自更新若只约定“先校验、再下载、再替换”，任何调用方都可能绕过顺序。review 后把已验证事实固化为不透明值对象：<b>后一步只能接收前一步验证完成后才能构造的类型</b>。</p>
+      <ul class="tl-list">
+        <li><b>typed channel</b>：Stable / Prerelease 是领域值对象；Config 经 ACL 映射，不让自由字符串污染渠道、cache key 和 release 筛选</li>
+        <li><b>VerifiedUpdatePlan 私有构造</b>：绑定签名 manifest、artifact digest、可信 host、target executable canonical path + 当前 digest、redirect 与安装策略</li>
+        <li><b>防旧计划覆盖新版本</b>：持跨进程锁后、commit 前重新校验 executable identity；不匹配返回 PlanStale，必须重新 plan</li>
+        <li><b>承诺只到可证明边界</b>：pre-commit 失败旧版本不变；平台无单步 atomic replace 就用 helper 或拒绝——不虚构“永远可恢复”</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">安全流程 · 用类型闭合</span><span class="d">Release DTO</span>  → ACL + signature verify
+    ↓
+<span class="d">VerifiedUpdatePlan</span>  <span class="m">// private constructor</span>
+    ├─ target_path + target_digest
+    ├─ artifact_digest + trust_key
+    └─ host / redirect / install_strategy
+    ↓
+<span class="d">Installer::apply(plan)</span> → lock → recheck target → atomic commit
+
+<span class="m">// 安全事实进入类型；installer 不接受 raw URL / version</span></pre>
+      <div class="tl-out">产出 · Application Version Control 以<b>VerifiedUpdatePlan</b>封住信任链、TOCTOU 与安装提交边界</div>
+    </div>
+  </div>
+</div>
 </section>
 
 <div class="rule"></div>

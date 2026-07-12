@@ -82,21 +82,44 @@
 | P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
 | P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
 
-## 4. Memory 现状缺口（S2 代码盘点）
+## 5. Storage 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
-| M1 | **无 MemoryPort trait** | Runtime 直调 `MemoryStore` 具体类型（`storage::api::MemoryStore`）| 抽 `MemoryPort` trait，实现移到 adapter；Runtime 不接触 MemoryStore | S5 |
-| M2 | **领域逻辑与 I/O 混合** | `MemoryStore` 同时做 scoring/dedup/retrieval 和文件读写 | 拆分 MemoryService（领域）+ MemoryStorageAdapter（I/O）| S7 |
-| M3 | **检索为子串匹配** | `entry_matches` 朴素小写 contains，无相关性排序 | Tier 1 BM25 关键词相关性排序 | #551 |
-| M4 | **similarity_threshold 仅用于去重** | 检索不接入 threshold | 检索也用 threshold 过滤低相关结果 | #551 |
-| M5 | **Reflection 代码在 Runtime** | `runtime/business/reflection/` 含 prompt/output/apply 领域逻辑 | 领域逻辑迁回 Memory BC，Runtime 只编排触发 + LLM 调用 | S5 |
-| M6 | **无 ReflectionPromptPort** | Runtime 直接调 reflection 模块函数 | 抽 trait，Memory BC 暴露领域服务 | S5 |
-| M7 | **memory_inject 硬编码参数** | `open_memory_store` 硬编码 `max_entries=100, threshold=0.8` | 从 ConfigSnapshot 读取 | S5 |
-| M8 | **SessionReminder 在 Memory** | `share::memory::session_reminder` 是会话级数据 | 迁移到 Context Management（Session 聚合）| S5/S7 |
-| M9 | **无 NoOpMemory** | Sub 无 Memory 隔离（可读写主记忆）| Sub 装配 NoOpMemory，不读不写不 reflection | S3/S5 |
+| S1 | **Storage 同时拥有业务模型** | Task/Batch 状态、依赖图、Memory 查询与 History 策略寄居 storage crate | Task/Memory/History 所属 BC 独占模型和不变量；Storage 只实现物理端口 | S5/S7 |
+| S2 | **原子写机制未复用** | Session 自带 tmp/fsync/.bak；Memory、History、Tool Result 等路径直接 `fs::write` | 通用 AtomicBlob adapter；数据 BC 的窄持久化端口复用同一机制 | S5 |
+| S3 | **backup/恢复协议不完整** | Session 有一代 `.bak`，但备份旋转失败被忽略；其他路径无 previous/quarantine | 原子可见、机械代际读取、领域验证后显式 promote/quarantine | S5 |
+| S4 | **路径与任意物理 Path 耦合** | 多处业务代码拼接 `~/.agents` 路径或直接持有 PathBuf | StorageKey + SafePathSegment；物理根和路径解析只在 adapter | S5/S7 |
+| S5 | **Tool Result 策略落入 Storage** | 50K 阈值、head/tail preview、inline reference 格式和写盘混在一个模块 | Config 提供阈值；Tool/Context Management 决定替换语义；Storage 只写 blob | S5 |
+| S6 | **错误与损坏处理不统一** | String/Option/领域错误混用，部分失败静默跳过或仅日志 | StorageErrorKind + Generation ReadOutcome；数据 BC 验证并显式恢复 | S5 |
+| S7 | **并发写与临时文件协议未统一** | 固定 `.tmp/.new`，跨实例互斥和残留清扫语义不一致 | 随机 create-new、跨进程锁、commit marker crash recovery | S5 |
 
-## 5. 死代码 / 退役清单
+## 6. Logging 现状缺口（S2 摘要盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| L1 | **Main/Sub 日志上下文互相覆盖** | request/model/provider/role/chat 保存在进程级 `CURRENT_*` | LogContextPatch + capture/instrument scope-local 传播 | S3/S5 |
+| L2 | **sink 失败被静默吞掉** | write/flush/rotate/reopen 忽略 Result，sink 可永久失效 | Sink lifecycle + stderr emergency fallback + 限频恢复 | S5 |
+| L3 | **TargetCatalog 多份真相** | 白名单、文件映射、sink 字段、flush 列表、guard 各自维护 | TargetSpec catalog 一次定义并共同消费 | S5/S7 |
+| L4 | **Update target 未注册** | `aemeath:agent:update` 不在合法 catalog，落入兜底 | 注册 Application Version Control 诊断 target 与 sink | S5 |
+| L5 | **Logging 与 Audit 混淆** | `agent-audit.log` 是普通诊断 sink | DiagnosticRecord 与 AuditSink 完全分离 | S5/S7 |
+| L6 | **Config 参数接线不完整** | retention/logs_dir 未形成单一闭环 | ConfigSnapshot 注入 Filter/Sink/RotationPolicy | S5 |
+| L7 | **schema/规范漂移** | 实现为 14 字段，部分注释仍称 13 | 14 字段 v1 契约 + consistency guard | S5/S7 |
+
+## 7. Application Version Control 现状缺口（S2 摘要盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| V1 | **Channel 配置未生效** | Config 声明渠道，gateway 固定 `/releases/latest` | Config ACL 映射 typed UpdateChannel | S5 |
+| V2 | **检查缓存契约矛盾** | SDK 称 24h cache，spec/实现每次请求 | Cached/ForceRefresh、TTL/max stale/rate-limit | S5 |
+| V3 | **Config 未注入装配** | Composition 直接 `UpdateGateway::new()` | 构造 policy、source、cache 与 installer | S5 |
+| V4 | **错误同质化** | 全部压成 `Internal(String)` | 稳定 UpdateErrorKind 与结构化元数据 | S5 |
+| V5 | **checksum 不证明发布者身份** | artifact 与 checksums 同源 | signed manifest + 固化信任根 | 独立安全 issue |
+| V6 | **安装不是受验证的单步提交** | 固定 `.new` 直接 rename；无 target identity/锁 | VerifiedUpdatePlan + digest recheck + atomic commit/helper | 独立安全 issue |
+| V7 | **Release Source ACL 不完整** | DTO/URL/状态码直通且缺 host/size 约束 | 私有 DTO + source 安全校验 | 独立安全 issue |
+| V8 | **检查与执行端口混合** | 单一 UpdateService，perform 内再次检查 | Runtime ApplicationVersionPort；模块内 plan/apply 分离 | S5 |
+
+## 8. 死代码 / 退役清单
 
 | 项 | 现状 | 处理 | 阶段 |
 |---|---|---|---|
@@ -114,15 +137,20 @@
 | Provider 内部 retry / non-stream fallback | driver 内部执行跨调用重试与隐式第二次请求 | Runtime model_invocation 统一 attempt 编排后删除 | S5/S7 |
 | `SessionReminders` 在 `share::memory` | 会话级提醒放在 Memory 共享内核，语义不属跨会话记忆 | 迁移到 Context Management 后从 `share::memory` 删除 | S5/S7 |
 | `MemoryStore` 领域方法 | scoring/dedup/retrieval 混在 Storage crate 的 MemoryStore 中 | 拆分后领域方法迁到 MemoryService，MemoryStore 降为 Storage adapter | S7 |
+| Storage crate 内 Task/Memory 业务实现 | 物理持久化 crate 同时拥有 Task 状态机、依赖图与 Memory 查询行为 | 迁回对应 BC；Storage 仅保留 adapter 与通用机制 | S5/S7 |
+| 业务代码散点直接文件写入 | Session/Memory/History/Tool Result 各自实现 IO 语义 | 窄数据端口接 Storage adapter 后删除重复路径 | S5/S7 |
+| Logging 进程级 `CURRENT_*` | Main/Sub 并发共享可变上下文 | scope-local LogContext 接线后退役 setter | S3/S5/S7 |
+| 普通诊断 `agent-audit.log` 路由 | 将 Audit 误当诊断 sink | AuditSink 接线后重新定义或删除 | S5/S7 |
+| Update 单体 `UpdateService` / Gateway | 检查/缓存/下载/安装混成单对象 | ApplicationVersionPort + 内部 source/cache/installer adapters | S5/S7 |
 
-## 6. 已正确隔离（可作参考范式）
+## 9. 已正确隔离（可作参考范式）
 
 | 项 | 现状 | 说明 |
 |---|---|---|
 | **Workspace 隔离** | `seed_isolated()`：继承 cwd/root，空栈+新锁，子 worktree 进出不影响父 | ✅ 子资源隔离范式 |
 | **Task 隔离** | Sub 用全新 `TaskStore::new()` | ✅ |
 
-## 7. 相关文档
+## 10. 相关文档
 
 - 领域模型（目标态）：[../02-modules/runtime/01-domain-model.md](../02-modules/runtime/01-domain-model.md)
 - 模块边界：[../02-modules/runtime/02-module-boundaries.md](../02-modules/runtime/02-module-boundaries.md)
@@ -130,6 +158,9 @@
 - Tool & Skill & Command 目标设计：[../02-modules/tools/README.md](../02-modules/tools/README.md)
 - Provider 目标设计：[../02-modules/provider/README.md](../02-modules/provider/README.md)
 - Memory 目标设计：[../02-modules/memory/README.md](../02-modules/memory/README.md)
+- Storage 摘要设计：[../02-modules/storage/README.md](../02-modules/storage/README.md)
+- Logging 摘要设计：[../02-modules/logging/README.md](../02-modules/logging/README.md)
+- Application Version Control 摘要设计：[../02-modules/application-version-control/README.md](../02-modules/application-version-control/README.md)
 - 横切工程总览：[README.md](README.md)
 
 ## 修改历史
@@ -140,3 +171,4 @@
 | 2026-07-12 | 新增 Tool/Skill/Command 缺口 T1-T12 与旧 Profile、SkillTool、idle_commands、MCP 路径退役项 | #787 |
 | 2026-07-12 | 新增 Provider 缺口 P1-P12 与共享 client、回调流、wire DTO、隐式重试退役项 | #788 |
 | 2026-07-12 | 新增 Memory 缺口 M1-M9 与 SessionReminders、MemoryStore 领域方法退役项 | #789 |
+| 2026-07-12 | 新增 Storage S1-S7、Logging L1-L7、Application Version Control V1-V8 缺口与退役项 | #793 |
