@@ -11,12 +11,15 @@
 | 目标文档 | 内容 | 状态 |
 |---|---|---|
 | [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 | ✅ S2 |
-| [context-management/](context-management/01-session.md) | Session 聚合（已填充）；compact 家族 / token budget / prompt 待补 | 🚧 部分 |
+| [context-management/](context-management/01-session.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
 | [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
 | [task/](task/README.md) | Task 聚合根、状态机、依赖图不变量、Batch 领域服务、TaskPort、Published Language | ✅ S2 |
-| [project/](project/README.md) | Workspace 聚合根、Frame 栈、seed_isolated 隔离范式、三端口、GitWorktreeOps、git 上下文供给 | ✅ S2 |
-| memory / policy / audit | 各支撑 BC 战术设计 | 规划 |
-| provider | Provider ACL、driver 映射 | 规划 |
+| [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离范式、三端口、GitWorktreeOps、git 上下文供给 | ✅ S2 |
+| [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入(#551)、Reflection 引擎、MemoryPort | ✅ S2 |
+| [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
+| [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
+| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
+| policy / audit | 各支撑 BC 战术设计 | 规划 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
 | server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
 
@@ -40,5 +43,9 @@
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
 | 2026-07-11 | S2 填充 runtime/（7 篇）与 context-management/session.md，规划表改链接 | #761 |
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
+| 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
+| 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
+| 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
+| 2026-07-12 | 新增 memory/ 战术设计：MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort | #789 |
 | 2026-07-12 | 新增 task/ 战术设计：Task 聚合、状态机、依赖图不变量、Batch、TaskPort、PL | #791 |
-| 2026-07-12 | 新增 project/ 战术设计：Workspace 聚合、Frame 栈、seed_isolated、三端口、git 供给 | #791 |
+| 2026-07-12 | 新增 project/ 战术设计：Workspace 聚合、Frame 栈、fork、三端口、git 供给 | #791 |

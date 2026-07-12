@@ -35,6 +35,8 @@
 | 查术语精确定义 | [02-ubiquitous-language.md](01-system/02-ubiquitous-language.md) |
 | 理解 BC 之间怎么集成 / 端口 | [03-context-map.md](01-system/03-context-map.md) |
 | 理解 Tool/Skill/Command、Scope/Profile 与 MCP 边界 | [02-modules/tools/](02-modules/tools/README.md) |
+| 理解 Provider ACL、统一调用流、reasoning 映射与 Invocation Scope | [02-modules/provider/](02-modules/provider/README.md) |
+| 理解 Memory 检索、注入与 Reflection 引擎 | [02-modules/memory/](02-modules/memory/README.md) |
 | 理解依赖方向 / 六边形 | [04-system-architecture.md](01-system/04-system-architecture.md) + [05-dependency-rules.md](01-system/05-dependency-rules.md) |
 | 新增 / 调整架构守卫、Stop 钩子失败排查 | [02-architecture-guards.md](02-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
@@ -60,3 +62,5 @@
 | 2026-07-11 | 迁移地图收敛为过渡说明（迁移追踪归 migration-governance）、状态约定改为纯目标态、新增修改历史 | #760 |
 | 2026-07-12 | 阅读路径新增 Tool/Skill/Command 战术设计入口 | #787 |
 | 2026-07-12 | 系统导航补充 15 BC 责任章程，并精确状态机原则命名 | #743 / #787 |
+| 2026-07-12 | 阅读路径新增 Provider 战术设计入口 | #788 |
+| 2026-07-12 | 阅读路径新增 Memory 战术设计入口 | #789 |
