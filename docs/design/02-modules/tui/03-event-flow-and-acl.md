@@ -4,6 +4,13 @@
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#797（S2）
 > 本文定义 TUI 事件流的完整链路、AgentEventMapper 防腐层（ACL）、SDK DTO 边界、agent_id 缺口（R8）、sub-agent 事件路由（#612）、转换集中化策略与架构门禁。
 
+> **解耦铁律**（[01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)）：
+> - **R4**：TUI 只经 `AgentClient`，**NEVER** import 核心内部类型
+> - **R7**：领域事件与 TUI Model **NEVER** 跨界直用，**MUST** 经防腐层转换
+> - **§5**：Server 化时传输层 NEVER 进核心，`AgentClient` 保持传输透明
+>
+> 本文设计的目标态 **MUST** 满足以上铁律。UiEvent **NEVER** 持有 `sdk::*` 类型，SDK 类型在第一层 `sdk_event_to_ui_event` 中**彻底**转换为 TUI 自有类型。
+
 ## 1. 定位
 
 事件流是 TUI 三条信息流之一（#795 §4.2），承载 Runtime → TUI 的单向数据流：
@@ -184,7 +191,10 @@ struct AgentEventMapping {
 | `ContentBlock` | share 定义 → SDK re-export | 删除 JSON round-trip；SDK 直接 `pub use share::message::ContentBlock` |
 | 架构守卫 | CI test 验证两侧 JSON shape 一致 | 添加 round-trip 测试 |
 
-### 4.4 UiEvent 类型泄漏现状
+### 4.4 UiEvent 类型泄漏——违反 R7 铁律
+
+> **R7 要求**：领域事件与 TUI Model **NEVER** 跨界直用，**MUST** 经防腐层转换。
+> **现状违规**：`UiEvent` 直接持有 14+ 个 `sdk::*` 类型，SDK 类型泄漏到 TUI 内部（model/、update/、view_model/ 均可见）。
 
 当前 `UiEvent`（`AppEvent`）直接持有以下 SDK 类型：
 
@@ -205,10 +215,83 @@ struct AgentEventMapping {
 | `ContextEstimated` | `sdk::ContextEstimate` | TUI DTO |
 | `WorkingDirectoryChanged` | `sdk::WorkspaceContextView` | TUI 类型 |
 
-> **目标态**：`sdk_event_to_ui_event` 在第一层转换时 **MUST** 把所有 SDK 类型转换为 TUI 自有类型。`UiEvent` **NEVER** 直接持有 `sdk::*` 类型。这需要：
-> 1. 在 `app/event.rs` 中定义 TUI 自有 DTO（或从 SDK re-export 但加 TUI 别名）
-> 2. `event_mapping.rs` 中完成所有类型转换
-> 3. 架构守卫 #6 验证 SDK 类型只在 `adapter/` + `effect/session/processing/` 出现
+### 4.5 目标态：TUI 自有 DTO 完全隔离
+
+**设计原则**：TUI 定义自己的 DTO 类型，`sdk_event_to_ui_event` 在第一层转换时**彻底**消除所有 `sdk::*` 类型。UiEvent 是纯 TUI 类型，model/、update/、view_model/ 永远看不到 SDK 类型。
+
+```rust
+// app/event.rs — TUI 自有类型，NEVER import sdk::*
+
+/// TUI 自有的 ToolCall 状态（不依赖 sdk::ToolCallStatusView）
+enum ToolCallStatus { PendingArgs, Ready, Running }
+
+/// TUI 自有的 Agent 进度事件（不依赖 sdk::AgentProgressEventView）
+struct AgentProgressEvent {
+    kind: AgentProgressKind,
+}
+enum AgentProgressKind {
+    Started { role: String, model: String },
+    ToolOutput { tool_name: String, output: String },
+    Text { text: String },
+    ToolCallStart { name: String },
+    ToolCallEnd { name: String, success: bool },
+    Finished { summary: String },
+    Error { message: String },
+}
+
+/// TUI 自有的 Hook 事件（不依赖 sdk::HookEventView）
+struct HookEvent {
+    hook_name: String,
+    event_name: String,
+    detail: String,
+    outcome: HookOutcome,
+}
+
+/// TUI 自有的消息（不依赖 sdk::ChatMessage）
+struct ChatMessage {
+    text: String,
+    input_id: Option<InputId>,
+    // ...
+}
+
+/// 干净的 UiEvent — 所有字段都是 TUI 自有类型
+enum UiEvent {
+    Text { context: UiTurnContext, text: String },
+    ToolCallStart {
+        context: UiTurnContext,
+        id: ToolCallId,              // TUI 自有
+        provider_id: Option<String>,
+        name: String,
+        index: usize,
+    },
+    ToolCallUpdate {
+        context: UiTurnContext,
+        id: ToolCallId,              // TUI 自有
+        status: ToolCallStatus,      // TUI 自有
+        // ...
+    },
+    AgentProgress {
+        context: UiTurnContext,
+        tool_id: ToolCallId,
+        event: AgentProgressEvent,   // TUI 自有
+    },
+    HookEvent(HookEvent),            // TUI 自有
+    // ...
+}
+```
+
+**迁移策略**：
+
+1. **MUST** 在 `app/event.rs` 中定义所有 TUI 自有 DTO 类型
+2. **MUST** `sdk_event_to_ui_event` 中完成所有 `sdk::*` → TUI 类型的转换——这是唯一的转换点
+3. **MUST** `UiEvent` 定义中 **NEVER** 出现 `sdk::` 前缀
+4. **MUST** 架构守卫 #6 验证：`app/event.rs` 之外的 `model/`、`update/`、`view_model/`、`view_assembler/`、`render/` 目录 **NEVER** import `sdk::*` 类型
+5. **SHOULD** TUI 自有 DTO 与 SDK DTO 保持结构一致（字段名/语义），减少转换逻辑复杂度
+6. **MAY** 对于简单的值类型（如 `ToolCallId = String`），TUI 可直接 `type ToolCallId = String;` 而非从 SDK re-export——彻底切断依赖
+
+> **与 re-export 的区别**：当前代码中部分类型通过 `pub use sdk::ToolCallId` re-export 使用——这虽然减少了重复定义，但 TUI 仍然依赖 SDK crate。目标态：TUI 定义自己的 `type ToolCallId = String`，`sdk_event_to_ui_event` 负责 `sdk::ToolCallId → String` 转换。这样 TUI 可以完全脱离 SDK crate 编译（除了 `AgentClient` trait 本身）。
+
+> **AgentClient trait 的特殊性**：`AgentClient` 是 TUI 的出站端口，定义在 SDK 中。TUI **MUST** 依赖此 trait（R4 允许）。但 trait 方法返回的 `ChatEvent` / `ChatStream` 中的类型 **MUST** 在 ACL 层转换为 TUI 自有类型后才能进入 UiEvent。
 
 ## 5. 事件缺 agent_id 缺口（R8）
 
@@ -367,6 +450,8 @@ enum AgentProgressKindView {
 3. **MUST** `event_mapping.rs` 和 `agent_event.rs` 在 `adapter/` 或 `effect/session/processing/` 目录下——**NEVER** 在 `model/` 或 `render/` 中
 4. **MUST** composition 根负责装配——`spawn_processing` 持 `AgentClient`，event_mapping 和 agent_event 是静态函数
 5. **NEVER** 在 `model/` 中 import `sdk::*` 类型（架构门禁 #2 + #6）
+6. **MUST** `UiEvent`（`app/event.rs`）**NEVER** 出现 `sdk::` 前缀——TUI 自有 DTO 在此定义，SDK 类型在 `event_mapping.rs` 中彻底转换（R7）
+7. **NEVER** 在 `update/`、`view_model/`、`view_assembler/`、`render/` 中 import `sdk::*` 类型——这些层只消费 TUI 自有类型
 
 ### 7.3 Composition 根装配
 
@@ -410,22 +495,28 @@ impl App {
 
 ### 8.2 门禁 #6 详细规则
 
-**门禁 #6：SDK event 类型只在 adapter 层出现**
+**门禁 #6：SDK 类型只在 ACL 边界出现（R4 + R7）**
 
 ```
-允许 import sdk::ChatEvent / sdk::ChatEventContext / sdk::*View 的目录：
-  ✅ apps/cli/src/tui/adapter/
-  ✅ apps/cli/src/tui/effect/session/processing/
+允许 import sdk::* 类型的目录（ACL 边界）：
+  ✅ apps/cli/src/tui/effect/session/processing/   — sdk_event_to_ui_event 转换点
+  ✅ apps/cli/src/tui/adapter/                      — ACL 第二层（如需直接引用 SDK 类型）
 
-禁止 import sdk::ChatEvent / sdk::ChatEventContext / sdk::*View 的目录：
-  ❌ apps/cli/src/tui/model/
-  ❌ apps/cli/src/tui/app/update/
-  ❌ apps/cli/src/tui/view_model/
-  ❌ apps/cli/src/tui/view_assembler/
-  ❌ apps/cli/src/tui/render/
+允许 import sdk::AgentClient trait 的目录（端口依赖，R4 允许）：
+  ✅ apps/cli/src/tui/effect/session/processing/   — 持有 AgentClient
+  ✅ apps/cli/src/tui/effect/                      — Effect 执行器调 AgentClient
+  ✅ composition 根                                — 依赖注入
+
+禁止 import 任何 sdk::* 类型的目录（R7）：
+  ❌ apps/cli/src/tui/app/event.rs                  — UiEvent 只持有 TUI 自有类型
+  ❌ apps/cli/src/tui/model/                        — Model 纯净
+  ❌ apps/cli/src/tui/app/update/                   — TEA Update 纯净
+  ❌ apps/cli/src/tui/view_model/                   — ViewModel 不接触 SDK
+  ❌ apps/cli/src/tui/view_assembler/               — ViewAssembler 不接触 SDK
+  ❌ apps/cli/src/tui/render/                       — Render 只读 TUI 类型
 ```
 
-**目标态**：`UiEvent`（`app/event.rs`）也不持有 SDK 类型——当前是现状缺口，需逐步迁移（见 §4.4）。
+> **关键**：`app/event.rs`（UiEvent 定义）也在禁止列表中——UiEvent **NEVER** 持有 `sdk::*` 类型。这是 R7 的直接要求：领域事件与 TUI Model **NEVER** 跨界直用。
 
 ### 8.3 门禁实现模式
 
@@ -453,14 +544,14 @@ fn test_sdk_event_types_only_in_adapter() {
 
 | # | 缺口 | 现状 | 目标态 | 关联 |
 |---|---|---|---|---|
-| 1 | UiEvent 持有 SDK 类型 | 14+ 个 UiEvent 变体直接持有 `sdk::*` 类型 | UiEvent 只持有 TUI 自有类型，第一层转换完成全部类型消除 | #797 |
+| 1 | UiEvent 持有 SDK 类型（**违反 R7**） | 14+ 个 UiEvent 变体直接持有 `sdk::*` 类型，SDK 类型泄漏到 model/update/view_model | UiEvent 只持有 TUI 自有 DTO（§4.5），第一层转换彻底消除 SDK 类型 | #797 |
 | 2 | convert.rs 444 行手工 match | RuntimeStreamEvent → ChatEvent 手工转换，已有 5 处漂移 | Runtime 定义 → SDK re-export，删除 convert.rs | #795 §8 |
 | 3 | 事件缺 agent_id | ChatEventContext 无 agent_id，sub-agent 事件无法区分来源 | ChatEventContext 加 agent_id，TUI 按 agent_id 路由 | #797 R8 |
 | 4 | sub-agent 事件被聚合 | 子 agent 事件压缩为字符串，无实时细节 | AgentProgressKind 扩展 Text/ToolCallStart/ToolCallEnd，实时传递 | #612 |
 | 5 | WorkingDirectoryChanged sync I/O | event_mapping.rs 同步调 git branch + worktree kind 子进程 | 移到 Effect 异步执行或加缓存 | #795 §10.5 |
 | 6 | `_diagnostic` helper 死代码 | 无调用方 | 删除 | #795 §10.2 |
 | 7 | subagent header 回调注入 | `map_agent_event_with_tool_header` 接受 `FnMut` 回调 | progress 格式化内聚在 progress.rs | #797 |
-| 8 | 架构门禁 #6 缺失 | SDK 类型在 model/ 等非 adapter 目录可见 | 补齐门禁，SDK 类型只在 adapter + processing 出现 | #795 §9 |
+| 8 | 架构门禁 #6 缺失（**R4+R7 保障**） | SDK 类型在 model/、app/event.rs 等非 ACL 目录可见 | 补齐门禁，SDK 类型只在 effect/session/processing + adapter 出现，app/event.rs 也禁止 | #795 §9 |
 | 9 | UiEvent::ReflectionDone / ReflectionApplyDone 死代码 | `#[allow(dead_code)]`，映射时静默丢弃 | 删除 | #795 §10.2 |
 | 10 | ToolOutput progress 被忽略 | `AgentProgressKindView::ToolOutput` 返回 `AgentEventMapping::default()` | 目标态展示 sub-agent tool 输出摘要 | #612 |
 | 11 | ContentBlock JSON round-trip | `serde_json::from_value(to_value(...))` | share 定义 → SDK re-export | #795 §8 |
@@ -479,3 +570,4 @@ fn test_sdk_event_types_only_in_adapter() {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：事件流完整链路、AgentEventMapper ACL、SDK DTO 边界、agent_id 缺口 R8、sub 事件路由 #612、转换集中化、架构门禁、现状缺口 11 项 | #797 |
+| 2026-07-12 | 强化解耦：引用 R4/R7 铁律；新增 §4.5 TUI 自有 DTO 完全隔离设计；门禁 #6 扩展覆盖 app/event.rs；缺口 #1/#8 标注 R7/R4 违规 | #797 |
