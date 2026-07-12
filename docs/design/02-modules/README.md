@@ -19,7 +19,7 @@
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
-| [tui/](tui/README.md) | 八层 TEA 管线、三条信息流、3+3 Context Model、Msg/Intent/Change/Effect 枚举、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态、Model 层完整字段与投影状态机、SpinnerPhase 派生函数、ConfigProjection、WorkspaceProjection、出站端口适配器（Local + WSS）、单一真相规则、纯净性约束 | ✅ S2 |
+| [tui/](tui/README.md) | 八层 TEA 管线、三条信息流、3+3 Context Model、Msg/Intent/Change/Effect 枚举、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态、Model 层完整字段与投影状态机、SpinnerPhase 派生函数、ConfigProjection、WorkspaceProjection、出站端口适配器（Local + WSS）、单一真相规则、纯净性约束、事件流两层转换 ACL、agent_id 缺口 R8、sub-agent 事件路由 #612 | ✅ S2 |
 | [storage/](storage/README.md) | 原子读写、backup/quarantine、路径安全及数据所有权边界 | ✅ S2 摘要 |
 | [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink/rotation 与 Audit 分离 | ✅ S2 摘要 |
 | [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 | ✅ S2 摘要 |
@@ -56,3 +56,4 @@
 | 2026-07-12 | 新增 server/ 占位文档：暂缓设计，继承草案约束 | #794 |
 | 2026-07-12 | 新增 tui/ 战术设计：八层 TEA 管线、三条信息流、3+1 Context、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 | #795 |
 | 2026-07-12 | 新增 tui/02-model：3+3 Context 完整字段、投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束 | #796 |
+| 2026-07-12 | 新增 tui/03-event-flow-and-acl：事件流两层转换 ACL、SDK DTO 边界、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6 | #797 |
