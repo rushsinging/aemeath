@@ -128,7 +128,8 @@ struct RuntimeContext {
     reasoning: Arc<dyn ReasoningPort>,  // Sub: EffortOnly/Inherit
     audit:     Arc<dyn AuditSink>,
     config:    ConfigSnapshot,          // Main/Sub 共享
-    events:    Arc<dyn EventSink>,      // Main→TUI ; Sub→父 Run
+    input:     Arc<dyn InputSource>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
+    events:    Arc<dyn EventSink>,      // 出站：Main→TUI ; Sub→父 Run
 }
 ```
 
@@ -205,3 +206,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：Run 聚合 + RunSpec + RuntimeContext 三元组、不变量、领域事件、控制权矩阵、安全铁律、差异矩阵 | #761 |
+| 2026-07-11 | RuntimeContext 补入站端口 input（InputSource）；澄清 result 不进 RuntimeContext | #761 |

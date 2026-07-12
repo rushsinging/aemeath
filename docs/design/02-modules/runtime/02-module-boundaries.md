@@ -10,7 +10,7 @@
                         api（入站适配器实现 + 装配入口）
                           │
                           ▼
-              agent_execution（Run 聚合 + 状态机 + 用例编排）
+              agent_run（Run 聚合 + 状态机 + 用例编排）
                           │
                           ▼
                  loop_engine（统一 ReAct 循环骨架 + StuckGuard）
@@ -26,15 +26,16 @@
 
 ## 2. 各模块职责
 
-### agent_execution（模块核心）
+### agent_run（模块核心）
 - **状态所有权**：`Run` 聚合、`RunStatus` 状态机、Run Step / Tool Call 实体
 - **用例**：`start_run` / `resume_run`(ask_user 后) / `cancel_run` / `derive_sub_run`
 - **不持有** RuntimeContext（作为参数流转），**不直接调 Port**（经 loop_engine + coordinators）
 
 ### loop_engine（Main/Sub 共用）
-- **职责**：ReAct 循环骨架（推理→行动→观察）+ 停止条件 + 步进
+- **职责**：ReAct 循环骨架（推理→行动→观察）+ 停止条件 + 步进 + 门禁 `InputSource.drain`（纳入追问）
 - **内置 StuckGuard**（4 层防 stuck，见 `04-stuck-prevention`）——Main/Sub 统一获得保护
 - **零分支**：Main/Sub 差异全在传入的 `RuntimeContext` + `RunSpec`
+- 消费：入站 `InputSource`（drain 输入）、`HookPort`（Stop hook 时机——**判定归 Hook，重试编排归本模块**）
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
@@ -45,13 +46,13 @@
 ### tool_coordination
 - **职责**：ToolCall 双 ID 映射（领域 `ToolCallId` ↔ provider_id）、并发执行、结果回收
 - **内置 ToolLoopGuard**（工具循环熔断，StuckGuard L2）
-- 消费：`ToolPort`（受限 registry）
-- SubAgent 派生工具 → 触发 agent_execution 的 `derive_sub_run`
+- 消费：`ToolPort`（受限 registry）、`HookPort`（PreToolCall / PostToolCall 时机）
+- SubAgent 派生工具 → 触发 agent_run 的 `derive_sub_run`
 
 ### context_coordination
 - **职责**：构建本轮 Context Window（取历史 + compact 家族 + memory 注入 + prompt/guidance 装配 + token budget）
 - 消费：`ContextPort`（Context Management BC）、`MemoryPort`
-- **注**：Session 对话历史属 Context Management，本模块只是 Runtime 侧的调用协调
+- **注**：Session 对话历史属 Context Management，本模块只是 Runtime 侧调用协调。**Memory 边界**：检索归 Memory（`MemoryPort.retrieve`），注入进 Context Window 归 Context Management——记忆本体是独立 BC，不是 Context 的一部分
 
 ### interaction
 - **职责**：处理执行中断——`AwaitingUser`（ask_user）、`AwaitingToolApproval`（权限门）、pause/resume
@@ -63,24 +64,35 @@
 - 消费：`EventSink`、`AuditSink`（成本/审计事件）
 
 ### api（入站适配器实现）
-- **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口；SubAgent 派生时装配子 RuntimeContext
+- **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputSource`）；SubAgent 派生时装配子 RuntimeContext
 - **注**：真正的生产装配收敛在 Composition Root（见 `06-ports-and-adapters`），api 模块只做 Runtime 内的接线
+
+### Runtime / Hook 边界（跨模块）
+Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtime 编排**：
+
+| | 拥有 |
+|---|---|
+| **Hook BC** | 执行机制：跑脚本、注入环境变量、解析输出、判定阻断/放行 + feedback |
+| **Runtime** | 触发时机（UserPromptSubmit/Stop/PreToolCall/PostToolCall/SubagentStart-Stop/Notification）+ 响应编排（拿到阻断后 `stop_hook_block_limit` 重试、注入 feedback 重跑）|
+
+触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubagentStart/Stop）。现状缺口 R4：无 `HookPort` 抽象（裸 `HookRunner`）。
 
 ## 3. 状态所有权矩阵
 
 | 状态 | 所有者模块 | 说明 |
 |---|---|---|
-| Run 聚合 / RunStatus 状态机 | **agent_execution** | 唯一状态机 |
-| Run Step / Tool Call 实体 | agent_execution（Run 聚合内）| |
+| Run 聚合 / RunStatus 状态机 | **agent_run** | 唯一状态机 |
+| Run Step / Tool Call 实体 | agent_run（Run 聚合内）| |
 | StuckGuard 计数（stall/fuse）| loop_engine | 循环级 |
 | ToolCall 双 ID 映射表 | tool_coordination | 运行时映射 |
 | Context Window（临时）| context_coordination | 每轮构建 |
 | RuntimeContext（活资源）| 由 api/派生逻辑装配，**流经各模块作参数** | 不属任何模块的持久状态 |
+| InputSource 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
 
 ## 4. 依赖方向（Clean）
 
 ```
-api → agent_execution → loop_engine → {model_invocation, tool_coordination,
+api → agent_run → loop_engine → {model_invocation, tool_coordination,
                                         context_coordination, interaction} → *Port
 event_projection：被各模块调用（emit），不反向依赖业务
 ```
@@ -105,3 +117,4 @@ event_projection：被各模块调用（emit），不反向依赖业务
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：8 个内部模块划分、状态所有权、依赖方向、收敛方向 | #761 |
+| 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputSource 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputSource 状态、Runtime/Hook 边界子节 | #761 |

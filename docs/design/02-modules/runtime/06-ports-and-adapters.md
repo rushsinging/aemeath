@@ -81,6 +81,7 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
         reasoning: match spec.reasoning { GraphDriven => root.reasoning(), EffortOnly => Effort::new(inherit(parent)), Inherit => parent_effort() },
         audit:     root.audit(),
         config:    root.config_snapshot(),                // 共享
+        input:     match spec.name.as_ref() { "main" => root.tui_input(), _ => FixedQueue::new(spec.initial_prompt) }, // 入站
         events:    match spec.name.as_ref() { "main" => root.tui_sink(), _ => ParentRunSink::new(parent) },
     }
 }
@@ -124,3 +125,4 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：入站端口、12 出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、现状缺口 | #761 |
+| 2026-07-11 | RuntimeContext/assemble 补入站端口 InputSource（Main=TUI 通道+buffer，Sub=固定队列）| #761 |

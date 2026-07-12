@@ -58,6 +58,9 @@ fn run_loop(run: &mut Run, ctx: &RuntimeContext, guard: &mut StuckGuard) {
         if let Some(reason) = guard.check_timeout(run) {     // L3 时间兜底（timeout=0 跳过）
             run.fail(reason); break;
         }
+        for input in ctx.input.drain() {                     // 入站门禁：纳入忙期/新输入（追问）
+            run.append_input(input);                         // Main: 用户追问排队; Sub: 首轮 prompt
+        }
         if run.needs_compaction() {
             ctx.context.compact(run);                        // context_coordination
         }
@@ -105,13 +108,25 @@ fn run_loop(run: &mut Run, ctx: &RuntimeContext, guard: &mut StuckGuard) {
 | | 谁管 | 循环 |
 |---|---|---|
 | **单个 Run** | `loop_engine::run_loop` | Run 内 Run Step 循环，跑到 Completed/AwaitingUser/Failed/Cancelled |
-| **Main 常驻多轮** | `agent_execution` 会话循环 | `等用户输入 → start_run → Run 完成 → 等下一输入 → 新 Run`（一个 Session 内 Run 序列）|
+| **Main 常驻多轮** | `agent_run` 会话循环 | `等用户输入 → start_run → Run 完成 → 等下一输入 → 新 Run`（一个 Session 内 Run 序列）|
 | **Sub 单次** | 父 Run 的 tool_coordination | 派生一个子 Run，跑完回传父，无后续 |
 
 **统一点**：Sub = 单次输入的一个 Run；Main = Session 层多个 Run 的序列，每个 Run 就是"单次输入"的特例。**Loop Engine 不感知这个区别**——它只跑一个 Run。
 
 - `AwaitingUser`（ask_user 暂停）：同一个 Run 内暂停/resume，Run 未完成
 - `Completed` 后等下一输入：Run 完成，Session 层开新 Run（不是同一 Run）
+
+### InputSource（入站端口）— 支撑追问
+
+Loop Engine 每轮在门禁点 `ctx.input.drain()` 纳入新输入，Main/Sub 靠装配的 `InputSource` 区分，引擎零分支：
+
+| | InputSource 装配 | 行为 |
+|---|---|---|
+| Main | TUI 输入通道 + 忙期排队 buffer | 用户在 Run 执行中**追问** → 排队 → 下一轮门禁 drain → append 进 Context Window 带上 |
+| Sub | 固定初始队列 | 首轮 drain 出 prompt，之后为空 → 自然收敛 |
+
+- `input` 是 **RuntimeContext 的入站端口**（与出站端口同层，装配时确定）
+- `result` **不进** RuntimeContext——是 Run 产出：流式经 `event sink` 发出、终态记 Run outcome；**Sub 的 result 经 event adapter 回传父 + finalize 返回值**
 
 ## 4. 停止条件
 
@@ -137,3 +152,4 @@ fn run_loop(run: &mut Run, ctx: &RuntimeContext, guard: &mut StuckGuard) {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：Run 单状态机 + 迁移表、Loop Engine 零分支骨架、单 Run vs Session 多 Run 序列、停止条件 | #761 |
+| 2026-07-11 | 补 InputSource 入站端口（Loop 门禁 drain 支撑追问）+ input/result 归属；agent_execution→agent_run | #761 |
