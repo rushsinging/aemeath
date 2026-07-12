@@ -3,14 +3,10 @@ use crate::LOG_TARGET;
 use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::agent::{AgentInput, AgentResult};
-use std::sync::Arc;
-use storage::api::{TaskStatus, TaskStore};
 
 const SUB_AGENT_MAX_TURNS_CAP: u32 = 1000;
 
-pub struct AgentTool {
-    pub store: Arc<TaskStore>,
-}
+pub struct AgentTool;
 
 #[async_trait]
 impl TypedTool for AgentTool {
@@ -20,7 +16,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, up to 1000 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `task_id` to bind to a tracked task for automatic status management."
+        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, up to 1000 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -74,30 +70,10 @@ impl TypedTool for AgentTool {
         let cwd_str = cwd.to_string_lossy();
         let turns = max_turns;
 
-        // Resolve role and model:
-        //   - `model` takes precedence: a direct "provider/model_id" spec
-        //   - `role` is resolved by CliAgentRunner via AgentsConfig::roles
-        //   - If neither is set, the runner uses the default model
-        let role = args.role.as_deref();
-        let model = args.model.as_deref();
-        let model_spec = if model.is_some() { model } else { role };
+        // `role` is resolved by CliAgentRunner via AgentsConfig::roles.
+        // If not set, the runner uses the default model.
+        let model_spec = args.role.as_deref();
 
-        // --- Task status management ---
-        // If `taskId` is provided, automatically manage its lifecycle:
-        //   Pending → InProgress (before run_agent)
-        //   InProgress → Completed (on success) or Pending (on failure)
-        let task_id = args.task_id.clone();
-
-        if let Some(ref tid) = task_id {
-            if self.store.get(tid).await.is_none() {
-                return TypedToolResult::error(format!("task not found: {tid}"));
-            }
-            self.store
-                .update(tid, |t| {
-                    t.status = TaskStatus::InProgress;
-                })
-                .await;
-        }
         let system = format!(
             r#"You are a sub-agent performing a specific task. You have access to tools for running commands, reading and editing files, and searching codebases.
 
@@ -130,20 +106,6 @@ Instructions:- Complete the task described in the user message
             })
             .await;
 
-        // Update task status based on agent outcome
-        if let Some(ref tid) = task_id {
-            let is_failure = is_agent_failure(&final_output);
-            self.store
-                .update(tid, |t| {
-                    t.status = if is_failure {
-                        TaskStatus::Pending
-                    } else {
-                        TaskStatus::Completed
-                    };
-                })
-                .await;
-        }
-
         // text → 父 LLM：必须包含子代理实际产出，否则父 agent 无法基于结果决策。
         // data → TUI：结构化展示（AgentResult.output 同步保留）。
         let text = if final_output.trim().is_empty() {
@@ -153,8 +115,7 @@ Instructions:- Complete the task described in the user message
         };
         log::debug!(
             target: LOG_TARGET,
-            "agent final output: task_id={:?}, output_bytes={}, text_bytes={}, output_preview={:?}",
-            task_id,
+            "agent final output: output_bytes={}, text_bytes={}, output_preview={:?}",
             final_output.len(),
             text.len(),
             truncate_debug_preview(&final_output, 500)
@@ -162,21 +123,10 @@ Instructions:- Complete the task described in the user message
         TypedToolResult::success(
             text,
             AgentResult {
-                task_id,
                 output: final_output,
             },
         )
     }
-}
-
-/// Detect whether a sub-agent result indicates failure (error, timeout,
-/// cancellation, or max-turns exhaustion). These markers are produced by
-/// `CliAgentRunner::run_agent` in `agent_runner.rs`.
-fn is_agent_failure(result: &str) -> bool {
-    result.contains("Cancelled by user")
-        || result.contains("[Sub-agent timed out")
-        || result.contains("Sub-agent error:")
-        || result.contains("[Sub-agent reached max turns")
 }
 
 fn truncate_debug_preview(value: &str, max_chars: usize) -> String {

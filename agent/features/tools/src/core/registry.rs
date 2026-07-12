@@ -89,12 +89,7 @@ pub fn register_tools(
     reg!("WebSearch", web_search::WebSearchTool);
 
     // Agent dispatch
-    reg!(
-        "Agent",
-        agent_tool::AgentTool {
-            store: task_store.clone(),
-        }
-    );
+    reg!("Agent", agent_tool::AgentTool);
 
     // Task management tools
     reg!(
