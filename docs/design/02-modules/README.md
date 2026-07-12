@@ -11,7 +11,7 @@
 | 目标文档 | 内容 | 状态 |
 |---|---|---|
 | [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 | ✅ S2 |
-| [context-management/](context-management/01-session.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
+| [context-management/](context-management/README.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
 | [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
 | [task/](task/README.md) | Task 聚合根、状态机、依赖图不变量、Batch 领域服务、TaskPort、Published Language | ✅ S2 |
 | [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离范式、三端口、GitWorktreeOps、git 上下文供给 | ✅ S2 |
