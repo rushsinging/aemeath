@@ -8,20 +8,44 @@
 
 `AgentClient` trait（`packages/sdk`）= 核心域对外的入站端口 + 发布语言，供 CLI/TUI/Server 消费。所有权属 Agent Runtime，独立成 crate 仅为依赖倒置。契约细节见 [../../01-system/03-context-map.md](../../01-system/03-context-map.md)。
 
+### 同步打断入口
+
+```rust
+trait AgentClient {
+    // 其他命令省略
+    fn cancel_run(&self, run_id: RunId) -> CancelRunOutcome;
+}
+
+enum CancelRunOutcome {
+    Accepted,       // 调用返回前已进入 Cancelling 且 cancellation scope 已触发
+    AlreadyCancelling,
+    AlreadyTerminal,
+    NotFound,
+}
+```
+
+- `cancel_run` 是同步、幂等、out-of-band 的控制命令，NEVER 经 `InputBuffer` 排队。
+- TUI 只持 `Arc<dyn AgentClient>` 或 SDK 提供的、绑定 `run_id` 的薄 `CancelHandle`；NEVER 持有 Runtime 实例、Run 聚合或 `CancellationToken`。
+- `CancelHandle::cancel()` 只是 `cancel_run(run_id)` 的语法便利，生命周期绑定单个 Run，NEVER 捕获 Session 级可替换 token 槽。
+- 返回 `Accepted` 只确认取消请求已即时生效；取消完成由 `RunCancelled` 事件异步确认。
+- 对未带 `run_id` 的旧 `ChatInputEvent::Cancel`，迁移期只能映射到同一个 `cancel_run(active_run_id)`，完成 SDK 迁移后退役，NEVER 保留第二套语义。
+
 ## 2. 出站端口清单（12 个，签名草案）
 
 ```rust
 trait ContextPort {                                  // Context Management BC
     fn build_window(&self, run: &Run) -> ContextWindow;   // 历史+compact+注入+prompt
     fn needs_compaction(&self, run: &Run) -> bool;
-    fn compact(&self, run: &mut Run);
+    fn compact(&self, run: &mut Run, cancel: &RunCancellationScope);
 }
 trait ProviderPort {                                 // Provider BC（内部 ACL）
-    fn invoke(&self, window: ContextWindow, effort: ReasoningLevel)
+    fn invoke(&self, window: ContextWindow, effort: ReasoningLevel,
+              cancel: &RunCancellationScope)
         -> Stream<InvocationDelta>;                       // 流式
 }
 trait ToolPort {                                     // Tool & Skill & Command BC
-    fn execute(&self, calls: Vec<ToolCall>) -> Vec<ToolResult>;
+    fn execute(&self, calls: Vec<ToolCall>, cancel: &RunCancellationScope)
+        -> Vec<ToolResult>;
     fn schemas(&self) -> Vec<ToolSchema>;                 // 受限 registry 的可用工具
 }
 trait PolicyPort {                                   // Policy BC
@@ -41,7 +65,8 @@ trait WorkspacePort {                                // Project BC（Sub: 独立
     fn seed_isolated(&self) -> WorkspaceFrame;            // 快照父 frame
 }
 trait HookPort {                                     // Hook BC（Sub: BoundaryOnly）
-    fn run(&self, point: HookPoint, ctx: HookContext) -> HookOutcome;
+    fn run(&self, point: HookPoint, ctx: HookContext,
+           cancel: &RunCancellationScope) -> HookOutcome;
 }
 trait ReasoningPort {                                // Workflow BC（Sub: EffortOnly）
     fn effort(&self, run: &Run) -> ReasoningLevel;
@@ -81,8 +106,9 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
         reasoning: match spec.reasoning { GraphDriven => root.reasoning(), EffortOnly => Effort::new(inherit(parent)), Inherit => parent_effort() },
         audit:     root.audit(),
         config:    root.config_snapshot(),                // 共享
-        input:     match spec.name.as_ref() { "main" => root.tui_input(), _ => FixedQueue::new(spec.initial_prompt) }, // 入站
+        input:     match spec.name.as_ref() { "main" => root.tui_input(), _ => FixedQueue::new(spec.initial_prompt) }, // 仅内容输入
         events:    match spec.name.as_ref() { "main" => root.tui_sink(), _ => ParentRunSink::new(parent) },
+        cancel:    match parent { Some(ctx) => ctx.cancel.child_scope(), None => RunCancellationScope::new() },
     }
 }
 ```
@@ -112,6 +138,8 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | HookPort | ⚠️ 仅 `HookNotificationPort` | 补 per-tool run |
 | TaskPort / ConfigSnapshot / EventSink | ✅ `TaskStorePort`/`ConfigReader`/`ChatEventSink` | 沿用 |
 | EventSink agent_id | ⚠️ 事件仅 chat_id/turn_id | 补 agent_id（#612）|
+| cancel_run / RunCancellationScope | ⚠️ SDK `CancelHandle` 捕获 Session 级 `Arc<Mutex<CancellationToken>>`，每回合替换；另有 `ChatInputEvent::Cancel` | 改为绑定 `run_id` 的同步幂等入口 + per-Run scope；旧事件退役（#700）|
+| Context/Provider/Tool/Hook cancellation | ⚠️ Provider/Tool 部分监听 token；compact 创建独立 token；Hook 仅 timeout | 全部接收同一 Run scope 或派生 scope（#700/S5）|
 
 ## 7. 相关文档
 
@@ -126,3 +154,4 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 |---|---|---|
 | 2026-07-11 | 初稿：入站端口、12 出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、现状缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
+| 2026-07-12 | 定义同步幂等 `cancel_run(run_id)`、per-Run cancellation scope 及 Provider/Tool/Compact/Hook 传播边界 | #700 |

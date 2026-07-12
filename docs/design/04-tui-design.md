@@ -145,10 +145,11 @@ Runtime-origin event 必须经过 anti-corruption mapper，转换为 Conversatio
 ConversationIntent::StartChat / ObserveAssistantText / ObserveToolCallStart /
     ObserveToolArguments / ObserveToolCall / ObserveToolResult / CompleteChat / QueueSubmission
 
-InputIntent::InsertText / MoveCursor / Submit / AcceptCompletion / Clear
+InputIntent::InsertText / MoveCursor / Submit / AcceptCompletion / Clear /
+    InterruptCurrentRun
 
 RuntimeIntent::UpdateWorkspace / RefreshTaskStatus / RecordUsage /
-    StartProcessingJob / FinishProcessingJob
+    StartProcessingJob / MarkRunCancelling / FinishProcessingJob
 
 DiagnosticIntent::RecordNotice / OpenPrompt / AnswerPrompt / DismissNotice
 ```
@@ -159,9 +160,11 @@ DiagnosticIntent::RecordNotice / OpenPrompt / AnswerPrompt / DismissNotice
 ConversationChange::ChatStarted / ChatTurnStarted / AssistantTextAppended /
     ToolCallObserved / ToolCallBound / ToolCallCompleted / ChatCompleting / ChatCompleted
 
-InputChange::TextChanged / CursorMoved / Submitted / Cleared
+InputChange::TextChanged / CursorMoved / Submitted / Cleared /
+    CurrentRunInterruptRequested
 
-RuntimeChange::WorkspaceChanged / TaskStatusChanged / ProcessingStarted / ProcessingFinished
+RuntimeChange::WorkspaceChanged / TaskStatusChanged / ProcessingStarted /
+    RunCancelling / ProcessingFinished
 
 DiagnosticChange::NoticeRecorded / PromptOpened / PromptAnswered / NoticeDismissed
 ```
@@ -169,9 +172,28 @@ DiagnosticChange::NoticeRecorded / PromptOpened / PromptAnswered / NoticeDismiss
 ### Effect（update 后交给 runtime 执行的副作用）
 
 ```
-Effect::SpawnAgentChat / SaveSession / FetchTaskStatus /
+Effect::SpawnAgentChat / CancelCurrentRun / SaveSession / FetchTaskStatus /
     CopyToClipboard / RequestRender / StartTimer / StopTimer / RunHook
 ```
+
+### 当前 Run 打断
+
+`Esc` 与 `Ctrl+C` 在存在 active Run 时 MUST 归一为同一个业务意图和同一个副作用：
+
+```text
+Esc / Ctrl+C
+→ InputIntent::InterruptCurrentRun
+→ InputChange::CurrentRunInterruptRequested
+→ Effect::CancelCurrentRun { run_id }
+→ AgentClient::cancel_run(run_id)
+```
+
+- update/reducer NEVER 直接调用 `CancelHandle`；所有 IO 统一由 Effect executor 执行。
+- executor 调用同步 `cancel_run(run_id)`；仅返回 `Accepted`/`AlreadyCancelling` 时立即把 active chat 投影为 `Cancelling`，保持 UI 可响应，NEVER 等待 Runtime 收口。`AlreadyTerminal`/`NotFound` 作为 late/stale diagnostic 处理，不伪造 Cancelling 状态。
+- 收到 SDK `RunCancelled` 后才投影为 `Cancelled`，随后 Runtime processing 状态回到 Idle。
+- TUI NEVER 持有 Runtime 实例或 `CancellationToken`；只持 `Arc<dyn AgentClient>`，或 SDK 暴露的、绑定单个 `run_id` 的薄 CancelHandle。
+- `Esc` 与首次 `Ctrl+C` 的取消语义完全相同；若 Run 已处于 `Cancelling`，重复 `Esc` 幂等，重复 `Ctrl+C` MAY 作为应用级强制退出手势，但 NEVER 建立第二条 Runtime 取消路径。
+- 无 active Run 时，按键行为由应用级导航/退出规则决定，不调用 Runtime。
 
 规则：
 - Model Context 不直接执行 Effect

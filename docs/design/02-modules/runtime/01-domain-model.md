@@ -24,9 +24,15 @@ struct Run {
     id: RunId,                 // UUIDv7
     spec: RunSpec,             // 规格（可序列化，随 session 快照）
     parent: Option<RunId>,     // Sub Run 指向父 Run（结果/事件回传）
-    status: RunStatus,         // 状态机（见 03-loop-and-state-machine）
+    status: RunStatus,         // 状态机（含 Cancelling 过渡态，见 03-loop-and-state-machine）
     steps: Vec<RunStep>,       // 内部实体序列
     started_at: Instant,
+}
+
+/// 每个 Run 独占的协作式取消作用域；属于 RuntimeContext 活资源，不持久化。
+/// 子 Run 从父作用域派生，父取消会同步传播到全部子 Run。
+struct RunCancellationScope {
+    token: CancellationToken,
 }
 
 // —— 聚合内实体（有标识+生命周期，归属 Run）——
@@ -62,15 +68,19 @@ struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 
 ## 3. 不变量（Run 聚合守护）
 
 1. Run 进入 `Completed/Failed/Cancelled` 后**不可再加 Run Step**
-2. 每个 Tool Call **必须归属**某个 Run Step
-3. 每个 Run Step **至多一次** Model Invocation
-4. Tool Call 状态**单向推进**（不可从 Success 回到 Running）
-5. `AwaitingToolApproval` 未决时，不可进入 `ExecutingTools`
-6. **timeout > 0 时**，墙钟超时强制迁移到 `Failed`（timeout=0 表示无限，见 §5）
+2. `Cancelling` 只接受取消收口，不可开始 Model Invocation、Tool Call 或 Compaction
+3. 每个 Tool Call **必须归属**某个 Run Step
+4. 每个 Run Step **至多一次** Model Invocation
+5. Tool Call 状态**单向推进**（不可从 Success 回到 Running）
+6. `AwaitingToolApproval` 未决时，不可进入 `ExecutingTools`
+7. **timeout > 0 时**，墙钟超时强制迁移到 `Failed`（timeout=0 表示无限，见 §5）
+8. 每个 Run **必须独占**一个 cancellation scope；子 Run 从父 scope 派生，NEVER 共享可替换的 Session 级 token 槽
 
 ## 4. 领域事件（→ Event Projection → SDK ChatEvent）
 
-`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCompleted/Failed/Cancelled`
+`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCancellationRequested · RunCompleted/Failed/Cancelled`
+
+> **取消事件分两阶段**：`RunCancellationRequested` 在同步取消入口接受请求并将 Run 迁移到 `Cancelling` 时产生；`RunCancelled` 仅在 Provider/Tool/Compact/Hook 等在途工作停止且回滚完成后产生。前者是即时请求事实，后者是异步完成确认。
 
 > **终态事件族统一带载荷**：`RunCompleted{ result }`（最后 assistant 文本/结构）/ `RunFailed{ error }` / `RunCancelled`。这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；**Sub→父 Run，父从终态事件统一提取**（成功取 `result`、失败取 `error`）继续。**靠终态领域事件识别，不靠遍历 message**。
 
@@ -132,6 +142,7 @@ struct RuntimeContext {
     config:    ConfigSnapshot,          // Main/Sub 共享
     input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
     events:    Arc<dyn EventSink>,      // 出站：Main→TUI ; Sub→父 Run
+    cancel:    RunCancellationScope,    // per-Run；Provider/Tool/Compact/Hook 共享或派生
 }
 ```
 
@@ -148,6 +159,7 @@ struct RuntimeContext {
 | `reasoning` | GraphDriven | EffortOnly/Inherit | 全 graph / 仅 effort（无设置继承父）|
 | `task` | Shared | Isolated | 独立 `TaskStore` |
 | `tools` | 全集 | 白名单 | 受限 registry |
+| `cancel` | 新建 per-Run scope | 从父 scope 派生 | 父取消传播到子 Run；各 Run 独立终态收口 |
 
 ## 7. SubAgent 派生：控制权矩阵 + 安全铁律
 
@@ -211,3 +223,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | 2026-07-11 | RuntimeContext 补入站端口 input（InputBuffer）；澄清 result 不进 RuntimeContext | #761 |
 | 2026-07-11 | output/result 定案：统一经 EventSink，result 为 RunCompleted 载荷（无独立 RunResult），靠终态事件识别 | #761 |
 | 2026-07-11 | 领域事件补终态族对称载荷（RunFailed{error} / RunCancelled）+ ModelInvocationRetrying | #761 |
+| 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |
