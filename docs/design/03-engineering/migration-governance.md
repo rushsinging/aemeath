@@ -41,6 +41,35 @@
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
 | P1 | **Runtime 依赖具体 client/pool** | Runtime 直接持有并调用 `LlmClient` / `LlmClientPool`，ProviderInfoPort 只覆盖元数据 | Runtime 只依赖自有 `ProviderPort` 与稳定 Invocation PL；具体 provider 仅在 Composition Root 装配 | S3/S5 |
+| P2 | **调用期配置为共享可变状态** | model client 上以 `set_max_tokens` / `set_reasoning_level` 原地修改，再由 Sub finalize 手动恢复 | 共享不可变 Transport；每次 attempt 构造不可变 Invocation scope，无 `set_*` 与 restore | S3/S5 |
+| P3 | **Main/Sub client 并发踩踏** | 多个 Sub 可拿到同一 `Arc<LlmClient>`，setup/read-modify/finalize restore 非原子，取消或 panic 会遗留污染 | Main/Sub 只共享只读 Transport，各自持有调用期状态；任一调用 drop 不影响其他调用 | S3/S5 |
+| P4 | **流协议依赖多方法回调** | `StreamHandler` 通过 text/thinking/tool/error 等回调把 Provider 与 Runtime handler 生命周期耦合，错误主要为字符串 | pull-based `InvocationStream` + 封闭 `InvocationDelta` + 结构化终结错误；Runtime 自行组装 ModelInvocation | S5 |
+| P5 | **wire DTO 发布面过宽** | Provider contract/api re-export 含供应商 request/stream payload、client config 和具体构造类型 | wire request/response/SSE DTO 全部留在 driver adapter；跨 BC 只交换 Invocation PL、ModelCapability 与 Message | S5/S7 |
+| P6 | **跨调用重试下沉到 Provider** | 各 provider 内部自行 attempt/backoff，策略与日志不一致，Runtime 无法完整拥有 attempt 事件 | Provider 一次 invoke 只做一次上游语义请求并分类错误；Runtime 统一 retry/backoff/compact/final failure | S3/S5 |
+| P7 | **stream → non-stream fallback 隐式重发** | 部分 driver 在流失败后于 Provider 内再次请求；已输出内容时存在重复或归因不清风险 | fallback 必须由 Runtime 作为新 attempt 显式编排；每次 attempt 独立事件、usage 与取消 | S5 |
+| P8 | **reasoning 能力与 clamp 分散** | driver、provider、Runtime 与 model 配置分别处理上限/字段；Anthropic、OpenAI-compatible、Ollama 路径不统一 | Workflow desired ∩ Config user max ∩ Provider/model max；Provider 统一能力解析与 wire 映射 | S3/S5 |
+| P9 | **错误分类不稳定** | HTTP、网络、stream、取消和 context 超限在多路径转换，部分上层依赖字符串判断 | `ProviderErrorKind + retryable + safe provider code`；Runtime 只按结构化语义编排 | S5 |
+| P10 | **Usage 与成本边界未显式** | Provider 返回 usage，但流中累计语义、cache/reasoning token 与 Audit 成本归属未形成统一契约 | Provider 标准化 RawUsageSnapshot；Runtime 关联 attempt；Audit 独占 pricing、cost 与聚合 | S5 |
+| P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
+| P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
+
+## 4. Memory 现状缺口（S2 代码盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| M1 | **无 MemoryPort trait** | Runtime 直调 `MemoryStore` 具体类型（`storage::api::MemoryStore`）| 抽 `MemoryPort` trait，实现移到 adapter；Runtime 不接触 MemoryStore | S5 |
+| M2 | **领域逻辑与 I/O 混合** | `MemoryStore` 同时做 scoring/dedup/retrieval 和文件读写 | 拆分 MemoryService（领域）+ MemoryStorageAdapter（I/O）| S7 |
+| M3 | **检索为子串匹配** | `entry_matches` 朴素小写 contains，无相关性排序 | Tier 1 BM25 关键词相关性排序 | #551 |
+| M4 | **similarity_threshold 仅用于去重** | 检索不接入 threshold | 检索也用 threshold 过滤低相关结果 | #551 |
+| M5 | **Reflection 代码在 Runtime** | `runtime/business/reflection/` 含 prompt/output/apply 领域逻辑 | 领域逻辑迁回 Memory BC，Runtime 只编排触发 + LLM 调用 | S5 |
+| M6 | **无 ReflectionPromptPort** | Runtime 直接调 reflection 模块函数 | 抽 trait，Memory BC 暴露领域服务 | S5 |
+| M7 | **memory_inject 硬编码参数** | `open_memory_store` 硬编码 `max_entries=100, threshold=0.8` | 从 ConfigSnapshot 读取 | S5 |
+| M8 | **SessionReminder 在 Memory** | `share::memory::session_reminder` 是会话级数据 | 迁移到 Context Management（Session 聚合）| S5/S7 |
+| M9 | **无 NoOpMemory** | Sub 无 Memory 隔离（可读写主记忆）| Sub 装配 NoOpMemory，不读不写不 reflection | S3/S5 |
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| P1 | **Runtime 依赖具体 client/pool** | Runtime 直接持有并调用 `LlmClient` / `LlmClientPool`，ProviderInfoPort 只覆盖元数据 | Runtime 只依赖自有 `ProviderPort` 与稳定 Invocation PL；具体 provider 仅在 Composition Root 装配 | S3/S5 |
 | P2 | **调用期配置为共享可变状态** | model client 上以 `set_max_tokens` / `set_reasoning_level` 原地修改，再由 Sub finalize 手动恢复 | 共享不可变 Transport；每次 attempt 构造不可变 Invocation Scope，无 `set_*` 与 restore | S3/S5 |
 | P3 | **Main/Sub client 并发踩踏** | 多个 Sub 可拿到同一 `Arc<LlmClient>`，setup/read-modify/finalize restore 非原子，取消或 panic 会遗留污染 | Main/Sub 只共享只读 Transport，各自持有调用期状态；任一调用 drop 不影响其他调用 | S3/S5 |
 | P4 | **流协议依赖多方法回调** | `StreamHandler` 通过 text/thinking/tool/error 等回调把 Provider 与 Runtime handler 生命周期耦合，错误主要为字符串 | pull-based `InvocationStream` + 封闭 `InvocationDelta` + 结构化终结错误；Runtime 自行组装 ModelInvocation | S5 |
@@ -53,7 +82,21 @@
 | P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
 | P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
 
-## 4. 死代码 / 退役清单
+## 4. Memory 现状缺口（S2 代码盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| M1 | **无 MemoryPort trait** | Runtime 直调 `MemoryStore` 具体类型（`storage::api::MemoryStore`）| 抽 `MemoryPort` trait，实现移到 adapter；Runtime 不接触 MemoryStore | S5 |
+| M2 | **领域逻辑与 I/O 混合** | `MemoryStore` 同时做 scoring/dedup/retrieval 和文件读写 | 拆分 MemoryService（领域）+ MemoryStorageAdapter（I/O）| S7 |
+| M3 | **检索为子串匹配** | `entry_matches` 朴素小写 contains，无相关性排序 | Tier 1 BM25 关键词相关性排序 | #551 |
+| M4 | **similarity_threshold 仅用于去重** | 检索不接入 threshold | 检索也用 threshold 过滤低相关结果 | #551 |
+| M5 | **Reflection 代码在 Runtime** | `runtime/business/reflection/` 含 prompt/output/apply 领域逻辑 | 领域逻辑迁回 Memory BC，Runtime 只编排触发 + LLM 调用 | S5 |
+| M6 | **无 ReflectionPromptPort** | Runtime 直接调 reflection 模块函数 | 抽 trait，Memory BC 暴露领域服务 | S5 |
+| M7 | **memory_inject 硬编码参数** | `open_memory_store` 硬编码 `max_entries=100, threshold=0.8` | 从 ConfigSnapshot 读取 | S5 |
+| M8 | **SessionReminder 在 Memory** | `share::memory::session_reminder` 是会话级数据 | 迁移到 Context Management（Session 聚合）| S5/S7 |
+| M9 | **无 NoOpMemory** | Sub 无 Memory 隔离（可读写主记忆）| Sub 装配 NoOpMemory，不读不写不 reflection | S3/S5 |
+
+## 5. 死代码 / 退役清单
 
 | 项 | 现状 | 处理 | 阶段 |
 |---|---|---|---|
@@ -69,21 +112,24 @@
 | `StreamHandler` 多方法回调 | Provider 主动调用 Runtime handler，错误和重试提示混入字符串回调 | InvocationStream 接线后删除 callback trait 与桥接 wrapper | S5/S7 |
 | Provider wire DTO 公共 re-export | request/stream payload、client config 等由 contract/api 对外发布 | Runtime 迁至 Invocation PL 后收窄可见性并删除无消费者 re-export | S5/S7 |
 | Provider 内部 retry / non-stream fallback | driver 内部执行跨调用重试与隐式第二次请求 | Runtime model_invocation 统一 attempt 编排后删除 | S5/S7 |
+| `SessionReminders` 在 `share::memory` | 会话级提醒放在 Memory 共享内核，语义不属跨会话记忆 | 迁移到 Context Management 后从 `share::memory` 删除 | S5/S7 |
+| `MemoryStore` 领域方法 | scoring/dedup/retrieval 混在 Storage crate 的 MemoryStore 中 | 拆分后领域方法迁到 MemoryService，MemoryStore 降为 Storage adapter | S7 |
 
-## 5. 已正确隔离（可作参考范式）
+## 6. 已正确隔离（可作参考范式）
 
 | 项 | 现状 | 说明 |
 |---|---|---|
 | **Workspace 隔离** | `seed_isolated()`：继承 cwd/root，空栈+新锁，子 worktree 进出不影响父 | ✅ 子资源隔离范式 |
 | **Task 隔离** | Sub 用全新 `TaskStore::new()` | ✅ |
 
-## 6. 相关文档
+## 7. 相关文档
 
 - 领域模型（目标态）：[../02-modules/runtime/01-domain-model.md](../02-modules/runtime/01-domain-model.md)
 - 模块边界：[../02-modules/runtime/02-module-boundaries.md](../02-modules/runtime/02-module-boundaries.md)
 - 端口缺口：[../02-modules/runtime/06-ports-and-adapters.md](../02-modules/runtime/06-ports-and-adapters.md)
 - Tool & Skill & Command 目标设计：[../02-modules/tools/README.md](../02-modules/tools/README.md)
 - Provider 目标设计：[../02-modules/provider/README.md](../02-modules/provider/README.md)
+- Memory 目标设计：[../02-modules/memory/README.md](../02-modules/memory/README.md)
 - 横切工程总览：[README.md](README.md)
 
 ## 修改历史
@@ -93,3 +139,4 @@
 | 2026-07-11 | 初稿：S2 盘点的 Runtime 现状缺口(R1-R10)、死代码退役清单、已隔离参考范式 | #761 |
 | 2026-07-12 | 新增 Tool/Skill/Command 缺口 T1-T12 与旧 Profile、SkillTool、idle_commands、MCP 路径退役项 | #787 |
 | 2026-07-12 | 新增 Provider 缺口 P1-P12 与共享 client、回调流、wire DTO、隐式重试退役项 | #788 |
+| 2026-07-12 | 新增 Memory 缺口 M1-M9 与 SessionReminders、MemoryStore 领域方法退役项 | #789 |
