@@ -26,8 +26,8 @@ pub struct AgentInput {
     pub role: Option<String>,
     /// Direct model override in 'provider/model_id' format (e.g. 'deepseek/deepseek-chat', 'ollama/llama3.2'). Takes precedence over 'role' if both are specified.
     pub model: Option<String>,
-    /// Maximum number of tool-call rounds (max 1000)
-    pub max_turns: Option<u64>,
+    /// Wall-clock timeout in seconds. Defaults to 1800 seconds and is capped at 10800 seconds. Use 0 for no timeout.
+    pub timeout: Option<u64>,
     /// Task ID from TaskCreate. OPTIONAL — only pass when you want the dispatcher to auto-manage task status (InProgress on start, Completed on success, Pending on failure). Free-form exploration or ad-hoc agent calls do NOT need a task_id.
     #[serde(alias = "taskId")]
     pub task_id: Option<String>,

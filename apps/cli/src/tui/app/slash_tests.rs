@@ -19,6 +19,10 @@ pub(super) struct BlockingReflectionClient {
 
 #[async_trait]
 impl sdk::AgentClient for BlockingReflectionClient {
+    fn cancel_run(&self, _run_id: &sdk::RunId) -> sdk::CancelRunOutcome {
+        sdk::CancelRunOutcome::NotFound
+    }
+
     async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok(sdk::ChatStream::new(rx))

@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::{AgentRunRequest, AgentRunner, ToolResources};
+use crate::api::{AgentRunRequest, AgentRunTerminal, AgentRunner, ToolResources};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -8,18 +8,20 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct StubRunner {
-    captured_max_turns: Mutex<u32>,
+    captured_timeout: Mutex<std::time::Duration>,
     captured_system: Mutex<String>,
     run_count: Mutex<usize>,
 }
 
 #[async_trait::async_trait]
 impl AgentRunner for StubRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
-        *self.captured_max_turns.lock().unwrap() = request.max_turns;
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> AgentRunTerminal {
+        *self.captured_timeout.lock().unwrap() = request.timeout;
         *self.captured_system.lock().unwrap() = request.system.to_string();
         *self.run_count.lock().unwrap() += 1;
-        request.prompt.to_string()
+        AgentRunTerminal::Completed {
+            result: request.prompt.to_string(),
+        }
     }
 
     async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolExecutionContext) -> String {
@@ -54,7 +56,7 @@ fn test_ctx() -> ToolExecutionContext {
 }
 
 #[tokio::test]
-async fn test_agent_tool_uses_1000_default_turns() {
+async fn test_agent_tool_uses_finite_default_timeout() {
     let store = Arc::new(TaskStore::new());
     let tool = AgentTool { store };
     let runner = Arc::new(StubRunner::default());
@@ -71,16 +73,19 @@ async fn test_agent_tool_uses_1000_default_turns() {
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(1800)
+    );
     assert!(runner
         .captured_system
         .lock()
         .unwrap()
-        .contains("You have max 1000 rounds of tool calls"));
+        .contains("wall-clock timeout: 1800 seconds"));
 }
 
 #[tokio::test]
-async fn test_agent_tool_caps_max_turns_at_1000() {
+async fn test_agent_tool_caps_timeout_at_three_hours() {
     let store = Arc::new(TaskStore::new());
     let tool = AgentTool { store };
     let runner = Arc::new(StubRunner::default());
@@ -91,23 +96,21 @@ async fn test_agent_tool_caps_max_turns_at_1000() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "max_turns": 1500,
+                "timeout": 20000,
             }),
             &ctx,
         )
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
-    assert!(runner
-        .captured_system
-        .lock()
-        .unwrap()
-        .contains("You have max 1000 rounds of tool calls"));
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(10800)
+    );
 }
 
 #[test]
-fn test_agent_tool_schema_describes_1000_turn_limit() {
+fn test_agent_tool_schema_describes_timeout_without_max_turns() {
     let tool = AgentTool {
         store: Arc::new(TaskStore::new()),
     };
@@ -115,8 +118,9 @@ fn test_agent_tool_schema_describes_1000_turn_limit() {
     let schema = tool.input_schema().to_string();
     let description = tool.description();
 
-    assert!(schema.contains("max 1000"));
-    assert!(description.contains("up to 1000 rounds"));
+    assert!(schema.contains("timeout"));
+    assert!(!schema.contains("max_turns"));
+    assert!(!description.contains("1000 rounds"));
 }
 
 #[tokio::test]
@@ -147,6 +151,25 @@ async fn test_agent_tool_task_id_success_completes_task() {
 
 #[tokio::test]
 async fn test_agent_tool_task_id_failure_resets_pending() {
+    struct FailedRunner;
+    #[async_trait::async_trait]
+    impl AgentRunner for FailedRunner {
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> AgentRunTerminal {
+            AgentRunTerminal::Failed {
+                error: "failed".to_string(),
+            }
+        }
+
+        async fn complete(
+            &self,
+            _prompt: &str,
+            _system: &str,
+            _ctx: &ToolExecutionContext,
+        ) -> String {
+            String::new()
+        }
+    }
+
     let store = Arc::new(TaskStore::new());
     let task = store
         .create("agent task".to_string(), "run subagent".to_string(), None)
@@ -158,11 +181,11 @@ async fn test_agent_tool_task_id_failure_resets_pending() {
     let result = tool
         .call(
             serde_json::json!({
-                "prompt": "Sub-agent error: failed",
+                "prompt": "ordinary user data",
                 "description": "run task",
                 "task_id": task.id,
             }),
-            &test_ctx(),
+            &test_ctx_with_runner(Arc::new(FailedRunner)),
         )
         .await;
 
@@ -245,21 +268,20 @@ async fn test_agent_tool_allows_missing_task_id_without_active_list() {
 
 #[test]
 fn test_is_agent_failure_detects_known_markers() {
-    assert!(is_agent_failure("Cancelled by user"));
-    assert!(is_agent_failure(
-        "Some text\n\n[Sub-agent timed out after 600s]"
-    ));
-    assert!(is_agent_failure("Sub-agent error: connection refused"));
-    assert!(is_agent_failure(
-        "Done\n\n[Sub-agent reached max turns (50)]"
-    ));
+    assert!(is_agent_failure(&AgentRunTerminal::Cancelled));
+    assert!(is_agent_failure(&AgentRunTerminal::Failed {
+        error: "connection refused".to_string(),
+    }));
 }
 
 #[test]
 fn test_is_agent_failure_normal_result_is_not_failure() {
-    assert!(!is_agent_failure("Successfully refactored the module."));
-    assert!(!is_agent_failure(""));
-    assert!(!is_agent_failure("No issues found in the reviewed files."));
+    assert!(!is_agent_failure(&AgentRunTerminal::Completed {
+        result: "Successfully refactored the module.".to_string(),
+    }));
+    assert!(!is_agent_failure(&AgentRunTerminal::Completed {
+        result: String::new(),
+    }));
 }
 
 /// 回归：子 agent 的 workspace 必须从父快照派生为独立实例（继承位置、空栈、独立 Arc/锁），
@@ -340,8 +362,10 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
     struct EmptyRunner;
     #[async_trait::async_trait]
     impl AgentRunner for EmptyRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
-            String::new()
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> AgentRunTerminal {
+            AgentRunTerminal::Completed {
+                result: String::new(),
+            }
         }
         async fn complete(
             &self,

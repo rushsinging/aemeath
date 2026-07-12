@@ -40,6 +40,7 @@ pub(crate) async fn auto_compact<S>(
     llm_client: &Arc<provider::api::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Option<CompactOutcome>
 where
     S: ChatEventSink,
@@ -141,6 +142,7 @@ where
         context_size,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
+        cancel,
     )
     .await?;
 
@@ -304,6 +306,7 @@ where
     // 但 compact_messages_with_llm 内部的 needs_compaction 会基于 system_prompt + context_size
     // 判断；手动 compact 时用户明确要求，若消息太少会返回 None）。
     let progress = make_progress_sink(sink);
+    let manual_cancel = tokio_util::sync::CancellationToken::new();
 
     let result = compact::compact_messages_with_llm(
         messages,
@@ -311,6 +314,7 @@ where
         context_size,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
+        &manual_cancel,
     )
     .await?;
 

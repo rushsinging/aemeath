@@ -49,7 +49,7 @@
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)` |
 | 22 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
@@ -442,7 +442,7 @@
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 方法 | #567 后所有 TUI↔runtime 交互走 `ChatInputEvent` 事件流 + `ChatEvent` 回传，不允许在 trait 上新增 RPC 方法绕过事件流 |
+| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 

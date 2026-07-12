@@ -5,9 +5,7 @@ use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::evaluate_calls;
-use crate::business::chat::looping::tool_fuse::{
-    blocked_tool_execution, ToolCallFuse, ToolFuseDecision,
-};
+use crate::business::chat::looping::tool_fuse::blocked_tool_execution;
 use crate::business::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
@@ -36,7 +34,7 @@ pub(crate) async fn execute_tool_round<S>(
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &Path,
-    tool_call_fuse: &mut ToolCallFuse,
+    guarded_calls: &[(ToolCall, crate::business::loop_engine::ToolGuardDecision)],
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -54,17 +52,23 @@ where
     let denied_results =
         deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
+    let guard_by_id: std::collections::HashMap<_, _> = guarded_calls
+        .iter()
+        .map(|(call, decision)| (call.id.clone(), decision))
+        .collect();
     let mut fused_results = Vec::new();
     let mut fuse_allowed = Vec::new();
     for call in approved {
-        match tool_call_fuse.inspect(&call) {
-            ToolFuseDecision::Allow => fuse_allowed.push(call),
-            ToolFuseDecision::SoftBlock { reason } | ToolFuseDecision::HardPause { reason } => {
+        match guard_by_id.get(&call.id) {
+            Some(crate::business::loop_engine::ToolGuardDecision::SoftBlock { reason }) => {
                 send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Ready).await;
                 send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Running).await;
-                let execution = blocked_tool_execution(&call, &reason);
+                let execution = blocked_tool_execution(&call, reason);
                 send_tool_result(sink, context, &execution).await;
                 fused_results.push(execution);
+            }
+            Some(crate::business::loop_engine::ToolGuardDecision::Allow) | None => {
+                fuse_allowed.push(call)
             }
         }
     }
@@ -347,10 +351,10 @@ mod tests {
     use super::{execute_tool_round, tool_results_for_api};
     use crate::business::agent::{Agent, ToolCall, ToolExecution};
     use crate::business::chat::looping::hook_ui::HookUi;
-    use crate::business::chat::looping::tool_fuse::ToolCallFuse;
     use crate::business::chat::looping::{
         ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
     };
+    use crate::business::loop_engine::ToolGuardDecision;
     use async_trait::async_trait;
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
@@ -479,7 +483,11 @@ mod tests {
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let calls = vec![lifecycle_call(0), lifecycle_call(1)];
-        let mut fuse = ToolCallFuse::new();
+        let guarded_calls = calls
+            .iter()
+            .cloned()
+            .map(|call| (call, ToolGuardDecision::Allow))
+            .collect::<Vec<_>>();
 
         let _ = execute_tool_round(
             &context,
@@ -493,7 +501,7 @@ mod tests {
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,
-            &mut fuse,
+            &guarded_calls,
         )
         .await;
 

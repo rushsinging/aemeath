@@ -121,6 +121,17 @@ fn test_build_switched_client(
 }
 
 #[test]
+fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
+    // Architecture guard: behavioral tests below exercise this entry point, while this assertion
+    // prevents a future reintroduction of the retired Main-only orchestration state machine.
+    let source = include_str!("loop_runner.rs");
+    assert!(source.contains("run_loop(&mut run, &cancel, &mut port).await"));
+    assert!(!source.contains("ChatLoopFsm"));
+    assert!(!source.contains("StallDetector"));
+    assert!(!source.contains("ChatLoopTransition"));
+}
+
+#[test]
 fn provider_cancelled_error_maps_to_cancelled_outcome() {
     let error = provider::api::LlmError::Cancelled;
     assert!(is_user_cancelled_provider_error(&error));
@@ -479,7 +490,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -593,7 +604,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -709,7 +720,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -802,7 +813,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -827,21 +838,27 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
     driver.await.unwrap();
 
     let events = sink.events();
-    let queued_sync = events
-        .iter()
-        .position(|event| event == "PostToolExecutionSync:stop-hook input")
-        .expect("queued input should be synced after Stop hook");
-    let done = events
+    // Busy input is queued for a distinct Run after the current Run reaches terminal state.
+    let first_done = events
         .iter()
         .position(|event| event == "DoneWithDuration")
-        .expect("loop should eventually finish");
+        .expect("first run should finish");
+    let queued = events
+        .iter()
+        .position(|event| event == "UserMessagesQueued")
+        .expect("busy user input should be visibly queued");
     let handled_text = events
         .iter()
         .position(|event| event == "Text:handled queued input")
-        .expect("queued input should trigger another LLM turn");
+        .expect("queued input should create another Run");
+    let done_count = events
+        .iter()
+        .filter(|event| event.as_str() == "DoneWithDuration")
+        .count();
 
-    assert!(queued_sync < handled_text);
-    assert!(handled_text < done);
+    assert!(queued < first_done);
+    assert!(first_done < handled_text);
+    assert_eq!(done_count, 2, "each real user input owns a terminal Run");
 }
 
 /// Hook 首次输出 `{"continue": false}` JSON (exit 0)，之后放行。
@@ -963,7 +980,7 @@ async fn test_continue_false_json_treated_as_block() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1083,7 +1100,7 @@ async fn test_stall_triggers_stop_hook_check() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1109,10 +1126,12 @@ async fn test_stall_triggers_stop_hook_check() {
     let _ = std::fs::remove_file(&counter_path);
 
     let events = sink.events();
-    // stall 分支被触发（有 stall 的 SystemMessage）
+    // Repetition handling is owned by the shared engine's StuckGuard. The current engine records
+    // soft text repetition but does not expose it as a domain/UI event; importantly, it still
+    // preserves stop-hook feedback in this same Run and eventually reaches one terminal event.
     assert!(
-        events.iter().any(|e| e.contains("repetitive output")),
-        "stall should be detected: {:?}",
+        events.iter().any(|e| e == "HookEvent:Stop:Blocked"),
+        "stop hook should be checked while the shared Run continues: {:?}",
         events
     );
     // stall 后 Stop hook 阻断，应有第 4 次 LLM 响应（说明 detector 重置并继续了）
@@ -1240,7 +1259,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1425,7 +1444,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1478,55 +1497,6 @@ async fn test_stall_detector_resets_across_user_turns() {
         durations[0],
         durations[1]
     );
-}
-
-#[test]
-fn test_is_new_user_turn_message_genuine_user() {
-    // 正常路径：真正的新用户输入 → true（应触发 per-turn 重置）。
-    let msg = Message::user("turn-1");
-    assert!(super::idle_lifecycle::is_new_user_turn_message(Some(&msg)));
-}
-
-#[test]
-fn test_is_new_user_turn_message_tool_result_is_not_new_turn() {
-    // 边界：工具结果消息 role 虽为 User，但 has_tool_results() 为真 → false
-    // （对应回合内工具轮次再迭代，NEVER 视为新回合，必须保留单回合 stall 检测）。
-    let tool_msg = Message::tool_results_rich(vec![(
-        "tool-id-1".to_string(),
-        "ok".to_string(),
-        serde_json::Value::String("ok".to_string()),
-        false,
-        Vec::new(),
-    )]);
-    assert!(tool_msg.has_tool_results());
-    assert!(!super::idle_lifecycle::is_new_user_turn_message(Some(
-        &tool_msg
-    )));
-}
-
-#[test]
-fn test_is_new_user_turn_message_system_generated_is_not_new_turn() {
-    // 边界：stop-hook 阻断注入的 system-generated 用户消息 → false（回合仍在继续）。
-    let sys_msg = Message::system_generated_user("<system-reminder>keep working</system-reminder>");
-    assert!(!super::idle_lifecycle::is_new_user_turn_message(Some(
-        &sys_msg
-    )));
-}
-
-#[test]
-fn test_is_new_user_turn_message_assistant_or_empty_is_not_new_turn() {
-    // 错误/空路径：assistant 消息或空 messages → false。
-    let assistant = Message {
-        role: Role::Assistant,
-        content: vec![share::message::ContentBlock::Text {
-            text: "hi".to_string(),
-        }],
-        metadata: None,
-    };
-    assert!(!super::idle_lifecycle::is_new_user_turn_message(Some(
-        &assistant
-    )));
-    assert!(!super::idle_lifecycle::is_new_user_turn_message(None));
 }
 
 /// 记录每次 LLM 调用时 messages 中最后一条用户消息的文本。
@@ -1691,7 +1661,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1811,7 +1781,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1911,7 +1881,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -1988,7 +1958,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -2013,12 +1983,12 @@ async fn test_stop_hook_block_limit_stops_loop() {
     driver.await.unwrap();
 
     let events = sink.events();
-    // 超过上限应发出 SystemMessage 提示
+    // 超过上限应由共享 StuckGuard 产生结构化终止原因。
     assert!(
         events
             .iter()
-            .any(|e| e.contains("stop hook blocked 5 times in a row")),
-        "should emit block-limit SystemMessage: {:?}",
+            .any(|event| event.contains("stop hook blocked completion 5 times")),
+        "should emit StuckGuard block-limit reason: {:?}",
         events
     );
     // #604：blocked 上限退出时必须发出 DoneWithDuration，否则 TUI spinner 永不停
@@ -2116,8 +2086,8 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
     // 将槽重置为新 token 供下回合。若未重置，回合 2 的 LLM 调用会立即 Cancelled。
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
-    // 共享 cancel 槽：loop 与「外部取消者」共用，模拟 RuntimeHandle.current_cancel。
-    let cancel_slot = Arc::new(Mutex::new(CancellationToken::new()));
+    // Active Run registry：模拟 RuntimeHandle.active_run 的同步 cancel_run 入口。
+    let active_run = Arc::new(crate::core::active_run::ActiveRunRegistry::default());
     let provider = CancellableThenNormalProvider::new();
 
     // 首条输入（回合 1 的用户消息）在 loop 启动前投递。
@@ -2127,7 +2097,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
 
     let driver_sink = sink.clone();
     let driver_provider = provider.clone();
-    let driver_slot = cancel_slot.clone();
+    let driver_registry = active_run.clone();
     let driver = tokio::spawn(async move {
         // 等回合 1 的 LLM 调用真正开始（call count >= 1），此时 provider 正阻塞于
         // cancel.cancelled()。再触发取消，确保取消落在「回合进行中」。
@@ -2137,8 +2107,16 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
             }
             tokio::task::yield_now().await;
         }
-        // 外部取消（模拟 cancel_impl）：锁槽，取消当前 live token。
-        driver_slot.lock().unwrap().cancel();
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.cancel(&run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
 
         // 等回合 1 被取消（出现 Cancelled 事件）。
         loop {
@@ -2148,15 +2126,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
             tokio::task::yield_now().await;
         }
 
-        // 投递「陈旧的第二次 cancel」：若 loop 在重置后又把这个取消错误地
-        // 应用到下回合，会污染回合 2。这里用 input 通道的 Cancel 事件模拟
-        // 空闲期的 stale cancel（应被 idle 臂吞掉、保持空闲）。
-        input_tx.send(sdk::ChatInputEvent::Cancel).unwrap();
-        for _ in 0..50 {
-            tokio::task::yield_now().await;
-        }
-
-        // 投递真实用户消息：应恢复运行并完成回合 2（新 token 未被污染）。
+        // 投递真实用户消息：应恢复运行并完成回合 2（新 Run 拥有独立 token）。
         input_tx
             .send(sdk::ChatInputEvent::user_message("second", Vec::new()))
             .unwrap();
@@ -2193,7 +2163,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: cancel_slot.clone(),
+        active_run: active_run.clone(),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -2357,8 +2327,8 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
     // "turn 1 assistant" 必须仍存在（pre-fix `truncate(loop_start_baseline=0)` 会删除它们）。
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
-    // 共享 cancel 槽：模拟外部 cancel_impl。
-    let cancel_slot = Arc::new(Mutex::new(CancellationToken::new()));
+    // Active Run registry：模拟同步 cancel_run(run_id)。
+    let active_run = Arc::new(crate::core::active_run::ActiveRunRegistry::default());
     let provider = CompleteThenCancellableProvider::new();
 
     // 回合 1 的用户消息在 loop 启动前投递。
@@ -2368,7 +2338,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
 
     let driver_sink = sink.clone();
     let driver_provider = provider.clone();
-    let driver_slot = cancel_slot.clone();
+    let driver_registry = active_run.clone();
     let driver = tokio::spawn(async move {
         // 等回合 1 完成（第 1 个 DoneWithDuration），loop 进入空闲。
         loop {
@@ -2393,8 +2363,16 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
             }
             tokio::task::yield_now().await;
         }
-        // 外部 cancel：锁槽取消当前 live token。
-        driver_slot.lock().unwrap().cancel();
+        let run_id = loop {
+            if let Some(run_id) = driver_registry.active_id() {
+                break run_id;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(
+            driver_registry.cancel(&run_id),
+            sdk::CancelRunOutcome::Accepted
+        );
         // 等回合 2 被取消（出现 Cancelled 事件）。
         loop {
             if driver_sink.events().iter().any(|e| e == "Cancelled") {
@@ -2439,7 +2417,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: cancel_slot.clone(),
+        active_run: active_run.clone(),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -2686,7 +2664,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -2808,7 +2786,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -2901,7 +2879,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -2974,7 +2952,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
@@ -3141,7 +3119,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         session_reminders: Arc::new(std::sync::Mutex::new(share::tool::SessionReminders::new())),
         agent_runner: None,
         allow_all: false,
-        cancel: Arc::new(Mutex::new(CancellationToken::new())),
+        active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::api::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,

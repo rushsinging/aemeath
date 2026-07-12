@@ -189,6 +189,26 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     assert_eq!(data["output"], "完整输出");
 }
 
+#[test]
+fn test_sub_run_cancellation_scope_is_one_way() {
+    let parent = tokio_util::sync::CancellationToken::new();
+    let child = parent.child_token();
+
+    child.cancel();
+    assert!(child.is_cancelled());
+    assert!(
+        !parent.is_cancelled(),
+        "child cancellation must not cancel parent"
+    );
+
+    let second_child = parent.child_token();
+    parent.cancel();
+    assert!(
+        second_child.is_cancelled(),
+        "parent cancellation must reach child"
+    );
+}
+
 #[tokio::test]
 async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
     let runner = test_runner(LlmError::Cancelled);
@@ -199,13 +219,13 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: 1,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: None,
             progress_tx: None,
         })
         .await;
 
-    assert_eq!(result, "Cancelled by user");
+    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
 }
 
 #[tokio::test]
@@ -219,13 +239,13 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: 1,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: None,
             progress_tx: None,
         })
         .await;
 
-    assert_eq!(result, "Cancelled by user");
+    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
 }
 
 #[tokio::test]
@@ -276,7 +296,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: 5,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: None,
             progress_tx: None,
         }),
@@ -285,7 +305,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     .expect("run_agent 必须在 mid-flight cancel 后及时返回，不能挂起等待 provider 自然结束");
 
     canceller.await.unwrap();
-    assert_eq!(result, "Cancelled by user");
+    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
 }
 
 // issue #646：SubAgentRun emit Started 事件测试
@@ -305,7 +325,7 @@ async fn test_started_event_emitted_with_role_and_model() {
             prompt: "p",
             system: "s",
             ctx: &ctx,
-            max_turns: 1,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: Some("coder"),
             progress_tx: Some(tx),
         })
@@ -338,7 +358,7 @@ async fn test_started_event_without_role_uses_main_agent_model() {
             prompt: "p",
             system: "s",
             ctx: &ctx,
-            max_turns: 1,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: None,
             progress_tx: Some(tx),
         })
@@ -369,14 +389,18 @@ async fn test_started_event_not_emitted_without_progress_tx() {
             prompt: "p",
             system: "s",
             ctx: &ctx,
-            max_turns: 1,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: None,
             progress_tx: None,
         })
         .await;
 
     // ErrorProvider 会返回 Err，但不应 panic
-    assert!(result.contains("setup-only") || result.contains("error") || !result.is_empty());
+    assert!(matches!(
+        result,
+        tools::api::AgentRunTerminal::Failed { ref error }
+            if error.contains("setup-only") || error.contains("error") || !error.is_empty()
+    ));
 }
 
 #[tokio::test]
@@ -389,13 +413,42 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
             prompt: "prompt",
             system: "system",
             ctx: &ctx,
-            max_turns: 1,
+            timeout: std::time::Duration::from_secs(30),
             model_spec: None,
             progress_tx: None,
         })
         .await;
 
-    assert_eq!(result, "Sub-agent error: network error: boom");
+    assert_eq!(
+        result,
+        tools::api::AgentRunTerminal::Failed {
+            error: "loop adapter error: network error: boom".to_string(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
+    let runner = test_runner(LlmError::Network("should not be invoked".to_string()));
+    let ctx = test_ctx();
+
+    let result = runner
+        .run_agent(AgentRunRequest {
+            prompt: "prompt",
+            system: "system",
+            ctx: &ctx,
+            timeout: std::time::Duration::from_nanos(1),
+            model_spec: None,
+            progress_tx: None,
+        })
+        .await;
+
+    assert_eq!(
+        result,
+        tools::api::AgentRunTerminal::Failed {
+            error: "run timed out after 0 seconds".to_string(),
+        }
+    );
 }
 
 fn test_tool_call(
@@ -426,6 +479,7 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
             ErrorProvider { error },
         ))),
         pool: None,
+        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
         agents_config: Arc::new(share::config::AgentsConfig::default()),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
@@ -439,6 +493,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
             BlockingThenCancelledProvider { calls },
         ))),
         pool: None,
+        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
         agents_config: Arc::new(share::config::AgentsConfig::default()),
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,

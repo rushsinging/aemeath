@@ -6,7 +6,8 @@ use share::tool::types::agent::{AgentInput, AgentResult};
 use std::sync::Arc;
 use storage::api::{TaskStatus, TaskStore};
 
-const SUB_AGENT_MAX_TURNS_CAP: u32 = 1000;
+const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 1800;
+const SUB_AGENT_TIMEOUT_CAP_SECS: u64 = 10800;
 
 pub struct AgentTool {
     pub store: Arc<TaskStore>,
@@ -20,7 +21,7 @@ impl TypedTool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens, up to 1000 rounds) and can use all tools. Multiple Agent calls in the SAME response run concurrently. Pass `task_id` to bind to a tracked task for automatic status management."
+        "Launch a new agent to handle a focused, scoped task autonomously.\n\nEach sub-agent has its own context (~128K tokens), wall-clock timeout, and StuckGuard protection. Multiple Agent calls in the SAME response run concurrently. Pass `task_id` to bind to a tracked task for automatic status management."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))
@@ -62,17 +63,17 @@ impl TypedTool for AgentTool {
         let prompt = args.prompt.as_str();
 
         let cwd = ctx.workspace_read().current_path_base();
-        let max_turns = args
-            .max_turns
-            .map(|v| (v as u32).min(SUB_AGENT_MAX_TURNS_CAP))
-            .unwrap_or(SUB_AGENT_MAX_TURNS_CAP);
+        let timeout_secs = args
+            .timeout
+            .unwrap_or(SUB_AGENT_DEFAULT_TIMEOUT_SECS)
+            .min(SUB_AGENT_TIMEOUT_CAP_SECS);
+        let timeout = std::time::Duration::from_secs(timeout_secs);
         let runner = match &ctx.resources.agent_runner {
             Some(r) => r.clone(),
             None => return TypedToolResult::error("agent runner not available"),
         };
 
         let cwd_str = cwd.to_string_lossy();
-        let turns = max_turns;
 
         // Resolve role and model:
         //   - `model` takes precedence: a direct "provider/model_id" spec
@@ -109,7 +110,7 @@ CRITICAL — Context budget:
 - Use Grep to find specific code instead of reading entire files — this is much more token-efficient.
 - Use Glob to discover files, then read only the most relevant ones.
 - NEVER read more than 3 files per tool call round.
-- You have max {turns} rounds of tool calls. Plan ahead — don't waste rounds reading files you won't use.
+- This Run has a wall-clock timeout: {timeout_secs} seconds (0 means unlimited). StuckGuard independently detects repeated text, tool loops, and blocked completion.
 - You cannot use Task*, AskUserQuestion, or Agent tools. Task tracking and user clarification belong to the parent agent.
 - If the task is ambiguous or needs user input, return a concise `blocked:` explanation instead of asking the user.
 
@@ -119,20 +120,20 @@ Instructions:- Complete the task described in the user message
 - Do not ask questions — make reasonable decisions and proceed"#
         );
 
-        let final_output = runner
+        let terminal = runner
             .run_agent(crate::api::AgentRunRequest {
                 prompt,
                 system: &system,
                 ctx,
-                max_turns,
+                timeout,
                 model_spec,
                 progress_tx: ctx.progress_tx.clone(),
             })
             .await;
 
-        // Update task status based on agent outcome
+        // Update task status from the typed Run terminal event, never from result text.
         if let Some(ref tid) = task_id {
-            let is_failure = is_agent_failure(&final_output);
+            let is_failure = is_agent_failure(&terminal);
             self.store
                 .update(tid, |t| {
                     t.status = if is_failure {
@@ -144,6 +145,7 @@ Instructions:- Complete the task described in the user message
                 .await;
         }
 
+        let final_output = terminal.output();
         // text → 父 LLM：必须包含子代理实际产出，否则父 agent 无法基于结果决策。
         // data → TUI：结构化展示（AgentResult.output 同步保留）。
         let text = if final_output.trim().is_empty() {
@@ -169,14 +171,12 @@ Instructions:- Complete the task described in the user message
     }
 }
 
-/// Detect whether a sub-agent result indicates failure (error, timeout,
-/// cancellation, or max-turns exhaustion). These markers are produced by
-/// `CliAgentRunner::run_agent` in `agent_runner.rs`.
-fn is_agent_failure(result: &str) -> bool {
-    result.contains("Cancelled by user")
-        || result.contains("[Sub-agent timed out")
-        || result.contains("Sub-agent error:")
-        || result.contains("[Sub-agent reached max turns")
+/// Run failure classification is structural; result text is user data and is never parsed.
+fn is_agent_failure(result: &crate::api::AgentRunTerminal) -> bool {
+    matches!(
+        result,
+        crate::api::AgentRunTerminal::Failed { .. } | crate::api::AgentRunTerminal::Cancelled
+    )
 }
 
 fn truncate_debug_preview(value: &str, max_chars: usize) -> String {

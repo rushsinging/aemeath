@@ -111,14 +111,17 @@ impl<'a> SubAgentRun<'a> {
         }
 
         let old_len = self.messages.len();
-        let result = crate::business::compact::compact_messages_with_llm(
-            &self.messages,
-            &self.system,
-            self.ctx_context_size,
-            Some(&self.client),
-            None,
-        )
-        .await;
+        let result = tokio::select! {
+            _ = self.ctx.cancel.cancelled() => None,
+            result = crate::business::compact::compact_messages_with_llm(
+                &self.messages,
+                &self.system,
+                self.ctx_context_size,
+                Some(&self.client),
+                None,
+                &self.ctx.cancel,
+            ) => result,
+        };
 
         if let Some(result) = result {
             self.messages = result.recent_messages;
@@ -132,21 +135,6 @@ impl<'a> SubAgentRun<'a> {
                 ),
             );
         }
-    }
-
-    pub(super) fn max_turns_result(&self) -> String {
-        self.messages
-            .iter()
-            .rev()
-            .map(|msg| msg.text_content())
-            .find(|text| !text.is_empty())
-            .map(|text| {
-                format!(
-                    "{}\n\n[Sub-agent reached max turns ({})]",
-                    text, self.max_turns
-                )
-            })
-            .unwrap_or_else(|| format!("Sub-agent reached max turns ({})", self.max_turns))
     }
 }
 

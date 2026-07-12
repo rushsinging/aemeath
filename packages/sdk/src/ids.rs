@@ -201,6 +201,50 @@ impl ChatTurnId {
 impl_id_type!(ChatTurnId);
 
 // ---------------------------------------------------------------------------
+// RunId
+// ---------------------------------------------------------------------------
+
+/// Published Run identity (UUIDv7).
+#[derive(Debug, Clone)]
+pub struct RunId(Uuid, String);
+
+impl RunId {
+    pub fn new_v7() -> Self {
+        let uuid = Uuid::now_v7();
+        Self(uuid, cache(uuid))
+    }
+
+    pub fn new(s: impl AsRef<str>) -> Self {
+        Self::from_legacy_or_new(s.as_ref())
+    }
+
+    pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {
+        let uuid = Uuid::parse_str(s).map_err(|_| IdParseError::InvalidUuid(s.to_string()))?;
+        if uuid.get_version_num() != 7 {
+            return Err(IdParseError::NotVersion7(s.to_string()));
+        }
+        Ok(Self(uuid, cache(uuid)))
+    }
+
+    pub fn from_legacy_or_new(s: &str) -> Self {
+        Self::parse_uuid7(s).unwrap_or_else(|_| {
+            let uuid = deterministic_uuidv7(s);
+            Self(uuid, cache(uuid))
+        })
+    }
+
+    pub fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.1
+    }
+}
+
+impl_id_type!(RunId);
+
+// ---------------------------------------------------------------------------
 // ToolCallId
 // ---------------------------------------------------------------------------
 
@@ -313,6 +357,13 @@ impl_id_type!(InputId);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_run_id_new_v7_is_version_7() {
+        let id = RunId::new_v7();
+        assert_eq!(id.as_uuid().get_version_num(), 7);
+        assert_eq!(RunId::parse_uuid7(id.as_str()).unwrap(), id);
+    }
 
     #[test]
     fn test_chat_id_new_v7_is_version_7() {

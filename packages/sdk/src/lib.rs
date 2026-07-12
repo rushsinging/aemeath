@@ -16,6 +16,7 @@ pub mod content;
 pub mod error;
 pub mod models;
 pub mod project;
+pub mod run;
 pub mod session;
 pub mod session_lock;
 
@@ -32,10 +33,9 @@ pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
-    CancelHandle, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage,
-    ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView,
-    OptionItem, ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest,
+    ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView, OptionItem,
+    ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;
@@ -43,9 +43,10 @@ pub use commands::{ContextEstimate, ModelSwitchResult};
 pub use config_view::ConfigView;
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
-pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, ToolCallId};
+pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, RunId, ToolCallId};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
+pub use run::CancelRunOutcome;
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
 };
