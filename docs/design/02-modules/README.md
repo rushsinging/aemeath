@@ -17,6 +17,9 @@
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | ✅ S2 |
+| [storage/](storage/README.md) | 原子读写、backup/quarantine、路径安全及数据所有权边界 | ✅ S2 摘要 |
+| [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink/rotation 与 Audit 分离 | ✅ S2 摘要 |
+| [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、可信 UpdatePlan 与安装事务 | ✅ S2 摘要 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
 | server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
 
@@ -43,3 +46,4 @@
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
 | 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
+| 2026-07-12 | 新增 Storage、Logging、Application Version Control 三个通用域摘要设计 | #793 |

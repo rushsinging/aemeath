@@ -53,7 +53,44 @@
 | P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
 | P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
 
-## 4. 死代码 / 退役清单
+## 4. Storage 现状缺口（S2 摘要盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| S1 | **Storage 同时拥有业务模型** | Task/Batch 状态、依赖图、Memory 查询与 History 策略寄居 storage crate | Task/Memory/History 所属 BC 独占模型和不变量；Storage 只实现物理端口 | S5/S7 |
+| S2 | **原子写机制未复用** | Session 自带 tmp/fsync/.bak；Memory、History、Tool Result 等路径直接 `fs::write` | 通用 AtomicBlob adapter；数据 BC 的窄持久化端口复用同一机制 | S5 |
+| S3 | **backup/恢复协议不完整** | Session 有一代 `.bak`，但备份旋转失败被忽略；其他路径无 backup/quarantine | 原子可见、上一代良好值、结构化 RecoveredFromBackup、双损坏 quarantine | S5 |
+| S4 | **路径与任意物理 Path 耦合** | 多处业务代码拼接 `~/.agents` 路径或直接持有 PathBuf | StorageKey + SafePathSegment；物理根和路径解析只在 adapter | S5/S7 |
+| S5 | **Tool Result 策略落入 Storage** | 50K 阈值、head/tail preview、inline reference 格式和写盘混在一个模块 | Config 提供阈值；Tool/Context Management 决定替换语义；Storage 只写 blob | S5 |
+| S6 | **错误与损坏处理不统一** | String/Option/领域错误混用，部分 list/写入失败静默跳过或仅日志 | StorageErrorKind + ReadOutcome；恢复事实与不可恢复损坏必须向调用方可见 | S5 |
+| S7 | **并发写与临时文件协议未统一** | 固定 `.tmp/.new` 名称，跨实例写同一 key 的互斥和残留清扫语义不一致 | 随机 create-new 临时文件、同 key 串行化、adapter 自有残留清扫协议 | S5 |
+
+## 5. Logging 现状缺口（S2 摘要盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| L1 | **Main/Sub 日志上下文互相覆盖** | request/model/provider/role/chat 等保存在进程级 `CURRENT_*`，并发 task 共享写 | 显式 LogContext + scope-local/task-local 传播，child scope 自动恢复 | S3/S5 |
+| L2 | **sink 失败被静默吞掉** | write/flush/rotate/reopen 多处忽略 Result，重开失败可让 sink 永久失效 | 结构化 SinkError；直接 stderr emergency fallback + 限频报告 + 周期恢复 | S5 |
+| L3 | **TargetCatalog 多份真相** | target 白名单、文件映射、sink 字段、flush 列表、guard 各自维护 | TargetSpec catalog 一次定义，router/sink/guard/文档共同消费 | S5/S7 |
+| L4 | **Update target 未注册** | `aemeath:agent:update` 不在合法 target/sink catalog，落入 `aemeath.log` 兜底 | 为 Application Version Control 注册诊断 target 与明确 sink | S5 |
+| L5 | **Logging 与 Audit 混淆** | `agent-audit.log` 作为普通诊断 sink，无法兑现不可变 Audit Event 语义 | 诊断 Logging 与 AuditSink 完全分离；Audit 物理持久化经 Storage | S5/S7 |
+| L6 | **Config 参数接线不完整** | retention/logs_dir 等字段与 logger 初始化/清理路径未形成单一闭环 | 全部静态值经 ConfigSnapshot 注入 Filter/Sink/RotationPolicy | S5 |
+| L7 | **schema/规范漂移** | 实现和正文是 14 字段，部分注释仍称 13；测试 target 也可绕过 catalog | 14 字段稳定契约 + catalog consistency/formatter contract guard | S5/S7 |
+
+## 6. Application Version Control 现状缺口（S2 摘要盘点）
+
+| # | 缺口 | 现状 | 目标 | 迁移阶段 |
+|---|---|---|---|---|
+| V1 | **Channel 配置未生效** | Config 声明 stable/prerelease，自更新 gateway 未消费且固定 `/releases/latest` | typed UpdateChannel 注入 Release Source ACL；按渠道筛选候选 release | S5 |
+| V2 | **检查缓存契约矛盾** | SDK 注释称 24h cache；spec/实现为每次请求；TUI 启动 force check | Cached/ForceRefresh 显式语义、channel cache key、TTL/stale/rate-limit 策略 | S5 |
+| V3 | **Config 未注入装配** | Composition 直接 `UpdateGateway::new()`，check_on_startup/channel 未进入服务 | Composition Root 从 ConfigSnapshot 构造 check policy、source、cache 与 installer | S5 |
+| V4 | **错误同质化** | 网络、rate-limit、平台、完整性、权限、替换等统一压成 `Internal(String)` | 稳定 UpdateErrorKind + retry/rate-limit/manual URL 元数据 | S5 |
+| V5 | **checksum 不证明发布者身份** | artifact 与 checksums.txt 同源；只能检测损坏，无法抵抗同源替换 | signed manifest + 固化信任根；未建可信链时不宣称可信自更新 | 独立安全 issue |
+| V6 | **安装不是受验证的单步提交** | 固定 `.new` 写入后直接 rename 当前 exe；无 target identity、跨进程锁和平台提交策略 | VerifiedUpdatePlan + random stage + target digest recheck + atomic commit/helper/unsupported | 独立安全 issue |
+| V7 | **Release Source ACL 不完整** | GitHub DTO/URL/状态码直接映射为通用 Internal 错误，host/redirect/size 约束未建模 | GitHub adapter 私有 DTO；验证 host、redirect、大小、tag/version/asset 一致性 | 独立安全 issue |
+| V8 | **检查与执行端口混合** | 单一 UpdateService 同时暴露 check/force/perform，perform 内再次 force check | VersionCheckPort + UpdateApplyPort；先形成 VerifiedUpdatePlan，再 apply 同一 plan | S5 |
+
+## 7. 死代码 / 退役清单
 
 | 项 | 现状 | 处理 | 阶段 |
 |---|---|---|---|
@@ -69,21 +106,29 @@
 | `StreamHandler` 多方法回调 | Provider 主动调用 Runtime handler，错误和重试提示混入字符串回调 | InvocationStream 接线后删除 callback trait 与桥接 wrapper | S5/S7 |
 | Provider wire DTO 公共 re-export | request/stream payload、client config 等由 contract/api 对外发布 | Runtime 迁至 Invocation PL 后收窄可见性并删除无消费者 re-export | S5/S7 |
 | Provider 内部 retry / non-stream fallback | driver 内部执行跨调用重试与隐式第二次请求 | Runtime model_invocation 统一 attempt 编排后删除 | S5/S7 |
+| Storage crate 内 Task/Memory 业务实现 | 物理持久化 crate 同时拥有 Task 状态机、依赖图与 Memory 查询行为 | 迁回对应 BC；Storage 仅保留 adapter 与通用机制 | S5/S7 |
+| 业务代码散点直接文件写入 | Session/Memory/History/Tool Result 各自实现 write/rename/error 语义 | 窄数据端口接 Storage adapter 后删除重复 IO 路径 | S5/S7 |
+| Logging 进程级 `CURRENT_*` | Main/Sub 并发共享 request/model/provider/role 等可变上下文 | scope-local LogContext 接线后退役全局 setter | S3/S5/S7 |
+| 普通诊断 `agent-audit.log` 路由 | 将 Audit 误当诊断 target/sink，缺少独立审计 PL 与失败语义 | AuditSink 接线后重新定义为 Audit 内部诊断或删除 | S5/S7 |
+| Update 单体 `UpdateService` / Gateway | check/cache/channel/下载/安装混成单对象，perform 内重复检查 | VersionCheckPort + UpdateApplyPort + source/cache/installer adapters | S5/S7 |
 
-## 5. 已正确隔离（可作参考范式）
+## 8. 已正确隔离（可作参考范式）
 
 | 项 | 现状 | 说明 |
 |---|---|---|
 | **Workspace 隔离** | `seed_isolated()`：继承 cwd/root，空栈+新锁，子 worktree 进出不影响父 | ✅ 子资源隔离范式 |
 | **Task 隔离** | Sub 用全新 `TaskStore::new()` | ✅ |
 
-## 6. 相关文档
+## 9. 相关文档
 
 - 领域模型（目标态）：[../02-modules/runtime/01-domain-model.md](../02-modules/runtime/01-domain-model.md)
 - 模块边界：[../02-modules/runtime/02-module-boundaries.md](../02-modules/runtime/02-module-boundaries.md)
 - 端口缺口：[../02-modules/runtime/06-ports-and-adapters.md](../02-modules/runtime/06-ports-and-adapters.md)
 - Tool & Skill & Command 目标设计：[../02-modules/tools/README.md](../02-modules/tools/README.md)
 - Provider 目标设计：[../02-modules/provider/README.md](../02-modules/provider/README.md)
+- Storage 摘要设计：[../02-modules/storage/README.md](../02-modules/storage/README.md)
+- Logging 摘要设计：[../02-modules/logging/README.md](../02-modules/logging/README.md)
+- Application Version Control 摘要设计：[../02-modules/application-version-control/README.md](../02-modules/application-version-control/README.md)
 - 横切工程总览：[README.md](README.md)
 
 ## 修改历史
@@ -93,3 +138,4 @@
 | 2026-07-11 | 初稿：S2 盘点的 Runtime 现状缺口(R1-R10)、死代码退役清单、已隔离参考范式 | #761 |
 | 2026-07-12 | 新增 Tool/Skill/Command 缺口 T1-T12 与旧 Profile、SkillTool、idle_commands、MCP 路径退役项 | #787 |
 | 2026-07-12 | 新增 Provider 缺口 P1-P12 与共享 client、回调流、wire DTO、隐式重试退役项 | #788 |
+| 2026-07-12 | 新增 Storage S1-S7、Logging L1-L7、Application Version Control V1-V8 缺口与退役项 | #793 |
