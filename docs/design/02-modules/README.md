@@ -11,7 +11,7 @@
 | 目标文档 | 内容 | 状态 |
 |---|---|---|
 | [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 | ✅ S2 |
-| [context-management/](context-management/01-session.md) | Session 聚合（已填充）；compact 家族 / token budget / prompt 待补 | 🚧 部分 |
+| [context-management/](context-management/01-session.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
 | [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
 | memory / task / project / policy / audit | 各支撑 BC 战术设计 | 规划 |
 | provider | Provider ACL、driver 映射 | 规划 |
@@ -38,3 +38,4 @@
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
 | 2026-07-11 | S2 填充 runtime/（7 篇）与 context-management/session.md，规划表改链接 | #761 |
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
+| 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |

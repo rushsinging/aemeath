@@ -11,11 +11,16 @@
 ## 2. 出站端口清单（签名草案）
 
 ```rust
-trait ContextPort {                                  // Context Management BC
-    fn build_window(&self, run: &Run) -> ContextWindow;   // 历史+compact+注入+prompt
-    fn needs_compaction(&self, run: &Run) -> bool;
-    fn compact(&self, run: &mut Run);
+trait ContextPort: Send + Sync {                                  // Context Management BC
+    /// 构建本轮 Context Window（L2 snip + L3 microcompact + L4 collapse + memory 注入 + prompt 组装）
+    /// L2/L3/L4 均为读模型变换，不修改 ChatChain
+    fn build_window(&self, req: &ContextRequest) -> ContextWindow;
+    /// 判断是否需要 auto-compact（幂等）
+    fn needs_compaction(&self, req: &ContextRequest) -> CompactionDecision;
+    /// L5 auto-compact：LLM 摘要替换历史（唯一修改 ChatChain 的压缩策略）
+    fn compact(&self, chain: &mut ChatChain, req: &ContextRequest) -> CompactResult;
 }
+// 详见 context-management/02-compact.md
 trait ProviderPort {                                 // Provider BC（内部 ACL）
     fn invoke(&self, window: ContextWindow, effort: ReasoningLevel)
         -> Stream<InvocationDelta>;                       // 流式
@@ -124,6 +129,7 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 
 - 领域模型（RunSpec/RuntimeContext）：[01-domain-model.md](01-domain-model.md)
 - 模块边界：[02-module-boundaries.md](02-module-boundaries.md)
+- Context Management 战术设计（ContextPort/MemoryPort/PromptPort 详解）：[../context-management/02-compact.md](../context-management/02-compact.md)
 - 上下文地图（BC 集成）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 系统架构（Composition Root）：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
 
@@ -134,3 +140,4 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
 | 2026-07-12 | ToolPort 拆为 Catalog/Execution 双端口，补 Skill/Command 独立端口边界与 Scope/Profile 装配 | #787 |
+| 2026-07-12 | ContextPort 签名更新为 4 方法（build_window/microcompact/needs_compaction/compact），详见 context-management/02-compact.md | #786 |
