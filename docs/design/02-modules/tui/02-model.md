@@ -1,0 +1,774 @@
+# TUI · Model 层设计
+
+> 层级：02-modules / tui（模块战术设计）
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#796（S2）
+> 本文定义 TUI Model 层的 3+1 Context 完整字段、投影状态机、单一真相规则与纯净性约束。Model 是 TEA 管线第④层，纯函数，不执行 IO。
+
+## 1. 定位
+
+Model 是 **TEA 管线的唯一可变状态载体**（第④层）：
+
+- 接收 Coordinator 传递的 Intent，通过 `apply()` 更新内部状态并返回 Change
+- **不执行 IO**——不调 `AgentClient`、不发 channel、不 `tokio::spawn`、不访问文件系统
+- **不依赖 ratatui**——ViewModel / Render 才引用 ratatui 类型
+- 持有全部 UI 状态：对话内容、输入缓冲、诊断信息、session 元数据
+- **不持有领域权威态**——domain 态在 Runtime（AgentClient 侧），Model 只做投影
+
+> **与 #795 的关系**：#795 §5 给出了 3+1 Context 概要与 Intent/Change 模式。本文深化到每个字段的完整定义、状态机转换图、子模块设计、纯度约束与目标态缺口。
+
+## 2. TuiModel 根结构
+
+```rust
+struct TuiModel {
+    conversation: ConversationModel,
+    input: InputModel,
+    diagnostic: DiagnosticModel,
+    session: SessionModel,
+}
+```
+
+| 字段 | Context | 职责 | Intent 风格 |
+|---|---|---|---|
+| `conversation` | Conversation | chat/turn 生命周期、tool call、timeline、RuntimeState、AskUser | struct-per-variant + trait dispatch |
+| `input` | Input | buffer/cursor/selection/history/completion | enum match |
+| `diagnostic` | Diagnostic | 错误/警告/提示/阻塞请求 | enum match |
+| `session` | Session | session metadata、resume 候选、save 状态 | enum match |
+
+**设计决策**：
+
+1. RuntimeState **不拆出独立 Context**——与 chat 生命周期耦合（chat 启动 → spinner 开始，chat 完成 → spinner 停止），拆出去增加跨 Context 通信开销。臃肿通过子模块封装控制。
+2. AskUser **不拆出独立 Context**——同一时刻至多一个 AskUserBatch 块，交互状态内嵌在 OutputTimeline 中。
+3. 四个 Context 之间 **无直接引用**——跨 Context 通信通过 Coordinator 在 `update()` 中拆分 Intent 并分别 apply。
+
+## 3. ConversationModel
+
+### 3.1 字段定义与可见性
+
+```rust
+struct ConversationModel {
+    // ── 对话内容 ──
+    pub chats: Vec<Chat>,
+    pub active_chat_id: Option<ChatId>,
+    pub timeline: OutputTimelineModel,
+    pub queued_submissions: Vec<QueuedSubmission>,
+    pub agent_progress: Vec<AgentProgressEntry>,
+    next_chat_sequence: usize,              // private
+    next_block_sequence: usize,             // private
+    revision: u64,                          // private — memo 版本号
+    pub(super) active_text_block_id: Option<String>,
+    pub(super) active_text_context: Option<(ChatId, ChatTurnId)>,
+    pub(super) active_thinking_block_id: Option<String>,
+    pub(super) active_thinking_context: Option<(ChatId, ChatTurnId)>,
+    pub model_stream_placeholder: Option<ModelStreamWaitingView>,
+    // ── 运行态 ──
+    pub runtime: RuntimeState,
+}
+```
+
+| 字段 | 可见性 | 说明 |
+|---|---|---|
+| `chats` | pub | Chat 聚合根列表 |
+| `active_chat_id` | pub | 当前活跃 chat |
+| `timeline` | pub | 渲染用扁平时间线（与 chats 双重表示，见 §3.5） |
+| `queued_submissions` | pub | 排队中的用户输入 |
+| `agent_progress` | pub | sub-agent 进度条目 |
+| `next_chat_sequence` / `next_block_sequence` | private | ID 序列号 |
+| `revision` | private | 内容版本号，供渲染层 memo |
+| `active_text_block_id` / `active_text_context` | pub(super) | 流式文本块追踪 |
+| `active_thinking_block_id` / `active_thinking_context` | pub(super) | thinking 块追踪 |
+| `model_stream_placeholder` | pub | model stream 等待占位 |
+| `runtime` | pub | RuntimeState 子模块 |
+
+### 3.2 Chat 与 ChatStatus 状态机
+
+```rust
+struct Chat {
+    pub id: ChatId,
+    pub user_submission: String,
+    pub status: ChatStatus,
+    pub turns: Vec<ChatTurn>,
+}
+enum ChatStatus { Created, Running, Completing, Completed, Failed, Cancelled }
+```
+
+**ChatStatus 状态转换图**：
+
+```
+Created ──StartChat──→ Running ──CompleteChat──→ Completing ──→ Completed
+                          │                        │
+                          ├──AbortChat──→ Failed    ├──异常──→ Failed
+                          └──Cancel──→ Cancelled
+```
+
+| 转换 | 触发 Intent | 方法 | 说明 |
+|---|---|---|---|
+| → Running | `StartChat` | `start_chat()` | 创建 Chat + 初始 turn |
+| → Running | `ResumeConversation` | `ensure_runtime_turn()` | 恢复历史会话，不触发 spinner |
+| Running → Completing | `CompleteChat` | `complete_chat()` | 清理 active block 追踪 |
+| → Failed | 异常 / AbortChat | — | Runtime 报告异常 |
+| → Cancelled | 用户取消 | — | — |
+
+### 3.3 ChatTurn 与 ChatTurnStatus 状态机
+
+```rust
+struct ChatTurn {
+    pub id: ChatTurnId,
+    pub sequence: usize,
+    pub status: ChatTurnStatus,
+    pub assistant_stream: String,
+    pub tool_calls: Vec<ToolCall>,
+}
+enum ChatTurnStatus { Streaming, ToolCalling, ToolExecuting, Completing, Completed, Failed }
+```
+
+**ChatTurnStatus 状态转换图**：
+
+```
+Streaming ──ToolCallStart──→ ToolExecuting
+    │                           │
+    │              ToolCallUpdate(PendingArgs/Ready)
+    │                           ↓
+    │                       ToolCalling
+    │                           │
+    │                  bind()/update(Running)
+    │                           ↓
+    │                       ToolExecuting
+    │                           │
+    └──CompleteBlock──→     all tools done
+                               ↓
+                           Completing ──→ Completed
+```
+
+| 转换 | 触发 | 方法 | 说明 |
+|---|---|---|---|
+| → Streaming | `ChatTurn::new()` | — | 初始态 |
+| → ToolExecuting | `ToolCallStart` | `observe_tool_start()` | push 占位 ToolCall |
+| → ToolCalling | `ToolCallUpdate(PendingArgs/Ready)` | `update_tool()` | 参数就绪 |
+| → ToolExecuting | `ToolCallUpdate(Running)` / `bind_tool()` | `update_tool()` / `bind_tool()` | 开始执行 |
+| → Completing | 所有 tool_calls 终态 | `complete_tool()` | 全部终态检查 |
+
+### 3.4 ToolCall 与 ToolCallStatus 状态机
+
+```rust
+struct ToolCall {
+    pub id: Option<ToolCallId>,
+    pub stream_key: ToolStreamKey,
+    pub name: String,
+    pub args_preview: String,
+    pub status: ToolCallStatus,
+    pub result: Option<ToolResultPayload>,
+    pub activities: Vec<String>,
+    pub streaming_preview: Option<ToolStreamingPreviewBuffer>,
+    pub agent_meta: Option<AgentMeta>,
+}
+enum ToolCallStatus { PendingArgs, Ready, Running, Success, Error, Cancelled, Orphaned }
+```
+
+**ToolCallStatus 状态转换图**：
+
+```
+PendingArgs ──bind()──→ Running ──complete(ok)──→ Success
+     │                      │
+     │                 complete(err)──→ Error
+     │
+     └──orphan()──→ Orphaned
+```
+
+| 转换 | 方法 | 说明 |
+|---|---|---|
+| → PendingArgs | `pending()` | 创建占位（stream_key 已知，id 待绑） |
+| → Running | `bind()` / `update(Running)` | 绑定 ToolCallId，开始执行 |
+| → Success | `complete(payload, is_error=false)` | 执行成功 |
+| → Error | `complete(payload, is_error=true)` | 执行失败 |
+| → Orphaned | `orphan()` | provider 序号不匹配，从未被绑定 |
+
+> **绑定策略**（#87 修复）：`bind_tool(id)` 按 internal ToolCallId 直接查找占位并绑定，不依赖 provider content-block 序号。跨轮 `index` 重复时不会覆盖已绑定占位。
+
+### 3.5 OutputTimeline 双重表示
+
+ConversationModel 维护两套对话表示：
+
+| 表示 | 类型 | 用途 |
+|---|---|---|
+| 结构化 | `chats: Vec<Chat>` | chat/turn/tool_call 层级结构，业务逻辑操作 |
+| 扁平化 | `timeline: OutputTimelineModel` | 渲染用有序块列表，ViewAssembler 消费 |
+
+**OutputTimelineItem 变体**：
+
+| 变体 | 说明 |
+|---|---|
+| `UserMessage` | 用户消息块 |
+| `QueuedUserMessage` | 排队中的用户消息 |
+| `AssistantText` | assistant 文本块 |
+| `ThinkingText` | thinking 块 |
+| `ToolCall` | 工具调用块 |
+| `ToolResult` | 工具结果块（强制跟在对应 ToolCall 之后） |
+| `SystemMessage` | 系统消息 |
+| `HookNotice` | Hook 通知 |
+| `Error` | 错误消息 |
+| `AskUserBatch` | AskUser 交互块（同一时刻至多一个） |
+| `AgentProgress` | sub-agent 进度块 |
+
+**一致性保证**：
+
+- `revision` 版本号在每次产生 Change 的 `apply()` 时 `wrapping_add(1)`
+- 渲染层以 `(conversation.revision(), workspace_root)` 为 cache key，不变时跳过全量重建
+- `move_tool_result_after_tool_call` 强制 result 跟在对应 call 之后，处理流式事件乱序
+
+> **已知缺口**（#795 §10.8）：chats 与 timeline 无 invariant 测试。目标态：每次 `start_chat` / `append_*` / `complete_chat` 后断言两者同步。
+
+### 3.6 RuntimeState 内聚子模块
+
+RuntimeState 是 ConversationModel 的运行态聚合，包含 13 个字段。方法分三组：只读访问器、对话生命周期驱动状态转换、运行态 intent 直接字段操作。
+
+```rust
+struct RuntimeState {
+    spinner: SpinnerModel,
+    provider: Option<String>,
+    model_id: Option<String>,
+    workspace: WorkspaceState,
+    usage: UsageSummary,
+    live_tps: Option<f64>,
+    task_status: TaskStatusSnapshot,
+    processing_jobs: Vec<ProcessingJob>,
+    status_notice: StatusNotice,
+    thinking: bool,
+    graph_phase: Option<String>,
+    transient_notice_expiry: Option<Instant>,
+    compact_progress: Option<CompactProgressModel>,
+}
+```
+
+> **TODO**：字段当前全 `pub`，目标态逐步私有化，只经业务方法操作（#795 §10.1 reducer 纯化）。
+
+#### 3.6.1 SpinnerModel
+
+```rust
+struct SpinnerModel {
+    chat_active: bool,           // spinner 可见性的唯一真相
+    phase: Option<SpinnerPhase>, // 显示文案
+    running_tool_count: usize,   // 运行中 tool call 计数
+}
+enum SpinnerPhase {
+    Thinking, Generating, AgentWorking, Reflecting, Compacting,
+    CallingTool(String), CallingTools { remaining: usize },
+    Hook { event: String, detail: String, outcome: HookOutcome },
+}
+```
+
+**SpinnerPhase 状态转换**：
+
+| 触发方法 | phase → | 副作用 |
+|---|---|---|
+| `start_chat()` | Thinking | chat_active=true |
+| `generate()` | Generating | — |
+| `think()` | Thinking | — |
+| `start_tool_call(name)` | CallingTool(name) | running_tool_count++ |
+| `complete_tool_call()` | Thinking（归零）/ CallingTools{remaining}（未归零） | running_tool_count-- |
+| `report_agent_progress()` | AgentWorking | — |
+| `start_compact()` | Compacting | chat_active=true |
+| `pause_chat()` | None | chat_active=false |
+| `resume_chat()` | Thinking | chat_active=true |
+| `abort_chat()` / `complete_chat()` / `force_idle()` | None | chat_active=false, count=0 |
+
+> **已知问题**（#795 §10.4）：spinner 状态三处同步。目标态：model 为单一来源，view_state 只存动画帧。
+
+#### 3.6.2 UsageSummary
+
+```rust
+struct UsageSummary {
+    input_tokens: u64, output_tokens: u64, last_input_tokens: u64,
+    api_calls: u64, context_size: u64, cost_usd: f64,
+}
+```
+
+| 方法 | 说明 |
+|---|---|
+| `record_usage(input, output, last_input, cost)` | 累加 token 与成本，返回 (input, output, cost) 元组 |
+| `set_context_size(size)` | 设置 context window 大小 |
+| `update_last_input_tokens(tokens)` | 更新最近一次 input token 数 |
+
+#### 3.6.3 WorkspaceState
+
+```rust
+struct WorkspaceState {
+    cwd: Option<String>, worktree: Option<String>,
+    path_base: Option<String>, workspace_root: Option<String>,
+    branch: Option<String>, kind: WorktreeKind,
+}
+enum WorktreeKind { Unknown, MainCheckout, LinkedWorktree }
+```
+
+| 方法 | 说明 |
+|---|---|
+| `update_workspace(cwd, worktree)` | 设置 cwd 和 worktree |
+| `set_workspace_snapshot(path_base, root, branch, kind)` | 设置完整工作区快照 |
+
+#### 3.6.4 TaskStatusSnapshot
+
+```rust
+struct TaskStatusSnapshot {
+    total: usize, completed: usize, in_progress: usize, lines: Vec<String>,
+}
+```
+
+| 方法 | 说明 |
+|---|---|
+| `set_task_status(total, completed, in_progress)` | 更新计数（保留 lines） |
+| `set_task_lines(lines)` | 更新展示行 |
+
+#### 3.6.5 ProcessingJobTracker
+
+```rust
+struct ProcessingJob { id: String, chat_id: Option<String>, status: ProcessingStatus }
+enum ProcessingStatus { Running, Finished, Failed }
+```
+
+| 方法 | 说明 |
+|---|---|
+| `start_processing_job(id, chat_id)` | 添加 Running job |
+| `finish_processing_job(id, success)` | 标记 Finished / Failed |
+
+#### 3.6.6 CompactProgressModel
+
+```rust
+struct CompactProgressModel { stage: String, current: Option<u32>, total: Option<u32> }
+```
+
+| 方法 | 说明 |
+|---|---|
+| `set_compact_progress(stage, current, total)` | 设置进度 + 调用 `start_compact()` 激活 spinner |
+| `clear_compact_runtime()` | 清空 compact_progress + running_tool_count 归零（不碰 phase/chat_active） |
+
+#### 3.6.7 StatusNotice
+
+| 方法 | 说明 |
+|---|---|
+| `set_status_notice(notice)` | 设置持久 notice，清空 expiry |
+| `set_transient_status_notice(notice, expires_at)` | 设置临时 notice + 过期时间 |
+| `set_graph_phase(phase)` | 设置 graph_phase，同步派生 notice（当无临时 notice 时） |
+| `expire_transient_notice(now)` | 检查过期，回退到 graph_phase 派生的持久态 |
+| `notice_from_phase(phase)` | idle→"Ready"，其他→phase 文案 |
+
+#### 3.6.8 AskUserState
+
+AskUser 交互块**内嵌在 OutputTimeline** 中（`OutputTimelineItem::AskUserBatch`），同一时刻至多一个，固定 id `"ask-user"`。
+
+```
+AskUserPhase: Answering → Confirming → Confirmed
+```
+
+**AskUser 状态转换图**：
+
+```
+                    ┌─ 多题末题答完 ─→ Confirming ──ConfirmAskUserBatch──→ Confirmed
+Answering (idx 0..N)│                    │
+    │                │              NavigateAskUserTo(i)
+    │                └─── 跳回某题 ──→ Answering(idx=i)
+    └─ 单题直接答完 ─→ Confirmed（跳过 Confirming）
+```
+
+| 方法 | 说明 |
+|---|---|
+| `show_ask_user_batch(slots)` | 显示交互块（替换已存在的） |
+| `answer_current_ask_user(answer)` | 回答当前问题，自动前进或进入确认页 |
+| `navigate_ask_user_to(index)` | 确认页跳回某题重新作答 |
+| `set_ask_user_cursor(cursor)` | 选项光标（越界夹取） |
+| `toggle_ask_user_selected(index)` | 切换选项勾选（仅 LLM 选项可勾） |
+| `set_ask_user_chat_input(active)` | 切换 Type something 子态 |
+| `append/delete/move_ask_user_chat_*` | Type something 输入框编辑 |
+| `set_ask_user_confirm_cursor(cursor)` | 确认页导航光标（0..=N+1） |
+| `confirm_ask_user_batch()` | 确认提交，进入终态 |
+| `dismiss_ask_user_batch()` | 移除交互块 |
+| `ask_user_snapshot()` | 读取当前交互状态快照（供控制器读取） |
+
+### 3.7 Intent / Change / Update 模式
+
+Conversation 采用 **struct-per-variant + trait dispatch**：
+
+```rust
+trait ConversationUpdate {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange>;
+}
+```
+
+每个 Intent 是独立 struct，`impl ConversationUpdate` 逻辑在 `intent_impls.rs`。`ConversationIntent` enum 仅做传输容器，含 48 个 variant（27 conversation + 14 runtime + 7 ask_user）。
+
+**ConversationChange** 含 30+ variant，覆盖：
+- 对话生命周期：`ChatStarted` / `ChatTurnStarted` / `ChatCompleting` / `ChatCompleted`
+- 内容追加：`UserMessageAppended` / `AssistantTextAppended` / `ThinkingTextAppended` / `SystemMessageAppended` / `ErrorAppended`
+- 工具追踪：`ToolCallObserved` / `ToolCallBound` / `ToolCallCompleted` / `OrphanToolResultObserved`
+- 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
+- Agent 进度：`AgentProgressRecorded` / `AgentMetaUpdated`
+- AskUser：`AskUserShown` / `AskUserUpdated` / `AskUserDismissed`
+- 运行态：`ProviderModelChanged` / `WorkspaceChanged` / `UsageChanged` / `LiveTpsChanged` / `TaskStatusChanged` / `ProcessingJobChanged` / `CompactProgressChanged` / `SpinnerPhaseChanged` / `SpinnerStopped` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
+- 脏标记：`OutputDirty` / `StyleBoundaryResetRequired`
+
+> **已知不一致**（#795 §5.4）：Conversation 用 struct-per-variant + trait dispatch，其他三个用 enum match。后续统一（见 §10）。
+
+### 3.8 revision memo 机制
+
+```rust
+impl ConversationModel {
+    pub fn apply<U: ConversationUpdate>(&mut self, update: U) -> Vec<ConversationChange> {
+        let changes = update.update(self);
+        if !changes.is_empty() {
+            self.revision = self.revision.wrapping_add(1);
+        }
+        changes
+    }
+    pub fn revision(&self) -> u64 { self.revision }
+}
+```
+
+- 每次 `apply()` 产生非空 Change 时 `revision += 1`
+- no-op apply（空 Change）不增 revision
+- 渲染层以 `(revision, workspace_root)` 为 cache key，不变时跳过全量 `assemble_from_conversation`
+
+## 4. InputModel
+
+### 4.1 字段定义
+
+```rust
+struct InputModel {
+    pub document: InputDocument,
+    pub history: InputHistory,
+    pub completion: InputCompletion,
+    pub mode: InputMode,
+}
+```
+
+| 字段 | 类型 | 职责 |
+|---|---|---|
+| `document` | InputDocument | buffer / cursor / image_spans / copied_text_spans |
+| `history` | InputHistory | 输入历史 / selected_index / saved_input |
+| `completion` | InputCompletion | 补全 items / visible / selected_index / query |
+| `mode` | InputMode | Normal / Completion |
+
+### 4.2 InputDocument
+
+```rust
+struct InputDocument {
+    pub buffer: String,
+    pub cursor: usize,
+    // image_spans: Vec<ImageSpan>      — 图片占位 span
+    // copied_text_spans: Vec<Span>     — 复制标记 span
+}
+```
+
+| 方法 | 说明 |
+|---|---|
+| `insert_text(text)` / `insert_pasted_text(text)` | 插入文本（清补全、清历史选中） |
+| `replace_text(text)` | 全量替换 |
+| `delete_backward()` / `delete_forward()` / `delete_word_before_cursor()` | 删除 |
+| `move_cursor(cursor)` / `move_left/right/home/end/up/down()` | 光标移动 |
+| `insert_image(image)` | 插入图片 span |
+| `submit_text()` / `display_text()` / `drain_images()` | 提交时调用 |
+| `clear()` | 清空 |
+
+> **span 模型**：`copied_text_spans` + `image_spans` 在 buffer 中维护位置区间，编辑/删除时统一位移。提交时 `submit_text()` 按原始 buffer 位置还原 placeholder（#507 修复：image placeholder 保留不剔除）。
+
+### 4.3 InputCompletion
+
+```rust
+struct InputCompletion {
+    pub items: Vec<CompletionItem>,
+    pub visible: bool,
+    pub selected_index: Option<usize>,
+    pub query: String,
+}
+```
+
+补全触发类型：
+
+| TriggerType | 说明 |
+|---|---|
+| `AtSymbol` | `@` 触发（model 补全） |
+| `SlashCommand` | `/` 触发（命令补全） |
+| `ModelArg` | model 参数补全 |
+| `ModelSubCommand` | model 子命令补全 |
+| `ResumeArg` | `/resume` 参数补全 |
+
+`SuggestionType::Session` 有特殊替换逻辑：从 replacement 中提取 id，拼接 `/resume {id}`。
+
+### 4.4 InputHistory
+
+```rust
+struct InputHistory {
+    pub entries: Vec<String>,
+    pub selected_index: Option<usize>,
+    pub saved_input: String,
+}
+```
+
+- `MoveCursorUp` 在第一行时触发 `history_previous()`
+- `MoveCursorDown` 在最后一行时触发 `history_next()`
+- 选中历史时 `saved_input` 保存当前输入，退出历史时恢复
+
+### 4.5 InputMode
+
+```rust
+enum InputMode { Normal, Completion }
+```
+
+- `SetCompletions` 根据补全可见性自动切换 mode
+- `AcceptCompletion` / `Submit` / `Clear` 回到 Normal
+
+### 4.6 Intent / Change
+
+```rust
+enum InputIntent {
+    InsertChar(char), InsertText(String), InsertPastedText(String), ReplaceText(String),
+    MoveCursor(/*cursor*/), MoveCursorLeft/Right/Home/End/Up/Down,
+    InsertNewline, DeleteBackward, DeleteWordBeforeCursor, DeleteForward,
+    MoveHistoryPrevious, MoveHistoryNext, ReplaceHistory(Vec<String>),
+    SetCompletions { query, items }, SelectCompletionNext, SelectCompletionPrevious,
+    AcceptCompletion, AcceptCompletionValue(String),
+    InsertImage(image), SetMode(InputMode),
+    Submit, Clear,
+}
+enum InputChange {
+    TextChanged { text, cursor },
+    CursorMoved { cursor },
+    CompletionChanged { visible, selected_index, items },
+    ModeChanged { mode },
+    HistorySelected { text, cursor },
+    Submitted { submission },
+    Cleared,
+}
+```
+
+## 5. DiagnosticModel
+
+### 5.1 字段定义
+
+```rust
+struct DiagnosticModel {
+    pub notices: Vec<DiagnosticNotice>,
+    pub active_prompt: Option<ActivePrompt>,
+    next_notice_id: usize,  // private
+}
+```
+
+### 5.2 DiagnosticNotice
+
+```rust
+struct DiagnosticNotice { pub id: String, pub severity: DiagnosticSeverity, pub message: String }
+enum DiagnosticSeverity { Error, Warning, Info }
+```
+
+### 5.3 ActivePrompt
+
+```rust
+struct ActivePrompt { pub id: String, pub question: String }
+```
+
+同一时刻至多一个 `active_prompt`。`AnswerPrompt` 清空 `active_prompt` 并返回答案。
+
+### 5.4 Intent / Change
+
+```rust
+enum DiagnosticIntent {
+    RecordNotice { severity, message },
+    OpenPrompt { id, question },
+    AnswerPrompt { answer },
+    DismissNotice { id },
+}
+enum DiagnosticChange {
+    NoticeRecorded { id, severity },
+    PromptOpened { id },
+    PromptAnswered { answer },
+    NoticeDismissed { id },
+}
+```
+
+| 方法 | 说明 |
+|---|---|
+| `highest_severity()` | 返回当前最高级别（Error > Warning > Info），空列表返回 None |
+
+## 6. SessionModel
+
+### 6.1 字段定义
+
+```rust
+struct SessionModel {
+    pub current_session_id: Option<String>,
+    pub dirty: bool,
+    pub message_count: usize,
+    pub resume_candidates: Vec<SessionResumeCandidate>,
+    pub save_status: SessionSaveStatus,
+}
+```
+
+### 6.2 SessionSaveStatus 状态机
+
+```rust
+enum SessionSaveStatus { Idle, Saving, Saved, Failed { message: String } }
+```
+
+```
+Idle ──SaveStarted──→ Saving ──SaveFinished──→ Saved（dirty=false）
+                          │
+                          └──SaveFailed──→ Failed { message }
+```
+
+### 6.3 SessionResumeCandidate
+
+```rust
+struct SessionResumeCandidate { pub id: String, /* display fields */ }
+```
+
+### 6.4 Intent / Change
+
+```rust
+enum SessionIntent {
+    SetCurrentSession { id },
+    MarkDirty,
+    MessagesSynced { message_count },
+    SaveStarted, SaveFinished, SaveFailed { message },
+    ResumeCandidatesLoaded { candidates },
+}
+enum SessionChange {
+    CurrentSessionChanged { id },
+    DirtyChanged { dirty },
+    MessagesSynced { message_count },
+    SaveStatusChanged { status },
+    ResumeCandidatesChanged { candidates },
+}
+```
+
+| 转换 | 说明 |
+|---|---|
+| `MessagesSynced` | 设置 message_count + 清 dirty |
+| `SaveFinished` | 设 Saved + 清 dirty |
+| `SaveFailed` | 设 Failed { message } |
+
+## 7. 投影状态机规则
+
+### 7.1 非领域权威声明
+
+Model 中的所有状态机都是**投影状态机**，不是领域权威态：
+
+| 状态机 | 权威位置 | Model 中的角色 |
+|---|---|---|
+| ChatStatus | Runtime AgentRun | 投影——从 SDK 事件推导 |
+| ChatTurnStatus | Runtime AgentRun | 投影——从 SDK 事件推导 |
+| ToolCallStatus | Runtime ToolExecutor | 投影——从 SDK 事件推导 |
+| SpinnerPhase | 派生——从 chat/tool 生命周期 | Model 内部推导 |
+| AskUserPhase | Runtime（AskUserQuestion tool） | 投影——从 SDK 事件 + 用户输入推导 |
+| SessionSaveStatus | Runtime StorageService | 投影——从 SDK 事件推导 |
+
+**规则**：
+
+1. **MUST** Model 状态机的转换**只能**由 Intent 触发，**NEVER** 由 Model 自行轮询或定时器驱动。
+2. **MUST** 状态机转换产生 Change，Coordinator 消费 Change 决定是否生成 Effect。
+3. **MUST** 当 SDK 事件与 Model 状态不一致时，**以 SDK 事件为准**——Model 是投影，不是权威。
+4. **NEVER** 在 Model 中维护 Runtime 不存在的状态——避免幻觉态。
+
+### 7.2 状态终态保护
+
+- `ToolCallStatus::Success` / `Error` 为终态，`update()` 中 **MUST NOT** 覆盖已终态的 ToolCall
+- `ChatStatus::Completed` / `Failed` / `Cancelled` 为终态
+- `AskUserPhase::Confirmed` 为终态（block 等待 dismiss）
+
+## 8. 单一真相规则
+
+### 8.1 domain 态属 AgentClient
+
+以下状态**MUST**只在 Runtime（AgentClient 侧）维护，Model 只做只读投影：
+
+- AgentRun 生命周期（Running / Paused / Aborted / Completed）
+- Message 列表（权威对话历史）
+- Tool 执行结果（权威 payload）
+- Context window token 计数
+- Permission 决策
+
+### 8.2 UI 态只在 Model
+
+以下状态**MUST**只在 Model 维护，**NEVER**在 ViewAssembler / ViewState / Render 中独立持有：
+
+- SpinnerPhase（业务态——`chat_active` / `phase` / `running_tool_count`）
+- InputMode（Normal / Completion）
+- AskUserPhase（Answering / Confirming / Confirmed）
+- AskUser 交互快照（cursor / selected / chat_input）
+- OutputTimeline 块顺序
+- DiagnosticNotice 列表
+- SessionResumeCandidate 列表
+
+### 8.3 禁止双重真相
+
+| 状态 | 真相源 | 禁止 |
+|---|---|---|
+| spinner 可见性 | `model.conversation.runtime.spinner.chat_active` | **NEVER** 在 view_state 独立维护 `visible` |
+| spinner phase | `model.conversation.runtime.spinner.phase` | **NEVER** 在 view_state 维护业务 phase（只存动画帧 `frame`） |
+| input buffer | `model.input.document.buffer` | **NEVER** 在 render 层维护独立缓冲 |
+| active prompt | `model.diagnostic.active_prompt` | **NEVER** 在 view_state 维护 prompt 副本 |
+
+> **已知违规**（#795 §10.4）：spinner 状态三处同步。目标态：`model.conversation.runtime.spinner` 为唯一来源，`view_state` 只存 `spinner_frame`（动画帧）。
+
+## 9. Model 纯净性约束
+
+### 9.1 禁止依赖
+
+Model 层 `MUST NOT` import 以下 crate：
+
+| 禁止依赖 | 理由 |
+|---|---|
+| `ratatui` | 渲染框架——Model 不产出渲染类型 |
+| `tokio` | 异步运行时——Model 不执行 async 操作 |
+| `std::process::Command` | 子进程——Model 不执行 IO |
+| `crate::tui::render::*` | 渲染层——方向反了 |
+| `sdk::AgentClient` | 出站端口——Model 不直接调 Runtime |
+
+### 9.2 禁止操作
+
+| 禁止操作 | 理由 |
+|---|---|
+| `tokio::spawn` | 副作用——通过 Effect 描述 |
+| `.await` | async——Model 是同步纯函数 |
+| `Command::new` | 子进程——通过 Effect |
+| channel send/recv | 通信——通过 Effect |
+| `AgentClient::*` 调用 | Runtime 调用——通过 Effect |
+
+### 9.3 允许依赖
+
+| 允许依赖 | 用途 |
+|---|---|
+| `sdk`（DTO 类型） | ChatEvent / ChatMessage / ContentBlock 等只读类型 |
+| `share`（共享内核） | ContentBlock / InputId 等基础类型 |
+| `std` | 基础类型 |
+
+### 9.4 目标态 vs 现状
+
+| 约束 | 现状 | 目标态 | 关联 |
+|---|---|---|---|
+| Model purity arch test | ❌ 缺失 | 补齐（#795 §9 门禁 #2） | #795 |
+| reducer 纯化 | `root_reducer` 直接调 `runtime.start_chat()` 等副作用 | reducer 只产出 Change，Coordinator 消费 Change 生成 Effect | #795 §10.1 |
+| RuntimeState 字段私有化 | 全 `pub` | 只经业务方法操作 | #795 §10.1 |
+| Intent 风格统一 | Conversation 用 struct-per-variant，其他用 enum | 统一（后续 issue 决策） | #795 §10.9 |
+
+## 10. 现状缺口与目标态
+
+| # | 缺口 | 现状 | 目标态 | 关联 |
+|---|---|---|---|---|
+| 1 | reducer 副作用 | `root_reducer` 直接调 runtime 方法 | Change → Coordinator → Effect | #795 §10.1 |
+| 2 | spinner 三处同步 | model + view_state + animation | model 单一来源 | #795 §10.4 |
+| 3 | chats/timeline 无 invariant 测试 | 无 | 每次 append/complete 后断言同步 | #795 §10.8 |
+| 4 | Intent 风格不一致 | Conversation struct-per-variant，其他 enum | 统一 | #795 §10.9 |
+| 5 | Model purity arch test | 缺失 | 补齐门禁 #2 | #795 §9 |
+| 6 | RuntimeState 字段全 pub | TODO 标注 | 逐步私有化 | #795 §10.1 |
+| 7 | `model.rs` / `update.rs` / `effect.rs` / `view_state.rs` 的 `#![allow(dead_code)]` | 遮蔽真实死代码 | 移除 allow，逐个清理 | #795 §10.2 |
+
+## 11. 相关文档
+
+- TUI 架构与数据流：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
+- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-12 | 初稿：3+1 Context 完整字段、ChatStatus/ChatTurnStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 状态机、RuntimeState 8 子模块、单一真相规则、Model 纯净性约束、现状缺口 | #796 |
