@@ -64,6 +64,7 @@
 | Task Management | C/S | `TaskPort` | Runtime 读写 Task 规划自身工作；Task 拥有状态机 + 依赖图不变量 |
 | Project / Workspace | C/S | `WorkspacePort` | worktree 进出、git 上下文供给（含 git context 注入的数据源） |
 | Hook | C/S | `HookPort` | 一个类型化端口；Hook 执行/重试归 Hook，触发时机和 directive 的 Run 状态迁移归调用方 |
+| Application Version Control | C/S | `ApplicationVersionPort` | AgentClient 的 Application Control 用例由 Runtime 路由到版本检查/安装应用服务；CLI/TUI 不直接持有更新模块内部端口 |
 | Audit | **Pub/Sub**（Runtime 是 Supplier） | `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit 独立持久化和查询，不影响 Runtime；Cost/Pricing 保留 Future |
 
 > **SubAgent 不在此表**：SubAgent 的派生与执行是 Agent Runtime 的核心能力（子 Run 也是 Runtime 的执行实例），不是一条对外端口。
@@ -78,8 +79,7 @@
 
 | 上游 | 下游 | 模式 | 说明 |
 |---|---|---|---|
-| Context Management / Memory / Task | Storage | C/S | Storage 提供原子写 / 损坏兜底**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（经端口收集，恢复时分发回去）——跨 BC 快照组装，边界不破。 |
-| Audit | Storage | C/S | Audit 拥有 Usage schema 与按 SessionId 分区语义；Storage 通过 `AppendLogPort` 提供 append/flush/read/损坏隔离机制。Audit 文件独立于 Session 存储。 |
+| Context Management / Memory / Task / Audit | Storage | C/S | Storage 提供原子写 / 损坏隔离**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（经端口收集，恢复时分发回去）；Project 不单独持久化同一份 Workspace Snapshot。Audit 拥有 Usage schema 与按 SessionId 分区语义，通过 `AppendLogPort` 获取 append/flush/read 机制；其文件独立于 Session。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
 
 ## 7. Shared Kernel（谨慎，尽量小）
 
@@ -126,4 +126,6 @@
 | 2026-07-11 | Workflow 降为支撑域：移出核心框、并入 §4 出站端口表（ReasoningPort）、删原"核心内部"节、Future 去多-agent 编排 | #760 |
 | 2026-07-12 | Tool BC 出站契约拆为 Catalog/Execution 双端口；Skill 与 Command 使用独立端口，MCP 定位为 Tool adapter | #787 |
 | 2026-07-12 | 将 Run 限定为唯一 Agent 执行生命周期状态机，与各 BC 局部聚合状态机区分 | #743 / #787 |
-| 2026-07-12 | Policy 收缩为 AllowAll-only 实现；Hook 单端口；Audit MVP 收缩为非阻塞 UsageSink，并补 Audit→Storage AppendLog 边 | #790 |
+| 2026-07-12 | 补齐 Audit/Tool Result → Storage 机制边，并明确 Project Snapshot 由 Session 组装而非重复落盘 | #793 |
+| 2026-07-12 | 补充 Runtime Application Control → Application Version Control 出站边界 | #793 |
+| 2026-07-12 | Policy 收缩为 AllowAll-only 实现；Hook 单端口；Audit MVP 收缩为非阻塞 UsageSink，并明确 Audit→Storage AppendLog 语义 | #790 |

@@ -19,6 +19,9 @@
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
+| [storage/](storage/README.md) | 原子读写、backup/quarantine、路径安全及数据所有权边界 | ✅ S2 摘要 |
+| [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink/rotation 与 Audit 分离 | ✅ S2 摘要 |
+| [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 | ✅ S2 摘要 |
 | [tui/](tui/README.md) | 八层 TEA 管线、三条信息流、3+1 Context Model、Msg/Intent/Change/Effect 枚举、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 | ✅ S2 |
 | [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 | ✅ S2 |
 | [hook/](hook/README.md) | 单 HookPort、类型化协议、3 次执行重试与 Stop/Run 15 次阻断语义 | ✅ S2 |
@@ -48,6 +51,7 @@
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
 | 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
+| 2026-07-12 | 新增 Storage、Logging、Application Version Control 三个通用域摘要设计 | #793 |
 | 2026-07-12 | 新增 memory/ 战术设计：MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort | #789 |
 | 2026-07-12 | 新增 task/ 战术设计：Task 聚合、状态机、依赖图不变量、Batch、TaskPort、PL | #791 |
 | 2026-07-12 | 新增 project/ 战术设计：Workspace 聚合、Frame 栈、fork、三端口、git 供给 | #791 |
