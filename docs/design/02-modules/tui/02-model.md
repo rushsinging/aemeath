@@ -98,15 +98,19 @@ Created ──StartChat──→ Running ──CompleteChat──→ Completing 
                           │                        │
                           ├──AbortChat──→ Failed    ├──异常──→ Failed
                           └──Cancel──→ Cancelled
+
+ResumeConversation ──→ Completed（恢复已结束会话，不触发 spinner）
 ```
 
 | 转换 | 触发 Intent | 方法 | 说明 |
 |---|---|---|---|
 | → Running | `StartChat` | `start_chat()` | 创建 Chat + 初始 turn |
-| → Running | `ResumeConversation` | `ensure_runtime_turn()` | 恢复历史会话，不触发 spinner |
+| → Completed | `ResumeConversation` | `ensure_runtime_turn()` | 恢复历史会话，chat 保持已完成态，不触发 spinner |
 | Running → Completing | `CompleteChat` | `complete_chat()` | 清理 active block 追踪 |
 | → Failed | 异常 / AbortChat | — | Runtime 报告异常 |
 | → Cancelled | 用户取消 | — | — |
+
+> **已知 bug**：`ensure_runtime_turn()` 当前将 `chat.status` 设为 `Running`，但恢复的历史会话已结束，正确状态应为 `Completed`。目标态修正为 Completed。
 
 ### 3.3 ChatTurn 与 ChatTurnStatus 状态机
 
@@ -758,6 +762,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | 5 | Model purity arch test | 缺失 | 补齐门禁 #2 | #795 §9 |
 | 6 | RuntimeState 字段全 pub | TODO 标注 | 逐步私有化 | #795 §10.1 |
 | 7 | `model.rs` / `update.rs` / `effect.rs` / `view_state.rs` 的 `#![allow(dead_code)]` | 遮蔽真实死代码 | 移除 allow，逐个清理 | #795 §10.2 |
+| 8 | `ensure_runtime_turn()` 将 chat.status 设为 Running | 恢复历史会话后应为 Completed | 修正为 Completed | #796 |
 
 ## 11. 相关文档
 
