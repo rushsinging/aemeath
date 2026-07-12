@@ -11,17 +11,20 @@
 | 目标文档 | 内容 | 状态 |
 |---|---|---|
 | [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 | ✅ S2 |
-| [context-management/](context-management/01-session.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
+| [context-management/](context-management/README.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
 | [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
-| memory / task / project / policy / audit | 各支撑 BC 战术设计 | 规划 |
+| [task/](task/README.md) | Task 聚合根、状态机、依赖图不变量、Batch 领域服务、TaskPort、Published Language | ✅ S2 |
+| [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离范式、三端口、GitWorktreeOps、git 上下文供给 | ✅ S2 |
+| [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入(#551)、Reflection 引擎、MemoryPort | ✅ S2 |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
-| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | ✅ S2 |
+| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
 | [storage/](storage/README.md) | 原子读写、backup/quarantine、路径安全及数据所有权边界 | ✅ S2 摘要 |
 | [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink/rotation 与 Audit 分离 | ✅ S2 摘要 |
-| [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、可信 UpdatePlan 与安装事务 | ✅ S2 摘要 |
+| [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 | ✅ S2 摘要 |
+| policy / audit | 各支撑 BC 战术设计 | 规划 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
-| server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
+| [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑 | ⏸ 占位（#794 暂缓） |
 
 ## 编写原则
 
@@ -47,3 +50,7 @@
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
 | 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
 | 2026-07-12 | 新增 Storage、Logging、Application Version Control 三个通用域摘要设计 | #793 |
+| 2026-07-12 | 新增 memory/ 战术设计：MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort | #789 |
+| 2026-07-12 | 新增 task/ 战术设计：Task 聚合、状态机、依赖图不变量、Batch、TaskPort、PL | #791 |
+| 2026-07-12 | 新增 project/ 战术设计：Workspace 聚合、Frame 栈、fork、三端口、git 供给 | #791 |
+| 2026-07-12 | 新增 server/ 占位文档：暂缓设计，继承草案约束 | #794 |

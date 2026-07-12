@@ -37,6 +37,7 @@
 | 理解 Tool/Skill/Command、Scope/Profile 与 MCP 边界 | [02-modules/tools/](02-modules/tools/README.md) |
 | 理解 Provider ACL、统一调用流、reasoning 映射与 Invocation Scope | [02-modules/provider/](02-modules/provider/README.md) |
 | 理解持久化、诊断日志与应用自更新的通用域边界 | [Storage](02-modules/storage/README.md) · [Logging](02-modules/logging/README.md) · [Application Version Control](02-modules/application-version-control/README.md) |
+| 理解 Memory 检索、注入与 Reflection 引擎 | [02-modules/memory/](02-modules/memory/README.md) |
 | 理解依赖方向 / 六边形 | [04-system-architecture.md](01-system/04-system-architecture.md) + [05-dependency-rules.md](01-system/05-dependency-rules.md) |
 | 新增 / 调整架构守卫、Stop 钩子失败排查 | [02-architecture-guards.md](02-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
@@ -64,3 +65,4 @@
 | 2026-07-12 | 系统导航补充 15 BC 责任章程，并精确状态机原则命名 | #743 / #787 |
 | 2026-07-12 | 阅读路径新增 Provider 战术设计入口 | #788 |
 | 2026-07-12 | 阅读路径新增 Storage、Logging、Application Version Control 摘要入口 | #793 |
+| 2026-07-12 | 阅读路径新增 Memory 战术设计入口 | #789 |
