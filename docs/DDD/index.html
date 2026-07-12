@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-      <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXX</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器，<b>通用域篇 XXXI-XXXIII</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXIV</b> 做实现范围收缩、双层重试与独立事实流——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>。
+        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>。
   </p>
 
   <div class="timeline">
@@ -1484,9 +1484,62 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
       <div class="tl-out">产出 · <b>出站端口适配器设计</b>——Local + WSS 双适配器，组合根注入，端口透明</div>
     </div>
   </div>
-  <!-- ===== 阶段三十一：机制不等于语义 ===== -->
-  <div class="tl-item p-mix rev d2">
+
+  <!-- ===== 阶段三十一：ACL 彻底隔离不泄漏类型 ===== -->
+  <div class="tl-item p-hex rev d2">
     <div class="tl-rail"><div class="tl-node">XXXI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>ACL 彻底隔离 · 不泄漏类型到消费层</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TUI 的 <code>UiEvent</code> 直接持有 14+ 个 <code>sdk::*</code> 类型——SDK 类型泄漏到 model/update/view_model 层。<b>防腐层 MUST 彻底消除外部类型，消费层 NEVER 看到来源类型</b>（R7 铁律）。</p>
+      <ul class="tl-list">
+        <li><b>现状违规</b>：UiEvent 持有 <code>sdk::ToolCallStatusView</code> / <code>sdk::AgentProgressEventView</code> / <code>sdk::HookEventView</code> 等，SDK crate 成为 TUI 全层的硬依赖</li>
+        <li><b>目标态</b>：TUI 定义自有 DTO（<code>ToolCallStatus</code> / <code>AgentProgressEvent</code> / <code>HookEvent</code>），<code>sdk_event_to_ui_event</code> 是唯一转换点</li>
+        <li><b>不 re-export 而是自定义</b>：<code>type ToolCallId = String</code> 而非 <code>pub use sdk::ToolCallId</code>——切断 SDK crate 依赖，TUI 可脱离 SDK 独立编译</li>
+        <li><b>端口 trait 是唯一例外</b>：<code>AgentClient</code> trait 是 R4 允许的端口依赖，但 trait 返回的 ChatEvent 中的类型 MUST 在 ACL 层转换后才能进入 UiEvent</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">ACL 彻底隔离 · 不泄漏类型</span><span class="d">现状</span>  UiEvent { tool: sdk::ToolCallStatusView, ... }
+       model/update/view_model 全层可见 sdk::*
+
+<span class="d">目标</span>  UiEvent { status: ToolCallStatus, ... }   <span class="m">// TUI 自有</span>
+       sdk_event_to_ui_event() 是唯一转换点
+       model/update/view_model NEVER 见 sdk::*
+
+<span class="d">关键</span>  type ToolCallId = String  <span class="m">// 不 re-export</span>
+       切断 SDK crate 依赖
+
+<span class="m">// 防腐层彻底消除外部类型，消费层只看 TUI 类型</span></pre>
+      <div class="tl-out">产出 · <b>UiEvent 零 SDK 类型</b>——ACL 是唯一转换点，TUI 可脱离 SDK 独立编译</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十二：两层 ACL 分离结构与语义 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>两层 ACL · 结构转换与语义翻译分离</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">TUI 事件流有两层转换：第一层 <code>sdk_event_to_ui_event</code> 做结构转换（SDK→TUI 类型），第二层 <code>map_agent_event</code> 做语义翻译（事件→Intent 拆分）。<b>结构转换和语义翻译是不同关注点，MUST 分离</b>。</p>
+      <ul class="tl-list">
+        <li><b>第一层（结构转换）</b>：机械式 1:1 类型映射，<code>sdk::ChatEvent</code> → <code>UiEvent</code>，NEVER 产生 Intent/Effect</li>
+        <li><b>第二层（语义翻译）</b>：业务逻辑——Intent 拆分（跨 Context）、sanitize 截断、progress 格式化、hook notice 派生</li>
+        <li><b>分离理由</b>：结构转换是机械的（加字段只需改映射），语义翻译是业务的（涉及多 Context 拆分逻辑）——混在一起会变成 444 行手工 match 巨石</li>
+        <li><b>convert.rs 漂移教训</b>：Runtime → SDK 的 444 行手工 match 已有 5 处结构漂移（类型擦除、字段丢失），根因是两边各自定义类型</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">两层 ACL · 结构与语义分离</span><span class="d">第一层</span>  event_mapping.rs
+ sdk::ChatEvent → UiEvent         <span class="m">// 机械 1:1 映射</span>
+ · 消除 SDK 类型                  <span class="m">// NEVER 产生 Intent</span>
+
+<span class="d">第二层</span>  agent_event.rs
+ &UiEvent → AgentEventMapping      <span class="m">// 语义翻译</span>
+ · Intent 拆分（跨 Context）
+ · sanitize / format / derive     <span class="m">// NEVER 接触 SDK 类型</span>
+
+<span class="m">// 结构转换是机械的，语义翻译是业务的——分离</span></pre>
+      <div class="tl-out">产出 · <b>两层 ACL 职责边界</b>——结构转换与语义翻译分离，各层可独立测试</div>
+    </div>
+  </div>
+  <!-- ===== 阶段三十三：机制不等于语义 ===== -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXIII</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>机制不等于语义 · Storage 只保证 bytes，不判断领域合法</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
       <p class="tl-desc">Storage 初稿想直接返回 <code>RecoveredFromBackup</code>，却又坚持不依赖 Session / Memory schema——review 后发现契约无法实现：<b>只搬运 opaque bytes 的通用域，不可能知道数据在领域上是否可解析</b>。</p>
@@ -1506,9 +1559,9 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     </div>
   </div>
 
-  <!-- ===== 阶段三十二：全局资源不等于全局状态 ===== -->
-  <div class="tl-item p-mix rev d2">
-    <div class="tl-rail"><div class="tl-node">XXXII</div></div>
+  <!-- ===== 阶段三十四：全局资源不等于全局状态 ===== -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXIV</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>全局资源不等于全局状态 · Logger 单例，调用上下文 scope-local</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
       <p class="tl-desc">Logging 的 facade / sink 可以进程级共享，但 <code>CURRENT_REQUEST_ID</code> / model / provider / role 不能是进程级可变值。Main 与多个 Sub 并发时，<b>共享基础设施资源和共享请求状态是两回事</b>。</p>
@@ -1527,9 +1580,9 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     </div>
   </div>
 
-  <!-- ===== 阶段三十三：安全承诺类型化 ===== -->
-  <div class="tl-item p-ddd rev d2">
-    <div class="tl-rail"><div class="tl-node">XXXIII</div></div>
+  <!-- ===== 阶段三十五：安全承诺类型化 ===== -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXV</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>安全承诺类型化 · 让 installer 只接受 VerifiedUpdatePlan</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
       <p class="tl-desc">自更新若只约定“先校验、再下载、再替换”，任何调用方都可能绕过顺序。review 后把已验证事实固化为不透明值对象：<b>后一步只能接收前一步验证完成后才能构造的类型</b>。</p>
@@ -1553,9 +1606,9 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
     </div>
   </div>
 
-  <!-- ===== 阶段三十四：Policy/Hook/Audit 最小范围 + 双层重试 ===== -->
+  <!-- ===== 阶段三十六：Policy/Hook/Audit 最小范围 + 双层重试 ===== -->
   <div class="tl-item p-mix rev d2">
-    <div class="tl-rail"><div class="tl-node">XXXIV</div></div>
+    <div class="tl-rail"><div class="tl-node">XXXVI</div></div>
     <div class="tl-card">
       <div class="tl-top"><h3>控制范围 + 双层重试 · 让扩展点不反客为主</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
       <p class="tl-desc">接口可以为未来留形状，但实现必须诚实；跨 BC 重试必须按各自不变量分层计数。</p>

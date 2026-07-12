@@ -9,6 +9,7 @@
 |---|---|---|
 | 01 | [architecture-and-dataflow.md](01-architecture-and-dataflow.md) | 八层 TEA 管线、三条信息流、3+1 Context Model、Msg/Intent/Change/Effect 枚举、ViewAssembler/ViewModel/ViewState、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 |
 | 02 | [model.md](02-model.md) | 3+3 Context 完整字段、RunStatus/RunStepStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束、现状缺口 |
+| 03 | [event-flow-and-acl.md](03-event-flow-and-acl.md) | 事件流完整链路、AgentEventMapper ACL（两层转换 + sanitize）、SDK DTO 边界（convert.rs 漂移 + UiEvent 类型泄漏）、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6、现状缺口 11 项 |
 
 ## 定位
 
