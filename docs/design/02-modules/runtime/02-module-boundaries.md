@@ -39,7 +39,7 @@
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
-- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 `Usage`；**梯度重试**：T0 即时→T1 退避→T2 降级(降 effort/token/compact)→T3 故障转移(pool)→T4 放弃，Fatal(4xx) 直跳 T4（详见 `03-loop` §5）
+- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 `Usage`；**退避重试**：Retryable(超时/5xx/429/流中断)指数退避重试（≤10 次，退避封顶 5 分钟），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
 - 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`ReasoningPort`（取 effort）
 
@@ -119,3 +119,4 @@ event_projection：被各模块调用（emit），不反向依赖业务
 | 2026-07-11 | 初稿：8 个内部模块划分、状态所有权、依赖方向、收敛方向 | #761 |
 | 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputBuffer 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputBuffer 状态、Runtime/Hook 边界子节 | #761 |
 | 2026-07-11 | model_invocation 补错误重试职责（Retryable 退避 / context 超限 compact / Fatal fail）+ ModelInvocationRetrying | #761 |
+| 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
