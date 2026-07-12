@@ -18,7 +18,7 @@
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | ✅ S2 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
-| server | WSS 协议、控制面 / worker 拓扑（v0.1.0 之后） | 规划 |
+| [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑 | ⏸ 占位（#794 暂缓） |
 
 ## 编写原则
 
@@ -43,3 +43,4 @@
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
 | 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
+| 2026-07-12 | 新增 server/ 占位文档：暂缓设计，继承草案约束 | #794 |
