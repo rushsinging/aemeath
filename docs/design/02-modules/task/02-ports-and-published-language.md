@@ -47,7 +47,7 @@ pub trait TaskPort: Send + Sync {
 | **聚合方法内化** | `update` 接受闭包操作 `&mut Task`，但状态迁移不变量由 Task 聚合方法守护（闭包内调用 `transition_to` 等） |
 | **快照经端口** | `collect_snapshot` / `restore_snapshot` 是跨 BC 快照组装的唯一入口 |
 
-> **Decision**：`update` 的闭包模式当前允许调用方直接写字段。目标态应改为只能调用聚合方法（`transition_to`、`set_progress` 等），但这一收窄需要与 Runtime 消费方协调，在 S5 迁移时落地。当前设计文档锁定目标态为"聚合方法内化"。
+> **Decision**：`update` 的闭包模式当前允许调用方直接写字段。目标态应改为只能调用聚合方法（`transition_to`、`add_dependency` 等），但这一收窄需要与 Runtime 消费方协调，在 S5 迁移时落地。当前设计文档锁定目标态为"聚合方法内化"。
 
 ### 1.3 消费方
 
