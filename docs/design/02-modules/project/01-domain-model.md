@@ -92,7 +92,7 @@ exit worktree:
 - **可推理**：输入 → 输出明确，无隐藏状态变更。
 - **可复用**：`WorkspaceService` 只是 `Mutex<WorkspaceState>` + 委托调用纯函数。
 
-## 4. seed_isolated 隔离范式
+## 4. fork 隔离范式
 
 ### 4.1 动机
 
@@ -100,10 +100,10 @@ exit worktree:
 
 ### 4.2 范式
 
-`seed_isolated()` 从父 agent 当前快照派生独立实例：
+`fork()` 从父 agent 当前快照派生独立实例：
 
 ```
-fn seed_isolated(&self) -> Arc<Self>:
+fn fork(&self) -> Arc<Self>:
   let s = self.lock();
   Arc::new(WorkspaceService {
     state: Mutex::new(WorkspaceState {
@@ -136,7 +136,7 @@ fn seed_isolated(&self) -> Arc<Self>:
 - 子 agent 的 enter / exit 操作只影响自己的 state，父 agent 无感知。
 - `git` 端口共享是安全的（git CLI 是无状态命令）。
 
-> **Decision**：seed_isolated 是 Workspace BC 的核心隔离范式，与 Runtime 的 SubAgent ExecutionPolicy 对齐。SubAgent 的 `RuntimeContext` 持有独立的 `WorkspaceService` 实例。
+> **Decision**：fork 是 Workspace BC 的核心隔离范式，与 Runtime 的 SubAgent ExecutionPolicy 对齐。SubAgent 的 `RuntimeContext` 持有独立的 `WorkspaceService` 实例。
 
 ## 5. WorkspaceError
 
@@ -166,7 +166,7 @@ fn seed_isolated(&self) -> Arc<Self>:
 - 持有 `Mutex<WorkspaceState>`（单一可变状态源）。
 - 持有 `Arc<dyn GitWorktreeOps>`（git 出站端口）。
 - 实现 `WorkspaceRead` + `WorkspaceControl` + `WorkspacePersist`。
-- 提供 `seed_isolated()` 派生子实例。
+- 提供 `fork()` 派生子实例。
 
 ### 6.2 锁策略
 
@@ -180,7 +180,7 @@ fn seed_isolated(&self) -> Arc<Self>:
 |---|---|
 | `new(cwd)` | 生产构造，使用 `GitCli` |
 | `with_git(cwd, git)` | 测试构造，注入 `FakeGit` |
-| `seed_isolated(&self)` | 派生子 agent 实例 |
+| `fork(&self)` | 派生子 agent 实例 |
 
 ## 7. 相关文档
 
@@ -193,4 +193,4 @@ fn seed_isolated(&self) -> Arc<Self>:
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-12 | 初稿：Workspace 聚合根、Frame 栈、状态转换规则、seed_isolated、错误模型 | #791 |
+| 2026-07-12 | 初稿：Workspace 聚合根、Frame 栈、状态转换规则、fork、错误模型 | #791 |

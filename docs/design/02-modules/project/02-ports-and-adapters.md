@@ -166,7 +166,7 @@ pub trait GitWorktreeOps: Send + Sync {
 ### 5.2 设计约束
 
 - `GitWorktreeOps` 是 Workspace BC 的**内部出站端口**，不对外暴露。
-- `WorkspaceService` 持有 `Arc<dyn GitWorktreeOps>`，`seed_isolated` 时共享。
+- `WorkspaceService` 持有 `Arc<dyn GitWorktreeOps>`，`fork` 时共享。
 - `GitCli` **MAY** spawn 子进程（project feature 可 spawn，shared 不可）。
 - **NEVER** 在 `shared` 层 spawn 子进程——git CLI 调用只在 project feature 的 `GitCli` 适配器中。
 
@@ -220,7 +220,7 @@ project/src/
 ├── workspace/
 │   ├── state.rs            # WorkspaceState + 纯函数转换规则
 │   ├── frame.rs            # WorkspaceFrame
-│   ├── service.rs          # WorkspaceService（单一可变状态源 + seed_isolated）
+│   ├── service.rs          # WorkspaceService（单一可变状态源 + fork）
 │   ├── error.rs            # WorkspaceError
 │   └── port.rs             # WorkspaceRead / Control / Persist trait
 ├── git/
