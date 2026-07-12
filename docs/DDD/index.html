@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>。
+    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>。
   </p>
 
   <div class="timeline">
@@ -1124,6 +1124,70 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 <span class="tag">常量收口 · 单一真相</span><span class="d">TokenBudgetConfig</span>  max_summary_output / buffer / safety_factor
 <span class="d">ProviderPort</span>        max_output_tokens(model)  <span class="m">// 替代硬编码 8192</span></pre>
       <div class="tl-out">产出 · 四个关注点各归其位：<b>guidance / API 参数 / 预算常量 / 幂等指纹</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十六：检索与注入分离 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>检索与注入分离 · 谁输出数据 vs 谁决定放哪</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Memory BC 初稿把"注入位置"也归自己管——review 后推翻：Memory 只输出检索结果和格式化文本，<b>注入位置、token 预算、与 guidance/skill 的排序全归 Context Management</b>。这是 XII"读模型 vs 持久层"的跨 BC 版本。</p>
+      <ul class="tl-list">
+        <li>Memory BC 职责：<code>top_for_inject(limit)</code> 返回排序后的 MemoryEntry + <code>format_injection_block</code> 格式化</li>
+        <li>Context Management 职责：决定注入位置（system block 顺序）、token 预算分配、跨轮去重</li>
+        <li>判据：<b>谁拥有 Context Window 结构，谁决定注入策略</b>——Memory 是数据提供者不是窗口管理者</li>
+        <li>附产物：<code>top_for_inject</code> 不 touch（只读），避免注入行为导致排序漂移</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">跨 BC 职责分离 · 检索 vs 注入</span><span class="d">Memory BC</span>      top_for_inject() → Vec&lt;MemoryEntry&gt;     <span class="m">// 读模型，只排序</span>
+<span class="d">Memory BC</span>      format_injection_block() → String        <span class="m">// 格式化</span>
+<span class="d">Context Mgmt</span>   决定注入位置 / 预算 / 去重 / 排序        <span class="m">// 拥有 Context Window</span>
+
+<span class="m">// Memory 不知道自己被放在哪；CM 不知道记忆怎么排序</span></pre>
+      <div class="tl-out">产出 · MemoryPort 只管检索与格式化，<b>注入策略归 Context Management</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十七：领域服务不依赖外部资源 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域服务不依赖外部资源 · Reflection 不依赖 ProviderPort</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Reflection 需要调 LLM，但 Memory BC 不应依赖 ProviderPort——否则 Context Map 多出一条 Memory→Provider 边，破坏依赖方向。解法：<b>把 Reflection 拆为领域逻辑（prompt/output/apply）和编排逻辑（LLM 调用）</b>，前者归 Memory BC，后者归 Runtime。</p>
+      <ul class="tl-list">
+        <li>Memory BC 暴露 <b>ReflectionPromptPort</b>：build_prompt（纯函数）、parse_output、apply_output——不调 LLM</li>
+        <li>Runtime 经 ProviderPort 发起 LLM 调用，把原始响应交回 Memory BC parse + apply</li>
+        <li>双端口分离：<b>MemoryPort</b>（CRUD + 检索）给 context_coordination 和 slash 命令用；<b>ReflectionPromptPort</b>给 Runtime reflection 编排用——消费方不同、演进方向不同</li>
+        <li>与 IX 对照：Tool/Skill/Command 异构不硬统一；MemoryPort/ReflectionPromptPort <b>同属 Memory BC 但职责正交</b>，分端口而非合并</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">领域服务 · 不依赖外部资源</span><span class="d">Memory BC</span>    ReflectionPromptPort::build_prompt()    <span class="m">// 纯函数</span>
+<span class="d">Memory BC</span>    ReflectionPromptPort::parse_output()    <span class="m">// 纯函数</span>
+<span class="d">Memory BC</span>    ReflectionPromptPort::apply_output()     <span class="m">// 经 MemoryPort 写入</span>
+<span class="d">Runtime</span>      call_llm() → ProviderPort               <span class="m">// 编排，Memory 不参与</span>
+
+<span class="m">// Memory BC 无 Memory→Provider 边；依赖方向保持一致</span></pre>
+      <div class="tl-out">产出 · Memory BC 无 ProviderPort 依赖，<b>双端口按消费方分离</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十八：异步执行不阻塞主循环 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>异步执行不阻塞主循环 · Reflection 从同步改异步</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">初稿中 Reflection 的三种触发（interval / pre-compact / forced）全部同步 await——主循环在等 LLM 返回时完全阻塞。review 后推翻：<b>interval 和 pre-compact 改为 tokio::spawn 后台执行</b>，只有 forced（用户主动 <code>/reflection</code>）保持同步。</p>
+      <ul class="tl-list">
+        <li><b>Interval</b>：Run 完成后 spawn 后台反思，主循环立即处理 outcome / 下一轮——结果通过 mpsc channel 在后续轮次回传</li>
+        <li><b>Pre-compact</b>：compact 前抓 messages 快照交给后台任务，<b>compact 立即继续不等待</b>——反思用快照跑，用户可能在 compact 后才看到结果，可接受</li>
+        <li><b>Forced</b>：<code>/reflection</code> 是用户主动请求，保持同步 await</li>
+        <li>并发控制：<b>单一后台 slot</b>（interval + pre-compact 共享），前一个未完成时跳过本次；Run 结束时 drain，避免孤儿任务</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">异步执行 · 不阻塞主循环</span><span class="d">Interval</span>     spawn → 后台跑 → channel 回传          <span class="m">// 不阻塞</span>
+<span class="d">Pre-compact</span>  抓快照 → spawn → compact 立即继续       <span class="m">// 不阻塞</span>
+<span class="d">Forced</span>       await → 用户等结果                      <span class="m">// 同步</span>
+
+<span class="m">// 判据：用户是否在等结果？否 → 异步；是 → 同步</span></pre>
+      <div class="tl-out">产出 · 主循环零阻塞，<b>Reflection 在后台跑</b>，结果延迟到下一轮 emit</div>
     </div>
   </div>
 </section>
