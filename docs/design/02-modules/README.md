@@ -19,6 +19,7 @@
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
 | [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
+| [tui/](tui/README.md) | 八层 TEA 管线、三条信息流、3+1 Context Model、Msg/Intent/Change/Effect 枚举、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 | ✅ S2 |
 | policy / audit | 各支撑 BC 战术设计 | 规划 |
 | tui | TEA 架构、四 Context、DTO 边界、守卫 | 规划 |
 | [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑 | ⏸ 占位（#794 暂缓） |
@@ -50,3 +51,4 @@
 | 2026-07-12 | 新增 task/ 战术设计：Task 聚合、状态机、依赖图不变量、Batch、TaskPort、PL | #791 |
 | 2026-07-12 | 新增 project/ 战术设计：Workspace 聚合、Frame 栈、fork、三端口、git 供给 | #791 |
 | 2026-07-12 | 新增 server/ 占位文档：暂缓设计，继承草案约束 | #794 |
+| 2026-07-12 | 新增 tui/ 战术设计：八层 TEA 管线、三条信息流、3+1 Context、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 | #795 |
