@@ -72,7 +72,7 @@ struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 
 
 `RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCompleted/Failed/Cancelled`
 
-> **`RunCompleted{ result }` 携带载荷**（最后 assistant 文本/结构）——这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；Sub→父 Run，父从 `RunCompleted` 提取 result 继续。**靠终态领域事件识别 result，不靠遍历 message**。
+> **终态事件族统一带载荷**：`RunCompleted{ result }`（最后 assistant 文本/结构）/ `RunFailed{ error }` / `RunCancelled`。这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；**Sub→父 Run，父从终态事件统一提取**（成功取 `result`、失败取 `error`）继续。**靠终态领域事件识别，不靠遍历 message**。
 
 > Event Projection adapter 按 Main/Sub 路由与命名（Main→TUI，Sub→父 Run，详见 #612）。
 
