@@ -70,7 +70,7 @@ struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 
 
 ## 4. 领域事件（→ Event Projection → SDK ChatEvent）
 
-`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCompleted/Failed/Cancelled`
+`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCompleted/Failed/Cancelled`
 
 > **终态事件族统一带载荷**：`RunCompleted{ result }`（最后 assistant 文本/结构）/ `RunFailed{ error }` / `RunCancelled`。这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；**Sub→父 Run，父从终态事件统一提取**（成功取 `result`、失败取 `error`）继续。**靠终态领域事件识别，不靠遍历 message**。
 
