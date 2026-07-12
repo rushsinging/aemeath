@@ -9,7 +9,7 @@
 | 概念 | 回答 | 性质 |
 |---|---|---|
 | **RunSpec** | 跑什么（prompt/tools/model/timeout/资源模式）| 声明式、可序列化 |
-| **RuntimeContext** | 用什么资源跑（12 端口 + config + event sink）| 装配的活资源 |
+| **RuntimeContext** | 用什么资源跑（出站端口 + config + event sink）| 装配的活资源 |
 | **Run** | 一次执行实例 | 内存态聚合 + 唯一状态机 |
 
 因果链：`RunSpec ──装配──▶ RuntimeContext ──注入──▶ Run`；层级 `Session → Run → Run Step`。
@@ -31,7 +31,7 @@
 | [03-loop-and-state-machine.md](03-loop-and-state-machine.md) | Run 单状态机、Loop Engine 零分支骨架、单 Run vs Session 多 Run 序列 |
 | [04-stuck-prevention.md](04-stuck-prevention.md) | StuckGuard 四层防线、分级响应、状态机集成 |
 | [05-recovery-semantics.md](05-recovery-semantics.md) | 从头开始恢复、持久化边界、无 durable |
-| [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站端口、12 出站端口、RuntimeContext 装配、Composition Root |
+| [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站端口、出站端口、RuntimeContext 装配、Composition Root |
 
 ## 相关文档
 
@@ -43,3 +43,4 @@
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-11 | 初稿：模块入口 + 三元组速览 + 文档导航 | #761 |
+| 2026-07-12 | 出站端口数量改为开放表述，适配 Tool Catalog/Execution 拆分 | #787 |

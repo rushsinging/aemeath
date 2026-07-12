@@ -34,6 +34,7 @@
 | 理解 aemeath 是什么、怎么划分 BC | [01-product-and-domain.md](01-system/01-product-and-domain.md) |
 | 查术语精确定义 | [02-ubiquitous-language.md](01-system/02-ubiquitous-language.md) |
 | 理解 BC 之间怎么集成 / 端口 | [03-context-map.md](01-system/03-context-map.md) |
+| 理解 Tool/Skill/Command、Scope/Profile 与 MCP 边界 | [02-modules/tools/](02-modules/tools/README.md) |
 | 理解依赖方向 / 六边形 | [04-system-architecture.md](01-system/04-system-architecture.md) + [05-dependency-rules.md](01-system/05-dependency-rules.md) |
 | 新增 / 调整架构守卫、Stop 钩子失败排查 | [02-architecture-guards.md](02-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
@@ -57,3 +58,4 @@
 |---|---|---|
 | 2026-07-11 | 重写为三层信息架构导航 + 迁移地图 + 四态约定 | #760 |
 | 2026-07-11 | 迁移地图收敛为过渡说明（迁移追踪归 migration-governance）、状态约定改为纯目标态、新增修改历史 | #760 |
+| 2026-07-12 | 阅读路径新增 Tool/Skill/Command 战术设计入口 | #787 |

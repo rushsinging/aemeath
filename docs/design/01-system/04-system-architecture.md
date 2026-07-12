@@ -74,7 +74,7 @@ Agent Runtime
 ├── Run 聚合 + 状态机     # 唯一状态机，内存态
 ├── Loop Engine                # ReAct 循环骨架 + 停止条件（Main/SubAgent 共用）
 ├── Model Invocation 协调       # 调 ProviderPort，组装流式响应
-├── Tool Coordination          # 双 ID 映射、并发执行、结果回收 → ToolPort
+├── Tool Coordination          # 双 ID、Policy/Hook/审批、timeout/并发、结果回收 → ToolCatalogPort + ToolExecutionPort
 ├── Context Coordination       # compact / 注入 / prompt → ContextPort
 ├── Interaction                # AwaitingUser / ApprovalGate → InteractionPort
 └── Event Projection           # 领域事件 → SDK ChatEvent
@@ -106,3 +106,4 @@ Agent Runtime
 | 2026-07-11 | 移除组合根现状 / TODO 描述改为目标态、crate 映射去"当前"措辞、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run | #760 |
 | 2026-07-11 | Workflow 从核心域挪到支撑域（六边形图） | #760 |
+| 2026-07-12 | Tool Coordination 对齐 Catalog/Execution 双端口及 Runtime 编排职责 | #787 |
