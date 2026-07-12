@@ -105,7 +105,7 @@ enum RunProjectionStatus {
 }
 ```
 
-> **投影简化规则**：Runtime `RunStatus` 有 11 个状态，TUI 投影合并为 7 个——spinner phase 负责细粒度展示（Thinking / Generating / CallingTool 等），RunProjectionStatus 只需区分"运行中 / 等待用户 / 完成 / 失败 / 取消"。
+> **投影简化规则**：Runtime `RunStatus` 有 11 个状态，TUI 投影合并为 7 个——细粒度展示由 `derive_spinner_phase()` 从 RunProjectionStatus + RunStepProjectionStatus 派生（Thinking / Generating / CallingTool 等），RunProjectionStatus 只需区分"运行中 / 等待用户 / 完成 / 失败 / 取消"。SpinnerPhase **NEVER** 自建状态机。
 
 **RunProjectionStatus 状态转换图**：
 
@@ -279,37 +279,99 @@ struct RuntimeState {
 
 > **TODO**：字段当前全 `pub`，目标态逐步私有化，只经业务方法操作（#795 §10.1 reducer 纯化）。
 
-#### 3.6.1 SpinnerModel
+#### 3.6.1 SpinnerModel（派生自 Runtime 状态）
+
+> **设计原则**：SpinnerPhase **NEVER** 自建独立状态机，**MUST** 从 `RunProjectionStatus` + `RunStepProjectionStatus` + 运行时上下文（tool_calls / hook 事件）**派生**。SpinnerModel 只存储派生所需的输入数据，phase 是纯函数输出。
+
+**现状问题**：当前 `SpinnerPhase` 是独立状态机，由 `start_chat()` / `generate()` / `think()` / `start_tool_call()` 等方法驱动转换。这导致 spinner 状态与 Run 状态机脱耦——两套状态机需要手动同步，容易不一致。
+
+**目标态**：SpinnerPhase 是派生函数，不再有独立状态转换。
 
 ```rust
+/// Spinner 派生输入（存储在 RuntimeState 中，由 SDK 事件更新）
 struct SpinnerModel {
-    chat_active: bool,           // spinner 可见性的唯一真相
-    phase: Option<SpinnerPhase>, // 显示文案
-    running_tool_count: usize,   // 运行中 tool call 计数
+    /// 运行中 tool call 的名称列表（从当前 RunStep 的 tool_calls 中
+    /// status == Running | PendingArgs | Ready 的条目派生）
+    active_tools: Vec<String>,
+    /// 最近一次 hook 事件（由 HookExecuted intent 更新）
+    last_hook: Option<HookSnapshot>,
+    /// 最近一次 sub-agent 进度（由 AgentProgress intent 更新）
+    last_agent_progress: Option<AgentProgressEntry>,
 }
-enum SpinnerPhase {
-    Thinking, Generating, AgentWorking, Reflecting, Compacting,
-    CallingTool(String), CallingTools { remaining: usize },
-    Hook { event: String, detail: String, outcome: HookOutcome },
+
+/// SpinnerPhase 是纯派生函数，不存储在 Model 中
+fn derive_spinner_phase(
+    run_status: RunProjectionStatus,
+    step_status: Option<RunStepProjectionStatus>,
+    spinner: &SpinnerModel,
+) -> Option<SpinnerPhase> {
+    match run_status {
+        // 终态：无 spinner
+        Completed | Failed | Cancelled | Created => None,
+
+        // Compacting：直接映射
+        // 注：RunProjectionStatus 当前合并了 Compacting 到 Running，
+        // 需要补充 compact_progress 信号或从 Runtime 事件推导
+        _ if spinner.compact_active() => Some(SpinnerPhase::Compacting),
+
+        // Running 态：根据 step_status 和上下文细分
+        Running => {
+            match step_status {
+                Some(ToolExecuting) | Some(ToolCalling) => {
+                    let tools = &spinner.active_tools;
+                    if tools.len() == 1 {
+                        Some(SpinnerPhase::CallingTool(tools[0].clone()))
+                    } else if tools.len() > 1 {
+                        Some(SpinnerPhase::CallingTools { remaining: tools.len() })
+                    } else {
+                        Some(SpinnerPhase::CallingTools { remaining: 0 })
+                    }
+                }
+                Some(Streaming) => {
+                    // 有 agent progress 时显示 AgentWorking
+                    if spinner.last_agent_progress.is_some() {
+                        Some(SpinnerPhase::AgentWorking)
+                    } else {
+                        Some(SpinnerPhase::Generating)
+                    }
+                }
+                _ => {
+                    // Hook 执行中
+                    if let Some(h) = &spinner.last_hook {
+                        if h.is_running() {
+                            return Some(SpinnerPhase::Hook { .. });
+                        }
+                    }
+                    // 默认：等待首 token 或准备上下文
+                    Some(SpinnerPhase::Thinking)
+                }
+            }
+        }
+
+        AwaitingUser => None,  // AskUser 交互期间不显示 spinner
+
+        Completing => None,
+    }
 }
 ```
 
-**SpinnerPhase 状态转换**：
+**SpinnerPhase 变体与 Runtime 状态的映射**：
 
-| 触发方法 | phase → | 副作用 |
+| SpinnerPhase | 派生来源（Runtime 状态） | 说明 |
 |---|---|---|
-| `start_chat()` | Thinking | chat_active=true |
-| `generate()` | Generating | — |
-| `think()` | Thinking | — |
-| `start_tool_call(name)` | CallingTool(name) | running_tool_count++ |
-| `complete_tool_call()` | Thinking（归零）/ CallingTools{remaining}（未归零） | running_tool_count-- |
-| `report_agent_progress()` | AgentWorking | — |
-| `start_compact()` | Compacting | chat_active=true |
-| `pause_chat()` | None | chat_active=false |
-| `resume_chat()` | Thinking | chat_active=true |
-| `abort_chat()` / `complete_chat()` / `force_idle()` | None | chat_active=false, count=0 |
+| `Thinking` | `RunStatus::PreparingContext` 或 `InvokingModel`（首 token 前） | 等待上下文准备 / 等待首 token |
+| `Generating` | `RunStatus::InvokingModel`（收到 delta 后） + `RunStepStatus::Streaming` | 流式生成中 |
+| `CallingTool(name)` | `RunStatus::ExecutingTools` + 1 个 tool `Running` | 单工具执行中 |
+| `CallingTools { remaining }` | `RunStatus::ExecutingTools` + N 个 tool `Running` | 多工具并行执行 |
+| `Compacting` | `RunStatus::Compacting` | 上下文压缩中 |
+| `AgentWorking` | `RunStatus::InvokingModel` + sub-agent progress 事件 | sub-agent 工作中 |
+| `Hook { event, detail, outcome }` | Hook 事件（非 RunStatus，由 HookPort 事件驱动） | Hook 执行中 |
 
-> **已知问题**（#795 §10.4）：spinner 状态三处同步。目标态：model 为单一来源，view_state 只存动画帧。
+> **chat_active 也可派生**：`chat_active = run_status ∈ {Running, AwaitingUser}`，**NEVER** 独立维护 bool 字段。当前代码中 `chat_active` 与 `RunProjectionStatus` 重复维护，是双重真相。
+
+> **Reflecting 已移除**：当前代码中 `Reflecting` 变体没有对应的 Runtime 状态，是自己造的。目标态移除——如果需要区分 reasoning 模式的 spinner，应从 `RunSpec.reasoning_level` 派生，而非自建状态。
+
+> **已知问题**（#795 §10.4）：spinner 状态三处同步。根因就是 SpinnerPhase 是独立状态机。改为派生函数后，根因消除——只有 `RunProjectionStatus` + `RunStepProjectionStatus` 一个真相源，spinner phase 自动跟随。
 
 #### 3.6.2 UsageSummary
 
@@ -725,7 +787,7 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 
 以下状态**MUST**只在 Model 维护，**NEVER**在 ViewAssembler / ViewState / Render 中独立持有：
 
-- SpinnerPhase（业务态——`chat_active` / `phase` / `running_tool_count`）
+- SpinnerPhase 派生输入（`active_tools` / `last_hook` / `last_agent_progress`）——phase 本身是纯函数派生，不存储
 - InputMode（Normal / Completion）
 - AskUserPhase（Answering / Confirming / Confirmed）
 - AskUser 交互快照（cursor / selected / chat_input）
@@ -737,8 +799,8 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 
 | 状态 | 真相源 | 禁止 |
 |---|---|---|
-| spinner 可见性 | `model.conversation.runtime.spinner.chat_active` | **NEVER** 在 view_state 独立维护 `visible` |
-| spinner phase | `model.conversation.runtime.spinner.phase` | **NEVER** 在 view_state 维护业务 phase（只存动画帧 `frame`） |
+| spinner 可见性 | `RunProjectionStatus ∈ {Running, AwaitingUser}`（派生） | **NEVER** 在 spinner model 或 view_state 独立维护 `chat_active` bool |
+| spinner phase | `derive_spinner_phase(run_status, step_status, spinner)` 纯函数派生 | **NEVER** 在 model 存储独立 phase 状态机或 view_state 维护业务 phase |
 | input buffer | `model.input.document.buffer` | **NEVER** 在 render 层维护独立缓冲 |
 | active prompt | `model.diagnostic.active_prompt` | **NEVER** 在 view_state 维护 prompt 副本 |
 
@@ -790,7 +852,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | # | 缺口 | 现状 | 目标态 | 关联 |
 |---|---|---|---|---|
 | 1 | reducer 副作用 | `root_reducer` 直接调 runtime 方法 | Change → Coordinator → Effect | #795 §10.1 |
-| 2 | spinner 三处同步 | model + view_state + animation | model 单一来源 | #795 §10.4 |
+| 2 | spinner 独立状态机 | SpinnerPhase 有 `start_chat()` / `generate()` 等自驱动转换，与 RunStatus 脱耦 | 改为 `derive_spinner_phase()` 纯函数，从 RunProjectionStatus + RunStepProjectionStatus 派生 | #795 §10.4 |
 | 3 | chats/timeline 无 invariant 测试 | 无 | 每次 append/complete 后断言同步 | #795 §10.8 |
 | 4 | Intent 风格不一致 | Conversation struct-per-variant，其他 enum | 统一 | #795 §10.9 |
 | 5 | Model purity arch test | 缺失 | 补齐门禁 #2 | #795 §9 |
@@ -813,3 +875,4 @@ Model 层 `MUST NOT` import 以下 crate：
 |---|---|---|
 | 2026-07-12 | 初稿：3+1 Context 完整字段、ChatStatus/ChatTurnStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 状态机、RuntimeState 8 子模块、单一真相规则、Model 纯净性约束、现状缺口 | #796 |
 | 2026-07-12 | 术语对齐 Runtime 统一语言：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus；新增 AwaitingUser 投影态；补充术语迁移缺口 #9 | #796 |
+| 2026-07-12 | SpinnerPhase 从独立状态机改为派生函数：`derive_spinner_phase(run_status, step_status, spinner)`，映射表标注每个变体的 Runtime 派生来源；移除 Reflecting（无对应 Runtime 状态）；chat_active 改为派生 | #796 |
