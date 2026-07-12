@@ -8,7 +8,7 @@
 | 编号 | 文档 | 内容 |
 |---|---|---|
 | 01 | [architecture-and-dataflow.md](01-architecture-and-dataflow.md) | 八层 TEA 管线、三条信息流、3+1 Context Model、Msg/Intent/Change/Effect 枚举、ViewAssembler/ViewModel/ViewState、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 |
-| 02 | [model.md](02-model.md) | 3+1 Context 完整字段、ChatStatus/ChatTurnStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 投影状态机、RuntimeState 8 子模块、单一真相规则、Model 纯净性约束、现状缺口 |
+| 02 | [model.md](02-model.md) | 3+3 Context 完整字段、RunStatus/RunStepStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束、现状缺口 |
 
 ## 定位
 

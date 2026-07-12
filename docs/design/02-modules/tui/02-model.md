@@ -20,25 +20,29 @@ Model 是 **TEA 管线的唯一可变状态载体**（第④层）：
 
 ```rust
 struct TuiModel {
-    conversation: ConversationModel,
-    input: InputModel,
-    diagnostic: DiagnosticModel,
-    session: SessionModel,
+    conversation: ConversationModel,    // 对话 + Run 运行态
+    input: InputModel,                  // 输入 buffer/cursor/selection/history
+    diagnostic: DiagnosticModel,        // 错误/警告/提示/阻塞请求
+    session: SessionModel,              // session metadata + resume + task 状态 + save
+    config: ConfigProjection,           // provider / model_id（投影自 Config BC）
+    workspace: WorkspaceProjection,     // cwd / worktree / path_base（投影自 WorkspaceService）
 }
 ```
 
-| 字段 | Context | 职责 | Intent 风格 |
-|---|---|---|---|
-| `conversation` | Conversation | chat/turn 生命周期、tool call、timeline、RuntimeState、AskUser | struct-per-variant + trait dispatch |
-| `input` | Input | buffer/cursor/selection/history/completion | enum match |
-| `diagnostic` | Diagnostic | 错误/警告/提示/阻塞请求 | enum match |
-| `session` | Session | session metadata、resume 候选、save 状态 | enum match |
+| 字段 | Context | 职责 | 投影来源 | Intent 风格 |
+|---|---|---|---|---|
+| `conversation` | Conversation | run/step 生命周期、tool call、timeline、RunRuntimeState、AskUser | Runtime AgentRun | struct-per-variant + trait dispatch |
+| `input` | Input | buffer/cursor/selection/history/completion | 纯 UI | enum match |
+| `diagnostic` | Diagnostic | 错误/警告/提示/阻塞请求 | Runtime / Hook 事件 | enum match |
+| `session` | Session | session metadata、resume 候选、save 状态、task 状态 | StorageService / Task BC | enum match |
+| `config` | Config | provider / model_id | Config BC | enum match |
+| `workspace` | Workspace | cwd / worktree / path_base / branch | WorkspaceService | enum match |
 
 **设计决策**：
 
-1. RuntimeState **不拆出独立 Context**——与 chat 生命周期耦合（chat 启动 → spinner 开始，chat 完成 → spinner 停止），拆出去增加跨 Context 通信开销。臃肿通过子模块封装控制。
+1. RuntimeState **按投影来源拆分**——原 13 字段混了 4 个不同 BC 的投影。真正与 Run 生命周期耦合的 9 个字段留在 `RunRuntimeState`（内聚在 ConversationModel），Config 投影独立为 `ConfigProjection`，Workspace 投影独立为 `WorkspaceProjection`，`task_status` 移到 `SessionModel`（投影自 Task BC）。
 2. AskUser **不拆出独立 Context**——同一时刻至多一个 AskUserBatch 块，交互状态内嵌在 OutputTimeline 中。
-3. 四个 Context 之间 **无直接引用**——跨 Context 通信通过 Coordinator 在 `update()` 中拆分 Intent 并分别 apply。
+3. 六个 Context 之间 **无直接引用**——跨 Context 通信通过 Coordinator 在 `update()` 中拆分 Intent 并分别 apply。
 
 ## 3. ConversationModel
 
@@ -60,8 +64,8 @@ struct ConversationModel {
     pub(super) active_thinking_block_id: Option<String>,
     pub(super) active_thinking_context: Option<(RunId, RunStepId)>,  // 现状: ChatId, ChatTurnId
     pub model_stream_placeholder: Option<ModelStreamWaitingView>,
-    // ── 运行态 ──
-    pub runtime: RuntimeState,
+    // ── 运行态（与 Run 生命周期耦合） ──
+    pub run_runtime: RunRuntimeState,
 }
 ```
 
@@ -77,7 +81,7 @@ struct ConversationModel {
 | `active_text_block_id` / `active_text_context` | pub(super) | 流式文本块追踪 |
 | `active_thinking_block_id` / `active_thinking_context` | pub(super) | thinking 块追踪 |
 | `model_stream_placeholder` | pub | model stream 等待占位 |
-| `runtime` | pub | RuntimeState 子模块 |
+| `run_runtime` | pub | RunRuntimeState——与 Run 生命周期耦合的运行态（见 §3.6） |
 
 ### 3.2 Run 投影与 RunStatus 状态机
 
@@ -255,29 +259,35 @@ ConversationModel 维护两套对话表示：
 
 > **已知缺口**（#795 §10.8）：chats 与 timeline 无 invariant 测试。目标态：每次 `start_chat` / `append_*` / `complete_chat` 后断言两者同步。
 
-### 3.6 RuntimeState 内聚子模块
+### 3.6 RunRuntimeState（Run 生命周期耦合运行态）
 
-RuntimeState 是 ConversationModel 的运行态聚合，包含 13 个字段。方法分三组：只读访问器、对话生命周期驱动状态转换、运行态 intent 直接字段操作。
+> **拆分原则**：原 RuntimeState 13 字段混了 4 个不同 BC 的投影。本节只保留与 Run 生命周期耦合的 9 个字段。Config 投影移到 §7 ConfigProjection，Workspace 投影移到 §8 WorkspaceProjection，task_status 移到 §6 SessionModel。
 
 ```rust
-struct RuntimeState {
+struct RunRuntimeState {
     spinner: SpinnerModel,
-    provider: Option<String>,
-    model_id: Option<String>,
-    workspace: WorkspaceState,
-    usage: UsageSummary,
-    live_tps: Option<f64>,
-    task_status: TaskStatusSnapshot,
-    processing_jobs: Vec<ProcessingJob>,
-    status_notice: StatusNotice,
     thinking: bool,
     graph_phase: Option<String>,
-    transient_notice_expiry: Option<Instant>,
     compact_progress: Option<CompactProgressModel>,
+    processing_jobs: Vec<ProcessingJob>,
+    usage: UsageSummary,
+    live_tps: Option<f64>,
+    status_notice: StatusNotice,          // 从 graph_phase 派生，半耦合
+    transient_notice_expiry: Option<Instant>,
 }
 ```
 
-> **TODO**：字段当前全 `pub`，目标态逐步私有化，只经业务方法操作（#795 §10.1 reducer 纯化）。
+| 字段 | 投影来源 | 与 Run 生命周期耦合 |
+|---|---|---|
+| `spinner` | RunStatus + RunStepStatus 派生 | ✅ |
+| `thinking` | RunSpec.reasoning_level | ✅ |
+| `graph_phase` | Runtime workflow phase | ✅ |
+| `compact_progress` | RunStatus::Compacting | ✅ |
+| `processing_jobs` | Run 执行编排 | ✅ |
+| `usage` | Runtime cost tracking | ✅ 每次 Run 累加 |
+| `live_tps` | Runtime token 速率 | ✅ |
+| `status_notice` | 从 graph_phase 派生 | ✅ 半耦合 |
+| `transient_notice_expiry` | 纯 UI 组合态 | ✅ 半耦合 |
 
 #### 3.6.1 SpinnerModel（派生自 Runtime 状态）
 
@@ -388,36 +398,7 @@ struct UsageSummary {
 | `set_context_size(size)` | 设置 context window 大小 |
 | `update_last_input_tokens(tokens)` | 更新最近一次 input token 数 |
 
-#### 3.6.3 WorkspaceState
-
-```rust
-struct WorkspaceState {
-    cwd: Option<String>, worktree: Option<String>,
-    path_base: Option<String>, workspace_root: Option<String>,
-    branch: Option<String>, kind: WorktreeKind,
-}
-enum WorktreeKind { Unknown, MainCheckout, LinkedWorktree }
-```
-
-| 方法 | 说明 |
-|---|---|
-| `update_workspace(cwd, worktree)` | 设置 cwd 和 worktree |
-| `set_workspace_snapshot(path_base, root, branch, kind)` | 设置完整工作区快照 |
-
-#### 3.6.4 TaskStatusSnapshot
-
-```rust
-struct TaskStatusSnapshot {
-    total: usize, completed: usize, in_progress: usize, lines: Vec<String>,
-}
-```
-
-| 方法 | 说明 |
-|---|---|
-| `set_task_status(total, completed, in_progress)` | 更新计数（保留 lines） |
-| `set_task_lines(lines)` | 更新展示行 |
-
-#### 3.6.5 ProcessingJobTracker
+#### 3.6.3 ProcessingJobTracker
 
 ```rust
 struct ProcessingJob { id: String, chat_id: Option<String>, status: ProcessingStatus }
@@ -429,7 +410,7 @@ enum ProcessingStatus { Running, Finished, Failed }
 | `start_processing_job(id, chat_id)` | 添加 Running job |
 | `finish_processing_job(id, success)` | 标记 Finished / Failed |
 
-#### 3.6.6 CompactProgressModel
+#### 3.6.4 CompactProgressModel
 
 ```rust
 struct CompactProgressModel { stage: String, current: Option<u32>, total: Option<u32> }
@@ -440,7 +421,7 @@ struct CompactProgressModel { stage: String, current: Option<u32>, total: Option
 | `set_compact_progress(stage, current, total)` | 设置进度 + 调用 `start_compact()` 激活 spinner |
 | `clear_compact_runtime()` | 清空 compact_progress + running_tool_count 归零（不碰 phase/chat_active） |
 
-#### 3.6.7 StatusNotice
+#### 3.6.5 StatusNotice
 
 | 方法 | 说明 |
 |---|---|
@@ -450,7 +431,7 @@ struct CompactProgressModel { stage: String, current: Option<u32>, total: Option
 | `expire_transient_notice(now)` | 检查过期，回退到 graph_phase 派生的持久态 |
 | `notice_from_phase(phase)` | idle→"Ready"，其他→phase 文案 |
 
-#### 3.6.8 AskUserState
+#### 3.6.6 AskUserState
 
 AskUser 交互块**内嵌在 OutputTimeline** 中（`OutputTimelineItem::AskUserBatch`），同一时刻至多一个，固定 id `"ask-user"`。
 
@@ -501,7 +482,8 @@ trait ConversationUpdate {
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
 - Agent 进度：`AgentProgressRecorded` / `AgentMetaUpdated`
 - AskUser：`AskUserShown` / `AskUserUpdated` / `AskUserDismissed`
-- 运行态：`ProviderModelChanged` / `WorkspaceChanged` / `UsageChanged` / `LiveTpsChanged` / `TaskStatusChanged` / `ProcessingJobChanged` / `CompactProgressChanged` / `SpinnerPhaseChanged` / `SpinnerStopped` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
+- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `CompactProgressChanged` / `SpinnerPhaseChanged` / `SpinnerStopped` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
+- 配置态：`ProviderModelChanged`（→ ConfigProjection）/ `WorkspaceChanged`（→ WorkspaceProjection）/ `TaskStatusChanged`（→ SessionModel）——目标态移出 Conversation
 - 脏标记：`OutputDirty` / `StyleBoundaryResetRequired`
 
 > **已知不一致**（#795 §5.4）：Conversation 用 struct-per-variant + trait dispatch，其他三个用 enum match。后续统一（见 §10）。
@@ -697,10 +679,26 @@ struct SessionModel {
     pub message_count: usize,
     pub resume_candidates: Vec<SessionResumeCandidate>,
     pub save_status: SessionSaveStatus,
+    pub task_status: TaskStatusSnapshot,   // 从 RunRuntimeState 迁入——投影自 Task BC
 }
 ```
 
-### 6.2 SessionSaveStatus 状态机
+### 6.2 TaskStatusSnapshot
+
+```rust
+struct TaskStatusSnapshot {
+    total: usize, completed: usize, in_progress: usize, lines: Vec<String>,
+}
+```
+
+| 方法 | 说明 |
+|---|---|
+| `set_task_status(total, completed, in_progress)` | 更新计数（保留 lines） |
+| `set_task_lines(lines)` | 更新展示行 |
+
+> **迁移说明**：`task_status` 原在 `RuntimeState` 中，但它的投影来源是 Task BC，与 Run 生命周期无耦合。移到 SessionModel 因为 Task 与 Session 关联（每个 session 有独立的 task 列表）。
+
+### 6.3 SessionSaveStatus 状态机
 
 ```rust
 enum SessionSaveStatus { Idle, Saving, Saved, Failed { message: String } }
@@ -712,13 +710,13 @@ Idle ──SaveStarted──→ Saving ──SaveFinished──→ Saved（dirty
                           └──SaveFailed──→ Failed { message }
 ```
 
-### 6.3 SessionResumeCandidate
+### 6.4 SessionResumeCandidate
 
 ```rust
 struct SessionResumeCandidate { pub id: String, /* display fields */ }
 ```
 
-### 6.4 Intent / Change
+### 6.5 Intent / Change
 
 ```rust
 enum SessionIntent {
@@ -727,6 +725,8 @@ enum SessionIntent {
     MessagesSynced { message_count },
     SaveStarted, SaveFinished, SaveFailed { message },
     ResumeCandidatesLoaded { candidates },
+    SetTaskStatus { total, completed, in_progress },
+    SetTaskLines { lines },
 }
 enum SessionChange {
     CurrentSessionChanged { id },
@@ -734,6 +734,7 @@ enum SessionChange {
     MessagesSynced { message_count },
     SaveStatusChanged { status },
     ResumeCandidatesChanged { candidates },
+    TaskStatusChanged,
 }
 ```
 
@@ -743,9 +744,72 @@ enum SessionChange {
 | `SaveFinished` | 设 Saved + 清 dirty |
 | `SaveFailed` | 设 Failed { message } |
 
-## 7. 投影状态机规则
+## 7. ConfigProjection
 
-### 7.1 非领域权威声明
+> **投影来源**：Config BC（`ConfigSnapshot`）。provider / model_id 有独立更新路径——用户切 model / 切 provider 时不经过 Run 生命周期，原 RuntimeState 中这两个字段与 Run 无耦合。
+
+```rust
+struct ConfigProjection {
+    pub provider: Option<String>,
+    pub model_id: Option<String>,
+}
+```
+
+| 方法 | 说明 |
+|---|---|
+| `set_provider_model(provider, model_id)` | 设置 provider 和 model_id |
+
+### 7.1 Intent / Change
+
+```rust
+enum ConfigIntent {
+    ProviderModelChanged { provider, model_id },
+}
+enum ConfigChange {
+    ProviderModelChanged,
+}
+```
+
+> **迁移说明**：`provider` / `model_id` 原在 `RuntimeState` 中。移到独立 `ConfigProjection` 后，更新路径清晰——用户切 model 只更新 ConfigProjection，不触发 Conversation 的 revision 增长。
+
+## 8. WorkspaceProjection
+
+> **投影来源**：WorkspaceService（Project BC）。cwd / worktree / path_base 有独立更新路径——进/出 worktree 时不经过 Run 生命周期。
+
+```rust
+struct WorkspaceProjection {
+    pub cwd: Option<String>,
+    pub worktree: Option<String>,
+    pub path_base: Option<String>,
+    pub workspace_root: Option<String>,
+    pub branch: Option<String>,
+    pub kind: WorktreeKind,
+}
+enum WorktreeKind { Unknown, MainCheckout, LinkedWorktree }
+```
+
+| 方法 | 说明 |
+|---|---|
+| `update_workspace(cwd, worktree)` | 设置 cwd 和 worktree |
+| `set_workspace_snapshot(path_base, root, branch, kind)` | 设置完整工作区快照 |
+
+### 8.1 Intent / Change
+
+```rust
+enum WorkspaceIntent {
+    UpdateWorkspace { cwd, worktree },
+    SetWorkspaceSnapshot { path_base, root, branch, kind },
+}
+enum WorkspaceChange {
+    WorkspaceChanged,
+}
+```
+
+> **迁移说明**：`workspace` 原在 `RuntimeState` 中。移到独立 `WorkspaceProjection` 后，进/出 worktree 只更新 WorkspaceProjection，不影响 Conversation revision。
+
+## 9. 投影状态机规则
+
+### 9.1 非领域权威声明
 
 Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 
@@ -765,15 +829,15 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 3. **MUST** 当 SDK 事件与 Model 状态不一致时，**以 SDK 事件为准**——Model 是投影，不是权威。
 4. **NEVER** 在 Model 中维护 Runtime 不存在的状态——避免幻觉态。
 
-### 7.2 状态终态保护
+### 9.2 状态终态保护
 
 - `ToolCallStatus::Success` / `Error` 为终态，`update()` 中 **MUST NOT** 覆盖已终态的 ToolCall
 - `RunProjectionStatus::Completed` / `Failed` / `Cancelled`（现状 `ChatStatus`）为终态
 - `AskUserPhase::Confirmed` 为终态（block 等待 dismiss）
 
-## 8. 单一真相规则
+## 10. 单一真相规则
 
-### 8.1 domain 态属 AgentClient
+### 10.1 domain 态属 AgentClient
 
 以下状态**MUST**只在 Runtime（AgentClient 侧）维护，Model 只做只读投影：
 
@@ -783,7 +847,7 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 - Context window token 计数
 - Permission 决策
 
-### 8.2 UI 态只在 Model
+### 10.2 UI 态只在 Model
 
 以下状态**MUST**只在 Model 维护，**NEVER**在 ViewAssembler / ViewState / Render 中独立持有：
 
@@ -795,7 +859,7 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 - DiagnosticNotice 列表
 - SessionResumeCandidate 列表
 
-### 8.3 禁止双重真相
+### 10.3 禁止双重真相
 
 | 状态 | 真相源 | 禁止 |
 |---|---|---|
@@ -806,9 +870,9 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 
 > **已知违规**（#795 §10.4）：spinner 状态三处同步。目标态：`model.conversation.runtime.spinner` 为唯一来源，`view_state` 只存 `spinner_frame`（动画帧）。
 
-## 9. Model 纯净性约束
+## 11. Model 纯净性约束
 
-### 9.1 禁止依赖
+### 11.1 禁止依赖
 
 Model 层 `MUST NOT` import 以下 crate：
 
@@ -820,7 +884,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | `crate::tui::render::*` | 渲染层——方向反了 |
 | `sdk::AgentClient` | 出站端口——Model 不直接调 Runtime |
 
-### 9.2 禁止操作
+### 11.2 禁止操作
 
 | 禁止操作 | 理由 |
 |---|---|
@@ -830,7 +894,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | channel send/recv | 通信——通过 Effect |
 | `AgentClient::*` 调用 | Runtime 调用——通过 Effect |
 
-### 9.3 允许依赖
+### 11.3 允许依赖
 
 | 允许依赖 | 用途 |
 |---|---|
@@ -838,7 +902,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | `share`（共享内核） | ContentBlock / InputId 等基础类型 |
 | `std` | 基础类型 |
 
-### 9.4 目标态 vs 现状
+### 11.4 目标态 vs 现状
 
 | 约束 | 现状 | 目标态 | 关联 |
 |---|---|---|---|
@@ -847,7 +911,7 @@ Model 层 `MUST NOT` import 以下 crate：
 | RuntimeState 字段私有化 | 全 `pub` | 只经业务方法操作 | #795 §10.1 |
 | Intent 风格统一 | Conversation 用 struct-per-variant，其他用 enum | 统一（后续 issue 决策） | #795 §10.9 |
 
-## 10. 现状缺口与目标态
+## 12. 现状缺口与目标态
 
 | # | 缺口 | 现状 | 目标态 | 关联 |
 |---|---|---|---|---|
@@ -860,8 +924,9 @@ Model 层 `MUST NOT` import 以下 crate：
 | 7 | `model.rs` / `update.rs` / `effect.rs` / `view_state.rs` 的 `#![allow(dead_code)]` | 遮蔽真实死代码 | 移除 allow，逐个清理 | #795 §10.2 |
 | 8 | `ensure_runtime_turn()` 将 chat.status 设为 Running | 恢复历史会话后应为 Completed | 修正为 Completed | #796 |
 | 9 | 术语未对齐 Runtime 统一语言 | 代码用 `Chat`/`ChatTurn`/`ChatStatus`/`ChatTurnStatus` | 改为 `Run`/`RunStep`/`RunStatus`/`RunStepStatus`，TUI 投影类型加 `*Projection` 后缀 | #796 |
+| 10 | RuntimeState 杂物箱混 4 个 BC 投影 | provider/model_id（Config）、workspace（Project）、task_status（Task）混在 RuntimeState 中 | 拆为 RunRuntimeState（9 字段）+ ConfigProjection + WorkspaceProjection，task_status 移到 SessionModel | #796 |
 
-## 11. 相关文档
+## 13. 相关文档
 
 - TUI 架构与数据流：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
 - 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
@@ -876,3 +941,4 @@ Model 层 `MUST NOT` import 以下 crate：
 | 2026-07-12 | 初稿：3+1 Context 完整字段、ChatStatus/ChatTurnStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 状态机、RuntimeState 8 子模块、单一真相规则、Model 纯净性约束、现状缺口 | #796 |
 | 2026-07-12 | 术语对齐 Runtime 统一语言：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus；新增 AwaitingUser 投影态；补充术语迁移缺口 #9 | #796 |
 | 2026-07-12 | SpinnerPhase 从独立状态机改为派生函数：`derive_spinner_phase(run_status, step_status, spinner)`，映射表标注每个变体的 Runtime 派生来源；移除 Reflecting（无对应 Runtime 状态）；chat_active 改为派生 | #796 |
+| 2026-07-12 | RuntimeState 按投影来源拆分：RunRuntimeState（9 字段，Run 耦合）+ ConfigProjection（provider/model_id，Config BC）+ WorkspaceProjection（cwd/worktree，Project BC），task_status 移到 SessionModel（Task BC）；3+1→3+3 Context | #796 |
