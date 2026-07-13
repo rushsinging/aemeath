@@ -20,8 +20,8 @@ pub struct AgentInput {
     pub description: String,
     /// Agent role name defined in config (e.g. 'coder', 'reviewer'). Resolves to the model and settings configured for that role.
     pub role: Option<String>,
-    /// Maximum number of tool-call rounds (max 1000)
-    pub max_turns: Option<u64>,
+    /// Wall-clock timeout in seconds. Defaults to 1800 seconds and is capped at 10800 seconds. Use 0 for no timeout.
+    pub timeout: Option<u64>,
 }
 
 #[cfg(test)]
@@ -35,14 +35,15 @@ mod tests {
         assert_eq!(input.prompt, "p");
         assert_eq!(input.description, "d");
         assert!(input.role.is_none());
-        assert!(input.max_turns.is_none());
+        assert!(input.timeout.is_none());
     }
 
     #[test]
-    fn full_input_with_role_and_turns() {
-        let json = serde_json::json!({"prompt": "p", "description": "d", "role": "coder", "max_turns": 50});
+    fn full_input_with_role_and_timeout() {
+        let json =
+            serde_json::json!({"prompt": "p", "description": "d", "role": "coder", "timeout": 50});
         let input: AgentInput = serde_json::from_value(json).unwrap();
         assert_eq!(input.role.as_deref(), Some("coder"));
-        assert_eq!(input.max_turns, Some(50));
+        assert_eq!(input.timeout, Some(50));
     }
 }

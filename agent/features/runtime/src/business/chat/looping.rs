@@ -29,14 +29,13 @@ mod post_batch;
 mod queue;
 pub(crate) mod reflection;
 mod snapshot_registry;
-mod stall;
-mod state;
+pub(crate) mod stall;
 mod stream_handler;
 #[cfg(test)]
 mod stream_handler_tests;
 mod task_reminder;
 mod task_snapshot;
-mod tool_fuse;
+pub(crate) mod tool_fuse;
 mod tool_identity;
 mod tools;
 
@@ -53,5 +52,4 @@ pub use input_log::logged_input_messages;
 pub use loop_context::{ChatLoopContext, SwitchClientFn};
 pub use loop_runner::process_chat_loop;
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
-pub use state::{ChatLoopFsm, ChatLoopState, ChatLoopTransition};
 pub use stream_handler::RuntimeStreamHandler;

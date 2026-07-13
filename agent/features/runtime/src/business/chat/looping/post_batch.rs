@@ -9,19 +9,20 @@ pub(crate) async fn run_post_tool_batch<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    _ctx: &ToolExecutionContext,
+    ctx: &ToolExecutionContext,
     turn_count: usize,
     workspace_root: &Path,
 ) where
     S: ChatEventSink,
 {
     let post_batch_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PostToolBatch,
             None,
             HookData::Stop(StopHookData { turns: turn_count }),
             workspace_root,
+            &ctx.cancel,
         )
         .await;
     for (_entry, _result, json_output) in &post_batch_results {

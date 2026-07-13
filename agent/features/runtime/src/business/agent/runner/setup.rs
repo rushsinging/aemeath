@@ -11,22 +11,31 @@ use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistr
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::api::AgentRunTerminal {
         let prompt = request.prompt;
         let system = request.system;
         let ctx = request.ctx;
-        let max_turns_override = request.max_turns;
+        let timeout = request.timeout;
+        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(&ctx.run_id));
         let model_spec = request.model_spec;
         let progress_tx = request.progress_tx;
         // Resolve role and model
         let role = self.resolve_role(model_spec);
         let resolved_spec = self.resolve_model_spec(model_spec);
 
-        // Pick the right client
-        let client = match (&self.pool, &resolved_spec) {
-            (Some(pool), Some(spec)) => pool.get_client(Some(spec.as_str())).await,
-            (Some(pool), None) => pool.get_client(None).await,
-            _ => self.client.clone(),
+        // Model-specific sub Runs get an isolated client. The shared default client is guarded
+        // for the full Run because max_tokens/reasoning_level are mutable provider settings.
+        let (client, shared_client_guard) = match (&self.pool, &resolved_spec) {
+            (Some(pool), Some(spec)) => match pool.get_isolated_client(spec) {
+                Ok(client) => (std::sync::Arc::new(client), None),
+                Err(error) => {
+                    return tools::api::AgentRunTerminal::Failed { error };
+                }
+            },
+            _ => {
+                let guard = self.shared_client_lock.clone().lock_owned().await;
+                (self.client.clone(), Some(guard))
+            }
         };
 
         let max_tokens_override = Self::role_max_tokens_override(role);
@@ -47,6 +56,11 @@ impl AgentRunner for CliAgentRunner {
             };
             self.models_config.find_model(&query)
         });
+        let context_size = model_entry
+            .as_ref()
+            .map(|(_, _, entry)| entry.context_window)
+            .filter(|size| *size > 0)
+            .unwrap_or(200_000);
         let model_reasoning = model_entry
             .as_ref()
             .and_then(|(_, _, entry)| entry.reasoning);
@@ -191,6 +205,7 @@ impl AgentRunner for CliAgentRunner {
                 serde_json::to_string(&latest).unwrap_or_default(),
             );
         };
+        let sub_run_id = sdk::RunId::new_v7();
         let sub_ctx = ToolExecutionContext {
             resources: tools::api::ToolResources {
                 agent_runner: None, // No nested agents
@@ -202,7 +217,8 @@ impl AgentRunner for CliAgentRunner {
             // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
             // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
             workspace: ctx.workspace.seed_isolated(),
-            cancel: ctx.cancel.clone(),
+            run_id: sub_run_id.to_string(),
+            cancel: ctx.cancel.child_token(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
             ),
@@ -240,9 +256,9 @@ impl AgentRunner for CliAgentRunner {
         SubAgentRun {
             prompt,
             system,
-            ctx,
             progress_tx,
             client,
+            _shared_client_guard: shared_client_guard,
             hook_runner,
             sub_schemas,
             messages,
@@ -250,10 +266,16 @@ impl AgentRunner for CliAgentRunner {
             system_blocks,
             log_request_messages: Box::new(log_request_messages),
             agent,
-            max_turns: max_turns_override as usize,
+            timeout,
+            turn_count: 0,
+            last_api_input_tokens: 0,
+            last_api_output_tokens: 0,
+            active_run: self.active_run.clone(),
+            terminal: None,
             start_time: std::time::Instant::now(),
-            max_duration: std::time::Duration::from_secs(10800),
             session_id,
+            run_id: sub_run_id,
+            parent_run_id,
             role_name_for_log,
             model_name_for_log,
             resolved_spec,
@@ -261,7 +283,7 @@ impl AgentRunner for CliAgentRunner {
             previous_reasoning_level,
             restore_max_tokens,
             progress: Box::new(progress),
-            ctx_context_size: 200_000,
+            ctx_context_size: context_size,
         }
         .run_loop()
         .await

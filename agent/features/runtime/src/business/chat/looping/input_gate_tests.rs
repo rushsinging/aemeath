@@ -352,35 +352,6 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
 }
 
 #[tokio::test]
-async fn test_run_loop_gate_cancel_overrides_user_message() {
-    let mut buffer = PendingInputBuffer::default();
-    let input = TestInputEventPort::new(vec![
-        ChatInputEvent::Cancel,
-        ChatInputEvent::user_message("ignored", Vec::new()),
-    ]);
-    let sink = TestSink::default();
-    let mut chain = ChatChain::from_flat_messages(Vec::new());
-
-    let task_store = test_task_store();
-    let outcome = run_loop_gate(
-        GateKind::BeforeFinish,
-        &mut buffer,
-        &EmptyQueueDrainPort,
-        &input,
-        &sink,
-        &mut chain,
-        "seg",
-        &task_store,
-        false,
-    )
-    .await;
-
-    assert_eq!(outcome.decision, GateDecision::CancelCurrentLoop);
-    assert!(chain.is_empty());
-    assert!(sink.events.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
 async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![

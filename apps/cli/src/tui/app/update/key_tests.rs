@@ -39,6 +39,35 @@ fn test_busy_slash_no_placeholder() {
 }
 
 #[test]
+fn test_esc_and_ctrl_c_share_cancel_current_run_effect() {
+    let mut esc_app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    esc_app.chat.start_processing();
+    let spawn_refs = SpawnContextRefs { agent_client: None };
+    let esc = esc_app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    let mut ctrl_c_app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    ctrl_c_app.chat.start_processing();
+    let ctrl_c = ctrl_c_app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        &spawn_refs,
+    );
+
+    assert_eq!(esc.effects, vec![Effect::CancelCurrentRun]);
+    assert_eq!(ctrl_c.effects, vec![Effect::CancelCurrentRun]);
+}
+
+#[test]
 fn test_ctrlc_action_input_nonempty_clears() {
     assert_eq!(
         ctrlc_action(false, None, false, false),

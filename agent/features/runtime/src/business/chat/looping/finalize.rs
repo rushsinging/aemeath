@@ -1,9 +1,6 @@
 use crate::business::agent::runner::AgentRunOutcome;
 use crate::business::chat::looping::hook_ui::HookUi;
-use crate::business::chat::looping::{
-    ChatEventSink, ChatLoopFsm, ChatLoopState, ChatLoopTransition, RuntimeStreamEvent,
-    RuntimeTurnContext,
-};
+use crate::business::chat::looping::{ChatEventSink, RuntimeStreamEvent, RuntimeTurnContext};
 use crate::LOG_TARGET;
 use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
@@ -12,9 +9,7 @@ use storage::api::{BatchStatus, TaskStore};
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
-/// Stop hook 连续阻断的最大次数，超过后强制停止以避免无限循环（#372）。
-pub(crate) const MAX_STOP_HOOK_BLOCKS: usize = 5;
-
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_stop_hook_before_finish<S>(
     outcome: &AgentRunOutcome,
     _sink: &S,
@@ -23,12 +18,13 @@ pub(crate) async fn run_stop_hook_before_finish<S>(
     session_id: &str,
     language: &str,
     workspace_root: &Path,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Option<String>
 where
     S: ChatEventSink,
 {
     let stop_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::Stop,
             None,
@@ -36,6 +32,7 @@ where
                 turns: outcome.turns,
             }),
             workspace_root,
+            cancel,
         )
         .await;
     if let Some(feedback) = stop_hook_feedback(&stop_results, session_id, language).await {
@@ -272,42 +269,6 @@ struct HookFeedbackLabels {
     no_reason: &'static str,
     output_too_long_file: &'static str,
     output_too_long_preview: &'static str,
-}
-
-/// 检查 Stop hook 连续阻断是否超过上限。
-///
-/// 超过则发送 SystemMessage 提示、发出 `DoneWithDuration`（#604：否则 TUI spinner 永不停）、
-/// 状态机转到 Done 并返回 `true`（调用方应 `break`）。
-/// 未超过返回 `false`，调用方继续正常的阻断反馈注入与 `continue`。
-pub(crate) async fn stop_hook_block_limit_reached<S>(
-    block_count: usize,
-    sink: &S,
-    loop_fsm: &mut ChatLoopFsm,
-    outcome: &AgentRunOutcome,
-    context: &RuntimeTurnContext,
-    task_store: &TaskStore,
-) -> bool
-where
-    S: ChatEventSink,
-{
-    log::debug!(target: LOG_TARGET,
-        "[stop_hook_debug] block_count={}/{} limit_reached={}",
-        block_count, MAX_STOP_HOOK_BLOCKS, block_count > MAX_STOP_HOOK_BLOCKS
-    );
-    if block_count > MAX_STOP_HOOK_BLOCKS {
-        sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
-            "[stop hook blocked {MAX_STOP_HOOK_BLOCKS} times in a row; \
-             stopping to avoid infinite loop]"
-        )))
-        .await;
-        loop_fsm.transition(ChatLoopTransition::StopSucceeded);
-        loop_fsm.assert_state(ChatLoopState::Done, "stop hook block limit exceeded");
-        // #604：必须发出 DoneWithDuration，否则 TUI 永远收不到 turn 结束信号
-        finish_completed_loop(outcome, sink, context, task_store).await;
-        true
-    } else {
-        false
-    }
 }
 
 #[cfg(test)]

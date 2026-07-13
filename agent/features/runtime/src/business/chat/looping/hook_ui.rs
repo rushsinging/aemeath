@@ -31,6 +31,26 @@ where
         data: HookData,
         workspace_root: &Path,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
+        self.run_json_with_cancel(
+            runner,
+            event,
+            tool_name,
+            data,
+            workspace_root,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub(crate) async fn run_json_with_cancel(
+        &self,
+        runner: &HookRunner,
+        event: HookEvent,
+        tool_name: Option<&str>,
+        data: HookData,
+        workspace_root: &Path,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = runner.matching_hooks(event, tool_name);
         log::debug!(target: LOG_TARGET,
             "hook ui dispatch: event={} tool_name={:?} matched={}",
@@ -63,7 +83,9 @@ where
                 )))
                 .await;
 
-            let result = runner.execute_hook(hook, &input, workspace_root).await;
+            let result = runner
+                .execute_hook_with_cancel(hook, &input, workspace_root, cancel)
+                .await;
             let elapsed_ms = started_at.elapsed().as_millis();
             let json_output = result.parse_json_output();
             let status = runtime_hook_event_status(&result, &json_output);

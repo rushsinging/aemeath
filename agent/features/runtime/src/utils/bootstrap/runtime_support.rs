@@ -36,6 +36,7 @@ pub fn build_agent_runner(
     hook_runner: HookRunner,
     reasoning: bool,
     timeout_secs: u64,
+    active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
     let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
@@ -44,6 +45,8 @@ pub fn build_agent_runner(
     Arc::new(agent_runner::CliAgentRunner {
         client,
         pool,
+        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
+        active_run,
         agents_config,
         hook_runner,
         reasoning,

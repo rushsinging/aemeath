@@ -35,13 +35,9 @@ pub struct RuntimeHandle {
     pub(crate) current_client: std::sync::RwLock<Arc<provider::api::LlmClient>>,
 
     // ─── SDK 状态 ───
-    /// 会话级取消令牌槽（常驻 actor 可重建）。
-    ///
-    /// 不再用 `Option`：槽内始终持有一个有效 token。chat loop 每回合从此槽读取
-    /// 「当前 token」，并在处理完一次取消后把槽**重置为新 token**（见 `loop_runner`），
-    /// 以免常驻 loop 中被取消的 token 永久污染后续回合。`cancel_impl` 锁此槽对当前
-    /// token 调 `cancel()` 触发取消。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
-    pub(crate) current_cancel: Arc<Mutex<tokio_util::sync::CancellationToken>>,
+    /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、
+    /// 标记 Cancelling 并触发该 Run 的 token。
+    pub(crate) active_run: Arc<crate::core::active_run::ActiveRunRegistry>,
     /// 会话历史唯一活跃真相——按 user turn 分段的 `ChatChain` 聚合。
     ///
     /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。

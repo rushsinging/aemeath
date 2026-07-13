@@ -130,6 +130,54 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn provider_gateway_passes_cancellation_to_in_flight_provider() {
+        struct BlockingProvider;
+
+        #[async_trait]
+        impl LlmProvider for BlockingProvider {
+            async fn stream_message(
+                &self,
+                _system: &[SystemBlock],
+                _messages: &[Message],
+                _tool_schemas: &[Value],
+                _handler: &mut dyn StreamHandler,
+                cancel: &CancellationToken,
+            ) -> Result<StreamResponse, LlmError> {
+                cancel.cancelled().await;
+                Err(LlmError::Cancelled)
+            }
+
+            fn model_name(&self) -> &str {
+                "blocking-model"
+            }
+
+            fn provider_name(&self) -> &str {
+                "blocking"
+            }
+        }
+
+        let gateway = DefaultLlmProviderGateway;
+        let client = gateway.client_from_provider(Arc::new(BlockingProvider));
+        let cancel = CancellationToken::new();
+        let cancel_task = cancel.clone();
+        let canceller = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            cancel_task.cancel();
+        });
+        let mut handler = CallbackHandler::new(Box::new(|_| {}));
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            gateway.stream_message(&client, &[], &[], &[], &mut handler, &cancel),
+        )
+        .await
+        .expect("取消必须穿过 Gateway 唤醒 Provider future");
+
+        canceller.await.unwrap();
+        assert!(matches!(result, Err(LlmError::Cancelled)));
+    }
+
     #[test]
     fn default_llm_provider_gateway_is_object_safe_and_callable() {
         let gateway: &dyn LlmProviderGateway = &DefaultLlmProviderGateway;
