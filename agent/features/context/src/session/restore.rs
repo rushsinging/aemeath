@@ -73,8 +73,8 @@ impl SessionRestore {
         };
 
         Self {
-            active_messages: messages.clone(),
-            active_chain: ChatChain::from_flat_messages(messages),
+            active_messages: messages,
+            active_chain: chain,
             frozen_chats,
             active_summary: summary,
             created_at: session.created_at.clone(),
