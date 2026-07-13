@@ -85,7 +85,7 @@ pub fn global_agents_md_path() -> PathBuf {
 }
 
 pub fn old_global_claude_md_path() -> PathBuf {
-    PathBuf::from(CLAUDE_DIR_NAME).join(CLAUDE_MD)
+    home_dir_or_dot().join(CLAUDE_DIR_NAME).join(CLAUDE_MD)
 }
 
 pub fn project_agents_md_path(cwd: &Path) -> PathBuf {
@@ -301,6 +301,12 @@ mod tests {
             global_settings_path(),
             temp_agents_dir.join("settings.json")
         );
+    }
+
+    #[test]
+    fn test_old_global_claude_md_path_uses_home_directory() {
+        let expected = home_dir_or_dot().join(CLAUDE_DIR_NAME).join(CLAUDE_MD);
+        assert_eq!(old_global_claude_md_path(), expected);
     }
 
     #[test]

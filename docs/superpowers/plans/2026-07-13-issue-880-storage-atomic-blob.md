@@ -2,11 +2,16 @@
 
 > **执行要求：** 实施时使用 `superpowers:executing-plans` 或 `superpowers:subagent-driven-development`，严格按 TDD 的 Red → Green → Refactor 顺序推进。
 
-**日期：** 2026-07-13  
-**对应 Issue：** [#880](https://github.com/rushsinging/aemeath/issues/880)  
-**父 Issue：** [#848](https://github.com/rushsinging/aemeath/issues/848) → [#845](https://github.com/rushsinging/aemeath/issues/845) → [#743](https://github.com/rushsinging/aemeath/issues/743)  
-**目标分支：** `release/v0.1.0`  
-**实施分支：** `refactor/880-storage-atomic-blob`  
+**日期：** 2026-07-13
+
+**对应 Issue：** [#880](https://github.com/rushsinging/aemeath/issues/880)
+
+**父 Issue：** [#848](https://github.com/rushsinging/aemeath/issues/848) → [#845](https://github.com/rushsinging/aemeath/issues/845) → [#743](https://github.com/rushsinging/aemeath/issues/743)
+
+**目标分支：** `release/v0.1.0`
+
+**实施分支：** `refactor/880-storage-atomic-blob`
+
 **基线：** `release/v0.1.0@d62b10f9`
 
 ## 1. 目标
