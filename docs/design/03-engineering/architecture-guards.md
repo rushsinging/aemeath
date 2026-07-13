@@ -398,7 +398,7 @@
 - **运行模式**：
   - 默认（无参数）：扫描全仓库 `*/src/*/mod.rs`；
   - `--diff`：仅检查 git 暂存区 `*.rs` 中 `diff-filter=A` 的 `mod.rs`。
-- **跳过路径**：`.worktrees/`, `.claude/`, `target/`。
+- **跳过路径**：`.worktrees/`, `.claude/`, `target/`；默认模式使用目录级 `find -prune`，不得递归扫描 linked worktree、工具缓存或构建产物。
 - **白名单**：无（这就是"无例外"规则）。
 - **错误信息**：`Rust 2018+ 推荐使用与目录同名的文件代替 mod.rs：foo/mod.rs → foo.rs`.
   
