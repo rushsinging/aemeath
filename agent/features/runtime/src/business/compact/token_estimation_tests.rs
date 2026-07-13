@@ -73,7 +73,7 @@ fn test_needs_compaction_actual_reasoning_not_double_counted() {
     // .reasoning_tokens ⊂ completion_tokens），不应重复累加。
     // 即使 reasoning 很大，只要 input + output 没超 threshold，就不应触发。
     // input=50000, output=10000, reasoning=970000 → total=60000（不含 reasoning）
-    // threshold=1,027,384, 60000 < threshold -> false
+    // threshold = 821,907, 60000 < threshold -> false
     assert!(!needs_compaction_actual(
         50000,
         10000,
@@ -88,7 +88,7 @@ fn test_needs_compaction_actual_reasoning_not_double_counted() {
     ));
 
     // reasoning 不影响判定：只有 input+output 超 threshold 才触发
-    // input=1000000, output=50000, total=1050000 > 1,027,384 -> true
+    // input=1000000, output=50000, total=1050000 > 821,907 -> true
     assert!(needs_compaction_actual(
         1000000,
         50000,
@@ -103,7 +103,7 @@ fn test_needs_compaction_actual_with_both() {
     // cached 和 reasoning 同时存在：cached 不扣除，reasoning 不重复累加
     // input=200000, cached=150000 (不扣除), output=10000, reasoning=830000
     // total = 200000 + 10000 = 210000（不含 reasoning）
-    // threshold = 1,027,384, 210000 < threshold -> false
+    // threshold = 821,907, 210000 < threshold -> false
     assert!(!needs_compaction_actual(
         200000,
         10000,
@@ -113,7 +113,7 @@ fn test_needs_compaction_actual_with_both() {
     ));
 
     // input+output 超 threshold 时触发（reasoning 仍是 output 子集）
-    // input=1000000, output=50000, total=1050000 > 1,027,384 -> true
+    // input=1000000, output=50000, total=1050000 > 821,907 -> true
     assert!(needs_compaction_actual(
         1000000,
         50000,

@@ -253,10 +253,11 @@ pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -
 }
 
 /// Calculate the autocompact trigger threshold.
-/// Formula: (context_size - min(max_output, 20K)) - 13K
+/// Formula: (context_size - min(max_output, 20K) - 13K) * 0.8
 pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
-    effective_context_window(context_size, max_output_tokens)
-        .saturating_sub(AUTOCOMPACT_BUFFER_TOKENS)
+    let raw = effective_context_window(context_size, max_output_tokens)
+        .saturating_sub(AUTOCOMPACT_BUFFER_TOKENS);
+    ((raw as f64) * 0.8) as usize
 }
 
 /// Estimate the token overhead of tool schemas.
