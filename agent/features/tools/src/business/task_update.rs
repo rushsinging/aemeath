@@ -94,18 +94,26 @@ impl TypedTool for TaskUpdateTool {
                     };
                 }
 
-                // Basic field updates
+                // Basic field updates — skip empty strings to avoid clobbering existing values
                 if let Some(subject) = args.subject {
-                    task.subject = subject;
+                    if !subject.is_empty() {
+                        task.subject = subject;
+                    }
                 }
                 if let Some(desc) = args.description {
-                    task.description = desc;
+                    if !desc.is_empty() {
+                        task.description = desc;
+                    }
                 }
                 if let Some(af) = args.active_form {
-                    task.active_form = Some(af);
+                    if !af.is_empty() {
+                        task.active_form = Some(af);
+                    }
                 }
                 if let Some(owner) = args.owner {
-                    task.owner = Some(owner);
+                    if !owner.is_empty() {
+                        task.owner = Some(owner);
+                    }
                 }
 
                 // Priority update
@@ -120,7 +128,9 @@ impl TypedTool for TaskUpdateTool {
                     task.progress = progress.min(100);
                 }
                 if let Some(msg) = args.progress_message {
-                    task.progress_message = Some(msg);
+                    if !msg.is_empty() {
+                        task.progress_message = Some(msg);
+                    }
                 }
 
                 // Dependency updates — use pre-resolved global ids
@@ -168,3 +178,7 @@ impl TypedTool for TaskUpdateTool {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_update_tests.rs"]
+mod tests;
