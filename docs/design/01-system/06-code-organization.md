@@ -42,7 +42,7 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 3. 模块内部条目 **SHOULD** 默认使用私有或受限可见性；只有真实消费者需要的稳定表面才 **MAY** `pub`。Rust 的默认私有、`pub(crate)` / `pub(super)` 与受控 `pub use` 规则见 [Rust Reference](https://doc.rust-lang.org/reference/visibility-and-privacy.html)。
 4. 一次用例变化需要共同修改的策略、校验、局部类型和测试 **SHOULD** 共置；仅因代码“类型相同”而分散到全局技术目录是 **NEVER** 允许的组织依据。
 5. 跨能力依赖 **MUST** 只指向对方公开 façade 或 Published Language，**NEVER** 直接引用对方内部实现。
-6. 外部技术实现 **MUST** 依赖消费方定义的目的性 port；稳定策略 **NEVER** 反向依赖具体 provider、协议、存储或框架类型。
+6. 当确认稳定能力策略若不抽象便会依赖易变外部细节时，消费方 **MUST** 定义目的性 port；尚未形成这一边界时，模块 **MAY** 保持私有具体依赖，但 **NEVER** 让该依赖越过能力 façade，也 **NEVER** 预建 port。
 7. 具体实现装配 **MUST** 收敛到 Composition Root；能力内部 **NEVER** 私自选择生产实现。
 8. 公共抽象 **MUST** 有真实消费者与契约测试；没有行为差异的转发接口 **SHOULD** 内联或删除。
 9. 架构边界 **MUST** 尽可能由编译器和机械守卫验证；评审约定 **NEVER** 是循环依赖、越界 import 或公开面膨胀的唯一防线。
@@ -50,24 +50,25 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 ## 3. 渐进结构阶梯
 
 ```text
-扁平能力模块
-  → 内聚的用例 / 能力子模块
-  → 可选：跨用例共享不变量的 model
-  → 可选：真实外部 seam 的 port
-  → 可选：编译器隔离或稳定 Published Language 的 crate
+基础粒度：扁平能力模块 → 内聚的用例 / 能力子模块
+独立选项：
+  ├── 可选：跨用例共享不变量的 model
+  ├── 可选：真实外部 seam 的 port
+  ├── 可选：按 provider / protocol 命名的技术目录
+  └── 可选：编译器隔离或稳定 Published Language 的 crate
 ```
 
-这是一组按证据触发的升格选项，**NEVER** 是每个模块必须走完的成熟度等级。`model`、port 和 crate 可以独立出现，也可以永远不出现；证据消失后结构 **SHOULD** 降级或合并。
+这是一组按证据触发的升格选项，**NEVER** 是每个模块必须走完的成熟度等级。基础粒度先在扁平模块与用例 / 能力子模块之间选择；model、port、技术目录和 crate **MUST** 分别独立评估，可以任意组合，也可以永远不出现。证据消失后结构 **SHOULD** 降级或合并。
 
 ### 3.1 第一级：扁平能力模块
 
 单一职责、少量文件、一个主要用例或一组紧密行为 **MUST** 先保持扁平：
 
 ```text
+capability.rs       # 窄 façade
 capability/
-├── mod.rs        # 窄 façade
-├── execute.rs    # 用例及其局部类型
-└── error.rs      # 仅在多个文件共同消费时存在
+├── execute.rs      # 用例及其局部类型
+└── error.rs        # 仅在多个文件共同消费时存在
 ```
 
 - **MUST** 把测试放在被测行为附近。
@@ -79,13 +80,13 @@ capability/
 子模块名称 **MUST** 表达用例或稳定能力，例如 `start_run`、`tool_coordination`、`stream_completion`，**NEVER** 只表达代码的技术形态。
 
 ```text
+capability.rs
 capability/
-├── mod.rs
+├── create_item.rs
 ├── create_item/
-│   ├── mod.rs
 │   └── validation.rs
+├── inspect_item.rs
 └── inspect_item/
-    ├── mod.rs
     └── projection.rs
 ```
 
@@ -115,14 +116,16 @@ capability/
 
 ### 3.4 可选 port
 
-Port 表达核心与外部参与者之间一段有业务目的的对话。满足下列任一真实需求时 **MAY** 定义 port：
+Port 表达核心与外部参与者之间一段有业务目的的对话。下列信号是 port 的候选 / 评估证据；出现任一信号时 **SHOULD** 评估边界，但信号本身 **NEVER** 自动要求增加抽象：
 
 - 能力策略必须在无网络、文件系统、进程、时钟或 UI 的情况下运行和测试；
 - 已存在两个实现，或已有获批交付要求需要第二个实现；
 - 外部依赖慢、非确定、会失败，需要可控替身验证策略；
 - 跨 Bounded Context 交互需要稳定 Published Language 与防腐转换。
 
-Port **MUST** 由消费方按目的命名并拥有，例如 `CompletionProvider`、`WorkspaceRepository`、`EventSink`；它 **SHOULD** 靠近消费它的用例。只有多个稳定 port 需要独立导航时才 **MAY** 建 `ports.rs` 或 `ports/`。
+一旦确认稳定能力策略若不抽象就会依赖易变外部细节，消费方 **MUST** 定义 port。尚未形成这一策略 / 细节边界时，模块 **MAY** 保持私有具体依赖，并 **NEVER** 为假设中的未来替换预建 port。
+
+已引入的 port **MUST** 由消费方按目的命名并拥有，例如 `CompletionProvider`、`WorkspaceRepository`、`EventSink`；它 **SHOULD** 靠近消费它的用例。只有多个稳定 port 需要独立导航时才 **MAY** 建 `ports.rs` 或 `ports/`。
 
 以下情况 **NEVER** 引入 port：纯模块内 helper、稳定且确定的语言库调用、只包一层同签名转发、没有替换或隔离需求的“以防将来”。当 port 不再保护策略、测试或演进 seam 时，**SHOULD** 内联并删除。
 
@@ -134,7 +137,7 @@ Port **MUST** 由消费方按目的命名并拥有，例如 `CompletionProvider`
 
 - 同一技术拥有多个共同变化的 wire type、错误映射、连接生命周期或协议测试；
 - 目录边界能把技术依赖与其余能力隔离；
-- 目录对内实现一个明确 port，对外不泄漏 wire type。
+- 已形成 §3.4 的策略 / 细节边界时，目录对内实现明确 port；边界尚未形成时，具体依赖保持私有；两种情况都不对外泄漏 wire type。
 
 单文件即可讲清的集成 **MUST** 保持为 `anthropic.rs` 之类的文件；纯业务代码、跨技术共享策略和只有名称相同的 helper **NEVER** 放入技术目录。技术被移除后，其专属目录 **MUST** 连同死转换与配置入口一起退役。
 
@@ -149,68 +152,76 @@ Port **MUST** 由消费方按目的命名并拥有，例如 `CompletionProvider`
 
 文件多、团队多人、测试慢、名称重要或“每个能力一个 crate” **NEVER** 单独构成拆分理由。提议新 crate 时 **MUST** 同时说明：所有者、公开 API、允许依赖、禁止依赖、消费者、循环检查与退役路径。若双方只有单一消费者、总是锁步变化且没有编译隔离收益，**MUST** 保持同 crate 私有模块。
 
-## 4. aemeath 目标示例
+## 4. aemeath 非规范性逻辑投影
 
-以下树只表达目标组织决策，**NEVER** 表示每个同类模块都必须复制相同形状。
+本节只投影 §3 的组织决策，帮助比较不同复杂度的逻辑形状；它 **NEVER** 定义模块的具体战术边界、物理 Target 路径或强制文件拆分。Policy、Provider 与 Runtime 的具体战术命名分别以 [Policy 模块设计](../02-modules/policy/README.md)、[Provider 模块设计](../02-modules/provider/README.md) 和 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 为真相源；若逻辑投影与模块战术设计冲突，**MUST** 以后者为准。
+
+以下 Rust 树统一使用 Rust 2018+ 的 `capability.rs` + `capability/...` 模块布局，**NEVER** 表示每个同类模块都必须复制相同形状。
 
 ### 4.1 小型 Policy：保持扁平
 
 ```text
+policy.rs           # PolicyRequest、PolicyDecision 与窄评估 façade
 policy/
-├── mod.rs          # PolicyRequest、PolicyDecision 与窄评估 façade
 └── allow_all.rs    # AllowAll 行为及就近单元测试
 ```
 
-Policy 只有一个小型评估能力时 **MUST** 保持扁平；`PolicyRequest` 与 `PolicyDecision` 直接由 façade 发布。它 **NEVER** 为尚不存在的规则引擎预建 model、port 或技术目录。未来多个决策用例共享真实规则不变量时才 **MAY** 提取 model。
+此投影对应 [Policy 模块设计](../02-modules/policy/README.md) 的小型评估能力：`PolicyRequest` 与 `PolicyDecision` 由 façade 发布，`AllowAll` 行为就近组织。小型 Policy **SHOULD** 保持扁平，**NEVER** 为尚不存在的规则引擎预建 model、port 或技术目录；未来多个决策用例共享真实规则不变量时才 **MAY** 提取 model。
 
 ### 4.2 Provider：按 provider / protocol 命名技术集成
 
 ```text
+provider.rs                 # 窄 façade
 provider/
-├── mod.rs                  # 统一 completion / stream façade 与 ACL
-├── completion.rs           # 统一调用语义
-├── anthropic/
-│   ├── client.rs
-│   ├── wire.rs
-│   └── stream.rs
-├── openai_compatible/
-│   ├── client.rs
-│   ├── wire.rs
-│   └── stream.rs
-└── sse/
-    ├── decoder.rs
-    └── event.rs
+├── capability.rs           # driver + model 能力解析
+├── invocation.rs           # 单次调用与统一流语义
+├── transport.rs            # endpoint / auth / HTTP transport
+├── transport/
+│   └── sse.rs              # SSE 协议解码
+├── drivers.rs
+├── drivers/
+│   ├── anthropic.rs
+│   ├── anthropic/
+│   │   ├── request.rs
+│   │   └── stream.rs
+│   ├── openai_compatible.rs
+│   └── openai_compatible/
+│       ├── request.rs
+│       └── stream.rs
+├── error.rs                # wire / HTTP 错误映射
+└── api.rs                  # ProviderPort adapter factory
 ```
 
-`anthropic` 按 provider 命名，`openai_compatible` 与 `sse` 按协议命名；这些目录 **MUST** 私有，并把 wire type 与错误转换收在边界内。Runtime 消费方拥有目的性 provider port，Provider 实现该 port；Provider **NEVER** 把 HTTP / SSE 类型作为统一 façade 的 Published Language。若某集成只有一个文件，**MUST** 使用同名 `.rs` 文件而非空壳目录。
+此投影沿用 [Provider 模块设计](../02-modules/provider/README.md) 的 `capability`、`invocation`、`transport`、`drivers`、`error` 与 `api` 战术命名。`anthropic` 按 provider 命名，`openai_compatible` 与 `sse` 按协议命名；这些技术子模块 **MUST** 私有，并把 wire type 与错误转换收在边界内。Runtime 消费方 **MUST** 拥有目的性 provider port，Provider 实现该 port；Provider **NEVER** 把 HTTP / SSE 类型作为统一 façade 的 Published Language。若某集成只有一个文件，**MUST** 使用同名 `.rs` 文件而非空壳目录。
 
-### 4.3 复杂 Runtime：按 run / loop / coordinator 能力组织
+### 4.3 复杂 Runtime：按 agent_run / loop_engine / coordination 能力组织
 
 ```text
+runtime.rs
 runtime/
-├── mod.rs
-├── run/
-│   ├── mod.rs
+├── api.rs
+├── agent_run.rs
+├── agent_run/
 │   ├── state.rs
 │   └── step.rs
+├── loop_engine.rs
 ├── loop_engine/
-│   ├── mod.rs
 │   ├── drive.rs
 │   └── stuck_guard.rs
-├── model_coordinator/
-│   ├── mod.rs
+├── model_invocation.rs
+├── model_invocation/
 │   └── retry.rs
-├── tool_coordinator/
-│   ├── mod.rs
+├── tool_coordination.rs
+├── tool_coordination/
 │   └── approval.rs
-├── context_coordinator/
-│   ├── mod.rs
+├── context_coordination.rs
+├── context_coordination/
 │   └── window.rs
 ├── interaction.rs
 └── event_projection.rs
 ```
 
-`run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordinator 封装独立编排能力。coordinator 之间 **NEVER** 互相装配或穿透内部类型；Loop Engine **MUST** 只经各自 façade 协调它们。外部 seam 的 port **SHOULD** 靠近实际消费方；只有多个 coordinator 共享同一 Run 不变量时才 **MAY** 抽取共享 model。
+此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `api`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名。`agent_run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordination / invocation 模块封装独立编排能力；它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。外部 seam 的 port **SHOULD** 靠近实际消费方；只有多个模块共享同一 Run 不变量时才 **MAY** 抽取共享 model。
 
 ## 5. 跨生态参照
 
@@ -315,18 +326,29 @@ components/foo/
 
 ## 6. 机械边界与评审顺序
 
-每次新增或重组能力时 **MUST** 按以下顺序评审：
+每次新增或重组能力时 **MUST** 分三阶段评审，**NEVER** 把可选结构误作线性成熟度门禁。
 
-1. 统一语言能否说明能力所有者；
-2. 扁平模块能否清楚容纳行为；
-3. 是否已有共同变化证据支持用例 / 能力子模块；
-4. 是否已有跨用例业务不变量支持 model；
-5. 是否已有真实外部 seam 支持 port；
-6. module privacy、受控 re-export 与 façade 能否锁住公开面；
-7. 是否必须借助 Cargo 才能获得编译隔离或稳定 Published Language；
-8. architecture guard 是否能检查越界依赖、环、Composition Root 装配与公开面。
+### 6.1 先选基础粒度
 
-任何一步答案为“否”时，结构 **MUST** 停在更简单一级。评审 **NEVER** 以目录看起来整齐替代依赖图、可见性和测试证据。
+1. **MUST** 先用统一语言说明能力所有者；无法说明所有者时，停止并重新划定边界。
+2. 单一用例或紧密行为 **MUST** 选择扁平模块；已有独立词汇、共同变化与测试边界时，才 **SHOULD** 选择用例 / 能力子模块。
+
+这一步只决定扁平或子模块粒度，**NEVER** 预先决定是否需要 model、port、技术目录或 crate。
+
+### 6.2 独立评估四类可选结构
+
+| 结构 | 独立问题 | 结论 |
+|---|---|---|
+| model | 是否已有跨用例共享业务不变量 | 是则 **MAY** 引入；否则不引入 |
+| port | 稳定策略若不抽象是否会依赖易变外部细节 | 是则消费方 **MUST** 定义；否则 **MAY** 保持私有具体依赖且 **NEVER** 预建 |
+| 技术目录 | 同一 provider / protocol 是否已有多文件共同变化与隔离价值 | 是则 **MAY** 引入；否则保持单文件 |
+| crate | 是否确需编译器隔离或稳定 Published Language | 是则 **MAY** 升格；否则保持同 crate 私有模块 |
+
+四项 **MUST** 分别依据 §3 的证据判断；任一项为“否”只表示不引入该结构，**NEVER** 阻断其他三项。
+
+### 6.3 最后验证边界
+
+最终结构 **MUST** 通过以下检查：module privacy 与受控 re-export 锁住公开面；façade 只发布稳定语言；依赖图无越界和环；具体实现只在 Composition Root 装配；architecture guard 能机械验证适用规则。评审 **NEVER** 以目录看起来整齐替代可见性、依赖图、守卫和测试证据。
 
 ## 7. 决策追溯
 
@@ -334,11 +356,11 @@ components/foo/
 |---|---|---|---|
 | 采用 capability-first modular monolith | [Package by Component](https://simonbrown.je/modular-monolith/)；[Spring Modulith](https://docs.spring.io/spring-modulith/reference/fundamentals.html) | 能力顶层、窄公开面、组件内部隐藏 | Java package 规则、框架注解、统一内部目录 |
 | 用例代码沿变化轴共置 | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/) | 切片内高内聚、切片间低耦合 | 强制 CQRS / Mediator；禁止共享真实不变量 |
-| port 只在真实外部 seam 出现 | [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture) | inside/outside、目的性对话、可替换外部参与者 | 每用例一个 port、固定端口数量、固定外层目录 |
+| 真实外部 seam 形成时由消费方定义 port | [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture) | inside/outside、目的性对话、可替换外部参与者 | 每用例一个 port、固定端口数量、固定外层目录 |
 | 依赖由技术细节指向能力策略 | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) | Dependency Rule、依赖反转、边界数据归内侧所有 | 固定圆环数量与名称、物理分层模板 |
 | 先 module privacy，必要时再 crate | [Rust visibility](https://doc.rust-lang.org/reference/visibility-and-privacy.html)；[Go module layout](https://go.dev/doc/modules/layout) | 默认私有、受限公开、由复杂度逐步升格 | Go 目录约定；为每个能力预建 crate |
-| crate 必须代表编译隔离或稳定 API boundary | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | capability-named crates、façade、明确 API boundary | 按参考项目的 crate 数量或内部流水线照抄 |
-| 边界规则必须机械验证 | [Spring Modulith verification](https://docs.spring.io/spring-modulith/reference/verification.html)；[Chromium components](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/README.md) | 环检查、允许依赖、公开面与构建图 | Spring / GN 专属工具和 Chromium 组织规模 |
+| crate **MUST** 代表编译隔离或稳定 API boundary | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | capability-named crates、façade、明确 API boundary | 按参考项目的 crate 数量或内部流水线照抄 |
+| 边界规则 **MUST** 机械验证 | [Spring Modulith verification](https://docs.spring.io/spring-modulith/reference/verification.html)；[Chromium components](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/README.md) | 环检查、允许依赖、公开面与构建图 | Spring / GN 专属工具和 Chromium 组织规模 |
 | **拒绝：所有能力采用固定横向目录模板** | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 保留依赖方向；复杂领域按需隔离 | 拒绝原因：把示意层误当目录，会给小模块增加仪式并掩盖能力边界 |
 | **拒绝：纯切片、永不共享 model** | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；DDD 战略设计 | 保留变化局部性 | 拒绝原因：跨用例真实不变量会复制并漂移，必须允许共同模型按证据出现 |
 | **拒绝：为所有依赖预建 port** | [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture) | 对真实外部参与者保持可替换和可测试 | 拒绝原因：无 seam 的转发抽象增加命名、装配与测试成本，却不隔离变化 |
@@ -359,3 +381,4 @@ components/foo/
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-14 | 初稿：确立 capability-first、用例共置、按需 port 与渐进 crate 边界；补 aemeath 及跨生态示例和决策追溯 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 审查修订：统一 Rust 2018+ 模块布局、独立结构判据、port 强制边界与模块战术真相源 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
