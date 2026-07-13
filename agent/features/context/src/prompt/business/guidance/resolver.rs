@@ -2,6 +2,9 @@
 
 use crate::prompt::LOG_TARGET;
 
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
 use super::constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH};
 use super::guidance_dir;
 
@@ -10,361 +13,328 @@ pub trait InstructionsLoadedHook {
     async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str);
 }
 
-/// Resolve the guidance text for a given model.
-///
-/// Assembles the final guidance string:
-///   1. `_default.md` content (always injected, if exists)
-///   2. Model-specific guidance from prefix-matched `{prefix}.md` file
-///   3. Fallback to config guidance map (glob match from config)
-///   4. If `reasoning == true`, append `_reasoning.md`
-pub fn resolve_guidance(
-    model_id: &str,
-    config_guidance: &std::collections::HashMap<String, String>,
-    reasoning: bool,
-    language: &str,
-) -> String {
-    let mut parts: Vec<String> = Vec::new();
+#[derive(Debug)]
+struct LoadedGuidance {
+    path: Option<PathBuf>,
+    content: String,
+}
 
-    // 1. Always inject _default guidance
-    if let Some(content) = load_named_file_with_lang("_default", language) {
-        parts.push(content);
-    }
-
-    // 2. Try prefix-matched file from guidance dir
-    // 3. Fallback to config guidance map
-    if let Some(content) = resolve_model_guidance(model_id, config_guidance, language) {
-        parts.push(content);
-    }
-
-    // 4. Append reasoning guidance
-    if reasoning {
-        if let Some(content) = load_named_file_with_lang("_reasoning", language) {
-            parts.push(content);
+impl LoadedGuidance {
+    fn builtin(content: String) -> Self {
+        Self {
+            path: None,
+            content,
         }
     }
 
-    parts.join("\n")
+    fn file(path: PathBuf, content: String) -> Self {
+        Self {
+            path: Some(path),
+            content,
+        }
+    }
 }
 
-/// Resolve the guidance text for a given model with InstructionsLoaded hook support.
+/// Resolve the guidance text for a given model.
 ///
-/// Assembles the final guidance string and triggers hooks for loaded files:
+/// Assembles all matching guidance in deterministic priority order:
 ///   1. `_default.md` content (always injected, if exists)
-///   2. Model-specific guidance from prefix-matched `{prefix}.md` file
-///   3. Fallback to config guidance map (glob match from config)
+///   2. Every prefix-matched `{prefix}.md`, general to specific
+///   3. Every matching config guidance entry, general to specific
 ///   4. If `reasoning == true`, append `_reasoning.md`
+pub fn resolve_guidance(
+    model_id: &str,
+    config_guidance: &HashMap<String, String>,
+    reasoning: bool,
+    language: &str,
+) -> String {
+    collect_guidance(model_id, config_guidance, reasoning, language)
+        .into_iter()
+        .map(|guidance| guidance.content)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Resolve guidance and trigger `InstructionsLoaded` once per loaded file.
 pub async fn resolve_guidance_async(
     model_id: &str,
-    config_guidance: &std::collections::HashMap<String, String>,
+    config_guidance: &HashMap<String, String>,
     reasoning: bool,
     language: &str,
     hook_runner: Option<&dyn InstructionsLoadedHook>,
 ) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    let guidance = collect_guidance(model_id, config_guidance, reasoning, language);
+    trigger_loaded_hooks(&guidance, hook_runner).await;
+    guidance
+        .into_iter()
+        .map(|guidance| guidance.content)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
-    // 1. Always inject _default guidance
-    if let Some(content) = load_named_file_async_with_lang("_default", language, hook_runner).await
-    {
-        parts.push(content);
+/// Resolve all model-specific file and config guidance with hook support.
+pub async fn resolve_model_guidance_async(
+    model_id: &str,
+    config_guidance: &HashMap<String, String>,
+    language: &str,
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
+) -> Option<String> {
+    let guidance = collect_model_guidance(model_id, config_guidance, language);
+    trigger_loaded_hooks(&guidance, hook_runner).await;
+    join_loaded_guidance(guidance)
+}
+
+fn collect_guidance(
+    model_id: &str,
+    config_guidance: &HashMap<String, String>,
+    reasoning: bool,
+    language: &str,
+) -> Vec<LoadedGuidance> {
+    let mut guidance = Vec::new();
+
+    if let Some(default) = load_named_guidance_with_lang("_default", language) {
+        guidance.push(default);
     }
-
-    // 2. Try prefix-matched file from guidance dir
-    // 3. Fallback to config guidance map
-    if let Some(content) =
-        resolve_model_guidance_async(model_id, config_guidance, language, hook_runner).await
-    {
-        parts.push(content);
-    }
-
-    // 4. Append reasoning guidance
+    guidance.extend(collect_model_guidance(model_id, config_guidance, language));
     if reasoning {
-        if let Some(content) =
-            load_named_file_async_with_lang("_reasoning", language, hook_runner).await
-        {
-            parts.push(content);
+        if let Some(reasoning) = load_named_guidance_with_lang("_reasoning", language) {
+            guidance.push(reasoning);
         }
     }
 
-    parts.join("\n")
+    guidance
+}
+
+fn collect_model_guidance(
+    model_id: &str,
+    config_guidance: &HashMap<String, String>,
+    language: &str,
+) -> Vec<LoadedGuidance> {
+    let mut guidance = load_prefix_matched_files_with_lang(model_id, language);
+    guidance.extend(load_matching_config_guidance(model_id, config_guidance));
+    guidance
+}
+
+fn join_loaded_guidance(guidance: Vec<LoadedGuidance>) -> Option<String> {
+    if guidance.is_empty() {
+        None
+    } else {
+        Some(
+            guidance
+                .into_iter()
+                .map(|guidance| guidance.content)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+}
+
+async fn trigger_loaded_hooks(
+    guidance: &[LoadedGuidance],
+    hook_runner: Option<&dyn InstructionsLoadedHook>,
+) {
+    let Some(hook_runner) = hook_runner else {
+        return;
+    };
+    for item in guidance {
+        if let Some(path) = &item.path {
+            hook_runner
+                .on_instructions_loaded(&path.to_string_lossy(), "guidance")
+                .await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Resolve model-specific guidance: guidance dir prefix match → config map.
-fn resolve_model_guidance(
-    model_id: &str,
-    config_guidance: &std::collections::HashMap<String, String>,
-    language: &str,
-) -> Option<String> {
-    // Try guidance dir: prefix-matched file (longest match wins) with lang support
-    if let Some(content) = load_prefix_matched_file_with_lang(model_id, language) {
-        return Some(content);
-    }
-
-    // Try config guidance map
-    find_matching_config_guidance(model_id, config_guidance)
-}
-
-/// Async version of resolve_model_guidance with hook support.
-pub async fn resolve_model_guidance_async(
-    model_id: &str,
-    config_guidance: &std::collections::HashMap<String, String>,
-    language: &str,
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) -> Option<String> {
-    // Try guidance dir: prefix-matched file (longest match wins) with lang support
-    if let Some(content) =
-        load_prefix_matched_file_async_with_lang(model_id, language, hook_runner).await
-    {
-        return Some(content);
-    }
-
-    // Try config guidance map
-    find_matching_config_guidance(model_id, config_guidance)
-}
-
 /// Load a named file with language subdirectory support.
-/// Tries `{language}/{name}.md` first, falls back to `{name}.md`.
-/// If file is empty or not found, falls back to built-in default content.
+/// Tries `{language}/{name}.md` first, falls back to `{name}.md`, then built-in content.
 pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<String> {
-    let dir = guidance_dir()?;
+    load_named_guidance_with_lang(name, language).map(|guidance| guidance.content)
+}
 
-    // Try language subdirectory first
+fn load_named_guidance_with_lang(name: &str, language: &str) -> Option<LoadedGuidance> {
+    let dir = guidance_dir()?;
     if !language.is_empty() {
-        let lang_path = dir.join(language).join(format!("{}.md", name));
-        if let Ok(content) = std::fs::read_to_string(&lang_path) {
-            if !content.trim().is_empty() {
-                log::debug!(target: LOG_TARGET, "Loaded guidance from {}", lang_path.display());
-                return Some(content);
+        let lang_path = dir.join(language).join(format!("{name}.md"));
+        if let Some(guidance) = read_guidance_file(lang_path, false) {
+            return Some(guidance);
+        }
+    }
+
+    let root_path = dir.join(format!("{name}.md"));
+    if let Some(guidance) = read_guidance_file(root_path, false) {
+        return Some(guidance);
+    }
+
+    load_builtin_default(name, language).map(LoadedGuidance::builtin)
+}
+
+/// Load every prefix-matched guidance file, general to specific.
+/// A non-empty language file overrides only the root file with the same normalized stem.
+fn load_prefix_matched_files_with_lang(model_id: &str, language: &str) -> Vec<LoadedGuidance> {
+    let Some(dir) = guidance_dir() else {
+        return Vec::new();
+    };
+    let model_lower = model_id.to_lowercase();
+    let mut candidates: BTreeMap<String, LoadedGuidance> =
+        scan_prefix_candidates(&dir, &model_lower)
+            .into_iter()
+            .filter_map(|(stem, path)| read_guidance_file(path, false).map(|item| (stem, item)))
+            .collect();
+
+    if !language.is_empty() {
+        let lang_dir = dir.join(language);
+        for (stem, path) in scan_prefix_candidates(&lang_dir, &model_lower) {
+            if let Some(item) = read_guidance_file(path, false) {
+                candidates.insert(stem, item);
             }
         }
     }
 
-    // Fallback to root directory
-    let root_path = dir.join(format!("{}.md", name));
-    if let Ok(content) = std::fs::read_to_string(&root_path) {
-        if !content.trim().is_empty() {
-            log::debug!(target: LOG_TARGET, "Loaded guidance from {}", root_path.display());
-            return Some(content);
-        }
-    }
+    let mut candidates: Vec<_> = candidates.into_iter().collect();
+    candidates.sort_by(|(stem_a, item_a), (stem_b, item_b)| {
+        stem_a
+            .len()
+            .cmp(&stem_b.len())
+            .then_with(|| stem_a.cmp(stem_b))
+            .then_with(|| item_a.path.cmp(&item_b.path))
+    });
 
-    // Fallback to built-in default content
-    load_builtin_default(name, language)
+    candidates
+        .into_iter()
+        .map(|(stem, guidance)| {
+            log::debug!(target: LOG_TARGET,
+                "Matched guidance prefix '{}' for model '{}'",
+                stem,
+                model_lower
+            );
+            guidance
+        })
+        .collect()
 }
 
-/// Async version of load_named_file_with_lang.
-async fn load_named_file_async_with_lang(
-    name: &str,
-    language: &str,
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) -> Option<String> {
-    let dir = match guidance_dir() {
-        Some(d) => d,
-        None => return None,
+fn scan_prefix_candidates(dir: &Path, model_lower: &str) -> BTreeMap<String, PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return BTreeMap::new();
     };
 
-    // Try language subdirectory first
-    if !language.is_empty() {
-        let lang_path = dir.join(language).join(format!("{}.md", name));
-        if let Ok(content) = std::fs::read_to_string(&lang_path) {
-            if !content.trim().is_empty() {
-                log::debug!(target: LOG_TARGET, "Loaded guidance from {}", lang_path.display());
-                if let Some(hr) = hook_runner {
-                    let file_path_str = lang_path.to_string_lossy().to_string();
-                    hr.on_instructions_loaded(&file_path_str, "guidance").await;
-                }
-                return Some(content);
-            }
-        }
-    }
-
-    // Fallback to root directory
-    let root_path = dir.join(format!("{}.md", name));
-    if let Ok(content) = std::fs::read_to_string(&root_path) {
-        if !content.trim().is_empty() {
-            log::debug!(target: LOG_TARGET, "Loaded guidance from {}", root_path.display());
-            if let Some(hr) = hook_runner {
-                let file_path_str = root_path.to_string_lossy().to_string();
-                hr.on_instructions_loaded(&file_path_str, "guidance").await;
-            }
-            return Some(content);
-        }
-    }
-
-    // Fallback to built-in default content
-    load_builtin_default(name, language)
-}
-
-/// Load prefix-matched guidance file with language subdirectory support.
-/// Tries `{language}/{prefix}.md` first, falls back to `{prefix}.md`.
-fn load_prefix_matched_file_with_lang(model_id: &str, language: &str) -> Option<String> {
-    let dir = guidance_dir()?;
-    let model_lower = model_id.to_lowercase();
-
-    // Try language subdirectory first
-    if !language.is_empty() {
-        let lang_dir = dir.join(language);
-        if let Some(content) = load_prefix_matched_from_dir(&lang_dir, &model_lower) {
-            return Some(content);
-        }
-    }
-
-    // Fallback to root directory
-    load_prefix_matched_from_dir(&dir, &model_lower)
-}
-
-/// Scan a directory for prefix-matched guidance files.
-fn load_prefix_matched_from_dir(dir: &std::path::Path, model_lower: &str) -> Option<String> {
-    let entries = std::fs::read_dir(dir).ok()?;
-
-    let mut best_prefix = String::new();
-    let mut best_content: Option<String> = None;
-
+    let mut candidates = BTreeMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
             continue;
         }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        // Skip special files
-        if stem.starts_with('_') {
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
-        }
-        if model_lower.starts_with(&stem.to_lowercase()) && stem.len() > best_prefix.len() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                best_prefix = stem;
-                best_content = Some(content);
-            }
-        }
-    }
-
-    if best_content.is_some() {
-        log::debug!(target: LOG_TARGET,
-            "Matched guidance prefix '{}' for model '{}' in {}",
-            best_prefix,
-            model_lower,
-            dir.display()
-        );
-    }
-    best_content
-}
-
-/// Async version with hook support.
-async fn load_prefix_matched_file_async_with_lang(
-    model_id: &str,
-    language: &str,
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) -> Option<String> {
-    let dir = guidance_dir()?;
-    let model_lower = model_id.to_lowercase();
-
-    // Try language subdirectory first
-    if !language.is_empty() {
-        let lang_dir = dir.join(language);
-        if let Some(content) =
-            load_prefix_matched_from_dir_async(&lang_dir, &model_lower, hook_runner).await
-        {
-            return Some(content);
-        }
-    }
-
-    // Fallback to root directory
-    load_prefix_matched_from_dir_async(&dir, &model_lower, hook_runner).await
-}
-
-async fn load_prefix_matched_from_dir_async(
-    dir: &std::path::Path,
-    model_lower: &str,
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) -> Option<String> {
-    let entries = std::fs::read_dir(dir).ok()?;
-
-    let mut best_prefix = String::new();
-    let mut best_path: Option<std::path::PathBuf> = None;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let stem = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
         };
         if stem.starts_with('_') {
             continue;
         }
-        if model_lower.starts_with(&stem.to_lowercase()) && stem.len() > best_prefix.len() {
-            best_prefix = stem;
-            best_path = Some(path);
+        let normalized = stem.to_lowercase();
+        if !model_lower.starts_with(&normalized) {
+            continue;
         }
+        insert_prefix_candidate(&mut candidates, normalized, path);
     }
-
-    if let Some(path) = best_path {
-        if let Some(hr) = hook_runner {
-            let file_path_str = path.to_string_lossy().to_string();
-            hr.on_instructions_loaded(&file_path_str, "guidance").await;
-        }
-        std::fs::read_to_string(&path).ok()
-    } else {
-        None
-    }
+    candidates
 }
 
-/// Find matching guidance from config map (glob patterns → file paths).
-fn find_matching_config_guidance(
+fn insert_prefix_candidate(
+    candidates: &mut BTreeMap<String, PathBuf>,
+    normalized: String,
+    path: PathBuf,
+) {
+    candidates
+        .entry(normalized)
+        .and_modify(|existing| {
+            if path < *existing {
+                *existing = path.clone();
+            }
+        })
+        .or_insert(path);
+}
+
+/// Load every matching config guidance file, general to specific.
+fn load_matching_config_guidance(
     model_id: &str,
-    guidance_map: &std::collections::HashMap<String, String>,
-) -> Option<String> {
-    let mut matches: Vec<(&str, &str, usize)> = guidance_map
+    guidance_map: &HashMap<String, String>,
+) -> Vec<LoadedGuidance> {
+    let mut matches: Vec<_> = guidance_map
         .iter()
         .filter(|(pattern, _)| glob_match(pattern, model_id))
         .map(|(pattern, path)| {
-            let wildcards = pattern.chars().filter(|c| *c == '*').count();
-            (pattern.as_str(), path.as_str(), wildcards)
+            let literal_len = pattern
+                .chars()
+                .filter(|character| *character != '*')
+                .count();
+            let wildcards = pattern
+                .chars()
+                .filter(|character| *character == '*')
+                .count();
+            (pattern.as_str(), path.as_str(), literal_len, wildcards)
         })
         .collect();
 
-    // Sort by specificity: fewer wildcards first
-    matches.sort_by_key(|(_, _, wildcards)| *wildcards);
+    matches.sort_by(|a, b| {
+        a.2.cmp(&b.2)
+            .then_with(|| b.3.cmp(&a.3))
+            .then_with(|| a.0.cmp(b.0))
+            .then_with(|| a.1.cmp(b.1))
+    });
 
-    if let Some((_, path, _)) = matches.first() {
-        let expanded = expand_tilde(path);
-        match std::fs::read_to_string(&expanded) {
-            Ok(content) => {
-                let warnings = crate::prompt::business::security::scan_content(path, &content);
-                if !warnings.is_empty() {
-                    for w in &warnings {
-                        log::warn!(target: LOG_TARGET,
-                            "[Security] {} in {} line {}: {}",
-                            w.threat_type,
-                            w.filename,
-                            w.line_number,
-                            w.matched_text
-                        );
-                    }
-                    if let Some(prefix) =
-                        crate::prompt::business::security::format_warnings(&warnings)
-                    {
-                        return Some(format!("{}\n\n{}", prefix, content));
-                    }
-                }
-                Some(content)
+    let mut loaded_paths = HashSet::new();
+    matches
+        .into_iter()
+        .filter_map(|(_, path, _, _)| {
+            let expanded = PathBuf::from(expand_tilde(path));
+            let identity = std::fs::canonicalize(&expanded).unwrap_or_else(|_| expanded.clone());
+            if !loaded_paths.insert(identity) {
+                return None;
             }
-            Err(e) => {
-                log::warn!(target: LOG_TARGET, "Failed to read guidance file {}: {}", expanded, e);
-                None
+            read_guidance_file(expanded, true)
+        })
+        .collect()
+}
+
+fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidance> {
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) if !content.trim().is_empty() => content,
+        Ok(_) => return None,
+        Err(error) => {
+            if scan_security || path.exists() {
+                log::warn!(target: LOG_TARGET,
+                    "Failed to read guidance file {}: {}",
+                    path.display(),
+                    error
+                );
             }
+            return None;
         }
-    } else {
-        None
+    };
+
+    log::debug!(target: LOG_TARGET, "Loaded guidance from {}", path.display());
+    if !scan_security {
+        return Some(LoadedGuidance::file(path, content));
     }
+
+    let display_path = path.to_string_lossy();
+    let warnings = crate::prompt::business::security::scan_content(&display_path, &content);
+    for warning in &warnings {
+        log::warn!(target: LOG_TARGET,
+            "[Security] {} in {} line {}: {}",
+            warning.threat_type,
+            warning.filename,
+            warning.line_number,
+            warning.matched_text
+        );
+    }
+    let content = crate::prompt::business::security::format_warnings(&warnings)
+        .map(|prefix| format!("{prefix}\n\n{content}"))
+        .unwrap_or(content);
+    Some(LoadedGuidance::file(path, content))
 }
 
 /// Simple glob matching: `*` matches any sequence of characters.

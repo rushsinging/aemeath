@@ -2,7 +2,7 @@
 //!
 //! Guidance files are loaded from `~/.agents/guidance/` directory:
 //!   - `_default.md`          — injected for ALL models
-//!   - `{prefix}.md`          — matched by model-id prefix (longest match wins)
+//!   - `{prefix}.md`          — all matching model-id prefixes, general to specific
 //!     e.g. `glm.md` matches `glm-5.1`, `deepseek.md` matches `deepseek-chat`
 //!   - `_reasoning.md`        — appended when reasoning/thinking is enabled
 //!
@@ -19,6 +19,9 @@ use crate::prompt::LOG_TARGET;
 
 use share::config::paths;
 use std::path::PathBuf;
+
+#[cfg(test)]
+pub(super) static GUIDANCE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub mod constants;
 pub mod resolver;
@@ -84,7 +87,7 @@ pub fn init_guidance_dir() {
 mod tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static ENV_LOCK: &std::sync::Mutex<()> = &super::GUIDANCE_ENV_LOCK;
 
     struct EnvVarGuard {
         key: &'static str,
