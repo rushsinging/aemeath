@@ -13,6 +13,17 @@ pub use crate::business::types::{
 pub use crate::core::provider::{LlmProvider, ReasoningLevel};
 pub use crate::LlmError;
 
+// #901: Provider Published Language re-export。
+// 跨 BC 消费方通过 provider::api（→ contract）访问 PL 类型。
+// 注意：新 PL StopReason（6 变体）与 legacy StopReason（3 变体）同名，
+// 新类型用别名 ProviderStopReason 导出，旧消费方不受影响。
+pub use crate::published_language::{
+    InvocationDelta, InvocationOptions, InvocationRequest, ModelCapability, ModelId,
+    ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,
+    ProviderStopReason, ProviderToolCall, ProviderToolCallId, RawUsageSnapshot,
+    ReasoningCapability, ReasoningMappingKind,
+};
+
 /// Provider error alias for the published language.
 pub type Error = LlmError;
 
