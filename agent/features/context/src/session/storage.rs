@@ -75,6 +75,24 @@ pub async fn save_session(session: &Session) -> Result<(), String> {
     let tmp_path = dir.join(format!("{}.json.tmp", session.id));
     let bak_path = dir.join(format!("{}.json.bak", session.id));
 
+    // 并发保存防覆盖：若磁盘上的 session 比当前 session 更新，跳过写入。
+    if path.exists() {
+        if let Ok(existing) = tokio::fs::read_to_string(&path).await {
+            if let Ok(existing_session) = serde_json::from_str::<Session>(&existing) {
+                if existing_session.updated_at > session.updated_at {
+                    log::warn!(
+                        target: LOG_TARGET,
+                        "session {} skipped save: disk updated_at={} > incoming updated_at={}",
+                        session.id,
+                        existing_session.updated_at,
+                        session.updated_at,
+                    );
+                    return Ok(());
+                }
+            }
+        }
+    }
+
     let json = serde_json::to_string_pretty(session)
         .map_err(|e| format!("failed to serialize session: {e}"))?;
 

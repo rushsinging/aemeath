@@ -52,8 +52,8 @@ pub use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFram
 pub struct Session {
     pub id: String,
     pub cwd: String,
-    /// 旧格式兼容字段（加载后迁移到 `chats`）。新 session 写入空数组。
-    #[serde(default)]
+    /// 旧格式兼容字段（加载后迁移到 `chats`）。新 session 不写入此字段。
+    #[serde(default, skip_serializing)]
     pub messages: Vec<Message>,
     /// Chat 链：按 user 消息分段的对话历史（新格式）。
     ///

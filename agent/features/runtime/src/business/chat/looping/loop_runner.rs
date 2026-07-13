@@ -229,7 +229,11 @@ where
                                 .send_event(RuntimeStreamEvent::SessionResumed {
                                     messages: chain.messages_flat(),
                                     session_id: id.clone(),
-                                    created_at: 0u64,
+                                    created_at: chrono::DateTime::parse_from_rfc3339(
+                                        &restore.created_at,
+                                    )
+                                    .map(|dt| dt.timestamp_millis() as u64)
+                                    .unwrap_or(0),
                                 })
                                 .await;
                             if restore.trimmed > 0 || restore.repaired > 0 {
