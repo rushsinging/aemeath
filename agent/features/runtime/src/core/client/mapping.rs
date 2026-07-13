@@ -3,7 +3,7 @@ use sdk::{
     SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
 };
 
-use prompt::api::skill::Skill;
+use context::api::skill::Skill;
 use share::memory::{MemoryCategory, MemoryLayer};
 
 pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> MemoryConfigView {

@@ -1,5 +1,5 @@
 [package]
-name = "prompt"
+name = "context"
 version.workspace = true
 edition.workspace = true
 
@@ -8,7 +8,9 @@ share = { path = "../../shared" }
 log = "0.4"
 dirs = "6"
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_yml = "0.0.12"
 inventory = { workspace = true }
 async-trait = { workspace = true }
 regex = "1"
+thiserror = { workspace = true }

@@ -99,12 +99,21 @@ for old_path in RUNTIME_PROVIDER_TOOLS_OLD_PATHS:
     if old_path.exists():
         violations.append(f"{old_path.relative_to(root)}: runtime/provider/tools must live under agent/features/*")
 
+# Context crate organises its first level by domain sub-module (session/compact/
+# budget/prompt/memory_inject/port), not by COLA layer.  Each sub-module internally
+# may use COLA layers.  Design doc: docs/design/02-modules/context-management/README.md
+CONTEXT_DOMAIN_DIRS = {"session", "compact", "budget", "prompt", "memory_inject", "context_port", "port"}
+
 features_root = root / "agent" / "features"
 for feature_src in sorted(features_root.glob("*/src")):
+    crate_name = feature_src.parent.name
     for child in feature_src.iterdir():
         if child.name.startswith("."):
             continue
         if child.is_dir() and child.name not in FEATURE_LAYERS:
+            # Context crate uses domain sub-modules at top level (by design).
+            if crate_name == "context" and child.name in CONTEXT_DOMAIN_DIRS:
+                continue
             violations.append(
                 f"{child.relative_to(root)}: feature src directories must be COLA layers {sorted(FEATURE_LAYERS)}"
             )

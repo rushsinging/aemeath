@@ -65,11 +65,11 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `prompt`, `provider`, `tools`, `storage`, `hook`, `audit`, `update`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `update`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `prompt` | `share` |
+| `context` | `share` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage` |
 | `storage` | `share` |
@@ -91,7 +91,7 @@
 - **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §薄入口——CLI 不得直连 runtime 内部或任何 supporting feature，业务能力一律经 composition 装配 + `sdk::AgentClient` 契约接入。
 - **白名单**：
   - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
-  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, prompt, provider, tools, storage, hook, audit, share}`
+  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share}`
   - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
 - **例外**：无。
 - **检查范围**：
@@ -103,7 +103,7 @@
 
 - **功能**：检查 `agent/shared/Cargo.toml` 不依赖任何业务 feature。
 - **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律 `share → ∅`——share 是最底层共享内核，禁止反依赖上层。
-- **被禁上游 crate 列表**：`runtime, project, policy, prompt, provider, tools, storage, hook, audit, composition, cli, sdk`。
+- **被禁上游 crate 列表**：`runtime, project, policy, context, provider, tools, storage, hook, audit, composition, cli, sdk`。
 - **例外**：无。
 - **检查方式**：单文件清单匹配 `[dependencies]` 段；命中即失败。
 
@@ -185,7 +185,7 @@
 - **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
 - **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
 - **常量**：
-  - `FEATURE_CRATES = {runtime, project, policy, prompt, provider, tools, storage, hook, audit, update}`
+  - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`（project 可在根级 `pub use project::ProjectContext`，如 `sdk` 投影）
@@ -485,7 +485,7 @@
   1. 输出 hook 调试信息（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` / `ROOT` / `PWD`）；
   2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
   3. 对 11 个 crate 顺序跑 `cargo test --lib`（`cli` 用 `cargo test -p cli --bin aemeath`）。
-- **被测 crates**：`share, runtime, project, policy, prompt, provider, tools, storage, hook, audit, cli`。
+- **被测 crates**：`share, runtime, project, policy, context, provider, tools, storage, hook, audit, cli`。
 
 ## 维护说明
 

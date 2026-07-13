@@ -1,6 +1,6 @@
 //! Guidance resolution logic: loading, prefix-matching, and assembly.
 
-use crate::LOG_TARGET;
+use crate::prompt::LOG_TARGET;
 
 use super::constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH};
 use super::guidance_dir;
@@ -338,7 +338,7 @@ fn find_matching_config_guidance(
         let expanded = expand_tilde(path);
         match std::fs::read_to_string(&expanded) {
             Ok(content) => {
-                let warnings = crate::business::security::scan_content(path, &content);
+                let warnings = crate::prompt::business::security::scan_content(path, &content);
                 if !warnings.is_empty() {
                     for w in &warnings {
                         log::warn!(target: LOG_TARGET,
@@ -349,7 +349,9 @@ fn find_matching_config_guidance(
                             w.matched_text
                         );
                     }
-                    if let Some(prefix) = crate::business::security::format_warnings(&warnings) {
+                    if let Some(prefix) =
+                        crate::prompt::business::security::format_warnings(&warnings)
+                    {
                         return Some(format!("{}\n\n{}", prefix, content));
                     }
                 }
