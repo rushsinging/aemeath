@@ -1,0 +1,234 @@
+# Agent Runtime · 领域模型
+
+> 层级：02-modules / runtime（模块战术设计）
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）
+> 本文定义 Agent Runtime 核心域的领域模型：Run 聚合、RunSpec、RuntimeContext 三元组，及其实体/值对象、不变量、领域事件与 SubAgent 派生规则。**只描述目标态**；与现状的差距记入 `03-engineering/migration-governance`。
+
+## 1. 三元组总览
+
+| 概念 | 回答 | 性质 | 层 |
+|---|---|---|---|
+| **RunSpec** | 跑**什么**（prompt/tools/model/timeout/资源模式）| 声明式、可序列化、可复用 | 领域 |
+| **RuntimeContext** | 用**什么资源**跑（装配好的各 Port + config + event sink）| 活资源、不可序列化、运行时装配 | 基础设施/应用 |
+| **Run** | 一次执行实例 | 领域聚合（内存态状态机）| 领域 |
+
+因果链：`RunSpec（声明） ──装配──▶ RuntimeContext（资源） ──注入──▶ Run（执行）`
+
+层级对齐：`Session → Run → Run Step`（≈ OpenAI Thread / Run / Run Step）。
+
+## 2. Run 聚合
+
+```rust
+// —— 聚合根 ——
+struct Run {
+    id: RunId,                 // UUIDv7
+    spec: RunSpec,             // 规格（可序列化，随 session 快照）
+    parent: Option<RunId>,     // Sub Run 指向父 Run（结果/事件回传）
+    status: RunStatus,         // 状态机（含 Cancelling 过渡态，见 03-loop-and-state-machine）
+    steps: Vec<RunStep>,       // 内部实体序列
+    started_at: Instant,
+}
+
+/// 每个 Run 独占的协作式取消作用域；属于 RuntimeContext 活资源，不持久化。
+/// 子 Run 从父作用域派生，父取消会同步传播到全部子 Run。
+struct RunCancellationScope {
+    token: CancellationToken,
+}
+
+// —— 聚合内实体（有标识+生命周期，归属 Run）——
+struct RunStep {
+    id: RunStepId,
+    status: RunStepStatus,             // Pending/Invoking/Applying/ToolPhase/Done/Failed
+    invocation: Option<ModelInvocation>,
+    tool_calls: Vec<ToolCall>,
+}
+
+struct ToolCall {                      // 实体（ToolCallId + 状态生命周期）
+    id: ToolCallId,
+    provider_id: String,               // provider 消息边界标识（双 ID）
+    name: String,
+    args: ToolCallArgs,
+    status: ToolCallStatus,            // PendingArgs/Ready/AwaitingApproval/Running/Success/Error/Cancelled
+    result: Option<ToolResult>,
+}
+
+// —— 值对象（无标识、按值、不可变）——
+struct InvocationResponse {
+    message: Message,                 // Runtime 将 ProviderCompletion 映射为领域 Message
+    stop_reason: StopReason,
+    usage: Option<RawUsageSnapshot>,
+    effective_reasoning: ReasoningLevel,
+}
+
+struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 RunStep
+    request: InvocationRequest,
+    response: InvocationResponse,
+}
+```
+
+**实体 vs VO**：Run（聚合根）/ Run Step / Tool Call = 实体；Model Invocation = VO；`RunId/RunStepId/ToolCallId`、各 `*Status`、`RawUsageSnapshot`、`ToolCallArgs`、`ToolResult`、`ReasoningLevel` = VO。
+
+> **注**：`RuntimeContext` 不进 Run 聚合——它是活资源，由派生逻辑装配后作为参数传入 Loop Engine；崩溃重建即可（呼应"从头开始"，见 `05-recovery-semantics`）。
+
+## 3. 不变量（Run 聚合守护）
+
+1. Run 进入 `Completed/Failed/Cancelled` 后**不可再加 Run Step**
+2. `Cancelling` 只接受取消收口，不可开始 Model Invocation、Tool Call 或 Compaction
+3. 每个 Tool Call **必须归属**某个 Run Step
+4. 每个 Run Step **至多一次** Model Invocation
+5. Tool Call 状态**单向推进**（不可从 Success 回到 Running）
+6. `AwaitingToolApproval` 未决时，不可进入 `ExecutingTools`
+7. **timeout > 0 时**，墙钟超时强制迁移到 `Failed`（timeout=0 表示无限，见 §5）
+8. 每个 Run **必须独占**一个 cancellation scope；子 Run 从父 scope 派生，NEVER 共享可替换的 Session 级 token 槽
+
+## 4. 领域事件（→ Event Projection → SDK ChatEvent）
+
+`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCancellationRequested · RunCompleted/Failed/Cancelled`
+
+> **取消事件分两阶段**：`RunCancellationRequested` 在同步取消入口接受请求并将 Run 迁移到 `Cancelling` 时产生；`RunCancelled` 仅在 Provider/Tool/Compact/Hook 等在途工作停止且回滚完成后产生。前者是即时请求事实，后者是异步完成确认。
+
+> **终态事件族统一带载荷**：`RunCompleted{ result }`（最后 assistant 文本/结构）/ `RunFailed{ error }` / `RunCancelled`。这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；**Sub→父 Run，父从终态事件统一提取**（成功取 `result`、失败取 `error`）继续。**靠终态领域事件识别，不靠遍历 message**。
+
+> Event Projection adapter 按 Main/Sub 路由与命名（Main→TUI，Sub→父 Run，详见 #612）。
+
+## 5. RunSpec —— 声明式规格
+
+```rust
+/// 一次 Run 的完整规格：声明"要什么"。可序列化、可复用（用户默认 / skill / role / 父 Run 派生）。
+struct RunSpec {
+    name: String,                     // "main" / sub role 名 / skill 名
+
+    // —— 提示与模型 ——
+    model: ModelId,
+    system_prompt: SystemPromptSpec,  // 基础 prompt + guidance 选择键
+
+    // —— 能力（交互能力 = Scope/Profile 是否装配并允许 user interaction）——
+    tools: ToolAccessSpec,              // Registry Scope + 只能收缩的 Tool Profile
+
+    // —— 执行约束 ——
+    timeout: Duration,                // 墙钟上限；**0 = 无限**（Main 默认 0，Sub 可配有限值）
+
+    // —— 资源模式：驱动 RuntimeContext 装配 ——
+    context:   ContextMode,           // SharedSession | Isolated
+    workspace: WorkspaceMode,         // Inherit | Snapshot
+    policy:    PolicyMode,            // v0.1.0: AllowAll
+    memory:    MemoryMode,            // Enabled | Disabled(不读不写/不 reflection)
+    hooks:     HookMode,              // Full | BoundaryOnly | Disabled
+    reasoning: ReasoningMode,         // GraphDriven | EffortOnly | Inherit
+    task:      TaskMode,              // Shared | Isolated
+}
+
+enum ContextMode   { SharedSession, Isolated }
+enum WorkspaceMode { Inherit, Snapshot }              // Snapshot: 快照父 frame，改目录不回写
+enum PolicyMode    { AllowAll }                         // CLI --yolo 的领域映射；Future 再扩规则模式
+enum MemoryMode    { Enabled, Disabled }
+enum HookMode      { Full, BoundaryOnly, Disabled }   // BoundaryOnly: 仅 start/stop
+enum ReasoningMode { GraphDriven, EffortOnly, Inherit } // Main: GraphDriven; Sub: EffortOnly/Inherit
+enum TaskMode      { Shared, Isolated }
+```
+
+**去掉 max_turns**：无限循环由 `timeout` + 防 stuck（`04-stuck-prevention`）双重兜底，不再用轮次上限。
+
+## 6. RuntimeContext —— 装配的活资源
+
+```rust
+/// 按 RunSpec 装配出的执行资源容器：运行时构造，注入 Loop Engine。不可序列化，不进 Run 聚合。
+struct RuntimeContext {
+    context:   Arc<dyn ContextPort>,    // Sub: 独立 context manager
+    provider:  Arc<dyn ProviderPort>,   // Main/Sub 可共享不可变 transport；调用期 Invocation Scope 独立
+    tool_catalog:   Arc<dyn ToolCatalogPort>,   // 按 Registry Scope/Profile 投影 schemas
+    tool_execution: Arc<dyn ToolExecutionPort>, // 不暴露 Tool/Registry，实现单次函数调用
+    policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy
+    memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
+    task:      Arc<dyn TaskPort>,       // Sub: 独立实例
+    workspace: Arc<dyn WorkspacePort>,  // Sub: 独立快照 frame
+    hooks:     Arc<dyn HookPort>,       // Sub: BoundaryOnly
+    reasoning: Arc<dyn ReasoningPort>,  // Sub: EffortOnly/Inherit
+    usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
+    config:    ConfigSnapshot,          // Main/Sub 共享
+    input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
+    events:    Arc<dyn EventSink>,      // 出站：Main→TUI ; Sub→父 Run
+    cancel:    RunCancellationScope,    // per-Run；Provider/Tool/Compact/Hook 共享或派生
+}
+```
+
+### RunSpec 模式 → RuntimeContext 装配映射
+
+| RunSpec 字段 | Main | Sub | 装配 |
+|---|---|---|---|
+| `context` | SharedSession | Isolated | `ContextPort` 实例 |
+| `provider` | 可共享不可变 transport | 可共享不可变 transport | 每次调用创建独立 Invocation Scope，隔离 model/reasoning/max tokens |
+| `workspace` | Inherit | Snapshot | 快照父 frame，改目录不回写 |
+| `policy` | AllowAll | AllowAll | v0.1.0 同一 PolicyPort；Future 模式另行设计 |
+| `memory` | Enabled | Disabled | 真实 / `NoOpMemory` |
+| `hooks` | Full | BoundaryOnly | per-tool / 仅 start-stop |
+| `reasoning` | GraphDriven | EffortOnly/Inherit | 全 graph / 仅 effort（无设置继承父）|
+| `task` | Shared | Isolated | 独立 `TaskStore` |
+| `tools` | Main Scope + 完整基线 Profile | Sub Scope + 收缩 Profile | Scope 决定装配资源，Profile 只按 capability 收缩 |
+| `cancel` | 新建 per-Run scope | 从父 scope 派生 | 父取消传播到子 Run；各 Run 独立终态收口 |
+
+## 7. SubAgent 派生：控制权矩阵 + 安全铁律
+
+SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext** → 启动子 Run，跑同一套 Loop（引擎零分支）。
+
+### 安全铁律
+> **Sub 的权限/能力 NEVER 超过 Main 授予的范围。Main 只能"削弱或平移"，NEVER 让 Sub 越权。**
+
+作为 RunSpec 派生不变量：Registry Scope 只能移除工具/资源，Tool Profile 的 allowed capabilities 只能收缩；policy 不可放宽；workspace 强制隔离。
+
+### 控制权矩阵
+
+| RunSpec 字段 | 控制权 | 说明 |
+|---|---|---|
+| **prompt（任务）** | 🟢 main 可控 | 就是任务本身 |
+| **model** | 🟢 main 可控 | 选模型，无安全风险 |
+| **timeout** | 🟢 main 可控（有 cap）| 任务时长；0=无限 |
+| **memory** | 🟢 main 可控（默认 off）| `share_memory` 参数，main 决定是否给 sub 注入 |
+| **system_suffix** | 🟡 role 预设 | 角色人设 |
+| **reasoning effort** | 🟡 role 预设 + 继承父 | role>model>继承父进程 |
+| **tools** | 🔴 Scope/Profile 固定受限，**不可扩大** | 安全：Scope 只移除资源，Profile capability 集只收缩 |
+| **workspace** | 🔴 固定独立 | 安全：隔离，防改父目录 |
+| **policy** | 🔴 固定继承，**不可放宽** | 安全铁律 |
+| **hooks** | 🔴 固定 BoundaryOnly | 一致性/安全 |
+| **task** | 🔴 固定独立 | 防污染父任务 |
+
+## 8. Main / Sub 差异矩阵（最终）
+
+| 项 | Main | Sub |
+|---|---|---|
+| context | 共享 Session | 独立 |
+| tools | Main Scope + 基线 Profile | Sub Scope + capability 收缩 Profile |
+| workspace | Inherit | 独立快照（改目录不回写父）|
+| task | 共享 | 独立 |
+| memory | 读写 + reflection | **不读不写**（可由 main 开启注入）|
+| hooks | Full | BoundaryOnly（start/stop）|
+| policy | AllowAll | AllowAll |
+| reasoning | GraphDriven | EffortOnly（无 graph，无设置继承父）|
+| provider | 共享不可变 transport；独立 Invocation Scope | 共享不可变 transport；独立 Invocation Scope |
+| timeout | 默认 0（无限）| 可配有限值 |
+| 事件出口 | → TUI | → 父 Run（#612）|
+| 输入 | 常驻多轮 | 单次输入 |
+
+> **差异 100% 由 RunSpec + RuntimeContext + Event adapter 表达，Loop Engine 零分支。**
+
+## 9. 相关文档
+
+- 模块边界：[02-module-boundaries.md](02-module-boundaries.md)
+- 状态机与 Loop：[03-loop-and-state-machine.md](03-loop-and-state-machine.md)
+- 防 stuck：[04-stuck-prevention.md](04-stuck-prevention.md)
+- 恢复语义：[05-recovery-semantics.md](05-recovery-semantics.md)
+- 端口与装配：[06-ports-and-adapters.md](06-ports-and-adapters.md)
+- Session 聚合：[../context-management/01-session.md](../context-management/01-session.md)
+- 统一语言：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-11 | 初稿：Run 聚合 + RunSpec + RuntimeContext 三元组、不变量、领域事件、控制权矩阵、安全铁律、差异矩阵 | #761 |
+| 2026-07-11 | RuntimeContext 补入站端口 input（InputBuffer）；澄清 result 不进 RuntimeContext | #761 |
+| 2026-07-11 | output/result 定案：统一经 EventSink，result 为 RunCompleted 载荷（无独立 RunResult），靠终态事件识别 | #761 |
+| 2026-07-11 | 领域事件补终态族对称载荷（RunFailed{error} / RunCancelled）+ ModelInvocationRetrying | #761 |
+| 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |
+| 2026-07-12 | RuntimeContext 的 ToolPort 拆为 Catalog/Execution；RunSpec tools 改为 Registry Scope + capability Profile | #787 |
+| 2026-07-12 | Provider 隔离语义收敛为共享不可变 transport + 每次调用独立 Invocation Scope | #788 |

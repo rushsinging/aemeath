@@ -241,6 +241,6 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 - **AutoGen** 官方文档：`microsoft.github.io/autogen`（GroupChat、speaker selection、TerminationCondition、GraphFlow）。
 - **AutoGPT** 官方仓库与文档：`github.com/Significant-Gravitas/AutoGPT`、`agpt.co/docs/classic`（Classic → Platform 的架构转型）。
 - Issue #358：本方向的原始动机与四个探索方向。
-- `docs/design/01-outline.md` §核心域 / §Bounded Context：aemeath 的领域划分，编排层的落点 **MUST** 遵循。
-- `docs/design/03-runtime-design.md`：现有 Agent Looping 的设计真相源，任何 loop 改造 **MUST** 先核对此文档。
+- `docs/snapshot/design/01-outline.md` §核心域 / §Bounded Context：aemeath 的领域划分，编排层的落点 **MUST** 遵循。
+- `docs/design/02-modules/runtime/01-domain-model.md`：现有 Agent Looping 的设计真相源，任何 loop 改造 **MUST** 先核对此文档。
 - `docs/design/08-agent-workflow-graph.md`（PR #533，待合并）：Workflow 主线的具体落地设计（`PlanWorkflow` tool、线性序列 + cursor、准入准出守卫）。

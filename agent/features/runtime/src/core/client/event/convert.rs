@@ -275,6 +275,19 @@ pub(crate) fn runtime_event_to_sdk_event(
                 duration_ms: duration.as_millis() as u64,
             }
         }
+        crate::business::chat::RuntimeStreamEvent::RunStarted {
+            run_id,
+            parent_run_id,
+        } => ChatEvent::RunStarted {
+            run_id,
+            parent_run_id,
+        },
+        crate::business::chat::RuntimeStreamEvent::RunCancelling { run_id } => {
+            ChatEvent::RunCancelling { run_id }
+        }
+        crate::business::chat::RuntimeStreamEvent::RunCancelled { run_id } => {
+            ChatEvent::RunCancelled { run_id }
+        }
         crate::business::chat::RuntimeStreamEvent::Cancelled { context } => ChatEvent::Cancelled {
             context: ChatEventContext::new(context.chat_id, context.turn_id),
         },

@@ -189,8 +189,10 @@ mod tests {
 
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
-            String::new()
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::api::AgentRunTerminal {
+            tools::api::AgentRunTerminal::Completed {
+                result: String::new(),
+            }
         }
 
         async fn complete(
@@ -305,9 +307,7 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             current_client: std::sync::RwLock::new(client),
-            current_cancel: Arc::new(std::sync::Mutex::new(
-                tokio_util::sync::CancellationToken::new(),
-            )),
+            active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
             current_chain: Arc::new(std::sync::Mutex::new(
                 crate::business::session::ChatChain::default(),
             )),

@@ -5,9 +5,7 @@ use crate::business::chat::looping::ask_user::ask_user;
 use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::non_agent::execute_non_agent;
 use crate::business::chat::looping::permissions::evaluate_calls;
-use crate::business::chat::looping::tool_fuse::{
-    blocked_tool_execution, ToolCallFuse, ToolFuseDecision,
-};
+use crate::business::chat::looping::tool_fuse::blocked_tool_execution;
 use crate::business::chat::looping::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
@@ -21,7 +19,7 @@ use share::tool::ToolOutcome;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::api::ToolRegistry;
+use tools::api::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -36,7 +34,7 @@ pub(crate) async fn execute_tool_round<S>(
     cancel: &CancellationToken,
     language: &str,
     workspace_root: &Path,
-    tool_call_fuse: &mut ToolCallFuse,
+    guarded_calls: &[(ToolCall, crate::business::loop_engine::ToolGuardDecision)],
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -54,17 +52,23 @@ where
     let denied_results =
         deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
+    let guard_by_id: std::collections::HashMap<_, _> = guarded_calls
+        .iter()
+        .map(|(call, decision)| (call.id.clone(), decision))
+        .collect();
     let mut fused_results = Vec::new();
     let mut fuse_allowed = Vec::new();
     for call in approved {
-        match tool_call_fuse.inspect(&call) {
-            ToolFuseDecision::Allow => fuse_allowed.push(call),
-            ToolFuseDecision::SoftBlock { reason } | ToolFuseDecision::HardPause { reason } => {
+        match guard_by_id.get(&call.id) {
+            Some(crate::business::loop_engine::ToolGuardDecision::SoftBlock { reason }) => {
                 send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Ready).await;
                 send_tool_call_status(sink, context, &call, RuntimeToolCallStatus::Running).await;
-                let execution = blocked_tool_execution(&call, &reason);
+                let execution = blocked_tool_execution(&call, reason);
                 send_tool_result(sink, context, &execution).await;
                 fused_results.push(execution);
+            }
+            Some(crate::business::loop_engine::ToolGuardDecision::Allow) | None => {
+                fuse_allowed.push(call)
             }
         }
     }
@@ -186,16 +190,18 @@ pub(crate) async fn run_post_tool_hooks<S>(
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
     call: &ToolCall,
-    output: &str,
-    is_error: bool,
+    execution: &ToolExecution,
     workspace_root: &Path,
+    ctx: &ToolExecutionContext,
 ) where
     S: ChatEventSink,
 {
+    let output = &execution.outcome.text;
+    let is_error = execution.outcome.is_error;
     emit_json_hook_context(
         sink,
         hook_ui
-            .run_json(
+            .run_json_with_cancel(
                 hook_runner,
                 HookEvent::PostToolUse,
                 Some(&call.name),
@@ -206,6 +212,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                     is_error: Some(is_error),
                 }),
                 workspace_root,
+                &ctx.cancel,
             )
             .await,
     )
@@ -214,7 +221,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
         emit_json_hook_context(
             sink,
             hook_ui
-                .run_json(
+                .run_json_with_cancel(
                     hook_runner,
                     HookEvent::PostToolUseFailure,
                     Some(&call.name),
@@ -225,6 +232,7 @@ pub(crate) async fn run_post_tool_hooks<S>(
                         is_error: Some(is_error),
                     }),
                     workspace_root,
+                    &ctx.cancel,
                 )
                 .await,
         )
@@ -347,10 +355,10 @@ mod tests {
     use super::{execute_tool_round, tool_results_for_api};
     use crate::business::agent::{Agent, ToolCall, ToolExecution};
     use crate::business::chat::looping::hook_ui::HookUi;
-    use crate::business::chat::looping::tool_fuse::ToolCallFuse;
     use crate::business::chat::looping::{
         ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext,
     };
+    use crate::business::loop_engine::ToolGuardDecision;
     use async_trait::async_trait;
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
@@ -442,6 +450,7 @@ mod tests {
                 allow_all: true,
             },
             workspace: project::api::WorkspaceService::new(cwd),
+            run_id: sdk::RunId::new_v7().to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
             session_reminders: None,
@@ -479,7 +488,11 @@ mod tests {
         let context = RuntimeTurnContext::new(ChatId::new("chat"), ChatTurnId::new("turn"));
         let workspace_root = std::env::current_dir().unwrap();
         let calls = vec![lifecycle_call(0), lifecycle_call(1)];
-        let mut fuse = ToolCallFuse::new();
+        let guarded_calls = calls
+            .iter()
+            .cloned()
+            .map(|call| (call, ToolGuardDecision::Allow))
+            .collect::<Vec<_>>();
 
         let _ = execute_tool_round(
             &context,
@@ -493,7 +506,7 @@ mod tests {
             &tokio_util::sync::CancellationToken::new(),
             "en",
             &workspace_root,
-            &mut fuse,
+            &guarded_calls,
         )
         .await;
 

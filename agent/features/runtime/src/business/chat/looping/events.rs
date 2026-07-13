@@ -179,6 +179,16 @@ pub enum RuntimeStreamEvent {
         context: RuntimeTurnContext,
         duration: std::time::Duration,
     },
+    RunStarted {
+        run_id: sdk::RunId,
+        parent_run_id: Option<sdk::RunId>,
+    },
+    RunCancelling {
+        run_id: sdk::RunId,
+    },
+    RunCancelled {
+        run_id: sdk::RunId,
+    },
     Cancelled {
         context: RuntimeTurnContext,
     },

@@ -117,7 +117,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let session_id = start_session(args.resume.clone());
     set_session_id(session_id.clone());
 
-    // 13. Agent runner
+    // 13. Agent runner 与 Main/Sub 共享同一个 per-Run registry。
+    let active_run = Arc::new(crate::core::active_run::ActiveRunRegistry::default());
     let agent_runner = build_agent_runner(
         Some(snapshot.models()),
         Some(snapshot.agents()),
@@ -125,6 +126,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         hook_runner.clone(),
         runtime_settings.reasoning,
         snapshot.api_timeout_secs(),
+        active_run.clone(),
     );
 
     // 15. Prompt bundle
@@ -217,7 +219,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
-        current_cancel: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
+        active_run,
         current_chain: Arc::new(Mutex::new(crate::business::session::ChatChain::default())),
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),

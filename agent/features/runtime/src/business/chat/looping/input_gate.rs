@@ -16,7 +16,6 @@ pub type InputEventOptFuture<'a> =
 /// 排查「无用户输入却持续跑」时，逐条打印 gate 收到的事件类型。
 pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
     match event {
-        ChatInputEvent::Cancel => "Cancel",
         ChatInputEvent::ControlCommand { .. } => "ControlCommand",
         ChatInputEvent::UserMessage { .. } => "UserMessage",
         ChatInputEvent::Reset => "Reset",
@@ -53,7 +52,6 @@ pub enum GateDecision {
     Proceed,
     ContinueNextTurn,
     AbortCurrentLoop,
-    CancelCurrentLoop,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,10 +266,6 @@ where
     let mut iter = events.into_iter().peekable();
     while let Some(event) = iter.next() {
         match event {
-            ChatInputEvent::Cancel => {
-                decision = GateDecision::CancelCurrentLoop;
-                break;
-            }
             ChatInputEvent::ControlCommand { raw } => {
                 let kind = classify_control_command(&raw);
                 commands.push(ControlCommand {

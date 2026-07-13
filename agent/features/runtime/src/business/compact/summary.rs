@@ -265,6 +265,7 @@ pub async fn compact_messages_with_llm(
     context_size: usize,
     client: Option<&provider::api::LlmClient>,
     progress: Option<&dyn CompactProgressFn>,
+    cancel: &CancellationToken,
 ) -> Option<CompactResult> {
     if !needs_compaction(messages, system_prompt, context_size) {
         return None;
@@ -286,13 +287,13 @@ pub async fn compact_messages_with_llm(
     let summary = match client {
         Some(client) => {
             if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
-                match compact_messages_map_reduce(client, early_messages, progress).await {
+                match compact_messages_map_reduce(client, early_messages, progress, cancel).await {
                     Ok(text) => text,
                     Err(_) => build_summary_text(early_messages),
                 }
             } else {
                 emit_progress(progress, CompactStage::Summarizing);
-                match llm_compact(client, early_messages).await {
+                match llm_compact(client, early_messages, cancel).await {
                     Ok(text) => text,
                     Err(_) => build_summary_text(early_messages),
                 }
@@ -317,8 +318,8 @@ pub async fn compact_messages_with_llm(
 async fn llm_generate(
     client: &provider::api::LlmClient,
     request: Vec<Message>,
+    cancel: &CancellationToken,
 ) -> Result<String, String> {
-    let cancel = CancellationToken::new();
     let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let collected_clone = collected.clone();
     {
@@ -329,7 +330,7 @@ async fn llm_generate(
         }));
 
         client
-            .stream_message(&[], &request, &[], &mut handler, &cancel)
+            .stream_message(&[], &request, &[], &mut handler, cancel)
             .await
             .map_err(|e| format!("LLM call failed: {e}"))?;
     }
@@ -346,13 +347,14 @@ async fn llm_generate(
 async fn llm_compact(
     client: &provider::api::LlmClient,
     early_messages: &[Message],
+    cancel: &CancellationToken,
 ) -> Result<String, String> {
     let mut request = build_compact_request(early_messages);
     request.push(Message::user(format!(
         "{}\n\n这里是要总结的对话：",
         COMPACT_PROMPT
     )));
-    llm_generate(client, request).await
+    llm_generate(client, request, cancel).await
 }
 
 /// 将消息列表按 token 预算分块（不拆分单条消息）。
@@ -388,6 +390,7 @@ async fn compact_messages_map_reduce(
     client: &provider::api::LlmClient,
     early_messages: &[Message],
     progress: Option<&dyn CompactProgressFn>,
+    cancel: &CancellationToken,
 ) -> Result<String, String> {
     use super::token_estimation::estimate_messages_tokens;
 
@@ -405,7 +408,7 @@ async fn compact_messages_map_reduce(
     let mut sub_summaries = Vec::with_capacity(chunks.len());
     for (i, chunk) in chunks.iter().enumerate() {
         emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
-        let summary = llm_compact(client, chunk).await?;
+        let summary = llm_compact(client, chunk, cancel).await?;
         sub_summaries.push(summary);
         log::info!(
             target: crate::LOG_TARGET,
@@ -432,7 +435,7 @@ async fn compact_messages_map_reduce(
         "{COMPACT_PROMPT}\n\n以下是对话的多个分段摘要，请合并为一份连贯的最终摘要：\n\n<sub-summaries>\n{combined}\n</sub-summaries>\n\nWrite your summary inside <summary> tags."
     );
 
-    llm_generate(client, vec![Message::user(prompt)]).await
+    llm_generate(client, vec![Message::user(prompt)], cancel).await
 }
 
 #[cfg(test)]

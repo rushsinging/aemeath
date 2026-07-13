@@ -7,7 +7,7 @@
 
 ## 概述
 
-架构守卫是仓库的"机械式宪法"——把 [outline.md](./01-outline.md) 中"依赖铁律 / COLA 分层 / 薄入口 / 单一真相"等设计原则固化为可执行的静态检查。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
+架构守卫是仓库的"机械式宪法"——把 [01-product-and-domain.md](../01-system/01-product-and-domain.md) 中"依赖铁律 / COLA 分层 / 薄入口 / 单一真相"等设计原则固化为可执行的静态检查。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -18,12 +18,12 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 22 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 23 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 22 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 23 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
 
 ## 守卫索引
 
@@ -49,15 +49,16 @@
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` |
-| 22 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
+| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
+| 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
+| 23 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
 
 ## 1. check-cargo-dependency-graph.sh
 
 - **功能**：基于 `cargo metadata` 校验各 crate 的业务依赖是否落在显式白名单内。
-- **守护**：[outline.md](./01-outline.md) §依赖铁律——固化 feature 依赖方向：cli→{composition, sdk}；runtime→全部 supporting；supporting→share；share/sdk→∅。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律——固化 feature 依赖方向：cli→{composition, sdk}；runtime→全部 supporting；supporting→share；share/sdk→∅。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 - **白名单（`business_allow`）**：
 
 | Crate | 允许依赖（workspace crate） |
@@ -80,14 +81,14 @@
 | `utils` | ∅ |
 
 - **例外**：
-  - `tools → {project, storage}`：横向依赖登记（[outline.md](./01-outline.md) §6.4.7），仅经各自 `api` facade 接入。
+  - `tools → {project, storage}`：横向依赖登记（[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.7），仅经各自 `api` facade 接入。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
 
 ## 2. check-cli-thin-entry.sh
 
 - **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + 纯技术库`。
-- **守护**：[outline.md](./01-outline.md) §薄入口——CLI 不得直连 runtime 内部或任何 supporting feature，业务能力一律经 composition 装配 + `sdk::AgentClient` 契约接入。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §薄入口——CLI 不得直连 runtime 内部或任何 supporting feature，业务能力一律经 composition 装配 + `sdk::AgentClient` 契约接入。
 - **白名单**：
   - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
   - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share}`
@@ -101,7 +102,7 @@
 ## 3. check-share-no-upstream-deps.sh
 
 - **功能**：检查 `agent/shared/Cargo.toml` 不依赖任何业务 feature。
-- **守护**：[outline.md](./01-outline.md) §依赖铁律 `share → ∅`——share 是最底层共享内核，禁止反依赖上层。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律 `share → ∅`——share 是最底层共享内核，禁止反依赖上层。
 - **被禁上游 crate 列表**：`runtime, project, policy, context, provider, tools, storage, hook, audit, composition, cli, sdk`。
 - **例外**：无。
 - **检查方式**：单文件清单匹配 `[dependencies]` 段；命中即失败。
@@ -109,7 +110,7 @@
 ## 4. check-share-minimal-kernel.sh
 
 - **功能**：扫描 `agent/shared/src/`，禁止 kernel 出现行为/IO/并发/时钟/状态容器；并把 `agent/shared/Cargo.toml` 依赖限定在白名单内。
-- **守护**：[outline.md](./01-outline.md) §6.4.5 rule6——kernel 只放数据契约与纯函数。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.5 rule6——kernel 只放数据契约与纯函数。
 - **禁用模式（`forbidden_patterns`）**：
 
 | 模式 | 理由 |
@@ -143,7 +144,7 @@
 ## 5. check-cola-layer-purity.sh
 
 - **功能**：检查每个 feature 内部 COLA 分层的依赖方向。
-- **守护**：[outline.md](./01-outline.md) §6.4.8 分层纯度——内层只能内→外、不能外→内；domain/business 不得依赖 core 编排 / gateway / contract；utils 保持叶子。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.8 分层纯度——内层只能内→外、不能外→内；domain/business 不得依赖 core 编排 / gateway / contract；utils 保持叶子。
 - **层定义**：`FEATURE_LAYERS = {contract, gateway, core, business, utils}`。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
@@ -182,7 +183,7 @@
 ## 6. check-crate-api-boundary.sh
 
 - **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
-- **守护**：[outline.md](./01-outline.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
@@ -226,7 +227,7 @@
 ## 8. check-forbidden-imports.sh
 
 - **功能**：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
-- **守护**：[outline.md](./01-outline.md) §6.4.5 rule5——`share::adapter` / `shared::adapter` / `agent/shared/src/adapter` 只能在 composition 装配处引用，feature 与 cli 不得直接 import。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.5 rule5——`share::adapter` / `shared::adapter` / `agent/shared/src/adapter` 只能在 composition 装配处引用，feature 与 cli 不得直接 import。
 - **白名单（`RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS`）**——临时精确豁免：
 
 | 路径 | 说明 |
@@ -239,7 +240,7 @@
 ## 9. check-tui-tea-purity.sh
 
 - **功能**：检查 TUI update 子树保持 TEA 纯函数语义——副作用一律走 `Cmd` / `Effect` 派发。
-- **守护**：[tui-design.md](./04-tui-design.md) §TEA 架构——`update()` 不得直接 `await` / `spawn` / IO / 调 hook。
+- **守护**：[01-architecture-and-dataflow.md](../02-modules/tui/01-architecture-and-dataflow.md) §TEA 架构——`update()` 不得直接 `await` / `spawn` / IO / 调 hook。
 - **检查目标目录**（`TUI_PURE_DIRS`）：
   - `apps/cli/src/tui/app`
   - `apps/cli/src/tui/model`
@@ -442,7 +443,7 @@
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 方法 | #567 后所有 TUI↔runtime 交互走 `ChatInputEvent` 事件流 + `ChatEvent` 回传，不允许在 trait 上新增 RPC 方法绕过事件流 |
+| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 

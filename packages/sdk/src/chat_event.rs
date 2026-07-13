@@ -141,7 +141,20 @@ pub enum ChatEvent {
         context: ChatEventContext,
         duration_ms: u64,
     },
-    /// Chat 被取消。
+    /// Runtime 已创建并激活一个 Run。
+    RunStarted {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+    },
+    /// 同步打断请求已接受，Run 已进入 Cancelling。
+    RunCancelling {
+        run_id: crate::RunId,
+    },
+    /// Run 取消收口完成 ACK。
+    RunCancelled {
+        run_id: crate::RunId,
+    },
+    /// Chat 被取消（兼容旧 TUI 投影）。
     Cancelled {
         context: ChatEventContext,
     },
