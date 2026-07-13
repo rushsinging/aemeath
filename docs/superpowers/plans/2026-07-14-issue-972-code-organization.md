@@ -93,22 +93,49 @@
 
   Update the Project row in `AGENTS.md` to describe workspace ownership and the git outbound port without naming or mandating the retired directory template. Reframe the existing directory constraints in `specs/project.md` as migration-period implementation constraints, preserving the runtime truth without retaining the retired architecture concept.
 
+### Task 3.5: Resolve repository-wide active-document contradictions
+
+**Files:**
+- Modify: `README.md`
+- Modify: `specs/update.md`
+- Modify: `docs/design/01-system/04-system-architecture.md`
+- Modify: `docs/design/02-modules/project/README.md`
+- Modify: `docs/design/02-modules/project/01-domain-model.md`
+- Modify: `docs/design/03-engineering/architecture-guards.md`
+- Modify: `docs/design/03-engineering/migration-governance.md`
+
+- [ ] **Step 1: Align repository entry points and active instructions**
+
+  Replace stale root navigation with the three-level design index and code-organization source of truth. Reframe Update's current flat files as a migration-period implementation constraint, without treating the retired concept as architecture or hard-coding the guard count.
+
+- [ ] **Step 2: Eliminate duplicate Project target decisions**
+
+  Make `02-ports-and-adapters.md` the only Project physical-layout and port-contract source. Remove the duplicate tree and optional broad super-trait from the Project README, require Composition Root injection of `GitWorktreeOps`, and track the current self-construction gap in Migration Governance.
+
+- [ ] **Step 3: Reconcile system-level criteria and guard runtime wording**
+
+  Delegate crate promotion criteria to `06-code-organization.md` §3.6, keep DDD strategic identification separate from optional tactical aggregates, and describe the legacy guard's path-based test exclusion exactly.
+
+- [ ] **Step 4: Re-run independent specification and quality reviews**
+
+  Resolve all Critical and Important findings before repository verification.
+
 ### Task 4: Validate the documentation set
 
 **Files:**
-- Verify all files changed in Tasks 1-3.
+- Verify all files changed in Tasks 1-3.5.
 
-- [x] **Step 1: Check the retired concept is absent from target design prose**
+- [ ] **Step 1: Check the retired concept is absent from target design prose**
 
   Run:
 
   ```bash
-  rg -n -i '\bCOLA\b' docs/design AGENTS.md specs/project.md
+  rg -n -i '\bCOLA\b' README.md AGENTS.md specs docs/design
   ```
 
   Expected: the only permitted match is the exact legacy script identifier in `architecture-guards.md` and `migration-governance.md`; no target architecture prose uses the concept.
 
-- [x] **Step 2: Check required coverage and source traceability**
+- [ ] **Step 2: Check required coverage and source traceability**
 
   Run:
 
@@ -118,7 +145,7 @@
 
   Expected: every ecosystem and the decision traceability section is present.
 
-- [x] **Step 3: Check Markdown whitespace and links mechanically**
+- [ ] **Step 3: Check Markdown whitespace and links mechanically**
 
   Run:
 
@@ -148,7 +175,7 @@
 
   Result: all 10 changed Markdown files pass. The full-tree scan still reports the pre-existing Server Foundation link missing from `docs/design/02-modules/server/01-design.md`; the same link is present on `origin/release/v0.1.0` and is outside #972.
 
-- [x] **Step 4: Run architecture and repository verification**
+- [ ] **Step 4: Run architecture and repository verification**
 
   Run:
 
