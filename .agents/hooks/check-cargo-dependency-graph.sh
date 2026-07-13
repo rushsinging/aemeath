@@ -27,7 +27,7 @@ business_allow = {
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share"},
-    "context": {"share"},
+    "context": {"share", "provider", "storage", "sdk"},
     "provider": {"share"},
     # Approved horizontal dependencies (spec §6.4.7): tools -> project/storage, via their api facades.
     "tools": {"share", "project", "storage"},

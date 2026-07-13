@@ -380,15 +380,22 @@ name = "context"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "dirs",
  "inventory",
  "log",
+ "provider",
  "regex",
+ "sdk",
  "serde",
  "serde_json",
  "serde_yml",
  "share",
+ "storage",
  "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]

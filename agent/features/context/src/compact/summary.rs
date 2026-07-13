@@ -3,14 +3,14 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use crate::business::chat::looping::CompactStage;
-use crate::business::compact::restore::sanitize_tool_pairs;
+use super::CompactStage;
+use crate::compact::restore::sanitize_tool_pairs;
 use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
 // 向后兼容的 re-export
-pub use crate::business::compact::needs_compaction;
+pub use crate::compact::needs_compaction;
 
 /// Compact 进度回调 trait。
 ///
@@ -397,7 +397,7 @@ async fn compact_messages_map_reduce(
     let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
     let total_chunks = chunks.len();
     log::info!(
-        target: crate::LOG_TARGET,
+        target: "aemeath:agent:runtime",
         "map-reduce compact: {} chunks from {} messages ({} tokens)",
         total_chunks,
         early_messages.len(),
@@ -411,7 +411,7 @@ async fn compact_messages_map_reduce(
         let summary = llm_compact(client, chunk, cancel).await?;
         sub_summaries.push(summary);
         log::info!(
-            target: crate::LOG_TARGET,
+            target: "aemeath:agent:runtime",
             "map-reduce compact: chunk {}/{} done",
             i + 1,
             total_chunks,

@@ -8,10 +8,8 @@
 //! 还原逻辑的多路并存问题。两个调用点都应通过 `SessionRestore::from_session`
 //! 获取活跃链相关数据。
 
-use crate::business::chat::message_integrity::{
-    check_message_integrity, deep_clean_messages, sanitize_messages,
-};
-use crate::business::session::{ChatChain, ChatSegment, SegmentKind, Session};
+use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
+use crate::session::{ChatChain, ChatSegment, SegmentKind, Session};
 use share::message::Message;
 
 /// 从 `Session` 还原出的活跃链运行时状态。
@@ -90,7 +88,7 @@ impl SessionRestore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::business::session::SessionMetadata;
+    use crate::session::SessionMetadata;
     use share::message::Role;
 
     fn segment(parent: Option<String>, kind: SegmentKind, msgs: Vec<Message>) -> ChatSegment {

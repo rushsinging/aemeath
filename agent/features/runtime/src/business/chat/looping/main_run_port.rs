@@ -34,8 +34,8 @@ use crate::business::loop_engine::{
     ToolStep,
 };
 use crate::business::reasoning_graph::{GraphSignal, ReasoningGraph};
-use crate::business::session::ChatChain;
 use crate::LOG_TARGET;
+use context::api::session::ChatChain;
 
 /// Main-chat adapter for the shared run loop.
 ///
@@ -71,7 +71,7 @@ where
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) language: &'a str,
-    pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
+    pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::api::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
     pub(crate) active_summary_arc: &'a Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) reasoning_graph: &'a mut Option<ReasoningGraph>,
@@ -85,7 +85,7 @@ where
     pub(crate) segment_id: &'a str,
     pub(crate) turn_context: RuntimeTurnContext,
     pub(crate) rollback_chain: ChatChain,
-    pub(crate) rollback_frozen_chats: Vec<crate::business::session::ChatSegment>,
+    pub(crate) rollback_frozen_chats: Vec<context::api::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) memory_cwd: PathBuf,
@@ -225,9 +225,8 @@ where
 
     async fn compact_impl(&mut self) {
         let tool_schemas = self.registry.schemas_for(self.language);
-        let tool_schema_tokens =
-            crate::business::compact::estimate_tool_schemas_tokens(&tool_schemas);
-        let cleared = crate::business::compact::microcompact_chain(self.chain);
+        let tool_schema_tokens = context::api::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let cleared = context::api::compact::microcompact_chain(self.chain);
         if cleared > 0 {
             self.sink
                 .send_event(RuntimeStreamEvent::MicrocompactDone {
