@@ -19,7 +19,7 @@ use crate::business::chat::looping::hook_ui::HookUi;
 use crate::business::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::business::chat::looping::loop_helpers::is_user_cancelled_provider_error;
 use crate::business::chat::looping::loop_phases::build_api_messages;
-use crate::business::chat::looping::memory_inject::build_memory_block;
+use crate::business::chat::looping::memory_inject::system_blocks_with_memory;
 use crate::business::chat::looping::post_batch::run_post_tool_batch;
 use crate::business::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
 use crate::business::chat::looping::stream_handler::should_emit_model_stream_waiting;
@@ -287,14 +287,8 @@ where
         )
         .await;
         let tool_schemas = self.registry.schemas_for(self.language);
-        let mut effective_system_blocks = self.system_blocks.to_vec();
-        if self.memory_config.enabled && self.memory_config.inject_count > 0 {
-            if let Some(block) =
-                build_memory_block(&self.memory_cwd, self.memory_config.inject_count)
-            {
-                effective_system_blocks.push(block);
-            }
-        }
+        let mut effective_system_blocks =
+            system_blocks_with_memory(self.system_blocks, &self.memory_cwd, self.memory_config);
         if let Some(summary) = self.active_summary.clone() {
             effective_system_blocks.push(provider::api::SystemBlock {
                 block_type: "text".to_string(),

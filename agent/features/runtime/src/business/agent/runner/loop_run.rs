@@ -336,17 +336,13 @@ impl RunLoopPort for SubAgentRun<'_> {
         self.log_input(turn_number);
 
         // Memory is queried dynamically on every turn, matching the main loop.
-        let mut effective_blocks = self.system_blocks.clone();
         let memory_root = self.agent.ctx.workspace_read().initial_cwd();
-        let mc = &self.agent.ctx.resources.memory_config;
-        if mc.enabled && mc.inject_count > 0 {
-            if let Some(block) = crate::business::chat::looping::memory_inject::build_memory_block(
+        let effective_blocks =
+            crate::business::chat::looping::memory_inject::system_blocks_with_memory(
+                &self.system_blocks,
                 &memory_root,
-                mc.inject_count,
-            ) {
-                effective_blocks.push(block);
-            }
-        }
+                &self.agent.ctx.resources.memory_config,
+            );
 
         let messages_for_api = messages_for_llm(&self.messages);
         let response = self
