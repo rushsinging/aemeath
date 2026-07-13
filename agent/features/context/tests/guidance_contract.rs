@@ -1,4 +1,4 @@
-use prompt::api::guidance::{resolve_guidance, universal_execution_discipline};
+use context::prompt::api::guidance::{resolve_guidance, universal_execution_discipline};
 use std::collections::HashMap;
 
 #[test]

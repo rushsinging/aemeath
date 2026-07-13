@@ -1,4 +1,4 @@
-use crate::LOG_TARGET;
+use crate::prompt::LOG_TARGET;
 
 use serde::Deserialize;
 use share::skill_ops::Skill;

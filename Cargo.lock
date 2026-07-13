@@ -325,6 +325,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "context"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "dirs",
+ "inventory",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "share",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1935,20 +1951,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prompt"
-version = "0.0.0"
-dependencies = [
- "async-trait",
- "dirs",
- "inventory",
- "log",
- "regex",
- "serde",
- "serde_yml",
- "share",
-]
-
-[[package]]
 name = "provider"
 version = "0.0.0"
 dependencies = [
@@ -2168,6 +2170,7 @@ dependencies = [
  "audit",
  "base64",
  "chrono",
+ "context",
  "dirs",
  "env_logger",
  "futures",
@@ -2178,7 +2181,6 @@ dependencies = [
  "parking_lot",
  "policy",
  "project",
- "prompt",
  "provider",
  "rand",
  "regex",

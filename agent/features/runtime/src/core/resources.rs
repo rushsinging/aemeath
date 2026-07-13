@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use context::prompt::api::skill::Skill;
 use hook::api::HookRunner;
-use prompt::api::skill::Skill;
 use provider::api::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
 use storage::api::TaskStore;
