@@ -87,7 +87,6 @@ where
     pub(crate) rollback_chain: ChatChain,
     pub(crate) rollback_frozen_chats: Vec<context::api::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
-    pub(crate) cwd: PathBuf,
     pub(crate) memory_cwd: PathBuf,
     pub(crate) last_api_input_tokens: &'a mut u64,
     pub(crate) last_api_output_tokens: &'a mut u64,
@@ -105,6 +104,12 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
+    /// 实时从 `WorkspaceService` 读取 `workspace_root`，避免 turn 内
+    /// 切换 worktree 后使用过时路径。
+    fn current_cwd(&self) -> PathBuf {
+        project::api::WorkspaceRead::current_workspace_root(self.workspace.as_ref())
+    }
+
     async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
         match event {
             sdk::ChatInputEvent::UserMessage { .. } => {
@@ -252,7 +257,7 @@ where
             &self.memory_cwd,
             self.client,
             self.language,
-            &self.cwd,
+            &self.current_cwd(),
             &self.cancel,
         )
         .await
@@ -463,7 +468,7 @@ where
             self.hook_runner,
             self.session_id,
             self.language,
-            &self.cwd,
+            &self.current_cwd(),
             &self.cancel,
         )
         .await
@@ -576,7 +581,7 @@ where
             self.hook_runner,
             cancel,
             self.language,
-            &self.cwd,
+            &self.current_cwd(),
             calls,
         )
         .await;
@@ -645,7 +650,7 @@ where
             self.hook_runner,
             &agent.ctx,
             self.turn_count,
-            &self.cwd,
+            &self.current_cwd(),
         )
         .await;
         Ok(ToolStep::Continue)

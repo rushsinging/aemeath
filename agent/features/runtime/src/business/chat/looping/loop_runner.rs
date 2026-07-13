@@ -503,7 +503,6 @@ where
             rollback_chain,
             rollback_frozen_chats,
             rollback_active_summary,
-            cwd: cwd.clone(),
             memory_cwd: memory_cwd.clone(),
             last_api_input_tokens: &mut last_api_input_tokens,
             last_api_output_tokens: &mut last_api_output_tokens,
