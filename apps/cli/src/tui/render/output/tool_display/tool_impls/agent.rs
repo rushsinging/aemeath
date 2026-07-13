@@ -1,14 +1,21 @@
 use crate::tui::render::output_area::INDENT;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::super::common::{str_arg, truncate_ellipsis};
+use super::super::common::truncate_ellipsis;
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
 use super::helpers::build_header_line;
 use ratatui::text::Line;
+use sdk::tool_input::AgentInput;
 use std::path::Path;
+
+/// Deserialize a typed Input from a raw `serde_json::Value`, tolerating
+/// missing / malformed fields via `Default`.
+fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
+    serde_json::from_value(input.clone()).unwrap_or_default()
+}
 
 // ── Agent ────────────────────────────────────────────────────────
 
@@ -18,7 +25,12 @@ impl ToolDisplay for AgentDisplay {
         "Agent"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let desc = str_arg(input, "description", "sub-task");
+        let args = parse_input::<AgentInput>(input);
+        let desc = if args.description.is_empty() {
+            "sub-task"
+        } else {
+            &args.description
+        };
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
         let mut header = format!("{} {desc}", self.display_name());
@@ -31,12 +43,12 @@ impl ToolDisplay for AgentDisplay {
         header
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let prompt = str_arg(input, "prompt", "");
-        if prompt.is_empty() {
+        let args = parse_input::<AgentInput>(input);
+        if args.prompt.is_empty() {
             return vec![];
         }
         vec![truncate_ellipsis(
-            prompt,
+            &args.prompt,
             200usize.saturating_sub(INDENT.len()),
         )]
     }
@@ -57,10 +69,8 @@ impl ToolDisplay for AgentDisplay {
         _result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let description = input
-            .get("description")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let args = parse_input::<AgentInput>(input);
+        let description = args.description.as_str();
         // issue #499：追加 role/model 标记（由 merge_agent_meta 从 agent_meta 合并而来）
         let mut suffix = String::new();
         if let Some(role) = input.get("role").and_then(|v| v.as_str()) {

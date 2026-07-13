@@ -12,6 +12,7 @@ pub struct LspResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct LspInput {
     /// The LSP operation to perform (diagnostics, symbols)
     pub operation: String,
