@@ -5,8 +5,8 @@ use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::business::chat::looping::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
-use crate::business::session::ChatChain;
 use crate::LOG_TARGET;
+use context::api::session::ChatChain;
 
 pub(crate) async fn execute_set_thinking<S>(
     client: &provider::api::LlmClient,

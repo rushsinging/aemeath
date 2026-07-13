@@ -1,5 +1,5 @@
 use crate::business::reasoning_graph::ReasoningNode;
-use crate::business::session::PersistedWorkspaceContext;
+use context::api::session::PersistedWorkspaceContext;
 use provider::api::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
@@ -55,26 +55,8 @@ pub enum RuntimeToolCallStatus {
     Running,
 }
 
-/// Compact 进度阶段。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompactStage {
-    /// 正在分析/切分消息窗口
-    Preparing,
-    /// 正在执行 LLM 摘要（单次或 map-reduce 的某个 chunk）
-    Summarizing,
-    /// 正在清理 tool pairs / 组装结果
-    Finalizing,
-}
-
-impl CompactStage {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Preparing => "preparing",
-            Self::Summarizing => "summarizing",
-            Self::Finalizing => "finalizing",
-        }
-    }
-}
+/// Compact 进度阶段（re-export from context crate）。
+pub use context::api::compact::CompactStage;
 
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {
