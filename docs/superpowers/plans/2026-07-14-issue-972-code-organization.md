@@ -52,19 +52,19 @@
 - Modify: `docs/design/01-system/04-system-architecture.md`
 - Modify: `docs/design/01-system/05-dependency-rules.md`
 
-- [ ] **Step 1: Register the new source of truth**
+- [x] **Step 1: Register the new source of truth**
 
   Add `06-code-organization.md` to the system navigation and reading paths. Describe `05-dependency-rules.md` without naming the retired directory template.
 
-- [ ] **Step 2: Rewrite the architecture decision**
+- [x] **Step 2: Rewrite the architecture decision**
 
   Keep DDD-guided modular boundaries, selective Hexagonal seams, Clean dependency direction, and the single Composition Root. Remove wording that implies every module has mandatory domain/application/adapter layers, and link the new organization standard.
 
-- [ ] **Step 3: Rewrite dependency rules around policy and detail**
+- [x] **Step 3: Rewrite dependency rules around policy and detail**
 
   Replace the fixed three-layer diagram with `external detail -> capability policy`, clarify that ports are declared by the consumer at actual volatile boundaries, and replace the retired-template section with a rule that directory names do not prove dependency direction.
 
-- [ ] **Step 4: Update related-document links and modification histories**
+- [x] **Step 4: Update related-document links and modification histories**
 
   Add Issue #972 links and ensure each changed target document keeps its required related-documents and history sections.
 
