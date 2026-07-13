@@ -500,7 +500,7 @@ where
             "[run_domain] {} run_id={} parent={}",
             event_name(event),
             event_short_id(event),
-            event.parent_run_id().map(|id| short(id)).unwrap_or_else(|| "none".into()),
+            event.parent_run_id().map(short).unwrap_or_else(|| "none".into()),
         );
     }
     if let Err(error) = port.emit(events.clone()).await {
