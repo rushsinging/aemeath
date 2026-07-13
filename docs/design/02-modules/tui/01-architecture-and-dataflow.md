@@ -13,7 +13,7 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - **纯展示层**——Model 不执行 IO、不调 AgentClient、不发 channel（reducer 纯化目标，见 §10）
 - 基于 The Elm Architecture（TEA）变体：event → update → model → view → effect
 
-> **与 `04-tui-design.md` 的关系**：本文是 `04-tui-design.md` 的迁移深化版，修正了代码实现与设计文档的分歧，补充了架构门禁和缺口分析。原文件保留为历史归档。
+> **与 `snapshot/design/04-tui-design.md` 的关系**：本文是 `snapshot/design/04-tui-design.md` 的迁移深化版，修正了代码实现与设计文档的分歧，补充了架构门禁和缺口分析。原文件保留为历史归档。
 
 ## 2. 六边形边界
 
@@ -531,7 +531,7 @@ fn test_adapter_and_view_assembler_production_do_not_depend_on_render_modules() 
 
 ## 11. 相关文档
 
-- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 - Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)

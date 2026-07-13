@@ -22,6 +22,6 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 
 ## 相关文档
 
-- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - 上下文地图：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)

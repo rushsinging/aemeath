@@ -991,7 +991,7 @@ trait AgentClient: Send + Sync {
 - **响应流**：`ChatStream`（`Stream<Item = ChatEvent>`）
 - **事件类型**：`ChatEvent` 枚举（TextDelta / ToolCallStart / ToolCallUpdate / CompleteChat 等）
 
-`LocalAgentClient` 直接传递内存对象；`WssAgentClient` 序列化为 `Call`/`Resp` 帧传输（协议定义见 [07-server-design.md](../../07-server-design.md)），但 **MUST** 保证两端看到的 DTO 类型一致。
+`LocalAgentClient` 直接传递内存对象；`WssAgentClient` 序列化为 `Call`/`Resp` 帧传输（协议定义见 [07-server-design.md](../server/01-design.md)），但 **MUST** 保证两端看到的 DTO 类型一致。
 
 ### 13.4 设计约束
 
@@ -1006,10 +1006,10 @@ trait AgentClient: Send + Sync {
 ## 14. 相关文档
 
 - TUI 架构与数据流：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
-- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 - Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Server 模块（WssAgentClient 传输基础）：[../server/README.md](../server/README.md)
-- Server 设计草案（Call/Resp 帧协议）：[../../07-server-design.md](../../07-server-design.md)
+- Server 设计草案（Call/Resp 帧协议）：[../server/01-design.md](../server/01-design.md)
 - SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 

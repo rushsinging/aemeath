@@ -507,7 +507,7 @@ fn test_adapter_and_view_assembler_production_do_not_depend_on_render_modules() 
 - TUI 架构总览（八层管线 + 三条信息流）：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
 - TUI Model 层：[02-model.md](02-model.md)
 - TUI 事件流与 ACL：[03-event-flow-and-acl.md](03-event-flow-and-acl.md)
-- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 
 ## 修改历史
 
