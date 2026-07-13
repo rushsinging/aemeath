@@ -2,14 +2,21 @@ use crate::tui::render::output_area::INDENT;
 use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::super::common::{str_arg, truncate_ellipsis, typed_data};
+use super::super::common::{truncate_ellipsis, typed_data};
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use sdk::tool_input::BashInput;
 use std::path::Path;
+
+/// Deserialize a typed Input from a raw `serde_json::Value`, tolerating
+/// missing / malformed fields via `Default`.
+fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
+    serde_json::from_value(input.clone()).unwrap_or_default()
+}
 
 // ── Bash ─────────────────────────────────────────────────────────
 
@@ -19,12 +26,16 @@ impl ToolDisplay for BashDisplay {
         "Bash"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let cmd = str_arg(input, "command", "");
+        let args = parse_input::<BashInput>(input);
         // 命令可含任意 UTF-8（如中文 PR 标题），用宽度感知、char 边界安全的截断。
-        if cmd.is_empty() {
+        if args.command.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {}", self.display_name(), truncate_ellipsis(cmd, 80))
+            format!(
+                "{} {}",
+                self.display_name(),
+                truncate_ellipsis(&args.command, 80)
+            )
         }
     }
     fn header_for_subagent(
@@ -35,13 +46,13 @@ impl ToolDisplay for BashDisplay {
         self.format_header(input, workspace_root)
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let cmd = str_arg(input, "command", "");
-        if cmd.is_empty() {
+        let args = parse_input::<BashInput>(input);
+        if args.command.is_empty() {
             return vec![];
         }
         // 截断显示，避免过长命令占用太多空间
         vec![truncate_ellipsis(
-            cmd,
+            &args.command,
             200usize.saturating_sub(INDENT.len()),
         )]
     }
@@ -64,7 +75,8 @@ impl ToolDisplay for BashDisplay {
         result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+        let args = parse_input::<BashInput>(input);
+        let cmd = args.command.as_str();
         let result: Option<sdk::tool_result::BashResult> = typed_data(result_payload);
         let suffix = match result {
             Some(r) if r.exit_code != 0 => {

@@ -15,7 +15,7 @@ use crate::utils::bootstrap::{
     spawn_mcp_connect,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
-use prompt::api::skill::{load_all_skills, Skill};
+use context::api::skill::{load_all_skills, Skill};
 use provider::api::ProviderDriverKind;
 use provider::api::SystemBlock;
 use storage::api::TaskStore;
@@ -30,7 +30,7 @@ use crate::LOG_TARGET;
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
 pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
-    prompt::api::guidance::init_guidance_dir();
+    context::api::guidance::init_guidance_dir();
 
     // 2. 解析 cwd
     let cwd = args
@@ -117,7 +117,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     let session_id = start_session(args.resume.clone());
     set_session_id(session_id.clone());
 
-    // 13. Agent runner
+    // 13. Agent runner 与 Main/Sub 共享同一个 per-Run registry。
+    let active_run = Arc::new(crate::core::active_run::ActiveRunRegistry::default());
     let agent_runner = build_agent_runner(
         Some(snapshot.models()),
         Some(snapshot.agents()),
@@ -125,6 +126,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         hook_runner.clone(),
         runtime_settings.reasoning,
         snapshot.api_timeout_secs(),
+        active_run.clone(),
     );
 
     // 15. Prompt bundle
@@ -217,8 +219,8 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
-        current_cancel: Arc::new(Mutex::new(tokio_util::sync::CancellationToken::new())),
-        current_chain: Arc::new(Mutex::new(crate::business::session::ChatChain::default())),
+        active_run,
+        current_chain: Arc::new(Mutex::new(context::api::session::ChatChain::default())),
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
         workspace,

@@ -4,8 +4,8 @@ use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
-use crate::business::compact::needs_compaction_actual;
 use crate::LOG_TARGET;
+use context::api::compact::needs_compaction_actual;
 use provider::api::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
@@ -89,14 +89,14 @@ impl<'a> SubAgentRun<'a> {
 
         // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
         // 清理后重新判断是否还需要 LLM 摘要。
-        let mc_cleared = crate::business::compact::microcompact_messages(&mut self.messages);
+        let mc_cleared = context::api::compact::microcompact_messages(&mut self.messages);
         if mc_cleared > 0 {
             log::info!(target: crate::LOG_TARGET,
                 "[microcompact] sub-agent cleared {} stale tool results", mc_cleared);
             // 清理后重新检查是否还需要 compact
-            let mc_input = crate::business::compact::estimate_messages_tokens(&self.messages);
+            let mc_input = context::api::compact::estimate_messages_tokens(&self.messages);
             let remaining_budget =
-                crate::business::compact::autocompact_threshold(self.ctx_context_size, 8192);
+                context::api::compact::autocompact_threshold(self.ctx_context_size, 8192);
             // 估算下一轮 input ≈ 当前 mc_input + system + tool schemas
             // 用 api_input 作为上界（microcompact 前），减去已清理部分
             if mc_input + (api_input as usize) <= remaining_budget {
@@ -111,14 +111,17 @@ impl<'a> SubAgentRun<'a> {
         }
 
         let old_len = self.messages.len();
-        let result = crate::business::compact::compact_messages_with_llm(
-            &self.messages,
-            &self.system,
-            self.ctx_context_size,
-            Some(&self.client),
-            None,
-        )
-        .await;
+        let result = tokio::select! {
+            _ = self.agent.ctx.cancel.cancelled() => None,
+            result = context::api::compact::compact_messages_with_llm(
+                &self.messages,
+                &self.system,
+                self.ctx_context_size,
+                Some(&self.client),
+                None,
+                &self.agent.ctx.cancel,
+            ) => result,
+        };
 
         if let Some(result) = result {
             self.messages = result.recent_messages;
@@ -132,21 +135,6 @@ impl<'a> SubAgentRun<'a> {
                 ),
             );
         }
-    }
-
-    pub(super) fn max_turns_result(&self) -> String {
-        self.messages
-            .iter()
-            .rev()
-            .map(|msg| msg.text_content())
-            .find(|text| !text.is_empty())
-            .map(|text| {
-                format!(
-                    "{}\n\n[Sub-agent reached max turns ({})]",
-                    text, self.max_turns
-                )
-            })
-            .unwrap_or_else(|| format!("Sub-agent reached max turns ({})", self.max_turns))
     }
 }
 

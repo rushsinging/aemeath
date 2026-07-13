@@ -63,6 +63,7 @@ fn test_ctx() -> ToolExecutionContext {
             allow_all: true,
         },
         workspace: project::api::WorkspaceService::new(cwd),
+        run_id: sdk::RunId::new_v7().to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
         session_reminders: None,
@@ -565,6 +566,81 @@ async fn test_execute_tools_preserves_original_order() {
     assert_eq!(exec_results[1].provider_id, "provider-2");
     assert_eq!(exec_results[2].call_id, id_b); // tool_b
     assert_eq!(exec_results[2].provider_id, "provider-3");
+}
+
+#[tokio::test]
+async fn test_execute_tools_cancel_interrupts_in_flight_tool() {
+    struct BlockingTool {
+        started: Arc<Notify>,
+        completed: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl TypedTool for BlockingTool {
+        type Output = Value;
+
+        fn name(&self) -> &str {
+            "blocking"
+        }
+
+        fn description(&self) -> &str {
+            "blocking cancellation test"
+        }
+
+        fn input_schema(&self) -> Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn call(
+            &self,
+            _input: Value,
+            _ctx: &ToolExecutionContext,
+        ) -> TypedToolResult<Self::Output> {
+            self.started.notify_one();
+            std::future::pending::<()>().await;
+            self.completed.fetch_add(1, AtomicOrdering::SeqCst);
+            TypedToolResult::success("late", Value::Null)
+        }
+    }
+
+    let started = Arc::new(Notify::new());
+    let completed = Arc::new(AtomicUsize::new(0));
+    let registry = ToolRegistry::new();
+    registry.register(BlockingTool {
+        started: started.clone(),
+        completed: completed.clone(),
+    });
+    let ctx = test_ctx();
+    let cancel = ctx.cancel.clone();
+    let agent = Agent {
+        registry: &registry,
+        ctx,
+    };
+
+    let call = ToolCall {
+        provider_id: "provider-cancel".to_string(),
+        id: sdk::ids::ToolCallId::from_legacy_or_new("cancel-1"),
+        name: "blocking".to_string(),
+        index: 0,
+        input: serde_json::json!({}),
+    };
+    let cancel_task = tokio::spawn(async move {
+        started.notified().await;
+        cancel.cancel();
+    });
+
+    let results = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        agent.execute_tools(&[call]),
+    )
+    .await
+    .expect("取消必须中断在途 Tool future");
+
+    cancel_task.await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].outcome.is_error);
+    assert!(results[0].outcome.text.contains("cancelled"));
+    assert_eq!(completed.load(AtomicOrdering::SeqCst), 0);
 }
 
 #[tokio::test]

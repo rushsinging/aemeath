@@ -12,6 +12,7 @@ pub struct TaskCreateResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct TaskCreateInput {
     /// A brief title for the task
     pub subject: String,

@@ -3,9 +3,7 @@
 use crate::{ChatInputEventPort, QueueDrainPort};
 
 pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
-pub use crate::chat_result::{
-    CancelHandle, ChatInputImage, ChatResult, ChatStream, ToolResultImage,
-};
+pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
     HookEventView, HookExecutionResultView, OptionItem, WorkspaceContextView,
@@ -51,8 +49,6 @@ pub enum ChatInputEvent {
     },
     /// 忙碌期间输入的 slash/control command，永不作为 user message 发给 LLM。
     ControlCommand { raw: String },
-    /// 用户请求取消当前 Chat；与现有 cancel token 幂等合流。
-    Cancel,
     /// 整段会话重置：清空 messages + pending 输入，通知 TUI。
     ///
     /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
@@ -198,15 +194,6 @@ mod tests {
             event,
             ChatInputEvent::ControlCommand { ref raw } if raw == "  /clear"
         ));
-    }
-
-    #[test]
-    fn test_chat_input_event_cancel_is_distinct_from_user_message() {
-        assert_eq!(ChatInputEvent::Cancel, ChatInputEvent::Cancel);
-        assert_ne!(
-            ChatInputEvent::Cancel,
-            ChatInputEvent::user_message("cancel", Vec::new())
-        );
     }
 
     #[test]

@@ -99,9 +99,8 @@ impl App {
                     self.chat.is_cancelling,
                 ) {
                     CtrlCAction::RequestCancel => {
-                        self.chat.start_cancelling();
                         self.layout.mark_ctrlc_now();
-                        return UpdateResult::one(Effect::CancelAgentChat);
+                        return UpdateResult::one(Effect::CancelCurrentRun);
                     }
                     CtrlCAction::ForceQuit => {
                         return UpdateResult::one(Effect::QuitApplication);
@@ -145,12 +144,7 @@ impl App {
                 });
             }
             (KeyModifiers::NONE, KeyCode::Esc) if self.chat.is_processing => {
-                // Esc during processing: interrupt current LLM turn + tool calls
-                // #639：cancel 触发 runtime CancellationToken（即时），NEVER 用 abort()。
-                if let Some(h) = &self.chat.processing_handle {
-                    h.cancel();
-                }
-                self.set_transient_notice(StatusNotice::warning("Interrupted"));
+                return UpdateResult::one(Effect::CancelCurrentRun);
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
                 let doc_empty = self.model.input.document.is_empty();

@@ -13,6 +13,7 @@ pub struct PlanModeResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct EnterPlanModeInput {
     /// Optional reason for entering plan mode
     pub reason: Option<String>,
@@ -22,6 +23,7 @@ pub struct EnterPlanModeInput {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct ExitPlanModeInput {
     /// Whether to execute the planned actions
     pub execute: Option<bool>,

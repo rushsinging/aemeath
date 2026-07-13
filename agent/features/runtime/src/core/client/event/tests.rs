@@ -263,7 +263,7 @@ fn test_runtime_tool_result_maps_images_and_content() {
 #[test]
 fn test_runtime_working_directory_changed_marks_project_changeset() {
     let change_tx = event_mapping_context();
-    let workspace = crate::business::session::PersistedWorkspaceContext {
+    let workspace = context::api::session::PersistedWorkspaceContext {
         path_base: "/tmp/project".to_string(),
         workspace_root: "/tmp/project".to_string(),
         context_stack: Vec::new(),
@@ -322,6 +322,36 @@ fn test_runtime_user_messages_adopted_injects_input_ids() {
         }
         other => panic!("unexpected event: {other:?}"),
     }
+}
+
+#[test]
+fn test_run_lifecycle_events_preserve_run_id() {
+    let (change_tx, _) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
+    let run_id = sdk::RunId::new_v7();
+
+    let started = runtime_event_to_sdk_event(
+        crate::business::chat::RuntimeStreamEvent::RunStarted {
+            run_id: run_id.clone(),
+            parent_run_id: None,
+        },
+        &change_tx,
+    );
+    let cancelling = runtime_event_to_sdk_event(
+        crate::business::chat::RuntimeStreamEvent::RunCancelling {
+            run_id: run_id.clone(),
+        },
+        &change_tx,
+    );
+    let cancelled = runtime_event_to_sdk_event(
+        crate::business::chat::RuntimeStreamEvent::RunCancelled {
+            run_id: run_id.clone(),
+        },
+        &change_tx,
+    );
+
+    assert!(matches!(started, sdk::ChatEvent::RunStarted { run_id: id, .. } if id == run_id));
+    assert!(matches!(cancelling, sdk::ChatEvent::RunCancelling { run_id: id } if id == run_id));
+    assert!(matches!(cancelled, sdk::ChatEvent::RunCancelled { run_id: id } if id == run_id));
 }
 
 #[test]

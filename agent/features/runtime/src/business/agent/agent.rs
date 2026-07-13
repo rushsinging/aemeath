@@ -45,6 +45,7 @@ pub struct Agent<'a> {
     pub ctx: ToolExecutionContext,
 }
 
+#[derive(Clone)]
 pub struct ToolCall {
     pub id: sdk::ids::ToolCallId,
     pub provider_id: String,

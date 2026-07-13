@@ -115,6 +115,9 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CompactFinished { .. }
         | sdk::ChatEvent::UserMessagesAdopted { .. }
         | sdk::ChatEvent::UserMessagesQueued { .. }
+        | sdk::ChatEvent::RunStarted { .. }
+        | sdk::ChatEvent::RunCancelling { .. }
+        | sdk::ChatEvent::RunCancelled { .. }
         | sdk::ChatEvent::Usage { .. }
         | sdk::ChatEvent::LiveTps(_)
         | sdk::ChatEvent::TurnChanged(_)

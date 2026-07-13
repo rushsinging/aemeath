@@ -22,7 +22,7 @@ FORBIDDEN_DOMAIN_CRATES = {
     "runtime",
     "project",
     "policy",
-    "prompt",
+    "context",
     "provider",
     "tools",
     "storage",

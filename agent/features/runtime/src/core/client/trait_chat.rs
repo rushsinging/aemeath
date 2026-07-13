@@ -11,13 +11,6 @@ pub(super) async fn chat_impl(
     me: &AgentClientImpl,
     input: ChatRequest,
 ) -> Result<ChatStream, SdkError> {
-    // 会话级取消槽：每次 chat() 启动时重置为一个全新、未取消的 token。
-    *me.inner
-        .current_cancel
-        .lock()
-        .map_err(|_| SdkError::Internal("当前 chat 取消锁已损坏".to_string()))? =
-        tokio_util::sync::CancellationToken::new();
-    let cancel_slot = me.inner.current_cancel.clone();
     let queue_drain = input.queue_drain.clone();
     let input_events = input.input_events.clone();
 
@@ -67,9 +60,9 @@ pub(super) async fn chat_impl(
                         .collect(),
                 )
             };
-            crate::business::session::ChatChain::from_flat_messages(vec![msg])
+            context::api::session::ChatChain::from_flat_messages(vec![msg])
         } else {
-            crate::business::session::ChatChain::default()
+            context::api::session::ChatChain::default()
         }
     };
 
@@ -104,7 +97,7 @@ pub(super) async fn chat_impl(
                 session_reminders: Arc::new(Mutex::new(Default::default())),
                 agent_runner: Some(inner.context.resources.agent_runner.clone()),
                 allow_all: inner.context.resources.allow_all,
-                cancel: cancel_slot,
+                active_run: inner.active_run.clone(),
                 task_store: inner.context.resources.task_store.clone(),
                 max_tool_concurrency: inner.max_tool_concurrency,
                 max_agent_concurrency: inner.max_agent_concurrency,
@@ -133,7 +126,7 @@ pub(super) async fn chat_impl(
                 },
                 save_chain: {
                     let inner = inner.clone();
-                    std::sync::Arc::new(move |chain: &crate::business::session::ChatChain| {
+                    std::sync::Arc::new(move |chain: &context::api::session::ChatChain| {
                         let inner = inner.clone();
                         let chain = chain.clone();
                         Box::pin(async move {
@@ -199,11 +192,6 @@ pub(super) async fn chat_impl(
                 },
             })
             .await;
-        // loop 退出（shutdown / clear）后把取消槽重置为干净 token，
-        // 避免遗留的已取消 token 影响后续可能复用同一 RuntimeHandle 的 chat()。
-        if let Ok(mut guard) = inner.current_cancel.lock() {
-            *guard = tokio_util::sync::CancellationToken::new();
-        }
         // 最终 chain 同步到共享 slot（覆盖 loop 内任何未同步的变更）。
         if let Ok(mut guard) = inner.current_chain.lock() {
             *guard = final_chain;
@@ -215,18 +203,5 @@ pub(super) async fn chat_impl(
         }
     });
 
-    // #639：cancel 句柄——TUI 在 Ctrl+C/Esc 时调 `.cancel()`，即时触发共享 cancel 槽里
-    // 「当前回合的 token」。捕获槽（Arc<Mutex<CancellationToken>>）而非某个 token，故始终
-    // 取消 loop 正在用的那枚（loop 每回合 reset_cancel 换新 token，句柄照样命中）。
-    // 直接触发令牌 = 进程内 out-of-band 即时中断，NEVER 走事件流（避免工具/hook 期排队）。
-    let cancel_handle = {
-        let slot = me.inner.current_cancel.clone();
-        sdk::CancelHandle::new(move || {
-            if let Ok(guard) = slot.lock() {
-                log::debug!(target: "aemeath:agent:runtime", "[cancel] handle triggered → cancelling current token");
-                guard.cancel();
-            }
-        })
-    };
-    Ok(ChatStream::with_cancel(rx, cancel_handle))
+    Ok(ChatStream::new(rx))
 }

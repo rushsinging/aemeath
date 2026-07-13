@@ -40,11 +40,12 @@ pub(crate) async fn auto_compact<S>(
     llm_client: &Arc<provider::api::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Option<CompactOutcome>
 where
     S: ChatEventSink,
 {
-    use crate::business::compact;
+    use context::api::compact;
 
     // resume 保护：首 turn 无 API 反馈时不 compact。
     // resume 加载的是已精简的活跃链，第一轮直接原样发送，等拿到真实 token 数后再决定。
@@ -54,7 +55,7 @@ where
 
     // PreCompact hook
     let pre_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PreCompact,
             None,
@@ -65,6 +66,7 @@ where
                 was_compacted: false,
             }),
             workspace_root,
+            cancel,
         )
         .await;
     let pre_compact_blocked = pre_compact_results.iter().any(|(_, result, json)| {
@@ -141,6 +143,7 @@ where
         context_size,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
+        cancel,
     )
     .await?;
 
@@ -154,7 +157,7 @@ where
 
     // PostCompact hook
     let post_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PostCompact,
             None,
@@ -165,6 +168,7 @@ where
                 was_compacted: true,
             }),
             workspace_root,
+            cancel,
         )
         .await;
     for (_entry, _result, json_output) in &post_compact_results {
@@ -191,11 +195,11 @@ where
 /// 构造一个通过 `ChatEventSink::try_send_event` 发送 `CompactProgress` 事件的进度回调。
 fn make_progress_sink<S: ChatEventSink>(
     sink: &S,
-) -> Box<dyn crate::business::compact::CompactProgressFn> {
+) -> Box<dyn context::api::compact::CompactProgressFn> {
     struct SinkProgress<S: ChatEventSink> {
         sink: S,
     }
-    impl<S: ChatEventSink> crate::business::compact::CompactProgressFn for SinkProgress<S> {
+    impl<S: ChatEventSink> context::api::compact::CompactProgressFn for SinkProgress<S> {
         fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
             self.sink
                 .try_send_event(RuntimeStreamEvent::CompactProgress {
@@ -230,7 +234,7 @@ pub(crate) async fn manual_compact<S>(
 where
     S: ChatEventSink,
 {
-    use crate::business::compact;
+    use context::api::compact;
 
     if messages.len() <= 4 {
         let _ = sink
@@ -241,9 +245,11 @@ where
         return None;
     }
 
+    // Manual compact is an idle command outside an active Run, so it owns its command scope.
+    let manual_cancel = tokio_util::sync::CancellationToken::new();
     // PreCompact hook
     let pre_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PreCompact,
             None,
@@ -254,6 +260,7 @@ where
                 was_compacted: false,
             }),
             workspace_root,
+            &manual_cancel,
         )
         .await;
     let pre_compact_blocked = pre_compact_results.iter().any(|(_, result, json)| {
@@ -304,6 +311,7 @@ where
     // 但 compact_messages_with_llm 内部的 needs_compaction 会基于 system_prompt + context_size
     // 判断；手动 compact 时用户明确要求，若消息太少会返回 None）。
     let progress = make_progress_sink(sink);
+    let manual_cancel = tokio_util::sync::CancellationToken::new();
 
     let result = compact::compact_messages_with_llm(
         messages,
@@ -311,6 +319,7 @@ where
         context_size,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
+        &manual_cancel,
     )
     .await?;
 
@@ -324,7 +333,7 @@ where
 
     // PostCompact hook
     let post_compact_results = hook_ui
-        .run_json(
+        .run_json_with_cancel(
             hook_runner,
             HookEvent::PostCompact,
             None,
@@ -335,6 +344,7 @@ where
                 was_compacted: true,
             }),
             workspace_root,
+            &manual_cancel,
         )
         .await;
     for (_entry, _result, json_output) in &post_compact_results {

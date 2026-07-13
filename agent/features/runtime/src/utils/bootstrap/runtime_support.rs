@@ -24,7 +24,7 @@ pub fn build_hook_runner(hooks: Option<&HooksConfig>, _cwd: &Path) -> HookRunner
 }
 
 pub fn start_session(resume_session_id: Option<String>) -> String {
-    let session_id = resume_session_id.unwrap_or_else(crate::business::session::new_session_id);
+    let session_id = resume_session_id.unwrap_or_else(context::api::session::new_session_id);
     log::info!(target: LOG_TARGET, "session started");
     session_id
 }
@@ -36,6 +36,7 @@ pub fn build_agent_runner(
     hook_runner: HookRunner,
     reasoning: bool,
     timeout_secs: u64,
+    active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
     let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
@@ -44,6 +45,8 @@ pub fn build_agent_runner(
     Arc::new(agent_runner::CliAgentRunner {
         client,
         pool,
+        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
+        active_run,
         agents_config,
         hook_runner,
         reasoning,

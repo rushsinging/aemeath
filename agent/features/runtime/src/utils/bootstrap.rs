@@ -24,7 +24,7 @@ pub struct InstructionsLoadedHookRunner<'a> {
 }
 
 #[async_trait::async_trait(?Send)]
-impl prompt::api::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
+impl context::api::guidance::InstructionsLoadedHook for InstructionsLoadedHookRunner<'_> {
     async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
         let _ = self
             .hook_runner

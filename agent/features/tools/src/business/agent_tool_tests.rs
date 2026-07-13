@@ -1,25 +1,29 @@
 use super::*;
-use crate::api::{AgentRunRequest, AgentRunner, ToolResources};
+use crate::api::{AgentRunRequest, AgentRunTerminal, AgentRunner, ToolResources};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct StubRunner {
-    captured_max_turns: Mutex<u32>,
+    captured_timeout: Mutex<std::time::Duration>,
     captured_system: Mutex<String>,
+    captured_parent_run_id: Mutex<Option<String>>,
     run_count: Mutex<usize>,
 }
 
 #[async_trait::async_trait]
 impl AgentRunner for StubRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
-        *self.captured_max_turns.lock().unwrap() = request.max_turns;
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> AgentRunTerminal {
+        *self.captured_timeout.lock().unwrap() = request.timeout;
         *self.captured_system.lock().unwrap() = request.system.to_string();
+        *self.captured_parent_run_id.lock().unwrap() = Some(request.ctx.run_id.clone());
         *self.run_count.lock().unwrap() += 1;
-        request.prompt.to_string()
+        AgentRunTerminal::Completed {
+            result: request.prompt.to_string(),
+        }
     }
 
     async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolExecutionContext) -> String {
@@ -30,6 +34,7 @@ impl AgentRunner for StubRunner {
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
         workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
+        run_id: "01900000-0000-7000-8000-000000000001".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -54,9 +59,8 @@ fn test_ctx() -> ToolExecutionContext {
 }
 
 #[tokio::test]
-async fn test_agent_tool_uses_1000_default_turns() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+async fn test_agent_tool_uses_finite_default_timeout() {
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -71,18 +75,20 @@ async fn test_agent_tool_uses_1000_default_turns() {
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(1800)
+    );
     assert!(runner
         .captured_system
         .lock()
         .unwrap()
-        .contains("You have max 1000 rounds of tool calls"));
+        .contains("wall-clock timeout: 1800 seconds"));
 }
 
 #[tokio::test]
-async fn test_agent_tool_caps_max_turns_at_1000() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+async fn test_agent_tool_caps_timeout_at_three_hours() {
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -91,118 +97,34 @@ async fn test_agent_tool_caps_max_turns_at_1000() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "max_turns": 1500,
+                "timeout": 20000,
             }),
             &ctx,
         )
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
-    assert!(runner
-        .captured_system
-        .lock()
-        .unwrap()
-        .contains("You have max 1000 rounds of tool calls"));
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(10800)
+    );
 }
 
 #[test]
-fn test_agent_tool_schema_describes_1000_turn_limit() {
-    let tool = AgentTool {
-        store: Arc::new(TaskStore::new()),
-    };
+fn test_agent_tool_schema_describes_timeout_without_max_turns() {
+    let tool = AgentTool;
 
     let schema = tool.input_schema().to_string();
     let description = tool.description();
 
-    assert!(schema.contains("max 1000"));
-    assert!(description.contains("up to 1000 rounds"));
+    assert!(schema.contains("timeout"));
+    assert!(!schema.contains("max_turns"));
+    assert!(!description.contains("1000 rounds"));
 }
 
 #[tokio::test]
-async fn test_agent_tool_task_id_success_completes_task() {
-    let store = Arc::new(TaskStore::new());
-    let task = store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
-        .await;
-    let tool = AgentTool {
-        store: store.clone(),
-    };
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "finished",
-                "description": "run task",
-                "task_id": task.id,
-            }),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(!result.is_error);
-    let updated = store.get(&task.id).await.expect("task exists");
-    assert_eq!(updated.status, TaskStatus::Completed);
-}
-
-#[tokio::test]
-async fn test_agent_tool_task_id_failure_resets_pending() {
-    let store = Arc::new(TaskStore::new());
-    let task = store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
-        .await;
-    let tool = AgentTool {
-        store: store.clone(),
-    };
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "Sub-agent error: failed",
-                "description": "run task",
-                "task_id": task.id,
-            }),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(!result.is_error);
-    let updated = store.get(&task.id).await.expect("task exists");
-    assert_eq!(updated.status, TaskStatus::Pending);
-}
-
-#[tokio::test]
-async fn test_agent_tool_task_id_missing_task_errors() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
-
-    let result = tool
-        .call(
-            serde_json::json!({
-                "prompt": "finished",
-                "description": "run task",
-                "task_id": "missing",
-            }),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(result.is_error);
-    assert!(result.text.contains("task not found"));
-}
-
-#[tokio::test]
-async fn test_agent_tool_allows_missing_task_id_even_with_active_list() {
-    let store = Arc::new(TaskStore::new());
-    store
-        .create_list("request".to_string(), "complex request".to_string())
-        .await;
-    store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
-        .await;
-    let tool = AgentTool {
-        store: store.clone(),
-    };
+async fn test_agent_tool_passes_parent_run_id_to_sub_agent_request() {
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -216,16 +138,16 @@ async fn test_agent_tool_allows_missing_task_id_even_with_active_list() {
         )
         .await;
 
-    // Free-form agent calls without taskId should succeed even when an active
-    // task list has incomplete tasks.
     assert!(!result.is_error);
-    assert_eq!(*runner.run_count.lock().unwrap(), 1);
+    assert_eq!(
+        runner.captured_parent_run_id.lock().unwrap().as_ref(),
+        Some(&ctx.run_id)
+    );
 }
 
 #[tokio::test]
-async fn test_agent_tool_allows_missing_task_id_without_active_list() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+async fn test_agent_tool_runs_without_task_id() {
+    let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
 
@@ -241,25 +163,6 @@ async fn test_agent_tool_allows_missing_task_id_without_active_list() {
 
     assert!(!result.is_error);
     assert_eq!(*runner.run_count.lock().unwrap(), 1);
-}
-
-#[test]
-fn test_is_agent_failure_detects_known_markers() {
-    assert!(is_agent_failure("Cancelled by user"));
-    assert!(is_agent_failure(
-        "Some text\n\n[Sub-agent timed out after 600s]"
-    ));
-    assert!(is_agent_failure("Sub-agent error: connection refused"));
-    assert!(is_agent_failure(
-        "Done\n\n[Sub-agent reached max turns (50)]"
-    ));
-}
-
-#[test]
-fn test_is_agent_failure_normal_result_is_not_failure() {
-    assert!(!is_agent_failure("Successfully refactored the module."));
-    assert!(!is_agent_failure(""));
-    assert!(!is_agent_failure("No issues found in the reviewed files."));
 }
 
 /// 回归：子 agent 的 workspace 必须从父快照派生为独立实例（继承位置、空栈、独立 Arc/锁），
@@ -315,8 +218,7 @@ fn sub_agent_workspace_isolated() {
 /// 子代理有产出时，text 必须等于产出（父 LLM 能看到）。
 #[tokio::test]
 async fn test_agent_tool_text_contains_subagent_output() {
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+    let tool = AgentTool;
     let ctx = test_ctx(); // StubRunner 返回 prompt 作为 output
 
     let result = tool
@@ -340,8 +242,10 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
     struct EmptyRunner;
     #[async_trait::async_trait]
     impl AgentRunner for EmptyRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
-            String::new()
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> AgentRunTerminal {
+            AgentRunTerminal::Completed {
+                result: String::new(),
+            }
         }
         async fn complete(
             &self,
@@ -353,8 +257,7 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
         }
     }
 
-    let store = Arc::new(TaskStore::new());
-    let tool = AgentTool { store };
+    let tool = AgentTool;
     let ctx = test_ctx_with_runner(Arc::new(EmptyRunner));
 
     let result = tool

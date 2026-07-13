@@ -17,6 +17,8 @@ pub struct ToolExecutionContext {
 
     /// 唯一 workspace 状态源句柄（project 拥有）。
     pub workspace: Arc<WorkspaceService>,
+    /// Runtime Run ID 的 Published Language 字符串；Tools 只透传，不解释领域身份。
+    pub run_id: String,
     pub cancel: CancellationToken,
     pub read_files: Arc<Mutex<HashSet<String>>>,
     /// Session-local reminders shared by MemoryTool and UI/REPL.

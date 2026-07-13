@@ -65,8 +65,10 @@ mod tests {
 
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
-            String::new()
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::api::AgentRunTerminal {
+            tools::api::AgentRunTerminal::Completed {
+                result: String::new(),
+            }
         }
 
         async fn complete(
