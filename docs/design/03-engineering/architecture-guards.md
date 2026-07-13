@@ -3,11 +3,11 @@
 > 状态：**已落地** · 维护人：架构组
 > 对应实现：`.agents/aemeath.json` + `.agents/hooks/check-*.sh` + `.agents/hooks/no_mod_rs.sh`
 >
-> 本文档是架构守卫的**唯一设计真相**。任何守卫脚本内常量与白名单的变更，**MUST** 同步更新本文档；本文档与脚本不一致时，以脚本为准并在本文档 PR 中说明。
+> 本文档是已启用架构守卫**脚本行为、常量与白名单的唯一文档真相**。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档；本文档与脚本不一致时，以脚本的可执行语义为准并在本文档 PR 中说明。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](migration-governance.md) 为唯一治理真相。
 
 ## 概述
 
-架构守卫是仓库的"机械式宪法"——把 [01-product-and-domain.md](../01-system/01-product-and-domain.md) 中"依赖铁律 / COLA 分层 / 薄入口 / 单一真相"等设计原则固化为可执行的静态检查。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
+架构守卫是仓库的"机械式宪法"——把 [依赖铁律](../01-system/05-dependency-rules.md)、[能力优先代码组织](../01-system/06-code-organization.md)、薄入口和单一真相等规则固化为可执行的静态检查。已启用但只反映迁移期实现的守卫 **MUST** 在本文单独标记，**NEVER** 冒充 Target 原则。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -33,7 +33,7 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
-| 5 | `check-cola-layer-purity.sh` | COLA 分层 | 业务/utils 不得反依赖 core/gateway/contract |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 暂时约束业务/utils 对 core/gateway/contract 的依赖方向 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 跨 feature 仅经 `::<crate>::api` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 R1–R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
@@ -143,9 +143,12 @@
 
 ## 5. check-cola-layer-purity.sh
 
-- **功能**：检查每个 feature 内部 COLA 分层的依赖方向。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.8 分层纯度——内层只能内→外、不能外→内；domain/business 不得依赖 core 编排 / gateway / contract；utils 保持叶子。
+- **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
+- **功能**：检查普通 feature 的迁移期固定层目录与层间依赖方向，并对 context feature 应用下述精确顶层目录例外。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的非测试 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非测试 Rust 行中的 `crate::<layer>` 引用（`use` 可选）；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
+- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **层定义**：`FEATURE_LAYERS = {contract, gateway, core, business, utils}`。
+- **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature 放行这七个目录；其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -156,8 +159,8 @@
 | `gateway` | `business`, `utils` |
 
 - **检查方式**：
-  - 扫描 `agent/features/*/src/*` 的子目录名必须在 `FEATURE_LAYERS` 内（顶层非层目录即违规）。
-  - 在所有 `*.rs` 中匹配 `use crate::<layer>`，对非测试路径按上表核查。
+  - 扫描 `agent/features/*/src/*` 的顶层子目录：普通 feature 的目录名必须在 `FEATURE_LAYERS` 内；context feature 另放行 `CONTEXT_DOMAIN_DIRS`。
+  - 依赖方向扫描跳过测试 Rust 文件，且只对 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的文件按层分类；匹配非测试 Rust 行中的 `crate::<layer>` 引用（`use` 可选），并按上表核查。
   - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**（已迁到 `agent/features/*`）。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
 
@@ -476,7 +479,7 @@
   2. 解析 `git rev-parse --show-toplevel`，项目外文件放行；
   3. 用 git 原生检测（`git rev-parse --absolute-git-dir` vs `--git-common-dir`）判断是否在 worktree 中，worktree 放行；
   4. 否则输出 "Edit/Write rejected: 在 main 工作区直接修改" 错误并以 exit 2 阻断。
-- **设计意图**：强制 [AGENTS.md](../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
+- **设计意图**：强制 [AGENTS.md](../../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
 
 ### check-unit-tests.sh（Stop）
 
@@ -493,3 +496,16 @@
 - **调整白名单**：直接修改脚本中常量；**MUST** 在同一 PR 中同步本文档对应小节。
 - **清理 stale exception**：脚本自检会提示"exception list is stale"——按提示删除未命中的精确路径。
 - **冲突解决**：本文档与脚本不一致时，**以脚本为准**——脚本是运行时真相源；本文档跟随脚本迁移。
+
+## 相关文档
+
+- 系统级代码组织规范：[../01-system/06-code-organization.md](../01-system/06-code-organization.md)
+- 依赖规则与铁律：[../01-system/05-dependency-rules.md](../01-system/05-dependency-rules.md)
+- Current → Target 迁移跟踪：[migration-governance.md](migration-governance.md)
+- 仓库级工作约束：[../../../AGENTS.md](../../../AGENTS.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-14 | 将固定层级检查重分类为迁移期守卫，保留脚本行为、常量与白名单，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |

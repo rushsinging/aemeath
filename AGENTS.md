@@ -37,14 +37,14 @@
 | `specs/tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
 | `specs/provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `config-compat` 补默认值） |
 | `specs/prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |
-| `specs/project.md` | `agent/features/project/**` —— worktree 工作区上下文（`WorkspaceService` 单一可变状态源、COLA 分层、git 出站端口） | 改 worktree 进入 / 退出 / 持久化（同步 `storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `runtime.md`） |
+| `specs/project.md` | `agent/features/project/**` —— worktree 工作区所有权（`WorkspaceService` 单一可变状态源）、能力优先公开边界、git 出站端口 | 改 worktree 进入 / 退出 / 持久化（同步 `storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `runtime.md`） |
 | `specs/config-compat.md` | `agent/shared/src/config/**` —— 配置分层、provider 默认值 / env / base_url、Claude Code 兼容、运行时路径 | 新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级 |
 | `specs/storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
 | `specs/policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
 | `specs/update.md` | `agent/features/update/**` —— 版本检查（GitHub API + semver + 缓存）、`aemeath update` 子命令 | 改版本检查逻辑 / 缓存策略 / 更新渠道配置 |
 | `specs/bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；操作 GitHub Issues（迁移自 `docs/bug/`、`docs/snapshot/`） |
 | `specs/logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段、新增日志文件 |
-| `docs/design/03-engineering/architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/architecture-guards.md` 本身 |
+| `docs/design/03-engineering/architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 Guard 编排 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/architecture-guards.md` 本身 |
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
 

@@ -1,10 +1,30 @@
 # 迁移治理 · Current → Target 追踪
 
 > 层级：03-engineering（横切工程）
-> 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 伞 / #761（S2 盘点）
-> **本文是唯一允许记录 Current 现状的文档**。设计文档（01-system / 02-modules）只写目标态，一切"现状缺陷 / 旧路径 / 死代码 / 迁移进度"集中在此追踪，避免设计内容与实现现状混淆。
+> 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 / #761（S2 盘点）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
+> **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/project.md`](../../../specs/project.md)。
 
-## 1. Agent Runtime 现状缺口（S2 代码盘点）
+## 1. 代码组织与守卫 Current → Target（#972）
+
+| # | Current | Target | 责任与退出条件 |
+|---|---|---|---|
+| O1 | 普通 feature 仍受迁移期固定层目录约束，context feature 保留脚本级精确顶层例外；完整脚本行为与常量见 [Architecture Guards](architecture-guards.md) | 按 [代码组织规范](../01-system/06-code-organization.md) 收敛为 capability-first modular monolith + use-case colocation + ports on demand，并使用 Rust 2018+ 无 `mod.rs` 形状 | 具体 feature 迁移 leaf sub-issue 尚未创建、未排期；在创建并原生关联到 [#763](https://github.com/rushsinging/aemeath/issues/763) 前，**NEVER** 开始实施。#763 只承担 Guard + Verify 总验收 |
+| O2 | `check-cola-layer-purity.sh` 仍在 Stop 阶段运行；其检查行为、常量与白名单见 [Architecture Guards](architecture-guards.md) | 由守卫机械验证 capability-first 新规范的窄公开面、跨 feature 依赖、循环依赖与 Composition Root 装配 | legacy guard 替换 leaf sub-issue 尚未创建、未排期；在创建并原生关联到 #763 前，**NEVER** 开始实施。#763 只承担 Guard + Verify 总验收，退出证据见下 |
+
+#972 只对齐文档，**NEVER** 修改目录实现、守卫脚本或开始上述迁移。在具体 leaf sub-issue 完成创建、排期和原生关联前，迁移期固定层级守卫 **MUST** 保持运行。
+
+### 1.1 Legacy guard 替换退出证据
+
+legacy guard 替换的退出证据 **MUST** 包括：
+
+1. 新守卫已注册到 `check-architecture-guards.sh` 编排与 [Architecture Guards](architecture-guards.md) 守卫索引。
+2. 故意制造违规时，新守卫以 exit 2 阻断并命中预期规则。
+3. 恢复合规状态后，单守卫与完整 `check-architecture-guards.sh` 编排均 clean pass。
+4. 本文与 [Architecture Guards](architecture-guards.md) 已同步，legacy 引用与白名单已清理。
+
+上述证据未齐备时，现行迁移期守卫 **NEVER** 替换或退役。
+
+## 2. Agent Runtime 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -22,7 +42,7 @@
 | R12 | **取消传播不完整** | Provider/Tool 监听当前 token；compact 内建新 token，Hook 只有 timeout；父/子 Run 没有显式取消树 | Provider/Tool/Compact/Hook 共享或派生 Run scope；父取消传播到全部活动子 Run | S3/S5 (#700) |
 | R13 | **TUI 两条取消路径** | Esc 在 update 内直接调用 handle；Ctrl+C 产生 Effect 后再调用；不符合 TEA 单向副作用流 | 统一 `InterruptCurrentRun → Effect::CancelCurrentRun → cancel_run(run_id)`；请求同步、终态 ACK 异步 | S3 (#700) |
 
-## 2. Tool & Skill & Command 现状缺口（S2 代码盘点）
+## 3. Tool & Skill & Command 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -39,7 +59,7 @@
 | T11 | **MCP Tool Catalog 一致性不足** | disconnect 后目录撤销、动态上下线、annotations capability 映射及事件通知未形成统一契约 | MCP ACL 转 Tool PL；CatalogChanged 通知重新拉取 Snapshot；连接/投影一致 | MCP Ready 后 |
 | T12 | **MCP 稳定身份与版本未定** | 动态工具尚未形成可验证的稳定 ID、schema 版本和 Catalog revision 协议 | MCP 正式接线时单独设计 ToolId、rename、版本与 in-flight 兼容；当前不预设 | MCP Ready 后 |
 
-## 3. Provider 现状缺口（S2 代码盘点）
+## 4. Provider 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -56,7 +76,7 @@
 | P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
 | P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
 
-## 4. Memory 现状缺口（S2 代码盘点）
+## 5. Memory 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -85,7 +105,7 @@
 | P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
 | P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
 
-## 5. Storage 现状缺口（S2 摘要盘点）
+## 6. Storage 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -97,7 +117,7 @@
 | S6 | **错误与损坏处理不统一** | String/Option/领域错误混用，部分失败静默跳过或仅日志 | StorageErrorKind + Generation ReadOutcome；数据 BC 验证并显式恢复 | S5 |
 | S7 | **并发写与临时文件协议未统一** | 固定 `.tmp/.new`，跨实例互斥和残留清扫语义不一致 | 随机 create-new、跨进程锁、commit marker crash recovery | S5 |
 
-## 6. Logging 现状缺口（S2 摘要盘点）
+## 7. Logging 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -109,7 +129,7 @@
 | L6 | **Config 参数接线不完整** | retention/logs_dir 未形成单一闭环 | ConfigSnapshot 注入 Filter/Sink/RotationPolicy | S5 |
 | L7 | **schema/规范漂移** | 实现为 14 字段，部分注释仍称 13 | 14 字段 v1 契约 + consistency guard | S5/S7 |
 
-## 7. Application Version Control 现状缺口（S2 摘要盘点）
+## 8. Application Version Control 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -122,7 +142,7 @@
 | V7 | **Release Source ACL 不完整** | DTO/URL/状态码直通且缺 host/size 约束 | 私有 DTO + source 安全校验 | 独立安全 issue |
 | V8 | **检查与执行端口混合** | 单一 UpdateService，perform 内再次检查 | Runtime ApplicationVersionPort；模块内 plan/apply 分离 | S5 |
 
-## 8. Policy / Hook / Audit 现状缺口（S2 代码盘点）
+## 9. Policy / Hook / Audit 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -143,7 +163,7 @@
 | PHA15 | **Usage 与 Session 存储边界不清** | cost_history 为全局混合文件，缺独立 Audit 分区语义 | `~/.agents/audit/usage/{session_id}.jsonl`；Session 删除不级联 | S5 |
 | PHA16 | **Audit/Logging 混淆风险** | Usage/Hook 信息依赖诊断日志展示，无事实查询端口 | Logging 只做诊断；UsageQueryPort 读取 Audit 事实，不解析日志 | S5 |
 
-## 9. 死代码 / 退役清单
+## 10. 死代码 / 退役清单
 
 | 项 | 现状 | 处理 | 阶段 |
 |---|---|---|---|
@@ -173,15 +193,18 @@
 | `cost_history.json` 全量写路径 | 每次保存重写数组，记录含派生 cost 且缺 Run IDs | 后续 importer 只迁可验证 raw token；旧路径有计划退役 | S5/S7 |
 | Stop Hook 超限强制 Done | Stop 未放行却伪造 Completed | 改为第 16 次 RunFailed 后删除旧 helper | S3/S5 |
 
-## 10. 已正确隔离（可作参考范式）
+## 11. 已正确隔离（可作参考范式）
 
 | 项 | 现状 | 说明 |
 |---|---|---|
 | **Workspace 隔离** | `seed_isolated()`：继承 cwd/root，空栈+新锁，子 worktree 进出不影响父 | ✅ 子资源隔离范式 |
 | **Task 隔离** | Sub 用全新 `TaskStore::new()` | ✅ |
 
-## 11. 相关文档
+## 12. 相关文档
 
+- 系统级代码组织规范：[../01-system/06-code-organization.md](../01-system/06-code-organization.md)
+- Project 目标端口与代码组织：[../02-modules/project/02-ports-and-adapters.md](../02-modules/project/02-ports-and-adapters.md)
+- 守卫运行时真相：[architecture-guards.md](architecture-guards.md)
 - 领域模型（目标态）：[../02-modules/runtime/01-domain-model.md](../02-modules/runtime/01-domain-model.md)
 - 模块边界：[../02-modules/runtime/02-module-boundaries.md](../02-modules/runtime/02-module-boundaries.md)
 - 端口缺口：[../02-modules/runtime/06-ports-and-adapters.md](../02-modules/runtime/06-ports-and-adapters.md)
@@ -207,3 +230,4 @@
 | 2026-07-12 | 新增 Memory 缺口 M1-M9 与 SessionReminders、MemoryStore 领域方法退役项 | #789 |
 | 2026-07-12 | 新增 Storage S1-S7、Logging L1-L7、Application Version Control V1-V8 缺口与退役项 | #793 |
 | 2026-07-12 | 新增 Policy/Hook/Audit 缺口 PHA1-PHA16 与 Audit/Cost/Stop Hook 退役项 | #790 |
+| 2026-07-14 | 新增固定层目录与迁移期守卫的 Current → Target 记录，明确 #763 只承担总验收，leaf sub-issue 尚未创建 / 排期，并登记退出证据 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
