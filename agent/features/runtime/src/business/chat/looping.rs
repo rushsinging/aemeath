@@ -39,6 +39,7 @@ pub(crate) mod tool_fuse;
 mod tool_identity;
 mod tools;
 
+pub(crate) use compact::token_budget_config;
 pub use events::{
     ChatEventSink, CompactStage, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
     RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
