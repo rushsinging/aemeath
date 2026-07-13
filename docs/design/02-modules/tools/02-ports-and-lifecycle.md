@@ -108,19 +108,27 @@ struct ExecutionScope {
 }
 ```
 
-ExecutionScope 是 Tool PL，只携稳定标识和值对象。禁止包含 RuntimeContext、Session、Registry、具体 TaskStore、WorkspaceService 或 channel。
+ExecutionScope 是 Tool PL，**MUST** 只携稳定标识和值对象，**NEVER** 包含 RuntimeContext、Session、Registry、具体 Store、Project 实现类型、composition-only handle 或 channel。`workspace_id` / `workspace_root` 是调用开始时从 `WorkspaceRead` 取得的只读快照，**NEVER** 替代 live capability。
 
-Composition Root 按 Registry Scope 装配窄资源端口：
+Project 已发布 `WorkspaceRead` / `WorkspaceControl`，Tool BC **MUST** 直接消费所需的 trait view，**NEVER** 定义第二层 Workspace façade。其精确签名以 [Project Workspace 端口](../project/02-ports-and-adapters.md) 为唯一真相；本文 **MUST** 只定义 Tool 的消费约束。其他资源仍按能力拥有者发布的窄端口装配：
 
 ```rust
-trait WorkspaceAccess { /* 活跃 frame / worktree 操作 */ }
 trait FileAccess      { /* 工作区内文件能力 */ }
 trait TaskAccess      { /* Task BC 发布能力 */ }
 trait AgentDispatch   { /* 派生 Sub Run 的窄入口 */ }
 trait UserInteraction { /* AskUser 等交互入口 */ }
 ```
 
-资源端口的具体签名由对应 BC 拥有；Tool BC 只消费其 Published Language/OHS。缺少 required resource 时，Tool 不进入该 Scope 的 Catalog 投影。
+Composition Root **MUST** 从当前 composition-internal Run scope 的同一 Project wiring 取得窄 view，并按 Tool 实例而非整个 Registry Scope 广播能力；Tool adapter **NEVER** 接收 composition scope / wiring：
+
+| Tool 实例 | 注入的 Project view |
+|---|---|
+| 文件 Tool（Read / Write / Edit / Glob / Grep） | `Arc<dyn WorkspaceRead>` |
+| Bash | `Arc<dyn WorkspaceRead>` + `Arc<dyn WorkspaceControl>` |
+| EnterWorktree / ExitWorktree | `Arc<dyn WorkspaceControl>` |
+| 其他 Tool | 仅 descriptor 明确声明且通过 capability 校验的 view |
+
+只有 Bash、EnterWorktree、ExitWorktree **MAY** 获得 `WorkspaceControl`；只读文件 Tool **MUST** 只获得 `WorkspaceRead`。缺少 required resource 时，Tool 不进入该 Scope 的 Catalog 投影；Execution 时仍 **MUST** 重验 resource 与 capability。Tool adapter **NEVER** 接收 Project 的 production wiring handle。
 
 ## 4. Cancellation 与 timeout
 
@@ -262,7 +270,8 @@ Composition Root 负责：
 - 注册 built-in Tool adapter；
 - 根据 ConfigSnapshot 构造 Skill/Command catalog；
 - 根据 RunSpec 构造 Registry Scope 和 Tool Profile；
-- 为 Scope 注入资源端口；
+- 从当前 `CompositionRunScope` 的 Project wiring 取得 `WorkspaceRead` / `WorkspaceControl` 窄 view，并按 Tool 实例注入；scope / wiring **NEVER** 进入 Tool 类型，且 **NEVER** 预建通用 Workspace wrapper；
+- 为 Scope 注入其他资源端口；
 - MCP 动态接线阶段构造连接聚合与 adapter；
 - 向 Runtime/Context Management/交付层提供各独立端口。
 
@@ -290,7 +299,9 @@ Deny: agent/features/** domain/application modules and apps/**
 - 领域模型：[01-domain-model.md](01-domain-model.md)
 - Runtime Tool Coordination：[../runtime/02-module-boundaries.md](../runtime/02-module-boundaries.md)
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 依赖规则：[../../01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 
 ## 修改历史
@@ -298,3 +309,4 @@ Deny: agent/features/** domain/application modules and apps/**
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：双 Tool 端口、ExecutionScope、取消、Skill/Command 协作与 MCP 生命周期 | #787 |
+| 2026-07-14 | Tool 资源改为直接消费 Project-owned WorkspaceRead / WorkspaceControl，移除宽包装并将 Control 注入限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |

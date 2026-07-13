@@ -79,10 +79,6 @@ trait TaskPort {                                     // Task BC（Sub: 独立实
     fn restore(&self, snap: TaskSnapshot);
     fn list_current(&self) -> Vec<Task>;
 }
-trait WorkspacePort {                                // Project BC（Sub: 独立快照）
-    fn current_frame(&self) -> WorkspaceFrame;
-    fn seed_isolated(&self) -> WorkspaceFrame;            // 快照父 frame
-}
 trait HookPort {                                     // Hook BC：一个类型化端口
     fn dispatch(
         &self,
@@ -102,64 +98,87 @@ trait EventSink {                                    // 事件出口（Main→TU
 // ConfigSnapshot：只读快照（Config BC 的 PL），Main/Sub 共享
 ```
 
-## 3. RuntimeContext 装配
+## 3. RuntimeContext 与 CompositionRunScope 装配
 
-`RuntimeContext` 持有以上出站端口的**活实例**（Config 为快照、Event/Audit 为 sink）。装配规则由 `RunSpec` 驱动：
+`RuntimeContext` **MUST** 只持有 Runtime 消费的活端口（Config 为快照、Event/Audit 为 sink），**NEVER** 持有 Workspace trait、Project wiring 或 composition scope。`WorkspaceMode` 由 Composition 消费，在同一次装配中生成 runtime context 与 composition-internal Run scope：
 
 ```rust
-fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionRoot)
-    -> RuntimeContext
-{
-    RuntimeContext {
-        context:   root.context_for(spec.context),        // Isolated → 独立 manager
-        provider:  root.provider_for(&spec.model, spec),  // 共享只读 transport；invoke 时创建独立 scope
-        tool_catalog:   root.tool_catalog_for(&spec.tools),   // Scope ∩ capability Profile
-        tool_execution: root.tool_execution_for(&spec.tools), // 不暴露 Registry/Tool 实例
-        policy:    root.allow_all_policy(),              // v0.1.0 唯一生产实现
+// agent/composition 内部类型；NEVER 出现在任一 feature 的公开 API。
+struct CompositionRunScope {
+    workspace: WorkspaceWiring,
+}
+
+// 同为 composition 内部返回值；启动 Run 后 scope 仍由 Composition 保留。
+struct AssembledRun {
+    runtime: RuntimeContext,
+    scope: CompositionRunScope,
+}
+
+fn assemble(
+    spec: &RunSpec,
+    parent_runtime: Option<&RuntimeContext>,
+    parent_scope: Option<&CompositionRunScope>,
+    root: &CompositionRoot,
+) -> AssembledRun {
+    let scope = root.run_scope_for(spec.workspace, parent_scope);
+
+    // 两个 backing implementation 从同一 Project wiring 取得窄 view。
+    let context = root.context_for(
+        spec.context,
+        scope.workspace.read(),
+        scope.workspace.persist(),
+    );
+    let (tool_catalog, tool_execution) = root.tools_for(
+        &spec.tools,
+        scope.workspace.read(),
+        scope.workspace.control(),
+    );
+
+    let runtime = RuntimeContext {
+        context,
+        provider:  root.provider_for(&spec.model, spec),
+        tool_catalog,
+        tool_execution,
+        policy:    root.allow_all_policy(),
         memory:    match spec.memory { Enabled => root.memory(), Disabled => NoOpMemory },
         task:      match spec.task { Shared => root.task(), Isolated => TaskStore::new().into() },
-        workspace: match spec.workspace {
-                       Inherit => parent_or_root_frame(),
-                       Snapshot => root.workspace().seed_isolated(),
-                   },
-        hooks:     root.hooks(),                         // 单 HookPort；过滤由 point metadata 完成
-        reasoning: match spec.reasoning { GraphDriven => root.reasoning(), EffortOnly => Effort::new(inherit(parent)), Inherit => parent_effort() },
-        usage:     root.usage_sink(),                    // 非阻塞 try_record，Audit MVP 仅 Usage
-        config:    root.config_snapshot(),                // 共享
-        input:     match spec.name.as_ref() { "main" => root.tui_input(), _ => FixedQueue::new(spec.initial_prompt) }, // 仅内容输入
-        events:    match spec.name.as_ref() { "main" => root.tui_sink(), _ => ParentRunSink::new(parent) },
-        cancel:    match parent { Some(ctx) => ctx.cancel.child_scope(), None => RunCancellationScope::new() },
-    }
+        hooks:     root.hooks(),
+        reasoning: root.reasoning_for(spec.reasoning, parent_runtime),
+        usage:     root.usage_sink(),
+        config:    root.config_snapshot(),
+        input:     root.input_for(spec),
+        events:    root.event_sink_for(spec, parent_runtime),
+        cancel:    root.cancel_scope_for(parent_runtime),
+    };
+
+    AssembledRun { runtime, scope }
 }
 ```
 
-**安全铁律落地**（见 [01-domain-model.md](01-domain-model.md) §7）：Registry Scope 只能移除 Tool/Resource，Tool Profile 的 capability 集只能收缩；`policy` 不放宽；`workspace` 强制 `seed_isolated`。
+`run_scope_for` **MUST** 只接受两种生产组合：Main 的 `(parent_scope = None, WorkspaceMode::Inherit)` 调用 Project production factory；Sub 的 `(Some(parent_scope), WorkspaceMode::Snapshot)` 调用 `parent_scope.workspace.derive_isolated()`。其他组合 **MUST** 作为无效 RunSpec 拒绝。由此，Context Management 与 Tool backing implementation 获得的是同一个 Main / Sub workspace 实例的不同窄 view。
+
+注入 dispatch Tool 的 composition-provided `AgentDispatch` / Sub-run factory **MUST** 捕获父 `CompositionRunScope`，或以 RunId 在 composition-private registry 中索引它，再调用同一 `assemble`。`CompositionRunScope` / `AssembledRun` **NEVER** 进入 RuntimeContext、ToolInvocation、ContextRequest、ContextPort 或 ToolExecutionPort。
+
+**安全铁律落地**（见 [01-domain-model.md](01-domain-model.md) §7）：Registry Scope 只能移除 Tool/Resource，Tool Profile 的 capability 集只能收缩；`policy` 不放宽；Sub workspace **MUST** 通过 parent scope 的 `derive_isolated()` 派生。
 
 ## 4. Composition Root
 
-- **唯一生产装配入口**：`agent/composition`。持有各 Port 的具体实现（provider driver / tool registry / storage / git / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。
-- Main Run：由 Composition Root 直接 `assemble(main_spec, None, root)`
-- Sub Run：由 tool_coordination 派生时 `assemble(sub_spec, Some(parent_ctx), root)`
-- **MUST NOT** 任何模块私自 `new` Port 实现绕过 Composition Root
+- **唯一生产装配入口**：`agent/composition`。持有各 Port 的具体实现或模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。
+- Project workspace 的生产装配 **MUST** 经 Project-owned factory 取得 `WorkspaceWiring`，并 **MUST** 只保存在 `CompositionRunScope`；Composition **NEVER** 向 Runtime 或业务模块分发 handle / scope。
+- Main Run：Composition Root 直接建立 Main scope，再装配 RuntimeContext 与 Context / Tool backing implementation。
+- Sub Run：dispatch Tool 经 composition-provided AgentDispatch 从 parent scope 执行 `derive_isolated()`，再装配相同结构；Runtime tool coordination 只编排 `ToolExecutionPort` 调用。
+- 任何模块 **NEVER** 私自 `new` Port 实现绕过 Composition Root。
 
 ## 5. 关键 ACL
 
 1. **Provider 内部**：各家 LLM API → 统一 `InvocationDelta` + 领域 `Message`
 2. **event_projection**：领域 `DomainEvent` → SDK `ChatEvent`（Main/Sub 路由 + agent_id）
-3. **Session 快照组装**：落盘时经 TaskPort/WorkspacePort 收快照内嵌
+3. **Session 快照组装**：Context Management backing implementation 直接经注入的 `TaskPort` / Project-owned `WorkspacePersist` 收集与恢复；Runtime **NEVER** 中转 Workspace 能力
+4. **Workspace scope 隔离**：Composition 从同一 `CompositionRunScope` 分发 Project 窄 view；scope / wiring **NEVER** 穿过 Runtime、Tool 或 Context 边界
 
-## 6. 现状端口缺口（迁移提示）
+## 6. 迁移边界
 
-| 目标端口 | 现状 | 迁移动作（S5）|
-|---|---|---|
-| ContextPort / ToolCatalogPort / ToolExecutionPort / PolicyPort / MemoryPort / WorkspacePort / ReasoningPort | ❌ 无目标 trait，具体类型直调 | 抽端口，实现移到 adapter；Runtime 不再持有 ToolRegistry / Tool 实例 |
-| UsageSink | ❌ Audit crate 为空壳，Usage/Cost 混在 Runtime | 新建非阻塞 UsageSink + Audit worker；Cost/Pricing 不进入 MVP |
-| ProviderPort | ⚠️ 仅 `ProviderInfoPort`（只读元数据）| 补 invoke 方法 |
-| HookPort | ⚠️ 具体 HookRunner + 通知端口并存 | 收敛为一个类型化 dispatch；Runtime 拥有触发时机和状态解释 |
-| TaskPort / ConfigSnapshot / EventSink | ✅ `TaskStorePort`/`ConfigReader`/`ChatEventSink` | 沿用 |
-| EventSink agent_id | ⚠️ 事件仅 chat_id/turn_id | 补 agent_id（#612）|
-| cancel_run / RunCancellationScope | ⚠️ SDK `CancelHandle` 捕获 Session 级 `Arc<Mutex<CancellationToken>>`，每回合替换；另有 `ChatInputEvent::Cancel` | 改为绑定 `run_id` 的同步幂等入口 + per-Run scope；旧事件退役（#700）|
-| Context/Provider/Tool/Hook cancellation | ⚠️ Provider/Tool 部分监听 token；compact 创建独立 token；Hook 仅 timeout | 全部接收同一 Run scope 或派生 scope（#700/S5）|
+本文 **MUST** 只定义 Target 契约。Runtime 出站端口、取消链路与 composition-internal Run scope 的 Current → Target 差距、责任和退出条件 **MUST** 只在 [迁移治理](../../03-engineering/migration-governance.md) 维护，**NEVER** 在本文复制进度表。
 
 ## 7. 相关文档
 
@@ -169,6 +188,9 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 - 上下文地图（BC 集成）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 系统架构（Composition Root）：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
 - Provider 端口、流与 Invocation Scope：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
+- Project Workspace 端口与 wiring：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
+- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 
 ## 修改历史
 
@@ -181,3 +203,4 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 2026-07-12 | ProviderPort 补能力查询、取消、结构化错误与单 attempt InvocationStream 契约 | #788 |
 | 2026-07-12 | ContextPort 签名更新为 4 方法（build_window/microcompact/needs_compaction/compact），详见 context-management/02-compact.md | #786 |
 | 2026-07-12 | Policy 装配收缩为 AllowAll；Hook 收敛单 dispatch；Audit 出站收缩为非阻塞 UsageSink | #790 |
+| 2026-07-14 | 移除 Runtime Workspace 端口；由 CompositionRunScope 保留 Project wiring，Sub 在 AgentDispatch 内派生，并从同一实例装配 Context / Tool 窄能力 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

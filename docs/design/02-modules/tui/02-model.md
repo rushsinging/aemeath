@@ -25,7 +25,7 @@ struct TuiModel {
     diagnostic: DiagnosticModel,        // 错误/警告/提示/阻塞请求
     session: SessionModel,              // session metadata + resume + task 状态 + save
     config: ConfigProjection,           // provider / model_id（投影自 Config BC）
-    workspace: WorkspaceProjection,     // cwd / worktree / path_base（投影自 WorkspaceService）
+    workspace: WorkspaceProjection,     // TUI-owned snapshot + 异步 metadata 投影
 }
 ```
 
@@ -36,7 +36,7 @@ struct TuiModel {
 | `diagnostic` | Diagnostic | 错误/警告/提示/阻塞请求 | Runtime / Hook 事件 | enum match |
 | `session` | Session | session metadata、resume 候选、save 状态、task 状态 | StorageService / Task BC | enum match |
 | `config` | Config | provider / model_id | Config BC | enum match |
-| `workspace` | Workspace | cwd / worktree / path_base / branch | WorkspaceService | enum match |
+| `workspace` | Workspace | path_base / workspace_root / context_stack / branch / worktree kind | TUI ACL 对 `WorkingDirectoryChanged` 的转换结果 | enum match |
 
 **设计决策**：
 
@@ -776,38 +776,71 @@ enum ConfigChange {
 
 ## 8. WorkspaceProjection
 
-> **投影来源**：WorkspaceService（Project BC）。cwd / worktree / path_base 有独立更新路径——进/出 worktree 时不经过 Run 生命周期。
+> **上游事实**：SDK Published Language 中的 `ChatEvent::WorkingDirectoryChanged { workspace: WorkspaceContextView, .. }`。TUI ACL **MUST** 在边界将 SDK DTO 完整转换为 TUI-owned `WorkspaceSnapshot`；UiEvent、Intent 与 Model **NEVER** 持有 `sdk::*` 类型。
+
+```text
+SDK ChatEvent::WorkingDirectoryChanged { workspace: WorkspaceContextView, .. }
+  → sdk_event_to_ui_event（TUI ACL 第一层：SDK DTO → TUI WorkspaceSnapshot）
+  → UiEvent::WorkingDirectoryChanged(WorkspaceSnapshot)
+  → AgentEventMapper（TUI ACL 第二层）
+  → WorkspaceIntent::ApplySnapshot(snapshot)
+  → WorkspaceProjection / WorkspaceChange::SnapshotApplied { root, revision }
+  → Coordinator → ResolveWorkspaceMetadata Effect
+  → WorkspaceIntent::ApplyMetadata { root, revision, branch, kind }
+```
 
 ```rust
+// 以下类型均由 TUI 拥有，NEVER import sdk::*。
+struct WorkspaceStackEntry {
+    path_base: String,
+    workspace_root: String,
+}
+
+struct WorkspaceSnapshot {
+    path_base: String,
+    workspace_root: String,
+    context_stack: Vec<WorkspaceStackEntry>,
+}
+
+struct WorkspaceMetadata {
+    workspace_root: String,
+    snapshot_revision: u64,
+    branch: Option<String>,
+    kind: WorktreeKind,
+}
+
 struct WorkspaceProjection {
-    pub cwd: Option<String>,
-    pub worktree: Option<String>,
     pub path_base: Option<String>,
     pub workspace_root: Option<String>,
+    pub context_stack: Vec<WorkspaceStackEntry>,
     pub branch: Option<String>,
     pub kind: WorktreeKind,
+    snapshot_revision: u64,
 }
 enum WorktreeKind { Unknown, MainCheckout, LinkedWorktree }
 ```
 
 | 方法 | 说明 |
 |---|---|
-| `update_workspace(cwd, worktree)` | 设置 cwd 和 worktree |
-| `set_workspace_snapshot(path_base, root, branch, kind)` | 设置完整工作区快照 |
+| `apply_snapshot(snapshot)` | 原子替换 path/root/stack，递增 `snapshot_revision`，并清空旧 branch/kind |
+| `apply_metadata(metadata)` | 仅当 `(workspace_root, snapshot_revision)` 与当前投影一致时回填 branch/kind；过期结果为 no-op |
 
 ### 8.1 Intent / Change
 
 ```rust
 enum WorkspaceIntent {
-    UpdateWorkspace { cwd, worktree },
-    SetWorkspaceSnapshot { path_base, root, branch, kind },
+    ApplySnapshot(WorkspaceSnapshot),
+    ApplyMetadata(WorkspaceMetadata),
 }
 enum WorkspaceChange {
-    WorkspaceChanged,
+    SnapshotApplied { workspace_root: String, revision: u64 },
+    MetadataApplied,
 }
 ```
 
-> **迁移说明**：`workspace` 原在 `RuntimeState` 中。移到独立 `WorkspaceProjection` 后，进/出 worktree 只更新 WorkspaceProjection，不影响 Conversation revision。
+`WorkspaceContextView` 只提供 `path_base`、`workspace_root`、`context_stack`；branch 与 worktree kind **MUST** 由异步 `ResolveWorkspaceMetadata` Effect 解析，**NEVER** 在事件 mapper、reducer 或 Model 中同步执行 git。Coordinator **MUST** 从 `SnapshotApplied` Change 创建携带 root/revision 的 Effect；结果回填时 Model **MUST** 校验同一 tuple，**NEVER** 让旧 workspace 的异步结果覆盖新 snapshot。Effect **MAY** 按 workspace root 缓存 metadata。
+
+`WorkspaceProjection` **MUST** 只依赖 TUI-owned DTO，**NEVER** import SDK、Project 端口、Project 实现类型或 composition-only handle。`WorkingDirectoryChanged` 是 workspace core snapshot 的权威事实；Model **NEVER** 从零散 UI 操作自行推断状态。Current → Target 迁移进度只见 [迁移治理](../../03-engineering/migration-governance.md)。
 
 ## 9. 投影状态机规则
 
@@ -823,6 +856,7 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 | SpinnerPhase | 派生——从 run/tool 生命周期 | Model 内部推导 |
 | AskUserPhase | Runtime（AskUserQuestion tool） | 投影——从 SDK 事件 + 用户输入推导 |
 | SessionSaveStatus | Runtime StorageService | 投影——从 SDK 事件推导 |
+| WorkspaceProjection | `WorkingDirectoryChanged` 的 core snapshot + TUI Effect metadata | ACL 转换后的投影；metadata 仅在 root/revision 匹配时回填 |
 
 **规则**：
 
@@ -884,7 +918,8 @@ Model 层 `MUST NOT` import 以下 crate：
 | `tokio` | 异步运行时——Model 不执行 async 操作 |
 | `std::process::Command` | 子进程——Model 不执行 IO |
 | `crate::tui::render::*` | 渲染层——方向反了 |
-| `sdk::AgentClient` trait | 出站端口接口——Model 不直接调 Runtime，Controller 通过依赖注入选择适配器（见 §13） |
+| 任意 `sdk::*` 类型（含 `AgentClient` 与 DTO） | SDK 类型 **MUST** 在 TUI ACL 边界转换；Model **MUST** 只消费 TUI-owned 类型，Controller / Effect Handler 才持出站端口（见 §13） |
+| Project 端口、实现类型或 composition-only handle | TUI **MUST** 只接收 SDK 事件经 ACL 形成的投影，**NEVER** 直连 Project |
 
 ### 11.2 禁止操作
 
@@ -900,7 +935,7 @@ Model 层 `MUST NOT` import 以下 crate：
 
 | 允许依赖 | 用途 |
 |---|---|
-| `sdk`（DTO 类型） | ChatEvent / ChatMessage / ContentBlock 等只读类型 |
+| TUI-owned DTO | ACL 输出的 WorkspaceSnapshot / ChatMessage / ToolCallStatus 等纯值类型 |
 | `share`（共享内核） | ContentBlock / InputId 等基础类型 |
 | `std` | 基础类型 |
 
@@ -989,7 +1024,7 @@ trait AgentClient: Send + Sync {
 
 - **请求**：`ChatRequest` / `CancelRequest` / `ApprovalRequest` / `AskUserAnswer` / `SlashCommand`
 - **响应流**：`ChatStream`（`Stream<Item = ChatEvent>`）
-- **事件类型**：`ChatEvent` 枚举（TextDelta / ToolCallStart / ToolCallUpdate / CompleteChat 等）
+- **事件类型**：`ChatEvent` 枚举（TextDelta / ToolCallStart / ToolCallUpdate / CompleteChat 等）；工作区事件精确形状为 `WorkingDirectoryChanged { path_base, workspace_root, workspace: WorkspaceContextView }`，SDK DTO **MUST** 在 TUI ACL 边界转换完毕
 
 `LocalAgentClient` 直接传递内存对象；`WssAgentClient` 序列化为 `Call`/`Resp` 帧传输（协议定义见 [07-server-design.md](../server/01-design.md)），但 **MUST** 保证两端看到的 DTO 类型一致。
 
@@ -1006,11 +1041,15 @@ trait AgentClient: Send + Sync {
 ## 14. 相关文档
 
 - TUI 架构与数据流：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
+- TUI 事件流与 ACL：[03-event-flow-and-acl.md](03-event-flow-and-acl.md)
 - 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 - Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Server 模块（WssAgentClient 传输基础）：[../server/README.md](../server/README.md)
 - Server 设计草案（Call/Resp 帧协议）：[../server/01-design.md](../server/01-design.md)
 - SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- Project Workspace 端口边界（TUI 不直接消费）：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
+- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 - 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 
 ## 修改历史
@@ -1023,3 +1062,4 @@ trait AgentClient: Send + Sync {
 | 2026-07-12 | SpinnerPhase 从独立状态机改为派生函数：`derive_spinner_phase(run_status, step_status, spinner)`，映射表标注每个变体的 Runtime 派生来源；移除 Reflecting（无对应 Runtime 状态）；chat_active 改为派生 | #796 |
 | 2026-07-12 | RuntimeState 按投影来源拆分：RunRuntimeState（9 字段，Run 耦合）+ ConfigProjection（provider/model_id，Config BC）+ WorkspaceProjection（cwd/worktree，Project BC），task_status 移到 SessionModel（Task BC）；3+1→3+3 Context | #796 |
 | 2026-07-12 | 新增 §13 出站端口适配器：AgentClient trait 为端口接口，LocalAgentClient（直连）+ WssAgentClient（远程，#794）；Controller 依赖 trait 不绑死实现，组合根注入 | #796 |
+| 2026-07-14 | WorkspaceProjection 改由 TUI ACL 将 SDK WorkingDirectoryChanged / WorkspaceContextView 转为 TUI-owned snapshot；branch/kind 通过带 root/revision 的异步 Effect 回填，移除 SDK / Project 实现泄漏 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

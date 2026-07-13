@@ -28,13 +28,16 @@
    │   Agent Runtime（唯一 Agent 执行生命周期状态机 Run；派生 / 执行 SubAgent） │
    └───────┬───────────────────────────────────────────────────────┘
            │ 出站端口（C/S，Runtime 是 Customer）
-   ┌───────┼────────┬────────┬────────┬───────┬───────┬───────┬────────┐
-   ▼       ▼        ▼        ▼        ▼       ▼       ▼       ▼        ▼
- Context Workflow Provider  Tool    Policy  Memory  Task  Project   Hook
- Mgmt   (reason.) (ACL)   &Skill&Cmd                                    
-   │                                                            │
-   ▼ 持久化（C/S）                                               ▼ Pub/Sub
+   ┌───────┼────────┬────────┬────────┬───────┬───────┬────────┐
+   ▼       ▼        ▼        ▼        ▼       ▼       ▼        ▼
+ Context Workflow Provider  Tool    Policy  Memory  Task      Hook
+ Mgmt   (reason.) (ACL)   &Skill&Cmd
+   │                                                      │
+   ▼ 持久化（C/S）                                         ▼ Pub/Sub
  Storage  ◀── Memory / Task 也经此落盘                    Audit（含 Cost）
+
+ Context Mgmt ── WorkspaceRead / WorkspacePersist ──▶ Project
+ Tool ────────── WorkspaceRead / WorkspaceControl ──▶ Project
    ▲
    │ CF + PL（ConfigSnapshot）
  Config ───────────────────────────────▶ 所有 BC（全局上游）
@@ -62,12 +65,22 @@
 | Policy | C/S | `PolicyPort` | v0.1.0 只装配 `AllowAllPolicy`；Deny / RequireApproval 为接口预留，控制流仍归 Runtime |
 | Memory | C/S | `MemoryPort` | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | `TaskPort` | Runtime 读写 Task 规划自身工作；Task 拥有状态机 + 依赖图不变量 |
-| Project / Workspace | C/S | `WorkspacePort` | worktree 进出、git 上下文供给（含 git context 注入的数据源） |
 | Hook | C/S | `HookPort` | 一个类型化端口；Hook 执行/重试归 Hook，触发时机和 directive 的 Run 状态迁移归调用方 |
 | Application Version Control | C/S | `ApplicationVersionPort` | AgentClient 的 Application Control 用例由 Runtime 路由到版本检查/安装应用服务；CLI/TUI 不直接持有更新模块内部端口 |
 | Audit | **Pub/Sub**（Runtime 是 Supplier） | `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit 独立持久化和查询，不影响 Runtime；Cost/Pricing 保留 Future |
 
 > **SubAgent 不在此表**：SubAgent 的派生与执行是 Agent Runtime 的核心能力（子 Run 也是 Runtime 的执行实例），不是一条对外端口。
+
+`WorkspaceMode` 是 `RunSpec` 的装配策略，不形成 Runtime → Project 出站边。Composition 在内部 Run scope 中保留 Project wiring：Main 选择 production wiring，Sub 由 composition-provided AgentDispatch 对父 scope 执行 isolated derivation；Runtime **NEVER** 持有 Project 端口或 wiring。
+
+### 4.1 支撑 BC 之间的直接能力边
+
+| 消费方 | 供应方 | 模式 | 端口 / 契约 | 说明 |
+|---|---|---|---|---|
+| Tool & Skill & Command | Project / Workspace | C/S + OHS | Project-owned `WorkspaceRead` / `WorkspaceControl` | Tool 按需直接消费窄能力；只读文件 Tool **MUST** 只获得 Read，Control **MUST** 只注入 Bash、EnterWorktree、ExitWorktree |
+| Context Management | Project / Workspace | C/S + OHS | Project-owned `WorkspaceRead` / `WorkspacePersist` | Read 提供路径、分支等 Context Window 数据；Persist 专用于 Session 快照组装与恢复 |
+
+`WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist` 是 Project 发布的稳定能力。Composition **MUST** 从同一个 composition-internal Run scope 向 Context Management 与 Tool backing implementation 分发所需窄 view，保证每个 Main / Sub 使用同一隔离 workspace 实例；该 scope 与 wiring **NEVER** 进入 Runtime、Tool 或 Context 类型。
 
 ## 5. 全局上游：Config → 所有 BC
 
@@ -79,7 +92,7 @@
 
 | 上游 | 下游 | 模式 | 说明 |
 |---|---|---|---|
-| Context Management / Memory / Task / Audit | Storage | C/S | Storage 提供原子写 / 损坏隔离**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（经端口收集，恢复时分发回去）；Project 不单独持久化同一份 Workspace Snapshot。Audit 拥有 Usage schema 与按 SessionId 分区语义，通过 `AppendLogPort` 获取 append/flush/read 机制；其文件独立于 Session。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
+| Context Management / Memory / Task / Audit | Storage | C/S | Storage 提供原子写 / 损坏隔离**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPort` / Project-owned `WorkspacePersist` 收集，恢复时经同一能力边分发）；Project 不单独持久化同一份 Workspace Snapshot。Audit 拥有 Usage schema 与按 SessionId 分区语义，通过 `AppendLogPort` 获取 append/flush/read 机制；其文件独立于 Session。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
 
 ## 7. Shared Kernel（谨慎，尽量小）
 
@@ -92,8 +105,8 @@
 ## 8. 关键 ACL 位置（防腐重点）
 
 1. **Provider 内部**：各家 LLM API → 统一领域调用与 `Message`（最重的 ACL）。
-2. **TUI `AgentEventMapper`**：领域事件 → TUI Model / Msg，防核心内部类型泄漏进 UI。
-3. **Session 快照组装**：Context Management 落盘 Session 时从 Task / Project 收快照，恢复时分发——经端口，不共享内部结构。
+2. **TUI ACL**：SDK `ChatEvent::WorkingDirectoryChanged { workspace: WorkspaceContextView, .. }` 先转换为 TUI-owned `WorkspaceSnapshot`，再由 `AgentEventMapper` 生成 Intent；Model **NEVER** 持有 SDK / Project 类型。branch / worktree kind 经异步 Effect 回填。
+3. **Session 快照组装**：Context Management 落盘 Session 时经 `TaskPort` / `WorkspacePersist` 收快照，恢复时分发——经端口，不共享内部结构。
 
 ## 9. 未来演进的地图预留
 
@@ -102,11 +115,12 @@
 | **Server 化** | v0.1.0 之后 | Server 作为入站适配器接 `AgentClient`；**核心域对传输层透明**（进程内直调 / WS 远程二选一，核心不改）。 |
 | **单 main + 多 sub** | v0.2.0 | 由 Agent Runtime 的 SubAgent 能力承担（多个子 Run），**不属编排**，不新增 BC。无多-agent 图编排的长期计划。 |
 
-## 10. 三条 Context Map 决策
+## 10. 四条 Context Map 决策
 
 1. **Audit = Pub/Sub 单向 Usage 事实**：Runtime 只做非阻塞 try_record，不等待 Audit IO；Audit MVP 只记录 Usage metadata，不影响 Runtime。Cost/Pricing 保留为 Future。
 2. **Interaction 不成 BC**：ask_user / 权限审批 / plan mode / pause-resume 是 Runtime 的用例族，经 `InteractionPort` + `PolicyPort` 协作，由不同触发源（tool / policy / user）复用。
 3. **Task 类型 = Task BC 的 Published Language**（非 Shared Kernel）：由 Task BC 独占不变量，其他 BC 引用其发布类型。
+4. **Runtime 无 Project 端口**：`WorkspaceMode` 只驱动 Composition 的 Run-scope 装配；Tool 与 Context Management 直接消费同一 Project wiring 发布的窄 view，**NEVER** 再叠加 Runtime 或 Tool Workspace façade。
 
 ## 11. 相关文档
 
@@ -114,6 +128,9 @@
 - 统一语言：[02-ubiquitous-language.md](02-ubiquitous-language.md)
 - 系统架构与六边形：[04-system-architecture.md](04-system-architecture.md)
 - 依赖规则：[05-dependency-rules.md](05-dependency-rules.md)
+- 代码组织规范：[06-code-organization.md](06-code-organization.md)
+- Project Workspace 端口：[../02-modules/project/02-ports-and-adapters.md](../02-modules/project/02-ports-and-adapters.md)
+- 迁移治理：[../03-engineering/migration-governance.md](../03-engineering/migration-governance.md)
 - 目录总览：[../README.md](../README.md)
 
 ## 修改历史
@@ -129,3 +146,4 @@
 | 2026-07-12 | 补齐 Audit/Tool Result → Storage 机制边，并明确 Project Snapshot 由 Session 组装而非重复落盘 | #793 |
 | 2026-07-12 | 补充 Runtime Application Control → Application Version Control 出站边界 | #793 |
 | 2026-07-12 | Policy 收缩为 AllowAll-only 实现；Hook 单端口；Audit MVP 收缩为非阻塞 UsageSink，并明确 Audit→Storage AppendLog 语义 | #790 |
+| 2026-07-14 | 移除不可闭合的 Runtime → Project 端口，改由 Composition internal Run scope 保留隔离 wiring，并补齐 Tool / Context Management 直连 Project 与 TUI ACL 投影边 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

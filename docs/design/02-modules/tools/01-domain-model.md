@@ -66,13 +66,23 @@ Capability 表达安全权限，不表达 Tool 身份或装配位置。新增 To
 
 Tool 所需活资源通过窄端口提供，例如：
 
-- `WorkspaceAccess`
+- Project-owned `WorkspaceRead`
+- Project-owned `WorkspaceControl`
 - `FileAccess`
 - `TaskAccess`
 - `AgentDispatch`
 - `UserInteraction`
 
-Descriptor 声明 required resources，Registry Scope 装配时验证资源齐备。资源端口不等同 capability：capability 决定“能否授权”，resource 决定“是否有实现可用”。
+Descriptor 声明 required resources，Registry Scope 装配时验证资源齐备。资源端口不等同 capability：capability 决定“能否授权”，resource 决定“是否有实现可用”。Tool BC **MUST** 直接消费 Project 发布的窄 trait，**NEVER** 再定义或预装配覆盖读写控制的通用 Workspace wrapper。
+
+| Tool 类别 | Project 能力 | 约束 |
+|---|---|---|
+| 文件 Tool（Read / Write / Edit / Glob / Grep） | `WorkspaceRead` | 用于路径解析；其中只读文件 Tool **NEVER** 获得 Control |
+| Bash | `WorkspaceRead` + `WorkspaceControl` | **MUST** 仅在同步 `cd` / path base 时使用 Control |
+| EnterWorktree / ExitWorktree | `WorkspaceControl` | 由 Project 守护 worktree 状态转换；**NEVER** 因控制用例附带 Read |
+| 其他 Tool | 按 descriptor 声明 | 未声明 workspace resource 时 **NEVER** 注入任一 Project 能力 |
+
+`WorkspaceControl` 的 resource 与同名 `ToolCapability::WorkspaceControl` 权限 **MUST** 同时满足：前者证明实现已装配，后者证明调用被授权。只有 Bash、EnterWorktree、ExitWorktree **MAY** 声明该 resource；增加第四个消费者 **MUST** 先修改 Project 消费方契约与架构测试。
 
 ## 2. Registry Scope 与 Tool Profile
 
@@ -355,7 +365,9 @@ enum McpConnectionState {
 - 模块入口：[README.md](README.md)
 - 端口与生命周期：[02-ports-and-lifecycle.md](02-ports-and-lifecycle.md)
 - Runtime 领域模型：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
+- Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 
 ## 修改历史
@@ -363,3 +375,4 @@ enum McpConnectionState {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：Tool PL、Scope/Profile、Outcome、Skill/Command 机制与 MCP 聚合 | #787 |
+| 2026-07-14 | 移除通用 Workspace resource 包装，改为 Tool 按需直接消费 WorkspaceRead / WorkspaceControl，并将 Control 限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |

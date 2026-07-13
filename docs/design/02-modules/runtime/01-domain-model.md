@@ -108,9 +108,9 @@ struct RunSpec {
     // —— 执行约束 ——
     timeout: Duration,                // 墙钟上限；**0 = 无限**（Main 默认 0，Sub 可配有限值）
 
-    // —— 资源模式：驱动 RuntimeContext 装配 ——
+    // —— 资源模式：驱动 Composition 与 RuntimeContext 装配 ——
     context:   ContextMode,           // SharedSession | Isolated
-    workspace: WorkspaceMode,         // Inherit | Snapshot
+    workspace: WorkspaceMode,         // Inherit | Snapshot（Composition Run scope 策略）
     policy:    PolicyMode,            // v0.1.0: AllowAll
     memory:    MemoryMode,            // Enabled | Disabled(不读不写/不 reflection)
     hooks:     HookMode,              // Full | BoundaryOnly | Disabled
@@ -141,7 +141,6 @@ struct RuntimeContext {
     policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
     task:      Arc<dyn TaskPort>,       // Sub: 独立实例
-    workspace: Arc<dyn WorkspacePort>,  // Sub: 独立快照 frame
     hooks:     Arc<dyn HookPort>,       // Sub: BoundaryOnly
     reasoning: Arc<dyn ReasoningPort>,  // Sub: EffortOnly/Inherit
     usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
@@ -152,13 +151,15 @@ struct RuntimeContext {
 }
 ```
 
-### RunSpec 模式 → RuntimeContext 装配映射
+`WorkspaceMode` 保留在 `RunSpec` 中作为声明式装配策略，但 RuntimeContext **NEVER** 持有 Workspace 端口、Project trait 或 wiring。Composition 为每个 Run 保留独立的 `CompositionRunScope`：Main scope 选择 Project production wiring，Sub scope 对父 wiring 执行 Project-owned isolated derivation；scope **NEVER** 进入 Runtime、Tool 或 Context 类型。
+
+### RunSpec 模式 → RuntimeContext / CompositionRunScope 装配映射
 
 | RunSpec 字段 | Main | Sub | 装配 |
 |---|---|---|---|
 | `context` | SharedSession | Isolated | `ContextPort` 实例 |
 | `provider` | 可共享不可变 transport | 可共享不可变 transport | 每次调用创建独立 Invocation Scope，隔离 model/reasoning/max tokens |
-| `workspace` | Inherit | Snapshot | 快照父 frame，改目录不回写 |
+| `workspace` | Inherit | Snapshot | Composition：Main 建立 production scope；Sub 对 parent scope 执行 isolated derivation，并从同一 child wiring 向 Context / Tool backing implementation 分发窄 view；RuntimeContext 无 workspace 字段 |
 | `policy` | AllowAll | AllowAll | v0.1.0 同一 PolicyPort；Future 模式另行设计 |
 | `memory` | Enabled | Disabled | 真实 / `NoOpMemory` |
 | `hooks` | Full | BoundaryOnly | per-tool / 仅 start-stop |
@@ -169,12 +170,12 @@ struct RuntimeContext {
 
 ## 7. SubAgent 派生：控制权矩阵 + 安全铁律
 
-SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext** → 启动子 Run，跑同一套 Loop（引擎零分支）。
+SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 composition-provided AgentDispatch 捕获或按 RunId 索引父 `CompositionRunScope` → 派生子 scope 并装配**子 RuntimeContext** → 启动子 Run，跑同一套 Loop（引擎零分支）。Runtime 只编排 Tool 调用并声明 `WorkspaceMode::Snapshot`，**NEVER** 接触 scope 或 Project 能力。
 
 ### 安全铁律
 > **Sub 的权限/能力 NEVER 超过 Main 授予的范围。Main 只能"削弱或平移"，NEVER 让 Sub 越权。**
 
-作为 RunSpec 派生不变量：Registry Scope 只能移除工具/资源，Tool Profile 的 allowed capabilities 只能收缩；policy 不可放宽；workspace 强制隔离。
+作为 RunSpec 派生不变量：Registry Scope 只能移除工具/资源，Tool Profile 的 allowed capabilities 只能收缩；policy 不可放宽；Sub workspace **MUST** 为 Snapshot，并由 Composition 对父 Run scope 执行隔离派生。
 
 ### 控制权矩阵
 
@@ -209,7 +210,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | 事件出口 | → TUI | → 父 Run（#612）|
 | 输入 | 常驻多轮 | 单次输入 |
 
-> **差异 100% 由 RunSpec + RuntimeContext + Event adapter 表达，Loop Engine 零分支。**
+> **差异 100% 由 RunSpec + Composition 装配 + RuntimeContext + Event adapter 表达，Loop Engine 零分支。**
 
 ## 9. 相关文档
 
@@ -219,6 +220,9 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 - 恢复语义：[05-recovery-semantics.md](05-recovery-semantics.md)
 - 端口与装配：[06-ports-and-adapters.md](06-ports-and-adapters.md)
 - Session 聚合：[../context-management/01-session.md](../context-management/01-session.md)
+- Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
+- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 - 统一语言：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 
 ## 修改历史
@@ -232,3 +236,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 装配**子 RuntimeContext**
 | 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |
 | 2026-07-12 | RuntimeContext 的 ToolPort 拆为 Catalog/Execution；RunSpec tools 改为 Registry Scope + capability Profile | #787 |
 | 2026-07-12 | Provider 隔离语义收敛为共享不可变 transport + 每次调用独立 Invocation Scope | #788 |
+| 2026-07-14 | 移除 Runtime Workspace 端口；WorkspaceMode 仅驱动 composition-internal Run scope，Sub 从父 Project wiring 派生同一隔离实例供 Context / Tool 装配 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
