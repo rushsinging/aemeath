@@ -164,51 +164,75 @@ pub fn current_date() -> String {
 }
 
 fn project_instruction_walk(cwd: &Path, depth: u32) -> Vec<PathBuf> {
-    // 从 cwd 向上 depth 级祖先目录（含 cwd），每层 CLAUDE.md 优先于 AGENTS.md
-    paths::project_instruction_dirs(cwd, depth)
-        .into_iter()
-        .flat_map(|dir| [dir.join(paths::CLAUDE_MD), dir.join(paths::AGENTS_MD)])
+    // 从最远祖先到 cwd，每层 AGENTS.md 在 CLAUDE.md 前，保证具体规则最后注入。
+    let mut dirs = paths::project_instruction_dirs(cwd, depth);
+    dirs.reverse();
+    dirs.into_iter()
+        .flat_map(|dir| [dir.join(paths::AGENTS_MD), dir.join(paths::CLAUDE_MD)])
         .collect()
 }
 
-pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner, workspace_root: &Path) -> String {
-    let mut parts: Vec<String> = Vec::new();
+#[derive(Debug)]
+struct UserGuidanceFile {
+    path: PathBuf,
+    content: String,
+}
 
-    // Global: ~/.agents/AGENTS.md first, then fallback to ~/.claude/CLAUDE.md
-    let global_paths = [
-        paths::global_agents_md_path(),
-        paths::old_global_claude_md_path(),
-    ];
-    for global_path in &global_paths {
-        if global_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(global_path).await {
-                let file_path_str = global_path.to_string_lossy().to_string();
-                hook_runner
-                    .on_instructions_loaded(&file_path_str, "agents_md", workspace_root)
-                    .await;
-                parts.push(content);
-            }
-            break;
+async fn read_user_guidance_files(
+    paths: &[PathBuf],
+    hook_runner: &HookRunner,
+    workspace_root: &Path,
+) -> Vec<UserGuidanceFile> {
+    let mut files = Vec::new();
+    for path in paths {
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            hook_runner
+                .on_instructions_loaded(&path.to_string_lossy(), "agents_md", workspace_root)
+                .await;
+            files.push(UserGuidanceFile {
+                path: path.clone(),
+                content,
+            });
         }
     }
+    files
+}
 
-    // Project: walk up INSTRUCTION_SEARCH_DEPTH levels, Claude-first at each level
-    for project_path in project_instruction_walk(cwd, INSTRUCTION_SEARCH_DEPTH) {
-        if project_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&project_path).await {
-                let file_path_str = project_path.to_string_lossy().to_string();
-                hook_runner
-                    .on_instructions_loaded(&file_path_str, "agents_md", workspace_root)
-                    .await;
-                parts.push(content);
-            }
-            break;
-        }
-    }
+fn escape_xml_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
 
-    let mut agents_md = parts.join("\n\n");
+fn render_user_guidance(files: &[UserGuidanceFile]) -> String {
+    files
+        .iter()
+        .map(|file| {
+            let source = escape_xml_attribute(&file.path.to_string_lossy());
+            format!(
+                "<guidance source=\"{}\">\n{}\n</guidance>",
+                source, file.content
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
 
-    let warnings = policy::api::scan_content("AGENTS.md", &agents_md);
+async fn load_agents_md_from_paths(
+    global_paths: &[PathBuf],
+    project_paths: &[PathBuf],
+    hook_runner: &HookRunner,
+    workspace_root: &Path,
+) -> String {
+    let mut files = read_user_guidance_files(global_paths, hook_runner, workspace_root).await;
+    files.extend(read_user_guidance_files(project_paths, hook_runner, workspace_root).await);
+    scan_user_guidance(render_user_guidance(&files))
+}
+
+fn scan_user_guidance(mut user_guidance: String) -> String {
+    let warnings = policy::api::scan_content("AGENTS.md", &user_guidance);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(target: LOG_TARGET,
@@ -220,11 +244,21 @@ pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner, workspace_root
             );
         }
         if let Some(prefix) = policy::api::format_warnings(&warnings) {
-            agents_md = format!("{}\n\n{}", prefix, agents_md);
+            user_guidance = format!("{}\n\n{}", prefix, user_guidance);
         }
     }
 
-    agents_md
+    user_guidance
+}
+
+pub async fn load_agents_md(cwd: &Path, hook_runner: &HookRunner, workspace_root: &Path) -> String {
+    let global_paths = [
+        paths::global_agents_md_path(),
+        paths::old_global_claude_md_path(),
+    ];
+    let project_paths = project_instruction_walk(cwd, INSTRUCTION_SEARCH_DEPTH);
+
+    load_agents_md_from_paths(&global_paths, &project_paths, hook_runner, workspace_root).await
 }
 
 #[cfg(test)]
