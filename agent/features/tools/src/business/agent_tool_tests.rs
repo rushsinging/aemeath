@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::{AgentRunRequest, AgentRunner, ToolResources};
+use crate::api::{AgentRunRequest, AgentRunTerminal, AgentRunner, ToolResources};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -8,18 +8,22 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct StubRunner {
-    captured_max_turns: Mutex<u32>,
+    captured_timeout: Mutex<std::time::Duration>,
     captured_system: Mutex<String>,
+    captured_parent_run_id: Mutex<Option<String>>,
     run_count: Mutex<usize>,
 }
 
 #[async_trait::async_trait]
 impl AgentRunner for StubRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> String {
-        *self.captured_max_turns.lock().unwrap() = request.max_turns;
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> AgentRunTerminal {
+        *self.captured_timeout.lock().unwrap() = request.timeout;
         *self.captured_system.lock().unwrap() = request.system.to_string();
+        *self.captured_parent_run_id.lock().unwrap() = Some(request.ctx.run_id.clone());
         *self.run_count.lock().unwrap() += 1;
-        request.prompt.to_string()
+        AgentRunTerminal::Completed {
+            result: request.prompt.to_string(),
+        }
     }
 
     async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolExecutionContext) -> String {
@@ -30,6 +34,7 @@ impl AgentRunner for StubRunner {
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
         workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
+        run_id: "01900000-0000-7000-8000-000000000001".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -54,7 +59,7 @@ fn test_ctx() -> ToolExecutionContext {
 }
 
 #[tokio::test]
-async fn test_agent_tool_uses_1000_default_turns() {
+async fn test_agent_tool_uses_finite_default_timeout() {
     let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
@@ -70,16 +75,19 @@ async fn test_agent_tool_uses_1000_default_turns() {
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(1800)
+    );
     assert!(runner
         .captured_system
         .lock()
         .unwrap()
-        .contains("You have max 1000 rounds of tool calls"));
+        .contains("wall-clock timeout: 1800 seconds"));
 }
 
 #[tokio::test]
-async fn test_agent_tool_caps_max_turns_at_1000() {
+async fn test_agent_tool_caps_timeout_at_three_hours() {
     let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
@@ -89,30 +97,52 @@ async fn test_agent_tool_caps_max_turns_at_1000() {
             serde_json::json!({
                 "prompt": "finished",
                 "description": "run task",
-                "max_turns": 1500,
+                "timeout": 20000,
             }),
             &ctx,
         )
         .await;
 
     assert!(!result.is_error);
-    assert_eq!(*runner.captured_max_turns.lock().unwrap(), 1000);
-    assert!(runner
-        .captured_system
-        .lock()
-        .unwrap()
-        .contains("You have max 1000 rounds of tool calls"));
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(10800)
+    );
 }
 
 #[test]
-fn test_agent_tool_schema_describes_1000_turn_limit() {
+fn test_agent_tool_schema_describes_timeout_without_max_turns() {
     let tool = AgentTool;
 
     let schema = tool.input_schema().to_string();
     let description = tool.description();
 
-    assert!(schema.contains("max 1000"));
-    assert!(description.contains("up to 1000 rounds"));
+    assert!(schema.contains("timeout"));
+    assert!(!schema.contains("max_turns"));
+    assert!(!description.contains("1000 rounds"));
+}
+
+#[tokio::test]
+async fn test_agent_tool_passes_parent_run_id_to_sub_agent_request() {
+    let tool = AgentTool;
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(
+        runner.captured_parent_run_id.lock().unwrap().as_ref(),
+        Some(&ctx.run_id)
+    );
 }
 
 #[tokio::test]
@@ -212,8 +242,10 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
     struct EmptyRunner;
     #[async_trait::async_trait]
     impl AgentRunner for EmptyRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> String {
-            String::new()
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> AgentRunTerminal {
+            AgentRunTerminal::Completed {
+                result: String::new(),
+            }
         }
         async fn complete(
             &self,

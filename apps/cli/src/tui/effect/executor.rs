@@ -25,7 +25,7 @@ impl App {
             }
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
-            Effect::CancelAgentChat => self.cancel_agent_chat(),
+            Effect::CancelCurrentRun => self.cancel_current_run(),
             Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
@@ -42,18 +42,24 @@ impl App {
         }
     }
 
-    fn cancel_agent_chat(&mut self) {
-        self.chat.start_cancelling();
-        // #639：cancel 触发 runtime 的 CancellationToken（即时、进程内 out-of-band），
-        // NEVER 用 abort()——abort 只中断 TUI 消费流、不停 runtime loop（#639 根因）。
-        if let Some(h) = &self.chat.processing_handle {
-            h.cancel();
+    fn cancel_current_run(&mut self) {
+        let outcome = self
+            .chat
+            .processing_handle
+            .as_ref()
+            .map(|handle| handle.cancel_current_run())
+            .unwrap_or(sdk::CancelRunOutcome::NotFound);
+        if matches!(
+            outcome,
+            sdk::CancelRunOutcome::Accepted | sdk::CancelRunOutcome::AlreadyCancelling
+        ) {
+            self.chat.start_cancelling();
+            self.model
+                .conversation
+                .apply(SetStatusNotice(StatusNotice::warning(
+                    "Cancelling current response… Press Ctrl+C again to exit",
+                )));
         }
-        self.model
-            .conversation
-            .apply(SetStatusNotice(StatusNotice::warning(
-                "Cancelling current response… Press Ctrl+C again to exit",
-            )));
     }
 
     fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {

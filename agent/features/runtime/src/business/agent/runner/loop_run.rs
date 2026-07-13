@@ -6,14 +6,42 @@ use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
 use super::SilentHandler;
 use crate::business::agent::Agent;
+use crate::business::agent_run::{Run, RunDomainEvent, RunSpec};
+use crate::business::loop_engine::{
+    run_loop as shared_run_loop, LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision,
+    ToolStep,
+};
 use crate::LOG_TARGET;
+use async_trait::async_trait;
 use provider::api::LlmClient;
 use provider::api::{StopReason, SystemBlock};
 use share::message::Message;
 use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
-use tools::api::ToolExecutionContext;
+use tools::api::AgentRunTerminal;
+
+struct ActiveRunRegistration {
+    active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
+    run_id: sdk::RunId,
+}
+
+impl ActiveRunRegistration {
+    fn new(
+        active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
+        run_id: sdk::RunId,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Self {
+        active_run.activate(run_id.clone(), cancel);
+        Self { active_run, run_id }
+    }
+}
+
+impl Drop for ActiveRunRegistration {
+    fn drop(&mut self) {
+        self.active_run.clear(&self.run_id);
+    }
+}
 
 pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
     messages.iter().map(Message::to_llm_view).collect()
@@ -23,9 +51,9 @@ pub(super) fn messages_for_llm(messages: &[Message]) -> Vec<Message> {
 pub(super) struct SubAgentRun<'a> {
     pub prompt: &'a str,
     pub system: String,
-    pub ctx: &'a ToolExecutionContext,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
+    pub _shared_client_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
     pub hook_runner: hook::api::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
@@ -33,10 +61,16 @@ pub(super) struct SubAgentRun<'a> {
     pub system_blocks: Vec<SystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent<'a>,
-    pub max_turns: usize,
+    pub timeout: std::time::Duration,
+    pub turn_count: usize,
+    pub last_api_input_tokens: u64,
+    pub last_api_output_tokens: u64,
+    pub active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
+    pub terminal: Option<AgentRunTerminal>,
     pub start_time: std::time::Instant,
-    pub max_duration: std::time::Duration,
     pub session_id: String,
+    pub run_id: sdk::RunId,
+    pub parent_run_id: Option<sdk::RunId>,
     pub role_name_for_log: String,
     pub model_name_for_log: String,
     pub resolved_spec: Option<String>,
@@ -48,185 +82,79 @@ pub(super) struct SubAgentRun<'a> {
 }
 
 impl<'a> SubAgentRun<'a> {
-    pub async fn run_loop(mut self) -> String {
-        let workspace_root = self.ctx.workspace_read().current_workspace_root();
-        let memory_root = self.ctx.workspace_read().initial_cwd();
-        macro_rules! finalize_and_return {
-            ($status:expr, $turns:expr, $result:expr) => {{
-                let outcome = AgentRunOutcome {
-                    status: $status,
-                    turns: $turns,
-                    duration: self.start_time.elapsed(),
-                    role: Some(self.role_name_for_log.clone()),
-                    model: self.model_name_for_log.clone(),
-                };
-                finalize_sub_agent(
-                    &outcome,
-                    self.client.as_ref(),
-                    &self.hook_runner,
-                    &self.session_id,
-                    self.prompt,
-                    &self.system,
-                    self.resolved_spec.as_deref(),
-                    &$result,
-                    self.previous_max_tokens,
-                    self.previous_reasoning_level,
-                    self.restore_max_tokens,
-                    self.progress_tx.as_ref(),
-                    &workspace_root,
-                )
-                .await;
-                return $result;
-            }};
-        }
-
-        for turn in 0..self.max_turns {
-            let turn_number = turn + 1;
-            if self.ctx.cancel.is_cancelled() {
-                log::debug!(target: LOG_TARGET,
-                    "sub-agent cancel detected before turn {turn_number} (turn-boundary check)"
-                );
-                (self.progress)(Some(turn_number), "Agent cancelled by user");
-                let result = "Cancelled by user".to_string();
-                finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
-            }
-            if self.start_time.elapsed() > self.max_duration {
-                self.progress_timeout(turn_number);
-                let result = self.timeout_result();
-                finalize_and_return!(AgentRunStatus::TimedOut, turn, result);
-            }
-
-            self.progress_turn_start(turn_number);
-            (self.log_request_messages)(turn_number, &self.messages);
-            self.log_input(turn_number);
-
-            // memory 注入（与主循环一致：每轮动态查询，cache_control=None）
-            let mut effective_blocks = self.system_blocks.clone();
-            let mc = &self.ctx.resources.memory_config;
-            if mc.enabled && mc.inject_count > 0 {
-                if let Some(block) =
-                    crate::business::chat::looping::memory_inject::build_memory_block(
-                        &memory_root,
-                        mc.inject_count,
-                    )
-                {
-                    effective_blocks.push(block);
-                }
-            }
-
-            let messages_for_api = messages_for_llm(&self.messages);
-            let response = self
-                .client
-                .stream_message(
-                    &effective_blocks,
-                    &messages_for_api,
-                    &self.sub_schemas,
-                    &mut self.handler,
-                    &self.ctx.cancel,
-                )
-                .await;
-
-            match response {
-                Ok(resp) => {
-                    let api_input = resp.usage.input_tokens as u64;
-                    self.progress_api_ok(turn_number, &resp);
-                    self.messages.push(resp.assistant_message.clone());
-                    self.log_output(turn_number, &resp);
-                    self.send_text_progress(turn, &resp);
-
-                    let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
-
-                    // 检测 max_tokens 截断：告知 LLM 上次输出被截断，下次请分块
-                    if resp.stop_reason == StopReason::MaxTokens {
-                        log::warn!(
-                            target: crate::LOG_TARGET,
-                            "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
-                            turn_number,
-                        );
-                        self.messages.push(Message::user(
-                            "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
-                             请基于已有内容继续，或用更紧凑的方式重新组织响应：\
-                             大文件改用 Edit 分块写入（每次 < 12k 字符），\
-                             长命令用 Bash heredoc 分段执行。\
-                             不要重复已输出的内容，直接从截断点继续。"
-                                .to_string(),
-                        ));
-                        if tool_calls.is_empty() {
-                            // tool_calls 为空说明截断在文本生成阶段，不当 completed，继续下一轮让 LLM 重试
-                            continue;
-                        }
-                        // tool_calls 不为空（截断在 tool call 阶段但部分有效），继续执行 tool
-                    }
-
-                    if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-                        (self.progress)(Some(turn_number), "Agent completed");
-                        let result = resp.assistant_message.text_content();
-                        finalize_and_return!(AgentRunStatus::Completed, turn + 1, result);
-                    }
-
-                    self.log_tool_calls(turn_number, &tool_calls);
-                    let call_info = self.build_call_info(&tool_calls);
-                    if let Some(ref tx) = self.progress_tx {
-                        let _ = tx.try_send(build_tool_calls_progress_event(turn + 1, &tool_calls));
-                    }
-
-                    let results = self.agent.execute_tools(&tool_calls).await;
-                    self.progress_tools_done(turn_number, results.len());
-                    self.log_result_summaries(turn_number, &results, &call_info);
-                    self.log_tool_results(turn_number, &results, &call_info);
-
-                    append_tool_results(&mut self.messages, results, &self.session_id);
-                    self.compact_if_needed(api_input, resp.usage.output_tokens as u64, turn_number)
-                        .await;
-                }
-                Err(e) => {
-                    if e.is_cancelled() || self.ctx.cancel.is_cancelled() {
-                        log::debug!(target: LOG_TARGET,
-                            "sub-agent cancel detected during turn {turn_number} (post-stream_message check): provider_err_is_cancelled={}, ctx_cancel_is_cancelled={}",
-                            e.is_cancelled(), self.ctx.cancel.is_cancelled()
-                        );
-                        (self.progress)(Some(turn_number), "Agent cancelled by user");
-                        let result = "Cancelled by user".to_string();
-                        finalize_and_return!(AgentRunStatus::Cancelled, turn, result);
-                    }
-                    (self.progress)(Some(turn_number), &format!("Agent error: {e}"));
-                    let error_string = e.to_string();
-                    let result = format!("Sub-agent error: {error_string}");
-                    finalize_and_return!(AgentRunStatus::ApiError(error_string), turn, result);
-                }
-            }
-        }
-
-        (self.progress)(
-            Some(self.max_turns),
-            &format!(
-                "Agent reached max turns ({}), returning partial result",
-                self.max_turns
-            ),
+    /// Runs a sub-agent through the same loop engine used by every agent run.
+    pub async fn run_loop(mut self) -> AgentRunTerminal {
+        let mut run = Run::with_id(
+            self.run_id.clone(),
+            RunSpec::sub(self.role_name_for_log.clone(), self.timeout),
+            self.parent_run_id.clone(),
         );
-        let result = self.max_turns_result();
-        finalize_and_return!(AgentRunStatus::MaxTurns, self.max_turns, result);
-    }
-
-    fn progress_timeout(&self, turn_number: usize) {
-        (self.progress)(
-            Some(turn_number),
-            &format!(
-                "Agent timed out after {}s",
-                self.start_time.elapsed().as_secs()
-            ),
+        let cancel = self.agent.ctx.cancel.clone();
+        let _registration = ActiveRunRegistration::new(
+            self.active_run.clone(),
+            self.run_id.clone(),
+            cancel.clone(),
         );
-    }
+        let loop_result = shared_run_loop(&mut run, &cancel, &mut self).await;
 
-    fn timeout_result(&self) -> String {
-        let elapsed_secs = self.start_time.elapsed().as_secs();
-        self.messages
+        // A normal terminal path is recorded by `emit` from the authoritative
+        // RunDomainEvent. Keep an infrastructure fallback so finalization still
+        // runs if the engine itself cannot finish a transition.
+        let terminal = self
+            .terminal
+            .take()
+            .unwrap_or_else(|| AgentRunTerminal::Failed {
+                error: loop_result
+                    .err()
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| {
+                        "shared run loop ended without a terminal event".to_string()
+                    }),
+            });
+
+        let turns = run
+            .steps()
             .iter()
-            .rev()
-            .map(|msg| msg.text_content())
-            .find(|text| !text.is_empty())
-            .map(|text| format!("{}\n\n[Sub-agent timed out after {}s]", text, elapsed_secs))
-            .unwrap_or_else(|| format!("Sub-agent timed out after {}s", elapsed_secs))
+            .filter(|step| step.status() == crate::business::agent_run::RunStepStatus::Done)
+            .count();
+        let status = match &terminal {
+            AgentRunTerminal::Completed { .. } => AgentRunStatus::Completed,
+            AgentRunTerminal::Failed { error } => {
+                if error.starts_with("run timed out after ") {
+                    AgentRunStatus::TimedOut
+                } else {
+                    AgentRunStatus::Failed(error.clone())
+                }
+            }
+            AgentRunTerminal::Cancelled => AgentRunStatus::Cancelled,
+        };
+        let outcome = AgentRunOutcome {
+            status,
+            turns,
+            duration: self.start_time.elapsed(),
+            role: Some(self.role_name_for_log.clone()),
+            model: self.model_name_for_log.clone(),
+        };
+        let workspace_root = self.agent.ctx.workspace_read().current_workspace_root();
+        let output = terminal.output();
+        finalize_sub_agent(
+            &outcome,
+            self.client.as_ref(),
+            &self.hook_runner,
+            &self.session_id,
+            self.prompt,
+            &self.system,
+            self.resolved_spec.as_deref(),
+            &output,
+            self.previous_max_tokens,
+            self.previous_reasoning_level,
+            self.restore_max_tokens,
+            self.progress_tx.as_ref(),
+            &workspace_root,
+        )
+        .await;
+
+        terminal
     }
 
     fn progress_turn_start(&self, turn_number: usize) {
@@ -234,9 +162,8 @@ impl<'a> SubAgentRun<'a> {
         (self.progress)(
             Some(turn_number),
             &format!(
-                "Agent turn {}/{}, messages: {}, est_tokens: {}",
+                "Agent turn {}, messages: {}, est_tokens: {}",
                 turn_number,
-                self.max_turns,
                 self.messages.len(),
                 msg_tokens
             ),
@@ -304,7 +231,7 @@ impl<'a> SubAgentRun<'a> {
                     trimmed.to_string()
                 };
                 let _ = tx.try_send(AgentProgressEvent {
-                    sequence: turn + 1,
+                    sequence: turn,
                     kind: AgentProgressKind::Message { text: short },
                 });
             }
@@ -342,10 +269,340 @@ impl<'a> SubAgentRun<'a> {
     }
 }
 
+fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal> {
+    match event {
+        RunDomainEvent::Completed { result, .. } => Some(AgentRunTerminal::Completed {
+            result: result.clone(),
+        }),
+        RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
+            error: error.clone(),
+        }),
+        RunDomainEvent::Cancelled { .. } => Some(AgentRunTerminal::Cancelled),
+        RunDomainEvent::Started { .. }
+        | RunDomainEvent::StepStarted { .. }
+        | RunDomainEvent::StepCompleted { .. }
+        | RunDomainEvent::CancellationRequested { .. }
+        | RunDomainEvent::AwaitingUser { .. }
+        | RunDomainEvent::Resumed { .. }
+        | RunDomainEvent::StuckDetected { .. } => None,
+    }
+}
+
+#[async_trait]
+impl RunLoopPort for SubAgentRun<'_> {
+    async fn drain_input(
+        &mut self,
+    ) -> Result<Vec<crate::business::loop_engine::LoopInput>, LoopEngineError> {
+        Ok(Vec::new())
+    }
+
+    async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+        if self.last_api_input_tokens == 0 && self.last_api_output_tokens == 0 {
+            return Ok(false);
+        }
+        Ok(crate::business::compact::needs_compaction_actual(
+            self.last_api_input_tokens,
+            self.last_api_output_tokens,
+            None,
+            None,
+            self.ctx_context_size,
+        ))
+    }
+
+    async fn compact(
+        &mut self,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<(), LoopEngineError> {
+        let input = self.last_api_input_tokens;
+        let output = self.last_api_output_tokens;
+        self.compact_if_needed(input, output, self.turn_count).await;
+        if !self.agent.ctx.cancel.is_cancelled() {
+            self.last_api_input_tokens = 0;
+            self.last_api_output_tokens = 0;
+        }
+        // The engine owns cancellation transitions. Returning success lets its
+        // post-compaction cancellation check emit the authoritative event.
+        Ok(())
+    }
+
+    async fn invoke_model(
+        &mut self,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<ModelStep, LoopEngineError> {
+        self.turn_count += 1;
+        let turn_number = self.turn_count;
+        self.progress_turn_start(turn_number);
+        (self.log_request_messages)(turn_number, &self.messages);
+        self.log_input(turn_number);
+
+        // Memory is queried dynamically on every turn, matching the main loop.
+        let mut effective_blocks = self.system_blocks.clone();
+        let memory_root = self.agent.ctx.workspace_read().initial_cwd();
+        let mc = &self.agent.ctx.resources.memory_config;
+        if mc.enabled && mc.inject_count > 0 {
+            if let Some(block) = crate::business::chat::looping::memory_inject::build_memory_block(
+                &memory_root,
+                mc.inject_count,
+            ) {
+                effective_blocks.push(block);
+            }
+        }
+
+        let messages_for_api = messages_for_llm(&self.messages);
+        let response = self
+            .client
+            .stream_message(
+                &effective_blocks,
+                &messages_for_api,
+                &self.sub_schemas,
+                &mut self.handler,
+                &self.agent.ctx.cancel,
+            )
+            .await;
+
+        let resp = match response {
+            Ok(resp) => resp,
+            Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
+                // The shared engine recognizes cancellation through the run's
+                // cancellation token. Provider-originated cancellation joins
+                // that same path rather than creating an adapter-only terminal.
+                self.agent.ctx.cancel.cancel();
+                return Err(LoopEngineError::Cancelled);
+            }
+            Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),
+        };
+
+        self.last_api_input_tokens = resp.usage.input_tokens as u64;
+        self.last_api_output_tokens = resp.usage.output_tokens as u64;
+        self.progress_api_ok(turn_number, &resp);
+        self.messages.push(resp.assistant_message.clone());
+        self.log_output(turn_number, &resp);
+        self.send_text_progress(turn_number, &resp);
+
+        let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+        if resp.stop_reason == StopReason::MaxTokens {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
+                turn_number,
+            );
+            self.messages.push(Message::user(
+                "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
+                 请基于已有内容继续，或用更紧凑的方式重新组织响应：\
+                 大文件改用 Edit 分块写入（每次 < 12k 字符），\
+                 长命令用 Bash heredoc 分段执行。\
+                 不要重复已输出的内容，直接从截断点继续。"
+                    .to_string(),
+            ));
+            if tool_calls.is_empty() {
+                // Preserve the old retry path: a text-only truncation did not
+                // trigger compaction before asking the model to continue.
+                self.last_api_input_tokens = 0;
+                self.last_api_output_tokens = 0;
+                // An empty tool phase advances the shared state machine while
+                // retaining the old behavior of retrying a truncated response.
+                return Ok(ModelStep::Tools {
+                    text: resp.assistant_message.text_content(),
+                    calls: Vec::new(),
+                });
+            }
+        }
+
+        if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+            return Ok(ModelStep::Complete {
+                text: resp.assistant_message.text_content(),
+            });
+        }
+
+        Ok(ModelStep::Tools {
+            text: resp.assistant_message.text_content(),
+            calls: tool_calls,
+        })
+    }
+
+    async fn execute_tools(
+        &mut self,
+        calls: &[(crate::business::agent::ToolCall, ToolGuardDecision)],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<ToolStep, LoopEngineError> {
+        if calls.is_empty() {
+            return Ok(ToolStep::Continue);
+        }
+        let allowed: Vec<_> = calls
+            .iter()
+            .filter_map(|(call, decision)| {
+                matches!(decision, ToolGuardDecision::Allow).then_some(call.clone())
+            })
+            .collect();
+        let mut results: Vec<_> = calls
+            .iter()
+            .filter_map(|(call, decision)| match decision {
+                ToolGuardDecision::SoftBlock { reason } => Some(
+                    crate::business::chat::looping::tool_fuse::blocked_tool_execution(call, reason),
+                ),
+                ToolGuardDecision::Allow => None,
+            })
+            .collect();
+
+        let turn_number = self.turn_count;
+        let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+        self.log_tool_calls(turn_number, &all_calls);
+        let call_info = self.build_call_info(&all_calls);
+        if let Some(ref tx) = self.progress_tx {
+            let _ = tx.try_send(build_tool_calls_progress_event(turn_number, &allowed));
+        }
+
+        let mut executed = tokio::select! {
+            _ = self.agent.ctx.cancel.cancelled() => {
+                return Err(LoopEngineError::Cancelled);
+            }
+            executed = self.agent.execute_tools(&allowed) => executed,
+        };
+        results.append(&mut executed);
+        let mut by_id: std::collections::HashMap<_, _> = results
+            .into_iter()
+            .map(|result| (result.call_id.clone(), result))
+            .collect();
+        let results: Vec<_> = calls
+            .iter()
+            .filter_map(|(call, _)| by_id.remove(&call.id))
+            .collect();
+        self.progress_tools_done(turn_number, results.len());
+        self.log_result_summaries(turn_number, &results, &call_info);
+        self.log_tool_results(turn_number, &results, &call_info);
+        append_tool_results(&mut self.messages, results, &self.session_id);
+        Ok(ToolStep::Continue)
+    }
+
+    async fn on_stuck(
+        &mut self,
+        decision: &crate::business::loop_engine::StuckDecision,
+    ) -> Result<(), LoopEngineError> {
+        (self.progress)(Some(self.turn_count), &format!("StuckGuard: {decision:?}"));
+        Ok(())
+    }
+
+    fn claim_terminal(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_terminal(run_id)
+    }
+
+    fn claim_cancellation(&self, run_id: &sdk::RunId) -> bool {
+        self.active_run.claim_cancellation(run_id)
+    }
+
+    async fn emit(&mut self, events: Vec<RunDomainEvent>) -> Result<(), LoopEngineError> {
+        for event in events {
+            if let Some(terminal) = terminal_from_domain_event(&event) {
+                match &terminal {
+                    AgentRunTerminal::Completed { .. } => {
+                        (self.progress)(Some(self.turn_count), "Agent completed");
+                    }
+                    AgentRunTerminal::Failed { error } => {
+                        (self.progress)(Some(self.turn_count), &format!("Agent error: {error}"));
+                    }
+                    AgentRunTerminal::Cancelled => {
+                        (self.progress)(Some(self.turn_count), "Agent cancelled by user");
+                    }
+                }
+                self.terminal = Some(terminal);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::messages_for_llm;
+    use super::{messages_for_llm, terminal_from_domain_event, ActiveRunRegistration};
+    use crate::business::agent_run::{ActiveRunPort, RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
+
+    #[derive(Default)]
+    struct RecordingActiveRunPort {
+        active: std::sync::Mutex<std::collections::HashSet<RunId>>,
+    }
+
+    impl ActiveRunPort for RecordingActiveRunPort {
+        fn activate(&self, run_id: RunId, _cancel: tokio_util::sync::CancellationToken) {
+            self.active.lock().unwrap().insert(run_id);
+        }
+
+        fn claim_terminal(&self, _run_id: &RunId) -> bool {
+            true
+        }
+
+        fn claim_cancellation(&self, _run_id: &RunId) -> bool {
+            true
+        }
+
+        fn clear(&self, run_id: &RunId) {
+            self.active.lock().unwrap().remove(run_id);
+        }
+    }
+
+    #[test]
+    fn active_run_registration_clears_registry_when_dropped() {
+        let registry = std::sync::Arc::new(RecordingActiveRunPort::default());
+        let run_id = RunId::new_v7();
+        {
+            let _registration = ActiveRunRegistration::new(
+                registry.clone(),
+                run_id.clone(),
+                tokio_util::sync::CancellationToken::new(),
+            );
+            assert!(registry.active.lock().unwrap().contains(&run_id));
+        }
+        assert!(registry.active.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn terminal_domain_events_project_to_all_agent_terminal_variants() {
+        let run_id = RunId::new_v7();
+        let parent_run_id = Some(RunId::new_v7());
+        let cases = [
+            (
+                RunDomainEvent::Completed {
+                    run_id: run_id.clone(),
+                    parent_run_id: parent_run_id.clone(),
+                    result: "done".to_string(),
+                },
+                Some(tools::api::AgentRunTerminal::Completed {
+                    result: "done".to_string(),
+                }),
+            ),
+            (
+                RunDomainEvent::Failed {
+                    run_id: run_id.clone(),
+                    parent_run_id: parent_run_id.clone(),
+                    error: "boom".to_string(),
+                },
+                Some(tools::api::AgentRunTerminal::Failed {
+                    error: "boom".to_string(),
+                }),
+            ),
+            (
+                RunDomainEvent::Cancelled {
+                    run_id,
+                    parent_run_id,
+                },
+                Some(tools::api::AgentRunTerminal::Cancelled),
+            ),
+        ];
+
+        for (event, expected) in cases {
+            assert_eq!(terminal_from_domain_event(&event), expected);
+        }
+    }
+
+    #[test]
+    fn nonterminal_domain_event_does_not_create_agent_terminal() {
+        let event = RunDomainEvent::Started {
+            run_id: RunId::new_v7(),
+            parent_run_id: Some(RunId::new_v7()),
+        };
+
+        assert_eq!(terminal_from_domain_event(&event), None);
+    }
 
     #[test]
     fn messages_for_llm_converts_structured_tool_result_to_text() {

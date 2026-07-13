@@ -325,6 +325,36 @@ fn test_runtime_user_messages_adopted_injects_input_ids() {
 }
 
 #[test]
+fn test_run_lifecycle_events_preserve_run_id() {
+    let (change_tx, _) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
+    let run_id = sdk::RunId::new_v7();
+
+    let started = runtime_event_to_sdk_event(
+        crate::business::chat::RuntimeStreamEvent::RunStarted {
+            run_id: run_id.clone(),
+            parent_run_id: None,
+        },
+        &change_tx,
+    );
+    let cancelling = runtime_event_to_sdk_event(
+        crate::business::chat::RuntimeStreamEvent::RunCancelling {
+            run_id: run_id.clone(),
+        },
+        &change_tx,
+    );
+    let cancelled = runtime_event_to_sdk_event(
+        crate::business::chat::RuntimeStreamEvent::RunCancelled {
+            run_id: run_id.clone(),
+        },
+        &change_tx,
+    );
+
+    assert!(matches!(started, sdk::ChatEvent::RunStarted { run_id: id, .. } if id == run_id));
+    assert!(matches!(cancelling, sdk::ChatEvent::RunCancelling { run_id: id } if id == run_id));
+    assert!(matches!(cancelled, sdk::ChatEvent::RunCancelled { run_id: id } if id == run_id));
+}
+
+#[test]
 fn test_runtime_hook_event_maps_status_and_result() {
     let view = runtime_hook_event_to_sdk(RuntimeHookEvent {
         hook_name: "Stop".to_string(),

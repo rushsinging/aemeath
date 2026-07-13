@@ -182,6 +182,11 @@ impl LlmClientPool {
         ))
     }
 
+    /// Build an isolated client for a sub Run without inserting it into the shared cache.
+    pub fn get_isolated_client(&self, model_spec: &str) -> Result<LlmClient, String> {
+        self.create_client(model_spec)
+    }
+
     /// Get the default client.
     pub fn default_client(&self) -> Arc<LlmClient> {
         self.default_client.clone()
@@ -250,6 +255,22 @@ mod tests {
         let client = pool.get_client(Some("zhipu/glm-5.2")).await;
 
         assert_eq!(client.max_tokens(), 16_000);
+    }
+
+    #[test]
+    fn test_isolated_clients_do_not_share_mutable_provider_settings() {
+        let pool = LlmClientPool::new(
+            default_client(),
+            Arc::new(models_config(16_000)),
+            crate::business::DEFAULT_TIMEOUT_SECS,
+        );
+
+        let first = pool.get_isolated_client("zhipu/glm-5.2").unwrap();
+        let second = pool.get_isolated_client("zhipu/glm-5.2").unwrap();
+        first.set_max_tokens(1_024);
+
+        assert_eq!(first.max_tokens(), 1_024);
+        assert_eq!(second.max_tokens(), 16_000);
     }
 
     #[tokio::test]
