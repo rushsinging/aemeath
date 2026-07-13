@@ -18,5 +18,5 @@ pub use port::*;
 pub use protocol::classify_directive;
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "contract/tests.rs"]
 mod tests;
