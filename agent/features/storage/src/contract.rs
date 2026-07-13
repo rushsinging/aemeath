@@ -1,6 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StorageApiMarker;
+mod atomic_blob;
+mod error;
+mod storage_key;
 
-pub use crate::business::task::{
-    Batch, BatchStatus, Task, TaskPriority, TaskSnapshot, TaskStatus, TaskStoreStats,
-};
+pub use atomic_blob::{AtomicBlobPort, BlobRead, ReadOutcome, WriteOptions, WriteReceipt};
+pub use error::{StorageError, StorageErrorKind, StorageOperation};
+pub use storage_key::{SafePathSegment, StorageKey, StorageKeyError, StorageNamespace};
