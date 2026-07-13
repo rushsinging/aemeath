@@ -10,6 +10,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+async-trait = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
