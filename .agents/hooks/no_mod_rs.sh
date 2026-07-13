@@ -30,7 +30,7 @@ else
   while IFS= read -r f; do
     echo "ERROR: 发现 mod.rs 文件: $f" >&2
     found=1
-  done < <(find "$ROOT" -path '*/src/*' -name 'mod.rs' -not -path '*/.claude/*' -not -path '*/target/*')
+  done < <(find "$ROOT" -type d -name '.worktrees' -prune -o -path '*/src/*' -name 'mod.rs' -not -path '*/.claude/*' -not -path '*/target/*' -print)
 fi
 
 if [ "$found" -ne 0 ]; then
