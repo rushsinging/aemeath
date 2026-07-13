@@ -77,19 +77,19 @@
 - Modify: `AGENTS.md`
 - Modify: `specs/project.md`
 
-- [ ] **Step 1: Make the Project target tree capability-first**
+- [x] **Step 1: Make the Project target tree capability-first**
 
   Remove the Current-vs-Target fixed-layer comparison from the target-only module document. Keep only the target `workspace/`, `git/`, and narrow façade structure, and refer to migration governance for current paths.
 
-- [ ] **Step 2: Reclassify the legacy fixed-layer guard**
+- [x] **Step 2: Reclassify the legacy fixed-layer guard**
 
   In the guard registry, stop presenting the legacy guard as a target architecture principle. Keep its exact script identifier for runtime truth, describe it as a temporary migration guard, and point its replacement criteria to the new code organization standard.
 
-- [ ] **Step 3: Track the guard and directory migration explicitly**
+- [x] **Step 3: Track the guard and directory migration explicitly**
 
   Add a Current-to-Target entry to `migration-governance.md`: current feature directories and the fixed-layer guard remain until a dedicated Guard issue replaces them with public-surface, cross-feature, cycle, and Composition Root checks.
 
-- [ ] **Step 4: Remove the retired concept from project instructions**
+- [x] **Step 4: Remove the retired concept from project instructions**
 
   Update the Project row in `AGENTS.md` to describe workspace ownership and the git outbound port without naming or mandating the retired directory template. Reframe the existing directory constraints in `specs/project.md` as migration-period implementation constraints, preserving the runtime truth without retaining the retired architecture concept.
 
