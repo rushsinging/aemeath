@@ -119,6 +119,14 @@ where
         emit_events(run, port).await?;
     }
 
+    log::debug!(
+        target: "aemeath:agent:runtime",
+        "[run_loop] entered run_id={} parent={} spec={:?}",
+        run.id(),
+        run.parent_id().map(|id| id.to_string()).unwrap_or_else(|| "none".into()),
+        run.spec(),
+    );
+
     let mut guard = StuckGuard::new(run.spec().timeout, 5);
     loop {
         if handle_interrupt(run, cancel, port).await? {
@@ -197,6 +205,12 @@ where
         }
         run.record_model_invocation(&step_id, model_invocation(&model_step))?;
         run.transition(RunTransition::ModelInvoked)?;
+        log::debug!(
+            target: "aemeath:agent:runtime",
+            "[run_loop] model_step={} run_id={}",
+            model_step_label(&model_step),
+            short(run.id()),
+        );
 
         match model_step {
             ModelStep::Complete { text } => {
@@ -312,6 +326,12 @@ where
                         run.advance_tool_call(&step_id, &call.id, ToolCallStatus::Running)?;
                     }
                 }
+                log::debug!(
+                    target: "aemeath:agent:runtime",
+                    "[run_loop] execute_tools count={} run_id={}",
+                    guarded_calls.len(),
+                    short(run.id()),
+                );
                 let tool_step = match await_interruptible(
                     run,
                     cancel,
@@ -439,14 +459,29 @@ where
 {
     if run.status() != RunStatus::Cancelling {
         if !port.claim_cancellation(run.id()) {
+            log::debug!(
+                target: "aemeath:agent:runtime",
+                "[cancel_run] cancellation not claimed (owned by another port) run_id={}",
+                short(run.id()),
+            );
             return Ok(());
         }
         match run.request_cancellation() {
             RunCancellationRequest::Accepted | RunCancellationRequest::AlreadyCancelling => {}
             RunCancellationRequest::AlreadyTerminal => return Ok(()),
         }
+        log::debug!(
+            target: "aemeath:agent:runtime",
+            "[cancel_run] phase1 CancellationRequested run_id={}",
+            short(run.id()),
+        );
         emit_events(run, port).await?;
     }
+    log::debug!(
+        target: "aemeath:agent:runtime",
+        "[cancel_run] phase2 finish_cancellation run_id={}",
+        short(run.id()),
+    );
     run.finish_cancellation()?;
     emit_events(run, port).await
 }
@@ -459,9 +494,67 @@ where
     if events.is_empty() {
         return Ok(());
     }
+    for event in &events {
+        log::debug!(
+            target: "aemeath:agent:runtime",
+            "[run_domain] {} run_id={} parent={}",
+            event_name(event),
+            event_short_id(event),
+            event.parent_run_id().map(|id| short(id)).unwrap_or_else(|| "none".into()),
+        );
+    }
     if let Err(error) = port.emit(events.clone()).await {
         run.restore_events(events);
         return Err(error);
     }
     Ok(())
+}
+
+fn short(id: &sdk::RunId) -> String {
+    let s = id.to_string();
+    if s.len() > 8 {
+        s.split_at(8).0.to_string()
+    } else {
+        s
+    }
+}
+
+fn event_name(event: &RunDomainEvent) -> &'static str {
+    match event {
+        RunDomainEvent::Started { .. } => "Started",
+        RunDomainEvent::StepStarted { .. } => "StepStarted",
+        RunDomainEvent::StepCompleted { .. } => "StepCompleted",
+        RunDomainEvent::CancellationRequested { .. } => "CancellationRequested",
+        RunDomainEvent::AwaitingUser { .. } => "AwaitingUser",
+        RunDomainEvent::Resumed { .. } => "Resumed",
+        RunDomainEvent::StuckDetected { .. } => "StuckDetected",
+        RunDomainEvent::Completed { .. } => "Completed",
+        RunDomainEvent::Failed { .. } => "Failed",
+        RunDomainEvent::Cancelled { .. } => "Cancelled",
+    }
+}
+
+fn event_short_id(event: &RunDomainEvent) -> String {
+    let id = match event {
+        RunDomainEvent::Started { run_id, .. }
+        | RunDomainEvent::StepStarted { run_id, .. }
+        | RunDomainEvent::StepCompleted { run_id, .. }
+        | RunDomainEvent::CancellationRequested { run_id, .. }
+        | RunDomainEvent::AwaitingUser { run_id, .. }
+        | RunDomainEvent::Resumed { run_id, .. }
+        | RunDomainEvent::StuckDetected { run_id, .. }
+        | RunDomainEvent::Completed { run_id, .. }
+        | RunDomainEvent::Failed { run_id, .. }
+        | RunDomainEvent::Cancelled { run_id, .. } => run_id,
+    };
+    short(id)
+}
+
+fn model_step_label(step: &ModelStep) -> &'static str {
+    match step {
+        ModelStep::Complete { .. } => "Complete",
+        ModelStep::Continue { .. } => "Continue",
+        ModelStep::StopHookBlocked { .. } => "StopHookBlocked",
+        ModelStep::Tools { .. } => "Tools",
+    }
 }
