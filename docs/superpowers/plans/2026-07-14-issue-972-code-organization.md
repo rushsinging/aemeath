@@ -98,7 +98,7 @@
 **Files:**
 - Verify all files changed in Tasks 1-3.
 
-- [ ] **Step 1: Check the retired concept is absent from target design prose**
+- [x] **Step 1: Check the retired concept is absent from target design prose**
 
   Run:
 
@@ -108,7 +108,7 @@
 
   Expected: the only permitted match is the exact legacy script identifier in `architecture-guards.md` and `migration-governance.md`; no target architecture prose uses the concept.
 
-- [ ] **Step 2: Check required coverage and source traceability**
+- [x] **Step 2: Check required coverage and source traceability**
 
   Run:
 
@@ -118,7 +118,7 @@
 
   Expected: every ecosystem and the decision traceability section is present.
 
-- [ ] **Step 3: Check Markdown whitespace and links mechanically**
+- [x] **Step 3: Check Markdown whitespace and links mechanically**
 
   Run:
 
@@ -146,7 +146,9 @@
 
   Expected: no whitespace errors and no missing relative Markdown targets.
 
-- [ ] **Step 4: Run architecture and repository verification**
+  Result: all 10 changed Markdown files pass. The full-tree scan still reports the pre-existing Server Foundation link missing from `docs/design/02-modules/server/01-design.md`; the same link is present on `origin/release/v0.1.0` and is outside #972.
+
+- [x] **Step 4: Run architecture and repository verification**
 
   Run:
 
@@ -156,6 +158,8 @@
   ```
 
   Expected: both commands exit 0.
+
+  Result: architecture guards pass with Homebrew Python on `PATH` because the existing script uses Python 3.10+ union syntax while macOS `/usr/bin/python3` is 3.9.6; `cargo test --workspace` and `cargo clippy --workspace --all-targets` pass.
 
 ### Task 5: Integrate through the release branch
 
