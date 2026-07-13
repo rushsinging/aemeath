@@ -1,9 +1,9 @@
 # #828 user_guidance 多层级收集实施计划
 
-**日期**：2026-07-13  
-**对应 Issue**：[#828](https://github.com/rushsinging/aemeath/issues/828)  
-**父 Issue**：[#547](https://github.com/rushsinging/aemeath/issues/547)  
-**目标分支**：`release/v0.1.0`  
+**日期**：2026-07-13
+**对应 Issue**：[#828](https://github.com/rushsinging/aemeath/issues/828)
+**父 Issue**：[#547](https://github.com/rushsinging/aemeath/issues/547)
+**目标分支**：`release/v0.1.0`
 **工作分支**：`feat/828-user-guidance-hierarchy`
 
 ## 目标
