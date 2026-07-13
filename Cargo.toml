@@ -34,6 +34,7 @@ sha2 = "0.10"
 flate2 = "1.0"
 tar = "0.4"
 inventory = "0.3"
+rustix = { version = "1", features = ["fs"] }
 
 [workspace.package]
 version = "0.0.0"

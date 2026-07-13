@@ -3098,12 +3098,17 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "storage"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "dirs",
+ "libc",
  "log",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "share",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "uuid",
 ]
