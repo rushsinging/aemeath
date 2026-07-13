@@ -15,11 +15,11 @@
 **Files:**
 - Create: `docs/design/01-system/06-code-organization.md`
 
-- [ ] **Step 1: Write the decision and non-goals**
+- [x] **Step 1: Write the decision and non-goals**
 
   State the adopted shape as `capability-first modular monolith + use-case colocation + ports on demand`. Explicitly distinguish DDD strategic design, Hexagonal inside/outside isolation, Clean dependency direction, and Vertical Slice change locality from directory templates.
 
-- [ ] **Step 2: Define the progressive structure ladder**
+- [x] **Step 2: Define the progressive structure ladder**
 
   Document the promotion sequence:
 
@@ -33,15 +33,15 @@
 
   Include explicit entry and exit criteria for `model/`, ports, technology-specific directories, and new crates.
 
-- [ ] **Step 3: Add aemeath examples**
+- [x] **Step 3: Add aemeath examples**
 
   Include three target examples: a small policy module, a provider integration module named by protocol/provider, and the complex Runtime module organized around run/loop/coordinator capabilities.
 
-- [ ] **Step 4: Add ecosystem and paradigm examples**
+- [x] **Step 4: Add ecosystem and paradigm examples**
 
   Cover JVM/Spring Modulith, .NET eShop and Vertical Slice, Go official module layout, Rust rust-analyzer/Helix, and Chromium components. Each example must show a compact tree, the boundary mechanism, and the part aemeath does or does not copy.
 
-- [ ] **Step 5: Add decision traceability**
+- [x] **Step 5: Add decision traceability**
 
   End with a table whose columns are `最终决策`, `主要参考`, `借鉴`, and `未照搬`. Link primary sources close to each claim and include rejected alternatives with reasons.
 
@@ -75,6 +75,7 @@
 - Modify: `docs/design/03-engineering/architecture-guards.md`
 - Modify: `docs/design/03-engineering/migration-governance.md`
 - Modify: `AGENTS.md`
+- Modify: `specs/project.md`
 
 - [ ] **Step 1: Make the Project target tree capability-first**
 
@@ -88,9 +89,9 @@
 
   Add a Current-to-Target entry to `migration-governance.md`: current feature directories and the fixed-layer guard remain until a dedicated Guard issue replaces them with public-surface, cross-feature, cycle, and Composition Root checks.
 
-- [ ] **Step 4: Remove the retired concept from root instructions**
+- [ ] **Step 4: Remove the retired concept from project instructions**
 
-  Update the Project row in `AGENTS.md` to describe workspace ownership and the git outbound port without naming or mandating the retired directory template.
+  Update the Project row in `AGENTS.md` to describe workspace ownership and the git outbound port without naming or mandating the retired directory template. Reframe the existing directory constraints in `specs/project.md` as migration-period implementation constraints, preserving the runtime truth without retaining the retired architecture concept.
 
 ### Task 4: Validate the documentation set
 
@@ -102,7 +103,7 @@
   Run:
 
   ```bash
-  rg -n -i '\bCOLA\b' docs/design AGENTS.md
+  rg -n -i '\bCOLA\b' docs/design AGENTS.md specs/project.md
   ```
 
   Expected: the only permitted match is the exact legacy script identifier in `architecture-guards.md` and `migration-governance.md`; no target architecture prose uses the concept.
@@ -170,7 +171,7 @@
   Run:
 
   ```bash
-  git add docs/design docs/superpowers/plans/2026-07-14-issue-972-code-organization.md AGENTS.md
+  git add docs/design docs/superpowers/plans/2026-07-14-issue-972-code-organization.md AGENTS.md specs/project.md
   git commit -m "docs(architecture): define adaptive code organization (#972)"
   ```
 
