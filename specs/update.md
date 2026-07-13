@@ -3,9 +3,11 @@
 > 路径触发：`agent/features/update/**`
 > 场景触发：改版本检查逻辑 / 更新渠道配置
 
-## 架构
+## 迁移期实现约束
 
-`update` crate 遵循 COLA 分层（`contract` → `gateway` → `api`），经 composition 装配为 `Arc<dyn UpdateService>`。
+`update` crate 当前使用下列扁平运行路径，并经 composition 装配为 `Arc<dyn UpdateService>`。在对应迁移 leaf 完成前，Update 改动 **MUST** 保持这些入口与现行 SDK 行为兼容。
+
+这些文件名只描述迁移期实现，**NEVER** 作为 Update 或其他 feature 的 Target 目录模板。Target 组织 **MUST** 遵循[代码组织规范](../docs/design/01-system/06-code-organization.md)；已启用守卫的脚本行为 **MUST** 以[架构守卫注册表](../docs/design/03-engineering/architecture-guards.md)为真相源；Current → Target 差距、责任与退出条件 **MUST** 只在[迁移治理](../docs/design/03-engineering/migration-governance.md)维护。
 
 ```
 agent/features/update/src/
@@ -114,7 +116,7 @@ pub struct UpdateConfig {
 ## 验证
 
 ```bash
-cargo test -p update                    # 17 个单元测试
-cargo clippy -p update -p cli           # 零 warning
-bash .agents/hooks/check-architecture-guards.sh  # 17 个 guard 通过
+cargo test -p update
+cargo clippy -p update -p cli
+bash .agents/hooks/check-architecture-guards.sh
 ```

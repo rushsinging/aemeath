@@ -4,12 +4,13 @@
 > 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 / #761（S2 盘点）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/project.md`](../../../specs/project.md)。
 
-## 1. 代码组织与守卫 Current → Target（#972）
+## 1. 代码组织、装配与守卫 Current → Target（#972）
 
 | # | Current | Target | 责任与退出条件 |
 |---|---|---|---|
 | O1 | 普通 feature 仍受迁移期固定层目录约束，context feature 保留脚本级精确顶层例外；完整脚本行为与常量见 [Architecture Guards](architecture-guards.md) | 按 [代码组织规范](../01-system/06-code-organization.md) 收敛为 capability-first modular monolith + use-case colocation + ports on demand，并使用 Rust 2018+ 无 `mod.rs` 形状 | 具体 feature 迁移 leaf sub-issue 尚未创建、未排期；在创建并原生关联到 [#763](https://github.com/rushsinging/aemeath/issues/763) 前，**NEVER** 开始实施。#763 只承担 Guard + Verify 总验收 |
 | O2 | `check-cola-layer-purity.sh` 仍在 Stop 阶段运行；其检查行为、常量与白名单见 [Architecture Guards](architecture-guards.md) | 由守卫机械验证 capability-first 新规范的窄公开面、跨 feature 依赖、循环依赖与 Composition Root 装配 | legacy guard 替换 leaf sub-issue 尚未创建、未排期；在创建并原生关联到 #763 前，**NEVER** 开始实施。#763 只承担 Guard + Verify 总验收，退出证据见下 |
+| O3 | `WorkspaceService::new(cwd)` 内部选择 `GitCli`，`with_git(cwd, git)` 作为测试注入特例 | `WorkspaceService` 只保留 crate-private 注入构造 `new(cwd, Arc<dyn GitWorktreeOps>)`；`project::api::wire_production_workspace(cwd)` 在 Project 内构造私有 `GitCli` 并返回 composition-only opaque handle，后者只分发三个窄 trait view 并拥有 isolated derivation | 具体构造迁移 leaf sub-issue 尚未创建、未排期；在创建并原生关联到 [#763](https://github.com/rushsinging/aemeath/issues/763) 前，**NEVER** 开始实施。退出证据 **MUST** 包含守卫将 factory / handle 的跨 crate 消费限制在 `agent/composition`，并禁止 `GitCli` / `GitWorktreeOps` 泄漏到 Project 外部；#763 只承担 Guard + Verify 总验收 |
 
 #972 只对齐文档，**NEVER** 修改目录实现、守卫脚本或开始上述迁移。在具体 leaf sub-issue 完成创建、排期和原生关联前，迁移期固定层级守卫 **MUST** 保持运行。
 
@@ -230,4 +231,4 @@ legacy guard 替换的退出证据 **MUST** 包括：
 | 2026-07-12 | 新增 Memory 缺口 M1-M9 与 SessionReminders、MemoryStore 领域方法退役项 | #789 |
 | 2026-07-12 | 新增 Storage S1-S7、Logging L1-L7、Application Version Control V1-V8 缺口与退役项 | #793 |
 | 2026-07-12 | 新增 Policy/Hook/Audit 缺口 PHA1-PHA16 与 Audit/Cost/Stop Hook 退役项 | #790 |
-| 2026-07-14 | 新增固定层目录与迁移期守卫的 Current → Target 记录，明确 #763 只承担总验收，leaf sub-issue 尚未创建 / 排期，并登记退出证据 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 新增固定层目录、迁移期守卫与 WorkspaceService 自行选择 GitCli 的 Current → Target 记录，明确 production factory 的 composition-only guard 退出证据、#763 总验收职责及具体 leaf sub-issue 尚未创建 / 排期 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

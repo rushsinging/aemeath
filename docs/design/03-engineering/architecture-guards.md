@@ -145,7 +145,7 @@
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
 - **功能**：检查普通 feature 的迁移期固定层目录与层间依赖方向，并对 context feature 应用下述精确顶层目录例外。
-- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的非测试 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非测试 Rust 行中的 `crate::<layer>` 引用（`use` 可选）；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS`、且文件路径未被 `is_test_path` 判定为测试路径的 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非空且不以 `//` 或 `*` 开头的行中的 `crate::<layer>` 引用（`use` 可选）。脚本不解析普通文件内的 `#[cfg(test)]` block，因此其中符合匹配条件的行仍会被扫描；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **层定义**：`FEATURE_LAYERS = {contract, gateway, core, business, utils}`。
 - **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature 放行这七个目录；其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
@@ -160,7 +160,7 @@
 
 - **检查方式**：
   - 扫描 `agent/features/*/src/*` 的顶层子目录：普通 feature 的目录名必须在 `FEATURE_LAYERS` 内；context feature 另放行 `CONTEXT_DOMAIN_DIRS`。
-  - 依赖方向扫描跳过测试 Rust 文件，且只对 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的文件按层分类；匹配非测试 Rust 行中的 `crate::<layer>` 引用（`use` 可选），并按上表核查。
+  - 依赖方向扫描按路径跳过 `*_test.rs`、`*_tests.rs`、文件 stem 为 `tests` 或路径段含 `tests` 的 Rust 文件，且只对 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的文件按层分类；逐行跳过空行及以 `//` 或 `*` 开头的行，再匹配 `crate::<layer>` 引用（`use` 可选）并按上表核查。普通文件中的 `#[cfg(test)]` block **NEVER** 获得额外豁免。
   - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**（已迁到 `agent/features/*`）。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
 
@@ -508,4 +508,4 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-14 | 将固定层级检查重分类为迁移期守卫，保留脚本行为、常量与白名单，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |

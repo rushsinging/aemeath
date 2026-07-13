@@ -1,7 +1,7 @@
 # Workspace 领域模型
 
 > 层级：02-modules / project（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#791（S2）
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#791（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 
 ## 1. Workspace 聚合根
 
@@ -136,7 +136,7 @@ fn fork(&self) -> Arc<Self>:
 - 子 agent 的 enter / exit 操作只影响自己的 state，父 agent 无感知。
 - `git` 端口共享是安全的（git CLI 是无状态命令）。
 
-> **Decision**：fork 是 Workspace BC 的核心隔离范式，与 Runtime 的 SubAgent ExecutionPolicy 对齐。SubAgent 的 `RuntimeContext` 持有独立的 `WorkspaceService` 实例。
+> **Decision**：fork 是 Workspace BC 的核心隔离范式，与 Runtime 的 SubAgent ExecutionPolicy 对齐。production wiring handle 的 `derive_isolated()` **MUST** 委托 `WorkspaceService::fork()`，再按需分发新实例的 `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist` 独立 view；`WorkspaceService` 与 opaque handle **NEVER** 泄漏为业务契约。
 
 ## 5. WorkspaceError
 
@@ -161,12 +161,13 @@ fn fork(&self) -> Arc<Self>:
 
 ### 6.1 定位
 
-`WorkspaceService` 是 Workspace BC 的唯一生产入口：
+`WorkspaceService` 是单个 workspace context 内的有状态 façade 与唯一可变状态持有者，**NEVER** 是生产装配入口：
 
 - 持有 `Mutex<WorkspaceState>`（单一可变状态源）。
 - 持有 `Arc<dyn GitWorktreeOps>`（git 出站端口）。
 - 实现 `WorkspaceRead` + `WorkspaceControl` + `WorkspacePersist`。
 - 提供 `fork()` 派生子实例。
+- 只消费构造时注入的 git 出站端口，**NEVER** 自行选择生产适配器。
 
 ### 6.2 锁策略
 
@@ -174,23 +175,33 @@ fn fork(&self) -> Arc<Self>:
 - `lock()` 使用 `unwrap_or_else(|e| e.into_inner())` 处理毒锁——即使持有锁的线程 panic 也能继续。
 - `in_worktree()` 先克隆 `workspace_root` 释放状态锁，再 spawn git 子进程，避免持锁期间阻塞。
 
-### 6.3 构造
+### 6.3 构造与装配
 
 | 方法 | 说明 |
 |---|---|
-| `new(cwd)` | 生产构造，使用 `GitCli` |
-| `with_git(cwd, git)` | 测试构造，注入 `FakeGit` |
-| `fork(&self)` | 派生子 agent 实例 |
+| `pub(crate) new(cwd, git: Arc<dyn GitWorktreeOps>)` | 使用注入的 git 出站端口构造模块 façade；只供 Project 内部 wiring 与测试 |
+| `project::api::wire_production_workspace(cwd)` | 仅供 Composition Root 选择的生产 factory；返回 opaque wiring handle |
+| `fork(&self)` | Project 内部派生子 agent 实例，由 wiring handle 的 `derive_isolated()` 委托 |
+
+- `WorkspaceService` 的 Target 构造 **MUST** 只接受注入的 `Arc<dyn GitWorktreeOps>`，并 **MUST** 保持 crate-private。
+- `wire_production_workspace(cwd)` **MUST** 在 Project 内部构造私有 `GitCli`，调用 crate-private 构造，并返回字段不公开的 Project-owned wiring handle。
+- Composition Root **MUST** 通过调用该 factory 选择 Project 的生产 wiring，**NEVER** 直接命名、持有或构造私有 `GitCli` / `GitWorktreeOps`。
+- opaque wiring handle **MUST** 分别提供 `WorkspaceRead`、`WorkspaceControl`、`WorkspacePersist` view 与 Project-owned `derive_isolated()`；业务消费者 **NEVER** 接收该 handle。
+- 测试 **MUST** 通过同一 crate-private 构造契约注入 `FakeGit`。
 
 ## 7. 相关文档
 
 - Workspace 端口与适配器：[02-ports-and-adapters.md](02-ports-and-adapters.md)
 - 模块入口：[README.md](README.md)
 - 统一语言：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md) §7
+- 系统架构：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - Runtime 领域模型（SubAgent / ExecutionPolicy）：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
+- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：Workspace 聚合根、Frame 栈、状态转换规则、fork、错误模型 | #791 |
+| 2026-07-14 | 将 WorkspaceService 定位为模块有状态 façade 与 crate-private 注入构造，以 Project-owned factory 向 Composition Root 提供 production wiring，并由 opaque handle 保留隔离派生与三个窄 trait view | [#972](https://github.com/rushsinging/aemeath/issues/972) |
