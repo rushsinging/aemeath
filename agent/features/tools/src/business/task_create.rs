@@ -93,14 +93,18 @@ impl TypedTool for TaskCreateTool {
             .create_with_priority(subject, description, active_form, priority)
             .await;
 
-        // Set additional fields if provided
+        // Set additional fields if provided — skip empty strings to avoid dirty data
         if let Some(session_id) = args.session_id {
-            self.store
-                .update(&task.id, |t| t.session_id = Some(session_id))
-                .await;
+            if !session_id.is_empty() {
+                self.store
+                    .update(&task.id, |t| t.session_id = Some(session_id))
+                    .await;
+            }
         }
         if let Some(owner) = args.owner {
-            self.store.update(&task.id, |t| t.owner = Some(owner)).await;
+            if !owner.is_empty() {
+                self.store.update(&task.id, |t| t.owner = Some(owner)).await;
+            }
         }
         if let Some(tags) = args.tags {
             self.store.update(&task.id, |t| t.tags = tags).await;
@@ -129,3 +133,7 @@ impl TypedTool for TaskCreateTool {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "task_create_tests.rs"]
+mod tests;
