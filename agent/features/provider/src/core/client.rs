@@ -394,8 +394,11 @@ impl LlmClient {
                 .collect();
 
             log::debug!(target: LOG_TARGET,
-                "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} tool_calls={} thinking_blocks={}",
+                "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} cached_tokens={} cache_creation_tokens={} reasoning_tokens={} tool_calls={} thinking_blocks={}",
                 resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
+                resp.usage.cached_tokens.unwrap_or(0),
+                resp.usage.cache_creation_tokens.unwrap_or(0),
+                resp.usage.reasoning_tokens.unwrap_or(0),
                 tool_uses.len(), thinking_info.len(),
             );
             log::trace!(target: LOG_TARGET,

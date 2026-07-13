@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-    <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>。
+        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>。
   </p>
 
   <div class="timeline">
@@ -1041,7 +1041,596 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
         <div class="tl-out">产出 · runtime 战术设计定稿，<b>健壮性完整</b></div>
       </div>
     </div>
+
+  <!-- ===== 阶段十二：Context Management 实战经验 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>读模型 vs 持久层 · 同一 BC 内的两种作用层</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Context Management 的 compact 家族五级管线（L1-L5），初稿把 L3 microcompact 设计为修改 ChatChain 的独立端口方法——review 后推翻：<b>只有 L5 auto-compact 修改 ChatChain</b>，L1-L4 全是读模型变换。</p>
+      <ul class="tl-list">
+        <li>L1 budget reduction 在 tool 出站时截断（入 ChatChain 前），不入 build_window</li>
+        <li>L2 snip / L3 microcompact / L4 context collapse 都是 <b>build_window 内部读模型变换</b>——只影响 ContextWindow.messages，ChatChain 原始数据不变</li>
+        <li>L5 auto-compact 是<b>唯一修改 ChatChain</b>的策略（创建 Compact segment，冻结旧链）</li>
+        <li>端口签名从 4 方法收敛为 3 方法：<b>microcompact 内聚到 build_window</b>，Runtime 不感知内部策略分层</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">读模型 vs 持久层 · compact 管线</span><span class="d">build_window</span>  L2 snip → L3 microcompact → L4 collapse    <span class="m">// 读模型，不改 ChatChain</span>
+<span class="d">compact</span>       L5 auto-compact                              <span class="m">// 持久层，创建 Compact segment</span>
+
+<span class="m">// 五级管线是 ContextPort 实现细节，Runtime 只调 3 个方法</span></pre>
+      <div class="tl-out">产出 · ContextPort 3 方法签名定稿，<b>读模型与持久层职责分离</b></div>
+    </div>
   </div>
+
+  <!-- ===== 阶段十三：cacheable 判据 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>cacheable 不是按类型分 · 是按变化频率分</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">初稿把系统提示分为 static_part（cacheable）/ dynamic_part（non-cacheable）——user_guidance、skills、memory 被归入 dynamic 不 cache。review 后推翻：<b>它们变化频率低，不变时应 cache</b>，变化时 miss 重算一次后恢复。</p>
+      <ul class="tl-list">
+        <li><b>错误分法</b>：按"静态/动态"类型分组 → user_guidance / skills / memory 被错误排除出 cache</li>
+        <li><b>正确分法</b>：按<b>内容是否变化</b>判定——每部分独立检测（mtime / fingerprint / hash 比对）</li>
+        <li>cacheable_prefix 纳入 user_guidance / skills / memory / active_summary；uncached_suffix 只留 current_date / git_context / task_reminder</li>
+        <li>memory 通过 <b>entry fingerprint</b> 检测变化——reflection 写入时 miss 一次，下一轮恢复命中</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">cacheable_prefix · 低频变化内容</span><span class="d">discipline + guidance + skills + roles</span>
+<span class="d">user_guidance + memory + active_summary</span>     <span class="m">// mtime / fingerprint 检测变化</span>
+↓ cache_control 断点
+<span class="tag">uncached_suffix · 每轮可能变</span><span class="d">current_date + git_context + task_reminder</span></pre>
+      <div class="tl-out">产出 · cache 命中率从"每轮 miss"提升到<b>"不变即命中"</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十四：组合加载 vs fallback ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>组合加载 vs fallback · 别用 break 杀掉信息</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">guidance 文件和 user_guidance（AGENTS.md / CLAUDE.md）初稿都设计为"取第一个存在的就 break"——review 后改为<b>组合加载</b>：所有匹配的文件都追加，从通用到具体逐层叠加。</p>
+      <ul class="tl-list">
+        <li><b>model guidance</b>：_default.md 总是加载 + 所有前缀匹配的 {prefix}.md 都追加（短前缀→长前缀）+ _reasoning.md（is_reasoning 时）</li>
+        <li><b>user guidance</b>：全局 ~/.agents/AGENTS.md + ~/.claude/CLAUDE.md + 项目从远到近每层 AGENTS.md / CLAUDE.md 都加载</li>
+        <li>每段带<b>路径信息</b>：<code>&lt;guidance source="~/.agents/guidance/Zhipu.md"&gt;...&lt;/guidance&gt;</code></li>
+        <li>命名收敛：CLAUDE.md / AGENTS.md 统称 <b>user_guidance</b>；cwd → <b>project_root</b></li>
+      </ul>
+      <pre class="bp-code"><span class="tag">组合加载 · 从通用到具体</span><span class="d">_default.md</span>          <span class="m">// 系统通用</span>
+<span class="d">Zhipu.md</span>             <span class="m">// 厂商通用</span>
+<span class="d">Zhipu/glm.md</span>        <span class="m">// 模型系列</span>
+<span class="d">Zhipu/glm-5.md</span>      <span class="m">// 版本特定</span>
+<span class="d">_reasoning.md</span>       <span class="m">// reasoning 模式</span>
+
+<span class="m">// fallback 会丢掉更具体的 guidance；组合加载才完整</span></pre>
+      <div class="tl-out">产出 · guidance 和 user_guidance <b>同策略组合加载</b>，每段带路径溯源</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十五：正交关注点不混入 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>正交关注点不混入 · reasoning 与常量收口</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">两个看似无关的问题，本质同一：关注点越界——一个混入了不该属于该层的参数，一个散落在三个文件里没有单一真相。</p>
+      <ul class="tl-list">
+        <li><b>reasoning 正交性</b>：<code>is_reasoning</code> 是 guidance 层开关（加载 _reasoning.md），与 provider API 参数（<code>reasoning_effort</code> / <code>thinking.budget_tokens</code>）正交——LLM 不需要"知道"自己开了 reasoning</li>
+        <li><b>常量收口</b>：8192 / 13000 / 20000 三个魔法常量散落在 <code>token_estimation.rs</code> 三处，<b>max_output_tokens 硬编码 8192 忽略模型真实 max_tokens</b> → 统一到 <b>TokenBudgetConfig</b>，max_output 从 ProviderPort 获取</li>
+        <li><b>幂等决策（#550）</b>：<code>needs_compaction</code> 是纯函数，但 PreCompact hook 每轮无条件触发破坏幂等 → <b>CompactionFingerprint</b> 不变时跳过 hook</li>
+        <li><b>circuit breaker 死代码</b>：<code>AutoCompactState</code> 完整实现但从未接入主循环 → 设计中明确接入点</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">正交关注点 · 不混入</span><span class="d">PromptPort</span>  is_reasoning → 加载 _reasoning.md guidance  <span class="m">// guidance 层</span>
+<span class="d">ProviderPort</span> reasoning_effort → API 参数              <span class="m">// provider 层</span>
+<span class="m">// 两者正交，不互相注入</span>
+
+<span class="tag">常量收口 · 单一真相</span><span class="d">TokenBudgetConfig</span>  max_summary_output / buffer / safety_factor
+<span class="d">ProviderPort</span>        max_output_tokens(model)  <span class="m">// 替代硬编码 8192</span></pre>
+      <div class="tl-out">产出 · 四个关注点各归其位：<b>guidance / API 参数 / 预算常量 / 幂等指纹</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十六：检索与注入分离 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>检索与注入分离 · 谁输出数据 vs 谁决定放哪</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Memory BC 初稿把"注入位置"也归自己管——review 后推翻：Memory 只输出检索结果和格式化文本，<b>注入位置、token 预算、与 guidance/skill 的排序全归 Context Management</b>。这是 XII"读模型 vs 持久层"的跨 BC 版本。</p>
+      <ul class="tl-list">
+        <li>Memory BC 职责：<code>top_for_inject(limit)</code> 返回排序后的 MemoryEntry + <code>format_injection_block</code> 格式化</li>
+        <li>Context Management 职责：决定注入位置（system block 顺序）、token 预算分配、跨轮去重</li>
+        <li>判据：<b>谁拥有 Context Window 结构，谁决定注入策略</b>——Memory 是数据提供者不是窗口管理者</li>
+        <li>附产物：<code>top_for_inject</code> 不 touch（只读），避免注入行为导致排序漂移</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">跨 BC 职责分离 · 检索 vs 注入</span><span class="d">Memory BC</span>      top_for_inject() → Vec&lt;MemoryEntry&gt;     <span class="m">// 读模型，只排序</span>
+<span class="d">Memory BC</span>      format_injection_block() → String        <span class="m">// 格式化</span>
+<span class="d">Context Mgmt</span>   决定注入位置 / 预算 / 去重 / 排序        <span class="m">// 拥有 Context Window</span>
+
+<span class="m">// Memory 不知道自己被放在哪；CM 不知道记忆怎么排序</span></pre>
+      <div class="tl-out">产出 · MemoryPort 只管检索与格式化，<b>注入策略归 Context Management</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十七：领域服务不依赖外部资源 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域服务不依赖外部资源 · Reflection 不依赖 ProviderPort</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Reflection 需要调 LLM，但 Memory BC 不应依赖 ProviderPort——否则 Context Map 多出一条 Memory→Provider 边，破坏依赖方向。解法：<b>把 Reflection 拆为领域逻辑（prompt/output/apply）和编排逻辑（LLM 调用）</b>，前者归 Memory BC，后者归 Runtime。</p>
+      <ul class="tl-list">
+        <li>Memory BC 暴露 <b>ReflectionPromptPort</b>：build_prompt（纯函数）、parse_output、apply_output——不调 LLM</li>
+        <li>Runtime 经 ProviderPort 发起 LLM 调用，把原始响应交回 Memory BC parse + apply</li>
+        <li>双端口分离：<b>MemoryPort</b>（CRUD + 检索）给 context_coordination 和 slash 命令用；<b>ReflectionPromptPort</b>给 Runtime reflection 编排用——消费方不同、演进方向不同</li>
+        <li>与 IX 对照：Tool/Skill/Command 异构不硬统一；MemoryPort/ReflectionPromptPort <b>同属 Memory BC 但职责正交</b>，分端口而非合并</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">领域服务 · 不依赖外部资源</span><span class="d">Memory BC</span>    ReflectionPromptPort::build_prompt()    <span class="m">// 纯函数</span>
+<span class="d">Memory BC</span>    ReflectionPromptPort::parse_output()    <span class="m">// 纯函数</span>
+<span class="d">Memory BC</span>    ReflectionPromptPort::apply_output()     <span class="m">// 经 MemoryPort 写入</span>
+<span class="d">Runtime</span>      call_llm() → ProviderPort               <span class="m">// 编排，Memory 不参与</span>
+
+<span class="m">// Memory BC 无 Memory→Provider 边；依赖方向保持一致</span></pre>
+      <div class="tl-out">产出 · Memory BC 无 ProviderPort 依赖，<b>双端口按消费方分离</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十八：异步执行不阻塞主循环 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>异步执行不阻塞主循环 · Reflection 从同步改异步</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">初稿中 Reflection 的三种触发（interval / pre-compact / forced）全部同步 await——主循环在等 LLM 返回时完全阻塞。review 后推翻：<b>interval 和 pre-compact 改为 tokio::spawn 后台执行</b>，只有 forced（用户主动 <code>/reflection</code>）保持同步。</p>
+      <ul class="tl-list">
+        <li><b>Interval</b>：Run 完成后 spawn 后台反思，主循环立即处理 outcome / 下一轮——结果通过 mpsc channel 在后续轮次回传</li>
+        <li><b>Pre-compact</b>：compact 前抓 messages 快照交给后台任务，<b>compact 立即继续不等待</b>——反思用快照跑，用户可能在 compact 后才看到结果，可接受</li>
+        <li><b>Forced</b>：<code>/reflection</code> 是用户主动请求，保持同步 await</li>
+        <li>并发控制：<b>单一后台 slot</b>（interval + pre-compact 共享），前一个未完成时跳过本次；Run 结束时 drain，避免孤儿任务</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">异步执行 · 不阻塞主循环</span><span class="d">Interval</span>     spawn → 后台跑 → channel 回传          <span class="m">// 不阻塞</span>
+<span class="d">Pre-compact</span>  抓快照 → spawn → compact 立即继续       <span class="m">// 不阻塞</span>
+<span class="d">Forced</span>       await → 用户等结果                      <span class="m">// 同步</span>
+
+<span class="m">// 判据：用户是否在等结果？否 → 异步；是 → 同步</span></pre>
+      <div class="tl-out">产出 · 主循环零阻塞，<b>Reflection 在后台跑</b>，结果延迟到下一轮 emit</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十九：ACL 两层防腐 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>ACL 两层防腐 · 格式检测 + 语义翻译</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">兼容 Claude Code 的 settings.json 时，初稿只做格式检测——review 后指出 config 内容翻译也要防腐。外部 CLI 的字段语义和内部模型不对等，<b>不是字段名 1:1 直通</b>。</p>
+      <ul class="tl-list">
+        <li><b>第一层·格式检测防腐</b>：运行时检测文件格式（文件名 + 内容特征），未识别格式跳过 + 日志，不报错中断</li>
+        <li><b>第二层·内容语义翻译防腐</b>：外部字段经语义映射后产出 <code>ConfigPatch</code>——外部结构<b>不泄漏</b>到 Config domain</li>
+        <li>Claude <code>permissions.allow/deny</code> 规则列表 → <code>PermissionMode</code> 枚举（<b>聚合判断</b>，不是直通）</li>
+        <li>Claude <code>apiKeyHelper</code> 脚本 → 无法执行，<b>降级跳过 + warn</b>（不是塞原始结构进去）</li>
+        <li>新增外部 CLI 格式只加 translator（<code>ConfigTranslator</code> trait），不改 adapter / AppService / 分层</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">ACL 两层防腐</span><span class="d">CompatibilityAdapter</span>
+├─ <span class="m">// 第一层：格式检测</span>
+│   detect_format(path, content) → ConfigFormat
+│   未识别 → skip + log（不中断）
+│
+└─ <span class="m">// 第二层：语义翻译</span>
+    ClaudeTranslator::translate(content) → ConfigPatch
+      permissions  → PermissionMode（聚合判断）
+      env          → env 映射（过滤专有变量）
+      apiKeyHelper → skip + warn（降级）
+<span class="m">// 外部结构不泄漏到 Config domain</span></pre>
+      <div class="tl-out">产出 · <b>CompatibilityAdapter + ConfigTranslator trait</b>，两层防腐，外部格式可扩展</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十：clamp 统一 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>clamp 统一 · 3 处分散 → 1 个入口</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">ReasoningLevel 的 clamp 发生在 3 个时机（bootstrap / per-API-call / sub-agent setup），各自独立 clamp，导致 <code>max_reasoning</code> 配置已解析但从未生效，<code>current_reasoning_level()</code> 报告的值和实际发送给 provider 的值不一致（declared vs effective drift）。</p>
+      <ul class="tl-list">
+        <li><b>问题</b>：3 处 clamp 各拿各的上限——bootstrap 拿 user_cap，per-call 只拿 provider_max，<code>max_reasoning</code> 被跳过</li>
+        <li><b>目标</b>：<code>ReasoningPort.set_level()</code> 是<b>唯一 clamp 点</b>——内部 clamp <code>min(user_max, provider_max)</code></li>
+        <li>bootstrap / per-call / sub-agent 只调 <code>set_level</code>，不自行 clamp</li>
+        <li><code>current_level()</code> 返回<b>已 clamp 的有效值</b>——消除 declared vs effective drift</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">clamp 统一 · 唯一入口</span><span class="d">ReasoningPort::set_level</span>(desired)
+│  clamped = desired
+│      .min(user_max_reasoning)        <span class="m">// 用户配置上限</span>
+│      .min(provider.max_level())      <span class="m">// provider 模型上限</span>
+└─ inner.set_reasoning_level(clamped)
+
+<span class="m">// bootstrap / per-call / sub-agent 只调 set_level，不自行 clamp</span></pre>
+      <div class="tl-out">产出 · <b>ReasoningPort</b> 统一 clamp，<code>max_reasoning</code> 接入，drift 消除</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十一：暂缓条件明确 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>暂缓不是不做了 · 写明条件和远期规划</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">Workflow Engine（Phase 3 控制流编排）标记为暂缓——但"暂缓"不是"不做了"，设计文档中必须写明<b>暂缓原因</b>和<b>启动条件</b>，让后续开发者知道何时该重新评估。</p>
+      <ul class="tl-list">
+        <li><b>暂缓原因</b>：ReasoningGraph 已满足当前需求；Loop Engine 已是事实上的控制流；缺乏真实场景驱动</li>
+        <li><b>启动条件</b>（全部满足）：ReasoningGraph 稳定 + 出现 Loop Engine 无法表达的控制流需求 + 至少 2 个真实场景验证</li>
+        <li><b>远期方向</b>：与 ReasoningGraph 并存不替代——一个调 effort，一个调控制流；不修改 ChatChain（读模型层）</li>
+        <li>同理：<code>/think</code> 完整 6 级、L4 Context Collapse 等暂缓项都写明原因和条件</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">暂缓 ≠ 不做 · 写明条件</span><span class="d">Workflow Engine</span>  暂缓
+├─ 原因：ReasoningGraph 够用 + Loop Engine 事实控制流 + 无场景驱动
+└─ 启动条件（全部满足）：
+     1. ReasoningGraph 稳定
+     2. Loop Engine 无法表达的需求出现
+     3. ≥ 2 个真实场景验证
+
+<span class="m">// 暂缓项都有明确的重启条件，不是遗忘</span></pre>
+      <div class="tl-out">产出 · 暂缓项<b>条件化追踪</b>，不遗忘不盲启</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十二：领域模型极简 + 命名直觉 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域模型极简 · LLM 驱动系统的每个字段都是 token 成本</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Task BC 战术设计中发现：<code>progress</code> / <code>progress_message</code> 字段要求 LLM 每步更新，纯费 token 无消费方——直接砍掉。同轮中 <code>seed_isolated</code> 重命名为 <code>fork</code>：自造术语不如 Unix 语义直觉。</p>
+      <ul class="tl-list">
+        <li><b>字段存活判据</b>：每个字段必须回答"谁消费它"——TUI 不渲染、Runtime 不读取、快照不依赖的字段直接移除。LLM 驱动的领域模型尤其要极简，多余字段 = 每轮浪费 token</li>
+        <li><b>Batch 是领域服务非聚合根</b>：Batch 管理 Task 集合的分组与生命周期（Active / Paused / Archived），但无独立状态机——lifecycle 检测是纯函数，归档动作由调用方执行。不是每个"管理一组东西"的概念都需要是聚合根</li>
+        <li><b>Published Language 所有权</b>：Task 类型定义所有权属 Task BC，其他 BC 引用其发布类型经端口翻译——<b>NEVER</b> 自行定义副本。当前类型在 shared/tool/types 下（build.rs 生成 Schema 需要），目标迁移到 Task BC 所有权下</li>
+        <li><b>命名直觉化</b>：<code>seed_isolated</code> → <code>fork</code>——Unix fork 语义（继承父状态 + 独立可变）比自造术语更直觉，跨团队沟通成本更低</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">字段存活判据 · 谁消费它？</span><span class="d">Task.subject</span>        → TUI 渲染、用户可读          <span class="m">// 留</span>
+<span class="d">Task.status</span>         → Runtime 决策、TUI 渲染        <span class="m">// 留</span>
+<span class="d">Task.blocked_by</span>     → is_blocked 判定              <span class="m">// 留</span>
+<span class="d">Task.progress</span>       → ??? 无消费方                  <span class="m">// 砍</span>
+<span class="d">Task.progress_message</span> → ??? 无消费方                <span class="m">// 砍</span>
+
+<span class="tag">Batch · 领域服务非聚合根</span><span class="d">detect_batch_all_completed</span>(tasks) → Option&lt;batch_id&gt;  <span class="m">// 纯函数</span>
+<span class="d">detect_interrupted_batch</span>(tasks) → Option&lt;Info&gt;      <span class="m">// 纯函数</span>
+<span class="m">// 检测无副作用；归档动作由调用方执行</span>
+
+<span class="tag">fork · Unix 语义替代自造术语</span><span class="d">fn fork(&amp;self) -> Arc&lt;Self&gt;</span>
+  <span class="m">// 继承 root + path_base + initial_cwd</span>
+  <span class="m">// 空栈 + 独立锁 + 共享 git 端口</span></pre>
+      <div class="tl-out">产出 · Task 聚合砍掉 2 字段 / 1 不变量 / 1 事件；Batch 定位为领域服务；<code>fork</code> 替代 <code>seed_isolated</code></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十三：3+1 Context · 不拆但内聚子模块 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>3+1 Context · 不拆但内聚子模块</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">设计文档定 4 Context（Conversation / Input / Runtime / Diagnostic），代码把 RuntimeState 合并进 Conversation——review 时面临矛盾：不拆则 Conversation 臃肿，拆则跨 Context 通信开销大。<b>最终决策：不拆，通过内聚子模块 + 字段私有化控制臃肿。</b></p>
+      <ul class="tl-list">
+        <li>RuntimeState 与 chat 生命周期紧密耦合——chat 启动 → spinner 开始，chat 完成 → spinner 停止</li>
+        <li>拆成独立 Context 会增加跨 Context Intent/Change 通信开销，收益不明确</li>
+        <li><b>内聚子模块</b>：RuntimeState 作为 Conversation 的私有子模块，字段全私有，只经业务方法操作</li>
+        <li><b>臃肿通过封装控制</b>，不通过拆 Context 控制——"大但内聚"优于"小但耦合"</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">3+1 Context · 不拆但内聚</span><span class="d">ConversationModel</span>
+├─ chats: Vec&lt;Chat&gt;            <span class="m">// 对话结构</span>
+├─ timeline: OutputTimelineModel
+├─ <span class="d">runtime: RuntimeState</span>        <span class="m">// 内聚子模块，字段私有</span>
+│    ├─ spinner / usage / workspace
+│    └─ task_status / compact_progress
+└─ ask_user: AskUserState
+
+<span class="m">// "大但内聚" &gt; "小但耦合"</span></pre>
+      <div class="tl-out">产出 · <b>3+1 Context 定型</b>——不强行拆分，用封装控制复杂度</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十四：SDK DTO 从 runtime auto-gen ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>SDK DTO 从 runtime auto-gen · 别两边维护</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">SDK ↔ Runtime 类型同步存在三种方式：tool result 用 re-export（✅）、ChatEvent 用 444 行手工 match（⚠️ 已 5 处漂移）、ContentBlock 用 JSON round-trip（⚠️ 加变体静默降级）。<b>原则：Runtime 是类型定义唯一来源，SDK 不应两边维护。</b></p>
+      <ul class="tl-list">
+        <li><b>ChatEvent 漂移</b>：<code>DoneWithDuration { Duration }</code> → <code>DoneWithDurationMs { u64 }</code>（重命名+改类型）；<code>GraphPhaseChanged { ReasoningNode }</code> → <code>{ String }</code>（类型擦除）</li>
+        <li><b>ContentBlock 脆弱</b>：JSON round-trip 无编译期保证——加变体静默降级为空 Vec</li>
+        <li><b>目标</b>：ChatEvent 删除 444 行手工 match，ContentBlock 删 JSON round-trip，统一为 re-export</li>
+        <li>tool result 的 <code>pub use</code> re-export 模式是正确范例——其他两类应跟进</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">SDK DTO · 单一来源</span><span class="d">tool_result</span>    pub use → ✅ 单一来源，零漂移
+<span class="d">ChatEvent</span>       444 行手工 match → ⚠️ 5 处漂移 → 删 convert.rs
+<span class="d">ContentBlock</span>    JSON round-trip → ⚠️ 静默降级 → pub use share
+
+<span class="m">// Runtime 是唯一来源，SDK re-export，不两边维护</span></pre>
+      <div class="tl-out">产出 · <b>SDK DTO 收口目标态</b>——三类全走 re-export，加 CI shape 守卫</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十五：reducer 纯化 · 副作用隔离 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>reducer 纯化 · 副作用隔离到 Effect</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TEA 架构要求 Model update 是纯函数——但 <code>root_reducer</code> 直接调 <code>runtime.start_chat()</code> 等副作用方法。设计文档说"Model 不执行 IO"，代码违反。<b>目标态：reducer 只产出 Change，Coordinator 消费 Change 生成 Effect，Effect 执行副作用。</b></p>
+      <ul class="tl-list">
+        <li><b>当前</b>：<code>root_reducer → apply_change → runtime.start_chat()</code>（reducer 直接调副作用）</li>
+        <li><b>目标</b>：<code>root_reducer → apply_change → 产出 Change → Coordinator 消费 → 生成 Effect → EffectExecutor 执行</code></li>
+        <li>RuntimeState 字段私有化（当前全 <code>pub</code>，TODO 已标注）——副作用经业务方法，不经直接字段写</li>
+        <li>v0.1.0 只设计目标态，实现由后续 issue 承接</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">reducer 纯化 · 副作用隔离</span><span class="d">当前</span>  reducer → apply_change → runtime.start_chat()  <span class="m">// 副作用！</span>
+<span class="d">目标</span>  reducer → apply_change → Change
+      Coordinator → consume(Change) → Effect
+      EffectExecutor → execute(Effect)         <span class="m">// 副作用隔离在此</span>
+
+<span class="m">// reducer 只管状态转换，副作用归 Effect</span></pre>
+      <div class="tl-out">产出 · <b>reducer 纯化目标态</b>——Change → Effect 两段式，副作用隔离</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十六：死代码不是无害的 ===== -->
+  <div class="tl-item p-cln rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>死代码不是无害的 · allow 掩盖真相</h3><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI 代码走查发现：7 个 Msg 变体从未产生、4 个 Effect 变体 no-op、<code>coordinator.rs</code> 整个模块无调用方、4 个模块根级 <code>#![allow(dead_code)]</code> 掩盖一切。<b>死代码不是无害的——它误导后续开发者以为这些路径存在。</b></p>
+      <ul class="tl-list">
+        <li><b>7 个 Msg 变体</b>：<code>TimerTick</code> / <code>RenderTick</code> / <code>EffectCompleted</code> / <code>TerminalKey</code> / <code>TerminalMouse</code> / <code>TerminalResize</code> / <code>AgentEvent</code>——定义但从未产生</li>
+        <li><b>4 个 Effect 变体</b>：<code>StartTimer</code> / <code>StopTimer</code> / <code>RunHook</code> / <code>SetCurrentTurn</code>——no-op</li>
+        <li><b>4 个 <code>#![allow(dead_code)]</code></b>：model / update / effect / view_state 模块根级——掩盖真实死代码</li>
+        <li><b>分类处理</b>：删除（确认无用）/ 设计预留（标注 "reserved"）/ 待移除 allow（先暴露再清理）</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">死代码 · 分类处理</span><span class="d">删除</span>        7 Msg + 4 Effect + coordinator.rs + EffectResult
+<span class="d">设计预留</span>     标注 reserved（如有明确未来用途）
+<span class="d">待移除 allow</span>  移除 #![allow(dead_code)] → 暴露 → 逐个清理
+
+<span class="m">// allow(dead_code) 不是宽容，是掩盖</span></pre>
+      <div class="tl-out">产出 · <b>死代码清单 + 分类处理策略</b>——不让 allow 掩盖真相</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十七：投影层不自创术语 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影层不自创术语 · 对齐权威层统一语言</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI Model 是 Runtime 的投影层，但代码自创了一套术语——<code>Chat</code> / <code>ChatTurn</code> / <code>ChatStatus</code>，与 Runtime 的 <code>Run</code> / <code>RunStep</code> / <code>RunStatus</code> 不一致。<b>投影层不能自造词汇，MUST 对齐权威层统一语言。</b></p>
+      <ul class="tl-list">
+        <li><b>术语映射</b>：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus</li>
+        <li><b>投影类型加 <code>*Projection</code> 后缀</b>：明确这是投影而非权威——<code>RunProjection</code> / <code>RunStepProjection</code></li>
+        <li><b>投影简化规则</b>：Runtime RunStatus 有 11 态，TUI 投影合并为 7 态——细粒度展示交给 SpinnerPhase 派生函数</li>
+        <li><b>恢复历史会话的 bug</b>：<code>ensure_runtime_turn()</code> 把 status 设为 Running，但恢复的会话已结束——正确应为 Completed。术语不一致让这个 bug 更难发现</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">投影层术语 · 对齐权威</span><span class="d">权威 (Runtime)</span>    Run / RunStep / RunStatus
+<span class="d">投影 (TUI)</span>       RunProjection / RunStepProjection / RunProjectionStatus
+<span class="d">现状代码</span>         Chat / ChatTurn / ChatStatus  → ← 目标态统一
+
+<span class="m">// 投影层不能自造词汇，加 *Projection 后缀明示身份</span></pre>
+      <div class="tl-out">产出 · <b>投影层术语对齐</b>——TUI Model 不自创术语，对齐 Runtime 统一语言</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十八：投影状态从权威派生 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影状态从权威派生 · 不自建状态机</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">SpinnerPhase 有 <code>start_chat()</code> / <code>generate()</code> / <code>think()</code> 等自驱动转换方法——<b>投影层自建状态机是设计缺陷</b>。两套状态机需要手动同步，spinner 状态三处同步的根因就在于此。</p>
+      <ul class="tl-list">
+        <li><b>根因</b>：SpinnerPhase 是独立状态机，与 RunStatus 脱耦——需要手动同步，三处副本（model + view_state + animation）</li>
+        <li><b>目标态</b>：<code>derive_spinner_phase(run_status, step_status, spinner)</code> 纯函数——从 RunProjectionStatus + RunStepProjectionStatus 派生</li>
+        <li><b>chat_active 也可派生</b>：<code>run_status ∈ {Running, AwaitingUser}</code>——NEVER 独立维护 bool</li>
+        <li><b>Reflecting 移除</b>：无对应 Runtime 状态，是自己造的——需要区分 reasoning 模式应从 RunSpec.reasoning_level 派生</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">SpinnerPhase · 从派生函数替代状态机</span><span class="d">现状</span>  SpinnerPhase 独立状态机  →  start_chat() / generate() / think()
+                         ↓ 手动同步 ↓
+                model + view_state + animation  <span class="m">// 三处副本</span>
+
+<span class="d">目标</span>  derive_spinner_phase(run_status, step_status, ctx)
+       → Option&lt;SpinnerPhase&gt;  <span class="m">// 纯函数，零同步</span>
+
+<span class="m">// 投影状态从权威派生，不自建状态机</span></pre>
+      <div class="tl-out">产出 · <b>SpinnerPhase 改为派生函数</b>——根因消除，三处同步问题自动消失</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十九：投影按来源拆分不混 BC ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影按来源拆分不混 BC · 杂物箱按 BC 拆开</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">RuntimeState 13 字段混了 4 个不同 BC 的投影——provider/model_id（Config）、workspace（Project）、task_status（Task）、其余才是 Run 耦合。<b>不同更新路径的投影混在一起 = 杂物箱</b>，改一个 BC 的投影会误触其他 BC 的 revision。</p>
+      <ul class="tl-list">
+        <li><b>拆分判据</b>：字段的更新路径是否与 Run 生命周期耦合？不耦合就拆出去</li>
+        <li><b>RunRuntimeState（9 字段）</b>：spinner / thinking / graph_phase / compact_progress / processing_jobs / usage / live_tps / status_notice / transient_notice_expiry——与 Run 耦合</li>
+        <li><b>ConfigProjection（2 字段）</b>：provider / model_id——用户切 model 时不触发 Conversation revision</li>
+        <li><b>WorkspaceProjection（6 字段）</b>：cwd / worktree / path_base——进出 worktree 不影响 Conversation</li>
+        <li><b>task_status 移到 SessionModel</b>——投影自 Task BC，与 Session 关联</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RuntimeState 拆分 · 按投影来源</span><span class="d">原</span> RuntimeState (13 字段杂物箱)
+  ├─ provider / model_id     <span class="m">// → ConfigProjection</span>
+  ├─ workspace (6 字段)       <span class="m">// → WorkspaceProjection</span>
+  ├─ task_status              <span class="m">// → SessionModel</span>
+  └─ spinner / usage / ...   <span class="m">// → RunRuntimeState (9 字段)</span>
+
+<span class="d">拆后</span> TuiModel  3+1 → 3+3 Context
+  ├─ conversation.run_runtime    <span class="m">// Run 耦合</span>
+  ├─ config                      <span class="m">// Config BC</span>
+  ├─ workspace                   <span class="m">// Project BC</span>
+  └─ session.task_status         <span class="m">// Task BC</span>
+
+<span class="m">// 不同更新路径的投影不混在一起</span></pre>
+      <div class="tl-out">产出 · <b>3+1→3+3 Context</b>——每个投影来源独立 Context，更新路径互不干扰</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十：端口不绑死实现 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>端口不绑死实现 · trait + 多适配器注入</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI→Runtime 通信绑死在 <code>AgentClientImpl</code> 上——Controller 直接依赖具体实现而非 trait 接口。<b>端口接口（trait）必须支持多个适配器实现</b>：本地直连和 WSS 远程连接。</p>
+      <ul class="tl-list">
+        <li><b>LocalAgentClient</b>：TUI 与 Runtime 同进程，直接函数调用 + channel（现状已实现）</li>
+        <li><b>WssAgentClient</b>：TUI 远程连接 Server，WebSocket Secure 帧传输（#794 启动后实现）</li>
+        <li><b>Controller 依赖 trait</b>，NEVER 直接依赖具体适配器——适配器选择在组合根通过依赖注入完成</li>
+        <li><b>Model 层端口透明</b>：NEVER 知道当前使用哪个适配器——远程断连映射为 ChatEvent::Error，NEVER panic</li>
+        <li><b>协议契约统一</b>：无论本地还是远程，请求/响应流/事件类型 MUST 遵循同一套 SDK Published Language</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">端口适配器 · 不绑死实现</span><span class="d">trait</span>  AgentClient                    <span class="m">// 端口接口</span>
+ ├─ <span class="d">LocalAgentClient</span>   直连 + channel  <span class="m">// 现状</span>
+ └─ <span class="d">WssAgentClient</span>     WSS 远程帧      <span class="m">// #794</span>
+
+<span class="d">Controller</span>  depends on trait    <span class="m">// 不依赖具体类型</span>
+<span class="d">组合根</span>      inject adapter       <span class="m">// 依赖注入选择</span>
+<span class="d">Model</span>       port-transparent    <span class="m">// 不知道用哪个</span>
+
+<span class="m">// trait 是端口接口，不是绑死的实现</span></pre>
+      <div class="tl-out">产出 · <b>出站端口适配器设计</b>——Local + WSS 双适配器，组合根注入，端口透明</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十一：ACL 彻底隔离不泄漏类型 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>ACL 彻底隔离 · 不泄漏类型到消费层</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TUI 的 <code>UiEvent</code> 直接持有 14+ 个 <code>sdk::*</code> 类型——SDK 类型泄漏到 model/update/view_model 层。<b>防腐层 MUST 彻底消除外部类型，消费层 NEVER 看到来源类型</b>（R7 铁律）。</p>
+      <ul class="tl-list">
+        <li><b>现状违规</b>：UiEvent 持有 <code>sdk::ToolCallStatusView</code> / <code>sdk::AgentProgressEventView</code> / <code>sdk::HookEventView</code> 等，SDK crate 成为 TUI 全层的硬依赖</li>
+        <li><b>目标态</b>：TUI 定义自有 DTO（<code>ToolCallStatus</code> / <code>AgentProgressEvent</code> / <code>HookEvent</code>），<code>sdk_event_to_ui_event</code> 是唯一转换点</li>
+        <li><b>不 re-export 而是自定义</b>：<code>type ToolCallId = String</code> 而非 <code>pub use sdk::ToolCallId</code>——切断 SDK crate 依赖，TUI 可脱离 SDK 独立编译</li>
+        <li><b>端口 trait 是唯一例外</b>：<code>AgentClient</code> trait 是 R4 允许的端口依赖，但 trait 返回的 ChatEvent 中的类型 MUST 在 ACL 层转换后才能进入 UiEvent</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">ACL 彻底隔离 · 不泄漏类型</span><span class="d">现状</span>  UiEvent { tool: sdk::ToolCallStatusView, ... }
+       model/update/view_model 全层可见 sdk::*
+
+<span class="d">目标</span>  UiEvent { status: ToolCallStatus, ... }   <span class="m">// TUI 自有</span>
+       sdk_event_to_ui_event() 是唯一转换点
+       model/update/view_model NEVER 见 sdk::*
+
+<span class="d">关键</span>  type ToolCallId = String  <span class="m">// 不 re-export</span>
+       切断 SDK crate 依赖
+
+<span class="m">// 防腐层彻底消除外部类型，消费层只看 TUI 类型</span></pre>
+      <div class="tl-out">产出 · <b>UiEvent 零 SDK 类型</b>——ACL 是唯一转换点，TUI 可脱离 SDK 独立编译</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十二：两层 ACL 分离结构与语义 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>两层 ACL · 结构转换与语义翻译分离</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">TUI 事件流有两层转换：第一层 <code>sdk_event_to_ui_event</code> 做结构转换（SDK→TUI 类型），第二层 <code>map_agent_event</code> 做语义翻译（事件→Intent 拆分）。<b>结构转换和语义翻译是不同关注点，MUST 分离</b>。</p>
+      <ul class="tl-list">
+        <li><b>第一层（结构转换）</b>：机械式 1:1 类型映射，<code>sdk::ChatEvent</code> → <code>UiEvent</code>，NEVER 产生 Intent/Effect</li>
+        <li><b>第二层（语义翻译）</b>：业务逻辑——Intent 拆分（跨 Context）、sanitize 截断、progress 格式化、hook notice 派生</li>
+        <li><b>分离理由</b>：结构转换是机械的（加字段只需改映射），语义翻译是业务的（涉及多 Context 拆分逻辑）——混在一起会变成 444 行手工 match 巨石</li>
+        <li><b>convert.rs 漂移教训</b>：Runtime → SDK 的 444 行手工 match 已有 5 处结构漂移（类型擦除、字段丢失），根因是两边各自定义类型</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">两层 ACL · 结构与语义分离</span><span class="d">第一层</span>  event_mapping.rs
+ sdk::ChatEvent → UiEvent         <span class="m">// 机械 1:1 映射</span>
+ · 消除 SDK 类型                  <span class="m">// NEVER 产生 Intent</span>
+
+<span class="d">第二层</span>  agent_event.rs
+ &UiEvent → AgentEventMapping      <span class="m">// 语义翻译</span>
+ · Intent 拆分（跨 Context）
+ · sanitize / format / derive     <span class="m">// NEVER 接触 SDK 类型</span>
+
+<span class="m">// 结构转换是机械的，语义翻译是业务的——分离</span></pre>
+      <div class="tl-out">产出 · <b>两层 ACL 职责边界</b>——结构转换与语义翻译分离，各层可独立测试</div>
+    </div>
+  </div>
+  <!-- ===== 阶段三十三：机制不等于语义 ===== -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>机制不等于语义 · Storage 只保证 bytes，不判断领域合法</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Storage 初稿想直接返回 <code>RecoveredFromBackup</code>，却又坚持不依赖 Session / Memory schema——review 后发现契约无法实现：<b>只搬运 opaque bytes 的通用域，不可能知道数据在领域上是否可解析</b>。</p>
+      <ul class="tl-list">
+        <li><b>Storage 拥有机械 OHS</b>：<code>AtomicBlobPort</code> 只处理 StorageKey、Primary / Previous 代际、原子提交、commit marker、promote 与 quarantine</li>
+        <li><b>数据 BC 拥有窄端口</b>：SessionSnapshotStore / MemorySnapshotStore 定义 schema、decoder、migration、retention 与恢复决策</li>
+        <li><b>恢复流程反转</b>：机械读取 Primary → 数据 BC 验证 → 必要时读 Previous → 数据 BC 显式请求 promote / quarantine</li>
+        <li><b>策略不下沉</b>：Tool Result 阈值、preview、级联删除、archive / eviction 不属于 Storage；持久化 Snapshot 也不等于拥有聚合</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">机制域 vs 数据域 · 谁能判断合法？</span><span class="d">Storage</span>  read(Primary)  → opaque bytes           <span class="m">// 物理机制</span>
+<span class="d">Data BC</span>  decode(bytes)  → valid / invalid        <span class="m">// 领域语义</span>
+<span class="d">Storage</span>  read(Previous) → opaque bytes
+<span class="d">Data BC</span>  decode + decide → promote / quarantine  <span class="m">// 恢复决策</span>
+
+<span class="m">// 判据：谁能判断数据是否合法，谁就拥有恢复决策</span></pre>
+      <div class="tl-out">产出 · Storage 收敛为<b>机械持久化通用域</b>，schema / migration / retention 回归数据 BC</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十四：全局资源不等于全局状态 ===== -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>全局资源不等于全局状态 · Logger 单例，调用上下文 scope-local</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Logging 的 facade / sink 可以进程级共享，但 <code>CURRENT_REQUEST_ID</code> / model / provider / role 不能是进程级可变值。Main 与多个 Sub 并发时，<b>共享基础设施资源和共享请求状态是两回事</b>。</p>
+      <ul class="tl-list">
+        <li><b>可全局共享</b>：boot_ts / pid / version、TargetCatalog、文件 sink、rotation policy——构造后只读或内部同步</li>
+        <li><b>必须 scope-local</b>：session / chat / turn / request_id / model / provider / role——随异步任务传播并自动恢复</li>
+        <li><b>Patch 三态</b>：<code>Inherit / Set / Clear</code> 区分继承父值、覆盖新值和显式清空；普通 <code>Option</code> 表达不了这个语义</li>
+        <li><b>诊断 ≠ 审计</b>：Logging best-effort、失败降级 stderr；Audit Event 不得通过 target 文件路由伪装成审计交付</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">共享资源 vs scope-local 状态</span><span class="d">Global Logger</span>   TargetCatalog + Sink + Rotation      <span class="m">// 可共享</span>
+<span class="d">LogContextPatch</span> Inherit | Set(value) | Clear         <span class="m">// 每个执行 scope</span>
+<span class="d">spawn child</span>     capture(parent) → instrument(task)   <span class="m">// 显式传播</span>
+
+<span class="m">// 单例是资源生命周期；scope 是业务关联生命周期</span></pre>
+      <div class="tl-out">产出 · Main/Sub 日志上下文从进程全局改为<b>capture + instrument 的 scope-local 传播</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十五：安全承诺类型化 ===== -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>安全承诺类型化 · 让 installer 只接受 VerifiedUpdatePlan</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">自更新若只约定“先校验、再下载、再替换”，任何调用方都可能绕过顺序。review 后把已验证事实固化为不透明值对象：<b>后一步只能接收前一步验证完成后才能构造的类型</b>。</p>
+      <ul class="tl-list">
+        <li><b>typed channel</b>：Stable / Prerelease 是领域值对象；Config 经 ACL 映射，不让自由字符串污染渠道、cache key 和 release 筛选</li>
+        <li><b>VerifiedUpdatePlan 私有构造</b>：绑定签名 manifest、artifact digest、可信 host、target executable canonical path + 当前 digest、redirect 与安装策略</li>
+        <li><b>防旧计划覆盖新版本</b>：持跨进程锁后、commit 前重新校验 executable identity；不匹配返回 PlanStale，必须重新 plan</li>
+        <li><b>承诺只到可证明边界</b>：pre-commit 失败旧版本不变；平台无单步 atomic replace 就用 helper 或拒绝——不虚构“永远可恢复”</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">安全流程 · 用类型闭合</span><span class="d">Release DTO</span>  → ACL + signature verify
+    ↓
+<span class="d">VerifiedUpdatePlan</span>  <span class="m">// private constructor</span>
+    ├─ target_path + target_digest
+    ├─ artifact_digest + trust_key
+    └─ host / redirect / install_strategy
+    ↓
+<span class="d">Installer::apply(plan)</span> → lock → recheck target → atomic commit
+
+<span class="m">// 安全事实进入类型；installer 不接受 raw URL / version</span></pre>
+      <div class="tl-out">产出 · Application Version Control 以<b>VerifiedUpdatePlan</b>封住信任链、TOCTOU 与安装提交边界</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十六：Policy/Hook/Audit 最小范围 + 双层重试 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>控制范围 + 双层重试 · 让扩展点不反客为主</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">接口可以为未来留形状，但实现必须诚实；跨 BC 重试必须按各自不变量分层计数。</p>
+      <ul class="tl-list">
+        <li><b>Policy</b>：PL 保留 Allow / Deny / RequireApproval，本期生产实现只有 AllowAll；不为尚不存在的审批流过度设计</li>
+        <li><b>Hook</b>：先用一个类型化 HookPort；只有不同沙箱、一致性或失败策略真实出现时再拆端口</li>
+        <li><b>双层重试</b>：Hook 命令执行故障最多 3 次（Hook BC）；Stop 阻断同一 Run 最多 15 次（Runtime）</li>
+        <li>第 16 次 Stop Block → <b>Failed + RunFailed 事件</b>，不能为了防死循环伪造 Completed</li>
+        <li><b>Audit MVP</b>：只存 Usage metadata；非阻塞 enqueue，按 SessionId 分区到独立 Audit JSONL，不并入 Session</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RETRY OWNERSHIP · 两个计数器</span><span class="d">Hook BC</span>   max_attempts = 3
+└─ 处理单条命令 spawn / timeout / protocol failure
+
+<span class="d">Runtime</span>   max_stop_hook_blocks = 15
+└─ 处理同一 Run 的 Stop 协议不收敛 → 第 16 次 Failed
+
+<span class="tag">AUDIT MVP</span>Runtime --try_record--▶ UsageSink --AppendLogPort--▶ ~/.agents/audit/usage/{session}.jsonl
+<span class="m">// SessionId 是分区键，不是聚合所有权</span></pre>
+      <div class="tl-out">产出 · <b>最小但可实施</b>的 Policy / Hook / Audit 边界与失败语义</div>
+    </div>
+  </div>
+</div>
 </section>
 
 <div class="rule"></div>

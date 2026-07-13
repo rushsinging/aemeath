@@ -40,7 +40,7 @@
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
-- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 `Usage`；**退避重试**：Retryable(超时/5xx/429/流中断)指数退避重试（≤10 次，退避封顶 5 分钟），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
+- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 `RawUsageSnapshot`；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（≤10 次，退避封顶 5 分钟），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
 - 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`ReasoningPort`（取 effort）
 
@@ -63,7 +63,11 @@
 
 ### event_projection（横切）
 - **职责**：领域事件 → SDK `ChatEvent`；**Main/Sub 路由与命名**（Main→TUI，Sub→父 Run）；补 `agent_id`（#612 缺口）
-- 消费：`EventSink`、`AuditSink`（成本/审计事件）
+- 消费：`EventSink`
+
+### model_invocation 的 Usage 出口
+- Provider 返回 RawUsageSnapshot 后，model_invocation 构造带 SessionId / RunId / RunStepId / ModelInvocationId 的 UsageRecord
+- 经 `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态
 
 ### api（入站适配器实现）
 - **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputBuffer`）；SubAgent 派生时装配子 RuntimeContext
@@ -74,10 +78,10 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 
 | | 拥有 |
 |---|---|
-| **Hook BC** | 执行机制：跑脚本、注入环境变量、解析输出、判定阻断/放行 + feedback |
-| **Runtime** | 触发时机（UserPromptSubmit/Stop/PreToolCall/PostToolCall/SubagentStart-Stop/Notification）+ 响应编排（拿到阻断后 `stop_hook_block_limit` 重试、注入 feedback 重跑）|
+| **Hook BC** | subscription 匹配、稳定顺序、脚本执行/回收、3 次执行故障重试、输出解析与类型化 directive |
+| **Runtime** | 触发时机（UserPromptSubmit/Stop/PreToolCall/PostToolCall/SubRunStart-Stop/Notification）+ directive 响应编排；Stop 阻断累计 15 次后第 16 次 RunFailed |
 
-触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubagentStart/Stop）。现状缺口 R4：无 `HookPort` 抽象（裸 `HookRunner`）。
+触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubRunStart/Stop）。实现差距见 Migration Governance。
 
 ## 3. 状态所有权矩阵
 
@@ -123,3 +127,5 @@ event_projection：被各模块调用（emit），不反向依赖业务
 | 2026-07-11 | model_invocation 补错误重试职责（Retryable 退避 / context 超限 compact / Fatal fail）+ ModelInvocationRetrying | #761 |
 | 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
 | 2026-07-12 | tool_coordination 对齐 Catalog/Execution 双端口及 Runtime/Tool BC 职责分工 | #787 |
+| 2026-07-12 | model_invocation 对齐 ProviderCompletion、RawUsageSnapshot 与可见输出重试门禁 | #788 |
+| 2026-07-12 | Hook 边界补单端口与 3/15 两层重试；Usage 从 event_projection 分离到 model_invocation→UsageSink | #790 |

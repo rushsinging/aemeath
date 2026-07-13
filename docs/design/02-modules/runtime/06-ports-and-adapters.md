@@ -33,15 +33,29 @@ enum CancelRunOutcome {
 ## 2. 出站端口清单（签名草案）
 
 ```rust
-trait ContextPort {                                  // Context Management BC
-    fn build_window(&self, run: &Run) -> ContextWindow;   // 历史+compact+注入+prompt
-    fn needs_compaction(&self, run: &Run) -> bool;
-    fn compact(&self, run: &mut Run, cancel: &RunCancellationScope);
+trait ContextPort: Send + Sync {                                  // Context Management BC
+    /// 构建本轮 Context Window（L2 snip + L3 microcompact + L4 collapse + memory 注入 + prompt 组装）
+    /// L2/L3/L4 均为读模型变换，不修改 ChatChain
+    fn build_window(&self, req: &ContextRequest) -> ContextWindow;
+    /// 判断是否需要 auto-compact（幂等）
+    fn needs_compaction(&self, req: &ContextRequest) -> CompactionDecision;
+    /// L5 auto-compact：LLM 摘要替换历史（唯一修改 ChatChain 的压缩策略）
+    fn compact(
+        &self,
+        chain: &mut ChatChain,
+        req: &ContextRequest,
+        cancellation: &dyn CancellationSignal,
+    ) -> CompactResult;
 }
-trait ProviderPort {                                 // Provider BC（内部 ACL）
-    fn invoke(&self, window: ContextWindow, effort: ReasoningLevel,
-              cancel: &RunCancellationScope)
-        -> Stream<InvocationDelta>;                       // 流式
+// 详见 context-management/02-compact.md
+trait ProviderPort: Send + Sync {                    // Provider BC（内部 ACL）
+    fn capabilities(&self, model: &ModelId)
+        -> Result<ModelCapability, ProviderError>;
+    async fn invoke(
+        &self,
+        request: InvocationRequest,
+        cancellation: &dyn CancellationSignal,
+    ) -> Result<InvocationStream, ProviderError>;     // 单次 attempt 的有序流
 }
 trait ToolCatalogPort {                              // Tool BC：只读目录投影
     fn snapshot(&self, scope: RegistryScopeName, profile: ToolProfileName)
@@ -53,8 +67,8 @@ trait ToolExecutionPort {                            // Tool BC：单次函数�
 }
 // SkillCatalogPort / SkillMaterializationPort 面向 Context Management；
 // CommandCatalogPort / CommandRouterPort 面向 CLI/TUI/Server，不进入 RuntimeContext 的 Tool 执行路径。
-trait PolicyPort {                                   // Policy BC
-    fn check(&self, call: &ToolCall) -> PolicyDecision;   // Allowed/Denied/NeedAsk
+trait PolicyPort {                                   // Policy BC（v0.1.0: AllowAllPolicy）
+    fn evaluate(&self, request: &PolicyRequest) -> PolicyDecision;
 }
 trait MemoryPort {                                   // Memory BC（Sub: NoOp）
     fn retrieve(&self, query: &MemoryQuery) -> Vec<MemoryEntry>;
@@ -69,15 +83,18 @@ trait WorkspacePort {                                // Project BC（Sub: 独立
     fn current_frame(&self) -> WorkspaceFrame;
     fn seed_isolated(&self) -> WorkspaceFrame;            // 快照父 frame
 }
-trait HookPort {                                     // Hook BC（Sub: BoundaryOnly）
-    fn run(&self, point: HookPoint, ctx: HookContext,
-           cancel: &RunCancellationScope) -> HookOutcome;
+trait HookPort {                                     // Hook BC：一个类型化端口
+    fn dispatch(
+        &self,
+        invocation: HookInvocation,
+        cancellation: &dyn CancellationSignal,
+    ) -> HookOutcome;
 }
 trait ReasoningPort {                                // Workflow BC（Sub: EffortOnly）
     fn effort(&self, run: &Run) -> ReasoningLevel;
 }
-trait AuditSink {                                    // Audit BC（Pub/Sub，新增）
-    fn emit(&self, event: AuditEvent);                    // 执行/成本事件
+trait UsageSink {                                    // Audit BC（MVP Pub/Sub）
+    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
 }
 trait EventSink {                                    // 事件出口（Main→TUI / Sub→父）
     fn emit(&self, events: Vec<DomainEvent>);
@@ -95,22 +112,19 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 {
     RuntimeContext {
         context:   root.context_for(spec.context),        // Isolated → 独立 manager
-        provider:  root.provider_for(&spec.model, spec),  // Sub → 独立 client 副本
+        provider:  root.provider_for(&spec.model, spec),  // 共享只读 transport；invoke 时创建独立 scope
         tool_catalog:   root.tool_catalog_for(&spec.tools),   // Scope ∩ capability Profile
         tool_execution: root.tool_execution_for(&spec.tools), // 不暴露 Registry/Tool 实例
-        policy:    match spec.policy {
-                       Direct => root.policy(),
-                       DelegatedApproval => Delegated::new(root.policy(), parent), // 设计态
-                   },
+        policy:    root.allow_all_policy(),              // v0.1.0 唯一生产实现
         memory:    match spec.memory { Enabled => root.memory(), Disabled => NoOpMemory },
         task:      match spec.task { Shared => root.task(), Isolated => TaskStore::new().into() },
         workspace: match spec.workspace {
                        Inherit => parent_or_root_frame(),
                        Snapshot => root.workspace().seed_isolated(),
                    },
-        hooks:     match spec.hooks { Full => root.hooks(), BoundaryOnly => Boundary::new(root.hooks()), Disabled => NoOpHooks },
+        hooks:     root.hooks(),                         // 单 HookPort；过滤由 point metadata 完成
         reasoning: match spec.reasoning { GraphDriven => root.reasoning(), EffortOnly => Effort::new(inherit(parent)), Inherit => parent_effort() },
-        audit:     root.audit(),
+        usage:     root.usage_sink(),                    // 非阻塞 try_record，Audit MVP 仅 Usage
         config:    root.config_snapshot(),                // 共享
         input:     match spec.name.as_ref() { "main" => root.tui_input(), _ => FixedQueue::new(spec.initial_prompt) }, // 仅内容输入
         events:    match spec.name.as_ref() { "main" => root.tui_sink(), _ => ParentRunSink::new(parent) },
@@ -139,9 +153,9 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 目标端口 | 现状 | 迁移动作（S5）|
 |---|---|---|
 | ContextPort / ToolCatalogPort / ToolExecutionPort / PolicyPort / MemoryPort / WorkspacePort / ReasoningPort | ❌ 无目标 trait，具体类型直调 | 抽端口，实现移到 adapter；Runtime 不再持有 ToolRegistry / Tool 实例 |
-| AuditSink | ❌ 完全无 | 新建（Pub/Sub） |
+| UsageSink | ❌ Audit crate 为空壳，Usage/Cost 混在 Runtime | 新建非阻塞 UsageSink + Audit worker；Cost/Pricing 不进入 MVP |
 | ProviderPort | ⚠️ 仅 `ProviderInfoPort`（只读元数据）| 补 invoke 方法 |
-| HookPort | ⚠️ 仅 `HookNotificationPort` | 补 per-tool run |
+| HookPort | ⚠️ 具体 HookRunner + 通知端口并存 | 收敛为一个类型化 dispatch；Runtime 拥有触发时机和状态解释 |
 | TaskPort / ConfigSnapshot / EventSink | ✅ `TaskStorePort`/`ConfigReader`/`ChatEventSink` | 沿用 |
 | EventSink agent_id | ⚠️ 事件仅 chat_id/turn_id | 补 agent_id（#612）|
 | cancel_run / RunCancellationScope | ⚠️ SDK `CancelHandle` 捕获 Session 级 `Arc<Mutex<CancellationToken>>`，每回合替换；另有 `ChatInputEvent::Cancel` | 改为绑定 `run_id` 的同步幂等入口 + per-Run scope；旧事件退役（#700）|
@@ -151,8 +165,10 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 
 - 领域模型（RunSpec/RuntimeContext）：[01-domain-model.md](01-domain-model.md)
 - 模块边界：[02-module-boundaries.md](02-module-boundaries.md)
+- Context Management 战术设计（ContextPort/MemoryPort/PromptPort 详解）：[../context-management/02-compact.md](../context-management/02-compact.md)
 - 上下文地图（BC 集成）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 系统架构（Composition Root）：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
+- Provider 端口、流与 Invocation Scope：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 
 ## 修改历史
 
@@ -162,3 +178,6 @@ fn assemble(spec: &RunSpec, parent: Option<&RuntimeContext>, root: &CompositionR
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
 | 2026-07-12 | 定义同步幂等 `cancel_run(run_id)`、per-Run cancellation scope 及 Provider/Tool/Compact/Hook 传播边界 | #700 |
 | 2026-07-12 | ToolPort 拆为 Catalog/Execution 双端口，补 Skill/Command 独立端口边界与 Scope/Profile 装配 | #787 |
+| 2026-07-12 | ProviderPort 补能力查询、取消、结构化错误与单 attempt InvocationStream 契约 | #788 |
+| 2026-07-12 | ContextPort 签名更新为 4 方法（build_window/microcompact/needs_compaction/compact），详见 context-management/02-compact.md | #786 |
+| 2026-07-12 | Policy 装配收缩为 AllowAll；Hook 收敛单 dispatch；Audit 出站收缩为非阻塞 UsageSink | #790 |
