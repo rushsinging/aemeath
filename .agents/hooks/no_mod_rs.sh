@@ -26,11 +26,15 @@ if [ "$mode" = "--diff" ]; then
     fi
   done < <(git -C "$ROOT" diff --cached --name-only --diff-filter=A -- '*.rs')
 else
-  # 检查所有 mod.rs
+  # 检查所有 mod.rs；目录级 prune 避免递归进入 worktree、工具缓存和构建产物。
   while IFS= read -r f; do
     echo "ERROR: 发现 mod.rs 文件: $f" >&2
     found=1
-  done < <(find "$ROOT" -path '*/src/*' -name 'mod.rs' -not -path '*/.claude/*' -not -path '*/target/*')
+  done < <(
+    find "$ROOT" \
+      \( -type d \( -name .worktrees -o -name .claude -o -name target \) -prune \) -o \
+      \( -type f -path '*/src/*' -name 'mod.rs' -print \)
+  )
 fi
 
 if [ "$found" -ne 0 ]; then
