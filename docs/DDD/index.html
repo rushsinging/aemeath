@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流，<b>TUI 评审篇 XXXVII-XXXIX</b> 做位置即暗示、derived data 定位标注与门禁防线——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>、<b>位置即暗示（目录名/函数名是架构契约）</b>、<b>derived data 要标注定位（不然身份不清）</b>、<b>门禁是防漂移的最后防线（没有 = 靠自觉 = 必然漂移）</b>。
+        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流，<b>评审与落地篇 XXXVII-XL</b> 做位置即暗示、derived data 定位标注、门禁防线与共享 Run 内核——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>、<b>位置即暗示（目录名/函数名是架构契约）</b>、<b>derived data 要标注定位（不然身份不清）</b>、<b>门禁是防漂移的最后防线（没有 = 靠自觉 = 必然漂移）</b>、<b>聚合根必须机械守护不变量</b>、<b>取消也是终态竞争者</b>、<b>声明正确不等于接线正确</b>、<b>异步注册用 RAII 收口</b>、<b>并发状态用单一状态机表达</b>、<b>门禁必须正反向验证</b>。
   </p>
 
   <div class="timeline">
@@ -1691,6 +1691,35 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 
 <span class="m">// 门禁不是可选的——是防漂移的唯一机械保障</span></pre>
       <div class="tl-out">产出 · <b>门禁优先级 P0</b>——先补门禁再修问题，否则修了也会再漂</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段四十：共享 Run 内核落地 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XL</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>共享 Run 内核落地 · 类型、接线与生命周期缺一不可</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Main 与 Sub 共用 Loop Engine 后，独立评审仍发现五个高风险缺口：聚合对象存在却没守住不变量、取消绕过终态仲裁、child token 创建正确却接错持有者、注册清理依赖正常返回、并发状态被拆成互不原子的字段。结论是：<b>抽象统一只是起点，正确性最终落在聚合根、真实接线和生命周期边界上</b>。</p>
+      <ul class="tl-list">
+        <li><b>聚合根机械守规则</b>：Run 阻止多个活跃 Step、无 Invocation 的推进、未终结 Tool Call 的 Step 收口，以及活跃 Step 下 Run 进入终态</li>
+        <li><b>取消也是终态竞争者</b>：Completed / Failed / Cancelled 经过同一个互斥仲裁；取消不能绕过 claim 再发布第二终态</li>
+        <li><b>声明正确 ≠ 接线正确</b>：创建 <code>child_token()</code> 不代表 Sub 真正在使用它；验收要追踪实际持有者、registry 注册值和异步调用参数</li>
+        <li><b>异步注册用 RAII</b>：<code>activate → await → clear</code> 覆盖不了 future drop / abort / panic；Drop guard 才能关闭 stale entry 路径</li>
+        <li><b>并发状态用一个状态机表达</b>：<code>Idle / AwaitingStart / Active</code> 比独立 ID + pending flag 更能表达语义并消除 TOCTOU</li>
+        <li><b>门禁要做反向验证</b>：正常通过只说明当前合规；故意恢复旧 FSM 并确认 exit 2 阻断，才证明守卫真的有效</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RUN AGGREGATE · 唯一一致性边界</span><span class="d">Run</span>
+├─ active Step ≤ 1
+├─ ModelInvocation ≤ 1 / Step
+├─ ToolCall 必须归属 Step 且单向终结
+└─ Completed / Failed / Cancelled 互斥 claim
+
+<span class="tag">CANCELLATION TREE</span>Parent scope ──child_token──▶ Sub scope
+<span class="m">// 创建、持有、注册、传参必须指向同一个 child scope</span>
+
+<span class="tag">LIFECYCLE</span>ActiveRunRegistration::new() → await → Drop::clear()
+<span class="m">// future 被 drop 也必须清理；门禁再用故意违规证明边界可执行</span></pre>
+      <div class="tl-out">产出 · 共享执行内核从<b>结构统一</b>推进到<b>不变量、取消树与异步生命周期统一</b></div>
     </div>
   </div>
 </div>
