@@ -1,4 +1,4 @@
-use super::common::{bool_arg, str_arg, truncate_ellipsis, typed_data};
+use super::common::{truncate_ellipsis, typed_data};
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
@@ -7,8 +7,20 @@ use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use sdk::tool_input::{
+    EnterPlanModeInput, ExitPlanModeInput, LspInput, SkillInput, TaskCreateInput, TaskGetInput,
+    TaskListCreateInput, TaskStopInput, TaskUpdateInput,
+};
 use sdk::tool_result::TaskUpdateResult;
 use std::path::Path;
+
+/// Deserialize a typed Input from a raw `serde_json::Value`, tolerating
+/// missing / malformed fields via `Default`.  serde `#[serde(alias = ...)]`
+/// attributes are honoured, eliminating the snake_case / camelCase mismatch
+/// that `str_arg` caused (issue #839).
+fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
+    serde_json::from_value(input.clone()).unwrap_or_default()
+}
 
 // ── TaskCreate ───────────────────────────────────────────────────
 
@@ -18,18 +30,18 @@ impl ToolDisplay for TaskCreateDisplay {
         "TaskCreate"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let subject = str_arg(input, "subject", "");
-        if subject.is_empty() {
+        let args = parse_input::<TaskCreateInput>(input);
+        if args.subject.is_empty() {
             return self.display_name().to_string();
         }
-        let desc = str_arg(input, "description", "");
-        if desc.is_empty() {
-            format!("{} {subject}", self.display_name())
+        if args.description.is_empty() {
+            format!("{} {}", args.subject, self.display_name())
         } else {
             format!(
-                "{} {subject}: {}",
+                "{} {}: {}",
                 self.display_name(),
-                truncate_ellipsis(desc, 60)
+                args.subject,
+                truncate_ellipsis(&args.description, 60)
             )
         }
     }
@@ -57,14 +69,14 @@ impl ToolDisplay for TaskUpdateDisplay {
         "TaskUpdate"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let id = str_arg(input, "taskId", "");
-        if id.is_empty() {
+        let args = parse_input::<TaskUpdateInput>(input);
+        if args.task_id.is_empty() {
             return self.display_name().to_string();
         }
         let summary = self.header_summary(input, None);
         match summary.is_empty() {
-            false => format!("{} {id} — {}", self.display_name(), summary),
-            true => format!("{} {id}", self.display_name()),
+            false => format!("{} {} — {}", self.display_name(), args.task_id, summary),
+            true => format!("{} {}", self.display_name(), args.task_id),
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -78,7 +90,7 @@ impl ToolDisplay for TaskUpdateDisplay {
         }
     }
     /// result 到达后从 typed payload 取 subject 回填 header（issue #486）。
-    /// LLM 调用 TaskUpdate 时通常只传 taskId + status，subject 在 TaskCreate
+    /// LLM 调用 TaskUpdate 时通常只传 task_id + status，subject 在 TaskCreate
     /// 时设定，只有 store 回填的 result 才有 → 故必须覆写此方法。
     fn format_header_line_with_result(
         &self,
@@ -86,15 +98,15 @@ impl ToolDisplay for TaskUpdateDisplay {
         result_payload: Option<&ToolResultPayload>,
         workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let id = str_arg(input, "taskId", "");
-        if id.is_empty() {
+        let args = parse_input::<TaskUpdateInput>(input);
+        if args.task_id.is_empty() {
             return self.format_header_line(input, workspace_root);
         }
         let summary = self.header_summary(input, result_payload);
         let name = self.display_name().to_string();
         let mut spans = vec![
             Span::styled(name, Style::default().fg(theme::ACCENT_BRIGHT)),
-            Span::raw(format!(" {id}")),
+            Span::raw(format!(" {}", args.task_id)),
         ];
         if !summary.is_empty() {
             spans.push(Span::raw(format!(" — {summary}")));
@@ -111,16 +123,11 @@ impl TaskUpdateDisplay {
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> String {
-        let status = str_arg(input, "status", "");
-        let blocked_by = input
-            .get("addBlockedBy")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
+        let args = parse_input::<TaskUpdateInput>(input);
+        let blocked_by = args
+            .add_blocked_by
+            .as_ref()
+            .map(|v| v.join(","))
             .unwrap_or_default();
         // subject 优先从 typed result 取（store 回填），回退 input.subject
         let typed: Option<TaskUpdateResult> = typed_data(result_payload);
@@ -128,17 +135,18 @@ impl TaskUpdateDisplay {
             .as_ref()
             .map(|r| r.subject.as_str())
             .filter(|s: &&str| !s.is_empty())
-            .unwrap_or_else(|| str_arg(input, "subject", ""));
-        let priority = str_arg(input, "priority", "");
-        let progress = input.get("progress").and_then(|v| v.as_u64());
+            .unwrap_or(args.subject.as_deref().unwrap_or(""));
+        let priority = args.priority.as_deref().unwrap_or("");
 
         // subject 紧跟 id，便于识别是哪个任务（issue #486）
         let mut parts = Vec::new();
         if !subject.is_empty() {
             parts.push(truncate_ellipsis(subject, 40));
         }
-        if !status.is_empty() {
-            parts.push(format!("→ {status}"));
+        if let Some(status) = args.status.as_deref() {
+            if !status.is_empty() {
+                parts.push(format!("→ {status}"));
+            }
         }
         if !blocked_by.is_empty() {
             parts.push(format!("blocked by [{blocked_by}]"));
@@ -146,7 +154,7 @@ impl TaskUpdateDisplay {
         if !priority.is_empty() {
             parts.push(format!("p={priority}"));
         }
-        if let Some(pct) = progress {
+        if let Some(pct) = args.progress {
             parts.push(format!("{pct}%"));
         }
         parts.join(", ")
@@ -195,11 +203,11 @@ impl ToolDisplay for TaskListCreateDisplay {
         "TaskListCreate"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let subject = str_arg(input, "subject", "");
-        if subject.is_empty() {
+        let args = parse_input::<TaskListCreateInput>(input);
+        if args.subject.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{}: {subject}", self.display_name())
+            format!("{}: {}", self.display_name(), args.subject)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -252,11 +260,11 @@ impl ToolDisplay for SkillDisplay {
         "Skill"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let skill = str_arg(input, "skill", "");
-        if skill.is_empty() {
+        let args = parse_input::<SkillInput>(input);
+        if args.skill.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {skill}", self.display_name())
+            format!("{} {}", self.display_name(), args.skill)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -287,14 +295,13 @@ impl ToolDisplay for LspDisplay {
         "LSP"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let op = str_arg(input, "operation", "");
-        let path = str_arg(input, "filePath", "");
+        let args = parse_input::<LspInput>(input);
         let name = self.display_name();
-        match (op.is_empty(), path.is_empty()) {
+        match (args.operation.is_empty(), args.file_path.is_empty()) {
             (true, true) => name.to_string(),
-            (true, false) => format!("{name} {path}"),
-            (false, true) => format!("{name}::{op}"),
-            (false, false) => format!("{name}::{op} {path}"),
+            (true, false) => format!("{name} {}", args.file_path),
+            (false, true) => format!("{name}::{}", args.operation),
+            (false, false) => format!("{name}::{} {}", args.operation, args.file_path),
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -325,11 +332,11 @@ impl ToolDisplay for TaskGetDisplay {
         "TaskGet"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let id = str_arg(input, "taskId", "");
-        if id.is_empty() {
+        let args = parse_input::<TaskGetInput>(input);
+        if args.task_id.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {id}", self.display_name())
+            format!("{} {}", self.display_name(), args.task_id)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -360,11 +367,11 @@ impl ToolDisplay for TaskStopDisplay {
         "TaskStop"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let id = str_arg(input, "taskId", "");
-        if id.is_empty() {
+        let args = parse_input::<TaskStopInput>(input);
+        if args.task_id.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {id}", self.display_name())
+            format!("{} {}", self.display_name(), args.task_id)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -391,11 +398,10 @@ impl ToolDisplay for EnterPlanModeDisplay {
         "EnterPlanMode"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let reason = str_arg(input, "reason", "");
-        if reason.is_empty() {
-            self.display_name().to_string()
-        } else {
-            format!("Plan: {reason}")
+        let args = parse_input::<EnterPlanModeInput>(input);
+        match args.reason.as_deref() {
+            Some(reason) if !reason.is_empty() => format!("Plan: {reason}"),
+            _ => self.display_name().to_string(),
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -422,14 +428,16 @@ impl ToolDisplay for ExitPlanModeDisplay {
         "ExitPlanMode"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        if bool_arg(input, "execute", false) {
+        let args = parse_input::<ExitPlanModeInput>(input);
+        if args.execute.unwrap_or(false) {
             "Execute Plan".to_string()
         } else {
             self.display_name().to_string()
         }
     }
     fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        if bool_arg(input, "execute", false) {
+        let args = parse_input::<ExitPlanModeInput>(input);
+        if args.execute.unwrap_or(false) {
             vec!["Planned actions will now be executed.".to_string()]
         } else {
             vec!["Returning to normal execution.".to_string()]

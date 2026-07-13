@@ -13,6 +13,7 @@ pub struct AgentResult {
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 /// 字段标识符即 JSON property 名（build.rs 使用标识符，忽略 serde rename）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct AgentInput {
     /// The task for the agent to perform
     pub prompt: String,

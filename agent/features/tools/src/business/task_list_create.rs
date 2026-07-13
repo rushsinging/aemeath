@@ -57,6 +57,10 @@ impl TypedTool for TaskListCreateTool {
         let subject = args.subject;
         let summary = args.summary;
 
+        if summary.is_empty() {
+            return TypedToolResult::error("missing required field: summary");
+        }
+
         let batch = self.store.create_list(subject.clone(), summary).await;
         TypedToolResult::success(
             format!("Task list #{} created. Subject: {}", batch.id, subject),

@@ -47,7 +47,10 @@ impl ToolCall {
         }
     }
     pub fn update_args(&mut self, partial_args: impl Into<String>) {
-        self.args_preview = partial_args.into();
+        let args = partial_args.into();
+        if !args.is_empty() {
+            self.args_preview = args;
+        }
     }
 
     pub fn update(
@@ -197,5 +200,15 @@ mod tests {
             call.args_preview, r#"{"taskId":"42"}"#,
             "空字符串不应覆盖已有 args_preview"
         );
+    }
+
+    // ── issue #839：update_args 同样需要空值防护 ──
+
+    #[test]
+    fn test_update_args_empty_does_not_overwrite() {
+        let mut call = pending_call();
+        call.update_args(r#"{"task_id":"42"}"#);
+        call.update_args(""); // 空字符串应被忽略
+        assert_eq!(call.args_preview, r#"{"task_id":"42"}"#);
     }
 }

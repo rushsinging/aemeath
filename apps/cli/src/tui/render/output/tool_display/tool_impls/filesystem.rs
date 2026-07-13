@@ -1,7 +1,7 @@
 use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::super::common::{display_path, file_path, typed_data};
+use super::super::common::{display_path, typed_data};
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
@@ -9,7 +9,14 @@ use super::super::{
 use super::helpers::{build_header_line, truncate_path};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use sdk::tool_input::{EditInput, ReadInput, WriteInput};
 use std::path::Path;
+
+/// Deserialize a typed Input from a raw `serde_json::Value`, tolerating
+/// missing / malformed fields via `Default`.
+fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
+    serde_json::from_value(input.clone()).unwrap_or_default()
+}
 
 // ── Read ─────────────────────────────────────────────────────────
 
@@ -20,9 +27,9 @@ struct ReadDisplay;
 /// - `actual_lines = Some(n)`（result 到达）：返回 `start:end (n lines)`
 /// - `actual_lines = None`（running 中）：offset/limit 都默认时返回空字符串，
 ///   否则返回 `start:end`（预览范围）
-fn read_range_info(input: &serde_json::Value, actual_lines: Option<usize>) -> String {
-    let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-    let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(2000) as usize;
+fn read_range_info(args: &ReadInput, actual_lines: Option<usize>) -> String {
+    let offset = args.offset.unwrap_or(0) as usize;
+    let limit = args.limit.unwrap_or(2000) as usize;
     let start = offset + 1; // 转为 1-based
     match actual_lines {
         Some(actual) => {
@@ -32,7 +39,7 @@ fn read_range_info(input: &serde_json::Value, actual_lines: Option<usize>) -> St
         None => {
             // running 中：只在用户显式传了 offset/limit 时显示预览范围，
             // 默认值（offset=0, limit=2000）时不显示，等 result 到来再展示实际范围。
-            let has_explicit = input.get("offset").is_some() || input.get("limit").is_some();
+            let has_explicit = args.offset.is_some() || args.limit.is_some();
             if has_explicit {
                 format!("{start}:{}", offset + limit)
             } else {
@@ -63,10 +70,10 @@ impl ToolDisplay for ReadDisplay {
         "Read"
     }
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
+        let args = parse_input::<ReadInput>(input);
+        let rel = display_path(&args.file_path, workspace_root);
         let display_path = truncate_path(&rel, 60);
-        let range = read_range_info(input, None);
+        let range = read_range_info(&args, None);
         if range.is_empty() {
             format!("{} {display_path}", self.display_name())
         } else {
@@ -96,8 +103,8 @@ impl ToolDisplay for ReadDisplay {
         result_payload: Option<&ToolResultPayload>,
         workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
+        let args = parse_input::<ReadInput>(input);
+        let rel = display_path(&args.file_path, workspace_root);
         let display_path = truncate_path(&rel, 60);
 
         // typed 优先：ReadResult.line_count
@@ -106,7 +113,7 @@ impl ToolDisplay for ReadDisplay {
             // regex 回退：旧 ToolResult 仅 message 含 "Read N lines from ..."
             .or_else(|| result_payload.and_then(|p| parse_line_count_from_message(&p.output)));
 
-        let range_info = read_range_info(input, actual_lines);
+        let range_info = read_range_info(&args, actual_lines);
         Line::from(read_header_spans(
             self.display_name(),
             &display_path,
@@ -146,15 +153,10 @@ impl ToolDisplay for WriteDisplay {
         "Write"
     }
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
+        let args = parse_input::<WriteInput>(input);
+        let rel = display_path(&args.file_path, workspace_root);
         let display_path = truncate_path(&rel, 60);
-        // 从 input 的 content 计算字节数
-        let bytes = input
-            .get("content")
-            .and_then(|v| v.as_str())
-            .map(|s| s.len())
-            .unwrap_or(0);
+        let bytes = args.content.len();
         format!("{} {display_path} {bytes} bytes", self.display_name())
     }
     fn header_for_subagent(
@@ -172,8 +174,8 @@ impl ToolDisplay for WriteDisplay {
         result_payload: Option<&ToolResultPayload>,
         workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
+        let args = parse_input::<WriteInput>(input);
+        let rel = display_path(&args.file_path, workspace_root);
         let display_path = truncate_path(&rel, 60);
 
         // typed 优先：WriteResult.bytes_written
@@ -182,13 +184,7 @@ impl ToolDisplay for WriteDisplay {
             // regex 回退：旧 ToolResult 仅 message 含 "Wrote N bytes to ..."
             .or_else(|| result_payload.and_then(|p| parse_bytes_from_message(&p.output)));
 
-        // 计算入参中的字节数（回退值）
-        let input_bytes = input
-            .get("content")
-            .and_then(|v| v.as_str())
-            .map(|s| s.len())
-            .unwrap_or(0);
-
+        let input_bytes = args.content.len();
         let bytes = actual_bytes.unwrap_or(input_bytes);
         let bytes_info = format!("{bytes} bytes");
 
@@ -234,20 +230,11 @@ impl ToolDisplay for EditDisplay {
         "Edit"
     }
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
+        let args = parse_input::<EditInput>(input);
+        let rel = display_path(&args.file_path, workspace_root);
         let display_path = truncate_path(&rel, 60);
-        // 从 input 的 old_string/new_string 计算变更统计
-        let old_len = input
-            .get("old_string")
-            .and_then(|v| v.as_str())
-            .map(|s| s.len())
-            .unwrap_or(0);
-        let new_len = input
-            .get("new_string")
-            .and_then(|v| v.as_str())
-            .map(|s| s.len())
-            .unwrap_or(0);
+        let old_len = args.old_string.len();
+        let new_len = args.new_string.len();
         format!(
             "{} {display_path} Changed {old_len} -> {new_len} chars",
             self.display_name()
@@ -266,8 +253,8 @@ impl ToolDisplay for EditDisplay {
         result_payload: Option<&ToolResultPayload>,
         workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let path = file_path(input);
-        let rel = display_path(path, workspace_root);
+        let args = parse_input::<EditInput>(input);
+        let rel = display_path(&args.file_path, workspace_root);
         let suffix = typed_data::<sdk::tool_result::EditResult>(result_payload)
             .map(|r| format!(" (Replaced {})", r.replacements_made))
             .unwrap_or_default();
