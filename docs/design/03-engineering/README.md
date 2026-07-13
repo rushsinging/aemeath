@@ -4,15 +4,13 @@
 > 状态：Target｜Milestone：v0.1.0（S2+ 填充实质内容）
 > 本层承载**跨模块的横切关注点**：架构守卫、agent 工程方法论、reasoning graph、可观测性、迁移治理等。不属于单一 BC 的知识落在这里。**设计类文档只描述目标态；迁移治理文档专门承载过渡期的 Current→Target 追踪。**
 
-## 规划的横切文档
+## 文档索引
 
-| 目标文档 | 内容 |
+| 文档 | 内容 |
 |---|---|
-| architecture-guards | 守卫注册表、依赖铁律拦截 |
-| agent-engineering | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
-| reasoning-graph | reasoning effort 阶段调节、ReasoningLevel、provider 映射 |
-| observability | 日志 schema、target 路由、诊断 |
-| [migration-governance.md](migration-governance.md) ✅ S2 | Current→Target 迁移追踪、Runtime 现状缺口(R1-R10)、死代码退役清单（**所有过渡期状态集中于此，避免污染设计文档**） |
+| [architecture-guards.md](architecture-guards.md) ✅ | 守卫注册表、依赖铁律拦截、17 个 guard 脚本 |
+| [agent-orchestration.md](agent-orchestration.md) ✅ | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
+| [migration-governance.md](migration-governance.md) ✅ | Current→Target 迁移追踪、Runtime 现状缺口(R1-R10)、死代码退役清单 |
 
 ## 编写原则
 
@@ -23,7 +21,6 @@
 
 - 系统级总体设计：[../01-system/](../01-system/)
 - 模块级设计：[../02-modules/README.md](../02-modules/README.md)
-- 架构守卫注册表：[../02-architecture-guards.md](../02-architecture-guards.md)
 - 目录总览：[../README.md](../README.md)
 
 ## 修改历史

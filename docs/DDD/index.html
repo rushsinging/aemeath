@@ -849,7 +849,7 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
   <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
   <p class="sec-intro rev d2">
     电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
-        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>。
+        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流，<b>TUI 评审篇 XXXVII-XXXIX</b> 做位置即暗示、derived data 定位标注与门禁防线——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>、<b>位置即暗示（目录名/函数名是架构契约）</b>、<b>derived data 要标注定位（不然身份不清）</b>、<b>门禁是防漂移的最后防线（没有 = 靠自觉 = 必然漂移）</b>。
   </p>
 
   <div class="timeline">
@@ -1628,6 +1628,69 @@ footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(
 <span class="tag">AUDIT MVP</span>Runtime --try_record--▶ UsageSink --AppendLogPort--▶ ~/.agents/audit/usage/{session}.jsonl
 <span class="m">// SessionId 是分区键，不是聚合所有权</span></pre>
       <div class="tl-out">产出 · <b>最小但可实施</b>的 Policy / Hook / Audit 边界与失败语义</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十七：位置即暗示 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>位置即暗示 · 目录名是架构契约</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI 评审发现：第一层 ACL（SDK → UiEvent 结构转换）放在 <code>effect/session/processing/</code> 目录——"effect" 暗示可加副作用。<b>已发生污染</b>：<code>WorkingDirectoryChanged</code> 在 ACL 里同步调 git 子进程。目录名是架构契约，放错了会引导后续开发者犯错。</p>
+      <ul class="tl-list">
+        <li><b>目录名 = 架构承诺</b>：<code>effect/</code> 暗示副作用、<code>adapter/</code> 暗示纯翻译、<code>model/</code> 暗示纯状态——放错位置会劣化</li>
+        <li><b>纯函数放在 effect/ 目录 → 被当作可加副作用的地方</b>——位置即暗示</li>
+        <li>同理：<code>update_ui</code> 混合 5 种职责——函数名暗示"统一更新 UI"，实际成了杂物箱</li>
+        <li><b>AgentEventMapping hybrid</b>：ACL 同时返回 Intent + Effect——一个返回值混合"输入"和"输出"，mapper 从纯函数变有副作用</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">位置即暗示 · 目录名是契约</span><span class="d">adapter/</span>  ACL 纯翻译 ← 结构转换应放这
+<span class="d">effect/</span>   副作用执行 ← 放纯翻译会导致污染
+<span class="d">update_ui()</span> 统一更新 ← 混合 5 职责成杂物箱
+
+<span class="m">// 放对位置，后续开发者自然做对；放错位置，污染只是时间问题</span></pre>
+      <div class="tl-out">产出 · <b>位置即暗示</b>——目录名/函数名是架构契约，不是随便起的</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十八：derived data 要标注定 位 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>derived data 要标注定 · 不然身份不清</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TUI 的 <code>chats: Vec&lt;Chat&gt;</code>（source of truth）和 <code>OutputTimelineModel</code>（渲染用扁平时间线）并行维护——评审发现 <b>timeline 身份不清</b>：它是 Model 的一部分还是 ViewAssembler 的缓存？答案：它是 derived data（投影缓存），但缺少定位注释导致后人困惑。</p>
+      <ul class="tl-list">
+        <li><b>source of truth</b>：<code>chats</code>——每次 <code>apply()</code> 更新，不变量保护的权威数据</li>
+        <li><b>derived data</b>：<code>timeline</code>——从 chats 派生，维护时机在 <code>apply()</code> 中增量更新</li>
+        <li><b>不标注的后果</b>：新人以为 timeline 是独立数据源 → 直接写 timeline 不写 chats → 数据不一致</li>
+        <li>同理：<code>force_repaint</code> 的 <code>last_total_lines</code> 是 derived data——从 RenderedDocument 派生，不是独立状态</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">derived data · 要标注定位</span><span class="d">source of truth</span>  chats: Vec&lt;Chat&gt;          <span class="m">// 权威</span>
+<span class="d">derived data</span>      timeline: OutputTimelineModel <span class="m">// 从 chats 派生</span>
+                 ↑ 不标注 = 身份不清 = 后人写错
+
+<span class="m">// derived data 必须标注"从哪里派生""何时更新"</span></pre>
+      <div class="tl-out">产出 · <b>derived data 定位标注</b>——不是所有字段都是 source of truth</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十九：门禁是防漂移的最后防线 ===== -->
+  <div class="tl-item p-cln rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>门禁是防漂移的最后防线 · 没有 = 靠自觉</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">TUI 评审：设计文档描述 7 条架构门禁，代码只落地 1 条。15 个评审发现（5 易漂移 + 5 劣化 + 5 职责不清）<b>全部无法在 CI 中捕获</b>——因为没有门禁。<code>#![allow(dead_code)]</code> 更是主动关掉了编译器的漂移检测。</p>
+      <ul class="tl-list">
+        <li><b>Model purity 门禁</b>：model/ 禁止 import ratatui/tokio/process/AgentClient——防止 reducer 不纯（W1）</li>
+        <li><b>TEA purity 门禁</b>：update/ 禁止 spawn/await/Command——防止 ACL 污染（W4）</li>
+        <li><b>Agent event adapter 门禁</b>：SDK 类型只在 adapter/ 出现——防止 DTO 泄漏（D1）</li>
+        <li><b>没有门禁 = 靠自觉 = 必然漂移</b>——15 个发现就是实证</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">门禁 · 防漂移最后防线</span><span class="d">设计描述</span>  7 条门禁
+<span class="d">代码落地</span>  1 条（adapter → render）
+<span class="d">缺口</span>      6 条 → 15 个漂移点全部无法 CI 捕获
+
+<span class="m">// 门禁不是可选的——是防漂移的唯一机械保障</span></pre>
+      <div class="tl-out">产出 · <b>门禁优先级 P0</b>——先补门禁再修问题，否则修了也会再漂</div>
     </div>
   </div>
 </div>

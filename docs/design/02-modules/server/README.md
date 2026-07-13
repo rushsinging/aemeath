@@ -13,7 +13,7 @@ Server Foundation 属于 **v0.1.0 之后**的能力，当前里程碑（Context 
 
 ## 2. 已有草案
 
-`docs/design/07-server-design.md` 已包含完整设计草案，涵盖：
+`docs/design/02-modules/server/01-design.md` 已包含完整设计草案，涵盖：
 
 - 六边形端口定位（入站适配器，与 TUI 同级）
 - 进程拓扑（控制面 + worker，单一 `aemeath` 二进制三种角色）
@@ -52,7 +52,7 @@ Server 战术设计在以下任一条件满足时启动：
 
 ## 5. 相关文档
 
-- 设计草案：[../../07-server-design.md](../../07-server-design.md)
+- 设计草案：[./01-design.md](./01-design.md)
 - 系统总体设计：[../../01-system/](../../01-system/)
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
