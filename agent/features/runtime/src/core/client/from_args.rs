@@ -15,7 +15,7 @@ use crate::utils::bootstrap::{
     spawn_mcp_connect,
 };
 use crate::utils::bootstrap::{set_session_id, start_session, ChatBootstrapArgs};
-use prompt::api::skill::{load_all_skills, Skill};
+use context::api::skill::{load_all_skills, Skill};
 use provider::api::ProviderDriverKind;
 use provider::api::SystemBlock;
 use storage::api::TaskStore;
@@ -30,7 +30,7 @@ use crate::LOG_TARGET;
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
 pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
-    prompt::api::guidance::init_guidance_dir();
+    context::api::guidance::init_guidance_dir();
 
     // 2. 解析 cwd
     let cwd = args
@@ -220,7 +220,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
         active_run,
-        current_chain: Arc::new(Mutex::new(crate::business::session::ChatChain::default())),
+        current_chain: Arc::new(Mutex::new(context::api::session::ChatChain::default())),
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
         workspace,

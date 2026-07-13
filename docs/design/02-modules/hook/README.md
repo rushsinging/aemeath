@@ -165,12 +165,17 @@ struct HookExecution {
 | 结果 | 语义 |
 |---|---|
 | exit 0 + 合法 JSON/空输出 | 成功，解析 directive |
-| exit 2 | 主动 Block |
-| JSON `decision: block` / `continue: false` | 主动 Block |
-| 其他 exit | ExecutionFailed |
-| spawn / wait / IO / timeout / 非法 JSON | ExecutionFailed |
+| JSON `decision: block` / `continue: false` | 主动 Block（exit 0 时仍可通过 JSON 声明） |
+| 任意非零退出码（exit 1/2/...） | 主动 Block |
+| spawn / wait / IO / timeout | ExecutionFailed |
+| exit 0 + 非法 JSON | ExecutionFailed |
 
-主动 Block 是业务结果，不执行重试；ExecutionFailed 才进入重试。
+> **设计决策**：任意非零退出码 = Block，而非要求用户用 exit 2 表示 block。原因：
+> 1. **Unix 惯例**：非零退出码 = 失败/阻止，用户写 hook 脚本时自然用 `exit 1` 表示拒绝
+> 2. **不增加认知负担**：要求用户记住"exit 2 才是 block"不合理——大多数 hook 脚本用 `exit 1`
+> 3. **exit 0 + JSON `decision: block`** 是结构化声明 block 的方式（需要传递 reason 时使用）
+>
+> 主动 Block 是业务结果，不执行重试；ExecutionFailed 才进入重试。
 
 ## 6. 单 Hook 执行重试
 

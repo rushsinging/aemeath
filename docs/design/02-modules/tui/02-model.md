@@ -258,6 +258,8 @@ ConversationModel 维护两套对话表示：
 - `move_tool_result_after_tool_call` 强制 result 跟在对应 call 之后，处理流式事件乱序
 
 > **已知缺口**（#795 §10.8）：chats 与 timeline 无 invariant 测试。目标态：每次 `start_chat` / `append_*` / `complete_chat` 后断言两者同步。
+>
+> **timeline 定位**（DDD 评审）：`OutputTimelineModel` 是 **derived data（投影缓存）**，不是 source of truth。`chats: Vec<Chat>` 是 source of truth，timeline 是 Model 内部维护的渲染优化（避免 ViewAssembler 每帧全量遍历 chats）。语义上等同于 ViewAssembler 的缓存，只是维护时机不同——timeline 在 `apply()` 时增量更新，ViewAssembler 在 dirty flush 时全量读取。
 
 ### 3.6 RunRuntimeState（Run 生命周期耦合运行态）
 
@@ -989,7 +991,7 @@ trait AgentClient: Send + Sync {
 - **响应流**：`ChatStream`（`Stream<Item = ChatEvent>`）
 - **事件类型**：`ChatEvent` 枚举（TextDelta / ToolCallStart / ToolCallUpdate / CompleteChat 等）
 
-`LocalAgentClient` 直接传递内存对象；`WssAgentClient` 序列化为 `Call`/`Resp` 帧传输（协议定义见 [07-server-design.md](../../07-server-design.md)），但 **MUST** 保证两端看到的 DTO 类型一致。
+`LocalAgentClient` 直接传递内存对象；`WssAgentClient` 序列化为 `Call`/`Resp` 帧传输（协议定义见 [07-server-design.md](../server/01-design.md)），但 **MUST** 保证两端看到的 DTO 类型一致。
 
 ### 13.4 设计约束
 
@@ -1004,10 +1006,10 @@ trait AgentClient: Send + Sync {
 ## 14. 相关文档
 
 - TUI 架构与数据流：[01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)
-- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 - Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Server 模块（WssAgentClient 传输基础）：[../server/README.md](../server/README.md)
-- Server 设计草案（Call/Resp 帧协议）：[../../07-server-design.md](../../07-server-design.md)
+- Server 设计草案（Call/Resp 帧协议）：[../server/01-design.md](../server/01-design.md)
 - SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 
@@ -1017,6 +1019,7 @@ trait AgentClient: Send + Sync {
 |---|---|---|
 | 2026-07-12 | 初稿：3+1 Context 完整字段、ChatStatus/ChatTurnStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 状态机、RuntimeState 8 子模块、单一真相规则、Model 纯净性约束、现状缺口 | #796 |
 | 2026-07-12 | 术语对齐 Runtime 统一语言：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus；新增 AwaitingUser 投影态；补充术语迁移缺口 #9 | #796 |
+| 2026-07-12 | DDD 评审补漏：§3.5 timeline 定位标注为 derived data（投影缓存），明确 chats 为 source of truth | #798 评审 |
 | 2026-07-12 | SpinnerPhase 从独立状态机改为派生函数：`derive_spinner_phase(run_status, step_status, spinner)`，映射表标注每个变体的 Runtime 派生来源；移除 Reflecting（无对应 Runtime 状态）；chat_active 改为派生 | #796 |
 | 2026-07-12 | RuntimeState 按投影来源拆分：RunRuntimeState（9 字段，Run 耦合）+ ConfigProjection（provider/model_id，Config BC）+ WorkspaceProjection（cwd/worktree，Project BC），task_status 移到 SessionModel（Task BC）；3+1→3+3 Context | #796 |
 | 2026-07-12 | 新增 §13 出站端口适配器：AgentClient trait 为端口接口，LocalAgentClient（直连）+ WssAgentClient（远程，#794）；Controller 依赖 trait 不绑死实现，组合根注入 | #796 |

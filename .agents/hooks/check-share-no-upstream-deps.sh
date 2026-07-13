@@ -21,7 +21,7 @@ upstream = [
     "runtime",
     "project",
     "policy",
-    "prompt",
+    "context",
     "provider",
     "tools",
     "storage",

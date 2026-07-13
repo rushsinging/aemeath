@@ -1,7 +1,7 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::business::chat::looping::queue::{QueueDrainPort, QueueFuture};
-use crate::business::session::ChatChain;
 use crate::LOG_TARGET;
+use context::api::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::collections::VecDeque;

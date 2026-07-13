@@ -13,7 +13,7 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - **纯展示层**——Model 不执行 IO、不调 AgentClient、不发 channel（reducer 纯化目标，见 §10）
 - 基于 The Elm Architecture（TEA）变体：event → update → model → view → effect
 
-> **与 `04-tui-design.md` 的关系**：本文是 `04-tui-design.md` 的迁移深化版，修正了代码实现与设计文档的分歧，补充了架构门禁和缺口分析。原文件保留为历史归档。
+> **与 `snapshot/design/04-tui-design.md` 的关系**：本文是 `snapshot/design/04-tui-design.md` 的迁移深化版，修正了代码实现与设计文档的分歧，补充了架构门禁和缺口分析。原文件保留为历史归档。
 
 ## 2. 六边形边界
 
@@ -489,9 +489,49 @@ fn test_adapter_and_view_assembler_production_do_not_depend_on_render_modules() 
 
 **目标态**：统一为 enum match（更简单，减少文件数）或统一为 struct-per-variant（更可扩展）。后续 issue 决策。
 
+### 10.10 update_ui 混合职责
+
+**当前**：`App::update_ui` 同时做 5 种不相关的事——tool activity tracking + spinner phase sync + ask-user dialog setup + session cwd update + dirty marking。
+
+**架构违反**：Clean Architecture SRP——一个函数不应混合多个变更关注点。DDD——跨 Context 的副作用应在各自的 handler 中处理。
+
+**劣化机制**：新增 UI 副作用时不知往哪放 → 都塞进 update_ui → 函数膨胀 → 顺序敏感（reducer 先写 Model，update_ui 后写 view_state，顺序不能反）。
+
+**目标态**：拆为独立的 side-effect handler，每个职责一个函数。update_ui 只做"标记 dirty"，其余同步逻辑内聚到 ViewAssembler 或独立的 handler。
+
+### 10.11 AgentEventMapping hybrid 返回
+
+**当前**：`AgentEventMapping` 同时携带 `intents: Vec<Intent>` + `effects: Vec<Effect>`——ACL mapper 直接产出 Effect（副作用）。
+
+**架构违反**：TEA——Intent 是 Model 输入，Effect 是 Model 输出，两者不应在同一返回值中。Clean Architecture——ACL 应只做翻译，不做副作用决策。
+
+**劣化机制**：mapper 从纯函数变成有副作用的函数 → mapper 不可测试 → 后续开发者可能在 mapper 中加更多副作用。
+
+**目标态**：mapper 只产出 Intent，Effect 由 Coordinator 从 Change 派生（见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §9 缺口 #7）。
+
+### 10.12 event_mapping.rs 位置错误
+
+**当前**：第一层转换 `sdk_event_to_ui_event` 在 `effect/session/processing/` 目录——暗示它是副作用的一部分。
+
+**架构违反**：Hexagonal——ACL 应在 adapter 层。Clean Architecture——结构转换是 Interface Adapter 职责，不是 Use Case 层。
+
+**劣化机制**：位置暗示后续开发者可以在这里加副作用（"effect"目录就是做副作用的）→ ACL 逐渐被污染。**已发生**：`WorkingDirectoryChanged` 在这里同步调 git 子进程（§10.5）。
+
+**目标态**：移到 `adapter/event_mapping.rs`。
+
+### 10.13 update 顺序敏感
+
+**当前**：`update_agent_event` → `root_reducer`（写 Model）→ `update_ui`（写 view_state）——顺序不能调换，否则 Model 和 ViewState 不一致。
+
+**架构违反**：Clean Architecture——状态更新顺序应有编译期保证，而非靠调用顺序约定。
+
+**劣化机制**：如果有人调换 root_reducer 和 update_ui 的调用顺序，或新增一个中间步骤，Model 和 ViewState 会不一致——且无编译错误。
+
+**目标态**：update_ui 的逻辑应内聚到 ViewAssembler（读 Model 产出 ViewState），而非在 update 中手动同步。root_reducer 是唯一写 Model 的地方，ViewAssembler 是唯一读 Model 写 ViewState 的地方。
+
 ## 11. 相关文档
 
-- 原始 TUI 设计（历史归档）：[../../04-tui-design.md](../../04-tui-design.md)
+- 原始 TUI 设计（历史归档）：[../../../snapshot/design/04-tui-design.md](../../../snapshot/design/04-tui-design.md)
 - Runtime 端口（AgentClient = TUI 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - SDK Published Language：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言（TUI/TEA/Context）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
@@ -501,3 +541,4 @@ fn test_adapter_and_view_assembler_production_do_not_depend_on_render_modules() 
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：八层 TEA 管线、三条信息流、3+1 Context、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态 | #795 |
+| 2026-07-12 | DDD/Hexagonal/Clean 评审补漏：§10.10 update_ui 混合职责、§10.11 AgentEventMapping hybrid、§10.12 event_mapping 位置错误、§10.13 update 顺序敏感 | #798 评审 |

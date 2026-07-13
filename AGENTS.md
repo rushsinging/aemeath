@@ -44,7 +44,7 @@
 | `specs/update.md` | `agent/features/update/**` —— 版本检查（GitHub API + semver + 缓存）、`aemeath update` 子命令 | 改版本检查逻辑 / 缓存策略 / 更新渠道配置 |
 | `specs/bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；操作 GitHub Issues（迁移自 `docs/bug/`、`docs/snapshot/`） |
 | `specs/logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段、新增日志文件 |
-| `docs/design/02-architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/02-architecture-guards.md` 本身 |
+| `docs/design/03-engineering/architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/architecture-guards.md` 本身 |
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
 
@@ -205,20 +205,23 @@ Release Gate issue 模板：
 所有 Must have 完成且验证通过后，关闭本 issue，允许进入 `vX.Y.Z` 发版流程。
 ```
 
-### 大型工作的拆分与跟踪（总 → 分 / 伞 issue）
+### 大型工作的拆分与跟踪（GitHub Sub-issues）
 
-跨多个子系统、需多个 PR 才能完成的大型工作，**MUST** 按"总 → 分"组织，**NEVER** 塞进单一 issue 或单一 PR：
+跨多个子系统、需多个 PR 才能完成的大型工作，**MUST** 使用 GitHub 原生 parent / sub-issue 层级组织，**NEVER** 塞进单一 issue 或单一 PR，也 **NEVER** 新建或使用“伞 Issue（umbrella issue）”概念：
 
-1. **建伞（umbrella）issue 放大纲**：承载整体设计大纲、范围边界、子任务清单；大纲指向对应设计文档（`docs/superpowers/specs/`）。伞 issue 是该工作范围的**单一真相**。
-2. **拆子 issue**：每个可独立验证、独立 PR 的单元拆成一个子 issue；子 issue body **MUST** 链接回伞 issue，伞 issue **MUST** 列出全部子 issue。
-3. **标注依赖与并行性**：伞 issue **MUST** 对每个子 issue 标明——**可否并行**、**被谁 block / block 谁**，并据此排执行顺序。
-4. **跟进进度**：伞 issue 维护进度清单（每个子 issue：未开始 / 进行中 / 已合入）；状态变化时 **MUST** 同步更新伞 issue。
-5. **范围调整同步**：子任务执行中若发现更根本的问题需重做或移动范围，**MUST** 在伞 issue 与相关子 issue 同步调整（移入 / 移出 / 新建），保持伞 issue 大纲与依赖图始终为真。
-6. **子 issue 拆分原则**：大型工作的子 issue **SHOULD** 不超过 7 个，**MUST** 包含以下两类收尾 issue：
-   - **Guard + Verify issue**：落地架构守卫锁定新边界，故意制造违规验证拦截生效；端到端验收测试覆盖核心场景。
-    - **收尾退役 issue**：清理全项目的旧路径、散点读取和死代码（不限于本次改动引入）；去除 `cargo clippy --workspace --all-targets` 全部 warning；更新 `specs/` 分片和 `docs/design/`。
-    - **大文件拆分 issue**：对本次改动涉及的核心大文件进行模块边界整理，确保每个文件只承担单一职责。
-   其余子 issue 按依赖层次（领域模型 → 适配器 → 消费方）自然拆分，每个子 issue **MUST** 可独立 PR、独立验证。依赖方向严格从内到外，**NEVER** 反向。
+1. **父 Issue 承载大纲**：父 Issue **MUST** 承载整体目标、范围边界、依赖图、阶段状态和完成定义，并指向对应设计文档（`docs/superpowers/specs/` 或 `docs/superpowers/plans/`）。父 Issue 是该工作范围的单一真相，**NEVER** 直接承载代码 PR。
+2. **使用原生 Sub-issues**：每个可独立验证、独立 PR 的交付单元 **MUST** 创建为 GitHub 原生 sub-issue，**NEVER** 只用正文 checklist、反向链接或“Related”关系模拟父子层级。创建或调整后 **MUST** 查询并确认原生 parent / sub-issue 关系正确。
+3. **允许多级分解**：大型模块 **MAY** 先作为总父 Issue 的 sub-issue，再将原子交付任务作为该模块 Issue 的 sub-issues。叶子 sub-issue **MUST** 对应一个独立 PR 和一组独立验收标准。
+4. **标注依赖与并行性**：父 Issue **MUST** 对每个直接 sub-issue 标明可否并行、被谁 block / block 谁，并据此排执行顺序。依赖关系 **MUST** 使用 GitHub 原生 blocked-by / blocking 关系；正文可保留说明，但 **NEVER** 作为唯一依赖记录。
+5. **跟进进度**：父 Issue **MUST** 通过原生 sub-issue 状态和正文摘要维护进度（未开始 / 进行中 / 已合入）。sub-issue 状态变化时 **MUST** 同步父 Issue 的范围、阻断项和验收结论。
+6. **范围调整同步**：执行中若发现更根本的问题需重做或移动范围，**MUST** 调整相关原生 parent / sub-issue 与依赖关系，保持层级、依赖图和实际交付始终一致。
+7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 7 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
+8. **必有收尾能力**：大型工作 **MUST** 在最合适的父层级覆盖以下三类交付；若多个模块共享同一全局收尾，**MUST** 复用同一 sub-issue，**NEVER** 在每个模块重复创建：
+   - **Guard + Verify sub-issue**：落地架构守卫锁定新边界，故意制造违规验证拦截生效；端到端验收测试覆盖核心场景。
+   - **收尾退役 sub-issue**：清理全项目的旧路径、散点读取和死代码（不限于本次改动引入）；去除 `cargo clippy --workspace --all-targets` 全部 warning；更新 `specs/` 分片和 `docs/design/`。
+   - **大文件拆分 sub-issue**：对本次改动涉及的核心大文件进行模块边界整理，确保每个文件只承担单一职责。
+9. **依赖顺序**：其余 sub-issues **MUST** 按领域模型 → Port / Published Language → Adapter → 消费方 → Guard / 退役的方向拆分。依赖方向严格从内到外，**NEVER** 反向。
+10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 7 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
 
 ### Git 工作流
 

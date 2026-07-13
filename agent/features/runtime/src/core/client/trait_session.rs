@@ -10,12 +10,11 @@ use super::mapping;
 /// 从 chain + handle 数据保存 session。
 /// loop 内部直接传入 chain（无需经过 inner.current_chain）。
 pub(super) async fn save_chain_to_handle(
-    chain: &crate::business::session::ChatChain,
+    chain: &context::api::session::ChatChain,
     inner: &Arc<RuntimeHandle>,
 ) -> Result<(), SdkError> {
     // 从 chain 取活跃段（真实 segment 边界）
-    let active_segments: Vec<crate::business::session::ChatSegment> =
-        chain.active_segments().to_vec();
+    let active_segments: Vec<context::api::session::ChatSegment> = chain.active_segments().to_vec();
     let task_snapshot = {
         let snap = inner.context.resources.task_store.snapshot().await;
         if snap.tasks.is_empty() {
@@ -37,14 +36,14 @@ pub(super) async fn save_chain_to_handle(
     let mut chats = frozen_chats;
     chats.extend(active_segments);
 
-    let mut session = crate::business::session::Session::new(
+    let mut session = context::api::session::Session::new(
         inner.session_id.clone(),
         inner.cwd.to_string_lossy().to_string(),
     );
     session.chats = chats;
     // 旧 messages 字段置空（已迁移到 chats）
     session.messages = Vec::new();
-    session.updated_at = crate::business::session::now_iso();
+    session.updated_at = context::api::session::now_iso();
     session.metadata.model = Some(mapping::model_display(
         &inner.resolved_model.source_key,
         &inner.resolved_model.model.name,
@@ -52,7 +51,7 @@ pub(super) async fn save_chain_to_handle(
     ));
     session.tasks = task_snapshot;
     session.workspace = workspace;
-    crate::business::session::save_session(&session)
+    context::api::session::save_session(&session)
         .await
         .map_err(SdkError::Session)
 }
@@ -71,7 +70,7 @@ pub(super) async fn save_session_from_handle(inner: &Arc<RuntimeHandle>) -> Resu
 pub(super) async fn list_sessions_impl(
     _me: &AgentClientImpl,
 ) -> Result<Vec<SessionSummary>, SdkError> {
-    Ok(crate::business::session::list_sessions()
+    Ok(context::api::session::list_sessions()
         .await
         .into_iter()
         .map(mapping::session_summary_from_runtime)

@@ -212,7 +212,7 @@ fn assemble_reflection(root: &CompositionRoot) -> Arc<dyn ReflectionPromptPort> 
 
 ## 8. 守卫映射
 
-以下规则由架构守卫脚本在 CI / Stop hook 拦截（守卫注册表见 [../../02-architecture-guards.md](../../02-architecture-guards.md)）：
+以下规则由架构守卫脚本在 CI / Stop hook 拦截（守卫注册表见 [../../03-engineering/architecture-guards.md](../../03-engineering/architecture-guards.md)）：
 
 ```text
 Rule: memory-port-owned-by-composition

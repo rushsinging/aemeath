@@ -15,19 +15,19 @@ import json
 import subprocess
 import sys
 
-FEATURE_CRATES = {"runtime", "project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "update"}
+FEATURE_CRATES = {"runtime", "project", "policy", "context", "provider", "tools", "storage", "hook", "audit", "update"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
     "cli": {"composition", "sdk"},
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging", "update"},
-    "runtime": {"project", "policy", "prompt", "provider", "tools", "storage", "hook", "audit", "share", "sdk", "logging"},
+    "runtime": {"project", "policy", "context", "provider", "tools", "storage", "hook", "audit", "share", "sdk", "logging"},
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share"},
-    "prompt": {"share"},
+    "context": {"share", "provider", "storage", "sdk"},
     "provider": {"share"},
     # Approved horizontal dependencies (spec §6.4.7): tools -> project/storage, via their api facades.
     "tools": {"share", "project", "storage"},

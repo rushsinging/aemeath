@@ -34,7 +34,7 @@ use main_run_port::MainRunPort;
 /// again. `Run` is the only production state machine inside an active turn.
 pub async fn process_chat_loop<S, Q, I>(
     ctx: ChatLoopContext<S, Q, I>,
-) -> crate::business::session::ChatChain
+) -> context::api::session::ChatChain
 where
     S: ChatEventSink,
     Q: QueueDrainPort,
@@ -204,10 +204,10 @@ where
                     continue;
                 }
                 PendingCommand::ResumeSession { id } => {
-                    match crate::business::session::load_session(&id).await {
+                    match context::api::session::load_session(&id).await {
                         Ok(snapshot) => {
                             let restore =
-                                crate::business::session::SessionRestore::from_session(&snapshot);
+                                context::api::session::SessionRestore::from_session(&snapshot);
                             if restore.trimmed > 0 || restore.repaired > 0 {
                                 log::info!(
                                     target: "aemeath:agent:runtime",
@@ -229,7 +229,11 @@ where
                                 .send_event(RuntimeStreamEvent::SessionResumed {
                                     messages: chain.messages_flat(),
                                     session_id: id.clone(),
-                                    created_at: 0u64,
+                                    created_at: chrono::DateTime::parse_from_rfc3339(
+                                        &restore.created_at,
+                                    )
+                                    .map(|dt| dt.timestamp_millis() as u64)
+                                    .unwrap_or(0),
                                 })
                                 .await;
                             if restore.trimmed > 0 || restore.repaired > 0 {
@@ -243,7 +247,7 @@ where
                             }
                         }
                         Err(e) => {
-                            use crate::business::session::SessionLoadError;
+                            use context::api::session::SessionLoadError;
                             use sdk::SessionResumeFailureKind;
                             let (kind, message) = match &e {
                                 SessionLoadError::NotFound { .. } => (

@@ -555,6 +555,8 @@ fn test_sdk_event_types_only_in_adapter() {
 | 9 | UiEvent::ReflectionDone / ReflectionApplyDone 死代码 | `#[allow(dead_code)]`，映射时静默丢弃 | 删除 | #795 §10.2 |
 | 10 | ToolOutput progress 被忽略 | `AgentProgressKindView::ToolOutput` 返回 `AgentEventMapping::default()` | 目标态展示 sub-agent tool 输出摘要 | #612 |
 | 11 | ContentBlock JSON round-trip | `serde_json::from_value(to_value(...))` | share 定义 → SDK re-export | #795 §8 |
+| 12 | AgentEventMapping hybrid 返回 | ACL mapper 同时产出 Intent + Effect，mapper 从纯函数变有副作用 | mapper 只产出 Intent，Effect 由 Coordinator 从 Change 派生（#795 §10.11） | #798 评审 |
+| 13 | event_mapping.rs 位置错误 | 第一层转换在 `effect/session/processing/` 目录——暗示可加副作用，已发生 sync I/O 污染 | 移到 `adapter/event_mapping.rs`（#795 §10.12） | #798 评审 |
 
 ## 10. 相关文档
 
@@ -571,3 +573,4 @@ fn test_sdk_event_types_only_in_adapter() {
 |---|---|---|
 | 2026-07-12 | 初稿：事件流完整链路、AgentEventMapper ACL、SDK DTO 边界、agent_id 缺口 R8、sub 事件路由 #612、转换集中化、架构门禁、现状缺口 11 项 | #797 |
 | 2026-07-12 | 强化解耦：引用 R4/R7 铁律；新增 §4.5 TUI 自有 DTO 完全隔离设计；门禁 #6 扩展覆盖 app/event.rs；缺口 #1/#8 标注 R7/R4 违规 | #797 |
+| 2026-07-12 | DDD/Hexagonal 评审补漏：缺口 #12 AgentEventMapping hybrid 返回（mapper 同时产出 Intent+Effect）、#13 event_mapping.rs 位置错误（ACL 放 effect/ 目录导致副作用污染） | #798 评审 |
