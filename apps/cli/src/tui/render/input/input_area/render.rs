@@ -11,7 +11,7 @@ use ratatui::{
     style::Style,
     widgets::{Block, Borders, Widget},
 };
-use tui_textarea::TextArea;
+use ratatui_textarea::TextArea;
 
 impl InputArea {
     /// Render the input area from a ViewModel.
@@ -110,15 +110,15 @@ fn configured_textarea(
     }
     textarea.set_cursor_line_style(Style::default());
     textarea.set_cursor_style(Style::default().bg(theme::ACCENT).fg(theme::SURFACE));
-    textarea.move_cursor(tui_textarea::CursorMove::Top);
-    textarea.move_cursor(tui_textarea::CursorMove::Head);
+    textarea.move_cursor(ratatui_textarea::CursorMove::Top);
+    textarea.move_cursor(ratatui_textarea::CursorMove::Head);
     let (cursor_row, cursor_col) =
         display_position_for_anchor(display_lines, vm.cursor_row, vm.cursor_col);
     for _ in 0..cursor_row {
-        textarea.move_cursor(tui_textarea::CursorMove::Down);
+        textarea.move_cursor(ratatui_textarea::CursorMove::Down);
     }
     for _ in 0..cursor_col {
-        textarea.move_cursor(tui_textarea::CursorMove::Forward);
+        textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
     }
     textarea
 }
