@@ -2,7 +2,8 @@
 //!
 //! 跟踪连续压缩失败次数，超过阈值后停止尝试。
 
-use crate::LOG_TARGET;
+/// 自动压缩的日志 target。
+const LOG_TARGET: &str = "aemeath:agent:runtime";
 
 /// 连续自动压缩失败次数上限，超过后断路器跳闸。
 pub const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: u8 = 3;

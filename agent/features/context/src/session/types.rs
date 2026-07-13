@@ -1,18 +1,32 @@
 //! 会话核心类型定义
 
-use crate::business::state;
-use crate::utils::bootstrap::config_paths as paths;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use share::config::paths;
 use share::message::{Message, Role};
 use std::path::PathBuf;
 use storage::api::TaskSnapshot;
+use uuid::NoContext;
+use uuid::Timestamp;
+use uuid::Uuid;
 
 use super::chat_chain::ChatSegment;
 
-/// Validate a session ID — delegates to state::validate_session_id
+/// Validate a session ID to prevent path traversal attacks.
+/// Only allows alphanumeric characters, hyphens, and underscores.
 pub fn validate_session_id(id: &str) -> Result<(), String> {
-    state::validate_session_id(id)
+    if id.is_empty() {
+        return Err("session ID must not be empty".to_string());
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!(
+            "invalid session ID: {id:?} — only alphanumeric characters, hyphens, and underscores are allowed"
+        ));
+    }
+    Ok(())
 }
 
 /// Session metadata for organizing and filtering sessions
@@ -174,9 +188,9 @@ pub fn sessions_dir() -> PathBuf {
     paths::global_sessions_dir()
 }
 
-/// Generate a new session ID — delegates to state::new_session_id for consistency
+/// Generate a new session ID (UUIDv7, time-ordered, filename-safe).
 pub fn new_session_id() -> String {
-    crate::business::state::new_session_id()
+    Uuid::new_v7(Timestamp::now(NoContext)).to_string()
 }
 
 /// Get current ISO timestamp

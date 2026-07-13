@@ -63,7 +63,7 @@ pub struct SessionMessage {
 
 /// A saved session (internal use only, distinct from session::Session)
 /// This is used by AppState for runtime session management.
-/// For CLI persistence, use crate::business::session::Session instead.
+/// For CLI persistence, use context::api::session::Session instead.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InternalSession {
     /// Unique session ID
@@ -84,7 +84,7 @@ pub struct InternalSession {
 /// Alias for backward compatibility during transition
 #[deprecated(
     since = "0.1.0",
-    note = "Use InternalSession or crate::business::session::Session instead"
+    note = "Use InternalSession or context::api::session::Session instead"
 )]
 pub type Session = InternalSession;
 

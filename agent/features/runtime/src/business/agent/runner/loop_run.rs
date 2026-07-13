@@ -158,7 +158,7 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn progress_turn_start(&self, turn_number: usize) {
-        let msg_tokens = crate::business::compact::estimate_messages_tokens(&self.messages);
+        let msg_tokens = context::api::compact::estimate_messages_tokens(&self.messages);
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -300,7 +300,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         if self.last_api_input_tokens == 0 && self.last_api_output_tokens == 0 {
             return Ok(false);
         }
-        Ok(crate::business::compact::needs_compaction_actual(
+        Ok(context::api::compact::needs_compaction_actual(
             self.last_api_input_tokens,
             self.last_api_output_tokens,
             None,
