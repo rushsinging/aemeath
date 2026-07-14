@@ -150,6 +150,7 @@ mod tests {
                     max_tokens: model_max_tokens,
                     reasoning: None,
                     reasoning_effort: None,
+                    api_style: None,
                     input: Vec::new(),
                 }],
             },

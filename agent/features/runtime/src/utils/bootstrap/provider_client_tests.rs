@@ -23,6 +23,7 @@ fn resolved_model(
             max_tokens: 16_000,
             reasoning: None,
             reasoning_effort: None,
+            api_style: None,
         },
         driver: driver.as_str().to_string(),
     }

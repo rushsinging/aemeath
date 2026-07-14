@@ -18,6 +18,7 @@ fn test_config() -> ModelsConfig {
                 max_tokens: 32_000,
                 reasoning: Some(false),
                 reasoning_effort: None,
+                api_style: None,
             }],
         },
     );
