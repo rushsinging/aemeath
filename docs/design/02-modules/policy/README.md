@@ -115,7 +115,7 @@ Sub Run 可继承或收缩父 Run 的 Policy，但本期只有 AllowAll，因此
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - Runtime Loop：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 - Hook 设计：[../hook/README.md](../hook/README.md)
-- Migration：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Migration：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

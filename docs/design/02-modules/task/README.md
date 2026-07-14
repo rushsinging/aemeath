@@ -89,7 +89,7 @@ Config 通过只读 ConfigSnapshot 提供 Task 相关配置（如批次静默阈
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md) §4 / §7 / §10
 - Runtime 领域模型：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - Context Management Session：[../context-management/01-session.md](../context-management/01-session.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

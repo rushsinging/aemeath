@@ -300,7 +300,7 @@ Audit 不依赖 Runtime、TUI、Logging 具体实现或文件系统。
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
-- Migration：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Migration：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

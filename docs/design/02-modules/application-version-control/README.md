@@ -275,7 +275,7 @@ Deny: installer accepting raw URL/version or publicly constructible plan without
 - Config 目标设计：[../config/README.md](../config/README.md)
 - Storage 机制：[../storage/README.md](../storage/README.md)
 - Logging 机制：[../logging/README.md](../logging/README.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

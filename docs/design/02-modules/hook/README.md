@@ -237,7 +237,7 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 - Runtime 状态机：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 - Policy：[../policy/README.md](../policy/README.md)
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
-- Migration：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Migration：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

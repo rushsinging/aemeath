@@ -25,8 +25,8 @@
 旧扁平编号文档（`01-outline.md` ~ `07-server-design.md`）已整理完毕：
 
 - **已归档**（已被三层结构替代）：`01-outline.md` / `03-runtime-design.md` / `04-tui-design.md` / `06-agent-reasoning-graph.md` → `docs/snapshot/design/`
-- **已迁移**：`02-architecture-guards.md` → [`03-engineering/architecture-guards.md`](03-engineering/architecture-guards.md)；`05-agent-orchestration.md` → [`03-engineering/agent-orchestration.md`](03-engineering/agent-orchestration.md)；`07-server-design.md` → [`02-modules/server/01-design.md`](02-modules/server/01-design.md)
-- 迁移追踪与退役清单统一在 [`03-engineering/migration-governance`](03-engineering/migration-governance.md)
+- **已迁移**：`02-01-architecture-guards.md` → [`03-engineering/01-architecture-guards.md`](03-engineering/01-architecture-guards.md)；`05-02-agent-orchestration.md` → [`03-engineering/02-agent-orchestration.md`](03-engineering/02-agent-orchestration.md)；`07-server-design.md` → [`02-modules/server/01-design.md`](02-modules/server/01-design.md)
+- 迁移追踪与退役清单统一在 [`03-engineering/migration-governance`](03-engineering/03-migration-governance.md)
 
 ## 阅读路径
 
@@ -41,7 +41,7 @@
 | 理解 Memory 检索、注入与 Reflection 引擎 | [02-modules/memory/](02-modules/memory/README.md) |
 | 理解 Policy、Hook、Stop/Run Loop 与 Usage Audit 边界 | [02-modules/policy/](02-modules/policy/README.md) + [02-modules/hook/](02-modules/hook/README.md) + [02-modules/audit/](02-modules/audit/README.md) |
 | 理解依赖方向 / 六边形 | [04-system-architecture.md](01-system/04-system-architecture.md) + [05-dependency-rules.md](01-system/05-dependency-rules.md) |
-| 新增 / 调整架构守卫、Stop 钩子失败排查 | [03-engineering/architecture-guards.md](03-engineering/architecture-guards.md) |
+| 新增 / 调整架构守卫、Stop 钩子失败排查 | [03-engineering/01-architecture-guards.md](03-engineering/01-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
 
 ## 状态约定

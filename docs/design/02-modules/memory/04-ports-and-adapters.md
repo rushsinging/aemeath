@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）
-> 本文定义 Memory BC 的对外端口、NoOpMemory（Sub）、Storage 边界、Composition Root 装配与现状缺口。**只描述目标态**；现状缺口记入 `03-engineering/migration-governance.md`。
+> 本文定义 Memory BC 的对外端口、NoOpMemory（Sub）、Storage 边界、Composition Root 装配与现状缺口。**只描述目标态**；现状缺口记入 `03-engineering/03-migration-governance.md`。
 
 ## 1. MemoryPort
 
@@ -212,7 +212,7 @@ fn assemble_reflection(root: &CompositionRoot) -> Arc<dyn ReflectionPromptPort> 
 
 ## 8. 守卫映射
 
-以下规则由架构守卫脚本在 CI / Stop hook 拦截（守卫注册表见 [../../03-engineering/architecture-guards.md](../../03-engineering/architecture-guards.md)）：
+以下规则由架构守卫脚本在 CI / Stop hook 拦截（守卫注册表见 [../../03-engineering/01-architecture-guards.md](../../03-engineering/01-architecture-guards.md)）：
 
 ```text
 Rule: memory-port-owned-by-composition
@@ -233,7 +233,7 @@ Deny: agent/features/** domain/application modules and apps/**
 - Runtime 端口（MemoryPort 消费方）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map（Memory 集成关系）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 依赖规则：[../../01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

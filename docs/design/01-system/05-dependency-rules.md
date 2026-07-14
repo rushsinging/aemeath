@@ -2,7 +2,7 @@
 
 > 层级：01-system（系统级总体设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0
-> 本文定义强制性的依赖方向规则。**只描述目标态规则，不记录当前代码状态。** 违反即架构腐化，由 [../03-engineering/architecture-guards.md](../03-engineering/architecture-guards.md) 的守卫脚本在 CI / Stop hook 拦截。
+> 本文定义强制性的依赖方向规则。**只描述目标态规则，不记录当前代码状态。** 违反即架构腐化，由 [../03-engineering/01-architecture-guards.md](../03-engineering/01-architecture-guards.md) 的守卫脚本在 CI / Stop hook 拦截。
 
 ## 1. 依赖方向总则（Clean）
 
@@ -54,13 +54,13 @@
 
 ## 6. 守卫映射
 
-以上铁律由 [../03-engineering/architecture-guards.md](../03-engineering/architecture-guards.md) 注册的守卫脚本机械拦截。新增铁律 MUST 配套新增 / 调整守卫，否则规则形同虚设。
+以上铁律由 [../03-engineering/01-architecture-guards.md](../03-engineering/01-architecture-guards.md) 注册的守卫脚本机械拦截。新增铁律 MUST 配套新增 / 调整守卫，否则规则形同虚设。
 
 ## 7. 相关文档
 
 - 系统架构：[04-system-architecture.md](04-system-architecture.md)
 - 上下文地图：[03-context-map.md](03-context-map.md)
-- 架构守卫注册表：[../03-engineering/architecture-guards.md](../03-engineering/architecture-guards.md)
+- 架构守卫注册表：[../03-engineering/01-architecture-guards.md](../03-engineering/01-architecture-guards.md)
 - 目录总览：[../README.md](../README.md)
 
 ## 修改历史

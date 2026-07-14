@@ -2,7 +2,7 @@
 
 > 层级：02-modules / tools（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）
-> 本文只描述目标态；实现差距统一记录在 `03-engineering/migration-governance.md`。
+> 本文只描述目标态；实现差距统一记录在 `03-engineering/03-migration-governance.md`。
 
 ## 1. Tool 语言
 
@@ -356,7 +356,7 @@ enum McpConnectionState {
 - 端口与生命周期：[02-ports-and-lifecycle.md](02-ports-and-lifecycle.md)
 - Runtime 领域模型：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 
