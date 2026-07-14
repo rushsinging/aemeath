@@ -60,7 +60,7 @@ pub trait ContextPort: Send + Sync {
     /// L5 auto-compact：LLM 摘要替换历史（唯一修改 ChatChain 的压缩策略）。
     async fn compact(
         &self,
-        chain: &mut context::api::session::ChatChain,
+        chain: &mut context::session::ChatChain,
         req: &ContextRequest,
         cancellation: &CancellationToken,
     ) -> CompactResult;

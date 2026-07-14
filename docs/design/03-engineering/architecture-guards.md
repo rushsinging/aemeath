@@ -182,22 +182,24 @@
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
+- **功能**：检查跨 feature 访问只经该 feature 声明的公共入口。旧 COLA crate 继续经 `::<feature>::api`；capability-first 的 Context 直接经 `context::{budget, compact, context_port, memory_inject, prompt, session}`。
+- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 实现路径；对已完成 capability-first 迁移的 crate 允许显式能力根模块。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`
+  - `CAPABILITY_ROOT_ALLOW = {context: {budget, compact, context_port, memory_inject, prompt, session}}`
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`（project 可在根级 `pub use project::ProjectContext`，如 `sdk` 投影）
 - **检查方式**：
   - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；
   - 对每个文件，匹配 `<feature>::<segment>` 形态：
-    - `segment == "api"`：放行（这是入口）；
-    - `segment ∈ INTERNAL_SEGMENTS`：违规（需改走 `api`）；
+    - `segment == "api"`：旧 COLA crate 的公共入口；
+    - `segment ∈ CAPABILITY_ROOT_ALLOW[target]`：capability-first crate 的公共能力入口；
+    - `segment ∈ INTERNAL_SEGMENTS` 或其他未声明根模块：违规；
     - `segment ∈ ROOT_REEXPORT_ALLOW[target]` 且是 `pub use`：放行。
-  - 对 `agent/features/*/src/api.rs` 的 `pub use crate::<segment>`：`segment` 必须在 `API_FACADE_ALLOWED_SEGMENTS`。
+  - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 只能引用 `contract` / `gateway`。
 - **例外**：`ROOT_REEXPORT_ALLOW` 表中登记的符号（当前仅 `project::ProjectContext`）；`share` crate 不受跨 crate 检查约束（它处于依赖底层）。
-- **说明**：旧的 `WorktreeContextExt` 投影豁免已随 context 所有权重构删除；当前脚本**没有任何** path 级豁免。
+- **说明**：`CAPABILITY_ROOT_ALLOW` 是 crate 级发布入口清单，不是路径豁免；新增能力根必须同步设计文档与守卫自检。
 
 ## 7. check-context-architecture.sh
 

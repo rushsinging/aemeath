@@ -1,7 +1,7 @@
 //! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
 
 use crate::utils::bootstrap;
-use context::api::skill::Skill;
+use context::prompt::skill::Skill;
 use hook::api::HookRunner;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header, skills_header};
@@ -24,7 +24,7 @@ pub async fn build_static_prompt(
         hook_runner,
         workspace_root: cwd,
     };
-    let model_guidance = context::api::guidance::resolve_guidance_async(
+    let model_guidance = context::prompt::guidance::resolve_guidance_async(
         model,
         &guidance_config,
         reasoning,
@@ -34,7 +34,7 @@ pub async fn build_static_prompt(
     .await;
 
     let mut prompt = prompt_parts.static_part;
-    prompt.push_str(context::api::guidance::universal_execution_discipline(
+    prompt.push_str(context::prompt::guidance::universal_execution_discipline(
         language,
     ));
     append_skills(&mut prompt, &skills_guard, language);

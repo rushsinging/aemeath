@@ -60,9 +60,9 @@ pub(super) async fn chat_impl(
                         .collect(),
                 )
             };
-            context::api::session::ChatChain::from_flat_messages(vec![msg])
+            context::session::ChatChain::from_flat_messages(vec![msg])
         } else {
-            context::api::session::ChatChain::default()
+            context::session::ChatChain::default()
         }
     };
 
@@ -126,7 +126,7 @@ pub(super) async fn chat_impl(
                 },
                 save_chain: {
                     let inner = inner.clone();
-                    std::sync::Arc::new(move |chain: &context::api::session::ChatChain| {
+                    std::sync::Arc::new(move |chain: &context::session::ChatChain| {
                         let inner = inner.clone();
                         let chain = chain.clone();
                         Box::pin(async move {

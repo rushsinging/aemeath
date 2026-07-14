@@ -2,7 +2,7 @@ use super::*;
 use share::config::paths;
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::{Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};

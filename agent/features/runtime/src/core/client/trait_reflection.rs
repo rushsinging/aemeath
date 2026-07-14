@@ -308,9 +308,7 @@ mod tests {
             )),
             current_client: std::sync::RwLock::new(client),
             active_run: Arc::new(crate::core::active_run::ActiveRunRegistry::default()),
-            current_chain: Arc::new(std::sync::Mutex::new(
-                context::api::session::ChatChain::default(),
-            )),
+            current_chain: Arc::new(std::sync::Mutex::new(context::session::ChatChain::default())),
             frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_summary: Arc::new(std::sync::Mutex::new(None)),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),

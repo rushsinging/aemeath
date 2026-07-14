@@ -22,7 +22,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,
     turn_count: usize,
     sink: &S,
-    chain: &mut context::api::session::ChatChain,
+    chain: &mut context::session::ChatChain,
     language: &str,
     segment_id: &str,
 ) where

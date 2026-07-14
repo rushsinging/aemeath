@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 功能：检查跨 feature 访问只经 `<feature>::api`，且 feature 的 api.rs 只 re-export
-#       contract / gateway。
-# 作用：守住 feature 发布语言边界（§6.4.2）——禁止穿透对方 contract/gateway/core/
-#       business/utils 内部路径，禁止 api.rs 暴露内部层。
+# 功能：检查跨 feature 访问只经该 feature 声明的公共入口。
+#       旧 COLA crate 继续经 `<feature>::api`；capability-first 的 context 经
+#       `context::{budget, compact, context_port, memory_inject, prompt, session}`。
+# 作用：守住 feature 发布语言边界——禁止穿透对方 contract/gateway/core/business/utils
+#       等实现路径，同时允许显式 capability 根模块。
 # 例外：无。（旧 WorktreeContextExt 投影豁免已随 context 所有权重构删除。）
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -33,6 +34,16 @@ INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
+}
+CAPABILITY_ROOT_ALLOW = {
+    "context": {
+        "budget",
+        "compact",
+        "context_port",
+        "memory_inject",
+        "prompt",
+        "session",
+    },
 }
 
 path_pattern = re.compile(
@@ -113,6 +124,8 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
             continue
+        if segment in CAPABILITY_ROOT_ALLOW.get(target, set()):
+            continue
         if segment != "api":
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use {target}::api"
@@ -137,6 +150,8 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
                 continue
+            if item_name in CAPABILITY_ROOT_ALLOW.get(target, set()):
+                continue
             if item_name != "api":
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use {target}::api::..."
@@ -160,6 +175,7 @@ def check_api_line(line: str) -> list[str]:
 def run_sanity() -> None:
     allowed = [
         ("runtime", "use provider::api::LlmClient;"),
+        ("runtime", "use context::session::ChatChain;"),
         ("tools", "let _ = ctx.workspace_read();"),
         ("provider", "use crate::core::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
@@ -167,6 +183,7 @@ def run_sanity() -> None:
     ]
     blocked = [
         ("runtime", "use provider::core::client::LlmClient;"),
+        ("runtime", "use context::business::Session;"),
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
         ("runtime", "use storage::{api::MemoryStore, MemoryStore as RootStore};"),
     ]

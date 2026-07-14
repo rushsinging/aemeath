@@ -1,11 +1,10 @@
-//! Prompt & Guidance 子模块（PromptPort）。
+//! Prompt & Guidance 能力。
 //!
-//! 原 `agent/features/prompt/` crate 整体并入。
+//! 原 `agent/features/prompt/` crate 整体并入 Context Management。
 
-pub mod api;
-mod business;
-pub mod contract;
-pub mod gateway;
+pub mod guidance;
+mod security;
+pub mod skill;
 
-/// 旧 crate 的日志 target，prompt 内部 log 调用仍使用。
+/// Prompt 能力日志 target。
 pub const LOG_TARGET: &str = "aemeath:agent:prompt";

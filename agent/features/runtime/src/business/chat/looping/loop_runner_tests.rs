@@ -5,11 +5,11 @@
 use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
 
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 
 fn test_save_chain() -> Arc<
     dyn Fn(
-            &context::api::session::ChatChain,
+            &context::session::ChatChain,
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
         + Send
@@ -651,10 +651,10 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
     let workspace_root = tempfile::tempdir().unwrap();
     let marker = path_base.path().join("stop-hook-env.txt");
     let marker_path = marker.display().to_string();
-    let workspace_dto = context::api::session::PersistedWorkspaceContext {
+    let workspace_dto = context::session::PersistedWorkspaceContext {
         path_base: path_base.path().display().to_string(),
         workspace_root: workspace_root.path().display().to_string(),
-        context_stack: vec![context::api::session::PersistedWorkspaceFrame {
+        context_stack: vec![context::session::PersistedWorkspaceFrame {
             path_base: path_base.path().display().to_string(),
             workspace_root: path_base.path().display().to_string(),
         }],

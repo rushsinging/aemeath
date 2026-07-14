@@ -151,6 +151,7 @@ async fn trigger_loaded_hooks(
 
 /// Load a named file with language subdirectory support.
 /// Tries `{language}/{name}.md` first, falls back to `{name}.md`, then built-in content.
+#[cfg(test)]
 pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<String> {
     load_named_guidance_with_lang(name, language).map(|guidance| guidance.content)
 }
@@ -321,7 +322,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
     }
 
     let display_path = path.to_string_lossy();
-    let warnings = crate::prompt::business::security::scan_content(&display_path, &content);
+    let warnings = crate::prompt::security::scan_content(&display_path, &content);
     for warning in &warnings {
         log::warn!(target: LOG_TARGET,
             "[Security] {} in {} line {}: {}",
@@ -331,7 +332,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
             warning.matched_text
         );
     }
-    let content = crate::prompt::business::security::format_warnings(&warnings)
+    let content = crate::prompt::security::format_warnings(&warnings)
         .map(|prefix| format!("{prefix}\n\n{content}"))
         .unwrap_or(content);
     Some(LoadedGuidance::file(path, content))

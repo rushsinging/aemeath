@@ -1,5 +1,5 @@
 use crate::business::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 use share::message::Message;
 use std::future::Future;
 use std::pin::Pin;

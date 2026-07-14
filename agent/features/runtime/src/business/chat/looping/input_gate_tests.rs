@@ -3,7 +3,7 @@
 use super::input_gate::*;
 use crate::business::chat::looping::events::{ChatEventSink, EventFuture, RuntimeStreamEvent};
 use crate::business::chat::looping::queue::{QueueDrainPort, QueueFuture};
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::sync::{Arc, Mutex};

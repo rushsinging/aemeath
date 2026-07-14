@@ -263,7 +263,7 @@ fn test_runtime_tool_result_maps_images_and_content() {
 #[test]
 fn test_runtime_working_directory_changed_marks_project_changeset() {
     let change_tx = event_mapping_context();
-    let workspace = context::api::session::PersistedWorkspaceContext {
+    let workspace = context::session::PersistedWorkspaceContext {
         path_base: "/tmp/project".to_string(),
         workspace_root: "/tmp/project".to_string(),
         context_stack: Vec::new(),

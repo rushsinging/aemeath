@@ -45,7 +45,7 @@ pub(crate) async fn auto_compact<S>(
 where
     S: ChatEventSink,
 {
-    use context::api::compact;
+    use context::compact;
 
     // resume 保护：首 turn 无 API 反馈时不 compact。
     // resume 加载的是已精简的活跃链，第一轮直接原样发送，等拿到真实 token 数后再决定。
@@ -193,13 +193,11 @@ where
 }
 
 /// 构造一个通过 `ChatEventSink::try_send_event` 发送 `CompactProgress` 事件的进度回调。
-fn make_progress_sink<S: ChatEventSink>(
-    sink: &S,
-) -> Box<dyn context::api::compact::CompactProgressFn> {
+fn make_progress_sink<S: ChatEventSink>(sink: &S) -> Box<dyn context::compact::CompactProgressFn> {
     struct SinkProgress<S: ChatEventSink> {
         sink: S,
     }
-    impl<S: ChatEventSink> context::api::compact::CompactProgressFn for SinkProgress<S> {
+    impl<S: ChatEventSink> context::compact::CompactProgressFn for SinkProgress<S> {
         fn emit(&self, stage: CompactStage, current: Option<usize>, total: Option<usize>) {
             self.sink
                 .try_send_event(RuntimeStreamEvent::CompactProgress {
@@ -234,7 +232,7 @@ pub(crate) async fn manual_compact<S>(
 where
     S: ChatEventSink,
 {
-    use context::api::compact;
+    use context::compact;
 
     if messages.len() <= 4 {
         let _ = sink
