@@ -5,15 +5,6 @@ use share::tool::types::task_update::{TaskUpdateInput, TaskUpdateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
-fn current_timestamp_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or_default()
-}
-
 pub struct TaskUpdateTool {
     pub store: Arc<TaskStore>,
 }
@@ -27,7 +18,8 @@ impl TypedTool for TaskUpdateTool {
     fn description(&self) -> &str {
         "Update a single field on a task.\n\n\
          Pass `key` to select which field to change and `value` for the new value. \
-         Each call updates exactly one field.\n\n\
+         Each call updates exactly one field. Value is always a string.\n\n\
+         Valid keys: status, subject, description, owner, priority, blocked_by_id.\n\n\
          Status workflow: pending → in_progress → completed. Use 'deleted' to remove.\n\n\
          When you mark a task as completed, the system will show which downstream tasks \
          are now unblocked and ready to execute. Use this to decide what to work on next.\n\n\
@@ -69,55 +61,37 @@ impl TypedTool for TaskUpdateTool {
             None => return TypedToolResult::error(format!("task not found: {input_id}")),
         };
 
-        // ── Validate key & extract typed value ──────────────────────────
-        let now = current_timestamp_millis();
         let key = args.key.as_str();
         let val = &args.value;
 
-        // Pre-resolve dependency display numbers to global ids (must be async)
-        let resolved_deps: Vec<String> = match key {
-            "add_blocked_by" | "add_blocks" => {
-                let ids: Vec<String> = match val.as_array() {
-                    Some(arr) => arr
-                        .iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect(),
-                    None => {
-                        return TypedToolResult::error(format!(
-                            "value for '{key}' must be an array of strings"
-                        ))
-                    }
-                };
-                self.store.resolve_display_ids(&ids).await
+        // Validate: value must be a string for all keys
+        let val_str = match val.as_str() {
+            Some(s) => s,
+            None => {
+                return TypedToolResult::error(format!("value must be a string for key '{key}'"))
             }
-            _ => Vec::new(),
         };
 
-        // Validate value type per key before entering the closure
+        // Pre-resolve blocked_by_id display number to global id
+        let resolved_dep: Option<String> = match key {
+            "blocked_by_id" => {
+                let gid = self.store.resolve_display_id(val_str).await;
+                if gid.is_none() {
+                    return TypedToolResult::error(format!(
+                        "blocked_by_id task not found: {val_str}"
+                    ));
+                }
+                gid
+            }
+            _ => None,
+        };
+
+        // Validate key
         match key {
-            "status" | "subject" | "description" | "active_form" | "owner" | "priority"
-            | "progress_message" => {
-                if !val.is_string() {
-                    return TypedToolResult::error(format!("value for '{key}' must be a string"));
-                }
-            }
-            "progress" => {
-                if val.as_u64().is_none() {
-                    return TypedToolResult::error(format!(
-                        "value for '{key}' must be an integer (0-100)"
-                    ));
-                }
-            }
-            "add_blocked_by" | "add_blocks" | "add_tags" | "remove_tags" => {
-                if !val.is_array() {
-                    return TypedToolResult::error(format!(
-                        "value for '{key}' must be an array of strings"
-                    ));
-                }
-            }
+            "status" | "subject" | "description" | "owner" | "priority" | "blocked_by_id" => {}
             _ => {
                 return TypedToolResult::error(format!(
-                    "unknown field '{key}'. Valid keys: status, subject, description, active_form, owner, priority, progress, progress_message, add_blocked_by, add_blocks, add_tags, remove_tags"
+                    "unknown field '{key}'. Valid keys: status, subject, description, owner, priority, blocked_by_id"
                 ));
             }
         }
@@ -125,10 +99,8 @@ impl TypedTool for TaskUpdateTool {
         let result = self
             .store
             .update(&task_id, |task| match key {
-                // ── String fields ───────────────────────────────────────
                 "status" => {
-                    let s = val.as_str().unwrap_or("");
-                    task.status = match s {
+                    task.status = match val_str {
                         "pending" => TaskStatus::Pending,
                         "in_progress" => TaskStatus::InProgress,
                         "completed" => TaskStatus::Completed,
@@ -137,56 +109,23 @@ impl TypedTool for TaskUpdateTool {
                     };
                 }
                 "subject" => {
-                    task.subject = val.as_str().unwrap_or("").to_string();
+                    task.subject = val_str.to_string();
                 }
                 "description" => {
-                    task.description = val.as_str().unwrap_or("").to_string();
-                }
-                "active_form" => {
-                    task.active_form = Some(val.as_str().unwrap_or("").to_string());
+                    task.description = val_str.to_string();
                 }
                 "owner" => {
-                    task.owner = Some(val.as_str().unwrap_or("").to_string());
+                    task.owner = Some(val_str.to_string());
                 }
                 "priority" => {
-                    if let Some(p) = TaskPriority::parse(val.as_str().unwrap_or("")) {
+                    if let Some(p) = TaskPriority::parse(val_str) {
                         task.priority = p;
                     }
                 }
-                "progress_message" => {
-                    task.progress_message = Some(val.as_str().unwrap_or("").to_string());
-                }
-                // ── Integer fields ──────────────────────────────────────
-                "progress" => {
-                    task.progress = (val.as_u64().unwrap_or(0) as u8).min(100);
-                }
-                // ── Dependency fields (pre-resolved) ────────────────────
-                "add_blocked_by" => {
-                    for gid in &resolved_deps {
+                "blocked_by_id" => {
+                    if let Some(gid) = &resolved_dep {
                         if !task.blocked_by.contains(gid) {
                             task.blocked_by.push(gid.clone());
-                        }
-                    }
-                }
-                "add_blocks" => {
-                    for gid in &resolved_deps {
-                        if !task.blocks.contains(gid) {
-                            task.blocks.push(gid.clone());
-                        }
-                    }
-                }
-                // ── Tag fields ──────────────────────────────────────────
-                "add_tags" => {
-                    if let Some(arr) = val.as_array() {
-                        for tag in arr.iter().filter_map(|v| v.as_str()) {
-                            task.add_tag(tag.to_string(), now);
-                        }
-                    }
-                }
-                "remove_tags" => {
-                    if let Some(arr) = val.as_array() {
-                        for tag in arr.iter().filter_map(|v| v.as_str()) {
-                            task.remove_tag(tag, now);
                         }
                     }
                 }

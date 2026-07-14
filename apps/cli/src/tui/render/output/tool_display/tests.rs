@@ -285,15 +285,15 @@ fn test_format_tool_call_task_update_with_id_no_status() {
 fn test_format_tool_call_task_update_shows_blocked_by() {
     let (header, _) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"7","key":"add_blocked_by","value":["4","5","6"]}"#,
+        r#"{"taskId":"7","key":"blocked_by_id","value":"4"}"#,
         None,
         None,
     );
     let text = line_to_string(&header);
     assert!(text.contains("7"), "应包含 taskId: {text}");
     assert!(
-        text.contains("add_blocked_by [4,5,6]"),
-        "应包含 blockedBy: {text}"
+        text.contains("blocked by #4"),
+        "应包含 blocked_by_id: {text}"
     );
 }
 

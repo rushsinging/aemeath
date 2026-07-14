@@ -123,7 +123,7 @@ fn test_agent_tool_schema_describes_1000_turn_limit() {
 async fn test_agent_tool_task_id_success_completes_task() {
     let store = Arc::new(TaskStore::new());
     let task = store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
+        .create("agent task".to_string(), "run subagent".to_string())
         .await;
     let tool = AgentTool {
         store: store.clone(),
@@ -149,7 +149,7 @@ async fn test_agent_tool_task_id_success_completes_task() {
 async fn test_agent_tool_task_id_failure_resets_pending() {
     let store = Arc::new(TaskStore::new());
     let task = store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
+        .create("agent task".to_string(), "run subagent".to_string())
         .await;
     let tool = AgentTool {
         store: store.clone(),
@@ -198,7 +198,7 @@ async fn test_agent_tool_allows_missing_task_id_even_with_active_list() {
         .create_list("request".to_string(), "complex request".to_string())
         .await;
     store
-        .create("agent task".to_string(), "run subagent".to_string(), None)
+        .create("agent task".to_string(), "run subagent".to_string())
         .await;
     let tool = AgentTool {
         store: store.clone(),

@@ -17,7 +17,7 @@ pub fn task_create(lang: &str) -> &'static str {
 4. 用 TaskUpdate 设置依赖并分配代理
 
 创建任务后，用 TaskUpdate：
-- 在任务间设置依赖（add_blocked_by/add_blocks）
+- 在任务间设置依赖（blocked_by_id）
 - 开始工作前标记为 in_progress
 - 完成后标记为 completed——系统会显示哪些任务已解除阻塞
 
@@ -45,7 +45,7 @@ IMPORTANT workflow when task management is actually needed:
 4. Use TaskUpdate to set dependencies and assign agents
 
 After creating tasks, use TaskUpdate to:
-- Set dependencies (add_blocked_by/add_blocks) between tasks
+- Set dependencies (blocked_by_id) between tasks
 - Mark as in_progress before starting work
 - Mark as completed when done — the system will show which tasks are unblocked
 
@@ -97,17 +97,16 @@ pub fn task_stop(lang: &str) -> &'static str {
 pub fn task_update(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"更新任务的**单个**字段。每次调用只改一个字段。
+            r#"更新任务的**单个**字段。每次调用只改一个字段，value 始终为字符串。
 
-参数：task_id（任务 ID）、key（字段名）、value（新值）。
+参数：task_id（任务 ID）、key（字段名）、value（新值，字符串）。
 
 可用 key：
-- status: 状态字符串（pending / in_progress / completed / deleted）
-- subject / description / active_form / owner / progress_message: 字符串
-- priority: 优先级（high / medium / low）
-- progress: 整数 0-100
-- add_blocked_by / add_blocks: 任务 ID 字符串数组
-- add_tags / remove_tags: 标签字符串数组
+- status: 状态（pending / in_progress / completed / deleted）
+- subject / description: 字符串
+- owner: 字符串
+- priority: 优先级（low / medium / high）
+- blocked_by_id: 依赖的单个任务 ID（如 "4"）
 
 状态工作流：pending → in_progress → completed。用 'deleted' 删除。
 
@@ -116,17 +115,16 @@ pub fn task_update(lang: &str) -> &'static str {
 完成任务后，检查解除阻塞列表或调用 TaskList 查找下一个可用任务。"#
         }
         _ => {
-            r#"Update a **single** field on a task. Each call changes exactly one field.
+            r#"Update a **single** field on a task. Each call changes exactly one field. Value is always a string.
 
-Parameters: task_id (task ID), key (field name), value (new value).
+Parameters: task_id (task ID), key (field name), value (new value, string).
 
 Valid keys:
-- status: status string (pending / in_progress / completed / deleted)
-- subject / description / active_form / owner / progress_message: string
-- priority: priority level (high / medium / low)
-- progress: integer 0-100
-- add_blocked_by / add_blocks: array of task ID strings
-- add_tags / remove_tags: array of tag strings
+- status: status (pending / in_progress / completed / deleted)
+- subject / description: string
+- owner: string
+- priority: priority (low / medium / high)
+- blocked_by_id: single task ID this task depends on (e.g. "4")
 
 Status workflow: pending → in_progress → completed. Use 'deleted' to remove.
 

@@ -82,25 +82,15 @@ impl TypedTool for TaskGetTool {
             "status": status,
             "priority": priority,
             "description": task.description,
-            "progress": task.progress,
             "created_at": format_timestamp(task.created_at),
             "updated_at": format_timestamp(task.updated_at),
         });
 
-        if let Some(ref progress_message) = task.progress_message {
-            task_data["progress_message"] = serde_json::Value::String(progress_message.clone());
-        }
         if let Some(ref owner) = task.owner {
             task_data["owner"] = serde_json::Value::String(owner.clone());
         }
-        if let Some(ref active_form) = task.active_form {
-            task_data["active_form"] = serde_json::Value::String(active_form.clone());
-        }
         if let Some(ref session_id) = task.session_id {
             task_data["session_id"] = serde_json::Value::String(session_id.clone());
-        }
-        if !task.tags.is_empty() {
-            task_data["tags"] = serde_json::json!(task.tags);
         }
 
         // Dependencies
@@ -111,12 +101,6 @@ impl TypedTool for TaskGetTool {
             let is_blocked = self.store.is_blocked(&task).await;
             task_data["blocked_by"] = serde_json::json!(blocked_by);
             task_data["is_blocked"] = serde_json::json!(is_blocked);
-        }
-
-        if !task.blocks.is_empty() {
-            let dep_displays = self.store.to_display_ids(&task.blocks).await;
-            let blocks: Vec<String> = dep_displays.iter().map(|id| format!("#{}", id)).collect();
-            task_data["blocks"] = serde_json::json!(blocks);
         }
 
         TypedToolResult::success(

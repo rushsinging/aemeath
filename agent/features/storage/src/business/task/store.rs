@@ -2,14 +2,9 @@ use super::{Task, TaskPriority, TaskSnapshot, TaskStatus, TaskStore, TaskStoreSt
 use std::collections::HashMap;
 
 impl TaskStore {
-    /// Create a new task with all fields
-    pub async fn create(
-        &self,
-        subject: String,
-        description: String,
-        active_form: Option<String>,
-    ) -> Task {
-        self.create_with_priority(subject, description, active_form, TaskPriority::default())
+    /// Create a new task
+    pub async fn create(&self, subject: String, description: String) -> Task {
+        self.create_with_priority(subject, description, TaskPriority::default())
             .await
     }
 
@@ -18,12 +13,9 @@ impl TaskStore {
         &self,
         subject: String,
         description: String,
-        active_form: Option<String>,
         priority: TaskPriority,
     ) -> Task {
-        let task = self
-            .build_task(subject, description, active_form, priority)
-            .await;
+        let task = self.build_task(subject, description, priority).await;
         self.tasks
             .lock()
             .await
@@ -192,7 +184,7 @@ mod tests {
             .create_list("first".to_string(), "first batch".to_string())
             .await;
         let first = store
-            .create("first task".to_string(), "desc".to_string(), None)
+            .create("first task".to_string(), "desc".to_string())
             .await;
         store
             .update(&first.id, |task| task.status = TaskStatus::Completed)
@@ -203,7 +195,7 @@ mod tests {
             .create_list("second".to_string(), "second batch".to_string())
             .await;
         let second = store
-            .create("second task".to_string(), "desc".to_string(), None)
+            .create("second task".to_string(), "desc".to_string())
             .await;
 
         assert_eq!(second.id, "1");
@@ -216,7 +208,7 @@ mod tests {
             .create_list("first".to_string(), "first batch".to_string())
             .await;
         let first = store
-            .create("first task".to_string(), "desc".to_string(), None)
+            .create("first task".to_string(), "desc".to_string())
             .await;
         store
             .update(&first.id, |task| task.status = TaskStatus::Completed)
@@ -227,7 +219,7 @@ mod tests {
             .create_list("second".to_string(), "second batch".to_string())
             .await;
         let second = store
-            .create("second task".to_string(), "desc".to_string(), None)
+            .create("second task".to_string(), "desc".to_string())
             .await;
         let stored = store.get("1").await.expect("new task should use reused id");
 
@@ -240,13 +232,13 @@ mod tests {
     async fn test_clear_resets_task_ids() {
         let store = TaskStore::new();
         let first = store
-            .create("first task".to_string(), "desc".to_string(), None)
+            .create("first task".to_string(), "desc".to_string())
             .await;
         assert_eq!(first.id, "1");
 
         store.clear().await;
         let second = store
-            .create("second task".to_string(), "desc".to_string(), None)
+            .create("second task".to_string(), "desc".to_string())
             .await;
 
         assert_eq!(second.id, "1");
@@ -259,7 +251,7 @@ mod tests {
             .create_list("first".to_string(), "first batch".to_string())
             .await;
         let first = store
-            .create("first task".to_string(), "desc".to_string(), None)
+            .create("first task".to_string(), "desc".to_string())
             .await;
 
         store.complete_list().await;

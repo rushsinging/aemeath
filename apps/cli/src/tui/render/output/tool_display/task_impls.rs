@@ -137,21 +137,12 @@ impl TaskUpdateDisplay {
                     parts.push(format!("p={s}"));
                 }
             }
-            "progress" => {
-                if let Some(n) = value.and_then(|v| v.as_u64()) {
-                    parts.push(format!("{n}%"));
+            "blocked_by_id" => {
+                if let Some(s) = value.and_then(|v| v.as_str()) {
+                    parts.push(format!("blocked by #{s}"));
                 }
             }
-            "add_blocked_by" | "add_blocks" => {
-                if let Some(arr) = value.and_then(|v| v.as_array()) {
-                    let ids: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
-                    if !ids.is_empty() {
-                        parts.push(format!("{} [{}]", key, ids.join(",")));
-                    }
-                }
-            }
-            "subject" | "description" | "active_form" | "owner" | "progress_message"
-            | "add_tags" | "remove_tags" => {
+            "subject" | "description" | "owner" => {
                 // 这些字段变更不额外展示在 header，subject 从 result 回填即可
             }
             _ => {}

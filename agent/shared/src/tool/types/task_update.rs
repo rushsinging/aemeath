@@ -25,8 +25,8 @@ pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,
-    /// Field to update. One of: status, subject, description, active_form, owner, priority, progress, progress_message, add_blocked_by, add_blocks, add_tags, remove_tags
+    /// Field to update. One of: status, subject, description, owner, priority, blocked_by_id
     pub key: String,
-    /// New value for the field. Type depends on key: string for most fields, integer (0-100) for progress, array of task-id strings for add_blocked_by/add_blocks, array of tag strings for add_tags/remove_tags
+    /// New value for the field (always a string). For blocked_by_id, pass a single task ID.
     pub value: serde_json::Value,
 }
