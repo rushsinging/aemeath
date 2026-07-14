@@ -198,7 +198,7 @@ enum StorageErrorKind {
 }
 ```
 
-> **Audit AppendLogPort 所有权**：`AppendLogPort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。Audit adapter 内部消费 Storage 的 `AtomicBlobPort` / `AtomicDatasetPort` 机制实现 append-log 语义（追加写入 + flush + 顺序读取 + namespace 枚举），但端口 trait 的定义、调用和语义归属 **MUST** 属于 Audit。Storage 只提供原子读写和损坏兜底**机制**，不发布 append-log OHS。这样保持 Storage 的 blob/dataset 级抽象不被 append 语义污染，也避免两个 BC 同时声称拥有同一端口。
+> **Audit UsageAppendStorePort 所有权**：`UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。Audit adapter 内部消费 Storage 的 `AtomicBlobPort` / `AtomicDatasetPort` 机制实现 append-log 语义（追加写入 + flush + 顺序读取 + namespace 枚举），但端口 trait 的定义、调用和语义归属 **MUST** 属于 Audit。Storage 只提供原子读写和损坏兜底**机制**，不发布 append-log OHS。这样保持 Storage 的 blob/dataset 级抽象不被 append 语义污染，也避免两个 BC 同时声称拥有同一端口。
 
 `StorageKey` 表达逻辑位置，不暴露用户主目录或绝对路径。物理路径由 adapter 根据 ConfigSnapshot 提供的根目录与 namespace policy 解析。namespace policy 固定是否保留上一代；调用方不能逐次关闭该安全属性。
 

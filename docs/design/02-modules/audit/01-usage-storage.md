@@ -45,8 +45,8 @@ Runtime
   → bounded queue
   → Usage worker
   → serialize envelope as one JSON line
-  → AppendLogPort.append
-  → AppendLogPort.flush
+  → UsageAppendStorePort.append
+  → UsageAppendStorePort.flush
 ```
 
 每条 flush 的语义：worker 收到下一条记录前，上一条已请求 Storage flush。它不等同于 fsync 或绝对持久性；具体 File adapter 的 flush/fsync 语义由 Storage 设计定义。
@@ -89,7 +89,7 @@ Audit reader：
 
 按 SessionId 查询只读取对应分区。跨 Session 查询：
 
-- 由 Audit Query adapter 调用 `AppendLogPort::list_streams("usage")` 枚举可用分区；
+- 由 Audit Query adapter 调用 `UsageAppendStorePort::list_streams("usage")` 枚举可用分区；
 - 流式读取，不一次性加载全部文件；
 - pagination 在 Audit BC 内实施；
 - token summary 在解析后聚合；

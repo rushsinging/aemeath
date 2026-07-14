@@ -8,7 +8,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [architecture-guards.md](architecture-guards.md) ✅ | 守卫注册表、依赖铁律拦截、23 个 guard 脚本 |
+| [architecture-guards.md](architecture-guards.md) ✅ | 守卫注册表、依赖铁律拦截、23 个守卫 |
 | [agent-orchestration.md](agent-orchestration.md) ✅ | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
 | [migration-governance.md](migration-governance.md) ✅ | Current→Target 迁移追踪、Runtime 现状缺口(R1-R10)、死代码退役清单 |
 

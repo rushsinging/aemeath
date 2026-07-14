@@ -149,7 +149,7 @@ impl MemoryPort for NoOpMemory {
     async fn delete(&self, _: &MemoryId) -> Result<bool, MemoryError> { Ok(false) }
     async fn pin(&self, _: &MemoryId, _: bool) -> Result<bool, MemoryError> { Ok(false) }
     async fn mark_outdated(&self, _: &MemoryId) -> Result<bool, MemoryError> { Ok(false) }
-    async fn apply_reflection(&self, _: &ReflectionOutput) -> Result<ReflectionApplyResult, MemoryError> { Ok(ReflectionApplyResult::NoOp) }
+    async fn apply_reflection(&self, _: &ReflectionOutput) -> Result<ReflectionApplyResult, MemoryError> { Ok(ReflectionApplyResult { suggestions_added: 0, outdated_marked: 0 }) }
     async fn archive(&self, _: &[MemoryId]) -> Result<(), MemoryError> { Ok(()) }
     async fn compact(&self) -> Result<CompactResult, MemoryError> { Ok(CompactResult { archived: 0, remaining: 0 }) }
     fn list(&self, _: Option<MemoryLayer>) -> Vec<MemoryEntry> { Vec::new() }

@@ -244,7 +244,7 @@ Model + ViewState → ViewAssembler → ViewModel → Render
 | OutputArea force_repaint | render/output_area | `{total_lines, block_count}` | block_count 变化或 total_lines 减少 |
 
 - **ViewModelDirty bitfield** 控制每帧只重算脏部分
-- **OutputViewCache memo**：`(conversation.revision(), workspace_root)` 不变时跳过 `assemble_from_conversation` 全量重建
+- **OutputViewCache memo**：`(conversation.revision(), workspace_root, view_state.collapsed_revision())` 不变时跳过 `assemble_from_conversation` 全量重建；三元组保持与 [04-view-layer.md §3.3 / §5.1](04-view-layer.md) 一致
 - Running ToolCall 的 `marker_frame = animation_frame / BLINK_DIVISOR`——每个 blink 周期强制 re-cache
 - `workspace_root` 纳入 CacheKey——worktree 切换时自动失效
 
@@ -328,3 +328,4 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 | 2026-07-12 | DDD/Hexagonal/Clean 评审：收敛 reducer、ACL、event mapping 与 ViewAssembler 的职责边界 | #798 评审 |
 | 2026-07-14 | 事件主链统一为 TUI-owned DTO → Intent → Change → Coordinator Effect → result Intent；实现差距记录收口到 Migration Governance O6 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | Model 核心字段私有；Run 恢复 / 取消只投影 Runtime 权威事件；runs / timeline 明确为互补投影 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | OutputViewCache memo key 统一为三元组 `(revision, workspace_root, collapsed_revision)`（#10 阻断修复） | [#972](https://github.com/rushsinging/aemeath/issues/972) |

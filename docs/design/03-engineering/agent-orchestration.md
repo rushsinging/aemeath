@@ -159,6 +159,8 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 ### 方向 B：给 agent loop 加 checkpoint 语义（中期，**与 v0.1.0 无 durable 决策不冲突**）
 
 > **注意**：v0.1.0 的设计基线明确**不做引擎级 durable checkpoint**（见 `02-modules/runtime/05-recovery-semantics.md`）。本方向是**中长期探索**，触发条件满足前 **NEVER** 实施。
+>
+> **⚠️ 系统级约束**：aemeath 系统级决策 **NEVER 建立 durable checkpoint**，本方向与系统基线冲突，**NEVER** 在 aemeath 中实施。此处仅作为知识储备对比业界实践（如 LangGraph checkpoint、Temporal durable execution 等），供架构评估参考。
 
 - **触发条件**：出现「换模型/换 prompt 重跑同一段对话」「回放调试」「A/B 对比」等真实诉求。
 - **前置依赖**：**需要一个显式状态对象贯穿 loop**（当前 runtime 状态较散，散在 `SubAgentRun` 的十几个字段里）。
@@ -174,6 +176,8 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 - **建议**：长期，依赖 B 落地。
 
 ### 方向 D：多 agent 编排用子图表达
+
+> **⚠️ 系统级约束**：aemeath 系统级决策 **无多-agent graph 长期计划**，本方向与系统基线冲突，**NEVER** 在 aemeath 中实施。此处仅作为知识储备对比业界实践（如 LangGraph subgraph、Microsoft Agent Framework 等），供架构评估参考。
 
 - **触发条件**：sub-agent 的「当普通 tool 调用」语义不够（需要独立 checkpoint、清晰输入输出契约、并行编排）。
 - **前置依赖**：方向 B 的 checkpoint（子图需要独立可恢复）。

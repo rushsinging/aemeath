@@ -195,10 +195,11 @@ hook.max_attempts = 3
 
 重试耗尽：
 
-| HookPoint | 最终 directive |
-|---|---|
-| 普通 Hook | Continue，并保留 ExecutionFailed 明细 |
-| Stop | Block(StopHookExecutionFailed) |
+| HookPoint | failure_policy | 最终 directive |
+|---|---|---|
+| 普通 Hook | 未配置 | Continue，并保留 ExecutionFailed 明细 |
+| 普通 Hook | Block | Block（配置生效） |
+| Stop | — | Block(StopHookExecutionFailed) |
 
 `StopFailure` 是独立观察 HookPoint：Stop subscription 在 3 次执行重试耗尽后，Hook BC 先合成 `Block(StopHookExecutionFailed)` 返回 Runtime，再尽力派发一次 StopFailure 通知。Runtime **MUST** 在收到 Block 后推进自己的状态迁移（Finishing → PreparingContext）；StopFailure 是 best-effort 观察，Runtime **NEVER** 因 StopFailure 结果改变已决定的 Block 语义。StopFailure 的结果不递归触发新的 StopFailure。
 

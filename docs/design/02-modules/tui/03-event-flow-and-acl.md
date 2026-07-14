@@ -311,7 +311,7 @@ sdk::ChatEvent::InteractionRequested {
 
 规则：
 
-1. Runtime-owned bridge **MUST** 校验 request body 与 reply variant，并对未知、重复、已完成或 RunCancelling 返回结构化 `InteractionCommandOutcome`；TUI 只投影该结果，**NEVER** 复制校验真相或假定成功。
+1. Runtime-owned bridge **MUST** 校验 request body 与 reply variant，并对未知、重复、已完成或 RunCancelling 返回结构化 `InteractionCommandOutcome`；TUI 只投影该结果，**NEVER** 复制校验真相或假定成功。每个 variant 的类型化投影见 §4.6——`InvalidReply` **NEVER** 映射到终态。
 2. UserQuestions 的答案数量 **MUST** 等于 question count，并按原问题顺序把每个 `String` 无损包装为 Runtime `UserAnswer`；不得丢项、重排或附加隐式默认值。ToolApproval / PlanApproval 只接受各自的 Approve / Deny；HardPause 只接受 Continue。`InvalidReply` 不消费 Runtime pending request，用户可修正后重试。
 3. cancel 使用 typed `InteractionCancelReason::UserCancelled`，**NEVER** 用等长空字符串或 drop sender 猜测取消。
 4. Run cancel / session reset 的 pending continuation 清理由 Runtime cancellation scope 负责；stream failure / processing teardown 只影响 TUI 投影，**NEVER** 冒充 Runtime cancellation 或自行 drain waiter。
@@ -341,6 +341,32 @@ Runtime 停止在途工作并完成回滚 → SDK RunCancelled { run_id }
 `RunCancelling` 是取消 accepted 的权威 Published Language 事件；它必须立即让 TUI 展示 Cancelling，但仍是 live 非终态。仅 `RunCancelled` 可进入 Cancelled / Idle。`CancelInteraction` 发送 typed `InteractionCancelReason::UserCancelled`，只取消当前 interaction，**NEVER** 发送空答案，也 **NEVER** 等价为 `RequestRunCancellation`。
 
 > **AgentClient trait 的特殊性**：`AgentClient` 是 Runtime-owned 入站 OHS，由 SDK 发布。TUI 的 processing / effect 边界 **MUST** 依赖此 trait（R4 允许），但 trait 方法返回的 `ChatEvent` / `ChatStream` **MUST** 在 ACL 层转换为 TUI 自有类型后才能进入 UiEvent。
+
+### 4.6 Interaction command outcome 类型化投影
+
+Runtime `AgentClient::reply_interaction` / `cancel_interaction` 返回封闭枚举 `InteractionCommandOutcome`；effect runner **MUST** 按 variant 映射为不同的 result Intent，ACL / reducer **MUST** 按 outcome 区分终态与非终态，**NEVER** 把所有失败折叠为 `ReplyFailed`（[02-model.md](02-model.md) 的 `InteractionPhase` 转换遵循本表）：
+
+| `InteractionCommandOutcome` | TUI result Intent | Model InteractionPhase 目标 | draft 处置 | 交互块终态？ |
+|---|---|---|---|---|
+| `ReplySent` | `InteractionReplySent { request_id }` | `Collecting`/`Confirming` → `ReplyPending` → `Replied` | 消费 | 是 |
+| `CancelAccepted` | `InteractionCancelled { request_id }` | → `Cancelled` | 丢弃 | 是 |
+| `InvalidReply { reason }` | `InteractionReplyRejected { request_id, reason }` | **回** `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / PlanApproval / HardPause）；**NEVER** 进入终态 | **保留**，用户修正后重试同一 `request_id` | **否** |
+| `NotFound { request_id }` | Diagnostic-only Intent（无 Interaction Change） | 不改当前活跃 Interaction 投影（陈旧 request） | 静默丢弃 | n/a |
+| `AlreadyCompleted { request_id }` | Diagnostic-only Intent | 不改投影（协议冲突） | 静默丢弃 | n/a |
+| `RunCancelling { run_id }` | `InteractionReplyDeferred { request_id, run_id }`；**NEVER** 推进交互终态 | 保持 `ReplyPending` / `Confirming`，等 Run 终态事件（§4.5） | 保留 | 否 |
+| `IrrecoverableError { message }` | `InteractionReplyFailed { request_id, message }` | → `ReplyFailed { message }` | 丢弃 | **是**（唯一进入 `ReplyFailed` 的路径） |
+
+规则：
+
+1. **MUST** `InvalidReply` **NEVER** 映射到 `ReplyFailed` 或 `Cancelled`——它是可恢复的验证失败：Runtime 不消费 pending request，用户修正 draft 后可对同一 `request_id` 重试。
+2. **MUST** reducer 收到 `InteractionReplyRejected` 时把 phase 回退到 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / PlanApproval / HardPause），**保留** draft 与光标位置，并把 `reason` 追加为 Diagnostic notice。
+3. **MUST** `NotFound` / `AlreadyCompleted` 只产生 Diagnostic Intent，**NEVER** 改变当前活跃 Interaction 的 phase 或消费 draft；二者表示陈旧 / 协议冲突，effect runner **MUST** 记录结构化诊断日志后静默丢弃。
+4. **MUST** `RunCancelling` 不伪造交互终态——交互保持等待，直到 Runtime 发布 `RunCancelled` / `RunCompleted`；`CancelInteraction` 已发 typed `UserCancelled`，Runtime 在 cancellation scope 内清理 pending continuation。
+5. **MUST** 只有 `IrrecoverableError` 才进入 `ReplyFailed { message }`；该终态意味着 request 已无法重试（如对应 Run 已死、连接永久断开），且 **MUST** 在 Diagnostic 记录结构化错误。
+6. **MUST** effect runner 对封闭 `InteractionCommandOutcome` 做穷尽 match，**NEVER** 把未知 / wildcard outcome 默认到 `ReplyFailed`；新增 variant **MUST** 先扩展此表与对应 result Intent。
+7. **MUST** 状态机场景测试覆盖每个 outcome variant：证明 `InvalidReply` 不进入终态且 draft 保留；`NotFound` / `AlreadyCompleted` 不改活跃投影；`RunCancelling` 保持等待；只有 `IrrecoverableError` 进入 `ReplyFailed`。
+
+> **关键**：`ReplyFailed` 是 **Interaction 块** 的终态（用户看到失败块），**NOT** Run 终态。Run 生命周期只由 `Run*` Published Language 事件驱动（§4.5）。
 
 ## 5. 事件 identity 与 agent_id（R8）
 
@@ -607,3 +633,4 @@ fn test_sdk_event_types_only_in_adapter() {
 | 2026-07-12 | 强化 R4 / R7：TUI 自有 DTO 完全隔离，门禁 #6 覆盖 app/event.rs | #797 |
 | 2026-07-12 | DDD/Hexagonal 评审：收敛 AgentEventMapping、event_mapping 与 Effect 边界 | #798 评审 |
 | 2026-07-14 | 统一 SDK → TUI DTO → Intent → Change → Coordinator Effect → result Intent；Runtime-owned interaction id 经 AgentClient reply command 闭环，六 Context 穷尽映射，实现差距收口到 Migration Governance O6 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 新增 §4.6 Interaction command outcome 类型化投影：`InvalidReply` 回退 Collecting/Confirming 且保留 draft（**NEVER** 终态）；`NotFound`/`AlreadyCompleted` 静默丢弃 + 诊断；`RunCancelling` 保持等待；仅 `IrrecoverableError` 进入 `ReplyFailed`（#9 阻断修复） | [#972](https://github.com/rushsinging/aemeath/issues/972) |

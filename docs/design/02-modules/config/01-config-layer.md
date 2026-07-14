@@ -480,7 +480,7 @@ impl CompatibilityAdapter {
             ConfigFormat::ClaudeCode => Ok(Some(ClaudeTranslator::translate(&content)?)),
             ConfigFormat::Cursor    => Ok(Some(CursorTranslator::translate(&content)?)),   // 远期
             ConfigFormat::Other(cli) => {
-                log::info!(target: "aemeath:shared", "未支持的外部配置格式: {} ({})", cli, path.display());
+                log::info!(target: "aemeath:shared", "未支持的外部配置格式: {} (path omitted for security)", cli);
                 Ok(None)
             }
         }

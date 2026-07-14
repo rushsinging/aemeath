@@ -101,15 +101,17 @@ fn should_run_reflection(mode: ReflectionRunMode, config: &MemoryConfig) -> bool
 | 时机 | 模式 | 执行方式 | 触发者 | 说明 |
 |---|---|---|---|---|
 | **轮次间隔** | `Interval` | **异步 spawn** | Runtime loop | 每 `interval_turns`（默认 10）轮结束时触发；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
-| **Pre-compact** | `Forced` | **异步 spawn** | Runtime compact 前 | compact 前抓 messages 快照交给后台 reflection，compact 立即继续不等待；reflection 用快照跑，结果通过 channel 回传 |
+| **Pre-compact** | `Forced` | **同步 await** | Runtime compact 前 | compact 前同步等待 reflection 完成 + `apply_reflection` 写入；保证 compact 后第一轮 `retrieve_for_inject` 可检索到新记忆 |
 | **用户强制** | `Forced` | **同步 await** | 用户 `/reflection` | 用户主动请求反思，需等待结果展示 |
 
 ### 异步执行模型
 
-Interval 和 Pre-compact 触发的 Reflection **不阻塞主循环**——Runtime `tokio::spawn` 后台任务，主循环继续执行。后台任务完成后通过 `mpsc::channel` 回传结果，主循环在下一轮 `select!` 分支接收并 emit。
+Interval 触发的 Reflection **不阻塞主循环**——Runtime `tokio::spawn` 后台任务，主循环继续执行。后台任务完成后通过 `mpsc::channel` 回传结果，主循环在下一轮 `select!` 分支接收并 emit。
+
+Pre-compact 触发的 Reflection **MUST 同步完成**——compact 会改变对话历史，如果 reflection 未完成就 compact，新记忆无法在 compact 后的第一轮注入中检索到。
 
 ```text
-Interval / Pre-compact 触发:
+Interval 触发:
   Runtime 判定 should_run → spawn 后台任务（携带 messages 快照）
     │ (主循环不等待，继续处理 outcome / compact / 下一轮)
     ▼
@@ -120,6 +122,15 @@ Interval / Pre-compact 触发:
     │
     ▼
   主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
+
+Pre-compact 触发:
+  Runtime compact 前 → 同步调用 reflection pipeline
+    │ (主循环等待)
+    ▼
+  build_prompt → call_llm → parse → apply_reflection → 返回
+    │
+    ▼
+  compact 继续（此时新记忆已写入，compact 后第一轮可检索）
 ```
 
 ### 并发控制

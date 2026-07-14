@@ -6,7 +6,7 @@
 
 ## 1. 定位
 
-Token Budget 是 Compact 家族（[02-compact.md](02-compact.md)）和 ContextPort `needs_compaction` 的**计算基础**：
+Token Budget 是 Compact 家族（[02-compact.md](02-compact.md)）和 `build_window` 内 `compaction_decision` 计算的**基础**：
 
 - 回答"当前上下文用了多少 token？还有多少空间？"
 - 回答"是否需要 compact？紧迫程度？"
@@ -161,7 +161,7 @@ threshold  = 184,000 - 13,000 = 171,000
 ### 4.2 max_output_tokens 注入
 
 - Runtime 在每次 PreparingContext、且在 `build_window` 前调用 `ProviderPort.resolve_invocation_options`，把返回的真实上限写入 `ContextRequest.max_output_tokens`；同一个 `ResolvedInvocationOptions` 随后进入 `InvocationRequest`。
-- `needs_compaction` 和 `compaction_urgency` **MUST** 只使用 `req.max_output_tokens`，**NEVER** 以固定 `8192` 或另一个 provider lookup 形成第二真相。
+- `compaction_decision` 计算和 `compaction_urgency` **MUST** 只使用 `req.max_output_tokens`，**NEVER** 以固定 `8192` 或另一个 provider lookup 形成第二真相。
 
 ### 4.3 compaction_urgency 分级
 
@@ -180,9 +180,9 @@ fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urge
 }
 ```
 
-### 4.4 needs_compaction 决策
+### 4.4 compaction_decision 决策（build_window 内部纯函数）
 
-> 以下纯函数是 `ContextPort::needs_compaction` trait 方法的内部实现 helper（trait 签名只接收 `&ContextRequest`，实现内部从稳定 backing 构造 `WindowCandidate` 后调用此函数）。
+> 以下纯函数是 `build_window` 内部计算 `compaction_decision` 的 helper。`build_window` 从自身稳定 backing 构造 `WindowCandidate` 后调用此函数，结果写入 `ContextWindow.compaction_decision`。
 
 ```rust
 fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> CompactionDecision {
@@ -204,7 +204,7 @@ fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> Compac
 }
 ```
 
-**确定性保证**：相同 Context backing revision + 相同 `ContextRequest` → 相同 `WindowCandidate` 与 `CompactionDecision`。`ContextPort::needs_compaction` 在内部对稳定 backing + `pending_messages` 建 candidate，Runtime 不提供或修改历史。supplier revision 变化会形成新的 candidate/fingerprint，而不是在相同输入下产生漂移。
+**确定性保证**：相同 Context backing revision + 相同 `ContextRequest` → 相同 `WindowCandidate` 与 `CompactionDecision`。`build_window` 在内部对稳定 backing + `pending_messages` 建 candidate，Runtime 不提供或修改历史。supplier revision 变化会形成新的 candidate/fingerprint，而不是在相同输入下产生漂移。
 
 ## 5. 幂等性设计（#550）
 
@@ -216,7 +216,7 @@ fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> Compac
 | `needs_compaction_actual` / `needs_compaction_full` | 相同输入 → 相同输出 | 纯函数 |
 | `compaction_urgency` | 相同输入 → 相同分级 | 纯函数 |
 | `auto_compact` 外层 | fingerprint 不变时不重复触发 Hook / 扫描 | `CompactionFingerprint` |
-| `apply_compact_outcome` | 同一 source revision 最多提交一次 | expected revision + committed marker |
+| `ChatChain::compact` | 同一 source revision 最多提交一次 | `compact_source_revision` + `compact_committed` marker |
 
 ### 5.2 CompactionFingerprint
 
@@ -228,7 +228,7 @@ struct CompactionFingerprint {
     last_api_input_tokens: Option<u64>,
     context_size: usize,
     max_output_tokens: usize,
-    tool_schema_count: usize,              // tool 定义变化时 fingerprint 变化
+    tool_schema_hash: u64,                 // tool 定义内容 hash（schema 变化时 fingerprint 变化）
 }
 ```
 
@@ -267,7 +267,7 @@ async fn build_window(
     // 易变外部输入每轮都经各自 owner 物化；adapter 内部可按 revision 命中缓存。
     // 可观察顺序固定：Prompt/Skill → Memory → summary → final assembly。
     let prompt = self.prompt.build_system_prompt(req.prompt_request()).await?;
-    let memory = self.memory.retrieve_for_inject(req.memory_query())?;
+    let memory = self.memory.retrieve_for_inject(req.memory_query());
     let summary = self.active_summary(&projection);
     Ok(self.assemble_window(
         projection,
@@ -283,35 +283,17 @@ async fn build_window(
 
 ### 5.4 Hook 去重
 
-- PreCompact hook **MUST** 只在 `needs_compaction == true` 时触发
-- microcompact 只在 `fingerprint.messages_hash` 变化时执行
+- PreCompact hook **MUST** 只在 `compaction_decision.needed == true` 时触发
+- microcompact 只在 `fingerprint.pending_messages_hash` 变化时执行
 
-### 5.5 apply_compact_outcome 重入安全
+### 5.5 Compact 提交幂等性
 
-```rust
-fn apply_compact_outcome(chain: &mut ChatChain, result: CompactResult) {
-    // 幂等检查：使用 source revision + committed marker，而非 summary 文本比较。
-    // 相同 summary 但不同 recent messages 或不同 source revision 不能跳过。
-    if let Some(last) = chain.active_segments().last() {
-        if last.kind == SegmentKind::Compact
-            && last.compact_source_revision == result.source_revision
-            && last.compact_committed
-        {
-            return; // 已基于同一 source revision 提交过 compact，跳过
-        }
-    }
+Compact 提交的唯一入口是 `ChatChain::compact(summary, recent_messages, source_revision)`（三参数版，定义见 [01-session.md](01-session.md) §3.1，集成说明见 [02-compact.md](02-compact.md) §8.7）。
 
-    // 正常流程：freeze 当前 active segment，写入 compact 结果与 source revision
-    chain.freeze_active();
-    chain.compact(
-        result.summary,
-        result.recent_messages,
-        result.source_revision,  // 记录 compact 基于哪一轮 history revision
-    );
-}
-```
+`ChatChain::compact` 内部幂等保证：
 
-> **NEVER** 用 summary 文本等值判断幂等：相同 summary、不同 recent messages 或不同 source revision 是不同的 compact 操作，跳过会导致数据丢失。
+- 若最近 segment 已是 Compact 且 `compact_source_revision == source_revision` 且 `compact_committed == true`，则跳过（同一 source revision 最多提交一次）
+- **NEVER** 用 summary 文本等值判断幂等：相同 summary、不同 recent messages 或不同 source revision 是不同的 compact 操作，跳过会导致数据丢失
 
 ## 6. Per-message Token cache 决策
 

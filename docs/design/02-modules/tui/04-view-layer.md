@@ -303,7 +303,7 @@ impl ViewModelDirty {
 
 | 层 | 位置 | Key | 失效条件 | 用途 |
 |---|---|---|---|---|
-| **OutputViewCache memo** | App | `(revision, workspace_root)` | revision 变化或 worktree 切换 | 跳过全量 assemble |
+| **OutputViewCache memo** | App | `(revision, workspace_root, collapsed_revision)` | revision 变化、worktree 切换或 collapse/expand 切换 | 跳过全量 assemble |
 | **BlockCache** | render/output | `(version, text_width)` | block_version 或 text_width 变化 | 跳过 per-block 行渲染 |
 | **GuttedCache** | document_renderer | `(block_version, text_width, depth, marker_frame)` | 上述 + depth + 动画帧 | 跳过 per-(block,depth) gutter 布局 |
 | **force_repaint** | OutputArea | `(last_total_lines, last_block_count)` | block 数变化或行数减少 | 终端 clear + 全量重绘 |
@@ -524,3 +524,4 @@ Effect 是 Model Change 的副作用反馈分支，与 ViewAssembler 渲染分�
 |---|---|---|
 | 2026-07-12 | 初稿：10 种 block 类型、ViewAssembler 组装、ViewState 状态机、三层缓存、Render 管线与架构门禁 | #798 |
 | 2026-07-14 | 收敛 Target-only 视图契约：只读 Model、瞬时 ViewState、bounded cache、穷尽 timeline 组装与可执行门禁 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | OutputViewCache memo key 统一为三元组 `(revision, workspace_root, collapsed_revision)`（§3.3 / §5.1）（#10 阻断修复） | [#972](https://github.com/rushsinging/aemeath/issues/972) |

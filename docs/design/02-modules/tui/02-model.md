@@ -169,6 +169,7 @@ ResumeConversation ──→ Completed（恢复已结束会话，不触发 spinn
 | Running → AwaitingUser | `ProjectRunAwaitingUser` | `project_run_awaiting_user()` | 只投影 Runtime `RunAwaitingUser`；`ShowInteraction` 只建立交互块 |
 | AwaitingUser → Running | `ProjectRunResumed` | `project_run_resumed()` | 仅 Runtime 真正消费输入并发布 `RunResumed` 后推进；AgentClient command 成功不代表已恢复 |
 | Running → Completing | `ProjectRunCompleting` | `project_run_completing()` | 投影 Runtime `RunCompleting` 并清理 active block 追踪 |
+| Completing → Running | （Stop Hook Block） | — | 合法回退：`RunCompleting` 是 TUI 对 Runtime `Finishing` 状态的投影，**不是**独立的 Runtime 领域事件。Runtime PL 发出 `RunCompleting`（对应 Run 状态机的 `Finishing`）。Finishing 可能因 Stop Hook Block 返回执行态（`PreparingContext`），因此 `Completing → Running` 是合法回退 |
 | 任一 live 态 → Cancelling | `ProjectRunCancelling` | `project_run_cancelling()` | 投影 Runtime `RunCancelling`；仍非终态 |
 | Cancelling → Cancelled | `ProjectRunCancelled` | `project_run_cancelled()` | 仅 SDK `RunCancelled` 权威终态事件可进入 Cancelled |
 | → Failed | `ProjectRunFailed` | `project_run_failed()` | 投影 Runtime 异常终态 |
@@ -204,28 +205,34 @@ enum RunStepProjectionStatus {
 **RunStepProjectionStatus 状态转换图**：
 
 ```
-Streaming ──ToolCallStart──→ ToolExecuting
-    │                           │
-    │              ToolCallUpdate(PendingArgs/Ready)
-    │                           ↓
-    │                       ToolCalling
-    │                           │
-    │                  bind()/update(Running)
-    │                           ↓
-    │                       ToolExecuting
-    │                           │
-    └──CompleteBlock──→     all tools done
-                               ↓
-                           Completing ──→ Completed
+Streaming ──ToolCallStart──→ ToolCalling
+    │                              │
+    │              ToolCallUpdate(args accumulated)
+    │                              ↓
+    │                          PendingArgs
+    │                              │
+    │                  ToolCallUpdate(Ready)
+    │                              ↓
+    │                           Ready
+    │                              │
+    │                  bind()/update(Executing)
+    │                              ↓
+    │                         ToolExecuting
+    │                              │
+    │              ToolCallComplete(Success/Error/Cancelled)
+    │                              ↓
+    └──CompleteBlock──→     all tools terminal
+                                ↓
+                            Completing ──→ Completed
 ```
 
 | 转换 | 触发 | 方法 | 说明 |
 |---|---|---|---|
 | → Streaming | `RunStepProjection::new()` | — | 初始态 |
-| → ToolExecuting | `ToolCallStart` | `observe_tool_start()` | push 占位 ToolCall |
-| → ToolCalling | `ToolCallUpdate(PendingArgs/Ready)` | `update_tool()` | 参数就绪 |
-| → ToolExecuting | `ToolCallUpdate(Running)` / `bind_tool()` | `update_tool()` / `bind_tool()` | 开始执行 |
+| Streaming → ToolCalling | `ToolCallStart` | `observe_tool_start()` | push placeholder（仅 stream_key，无 ToolCallId） |
+| ToolCalling → ToolExecuting | `ToolCallUpdate(Ready)` / `bind_tool()` | `update_tool()` / `bind_tool()` | 参数完整 → 创建 ToolCallId → 开始执行 |
 | → Completing | 所有 tool_calls 终态 | `complete_tool()` | 全部终态检查 |
+| Completing → Completed | `ProjectRunStepCompleted` | `project_run_step_completed()` | Runtime 确认 step 完成 |
 
 ### 3.4 ToolCall 与 ToolCallStatus 状态机
 
@@ -241,28 +248,44 @@ struct ToolCall {
     streaming_preview: Option<ToolStreamingPreviewBuffer>,
     agent_meta: Option<AgentMeta>,
 }
-enum ToolCallStatus { PendingArgs, Ready, Running, Success, Error, Cancelled, Orphaned }
+enum ToolCallStatus {
+    PendingArgs,                  // 参数增量收集中（占位已创建，stream_key 已知，ToolCallId 尚未绑定）
+    Ready,                        // 参数完整，等待执行（ToolCallId 在此时创建/绑定）
+    Executing,                    // 正在执行
+    Success,                      // 执行成功（终态）
+    Error { message: String },    // 执行失败（终态）
+    Cancelled,                    // 已取消（终态）
+    Orphaned,                     // 从未被绑定（终态）
+}
 ```
 
 **ToolCallStatus 状态转换图**：
 
 ```
-PendingArgs ──bind()──→ Running ──complete(ok)──→ Success
-     │                      │
-     │                 complete(err)──→ Error
-     │
-     └──orphan()──→ Orphaned
+ToolCallStart ──→ PendingArgs ──args_complete──→ Ready ──exec──→ Executing
+                     │                    │                    │
+                     │                    │         ┌─ok──────→ Success
+                     │                    │         ├─err─────→ Error { message }
+                     │                    │         └─cancel──→ Cancelled
+                     │                    │
+                     └──orphan()──────────┴──────────→ Orphaned
 ```
+
+**NEVER** 从 `Executing` 回到 `PendingArgs` / `Ready`。**NEVER** 从终态（`Success` / `Error` / `Cancelled` / `Orphaned`）转出。
 
 | 转换 | 方法 | 说明 |
 |---|---|---|
-| → PendingArgs | `pending()` | 创建占位（stream_key 已知，id 待绑） |
-| → Running | `bind()` / `update(Running)` | 绑定 ToolCallId，开始执行 |
-| → Success | `complete(payload, is_error=false)` | 执行成功 |
-| → Error | `complete(payload, is_error=true)` | 执行失败 |
-| → Orphaned | `orphan()` | provider 序号不匹配，从未被绑定 |
+| → PendingArgs | `observe_tool_start(stream_key)` | 创建 placeholder（仅 stream_key 已知，尚未创建 ToolCallId） |
+| PendingArgs → Ready | `update_tool(Ready)` | 参数收集完整，此时创建/绑定 ToolCallId |
+| Ready → Executing | `bind(id)` / `update(Executing)` | ToolCallId 绑定后开始执行 |
+| Executing → Success | `complete(payload, is_error=false)` | 执行成功（终态） |
+| Executing → Error | `complete(payload, is_error=true, message)` | 执行失败（终态） |
+| Executing → Cancelled | `cancel()` | 用户/系统取消（终态） |
+| PendingArgs / Ready → Orphaned | `orphan()` | provider 序号不匹配，从未被绑定（终态） |
 
-> **绑定策略**（#87 修复）：`bind_tool(id)` 按 internal ToolCallId 直接查找占位并绑定，不依赖 provider content-block 序号。跨轮 `index` 重复时不会覆盖已绑定占位。
+> **placeholder 绑定策略**（修正）：placeholder 阶段只有 `stream_key`（provider call ID），尚未创建领域 `ToolCallId`。绑定先按 `stream_key` 查找 placeholder，在 `Ready` 时才创建/关联 `ToolCallId`。绑定按 `stream_key` 直接查找占位，不依赖 provider content-block 序号。跨轮 `index` 重复时不会覆盖已绑定占位。
+
+> **终态保护**：`Success` / `Error` / `Cancelled` / `Orphaned` 均为终态，`update()` 中 **MUST NOT** 覆盖已终态的 ToolCall。
 
 ### 3.5 Conversation 的互补投影
 
@@ -552,14 +575,17 @@ struct UiTurnContext {
 
 enum ConversationIntent {
     StartRun { text: String }, // 用户意图：只产生 RunStartRequested，不先写 Runtime 投影
-    ProjectRunStarted { run_id: RunId, text: String },
+    ProjectRunStarted { run_id: RunId, run_step_id: Option<RunStepId>, text: String },
     ProjectRunAwaitingUser { run_id: RunId },
     ProjectRunResumed { run_id: RunId },
     ProjectRunCompleting { run_id: RunId },
+    ProjectRunCompleted { context: UiTurnContext },
     ProjectRunFailed { run_id: RunId, message: String },
     ProjectRunCancelling { run_id: RunId },
     ProjectRunCancelled { run_id: RunId },
     RequestRunCancellation { run_id: RunId }, // 只产生 Change，不先改 RunProjectionStatus
+    ProjectRunStepStarted { context: UiTurnContext },
+    ProjectRunStepCompleted { context: UiTurnContext },
     AppendAssistantText { context: UiTurnContext, text: String },
     ShowInteraction { request_id: UiInteractionRequestId, run_id: RunId, body: UiInteractionBody },
     UpdateInteractionDraft { request_id: UiInteractionRequestId, action: UiInteractionDraftAction },
@@ -588,7 +614,7 @@ enum ConversationChange {
 
 ConversationChange 覆盖：
 
-- 对话生命周期：`RunStartRequested` / `RunCancellationRequested` / `RunStarted` / `RunStepStarted` / `RunCompleting` / `RunCancelling` / `RunCancelled` / `RunCompleted`
+- 对话生命周期：`RunStartRequested` / `RunCancellationRequested` / `RunStarted` / `RunStepStarted` / `RunStepCompleted` / `RunCompleting` / `RunCancelling` / `RunCancelled` / `RunCompleted`
 - 内容追加：`UserMessageAppended` / `AssistantTextAppended` / `ThinkingTextAppended` / `SystemMessageAppended` / `ErrorAppended`
 - 工具追踪：`ToolCallObserved` / `ToolCallBound` / `ToolCallCompleted` / `OrphanToolResultObserved`
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
@@ -815,12 +841,24 @@ enum SessionSaveStatus { Idle, Saving, Saved, Failed { message: String } }
 ```
 
 ```
-Idle ──SaveStarted──→ Saving ──SaveFinished──→ Saved（dirty = dirty_at_save_start XOR changes_since_save_start）
+Idle ──SaveStarted──→ Saving ──SaveFinished──→ Saved
                           │
                           └──SaveFailed──→ Failed { message }
+
+SaveFinished 清 dirty 逻辑：
+  if save_id == current_save_id && conversation.revision() == base_revision:
+      dirty = false   // 保存期间无新修改
+  else:
+      dirty = true    // 保存期间有新修改，仍需落盘
 ```
 
-> **Dirty 时序安全**：`SaveFinished` 不能无脑 `dirty=false`。保存过程中若产生新修改，那些修改的 dirty 标记 **MUST** 保留。实现方式：`SaveStarted` 时快照 `dirty_at_save_start`；`SaveFinished` 时 `dirty = dirty_at_save_start ^ changes_since_save_start`——即只有保存开始时的那批 dirty 被清除，保存期间的增量修改仍标记 dirty。
+> **Dirty 时序安全（revision/generation 协议）**：`SaveFinished` 不能无脑 `dirty=false`。保存过程中若产生新修改，那些修改的 dirty 标记 **MUST** 保留。实现方式：
+> 
+> 1. `SaveStarted` 时记录 `base_revision: u64`（当前 conversation revision）和 `save_id: u64`（单调递增）
+> 2. `SaveFinished { save_id }` 只有 `save_id` 匹配当前保存批次时才生效
+> 3. 生效时：如果 `conversation.revision() == base_revision`，则 `dirty = false`（保存期间无新修改）；否则保留 `dirty = true`（保存期间的修改仍未落盘）
+> 
+> **NEVER** 使用 XOR 公式 `dirty = dirty_at_save_start ^ changes_since_save_start`——该公式在并发修改场景下有竞态窗口，且语义不清晰。
 
 ### 6.4 SessionResumeCandidate
 
@@ -835,7 +873,9 @@ enum SessionIntent {
     SetCurrentSession { id },
     MarkDirty,
     MessagesSynced { message_count },
-    SaveStarted, SaveFinished, SaveFailed { message },
+    SaveStarted { save_id: u64, base_revision: u64 },
+    SaveFinished { save_id: u64 },
+    SaveFailed { message },
     ResumeCandidatesLoaded { candidates },
     SetTaskStatus { total, completed, in_progress },
     SetTaskLines { lines },
@@ -853,7 +893,8 @@ enum SessionChange {
 | 转换 | 说明 |
 |---|---|
 | `MessagesSynced` | 设置 message_count + 清 dirty |
-| `SaveFinished` | 设 Saved + 清 dirty |
+| `SaveStarted` | 记录 base_revision + save_id → Saving |
+| `SaveFinished` | 匹配 save_id 且 revision == base_revision 时设 Saved + 清 dirty；否则保留 dirty |
 | `SaveFailed` | 设 Failed { message } |
 
 ## 7. ConfigProjection
@@ -976,8 +1017,9 @@ Model 中的所有状态机都是**投影状态机**，不是领域权威态：
 
 ### 9.2 状态终态保护
 
-- `ToolCallStatus::Success` / `Error` 为终态，`update()` 中 **MUST NOT** 覆盖已终态的 ToolCall
-- `RunProjectionStatus::Completed` / `Failed` / `Cancelled` 为终态；`Cancelling` 不是终态
+- `ToolCallStatus::Success` / `Error` / `Cancelled` / `Orphaned` 为终态，`update()` 中 **MUST NOT** 覆盖已终态的 ToolCall
+- `Error` 变体 **MUST** 包含 `{ message: String }`，与 ACL DTO 一致
+- `RunProjectionStatus::Completed` / `Failed` / `Cancelled` 为终态；`Cancelling` 不是终态（等待 Runtime `RunCancelled`）
 - `InteractionPhase::Replied` / `Cancelled` / `ReplyFailed` 为终态；只有匹配 request id 的 result Intent 可进入终态
 
 ## 10. 单一真相规则

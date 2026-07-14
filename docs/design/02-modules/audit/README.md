@@ -88,8 +88,8 @@ Usage worker 顺序消费 queue：
 
 ```text
 receive one UsageRecord
-  → AppendLogPort.append(partition, record)
-  → AppendLogPort.flush(partition)
+  → UsageAppendStorePort.append(partition, record)
+  → UsageAppendStorePort.flush(partition)
   → receive next
 ```
 
@@ -266,7 +266,7 @@ Composition Root：
 
 ```text
 Runtime → UsageSink PL
-Audit worker → AppendLogPort
+Audit worker → UsageAppendStorePort
 Storage adapter → filesystem
 CLI/TUI → UsageQueryPort → Audit
 ```

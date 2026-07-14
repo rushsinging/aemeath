@@ -57,7 +57,7 @@ CLI（双模式，TUI 不变）
 
 ## AgentClient-over-WS 协议
 
-> **草案状态**：Server 设计是 **Future / 方向预留**，不属于 v0.1.0 范围。以下协议描述需要与 AgentClient trait 的 Target 形态（含 `set_reasoning_level` / `reply_interaction` / `cancel_interaction`）对齐后才能作为可实施设计。当前 Call 枚举中的部分 RPC（Cost、SaveSession 等）超出 Target AgentClient，需在正式设计时收窄。
+> **草案状态**：Server 设计是 **Future / 方向预留**，不属于 v0.1.0 范围。以下协议描述需要与 AgentClient trait 的 Target 形态（含 `set_reasoning_level` / `reply_interaction` / `cancel_interaction`）对齐后才能作为可实施设计。
 
 一条 WS 连接 = 一个 session 通道，`req_id` 多路复用，流式响应多帧：
 
@@ -73,11 +73,8 @@ pub enum Call {
 }
 
 pub enum Resp {
-    Snapshot(SessionSnapshot), Cost(CostInfo), Tasks(Vec<TaskSummary>),
-    Project(ProjectContext), Sessions(Vec<SessionSummary>),
     Unit, Err(SdkError),
-    ChatEvent(ChatEvent),   // 流式：多帧，Done/Error 终止
-    Change(ChangeSet),      // changes 订阅流
+    ChatEvent(ChatEvent),
 }
 
 pub struct Frame { pub req_id: u64, pub body: FrameBody }
@@ -140,7 +137,7 @@ async fn on_client_ws(client_ws, session_id) {
 }
 ```
 
-控制面在连接边缘做：auth 校验、`session_id` 路由。**帧内容一律透传，不反序列化**。
+控制面在连接边缘做：连接级 auth 校验（WS handshake）、`session_id` 路由。**帧内容一律透传，不反序列化**。帧级认证由 worker 侧经 AgentClient 校验。
 
 ## CLI 双模式
 
@@ -224,7 +221,7 @@ CLI 输入回车
 
 ## 非目标（defer）
 
-认证 / 多租户隔离、中心 DB、真沙箱（容器 / microVM）、跨机 / 控制面 HA、资源治理、swarm。
+帧级认证 / 多租户隔离、中心 DB、真沙箱（容器 / microVM）、跨机 / 控制面 HA、资源治理、swarm。
 
 ## 参考文档
 

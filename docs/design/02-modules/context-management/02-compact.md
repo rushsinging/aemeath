@@ -28,10 +28,6 @@ trait ContextPort: Send + Sync {
         req: &ContextRequest,
     ) -> Result<ContextWindow, ContextWindowError>;
 
-    /// 判断是否需要 auto-compact（相同 backing revision + request → 相同决策）。
-    /// 内部从自身稳定 backing 构造 WindowCandidate，再调用纯函数 needs_compaction(req, candidate)。
-    fn needs_compaction(&self, req: &ContextRequest) -> CompactionDecision;
-
     /// L5 执行 auto-compact（LLM 摘要）。实现只操作自身稳定 Session backing，
     /// NEVER 向调用方暴露 ChatChain 的可变引用。
     async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError>;
@@ -80,6 +76,7 @@ struct ContextWindow {
     messages: Vec<Message>,             // 发给 LLM 的消息序列
     tool_schemas: Vec<ModelToolSchema>, // req.tool_schemas 原样透传；Context 不重拉 Catalog
     token_estimation: TokenBudget,      // 预算快照
+    compaction_decision: CompactionDecision, // build_window 内计算，替代独立 needs_compaction
 }
 
 struct ContextAppend {
@@ -92,7 +89,7 @@ struct ContextAppend {
 
 struct CompactRequest {
     run_id: RunId,
-    source: ContextRequest,             // 与 needs_compaction 使用同一冻结输入
+    source: ContextRequest,             // 与 build_window 内的 compaction_decision 计算使用同一冻结输入
     trigger: CompactTrigger,            // Automatic | Manual
 }
 
@@ -108,7 +105,7 @@ enum DecisionReason {
     ActualApiWithDelta,                 // 基于上一轮 API 精确值 + 本轮增量估算
     Heuristic,                          // 纯启发式估算（首轮 / API 未返回）
     Manual,                             // 仅 manual compact 路径独立构造 Decision 时使用；
-                                        // needs_compaction 永远不会产出此值
+                                        // compaction_decision 计算永远不会产出此值
 }
 
 enum Urgency {
@@ -187,11 +184,11 @@ ExecutingTools
   ├─ active summary 读取
   ├─ 按 §2.1 唯一顺序编排 blocks，并原样携带 tool_schemas
   │
-  ▼ ContextWindow 就绪
+  ▼ ContextWindow 就绪（含 compaction_decision）
   │
-  ├─ needs_compaction 判定
-  │   ├─ 不需要 → InvokingModel
-  │   └─ 需要 → L5 compact → 重建 ContextWindow → InvokingModel
+  ├─ window.compaction_decision.needed 判定
+  │   ├─ false → InvokingModel
+  │   └─ true  → L5 compact → 重建 ContextWindow → InvokingModel
   │
   ▼
 ```
@@ -440,12 +437,10 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
     // 3. 修复 tail 中的 orphan tool pairs
     let recent = sanitize_tool_pairs(window.tail);
 
-    // 4. 只在 expected revision 仍匹配时提交新的 Compact segment
-    self.session.commit_compaction(
-        source.revision,
-        &result.summary,
-        &recent,
-    )?;
+    // 4. ChatChain::compact 一次性提交（三参数版：summary, recent_messages, source_revision）
+    //    内部完成 freeze_active → 创建 Compact segment → 记录 source_revision
+    //    定义见 01-session.md §3.1
+    self.session.compact(result.summary.clone(), recent.clone(), source.revision);
 
     Ok(CompactResult { summary: result.summary, recent_messages: recent })
 }
@@ -507,31 +502,27 @@ impl AutoCompactState {
 - 成功后调 `record_success()`
 - Circuit breaker 触发后，跳过 compact，直接进入 InvokingModel（由 provider 报 context error 再触发）
 
-### 8.7 CompactResult → ChatChain 集成
+### 8.7 Compact 提交协议（统一入口）
+
+Compact 提交由 `ChatChain::compact(summary, recent_messages, source_revision)` 一次性完成（三参数版，定义见 [01-session.md](01-session.md) §3.1）：
 
 ```rust
-fn apply_compact_outcome(chain: &mut ChatChain, result: CompactResult) {
-    // 1. 冻结旧链
-    let old_segments = chain.active_segments().to_vec();
-    chain.frozen_chats.lock().unwrap().extend(old_segments);
-
-    // 2. 创建新 Compact segment
-    chain.compact(result.summary, result.recent_messages);
-
-    // 3. 发出 CompactFinished 事件
-    // events.emit(RuntimeStreamEvent::CompactFinished { messages: chain.messages_flat() });
-}
+// ChatChain 唯一提交入口——不再有 apply_compact_outcome 或 commit_compaction 独立函数
+chain.compact(result.summary, result.recent_messages, source.revision);
+// 内部等价于：freeze_active() → 创建 Compact segment → 记录 source_revision
+// 幂等保护：若 compact_source_revision + compact_committed marker 匹配则跳过（见 03-token-budget.md §5.5）
 ```
 
 - summary 作为 `CompactSegment.summary`（走 system 通道，不会被 future compact 二次损耗）
 - recent_messages 保留在新 segment 的 `messages` 中
 - 旧 segment 冻结保留供审计
+- `ChatChain::compact` 是唯一提交入口——`apply_compact_outcome`、`commit_compaction` 等独立函数皆已退役
 
 ### 8.8 Manual Compact
 
 用户 `/compact` 命令触发：
 - **绕过 token 阈值检查**（但保留 `messages.len() > 4` 检查）
-- manual compact 不经过 `needs_compaction`，直接进入 compact use case；内部 **NEVER** 重复检查自动阈值
+- manual compact 不经过 `compaction_decision` 判定，直接进入 compact use case；内部 **NEVER** 重复检查自动阈值
 
 ## 9. 幂等性设计（#550）
 
@@ -540,7 +531,7 @@ fn apply_compact_outcome(chain: &mut ChatChain, result: CompactResult) {
 字段、构造与缓存范围的唯一真相见 [Token Budget](03-token-budget.md) §5。本文只定义 Compact 对该契约的使用规则，**NEVER** 复制类型字段。
 
 - **fingerprint 不变**时跳过 PreCompact hook 和 microcompact 扫描
-- `needs_compaction` 对相同 backing revision + request 是确定性函数
+- `compaction_decision` 计算对相同 backing revision + request 是确定性函数
 - `compact` 的效果对相同 ChatChain + 相同 ContextRequest 是确定性的
 
 ### 9.2 生命周期

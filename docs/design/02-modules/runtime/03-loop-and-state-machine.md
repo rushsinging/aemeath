@@ -127,19 +127,29 @@ async fn run_loop(
         }
 
         // 每次 PreparingContext 冻结一个 Catalog 与 Provider-resolved options。
-        let catalog = ctx.tool_catalog.snapshot(
+        let catalog = match ctx.tool_catalog.snapshot(
             run.spec.tools.scope(), run.spec.tools.profile(),
-        )?;
+        ) {
+            Ok(c) => c,
+            Err(e) => { run.fail(e.into()); break; }
+        };
         let tool_schemas = catalog.model_schemas();          // 本 invocation 唯一 schema 集
         let requested = ctx.reasoning.current_requested_level();
-        let resolved = ctx.provider.resolve_invocation_options(
+        let resolved = match ctx.provider.resolve_invocation_options(
             &run.spec.model,
             RequestedInvocationOptions {
                 requested_max_output_tokens: run.requested_output_limit(),
                 reasoning: requested,
             },
-        )?;                                                  // Provider-owned model clamp
-        let request = context_coordination::freeze_request(
+        ) {
+            Ok(r) => r,                                        // Provider-owned model clamp
+            Err(e) => { run.fail(e.into()); break; }
+        };
+        let task_reminder = ctx.task.reminder_snapshot().await;
+        // ── cancellation barrier ──
+        if run.is_cancelling() { run.finish_cancellation(); break; }
+
+        let request = match context_coordination::freeze_request(
             run,
             &ctx.config,
             ContextRequestInputs {
@@ -151,22 +161,34 @@ async fn run_loop(
                 last_api_input_tokens: run.last_api_input_tokens(),
                 tool_schema_tokens: estimate_tool_schemas_tokens(&tool_schemas),
                 tool_schemas,
-                task_reminder: ctx.task.reminder_snapshot().await,
+                task_reminder,
                 current_date: ctx.clock.calendar_date(),
                 language: ctx.config.language(),
                 agent_roles: ctx.config.agent_roles(),
                 config_snapshot: ctx.config.clone(),
                 // project_root / git_context 由 run-bound ContextPort 的 Project read view 冻结。
             },
-        )?;
+        ) {
+            Ok(r) => r,
+            Err(e) => { run.fail(e.into()); break; }
+        };
 
-        let decision = ctx.context.needs_compaction(&request); // ContextPort ①
-        if decision.needed {
-            ctx.context.compact(&CompactRequest::automatic(request)).await?; // ②
+        let window = match ctx.context.build_window(&request).await { // ③ 含 compaction_decision
+            Ok(w) => w,
+            Err(e) => { run.fail(e.into()); break; }
+        };
+        // ── cancellation barrier ──
+        if run.is_cancelling() { run.finish_cancellation(); break; }
+
+        if window.compaction_decision.needed {
+            if let Err(e) = ctx.context.compact(&CompactRequest::automatic(request)).await { // ②
+                run.fail(e.into()); break;
+            }
+            // ── cancellation barrier ──
+            if run.is_cancelling() { run.finish_cancellation(); break; }
             continue;
         }
 
-        let window = ctx.context.build_window(&request).await?; // ③
         debug_assert_eq!(window.tool_schemas, request.tool_schemas);
         let invocation_request = InvocationRequest {
             model: run.spec.model.clone(),
@@ -179,14 +201,23 @@ async fn run_loop(
             &ctx.provider, invocation_request, run.spec.retry, &ctx.cancel,
             |a| ctx.events.emit_retrying(a)).await {
             Ok(inv)               => inv,
+            // ── cancellation barrier ──
+            Err(_) if run.is_cancelling() => { run.finish_cancellation(); break; }
             Err(ContextExceeded)  => {
                 run.rollback_uncommitted_step(step);
-                ctx.context.compact(&CompactRequest::context_exceeded(request)).await?; // ②
+                if let Err(e) = ctx.context.compact(&CompactRequest::context_exceeded(request)).await { // ②
+                    run.fail(e.into()); break;
+                }
                 continue;
             }
             Err(CapabilityChanged) => {
                 run.rollback_uncommitted_step(step);
                 continue;                                    // 丢弃旧 window，重新 resolve/build
+            }
+            Err(ProviderCancelled) => {
+                // Provider 报告取消——若 Run 已在 Cancelling，走取消收口；否则视为 Fatal
+                if run.is_cancelling() { run.finish_cancellation(); break; }
+                else { run.fail(ProviderCancelled.into()); break; }
             }
             Err(Fatal(e))         => { run.fail(e); break; }            // fatal/耗尽→Failed
         };
@@ -201,9 +232,14 @@ async fn run_loop(
 
         if let Some(plan) = step.plan_approval_request() {
             debug_assert!(!step.has_tool_calls());             // plan decision 独占本 step
-            let decision = interaction::await_plan_approval(
+            let decision = match interaction::await_plan_approval(
                 run, plan, &ctx.interaction, &ctx.cancel,
-            ).await?;                                         // Approved | Rejected { feedback }
+            ).await {                                          // Approved | Deny { feedback }
+                Ok(d) => d,
+                Err(e) => { run.fail(e.into()); break; }
+            };
+            // ── cancellation barrier ──
+            if run.is_cancelling() { run.finish_cancellation(); break; }
             let append = context_coordination::completed_plan_step_append(
                 run, step, request.request_id, decision,
             );                                                // assistant plan → typed user decision
@@ -221,14 +257,21 @@ async fn run_loop(
         let final_results = if had_tool_calls {               // → AwaitingToolApproval
             tool_coordination::gate_calls_in_original_order(
                 run, step, guard, &ctx.policy, &ctx.interaction, &ctx.cancel,
-            ).await?;                                         // approval / HardPause typed continuations
+            ).await;                                           // approval / HardPause typed continuations
+            // ── cancellation barrier ──
+            if run.is_cancelling() { run.finish_cancellation(); break; }
             let outcomes = tool_coordination::execute_ready(
                 &ctx.tool_execution, step.ready_calls(), &ctx.cancel,
             ).await;                                          // completion order is not protocol order
-            let ordered = interaction::resolve_tool_suspensions_in_call_order(
+            // ── cancellation barrier ──
+            if run.is_cancelling() { run.finish_cancellation(); break; }
+            let ordered = match interaction::resolve_tool_suspensions_in_call_order(
                 run, step.original_call_order(), outcomes,
                 &ctx.interaction, &ctx.cancel,
-            ).await?;                                         // one PendingInteraction at a time
+            ).await {                                          // one PendingInteraction at a time
+                Ok(o) => o,
+                Err(e) => { run.fail(e.into()); break; }
+            };
             let ordered = tool_coordination::l1_reduce_in_original_order(ordered);
             for result in &ordered {
                 ctx.reasoning.observe(ReasoningSignal::ToolCompleted {

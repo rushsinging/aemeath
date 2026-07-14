@@ -146,9 +146,11 @@ auto_compact
 struct ReflectionConfig {
     enabled: bool,                 // 默认 true
     interval_turns: usize,         // 默认 10
-    auto_apply: bool,              // 默认 false
+    auto_apply: bool,              // 默认 false（周期性 Reflection 需用户确认）
 }
 ```
+
+> **PreCompact 例外**：PreCompact Reflection **MUST** 同步完成并自动写入（`apply_reflection`），**NEVER** 受 `auto_apply = false` 控制——因为 compact 会改变对话历史，未写入的新记忆将永久丢失。
 
 - 每 N 轮触发一次 reflection
 - LLM 分析近期对话，产出 MemorySuggestion
