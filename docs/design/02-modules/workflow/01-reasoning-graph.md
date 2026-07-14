@@ -12,7 +12,7 @@ ReasoningGraph 是 **Workflow 支撑域 BC 的聚合 / 策略核心**：
 - Workflow 独占节点迁移、desired effort 与**用户静态上限** clamp；Runtime 只负责在确定的 loop 时机发送信号
 - 通过 Workflow-owned `ReasoningPort` OHS 读写 requested reasoning level，与 Provider 的 model-capability clamp 解耦
 
-**不在本文范围**：Provider 侧的 `ReasoningLevel` 枚举定义和 per-driver wire format（见 [../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)）、Config 侧的 `ReasoningGraphConfig` 静态阈值（见 [../config/01-config-layer.md](../config/01-config-layer.md)）。
+**不在本文范围**：Shared Kernel 的 `ReasoningLevel` 稳定枚举定义、Provider 的 per-driver wire format（见 [../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)）、Config 侧的 `ReasoningGraphConfig` 静态阈值（见 [../config/01-config-layer.md](../config/01-config-layer.md)）。
 
 ## 2. ReasoningNode 状态机
 
@@ -99,19 +99,13 @@ fn current_effort(&self) -> ReasoningLevel {
 }
 ```
 
-### 3.3 ReasoningLevel 枚举
+### 3.3 Shared Kernel ReasoningLevel
 
 ```rust
-enum ReasoningLevel {
-    Off,        // 不启用 reasoning
-    Low,        // 低 effort（快速探索）
-    Medium,     // 中等 effort（默认执行）
-    High,       // 高 effort（复杂规划）
-    Xhigh,      // 超高 effort（深度推理）
-    Max,        // 最大 effort（极限场景）
-}
+use share::ReasoningLevel; // Off | Low | Medium | High | Xhigh | Max
 ```
 
+- 枚举由 Shared Kernel 唯一定义，Workflow / Config / Runtime / Context Management / Provider 直接消费，**NEVER** 各自复制同名类型
 - 实现 `Ord` / `PartialOrd` / `clamp`——支持 `min()` 比较
 - per-provider 可能不支持全部级别（如 Ollama 只有 on/off）
 
@@ -314,7 +308,7 @@ Workflow Engine **暂缓实现**，原因：
 ## 10. 相关文档
 
 - Runtime 装配（消费 Workflow-owned ReasoningPort）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
-- Provider 端口（ReasoningLevel 枚举 + provider clamp）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
+- Provider 端口（消费 Shared Kernel ReasoningLevel + provider clamp）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - Config 分层（ReasoningGraphConfig 静态阈值）：[../config/01-config-layer.md](../config/01-config-layer.md)
 - Run 状态机（Loop 集成点）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 - 上下文地图（Workflow = 支撑域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)

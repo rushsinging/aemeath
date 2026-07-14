@@ -237,20 +237,13 @@ struct ContextState {
 async fn build_window(
     &self,
     req: &ContextRequest,
-    state: &mut ContextState,
 ) -> Result<ContextWindow, ContextWindowError> {
     let fingerprint = CompactionFingerprint::from(req);
 
+    // ContextState 是 Context implementation-owned backing，NEVER 作为第五个 OHS 参数暴露。
     // fingerprint 只缓存纯 L2-L4 投影，NEVER 缓存整个 ContextWindow。
-    let projection = match (&state.last_fingerprint, &state.last_projection) {
-        (Some(previous), Some(projection)) if previous == &fingerprint => projection.clone(),
-        _ => {
-            let projection = self.project_compaction(req)?;
-            state.last_fingerprint = Some(fingerprint);
-            state.last_projection = Some(projection.clone());
-            projection
-        }
-    };
+    let projection = self.projection_cache
+        .get_or_compute(fingerprint, || self.project_compaction(req))?;
 
     // 易变外部输入每轮都经各自 owner 物化；adapter 内部可按 revision 命中缓存。
     // 可观察顺序固定：Prompt/Skill → Memory → summary → final assembly。

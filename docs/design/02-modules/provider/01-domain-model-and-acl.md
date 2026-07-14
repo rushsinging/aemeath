@@ -125,7 +125,7 @@ ReasoningPort.current_requested_level
 
 ### 3.1 映射规则
 
-ReasoningLevel 是跨 BC 的统一抽象：`Off / Low / Medium / High / Xhigh / Max`。driver 必须把 effective level 映射为本协议支持的形式，例如 effort 字符串、thinking 开关、token budget 或 adaptive mode。
+Shared Kernel 的 `ReasoningLevel` 是跨 BC 统一抽象：`Off / Low / Medium / High / Xhigh / Max`；Provider 只消费该类型并拥有 model-capability clamp 与 wire 映射，**NEVER** 再定义副本。driver 必须把 effective level 映射为本协议支持的形式，例如 effort 字符串、thinking 开关、token budget 或 adaptive mode。
 
 - 不支持的档位必须在有序 `supported` 集合中向下选择，禁止向上扩大；
 - `Off` 不得被默认开启逻辑反向提升；

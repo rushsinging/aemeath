@@ -124,7 +124,7 @@ enum AgentIntent {
 |---|---|---|
 | Conversation | `Text` / `Thinking` / `BlockComplete` / `ToolCallStart` / `ToolCallUpdate` / `ToolResult` / `AgentProgress` / `Done` / `DoneWithDuration` / `Cancelled` / `Usage` / `LiveTps` / `SystemMessage` / `ModelStreamWaiting` / `UserMessagesAdopted` / `UserMessagesQueued` / `GraphPhaseChanged` / `CompactProgress` / `ThinkingChanged` | 清 placeholder、sanitize、追加 timeline、更新 RunStep / Tool / 互补 timeline 投影与派生输入；turn-level `Cancelled` **NEVER** 代替 Run 终态 |
 | Conversation | `RunStarted` / `RunAwaitingUser` / `RunResumed` / `RunCompleting` / `RunCompleted` / `RunFailed` / `RunCancelling` / `RunCancelled` | 按 `run_id` 投影 Runtime 权威生命周期；`RunCancelling` 进入非终态 Cancelling，只有 `RunCancelled` 进入 Cancelled；Interaction command result Intent 不参与此状态机 |
-| Conversation | `InteractionRequested { request_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, body }`；只携 TUI DTO + id，**NEVER** 携 sender |
+| Conversation | `InteractionRequested { request_id, run_id, body }` | 穷尽映射四种 body 为 `ShowInteraction { request_id, run_id, body }`；保留 Runtime run/request identity，只携 TUI DTO，**NEVER** 携 sender |
 | Conversation + Diagnostic | `Error` / `ApiError` | Conversation 追加错误块；Diagnostic 记录结构化 notice |
 | Conversation + Diagnostic | `HookEvent` | Conversation 追加 sanitize 后的 hook notice；阻断 / 失败同时记录 Diagnostic Intent；PostCompact 也必须显式映射为 no-visual-state Intent，**NEVER** 静默丢弃 |
 | Input | `ClipboardImage` | `InputIntent::AttachClipboardImage`；只携 TUI-owned image DTO |
@@ -251,6 +251,7 @@ enum UiEvent {
     HookEvent(HookEvent),            // TUI 自有
     InteractionRequested {
         request_id: UiInteractionRequestId,
+        run_id: RunId,
         body: UiInteractionBody,
     },
     RunResumed { run_id: RunId },
@@ -275,16 +276,17 @@ Runtime 在进入 `AwaitingUser` 前生成 `InteractionRequestId`、注册 pendi
 ```text
 sdk::ChatEvent::InteractionRequested {
     request_id,
+    run_id,
     body: UserQuestions(items) | ToolApproval(prompt) |
           PlanApproval(prompt) | HardPause(diagnostic),
 }
-  → event_mapping: SDK id/body → TUI-owned UiInteractionRequestId / UiInteractionBody
-  → UiEvent::InteractionRequested { request_id, body }
+  → event_mapping: SDK run/id/body → TUI-owned RunId / UiInteractionRequestId / UiInteractionBody
+  → UiEvent::InteractionRequested { request_id, run_id, body }
   → AgentEventMapping { ConversationIntent::ShowInteraction { ... } }
   → reducer → InteractionShown Change
 ```
 
-转换必须可逆地保留 ID wire value，供 effect runner 调 Runtime-owned `AgentClient` command。processing 只转发纯值事件，**NEVER** 注册 sender、保存 pending reply 或写 Model。
+转换必须可逆地保留 request ID wire value，并保留 `run_id` 供 Model 拒绝旧 Run / Sub Run 的迟到投影；effect runner 仍只以 request ID 调 Runtime-owned `AgentClient` command。processing 只转发纯值事件，**NEVER** 注册 sender、保存 pending reply 或写 Model。
 
 ### 4.4 reply 与 cancel
 
@@ -305,10 +307,10 @@ sdk::ChatEvent::InteractionRequested {
 规则：
 
 1. Runtime-owned bridge **MUST** 校验 request body 与 reply variant，并对未知、重复、已完成或 RunCancelling 返回结构化 `InteractionCommandOutcome`；TUI 只投影该结果，**NEVER** 复制校验真相或假定成功。
-2. UserQuestions 的答案数量 **MUST** 等于 question count；ToolApproval / PlanApproval 只接受各自的 Approve / Deny；HardPause 只接受 Continue。`InvalidReply` 不消费 Runtime pending request，用户可修正后重试。
+2. UserQuestions 的答案数量 **MUST** 等于 question count，并按原问题顺序把每个 `String` 无损包装为 Runtime `UserAnswer`；不得丢项、重排或附加隐式默认值。ToolApproval / PlanApproval 只接受各自的 Approve / Deny；HardPause 只接受 Continue。`InvalidReply` 不消费 Runtime pending request，用户可修正后重试。
 3. cancel 使用 typed `InteractionCancelReason::UserCancelled`，**NEVER** 用等长空字符串或 drop sender 猜测取消。
 4. Run cancel / session reset 的 pending continuation 清理由 Runtime cancellation scope 负责；stream failure / processing teardown 只影响 TUI 投影，**NEVER** 冒充 Runtime cancellation 或自行 drain waiter。
-5. Model 只接受与活跃 `UiInteractionRequestId` 匹配的 result Intent；陈旧结果不改投影，并记录 Diagnostic Intent。
+5. Model 只建立属于已知非终态 Run 的 Interaction，并要求后续 result Intent 与活跃 `UiInteractionRequestId` 匹配；旧 Run / 未知 Run / 陈旧 request 不改投影，并记录 Diagnostic Intent。
 6. TUI 同一时刻只容纳一个 active Interaction。Runtime **MUST** 把并发 Tool suspension 按原始 ToolCall 稳定顺序串行发布；新 request 与未完成 request 冲突时 TUI 记录协议错误，**NEVER** 静默覆盖活跃块或建立第二个 registry。
 7. `InteractionReplySent` / `InteractionCancelled` 只更新匹配 Interaction 块的本地阶段，**NEVER** 把 Run 从 `AwaitingUser` 改为 `Running` 或 `Cancelled`；Runtime 完成 continuation 后发布 `RunResumed`，TUI 才恢复 Running。
 8. UserQuestions 渲染问题与答案；ToolApproval / PlanApproval 渲染 Approve / Deny；HardPause 渲染 diagnostic 与 Continue / Cancel。所有选择只形成 TUI draft，业务结果仍由 Runtime continuation 决定。

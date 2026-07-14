@@ -474,11 +474,12 @@ struct CompactProgressModel { stage: String, current: Option<u32>, total: Option
 
 #### 3.6.6 InteractionState
 
-Interaction 块**内嵌在 OutputTimeline** 中（`OutputTimelineItem::Interaction`），同一时刻至多一个。块持有 Runtime request id 的 TUI-owned 无损 newtype、四种 TUI-owned body、typed draft 与本地 phase，**NEVER** 持有 sender、pending waiter、SDK DTO 或 AgentClient handle。
+Interaction 块**内嵌在 OutputTimeline** 中（`OutputTimelineItem::Interaction`），同一时刻至多一个。块持有 Runtime run/request identity 的 TUI-owned 无损投影、四种 TUI-owned body、typed draft 与本地 phase，**NEVER** 持有 sender、pending waiter、SDK DTO 或 AgentClient handle。
 
 ```rust
 struct InteractionState {
     request_id: UiInteractionRequestId,
+    run_id: RunId,
     body: UiInteractionBody,
     draft: UiInteractionDraft,
     phase: InteractionPhase,
@@ -517,7 +518,7 @@ Collecting ──draft 完整──→ Confirming ──ConfirmInteraction──
 
 | 方法 | 说明 |
 |---|---|
-| `show_interaction(request_id, body)` | 显示交互块并按 body 建立同 variant draft；若已有不同 active id，返回协议冲突 Change，**NEVER** 静默覆盖 |
+| `show_interaction(request_id, run_id, body)` | 仅为已知非终态 Run 显示交互块并按 body 建立同 variant draft；若 Run 不匹配或已有不同 active id，返回协议冲突 Change，**NEVER** 静默覆盖 |
 | `update_interaction_draft(request_id, action)` | 只更新匹配 id、与 body variant 相容的 draft；非法 action 产生 Diagnostic Change |
 | `confirm_interaction(request_id)` | draft 完整时进入 ReplyPending，返回 typed `InteractionReplyRequested` Change |
 | `cancel_interaction(request_id)` | 进入 CancelPending，返回 `InteractionCancelRequested` Change |
@@ -544,7 +545,7 @@ enum ConversationIntent {
     ProjectRunCancelled { run_id: RunId },
     RequestRunCancellation { run_id: RunId }, // 只产生 Change，不先改 RunProjectionStatus
     AppendAssistantText { context: UiTurnContext, text: String },
-    ShowInteraction { request_id: UiInteractionRequestId, body: UiInteractionBody },
+    ShowInteraction { request_id: UiInteractionRequestId, run_id: RunId, body: UiInteractionBody },
     UpdateInteractionDraft { request_id: UiInteractionRequestId, action: UiInteractionDraftAction },
     ConfirmInteraction { request_id: UiInteractionRequestId },
     CancelInteraction { request_id: UiInteractionRequestId },

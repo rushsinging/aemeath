@@ -114,9 +114,9 @@ context::wire_main_session(MainSessionDependencies {
 }) -> Result<MainSessionWiring, SessionOpenError>
 
 MainSessionWiring::bind_main_run(&self).await
-    -> Result<BoundMainSession, SessionSwitchInProgress>
+    -> Result<BoundMainRun, SessionSwitchInProgress>
 
-struct BoundMainSession {
+struct BoundMainRun {
     context: Arc<dyn ContextPort>,
     memory: Arc<dyn MemoryPort>,
     config: ConfigSnapshot,
@@ -124,7 +124,7 @@ struct BoundMainSession {
 }
 ```
 
-`MainSessionWiring` 字段私有，拥有稳定 Session backing、唯一 `SessionSwitchCoordinator`、async shared / exclusive gate、`TaskPersist`、active Memory slot、Config participant view，以及构造私有 PromptPipeline 所需的稳定 Guidance / Skill seam；它 **NEVER** 保存第二份 active Config slot。Guidance / Skill adapter 每次按 request 的 project/config materialize，因而 resume 后 **NEVER** 静态捕获旧项目内容。`bind_main_run` **MUST** 是 async admission：await 一个 owned shared lease 后，才从 Memory slot 与 Config participant 的同一已提交版本读取资源并构造 run-bound `ContextPort` view；它 **NEVER** 用同步 read lock 跨越 resume 的 await。该 ContextPort 复用稳定 Session / ChatChain backing，但只捕获本 lease 对应的 Memory Arc 与 ConfigSnapshot，**NEVER** 静态捕获启动时实例。BoundMainSession 的资源不能越过 lease 存活。
+`MainSessionWiring` 字段私有，拥有稳定 Session backing、唯一 `SessionSwitchCoordinator`、async shared / exclusive gate、`TaskPersist`、active Memory slot、Config participant view，以及构造私有 PromptPipeline 所需的稳定 Guidance / Skill seam；它 **NEVER** 保存第二份 active Config slot。Guidance / Skill adapter 每次按 request 的 project/config materialize，因而 resume 后 **NEVER** 静态捕获旧项目内容。`bind_main_run` **MUST** 是 async admission：await 一个 owned shared lease 后，才从 Memory slot 与 Config participant 的同一已提交版本读取资源并构造 run-bound `ContextPort` view；它 **NEVER** 用同步 read lock 跨越 resume 的 await。该 ContextPort 复用稳定 Session / ChatChain backing，但只捕获本 lease 对应的 Memory Arc 与 ConfigSnapshot，**NEVER** 静态捕获启动时实例。`BoundMainRun` 的资源不能越过 lease 存活。
 
 `MainSessionWiring::resume` 是唯一 exclusive project-switch 入口，执行 §6 的 prepare / commit 协议；可能改变 active project-scoped resource 的 Config command 也 **MUST** 经 wiring 使用同一 gate 与 candidate protocol。ordinary ContextPort、Runtime 与 Tool **NEVER** 获得 coordinator、active slot setter、`TaskPersist`、Config participant commit authority 或 exclusive lease。无 Run 的 Session / Memory / Workspace / Config query 或 mutation 也必须经 gate-aware async façade await 同一 owned shared lease；因此同一 gate 同时证明 Run admission、资源读取与 resume 的原子边界。
 

@@ -178,6 +178,7 @@ Memory BC 输出已完成 filtering / ranking 的条目；Context Management 只
 ```rust
 struct MemoryConfig {
     similarity_threshold: f64,    // 默认 0.8，范围 [0, 1]
+    inject_count: usize,          // 默认 5
 }
 ```
 
@@ -193,11 +194,7 @@ Tier 1 的 BM25 分数归一化到 [0, 1]：
 
 ## 5. inject_count 配置
 
-```rust
-struct MemoryConfig {
-    inject_count: usize,    // 默认 5
-}
-```
+`inject_count` 是上节同一 `MemoryConfig` 的字段，默认值为 5；本文 **NEVER** 定义第二份配置结构。
 
 - **自动注入**：默认 5（query-independent access/recency/pin 排序，保守注入约 300 token）。
 - **Tier 1 与注入条数正交**：BM25 只服务显式 search，落地后 **MUST NOT** 仅以“相关性更高”为由提高 `inject_count`。

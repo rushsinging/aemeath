@@ -26,10 +26,11 @@
 CLI / TUI / REPL / Server ──依赖 AgentClient──────────────▶ Agent Runtime 能力策略
 Provider HTTP / SSE       ──实现 Runtime 消费方拥有的模型调用 port──▶ Model Invocation 用例策略
 Git CLI / 子进程 detail    ──实现 Project 消费方拥有的 git worktree port──▶ Project Workspace 能力策略
-Storage driver            ──实现目的性 repository / sink──▶ Context Management / Memory / Audit 等能力策略
+Storage driver            ──实现 Storage-owned AtomicBlob/Dataset OHS──▶ Storage 机制策略
+持久化 integration adapter ──实现消费方 repository / sink port──────────▶ Context Management / Memory / Audit 等能力策略
 ```
 
-图中箭头表示源码依赖，不表示运行时调用方向。隔离易变 detail 的出站 port 属于消费该外部交互的稳定策略；外部 detail 依赖或实现该 port，由 Composition Root 选择生产实现。Task / Project 快照只由 Context Management 组装进 Session 后经其 repository 落盘，**NEVER** 从该示意推导独立的 Task / Project → Storage 路径。供其他能力调用的入站 façade / OHS 属于供应方，例如 Runtime-owned `AgentClient` 与 Project-owned `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist`。键盘、WebSocket、HTTP、文件、git、进程与 runtime 等技术类型 **MUST** 在 seam 外侧完成转换，**NEVER** 越过能力 façade。
+图中箭头表示源码依赖，不表示运行时调用方向。隔离易变 detail 的出站 port 属于消费该外部交互的稳定策略；外部 detail 依赖或实现该 port，由 Composition Root 选择生产实现。Storage 是独立供应能力：driver 实现 Storage-owned OHS；消费方拥有窄 repository / sink port，integration adapter 同时实现该消费方 port 并调用 Storage OHS，**NEVER** 把 Storage driver 直接伪装成所有数据 BC 的 port。Task / Project 快照只由 Context Management 组装进 Session 后经其 repository 落盘，**NEVER** 从该示意推导独立的 Task / Project → Storage 路径。供其他能力调用的入站 façade / OHS 属于供应方，例如 Runtime-owned `AgentClient` 与 Project-owned `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist`。键盘、WebSocket、HTTP、文件、git、进程与 runtime 等技术类型 **MUST** 在 seam 外侧完成转换，**NEVER** 越过能力 façade。
 
 模型调用与工作区交互的具体战术端口名称和职责，分别 **MUST** 以 [Provider 模块设计](../02-modules/provider/README.md) 与 [Project 端口与适配器](../02-modules/project/02-ports-and-adapters.md) 为真相源；系统级示意 **NEVER** 另行命名战术 port。
 

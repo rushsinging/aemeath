@@ -57,7 +57,7 @@ AwaitingToolApproval / ExecutingTools / PreparingContext 之一。
 | ExecutingTools | 结果回收完 | PreparingContext（下一步）|
 | AwaitingUser | 匹配 reply + `ContinueToolApproval` | AwaitingToolApproval（应用决定后继续未决调用） |
 | AwaitingUser | 匹配 reply + `CompleteToolCall` | ExecutingTools（完成原 ToolCall） |
-| AwaitingUser | 匹配 reply + `ContinuePlanApproval` | PreparingContext（Approve / Deny 的 typed 结果进入下一步） |
+| AwaitingUser | 匹配 reply + `ContinuePlanApproval` | PreparingContext（Approve / Deny 的 typed 结果先随当前 step 恰好一次提交，再进入下一 invocation；该 step 不得同时携 tool_calls） |
 | AwaitingUser | 匹配 reply + `ContinueAfterHardPause` | PreparingContext |
 | AwaitingUser | completion=`Cancelled` + Tool continuation | ToolCall 得到 typed Cancelled，回原 Tool 状态继续 |
 | AwaitingUser | completion=`Cancelled` + Plan/HardPause continuation | Failed（typed PlanApprovalCancelled / HardPauseCancelled） |
@@ -167,9 +167,21 @@ async fn run_loop(
         }
 
         if let Some(plan) = step.plan_approval_request() {
-            interaction::await_plan_approval(
+            debug_assert!(!step.has_tool_calls());             // plan decision 独占本 step
+            let decision = interaction::await_plan_approval(
                 run, plan, &ctx.interaction, &ctx.cancel,
-            ).await?;                                         // ContinuePlanApproval
+            ).await?;                                         // Approved | Rejected { feedback }
+            let append = context_coordination::completed_plan_step_append(
+                run, step, request.request_id, decision,
+            );                                                // assistant plan → typed user decision
+            if let Err(error) = ctx.context.append_and_persist(append).await { // ContextPort ④，恰好一次
+                run.fail(error.into());
+                break;
+            }
+            run.mark_step_persisted(step);
+            ctx.reasoning.observe(ReasoningSignal::TurnBoundary);
+            run.resume_preparing_context();                   // 下一 invocation 消费决定
+            continue;                                         // NEVER 执行同一 response 的 tool calls
         }
 
         let had_tool_calls = step.has_tool_calls();

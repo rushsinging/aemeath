@@ -279,7 +279,7 @@ project/
     └── app/main.go
 ```
 
-- **边界机制**：[Go 官方布局指南](https://go.dev/doc/modules/layout) 从根目录单 package 起步，复杂度增长后才增加 supporting package；`internal` 由工具链禁止外部 module import。对 server project，指南进一步示范把已经适合跨项目复用的 package 拆为独立 module；这是一种适用场景，**NEVER** 被提升为 Go module 的唯一拆分门槛。
+- **边界机制**：[Go 官方布局指南](https://go.dev/doc/modules/layout) 从根目录单 package 起步，复杂度增长后才增加 supporting package；`internal` 由工具链禁止其父目录树之外的代码导入。对 server project，指南进一步示范把已经适合跨项目复用的 package 拆为独立 module；这是一种适用场景，**NEVER** 被提升为 Go module 的唯一拆分门槛。
 - **借鉴**：aemeath **MUST** 先保持扁平，并把编译器可见性当作边界；只有 §3.6 至少一个强边界收益成立时才 **MAY** 拆 crate。
 - **未照搬**：aemeath **NEVER** 复制 `cmd` / `internal` 名称或 Go 的“一目录一 package”约束。
 
@@ -309,8 +309,8 @@ helix/
 └── helix-tui/
 ```
 
-- **边界机制**：[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) 声明 capability-named workspace members；[`helix-term` manifest](https://github.com/helix-editor/helix/blob/master/helix-term/Cargo.toml) 显式声明对 core、view、LSP 与 TUI 等成员的依赖，由 Cargo manifest 形成可检查的 crate dependency graph。
-- **借鉴**：跨运行时或稳定能力边界确实需要编译隔离时，aemeath **MAY** 使用清楚表达能力的 crate 名称。
+- **边界机制**：[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) 声明 subsystem-named workspace members；[`helix-term` manifest](https://github.com/helix-editor/helix/blob/master/helix-term/Cargo.toml) 显式声明对 core、view、LSP 与 TUI 等成员的依赖，由 Cargo manifest 形成可检查的 crate dependency graph。
+- **借鉴**：Helix 直接提供“子系统命名 + manifest 依赖图”的事实；aemeath 据此推论，跨运行时或稳定能力边界确实需要编译隔离时 **MAY** 使用清楚表达能力的 crate 名称。
 - **未照搬**：aemeath **NEVER** 因 Helix 使用多 crate 就把每个内部 coordinator 升格；锁步变化的 Runtime 能力 **SHOULD** 先留在同 crate。
 
 ### 5.6 C++：Chromium components
@@ -366,7 +366,7 @@ components/foo/
 | 真实 seam 形成时按方向确定 port 所有权 | [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture)；aemeath [Context Map](03-context-map.md) 的 OHS 关系 | Hexagonal 提供 inside/outside 与目的性 port；aemeath 综合 Context Map 决定出站 port 归消费策略、入站 façade / OHS 归供应能力 | 每用例一个 port、固定端口数量、固定外层目录；不把仓库综合决策冒充原文结论 |
 | 依赖由技术细节指向能力策略 | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) | Dependency Rule、依赖反转、边界数据归内侧所有 | 固定圆环数量与名称、物理分层模板 |
 | 先 module privacy，存在强边界收益时再 crate | [Rust visibility](https://doc.rust-lang.org/reference/visibility-and-privacy.html)；[Go module layout](https://go.dev/doc/modules/layout)；aemeath §3.6 | 来源支持默认私有、受限公开与简单起步；生命周期、平台、发布、审计等强边界收益是 aemeath 的综合工程决策 | Go 目录约定；为每个能力预建 crate；不把本地判据冒充来源原文 |
-| crate **MUST** 承载 §3.6 的强边界收益 | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | capability-named crates、façade、明确 API / dependency boundary | 按参考项目的 crate 数量或内部流水线照抄 |
+| crate **MUST** 承载 §3.6 的强边界收益 | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | rust-analyzer 的 façade / API boundary；Helix 的 subsystem-named crates 与 Cargo dependency graph；能力判定是 aemeath 的综合推论 | 按参考项目的 crate 数量或内部流水线照抄 |
 | 边界规则 **MUST** 机械验证 | [Spring Modulith verification](https://docs.spring.io/spring-modulith/reference/verification.html)；[Chromium components](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/README.md) | 环检查、允许依赖、公开面与构建图 | Spring / GN 专属工具和 Chromium 组织规模 |
 | **拒绝：所有能力采用固定横向目录模板** | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 保留依赖方向；复杂领域按需隔离 | 拒绝原因：把示意层误当目录，会给小模块增加仪式并掩盖能力边界 |
 | **拒绝：纯切片、永不共享 model** | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；[DDD Reference](https://www.domainlanguage.com/ddd/reference/) | 保留变化局部性 | 拒绝原因：跨用例真实不变量会复制并漂移，必须允许共同模型按证据出现 |

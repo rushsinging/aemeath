@@ -106,6 +106,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 共享内核 | 参与 BC | 风险控制 |
 |---|---|---|
 | `Message`（对话消息类型） | Agent Runtime / Context Management / Provider | 最小化，只放稳定核心类型 |
+| `ReasoningLevel`（`Off / Low / Medium / High / Xhigh / Max`） | Workflow / Config / Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；graph、user max、model capability 与 wire 映射仍归各 BC 所有 |
 | `Task` 类型 | 实为 **Task BC 的 Published Language**（非 SK），其他 BC 引用其发布类型 | 不变量由 Task BC 独占 |
 
 领域标识 **NEVER** 使用“全域 ID”共享内核：RunId / ToolCallId 等 UUIDv7 newtype 由各自所有者发布，TaskId / BatchId 使用 Task-owned 单 Session 数字格式，WorkspaceId 使用 Project-owned deterministic opaque 格式。跨 BC 只消费所有者发布的精确类型，**NEVER** 退化为无所有权的通用 `Id`。

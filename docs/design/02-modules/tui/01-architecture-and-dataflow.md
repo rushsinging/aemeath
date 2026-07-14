@@ -173,7 +173,7 @@ enum ConversationIntent {
     ProjectRunCancelling { run_id },
     ProjectRunCancelled { run_id },
     RequestRunCancellation { run_id },
-    ShowInteraction { request_id, body },
+    ShowInteraction { request_id, run_id, body },
     UpdateInteractionDraft { request_id, action },
     ConfirmInteraction { request_id },
     CancelInteraction { request_id },
@@ -282,7 +282,7 @@ Runtime wire DTO **MUST** 在 `adapter/event_mapping.rs` 一次性转换成 TUI-
 
 ### 8.2 Interaction reply 边界
 
-Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 request id 与纯值 body；`event_mapping` 穷尽转换 `UserQuestions`、`ToolApproval`、`PlanApproval`、`HardPause` 为 TUI-owned `UiInteractionBody`，并把 ID 无损包装为 `UiInteractionRequestId`。Effect runner 把 ID 与 body-specific reply 无损映回 SDK `InteractionRequestId` / `InteractionReply`，调用 `AgentClient::reply_interaction` / `cancel_interaction`；TUI 任一层 **NEVER** 持有 sender 或 Runtime continuation。完整协议见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §4。
+Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request identity 与纯值 body；`event_mapping` 穷尽转换 `UserQuestions`、`ToolApproval`、`PlanApproval`、`HardPause` 为 TUI-owned `UiInteractionBody`，无损保留 `run_id` 并把 request ID 包装为 `UiInteractionRequestId`。Model 用 run identity 拒绝旧 Run / Sub Run 的迟到投影；Effect runner 把 request ID 与 body-specific reply 无损映回 SDK `InteractionRequestId` / `InteractionReply`，调用 `AgentClient::reply_interaction` / `cancel_interaction`；TUI 任一层 **NEVER** 持有 sender 或 Runtime continuation。完整协议见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §4。
 
 ## 9. 架构门禁
 
