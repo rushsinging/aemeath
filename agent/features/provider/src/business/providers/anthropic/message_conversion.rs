@@ -75,12 +75,22 @@ pub(crate) fn apply_message_cache_breakpoint(messages: &mut [serde_json::Value])
         .get_mut("content")
         .and_then(|c| c.as_array_mut())
     {
-        if let Some(last_block) = content.last_mut() {
-            if let Some(obj) = last_block.as_object_mut() {
-                obj.insert(
-                    "cache_control".to_string(),
-                    serde_json::json!({"type": "ephemeral"}),
-                );
+        // 倒序查找最后一个非 thinking block（Anthropic 不允许在 thinking
+        // content block 上设置 cache_control，返回 400）
+        for block in content.iter_mut().rev() {
+            let is_thinking = block
+                .get("type")
+                .and_then(|t| t.as_str())
+                .map(|s| s == "thinking" || s == "redacted_thinking")
+                .unwrap_or(false);
+            if !is_thinking {
+                if let Some(obj) = block.as_object_mut() {
+                    obj.insert(
+                        "cache_control".to_string(),
+                        serde_json::json!({"type": "ephemeral"}),
+                    );
+                }
+                break;
             }
         }
     }
