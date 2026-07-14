@@ -1,13 +1,13 @@
 //! Runtime 出站端口定义。
 //!
-//! 本模块定义 Runtime 八模块消费的全部出站 Port trait 和最小 Published Language 类型。
+//! 本模块定义 Runtime 八模块消费的全部出站 Port trait 和 Published Language 类型。
 //! 设计来源：`docs/design/02-modules/runtime/06-ports-and-adapters.md`。
 //!
-//! #873 只定义契约和 PL 骨架，不创建 legacy adapter，不切换现有代码，不退役 RuntimeResources。
+//! #873 建立骨架；#901 细化 ProviderPort PL（冻结契约）。
 //!
 //! 各 Port 对应的 BC 负责细化 PL 类型行为，后续迁移到各自 crate：
 //! - ContextPort -> context BC (#868)
-//! - ProviderPort -> provider BC (#901)
+//! - ProviderPort -> provider BC (#901) ✅ PL 已冻结
 //! - ToolCatalogPort / ToolExecutionPort -> tools BC (#908)
 //! - PolicyPort -> policy BC (#917)
 //! - MemoryPort -> memory BC (#895)
@@ -40,7 +40,10 @@ pub use input_buffer::InputBuffer;
 pub use memory_port::{MemoryEntry, MemoryPort, MemoryQuery};
 pub use policy_port::{PolicyDecision, PolicyPort, PolicyRequest};
 pub use provider_port::{
-    InvocationRequest, InvocationStream, ModelCapability, ModelId, ProviderError, ProviderPort,
+    InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, InvocationStream,
+    ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
+    ProviderError, ProviderErrorKind, ProviderPort, ProviderToolCall, ProviderToolCallId,
+    RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind, StopReason,
 };
 pub use reasoning_port::ReasoningPort;
 pub use task_port::TaskPort;

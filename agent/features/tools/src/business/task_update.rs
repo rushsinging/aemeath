@@ -5,6 +5,12 @@ use share::tool::types::task_update::{TaskUpdateInput, TaskUpdateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStatus, TaskStore};
 
+/// 判断是否为占位符值：纯空白（如 `""` `"  "`）。
+/// 标点占位符（如 `","`）不拦截，靠 result 回填 + prompt 提示从源头减少（#979）。
+pub(super) fn is_placeholder(val: &str) -> bool {
+    val.trim().is_empty()
+}
+
 fn current_timestamp_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -94,24 +100,24 @@ impl TypedTool for TaskUpdateTool {
                     };
                 }
 
-                // Basic field updates — skip empty strings to avoid clobbering existing values
+                // Basic field updates — skip blank/placeholder strings to avoid clobbering existing values (#979)
                 if let Some(subject) = args.subject {
-                    if !subject.is_empty() {
+                    if !is_placeholder(&subject) {
                         task.subject = subject;
                     }
                 }
                 if let Some(desc) = args.description {
-                    if !desc.is_empty() {
+                    if !is_placeholder(&desc) {
                         task.description = desc;
                     }
                 }
                 if let Some(af) = args.active_form {
-                    if !af.is_empty() {
+                    if !is_placeholder(&af) {
                         task.active_form = Some(af);
                     }
                 }
                 if let Some(owner) = args.owner {
-                    if !owner.is_empty() {
+                    if !is_placeholder(&owner) {
                         task.owner = Some(owner);
                     }
                 }
@@ -128,7 +134,7 @@ impl TypedTool for TaskUpdateTool {
                     task.progress = progress.min(100);
                 }
                 if let Some(msg) = args.progress_message {
-                    if !msg.is_empty() {
+                    if !is_placeholder(&msg) {
                         task.progress_message = Some(msg);
                     }
                 }
@@ -171,6 +177,9 @@ impl TypedTool for TaskUpdateTool {
                         task_id: display_id,
                         status,
                         subject: task.subject.clone(),
+                        priority: format!("{:?}", task.priority).to_lowercase(),
+                        progress: task.progress,
+                        blocked_by: task.blocked_by.clone(),
                     },
                 )
             }

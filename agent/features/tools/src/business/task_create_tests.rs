@@ -88,3 +88,49 @@ async fn test_non_empty_owner_still_stored() {
     let task = &snap.tasks[0];
     assert_eq!(task.owner.as_deref(), Some("alice"));
 }
+
+// --- #979: 空白占位符拦截 ---
+
+#[tokio::test]
+async fn test_whitespace_owner_not_stored() {
+    let store = Arc::new(TaskStore::new());
+    let tool = TaskCreateTool {
+        store: store.clone(),
+    };
+
+    tool.call(
+        serde_json::json!({
+            "subject": "测试任务",
+            "description": "描述",
+            "owner": "  "
+        }),
+        &test_ctx(),
+    )
+    .await;
+
+    let snap = store.snapshot().await;
+    let task = &snap.tasks[0];
+    assert_eq!(task.owner, None);
+}
+
+#[tokio::test]
+async fn test_whitespace_session_id_not_stored() {
+    let store = Arc::new(TaskStore::new());
+    let tool = TaskCreateTool {
+        store: store.clone(),
+    };
+
+    tool.call(
+        serde_json::json!({
+            "subject": "测试任务",
+            "description": "描述",
+            "sessionId": "\t"
+        }),
+        &test_ctx(),
+    )
+    .await;
+
+    let snap = store.snapshot().await;
+    let task = &snap.tasks[0];
+    assert_eq!(task.session_id, None);
+}

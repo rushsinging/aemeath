@@ -5,6 +5,8 @@ use share::tool::types::task_create::{TaskCreateInput, TaskCreateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStore};
 
+use super::task_update::is_placeholder;
+
 pub struct TaskCreateTool {
     pub store: Arc<TaskStore>,
 }
@@ -93,16 +95,16 @@ impl TypedTool for TaskCreateTool {
             .create_with_priority(subject, description, active_form, priority)
             .await;
 
-        // Set additional fields if provided — skip empty strings to avoid dirty data
+        // Set additional fields if provided — skip blank/placeholder strings to avoid dirty data (#979)
         if let Some(session_id) = args.session_id {
-            if !session_id.is_empty() {
+            if !is_placeholder(&session_id) {
                 self.store
                     .update(&task.id, |t| t.session_id = Some(session_id))
                     .await;
             }
         }
         if let Some(owner) = args.owner {
-            if !owner.is_empty() {
+            if !is_placeholder(&owner) {
                 self.store.update(&task.id, |t| t.owner = Some(owner)).await;
             }
         }
@@ -129,7 +131,13 @@ impl TypedTool for TaskCreateTool {
 
         TypedToolResult::success(
             format!("Task #{} created: {}", display_id, task.subject),
-            TaskCreateResult { task_id: task.id },
+            TaskCreateResult {
+                task_id: task.id,
+                display_id,
+                subject: task.subject.clone(),
+                status: format!("{:?}", task.status).to_lowercase(),
+                priority: format!("{:?}", task.priority).to_lowercase(),
+            },
         )
     }
 }
