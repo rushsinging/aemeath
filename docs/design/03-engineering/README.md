@@ -11,6 +11,7 @@
 | [architecture-guards.md](architecture-guards.md) ✅ | 守卫注册表、依赖铁律拦截、17 个 guard 脚本 |
 | [agent-orchestration.md](agent-orchestration.md) ✅ | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
 | [migration-governance.md](migration-governance.md) ✅ | Current→Target 迁移追踪、Runtime 现状缺口(R1-R10)、死代码退役清单 |
+| [testing-and-coverage.md](testing-and-coverage.md) ✅ | L0-L5 测试分层、目录组织、fixture/替身、覆盖率、生产可达性、dead-code 与 CI 门禁 |
 
 ## 编写原则
 
@@ -30,3 +31,4 @@
 | 2026-07-11 | 初稿：承接说明 + 待处理事项 | #760 |
 | 2026-07-11 | 移除 current 迁移问题描述、把过渡状态收敛到 migration-governance、链接化、新增修改历史 | #760 |
 | 2026-07-11 | S2 建 migration-governance.md（承接 Runtime 现状缺口），规划表改链接 | #761 |
+| 2026-07-14 | 新增测试架构与覆盖率治理，统一 L0-L5、production reachability 与 dead-code 门禁 | [#677](https://github.com/rushsinging/aemeath/issues/677)、[#1006](https://github.com/rushsinging/aemeath/issues/1006) |
