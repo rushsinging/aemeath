@@ -455,11 +455,13 @@ impl CompatibilityAdapter {
         Ok(patches)
     }
 
-    /// 读取单个文件，自动检测格式并翻译
+    /// 读取单个文件，自动检测格式并翻译。
+    /// 只把 NotFound 映射为 Ok(None)；其余 I/O 错误（PermissionDenied 等）MUST 传播。
     async fn read_one(path: &Path) -> Result<Option<ConfigPatch>> {
         let content = match tokio::fs::read_to_string(path).await {
             Ok(c) => c,
-            Err(_) => return Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
         };
         let format = Self::detect_format(path, &content)?;
         match format {

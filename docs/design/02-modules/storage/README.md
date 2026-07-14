@@ -66,6 +66,28 @@ struct BlobRead {
     bytes: Vec<u8>,
 }
 
+/// read() 返回的结果：Primary 不存在时返回 Previous（如有）或 NotFound。
+enum ReadOutcome {
+    Found(BlobRead),
+    NotFound,
+    /// primary 损坏但 previous 可读；adapter 已标记 quarantine。
+    PromotedToPrevious(BlobRead),
+}
+
+/// delete_all_generations() 的结果。
+struct DeleteOutcome {
+    deleted_primary: bool,
+    deleted_previous: bool,
+    deleted_quarantine: bool,
+}
+
+/// list_primary() 的单个条目。
+struct StorageEntry {
+    key: StorageKey,
+    size_bytes: usize,
+    generation: Generation,
+}
+
 struct DatasetKey {
     namespace: StorageNamespace,
     segments: Vec<SafePathSegment>,
@@ -104,6 +126,20 @@ enum CommitWarning {
     PreviousPromotionPending,
     JournalCleanupPending,
     MemberPublishRecoveryPending,
+}
+
+struct QuarantineId(SafePathSegment);
+
+struct QuarantinedArtifact {
+    generation: Generation,
+    bytes: Vec<u8>,
+    reason: QuarantineReason,
+}
+
+enum QuarantineReason {
+    DigestMismatch,
+    DecoderRejected,
+    PromoteFromCorrupt,
 }
 
 struct QuarantineReceipt {

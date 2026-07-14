@@ -534,6 +534,14 @@ Coordinator **MUST** 把 `InteractionReplyRequested` / `InteractionCancelRequest
 Conversation 的公开更新入口只接收封闭 Intent，并返回 Change：
 
 ```rust
+/// 标识一个对话轮次的上下文元数据——由 adapter/event_mapping 从 SDK event 投影生成。
+/// 所有字段均为 TUI 自有类型，NEVER 携带 SDK DTO。
+struct UiTurnContext {
+    run_id: RunId,
+    turn_index: usize,           // 当前轮次在 Run 中的序号
+    model_id: Option<String>,    // 当前使用的 model 标识
+}
+
 enum ConversationIntent {
     StartRun { text: String }, // 用户意图：只产生 RunStartRequested，不先写 Runtime 投影
     ProjectRunStarted { run_id: RunId, text: String },
@@ -700,7 +708,7 @@ enum InputIntent {
     MoveHistoryPrevious, MoveHistoryNext, ReplaceHistory(Vec<String>),
     SetCompletions { query, items }, SelectCompletionNext, SelectCompletionPrevious,
     AcceptCompletion, AcceptCompletionValue(String),
-    InsertImage(image), SetMode(InputMode),
+    AttachClipboardImage(image), SetMode(InputMode),
     Submit, Clear,
 }
 enum InputChange {

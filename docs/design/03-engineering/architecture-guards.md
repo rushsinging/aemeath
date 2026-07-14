@@ -65,18 +65,18 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `update`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share` |
+| `context` | `share`, `provider`, `storage`, `sdk` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage` |
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
-| `update` | `share`, `sdk` |
-| `sdk` | `utils` |
+| `update` | `share`, `sdk`, `logging` |
+| `sdk` | `share`, `utils` |
 | `logging` | ∅ |
 | `utils` | ∅ |
 
@@ -91,7 +91,7 @@
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
 - **白名单**：
   - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
-  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share}`
+  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share, update}`
   - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
 - **例外**：无。
 - **检查范围**：

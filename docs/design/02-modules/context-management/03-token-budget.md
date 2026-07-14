@@ -22,17 +22,33 @@ aemeath 有两条 token 估算路径，**按优先级选择**：
 
 | 路径 | 来源 | 精度 | 使用时机 |
 |---|---|---|---|
-| **Actual API** | `last_api_input_tokens`（provider 响应） | 精确 | 非首轮、API 正常返回 |
+| **Actual API** | `last_api_input_tokens`（上一次 provider 响应） | 上一轮精确值，非本轮 | 非首轮、API 正常返回；**MUST** 叠加本轮增量（pending messages、Memory、Guidance、Tool schemas 差异）后再与阈值比较 |
 | **Heuristic** | `estimate_messages_tokens()` | 估算（偏保守） | 首轮、API 未返回 token、resume 后首轮 |
+
+> **注意**：`last_api_input_tokens` 描述的是上一次实际请求的 token 数，不等于本轮 candidate 的精确计数。本轮可能新增 pending messages、Memory 注入、Guidance 变更或 Tool schema 变化。直接拿旧值判断本轮阈值可能严重低估，导致错过 compact。
 
 ```rust
 fn estimate_usage(req: &ContextRequest, candidate: &WindowCandidate) -> usize {
     match req.last_api_input_tokens {
-        Some(actual) => actual as usize,
+        // last_api_input_tokens 是上一轮请求的精确值；本轮 candidate 可能已变化
+        //（新增 pending messages / Memory / Guidance / Tool schemas）。
+        // 在阈值判断中叠加增量估算，避免低估导致错过 compact。
+        Some(prev) => prev as usize
+            + estimate_delta_tokens(req, candidate),
         None => estimate_messages_tokens(&candidate.messages)
               + estimate_system_tokens(&candidate.system_blocks)
               + req.tool_schema_tokens,
     }
+}
+
+/// 计算本轮相对于 last_api_input_tokens 基线的增量。
+fn estimate_delta_tokens(req: &ContextRequest, candidate: &WindowCandidate) -> usize {
+    let pending = estimate_messages_tokens(&req.pending_messages);
+    let system_delta = estimate_system_tokens(&candidate.system_blocks)
+        .saturating_sub(req.prev_system_tokens.unwrap_or(0));
+    let tool_delta = req.tool_schema_tokens
+        .saturating_sub(req.prev_tool_schema_tokens.unwrap_or(0));
+    pending + system_delta + tool_delta
 }
 ```
 
@@ -152,10 +168,7 @@ threshold  = 184,000 - 13,000 = 171,000
 ```rust
 fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urgency {
     let effective = effective_context_window(req.context_size, req.max_output_tokens);
-    let total = match req.last_api_input_tokens {
-        Some(actual) => actual as usize,
-        None => estimate_usage(req, candidate),
-    };
+    let total = estimate_usage(req, candidate);  // 内部已处理 Actual API 增量叠加
     let pct = total * 100 / effective;
 
     match pct {
@@ -173,27 +186,18 @@ fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urge
 fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> CompactionDecision {
     let effective = effective_context_window(req.context_size, req.max_output_tokens);
     let threshold = autocompact_threshold(effective);
-    let total = match req.last_api_input_tokens {
-        Some(actual) if actual > 0 => {
-            let t = actual as usize;
-            CompactionDecision {
-                needed: t > threshold,
-                urgency: compaction_urgency(req, candidate),
-                estimated_tokens: t,
-                threshold,
-                reason: DecisionReason::ActualApi,
-            }
-        }
-        _ => {
-            let t = estimate_usage(req, candidate);
-            CompactionDecision {
-                needed: t > threshold,
-                urgency: compaction_urgency(req, candidate),
-                estimated_tokens: t,
-                threshold,
-                reason: DecisionReason::Heuristic,
-            }
-        }
+    let total = estimate_usage(req, candidate);  // 内部已处理 Actual API 增量叠加
+    let reason = if req.last_api_input_tokens.is_some() {
+        DecisionReason::ActualApiWithDelta
+    } else {
+        DecisionReason::Heuristic
+    };
+    CompactionDecision {
+        needed: total > threshold,
+        urgency: compaction_urgency(req, candidate),
+        estimated_tokens: total,
+        threshold,
+        reason,
     }
 }
 ```
@@ -217,11 +221,12 @@ fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> Compac
 ```rust
 #[derive(PartialEq, Eq, Hash)]
 struct CompactionFingerprint {
-    messages_hash: u64,                // messages 内容 hash（to_llm_view 后）
+    backing_revision: SessionRevision,     // Context backing 的稳定 revision（ChatChain 版本）
+    pending_messages_hash: u64,            // req.pending_messages 内容 hash
     last_api_input_tokens: Option<u64>,
     context_size: usize,
     max_output_tokens: usize,
-    tool_schema_count: usize,          // tool 定义变化时 fingerprint 变化
+    tool_schema_count: usize,              // tool 定义变化时 fingerprint 变化
 }
 ```
 
@@ -242,7 +247,16 @@ async fn build_window(
     &self,
     req: &ContextRequest,
 ) -> Result<ContextWindow, ContextWindowError> {
-    let fingerprint = CompactionFingerprint::from(req);
+    // 1. 先读取 Context-owned 稳定 backing（ChatChain），获得当前 revision。
+    let backing = self.session.read_backing().await?;
+    let revision = backing.revision();
+
+    // 2. 基于 backing + req 构造 candidate（已提交 history + pending_messages）。
+    let candidate = self.build_candidate(&backing, req);
+
+    // 3. fingerprint 在读取稳定 backing 后生成——backing_revision 纳入 key，
+    //    确保 Session 历史变化时即使 pending input 相同也不会复用旧 projection。
+    let fingerprint = CompactionFingerprint::from(revision, req, &candidate);
 
     // cache 是 Context implementation-owned backing，NEVER 作为第五个 OHS 参数暴露。
     // fingerprint 只缓存纯 L2-L4 投影，NEVER 缓存整个 ContextWindow。
@@ -275,18 +289,28 @@ async fn build_window(
 
 ```rust
 fn apply_compact_outcome(chain: &mut ChatChain, result: CompactResult) {
-    // 幂等检查：如果最近一个 segment 已是 Compact 且 summary 相同，跳过
+    // 幂等检查：使用 source revision + committed marker，而非 summary 文本比较。
+    // 相同 summary 但不同 recent messages 或不同 source revision 不能跳过。
     if let Some(last) = chain.active_segments().last() {
-        if last.kind == SegmentKind::Compact && last.summary.as_deref() == Some(&result.summary) {
-            return; // 已应用，跳过
+        if last.kind == SegmentKind::Compact
+            && last.compact_source_revision == result.source_revision
+            && last.compact_committed
+        {
+            return; // 已基于同一 source revision 提交过 compact，跳过
         }
     }
 
-    // 正常流程
+    // 正常流程：freeze 当前 active segment，写入 compact 结果与 source revision
     chain.freeze_active();
-    chain.compact(result.summary, result.recent_messages);
+    chain.compact(
+        result.summary,
+        result.recent_messages,
+        result.source_revision,  // 记录 compact 基于哪一轮 history revision
+    );
 }
 ```
+
+> **NEVER** 用 summary 文本等值判断幂等：相同 summary、不同 recent messages 或不同 source revision 是不同的 compact 操作，跳过会导致数据丢失。
 
 ## 6. Per-message Token cache 决策
 

@@ -286,6 +286,8 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 
 ## 9. 架构门禁
 
+门禁编号与 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §8 保持一致。
+
 | # | 门禁 | Target 证明 |
 |---|---|---|
 | 1 | Adapter / ViewAssembler isolation | `adapter/` 与 `view_assembler/` **NEVER** import `render::*` |
@@ -296,7 +298,8 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 | 6 | Agent event adapter | SDK event DTO 只出现在 processing boundary 与 `adapter/event_mapping.rs`；`UiEvent` 之后零 SDK DTO |
 | 7 | TEA purity | `update/`、reducer 与 ACL **NEVER** spawn、await、执行命令、发 channel 或直接调用 AgentClient |
 | 8 | Interaction resource isolation | 四类 Runtime request body 的 id 贯穿 SDK / TUI ACL / AgentClient command；TUI 全树零 sender、pending waiter 与自生成协议 id |
-| 9 | Model encapsulation | 六 Context 核心字段私有；`apply` / `reduce_*` 生产调用点只有 `update/root_reducer.rs`，其余模块只读 accessor |
+| 9 | Event exhaustiveness | 构造每个 UiEvent 变体，断言第二层 ACL 产生显式 Context Intent；禁止 wildcard 与默认空 mapping |
+| 10 | Model write isolation | 六 Context 核心字段私有；`apply` / `reduce_*` 生产调用点只有 `update/root_reducer.rs`，adapter / Coordinator / ViewAssembler 只取得不可变 projection |
 
 每条门禁 **MUST** 有架构测试，并保留一次故意违规能失败的证明。迁移状态、旧路径与退役清单只在 [Migration Governance](../../03-engineering/migration-governance.md) O6 维护。
 
