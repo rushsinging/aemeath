@@ -74,6 +74,37 @@ AwaitingToolApproval / ExecutingTools / PreparingContext 之一。
 
 ## 2. Loop Engine 骨架（Main/Sub 共用，零分支）
 
+### 2.0 Cancellation Barrier 原则
+
+Loop 在**每个** `.await` 返回后 **MUST** 检查 Run 是否已进入 `Cancelling`。检查顺序：
+
+1. Provider / Tool / Context / Hook / Interaction 的 future 返回后，先 `if run.is_cancelling()` 检查；
+2. 若已取消：**NEVER** 调用 `run.fail()`、应用 Tool 结果、执行 `append_and_persist` 或 `run.finish()`；直接 drain cancellation scope 并 break 到终态收敛；
+3. `?` 操作符 **NEVER** 直接退出 `run_loop`——错误必须映射为 `run.fail(e)` 或 `run.finish_cancellation()` 后再 break；
+4. Loop 退出后由统一终态收敛逻辑保证 Run 进入 `Completed` / `Failed` / `Cancelled` 三态之一，并 emit 权威终态事件。
+
+> Provider / Tool / Compact / Hook 的 future **MUST** 接受 `CancellationSignal` 参数，在 cancel 触发时主动中止（取消 HTTP 请求 / kill 子进程 / abort compact），而不是等 future 自然返回后才发现 Run 已取消。
+
+### 2.1 Stop Hook 持久化边界
+
+最终 assistant step 的 `append_and_persist` 与 Stop Hook 判定 **MUST** 按以下顺序执行：
+
+1. `apply_response` + `apply_results`（内存态，不含持久化）；
+2. **Stop Hook dispatch**——若返回 Block，**NEVER** 执行 `append_and_persist`；把 feedback 注入 pending input 后 `resume_from_finishing()` → 继续下一轮；
+3. 若 Stop Hook 返回 Continue，**才**执行 `append_and_persist`（最终回答 + Tool results 一起提交）；
+4. `append_and_persist` 成功后 `run.finish()` → Completed。
+
+> 这保证了 Block 反馈不会因崩溃而永久丢失——未 Continue 时最终回答不落盘。
+
+### 2.2 HardPause Continuation
+
+从 `ExecutingTools` 因 StuckGuard HardPause 进入 `AwaitingUser(ContinueAfterHardPause)` 时，continuation **MUST** 记录当前 step 和 tool phase：
+
+- 若恢复（HardPauseContinue）：回到 `ExecutingTools` 继续未完成的 Tool 调用，**NEVER** 直接跳到 `PreparingContext`；
+- 若取消：为当前 step 的全部未完成 ToolCall 生成 typed Cancelled results，按原顺序提交完整 step（保持 assistant/tool-result 邻接协议），**THEN** 进入 Failed。
+
+### 2.3 骨架伪代码
+
 ```rust
 /// 驱动单个 Created Run 到终态；AwaitingUser 在本 future 内 await 后继续，NEVER 二次入栈。
 async fn run_loop(
@@ -83,7 +114,7 @@ async fn run_loop(
 ) -> Result<(), RunLoopError> {
     run.start_once();                                        // 仅 Created → PreparingContext
     'run: loop {
-        if run.is_cancelling() {                             // 不再启动新工作
+        if run.is_cancelling() {                             // Cancellation barrier
             ctx.cancel.await_quiesced();
             run.finish_cancellation(); break;                // → Cancelled
         }
@@ -216,6 +247,29 @@ async fn run_loop(
         let append = context_coordination::completed_step_append(
             run, step, request.request_id, &final_results,
         );                                                     // pending input → assistant → ordered results
+
+        // ── Stop Hook 持久化边界（§2.1）──
+        // Block 时不执行 append_and_persist，feedback 注入 pending 后继续下一轮；
+        // Continue 时才提交最终回答。
+        if !had_tool_calls {
+            run.begin_finishing();
+            let hook_outcome = ctx.hooks
+                .dispatch(HookInvocation::Stop(run.stop_input()))
+                .await;
+            match hook_outcome.directive {
+                HookDirective::Block { reason } if run.record_stop_block() <= 15 => {
+                    run.append_stop_feedback(reason);
+                    run.resume_from_finishing();
+                    continue;                                 // NEVER persist，feedback 在 pending
+                }
+                HookDirective::Block { .. } => {
+                    run.fail(StopHookRetryExhausted); break;
+                }
+                HookDirective::Continue => { /* 落入下方 persist */ }
+                _ => { run.fail(InvalidStopHookDirective); break; }
+            }
+        }
+
         if let Err(error) = ctx.context.append_and_persist(append).await { // ContextPort ④，恰好一次
             run.fail(error.into());
             break;
@@ -228,24 +282,10 @@ async fn run_loop(
             continue;
         }
 
-        run.begin_finishing();
-        let hook_outcome = ctx.hooks
-            .dispatch(HookInvocation::Stop(run.stop_input()))
-            .await;
-        match hook_outcome.directive {
-            HookDirective::Continue => { run.finish(); break; },
-            HookDirective::Block { reason } if run.record_stop_block() <= 15 => {
-                run.append_stop_feedback(reason);
-                run.resume_from_finishing();
-                continue;
-            }
-            HookDirective::Block { .. } => {
-                run.fail(StopHookRetryExhausted);
-                break;
-            }
-            _ => { run.fail(InvalidStopHookDirective); break; }
-        }
+        run.finish(); break;                                   // → Completed
     }
+    // 统一终态收敛：确保 Run 进入三态之一并 emit 权威终态事件
+    run.ensure_terminal_event();
     Ok(())
 }
 ```

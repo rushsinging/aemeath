@@ -47,29 +47,29 @@
 
 ## 3. 入站边：交付层 → 核心
 
-| 上游 | 下游 | 模式 | 端口 / 契约 |
+| 消费方 | 供应方 | 模式 | 端口 / 契约 |
 |---|---|---|---|
-| CLI / TUI | Agent Runtime | C/S + **PL** + **ACL**(TUI) | 入站端口 `AgentClient`；TUI 用 `AgentEventMapper` 把领域事件转 Model |
-| Server | Agent Runtime | C/S + **PL** | 同 `AgentClient`，WSS 透传，worker 内核心不改 |
+| Agent Runtime | CLI / TUI | C/S + **PL** + **ACL**(TUI) | 入站端口 `AgentClient`；TUI 用 `AgentEventMapper` 把领域事件转 Model |
+| Agent Runtime | Server | C/S + **PL** | 同 `AgentClient`，WSS 透传，worker 内核心不改 |
 
 > `AgentClient` trait + `ChatEvent / Command / Snapshot / Error` = **入站 Published Language**，**所有权属 Agent Runtime 核心域**；独立成 SDK 契约 crate 仅为依赖倒置（clients 依赖契约而非核心实现）。
 
 ## 4. Runtime 依赖的支撑能力契约
 
-下表描述 Runtime 作为 Customer 所依赖的契约，**NEVER** 暗示所有 trait 都归 Runtime 所有：供应 BC 对 Runtime 开放的 façade / OHS 归供应方所有；只有隔离 Runtime 策略与易变 detail 的出站 port 才归 Runtime 所有。
+下表描述 Runtime 作为消费者所依赖的契约，**NEVER** 暗示所有 trait 都归 Runtime 所有：供应 BC 对 Runtime 开放的 façade / OHS 归供应方所有；只有隔离 Runtime 策略与易变 detail 的出站 port 才归 Runtime 所有。
 
-| 下游 BC | 模式 | 契约与所有权 | 说明 |
+| 供应方 | 模式 | 契约与所有权 | 说明 |
 |---|---|---|---|
 | Context Management | C/S | Context-owned `ContextPort` OHS | Runtime 请求"构建本轮 Context Window"（取历史 + compact + 注入 + prompt） |
 | Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器 |
 | Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流 |
 | Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；MCP 是 Tool adapter |
-| Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`；Deny / RequireApproval 为接口预留，控制流仍归 Runtime |
+| Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
 | Task Management | C/S | Task-owned `TaskAccess` / `TaskPersist` OHS | Runtime / Tool 只持 Access；Context Management 只持 Persist；同一 backing 守护状态机与依赖图不变量 |
 | Hook | C/S | Hook-owned `HookPort` OHS | 一个类型化 façade；Hook 执行/重试归 Hook，触发时机和 directive 的 Run 状态迁移归调用方 |
 | Application Version Control | C/S | Runtime-owned outbound `ApplicationVersionPort` | 该 seam 隔离 Runtime 的 Application Control policy 与版本模块的 source/cache/installer detail；CLI/TUI 不直接持有更新模块内部端口 |
-| Audit | **Pub/Sub**（Runtime 是 Supplier） | Runtime-owned outbound `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit adapter 独立持久化和查询，不影响 Runtime；Cost/Pricing 保留 Future |
+| Audit | **Pub/Sub**（Runtime 是 Supplier） | Runtime-owned outbound `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit adapter 独立持久化和查询，不影响 Runtime。**v0.1.0 范围：仅 Usage metadata 持久化与查询**；Cost / Pricing 聚合属 **Future** |
 
 > **SubAgent 不在此表**：SubAgent 的派生与执行是 Agent Runtime 的核心能力（子 Run 也是 Runtime 的执行实例），不是一条对外端口。
 
@@ -89,7 +89,7 @@ Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 T
 
 ## 5. 全局上游：Config → 所有 BC
 
-| 上游 | 下游 | 模式 | 契约 |
+| 供应方 | 消费方 | 模式 | 契约 |
 |---|---|---|---|
 | Config | 全部 BC | **CF + PL** | 各 BC 顺从消费只读 `ConfigSnapshot`（Published Language），**NEVER** 反向依赖，**NEVER** 绕过快照读裸配置 |
 
@@ -97,9 +97,9 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 
 ## 6. 持久化：数据 BC → Storage
 
-| 上游 | 下游 | 模式 | 说明 |
+| 消费方（数据 BC） | 供应方（机制） | 模式 | 说明 |
 |---|---|---|---|
-| Context Management / Memory / Audit | Storage | C/S | Storage 提供原子写 / 损坏隔离**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPersist` / Project-owned `WorkspacePersist` 收集）；TaskStore 是纯内存聚合，**NEVER** 另建 Task → Storage 路径。恢复时 Context Management 先取得同一排他 gate，再在 gate 内依次 prepare Project → Config → Memory → Task，执行无失败 commit 并发布 Session / active resources 后才释放。Project 也不单独持久化同一份 Workspace Snapshot。Memory 独立持久化 project memory；Audit 通过 `AppendLogPort` 持久化 Usage facts。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
+| Context Management / Memory / Audit | Storage | C/S | Storage 提供原子写 / 损坏隔离**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPersist` / Project-owned `WorkspacePersist` 收集）；TaskStore 是纯内存聚合，**NEVER** 另建 Task → Storage 路径。恢复时 Context Management 先取得同一排他 gate，再在 gate 内依次 prepare Project → Config → Memory → Task，执行无失败 commit 并发布 Session / active resources 后才释放。Project 也不单独持久化同一份 Workspace Snapshot。Memory 独立持久化 project memory；Audit 经 Audit-owned `UsageAppendStorePort` 持久化 Usage facts（adapter 内部消费 Storage 机制）。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
 
 ## 7. Shared Kernel（谨慎，尽量小）
 

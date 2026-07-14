@@ -273,7 +273,8 @@ enum ProviderErrorKind {
     Authentication,
     PermissionDenied,
     RateLimited,
-    ContextTooLong,
+    ContextTooLong,       // Runtime 侧匹配为 ContextExceeded
+    CapabilityChanged,    // Model capability 在 invoke 时已变化；Runtime 需重新 resolve
     InvalidRequest,
     ModelUnavailable,
     UpstreamUnavailable,
@@ -290,8 +291,16 @@ struct ProviderError {
     safe_message: String,
     provider_code: Option<ProviderErrorCode>,
     retry_after: Option<Duration>,
+    /// 仅 CapabilityChanged 时携带：变化后的新 fingerprint
+    new_capability_fingerprint: Option<CapabilityFingerprint>,
 }
+
+/// 模型能力指纹——用于检测 capability 是否在 resolve → invoke 之间发生变化。
+/// 来源：ModelCapability 的关键字段 hash（context_limit / output_limit / reasoning.supported）。
+struct CapabilityFingerprint(String);
 ```
+
+> **Runtime 侧匹配**：Runtime 在 `invoke` 返回 `Err(ProviderError { kind: CapabilityChanged, .. })` 时丢弃旧 window 并重新 resolve + build。`kind: ContextTooLong` 匹配为 `ContextExceeded` → compact 后重跑。其余不可恢复错误匹配为 `Fatal`。
 
 - `retryable` 是 Provider 对失败性质的提示，不是重试命令；
 - `retry_after` 只承载经校验的协议等待 hint，Runtime 决定是否采用并施加自身上限；

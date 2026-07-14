@@ -117,7 +117,9 @@ impl BM25Index {
 - **收益**：按相关性排序（TF-IDF + 文档长度归一化），比子串匹配显著提升检索质量。
 - **`similarity_threshold` 接入**：BM25 分数归一化到 [0, 1] 后，低于 threshold 的结果排除。
 - **中文支持**：分词需兼顾中文（按字符 bigram 或接入简易分词）。
-- **构建时机**：首次检索时构建索引并缓存，写入/归档后失效。
+- **除零防护**：`avg_doc_len == 0` 时返回 0 分；BM25 score 归一化时 `max_score == 0` 时直接返回 0；Jaccard fallback 在双方 token 集均为空时返回 0。
+- **query 规范化**：substring fallback 对 query 做 `to_lowercase()` 后再匹配，与 entry 一致。
+- **构建时机**：首次检索时构建索引并缓存，写入/归档/**删除**后失效。
 
 ### Tier 2 — Embedding 语义检索（v0.2.0+，方向预留）
 

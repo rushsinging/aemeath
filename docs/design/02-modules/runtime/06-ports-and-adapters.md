@@ -163,7 +163,7 @@ enum InteractionCompletion {
     Cancelled(InteractionCancelReason),
 }
 
-trait UsageSink {                                    // Audit BC（MVP Pub/Sub）
+trait UsageSink:                                    // Runtime-owned outbound port；Audit adapter 实现
     fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
 }
 trait EventSink {                                    // 事件出口（Main→TUI / Sub→父）

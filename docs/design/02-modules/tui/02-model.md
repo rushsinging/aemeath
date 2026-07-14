@@ -544,8 +544,10 @@ Conversation 的公开更新入口只接收封闭 Intent，并返回 Change：
 /// 所有字段均为 TUI 自有类型，NEVER 携带 SDK DTO。
 struct UiTurnContext {
     run_id: RunId,
-    turn_index: usize,           // 当前轮次在 Run 中的序号
-    model_id: Option<String>,    // 当前使用的 model 标识
+    run_step_id: Option<RunStepId>,   // 当前步序号（流式 block 路由用）
+    turn_index: usize,                // 当前轮次在 Run 中的序号
+    agent_id: Option<AgentId>,        // Main / Sub agent 标识（sub-agent 路由用）
+    model_id: Option<String>,         // 当前使用的 model 标识
 }
 
 enum ConversationIntent {
@@ -813,10 +815,12 @@ enum SessionSaveStatus { Idle, Saving, Saved, Failed { message: String } }
 ```
 
 ```
-Idle ──SaveStarted──→ Saving ──SaveFinished──→ Saved（dirty=false）
+Idle ──SaveStarted──→ Saving ──SaveFinished──→ Saved（dirty = dirty_at_save_start XOR changes_since_save_start）
                           │
                           └──SaveFailed──→ Failed { message }
 ```
+
+> **Dirty 时序安全**：`SaveFinished` 不能无脑 `dirty=false`。保存过程中若产生新修改，那些修改的 dirty 标记 **MUST** 保留。实现方式：`SaveStarted` 时快照 `dirty_at_save_start`；`SaveFinished` 时 `dirty = dirty_at_save_start ^ changes_since_save_start`——即只有保存开始时的那批 dirty 被清除，保存期间的增量修改仍标记 dirty。
 
 ### 6.4 SessionResumeCandidate
 

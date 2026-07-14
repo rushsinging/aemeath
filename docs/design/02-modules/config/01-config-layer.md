@@ -49,10 +49,15 @@ trait ConfigWriter: Send + Sync {
     async fn update(&self, command: ConfigUpdate) -> Result<(), ConfigUpdateError>;
 }
 
-/// 跨 BC 写入命令——当前只有 session-switch gate 通知。
-/// 未来可扩展 model switch、permission mode change 等写入操作。
+/// 跨 BC 写入命令。
 enum ConfigUpdate {
     SessionSwitchGate(SwitchGateCommand),
+    /// 运行期切换 model（经 /model 命令或 Config 写端口）
+    SetModel { model: String },
+    /// 运行期切换 permission mode（经 /permissions 命令）
+    SetPermissionMode { mode: PermissionMode },
+    /// 运行期切换 memory 配置
+    SetMemoryConfig { config: MemoryConfig },
 }
 ```
 
@@ -562,11 +567,11 @@ impl ConfigTranslator for ClaudeTranslator {
             patch.env = Some(translate_claude_env(&env));
         }
 
-        // apiKeyHelper 脚本 → 无法执行，降级跳过 + warn
-        if let Some(helper) = claude.api_key_helper {
+        // apiKeyHelper 脚本 → 无法执行，降级跳过 + warn（NEVER 记录完整脚本内容）
+        if let Some(_helper) = claude.api_key_helper {
             log::warn!(
                 target: "aemeath:shared",
-                "Claude apiKeyHelper 无法翻译（脚本执行不支持），已跳过: {}", helper
+                "Claude apiKeyHelper 无法翻译（脚本执行不支持），已跳过"
             );
         }
 

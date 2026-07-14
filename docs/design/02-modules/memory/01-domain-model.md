@@ -16,7 +16,7 @@ struct MemoryEntry {                     // 聚合根（可序列化，持久化
     source_ref: Option<String>,          // 可选来源引用（如 hook 名、issue 编号）
     tags: Vec<String>,                   // 用户/LLM 标注的标签
     pinned: bool,                        // 固定条目，不参与淘汰
-    ttl: Option<Duration>,               // 过期时间（None=永不过期）
+    ttl: Option<Duration>,               // 相对 created_at 的过期时长（None=永不过期）；过期检查：now > created_at + ttl
     created_at: u64,                     // Unix 秒
     accessed_at: u64,                    // 最后访问时间
     access_count: u32,                   // 访问次数（单调递增）
@@ -210,6 +210,10 @@ enum WriteResult {
 ```
 
 `NeedsEviction` 是**非错误**——它告诉调用方“容量已满，这是淘汰候选”，Memory application service 可归档后重试。Storage / serialization 失败则通过结构化 `MemoryError` 返回，**NEVER** 伪装成结果值。
+
+> **写入顺序**：write **MUST** 先检查去重（content similarity），再检查容量。若新条目与已有条目重复（score ≥ dedup_threshold），直接 merge 并返回 `Merged`，**NEVER** 因容量满而拒绝合并。容量检查只针对全新条目。
+>
+> **TTL 过期检查**：`is_ttl_expired(now)` = `ttl.is_some() && now > created_at + ttl.unwrap()`。基准时间点固定为 `created_at`（创建时间），不是 accessed_at 或 updated_at。
 
 ## 8. SessionReminder 所有权边界
 

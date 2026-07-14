@@ -132,7 +132,9 @@ Audit 是尽力事实记录，不是 durable execution 或 Run checkpoint。
 
 路径只是默认 File AppendLog Adapter 的映射；Audit domain 不直接拼接或访问该路径。
 
-## 7. Storage AppendLogPort
+## 7. UsageAppendStorePort（Audit-owned 出站端口）
+
+> `UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**。Audit adapter 内部消费 Storage 的 `AtomicBlobPort` / `AtomicDatasetPort` 机制实现 append-log 语义。端口 trait 定义、调用和语义归属均属 Audit；Storage **不** 发布通用 AppendLogPort OHS。
 
 ```rust
 struct AppendLogNamespace(String);      // Audit 使用 "usage"
@@ -149,7 +151,7 @@ enum AppendLogError {
     Closed,
 }
 
-trait AppendLogPort: Send + Sync {
+trait UsageAppendStorePort: Send + Sync {
     async fn append(&self, stream: &AppendLogStream, bytes: &[u8]) -> Result<(), AppendLogError>;
     async fn flush(&self, stream: &AppendLogStream) -> Result<(), AppendLogError>;
     async fn read(&self, stream: &AppendLogStream) -> Result<AppendLogReader, AppendLogError>;
@@ -178,7 +180,7 @@ Audit 负责：
 - 查询与 token 聚合；
 - Future retention 策略。
 
-AppendLogPort 是通用 Storage 出站端口，不得命名为 SessionLogPort 或让 Storage 解释 Usage 字段。
+UsageAppendStorePort 是 Audit-owned 出站端口，adapter 内部消费 Storage 机制实现，不得命名为 SessionLogPort 或让 Storage 解释 Usage 字段。
 
 ## 8. UsageQueryPort
 

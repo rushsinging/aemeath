@@ -57,14 +57,19 @@ CLI（双模式，TUI 不变）
 
 ## AgentClient-over-WS 协议
 
+> **草案状态**：Server 设计是 **Future / 方向预留**，不属于 v0.1.0 范围。以下协议描述需要与 AgentClient trait 的 Target 形态（含 `set_reasoning_level` / `reply_interaction` / `cancel_interaction`）对齐后才能作为可实施设计。当前 Call 枚举中的部分 RPC（Cost、SaveSession 等）超出 Target AgentClient，需在正式设计时收窄。
+
 一条 WS 连接 = 一个 session 通道，`req_id` 多路复用，流式响应多帧：
 
 ```rust
+// Target AgentClient 方法子集的 WS 封装（非新 RPC）
 pub enum Call {
-    SessionSnapshot, Cost, TaskList, Project,
-    Chat(ChatRequest), Cancel,
-    SaveSession, LoadSession(String), ListSessions, DeleteSession(String),
-    Compact, SwitchModel(ModelSelector), SubscribeChanges,
+    Chat(ChatRequest),
+    Cancel { run_id: RunId },         // 必须携 RunId，映射 cancel_run(RunId)
+    ReplyInteraction { request_id: InteractionRequestId, reply: InteractionReply },
+    CancelInteraction { request_id: InteractionRequestId, reason: InteractionCancelReason },
+    SetReasoningLevel { level: ReasoningLevel },
+    // Session 管理由控制面负责，不在帧协议中
 }
 
 pub enum Resp {
@@ -223,4 +228,4 @@ CLI 输入回车
 
 ## 参考文档
 
-- [Server Foundation MVP](superpowers/specs/2026-06-01-server-foundation-mvp-design.md)
+- [Server Foundation MVP](../../../superpowers/specs/2026-06-01-server-foundation-mvp-design.md)

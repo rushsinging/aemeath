@@ -174,16 +174,17 @@ ConversationModel.timeline().items()
 ### 3.3 OutputViewCache memo
 
 ```rust
-fn refresh_output_document_from_model(&mut self, model: &ConversationModel, workspace_root: &Path) {
+fn refresh_output_document_from_model(&mut self, model: &ConversationModel, workspace_root: &Path, view_state: &OutputViewState) {
     let revision = model.revision();
-    let key = (revision, workspace_root.clone());
+    let collapsed_revision = view_state.collapsed_revision(); // collapse/expand 变化时自增
+    let key = (revision, workspace_root.clone(), collapsed_revision);
 
-    // memo：revision + workspace_root 不变时跳过全量 assemble
+    // memo：revision + workspace_root + collapsed_revision 不变时跳过全量 assemble
     if self.output_cache_key == Some(key) {
         return;
     }
 
-    let view_model = self.output_assembler.assemble_from_conversation(model, workspace_root);
+    let view_model = self.output_assembler.assemble_from_conversation(model, workspace_root, view_state);
     self.output_view_model = view_model;
     self.output_cache_key = Some(key);
 }

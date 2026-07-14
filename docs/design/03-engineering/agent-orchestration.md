@@ -156,7 +156,9 @@ aemeath 的主循环正是这种工程化形态（见 §4）。它保留了 ReAc
 - **PoC 度量**：token 消耗、成功率、可测试性，对比纯 prompt loop。
 - **建议**：作为 **首选 PoC 方向**——杠杆最高、风险最低、可逆。
 
-### 方向 B：给 agent loop 加 checkpoint 语义（中期）
+### 方向 B：给 agent loop 加 checkpoint 语义（中期，**与 v0.1.0 无 durable 决策不冲突**）
+
+> **注意**：v0.1.0 的设计基线明确**不做引擎级 durable checkpoint**（见 `02-modules/runtime/05-recovery-semantics.md`）。本方向是**中长期探索**，触发条件满足前 **NEVER** 实施。
 
 - **触发条件**：出现「换模型/换 prompt 重跑同一段对话」「回放调试」「A/B 对比」等真实诉求。
 - **前置依赖**：**需要一个显式状态对象贯穿 loop**（当前 runtime 状态较散，散在 `SubAgentRun` 的十几个字段里）。
