@@ -22,7 +22,7 @@ pub trait TaskAccess: Send + Sync {
     async fn add_tag(&self, id: &TaskId, tag: String) -> Result<Task, TaskCommandError>;
     async fn remove_tag(&self, id: &TaskId, tag: &str) -> Result<Task, TaskCommandError>;
     /// 在一次 state mutation 中移除该 Task 的全部依赖边，再标记 Deleted
-    async fn delete(&self, id: &TaskId) -> bool;
+    async fn delete(&self, id: &TaskId) -> Result<Task, TaskCommandError>;
 
     // ── 依赖图 ──
     async fn is_blocked(&self, task: &Task) -> bool;
@@ -89,7 +89,7 @@ pub enum TaskCommandError {
     IllegalBatchTransition { id: BatchId, from: BatchStatus, to: BatchStatus },
     IllegalTransition { from: TaskStatus, to: TaskStatus },
     DeletedOnlyViaDelete,
-    DependencyNotFound { id: TaskId },
+    DependencyNotFound { task_id: TaskId, missing_dependency: TaskId },
     DuplicateDependency { id: TaskId },
     DependencyCycle,
 }

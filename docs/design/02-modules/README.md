@@ -17,7 +17,7 @@
 | [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离、三端口、GitWorktreeOps、git 上下文供给 |
 | [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |
-| [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS 与 clamp 不变量 |
+| [workflow/](workflow/README.md) | ReasoningNode 状态机、effort 调节、ReasoningPort OHS 与 clamp 不变量 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、CompatibilityAdapter ACL |
 | [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与四类 Interaction 资源隔离 |
 | [storage/](storage/README.md) | 原子读写、backup / quarantine、路径安全及数据所有权边界 |
@@ -26,7 +26,7 @@
 | [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 |
 | [hook/](hook/README.md) | 单 HookPort、类型化协议、3 次执行重试与 Stop / Run 15 次阻断语义 |
 | [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink / Query 与独立 JSONL 存储 |
-| [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑的 Future 设计边界 |
+| [server/](server/README.md) | WS 协议、控制面 / worker 拓扑的 Future 设计边界 |
 
 ## 编写原则
 
@@ -51,7 +51,7 @@
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
-| 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningGraph、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
+| 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningNode、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
 | 2026-07-12 | 新增 Storage、Logging、Application Version Control 三个通用域摘要设计 | #793 |
 | 2026-07-12 | 新增 memory/ 战术设计：MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort | #789 |
 | 2026-07-12 | 新增 task/ 战术设计：Task 聚合、状态机、依赖图不变量、Batch、TaskPort、PL | #791 |

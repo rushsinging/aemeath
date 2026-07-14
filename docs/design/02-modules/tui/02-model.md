@@ -169,7 +169,7 @@ ResumeConversation ──→ Completed（恢复已结束会话，不触发 spinn
 | Running → AwaitingUser | `ProjectRunAwaitingUser` | `project_run_awaiting_user()` | 只投影 Runtime `RunAwaitingUser`；`ShowInteraction` 只建立交互块 |
 | AwaitingUser → Running | `ProjectRunResumed` | `project_run_resumed()` | 仅 Runtime 真正消费输入并发布 `RunResumed` 后推进；AgentClient command 成功不代表已恢复 |
 | Running → Completing | `ProjectRunCompleting` | `project_run_completing()` | 投影 Runtime `RunCompleting` 并清理 active block 追踪 |
-| Completing → Running | （Stop Hook Block） | — | 合法回退：`RunCompleting` 是 TUI 对 Runtime `Finishing` 状态的投影，**不是**独立的 Runtime 领域事件。Runtime PL 发出 `RunCompleting`（对应 Run 状态机的 `Finishing`）。Finishing 可能因 Stop Hook Block 返回执行态（`PreparingContext`），因此 `Completing → Running` 是合法回退 |
+| Completing → Running | （Stop Hook Block） | — | 合法回退：`Completing` 是 TUI 对 Runtime 内部状态 `Finishing` 的投影。Runtime PL **不发出** `RunCompleting` 事件——TUI 基于 `RunCompleted` 终态事件推断 Run 已经过了 Finishing 阶段。若 Finishing 因 Stop Hook Block 返回执行态（`PreparingContext`），TUI 会收到后续 `RunStepStarted` 事件，此时 `Completing → Running` 是合法回退 |
 | 任一 live 态 → Cancelling | `ProjectRunCancelling` | `project_run_cancelling()` | 投影 Runtime `RunCancelling`；仍非终态 |
 | Cancelling → Cancelled | `ProjectRunCancelled` | `project_run_cancelled()` | 仅 SDK `RunCancelled` 权威终态事件可进入 Cancelled |
 | → Failed | `ProjectRunFailed` | `project_run_failed()` | 投影 Runtime 异常终态 |
@@ -370,7 +370,7 @@ struct RunRuntimeState {
 /// Spinner 派生输入（存储在 RuntimeState 中，由 SDK 事件更新）
 struct SpinnerModel {
     /// 运行中 tool call 的名称列表（从当前 RunStep 的 tool_calls 中
-    /// status == Running | PendingArgs | Ready 的条目派生）
+    /// status == Executing | PendingArgs | Ready 的条目派生）
     active_tools: Vec<String>,
     /// 最近一次 hook 事件（由 HookExecuted intent 更新）
     last_hook: Option<HookSnapshot>,
@@ -440,8 +440,8 @@ fn derive_spinner_phase(
 |---|---|---|
 | `Thinking` | `RunStatus::PreparingContext` 或 `InvokingModel`（首 token 前） | 等待上下文准备 / 等待首 token |
 | `Generating` | `RunStatus::InvokingModel`（收到 delta 后） + `RunStepStatus::Streaming` | 流式生成中 |
-| `CallingTool(name)` | `RunStatus::ExecutingTools` + 1 个 tool `Running` | 单工具执行中 |
-| `CallingTools { remaining }` | `RunStatus::ExecutingTools` + N 个 tool `Running` | 多工具并行执行 |
+| `CallingTool(name)` | `RunStatus::ExecutingTools` + 1 个 tool `Executing` | 单工具执行中 |
+| `CallingTools { remaining }` | `RunStatus::ExecutingTools` + N 个 tool `Executing` | 多工具并行执行 |
 | `Compacting` | `RunStatus::Compacting` | 上下文压缩中 |
 | `Cancelling` | TUI `RunProjectionStatus::Cancelling`（投影自 SDK `RunCancelling`） | 取消已受理，等待 `RunCancelled` 终态 |
 | `AgentWorking` | `RunStatus::InvokingModel` + sub-agent progress 事件 | sub-agent 工作中 |
@@ -512,6 +512,7 @@ struct InteractionState {
     body: UiInteractionBody,
     draft: UiInteractionDraft,
     phase: InteractionPhase,
+    error_message: Option<String>,   // ReplyFailed 时存储错误文本
 }
 
 enum UiInteractionDraft {
@@ -528,7 +529,7 @@ enum InteractionPhase {
     CancelPending,
     Replied,
     Cancelled,
-    ReplyFailed,
+    ReplyFailed { message: String },
 }
 ```
 
@@ -815,6 +816,9 @@ struct SessionModel {
     message_count: usize,
     resume_candidates: Vec<SessionResumeCandidate>,
     save_status: SessionSaveStatus,
+    save_id_counter: u64,              // 单调递增 save ID 生成器
+    save_base_revision: Option<u64>,   // SaveStarted 时记录的 conversation.revision() 快照
+    pending_save_id: Option<u64>,      // 当前进行中的 save 批次 ID
     task_status: TaskStatusSnapshot,   // 投影自 Task BC
 }
 ```
@@ -837,7 +841,7 @@ struct TaskStatusSnapshot {
 ### 6.3 SessionSaveStatus 状态机
 
 ```rust
-enum SessionSaveStatus { Idle, Saving, Saved, Failed { message: String } }
+enum SessionSaveStatus { Idle, Saving { save_id: u64, base_revision: u64 }, Saved, Failed { message: String } }
 ```
 
 ```

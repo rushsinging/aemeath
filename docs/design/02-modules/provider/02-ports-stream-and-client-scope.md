@@ -35,6 +35,7 @@ enum InvocationEvent {
     Delta(InvocationDelta),
     Completed(ProviderCompletion),
     Failed(ProviderError),
+    Cancelled,
 }
 
 impl InvocationStream {
@@ -47,7 +48,7 @@ impl InvocationStream {
 - `resolve_invocation_options` 是 model capability clamp 的唯一入口；返回值供同一次 Context build 与 invoke 共同使用；
 - `invoke` 建立一次上游调用并返回有序流；
 - `Delta` 只表达非终结增量；
-- `Completed` 与 `Failed` 是互斥终结事件，恰好出现一个；取消以 `Failed(Cancelled)` 终结；
+- `Completed`、`Failed` 与 `Cancelled` 是互斥终结事件，恰好出现一个；取消以独立 `Cancelled` 终结；
 - 终结事件后下一次 `next` 必须返回 `None`，不再提供独立 `finish()` 造成二次终结；
 - consumer 可在本地根据全部 Delta + Completed 组装 attempt 结果；
 - 具体 Rust 实现可使用关联 Stream 类型，但 Published Language 不暴露 Tokio channel、reqwest bytes、SSE frame 或 callback handler。

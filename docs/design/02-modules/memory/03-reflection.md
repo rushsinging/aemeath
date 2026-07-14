@@ -86,12 +86,15 @@ enum ReflectionRunMode {
 
 ```rust
 fn should_run_reflection(mode: ReflectionRunMode, config: &MemoryConfig) -> bool {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
+    if !config.enabled || !config.reflection.enabled {
         return false;
     }
     match mode {
-        Interval { turn_count } => turn_count.is_multiple_of(config.reflection.interval_turns),
-        Forced => true,
+        Interval { turn_count } => {
+            config.reflection.interval_turns > 0
+                && turn_count.is_multiple_of(config.reflection.interval_turns)
+        }
+        Forced => true,           // Forced 永远运行，不受 interval_turns == 0 影响
     }
 }
 ```
@@ -135,10 +138,11 @@ Pre-compact 触发:
 
 ### 并发控制
 
-- **单一后台 slot**：同一时间最多一个后台 Reflection 任务（Interval 或 Pre-compact 共享一个 slot）。
-- **前一个未完成时跳过**：新触发时若 slot 被占用，跳过本次（log debug），不排队。
-- **Forced 不受限**：`/reflection` 是同步执行，不经过后台 slot，可与后台任务并发（但实际场景几乎不会同时发生）。
-- **Run 结束时 drain**：Run 结束时若后台任务仍在执行，等待其完成或超时后丢弃（避免孤儿任务）。
+- **单一后台 slot**：同一时间最多一个 **Interval** 后台 Reflection 任务。
+- **前一个未完成时跳过 Interval**：新 Interval 触发时若 slot 被占用，跳过本次（log debug），不排队。
+- **Pre-compact 不受 slot 限制**：Pre-compact 是同步 await 执行，**NEVER** 走后台 slot。即使 Interval 后台任务正在运行，Pre-compact 也会同步完成。
+- **Forced 不受限**：`/reflection` 是同步执行，不经过后台 slot。
+- **Run 结束时 drain**：Run 结束时若 Interval 后台任务仍在执行，等待其完成或超时后丢弃（避免孤儿任务）。
 
 ### 间隔触发的跳过条件
 
@@ -261,16 +265,16 @@ struct ReflectionApplyResult {
 
 ## 8. 完整编排流程（Runtime 侧）
 
-Memory BC 提供纯领域逻辑，Runtime 负责编排。Interval 和 Pre-compact 走异步路径，Forced 走同步路径。
+Memory BC 提供纯领域逻辑，Runtime 负责编排。Interval 走异步路径；Pre-compact 和 Forced 走同步路径。
 
-### 8.1 异步路径（Interval / Pre-compact）
+### 8.1 异步路径（Interval）
 
 ```text
 Runtime 判定 should_run_reflection
   │  └─ 检查后台 slot 是否空闲（非空闲 → skip + log debug）
   │
   ▼
-Runtime: spawn 后台任务（携带 messages 快照 / clone）
+Runtime: spawn 后台任务（携带 messages 快照）
   │ (主循环不等待，继续处理 outcome / compact / 下一轮)
   │
   ▼
@@ -298,41 +302,43 @@ Runtime: spawn 后台任务（携带 messages 快照 / clone）
   后台任务完成 → mpsc::Sender 发 ReflectionResult
   │
   ▼
-主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
+  主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
 ```
 
-### 8.2 同步路径（Forced / `/reflection`）
+### 8.2 同步路径（Pre-compact / Forced / `/reflection`）
 
 ```text
-Runtime 处理 /reflection 命令
+Runtime: 同步调用 reflection pipeline（主循环等待）
   │
   ▼
-Memory BC: build_reflection_prompt(project_memory, recent_summary, lang)
+  Memory BC: build_reflection_prompt(project_memory, recent_summary, lang)
   │
   ▼
-Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
+  Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
   │
   ▼
-Memory BC: parse_output(llm_response)
+  Memory BC: parse_output(llm_response)
   │
   ▼
-Memory BC: format_output(output, lang)  ──→ formatted_content
+  Memory BC: format_output(output, lang)  ──→ formatted_content
   │
   ▼
-if auto_apply:
-  本 Run 捕获的 MemoryPort Arc: await apply_reflection(output)
+  Pre-compact: 始终 apply_reflection（NEVER 受 auto_apply=false 控制）
+  Forced: if auto_apply → apply_reflection
   │
   ▼
-Runtime: emit ReflectionResult{output, formatted_content, tokens, auto_applied}
+  Runtime: emit ReflectionResult{output, formatted_content, tokens, auto_applied}
+  │
+  ▼
+  返回调用方（Pre-compact 的调用方在收到返回后才继续 compact）
 ```
 
 ### 8.3 Pre-compact 快照语义
 
-Pre-compact 触发时，Runtime 在 compact 前把 `messages` clone 一份交给后台任务。后台任务用这份快照构建 `recent_messages_summary`。compact 正常执行不等待。
+Pre-compact 触发时，Runtime 在 compact 前**同步**调用 reflection pipeline（使用当前 messages，不需要 clone 快照——因为主循环在等待，messages 不会被并发修改）。Reflection 完成后 `apply_reflection` 写入新记忆，compact 继续。
 
-- **快照时机**：compact 函数入口处，`messages` 尚未被压缩时。
-- **快照内容**：`messages_selected_for_precompact_memory(messages)` 的结果，只包含 compact 将丢弃的消息。
-- **结果回传**：后台任务完成后通过 channel 回传，主循环在后续轮次 emit。用户可能在 compact 后才看到 reflection 结果——这是可接受的 trade-off。
+- **不需要快照**：Pre-compact 是同步路径，主循环等待，messages 不会被并发修改。
+- **记忆即时可检索**：`apply_reflection` 完成后，compact 后第一轮 `retrieve_for_inject` 可检索到新写入的记忆。
 
 ## 9. model 覆盖
 

@@ -78,9 +78,15 @@ pub enum Resp {
 }
 
 pub struct Frame { pub req_id: u64, pub body: FrameBody }
+
+/// FrameBody 是 Call 或 Resp 的枚举包装。
+pub enum FrameBody {
+    Call(Call),
+    Resp(Resp),
+}
 ```
 
-`Call`/`Resp` 内全是现有 serde 的 SDK 类型，几乎不造新 DTO。
+`Call`/`Resp` 内全是现有 serde 的 SDK 类型，无需新 DTO。
 
 两侧复用同一份代码：
 - **client 侧** `WireClient`（实现 `AgentClient`）：序列化 `Call` 发出、按 `req_id` 路由 `Resp`、把 `ChatEvent` 帧还原成 `ChatStream`
@@ -137,7 +143,7 @@ async fn on_client_ws(client_ws, session_id) {
 }
 ```
 
-控制面在连接边缘做：连接级 auth 校验（WS handshake）、`session_id` 路由。**帧内容一律透传，不反序列化**。帧级认证由 worker 侧经 AgentClient 校验。
+控制面在连接边缘做：连接级 auth 校验（WS handshake）、`session_id` 路由。**帧内容一律透传，不反序列化**。帧级认证 / 多租户隔离为 **defer**（见非目标）。
 
 ## CLI 双模式
 

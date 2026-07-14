@@ -157,6 +157,7 @@ fn fork(&self) -> Arc<Self>:
 | 错误 | 语义 | 触发场景 |
 |---|---|---|
 | `PathNotFound(PathBuf)` | 路径不存在或无法访问 | change_directory / enter / switch_to 时路径无效 |
+| `PathOutsideWorkspaceRoot { path: PathBuf, root: PathBuf }` | 路径位于 workspace root 之外 | change_directory / enter / switch_to / restore 时目标路径越出 root 边界 |
 | `MissingPathAndBranch` | 未提供 path 或 branch | enter 时两者都为 None |
 | `InvalidBranch` | branch 名只含分隔符或敏感字符 | sanitize_branch_for_path 返回空 |
 | `NestedWorktree` | 已在 worktree 中尝试再 enter | 栈非空且 in_worktree 为 true |

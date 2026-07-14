@@ -8,7 +8,7 @@
 
 Compact 家族是 Context Management 的**核心能力**：在 LLM context window 耗尽前，以最小代价回收 token 预算。
 
-- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 4 个稳定用例
+- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 3 个稳定方法
 - **策略分层**：从零成本（规则）到高成本（LLM），逐级升级
 - **幂等性**：相同 Context backing revision + 相同 request → 相同压缩决策（#550）
 - **非破坏优先**：L1 先限制尚未进入 ChatChain 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化对话链
@@ -118,7 +118,20 @@ enum Urgency {
 struct CompactResult {
     summary: String,
     recent_messages: Vec<Message>,
-    source_revision: SessionRevision,  // compact 基于的 backing revision（幂等键）
+    source_revision: SessionRevision,  // compact 基于的 backing revision（幂等键 + CAS 校验值）
+}
+
+/// compact 调用的完整 outcome——Runtime 据此区分"已提交"与"被跳过"。
+enum CompactOutcome {
+    Committed(CompactResult),       // compact 已提交
+    Skipped(CompactSkipReason),     // compact 被跳过（Runtime 无需 continue 重试）
+    Failed(CompactError),           // compact 失败
+}
+
+enum CompactSkipReason {
+    ResumeProtection,               // resume 第一轮保护
+    HookBlocked,                    // PreCompact hook 阻止
+    CircuitBreakerOpen,             // 连续失败次数达上限
 }
 
 struct CalendarDate(String);             // ISO-8601 calendar date；一次 build 内冻结
@@ -437,12 +450,25 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
     // 3. 修复 tail 中的 orphan tool pairs
     let recent = sanitize_tool_pairs(window.tail);
 
-    // 4. ChatChain::compact 一次性提交（三参数版：summary, recent_messages, source_revision）
+    // 4. CAS 校验：确认 backing revision 未变（compact 跨多个 LLM await，期间可能有并发写入）
+    let current_revision = self.session.backing_revision();
+    if current_revision != source.revision {
+        return Err(CompactError::BackingChanged {
+            expected: source.revision,
+            actual: current_revision,
+        });
+    }
+
+    // 5. ChatChain::compact 一次性提交（三参数版：summary, recent_messages, source_revision）
     //    内部完成 freeze_active → 创建 Compact segment → 记录 source_revision
     //    定义见 01-session.md §3.1
     self.session.compact(result.summary.clone(), recent.clone(), source.revision);
 
-    Ok(CompactResult { summary: result.summary, recent_messages: recent })
+    Ok(CompactResult {
+        summary: result.summary,
+        recent_messages: recent,
+        source_revision: source.revision,
+    })
 }
 ```
 

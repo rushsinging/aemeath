@@ -183,12 +183,14 @@ v0.1.0 的 BM25 检索与写入去重 **MUST** 共用同一配置值，但分别
 
 ```text
 write(entry)
-  ├─ active.len() >= max_entries?
-  │   ├─ Yes → 取 eviction_candidates(count=3)
-  │   │         → 返回 NeedsEviction { candidates }
-  │   │         → 调用方决定 evict 后重试 add
-  │   └─ No  → 正常添加
-  └─ 合并检查（Jaccard ≥ threshold → Merged）
+  ├─ 合并检查（Jaccard ≥ similarity_threshold → Merged）
+  │   └─ 合并 **NEVER** 因容量满而拒绝
+  └─ 全新条目容量检查：
+      ├─ active.len() >= max_entries?
+      │   ├─ Yes → 取 eviction_candidates(count=3)
+      │   │         → 返回 NeedsEviction { candidates }
+      │   │         → 调用方决定 evict 后重试 add
+      │   └─ No  → 正常添加
 ```
 
 ### 归档语义
@@ -211,7 +213,7 @@ enum WriteResult {
 
 `NeedsEviction` 是**非错误**——它告诉调用方“容量已满，这是淘汰候选”，Memory application service 可归档后重试。Storage / serialization 失败则通过结构化 `MemoryError` 返回，**NEVER** 伪装成结果值。
 
-> **写入顺序**：write **MUST** 先检查去重（content similarity），再检查容量。若新条目与已有条目重复（score ≥ dedup_threshold），直接 merge 并返回 `Merged`，**NEVER** 因容量满而拒绝合并。容量检查只针对全新条目。
+> **写入顺序**：write **MUST** 先检查去重（content similarity），再检查容量。若新条目与已有条目重复（score ≥ similarity_threshold），直接 merge 并返回 `Merged`，**NEVER** 因容量满而拒绝合并。容量检查只针对全新条目。
 >
 > **TTL 过期检查**：`is_ttl_expired(now)` = `ttl.is_some() && now > created_at + ttl.unwrap()`。基准时间点固定为 `created_at`（创建时间），不是 accessed_at 或 updated_at。
 
@@ -246,3 +248,4 @@ enum WriteResult {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：MemoryEntry 聚合、枚举、不变量 M1-M8、评分函数、去重、淘汰归档 | #789 |
+| 2026-07-14 | 统一 TTL 基准、写入顺序、ReflectionApplyResult | #972 |

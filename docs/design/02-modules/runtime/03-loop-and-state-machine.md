@@ -221,7 +221,9 @@ async fn run_loop(
             }
             Err(Fatal(e))         => { run.fail(e); break; }            // fatal/耗尽→Failed
         };
-        debug_assert_eq!(inv.effective_reasoning, request.options.effective_reasoning);
+        debug_assert_eq!(inv.effective_reasoning, resolved.effective_reasoning);
+        // ── cancellation barrier ──
+        if run.is_cancelling() { run.finish_cancellation(); break; }
         let response_text = inv.text().to_owned();
         run.apply_response(step, inv);                       // → ApplyingResponse
         ctx.events.emit(run.drain_events());                 // event_projection
@@ -296,9 +298,13 @@ async fn run_loop(
         // Continue 时才提交最终回答。
         if !had_tool_calls {
             run.begin_finishing();
+            // ── cancellation barrier ──
+            if run.is_cancelling() { run.finish_cancellation(); break; }
             let hook_outcome = ctx.hooks
-                .dispatch(HookInvocation::Stop(run.stop_input()))
+                .dispatch(HookInvocation::Stop(run.stop_input()), &ctx.cancel)
                 .await;
+            // ── cancellation barrier ──
+            if run.is_cancelling() { run.finish_cancellation(); break; }
             match hook_outcome.directive {
                 HookDirective::Block { reason } if run.record_stop_block() <= 15 => {
                     run.append_stop_feedback(reason);
@@ -317,6 +323,8 @@ async fn run_loop(
             run.fail(error.into());
             break;
         }
+        // ── cancellation barrier ──
+        if run.is_cancelling() { run.finish_cancellation(); break; }
         run.mark_step_persisted(step);                         // 清空 pending input
         ctx.reasoning.observe(ReasoningSignal::TurnBoundary);  // commit 后才观察边界
 

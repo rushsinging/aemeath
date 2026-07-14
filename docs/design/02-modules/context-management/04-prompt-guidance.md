@@ -252,7 +252,7 @@ You are GLM model...
 
 ```rust
 fn find_matching_config_guidance(model_id: &str, config: &ConfigSnapshot) -> Vec<(String, String)> {
-    config.guidance_map.iter()
+    config.guidance_entries().iter()
         .filter(|(k, _)| model_id.starts_with(k.as_str()))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
