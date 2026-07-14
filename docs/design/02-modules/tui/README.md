@@ -11,6 +11,7 @@
 | 02 | [model.md](02-model.md) | 3+3 Context 完整字段、RunStatus/RunStepStatus/ToolCallStatus/SpinnerPhase/AskUserPhase 投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束、现状缺口 |
 | 03 | [event-flow-and-acl.md](03-event-flow-and-acl.md) | 事件流完整链路、AgentEventMapper ACL（两层转换 + sanitize）、SDK DTO 边界（convert.rs 漂移 + UiEvent 类型泄漏）、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6、现状缺口 11 项 |
 | 04 | [view-layer.md](04-view-layer.md) | 10 种 block 类型、ViewAssembler 组装规则、OutputViewCache memo、ViewState 状态机（滚动/选区/折叠/动画）、三层缓存（BlockCache/GuttedCache/force_repaint）、Render 管线、选区复制、Catppuccin 主题、Effect 副作用、架构门禁、死代码清单 |
+| 05 | [e2e-scenario-testing.md](05-e2e-scenario-testing.md) | 基于 ratatui TestBackend、crossterm 与 insta 的进程内 E2E 场景测试边界、单帧驱动器、Harness、Effect Driver、确定性约束、快照治理、P0/P1 场景矩阵与 CI 门禁 |
 
 ## 定位
 
