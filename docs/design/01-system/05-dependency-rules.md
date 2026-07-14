@@ -35,7 +35,7 @@ Git CLI / 子进程 detail ──实现 Project 消费方拥有的 git worktree 
 | R4 | **外部驱动 detail NEVER 触碰能力内部**：TUI / CLI 只经 `AgentClient`，NEVER import Runtime 内部类型 | UI 里出现 Runtime 的内部上下文类型 |
 | R5 | **Config 单向下发**：所有 BC 顺从消费只读 `ConfigSnapshot`，NEVER 反向依赖，NEVER 绕过快照读裸配置 / env 散点 | 业务代码里直接读环境变量 |
 | R6 | **Composition Root MUST 是唯一生产装配入口**：具体实现选择、factory 调用与跨能力接线只由组合根发起；模块可在 composition-only opaque factory 内构造私有 detail，但 NEVER 自行选择候选实现或从业务路径触发生产装配 | 能力在业务路径直接 `new` 存储实现，或根据全局配置自行挑选 adapter |
-| R7 | **边界模型 MUST 按 Context Map 转换或共享**：provider wire type **MUST** 经 Provider ACL 转为稳定 `Message`；`DomainEvent` **MUST** 经 TUI ACL 转为 TUI Model；[Context Map](03-context-map.md) 明确定义的稳定 `Message` Shared Kernel **MAY** 在 Agent Runtime / Context Management / Provider 间跨界，其他内部类型 **NEVER** 直通 | provider wire type 直接进入 Runtime，或 `DomainEvent` 直接进入 TUI Model |
+| R7 | **边界模型 MUST 按 Context Map 转换或共享**：provider wire type **MUST** 经 Provider ACL 转为稳定 `Message`；`DomainEvent` **MUST** 经 TUI ACL 转为 TUI Model；只有 [Context Map](03-context-map.md) 登记的 Shared Kernel 类型 **MAY** 在其列明的参与 BC 间跨界（`Message` 用于 Runtime / Context Management / Provider，`ReasoningLevel` 用于 Workflow / Config / Runtime / Context Management / Provider），其他内部类型 **NEVER** 直通 | provider wire type 直接进入 Runtime，或 `DomainEvent` 直接进入 TUI Model，或未登记类型被多个 BC 各自复制 |
 
 ## 3. 目录名称不证明依赖方向
 

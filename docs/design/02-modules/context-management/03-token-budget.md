@@ -228,9 +228,13 @@ struct CompactionFingerprint {
 ### 5.3 幂等保护机制
 
 ```rust
-struct ContextState {
+struct ProjectionCache {
     last_fingerprint: Option<CompactionFingerprint>,
     last_projection: Option<CompactionProjection>,
+}
+
+struct ContextImplementation {
+    projection_cache: ProjectionCache, // implementation 内部同步；不跨 OHS 暴露
     autocompact_state: AutoCompactState,
 }
 
@@ -240,7 +244,7 @@ async fn build_window(
 ) -> Result<ContextWindow, ContextWindowError> {
     let fingerprint = CompactionFingerprint::from(req);
 
-    // ContextState 是 Context implementation-owned backing，NEVER 作为第五个 OHS 参数暴露。
+    // cache 是 Context implementation-owned backing，NEVER 作为第五个 OHS 参数暴露。
     // fingerprint 只缓存纯 L2-L4 投影，NEVER 缓存整个 ContextWindow。
     let projection = self.projection_cache
         .get_or_compute(fingerprint, || self.project_compaction(req))?;

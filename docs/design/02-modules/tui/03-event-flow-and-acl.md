@@ -286,7 +286,7 @@ sdk::ChatEvent::InteractionRequested {
   → reducer → InteractionShown Change
 ```
 
-转换必须可逆地保留 request ID wire value，并保留 `run_id` 供 Model 拒绝旧 Run / Sub Run 的迟到投影；effect runner 仍只以 request ID 调 Runtime-owned `AgentClient` command。processing 只转发纯值事件，**NEVER** 注册 sender、保存 pending reply 或写 Model。
+转换必须可逆地保留 request ID wire value，并保留 `run_id` 供 Model 拒绝旧、未知或未路由 Run 的迟到投影；Composition 已登记 parent-mediated adapter 的 Sub Run 仍可显示，且必须保留 parent/sub correlation。effect runner 仍只以 request ID 调 Runtime-owned `AgentClient` command。processing 只转发纯值事件，**NEVER** 注册 sender、保存 pending reply 或写 Model。
 
 ### 4.4 reply 与 cancel
 

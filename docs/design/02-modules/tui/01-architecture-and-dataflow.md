@@ -282,7 +282,7 @@ Runtime wire DTO **MUST** 在 `adapter/event_mapping.rs` 一次性转换成 TUI-
 
 ### 8.2 Interaction reply 边界
 
-Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request identity 与纯值 body；`event_mapping` 穷尽转换 `UserQuestions`、`ToolApproval`、`PlanApproval`、`HardPause` 为 TUI-owned `UiInteractionBody`，无损保留 `run_id` 并把 request ID 包装为 `UiInteractionRequestId`。Model 用 run identity 拒绝旧 Run / Sub Run 的迟到投影；Effect runner 把 request ID 与 body-specific reply 无损映回 SDK `InteractionRequestId` / `InteractionReply`，调用 `AgentClient::reply_interaction` / `cancel_interaction`；TUI 任一层 **NEVER** 持有 sender 或 Runtime continuation。完整协议见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §4。
+Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request identity 与纯值 body；`event_mapping` 穷尽转换 `UserQuestions`、`ToolApproval`、`PlanApproval`、`HardPause` 为 TUI-owned `UiInteractionBody`，无损保留 `run_id` 并把 request ID 包装为 `UiInteractionRequestId`。Model 用 run identity 拒绝旧、未知或未路由 Run 的迟到投影；Composition 已登记 parent-mediated adapter 的 Sub Run 仍是合法来源，并保留 parent/sub correlation。Effect runner 把 request ID 与 body-specific reply 无损映回 SDK `InteractionRequestId` / `InteractionReply`，调用 `AgentClient::reply_interaction` / `cancel_interaction`；TUI 任一层 **NEVER** 持有 sender 或 Runtime continuation。完整协议见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §4。
 
 ## 9. 架构门禁
 
