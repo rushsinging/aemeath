@@ -132,8 +132,6 @@ impl TypedTool for TaskListTool {
                 "subject": task.subject,
                 "status": status_label,
                 "priority": priority_label,
-                "progress": task.progress,
-                "tags": task.tags,
                 "description": task.description
             });
 
@@ -145,11 +143,6 @@ impl TypedTool for TaskListTool {
                 let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
                 task_obj["blocked_by"] = serde_json::json!(dep_displays);
                 task_obj["is_blocked"] = serde_json::json!(is_blocked);
-            }
-
-            if !task.blocks.is_empty() {
-                let dep_displays = self.store.to_display_ids(&task.blocks).await;
-                task_obj["blocks"] = serde_json::json!(dep_displays);
             }
 
             tasks_json.as_array_mut().unwrap().push(task_obj);

@@ -25,13 +25,15 @@ fn test_ctx() -> ToolExecutionContext {
 
 async fn setup_task(store: &TaskStore) -> String {
     let task = store
-        .create("原始标题".into(), "原始描述".into(), Some("处理中".into()))
+        .create("原始标题".into(), "原始描述".into())
         .await;
     task.id
 }
 
+// --- key-value 模式基本测试 ---
+
 #[tokio::test]
-async fn test_empty_subject_does_not_clobber() {
+async fn test_update_status() {
     let store = Arc::new(TaskStore::new());
     let task_id = setup_task(&store).await;
 
@@ -40,19 +42,18 @@ async fn test_empty_subject_does_not_clobber() {
     };
     let result = tool
         .call(
-            serde_json::json!({"taskId": task_id, "subject": "", "addBlockedBy": ["999"]}),
+            serde_json::json!({"taskId": task_id, "key": "status", "value": "in_progress"}),
             &test_ctx(),
         )
         .await;
 
-    // add_blocked_by 引用不存在的 id 仍不影响 subject 守卫逻辑
     assert!(!result.is_error);
     let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.subject, "原始标题");
+    assert_eq!(task.status, TaskStatus::InProgress);
 }
 
 #[tokio::test]
-async fn test_empty_description_does_not_clobber() {
+async fn test_update_subject() {
     let store = Arc::new(TaskStore::new());
     let task_id = setup_task(&store).await;
 
@@ -60,91 +61,7 @@ async fn test_empty_description_does_not_clobber() {
         store: store.clone(),
     };
     tool.call(
-        serde_json::json!({"taskId": task_id, "description": ""}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.description, "原始描述");
-}
-
-#[tokio::test]
-async fn test_empty_active_form_does_not_clobber() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "activeForm": ""}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.active_form.as_deref(), Some("处理中"));
-}
-
-#[tokio::test]
-async fn test_empty_owner_does_not_clobber() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    // 先设置 owner
-    store
-        .update(&task_id, |t| t.owner = Some("alice".into()))
-        .await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "owner": ""}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.owner.as_deref(), Some("alice"));
-}
-
-#[tokio::test]
-async fn test_empty_progress_message_does_not_clobber() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    // 先设置 progress_message
-    store
-        .update(&task_id, |t| {
-            t.progress_message = Some("50% 完成".into());
-        })
-        .await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "progressMessage": ""}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.progress_message.as_deref(), Some("50% 完成"));
-}
-
-#[tokio::test]
-async fn test_non_empty_subject_still_updates() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "subject": "新标题"}),
+        serde_json::json!({"taskId": task_id, "key": "subject", "value": "新标题"}),
         &test_ctx(),
     )
     .await;
@@ -153,10 +70,8 @@ async fn test_non_empty_subject_still_updates() {
     assert_eq!(task.subject, "新标题");
 }
 
-// --- #979: 空白占位符拦截，标点占位符放行（靠 result 回填 + prompt 从源头减少）---
-
 #[tokio::test]
-async fn test_whitespace_subject_does_not_clobber() {
+async fn test_update_description() {
     let store = Arc::new(TaskStore::new());
     let task_id = setup_task(&store).await;
 
@@ -164,17 +79,17 @@ async fn test_whitespace_subject_does_not_clobber() {
         store: store.clone(),
     };
     tool.call(
-        serde_json::json!({"taskId": task_id, "subject": "  "}),
+        serde_json::json!({"taskId": task_id, "key": "description", "value": "新描述"}),
         &test_ctx(),
     )
     .await;
 
     let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.subject, "原始标题");
+    assert_eq!(task.description, "新描述");
 }
 
 #[tokio::test]
-async fn test_whitespace_description_does_not_clobber() {
+async fn test_update_owner() {
     let store = Arc::new(TaskStore::new());
     let task_id = setup_task(&store).await;
 
@@ -182,47 +97,7 @@ async fn test_whitespace_description_does_not_clobber() {
         store: store.clone(),
     };
     tool.call(
-        serde_json::json!({"taskId": task_id, "description": "   "}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.description, "原始描述");
-}
-
-#[tokio::test]
-async fn test_whitespace_active_form_does_not_clobber() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "activeForm": "\t"}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.active_form.as_deref(), Some("处理中"));
-}
-
-#[tokio::test]
-async fn test_whitespace_owner_does_not_clobber() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    store
-        .update(&task_id, |t| t.owner = Some("alice".into()))
-        .await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "owner": " "}),
+        serde_json::json!({"taskId": task_id, "key": "owner", "value": "alice"}),
         &test_ctx(),
     )
     .await;
@@ -232,53 +107,123 @@ async fn test_whitespace_owner_does_not_clobber() {
 }
 
 #[tokio::test]
-async fn test_whitespace_progress_message_does_not_clobber() {
+async fn test_update_priority() {
     let store = Arc::new(TaskStore::new());
     let task_id = setup_task(&store).await;
-
-    store
-        .update(&task_id, |t| {
-            t.progress_message = Some("50% 完成".into());
-        })
-        .await;
 
     let tool = TaskUpdateTool {
         store: store.clone(),
     };
     tool.call(
-        serde_json::json!({"taskId": task_id, "progressMessage": "  "}),
+        serde_json::json!({"taskId": task_id, "key": "priority", "value": "high"}),
         &test_ctx(),
     )
     .await;
 
     let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.progress_message.as_deref(), Some("50% 完成"));
+    assert_eq!(task.priority, TaskPriority::High);
 }
 
-// --- is_placeholder 单元测试 ---
+#[tokio::test]
+async fn test_invalid_key_returns_error() {
+    let store = Arc::new(TaskStore::new());
+    let task_id = setup_task(&store).await;
 
-#[test]
-fn test_is_placeholder_empty() {
-    assert!(is_placeholder(""));
+    let tool = TaskUpdateTool {
+        store: store.clone(),
+    };
+    let result = tool
+        .call(
+            serde_json::json!({"taskId": task_id, "key": "unknown_field", "value": "x"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("unknown field"));
 }
 
-#[test]
-fn test_is_placeholder_whitespace() {
-    assert!(is_placeholder("  "));
-    assert!(is_placeholder("\t\n"));
+#[tokio::test]
+async fn test_non_string_value_returns_error() {
+    let store = Arc::new(TaskStore::new());
+    let task_id = setup_task(&store).await;
+
+    let tool = TaskUpdateTool {
+        store: store.clone(),
+    };
+    let result = tool
+        .call(
+            serde_json::json!({"taskId": task_id, "key": "status", "value": 123}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("must be a string"));
 }
 
-#[test]
-fn test_is_placeholder_not_punctuation() {
-    // 标点占位符不拦截——靠 result 回填 + prompt 从源头减少
-    assert!(!is_placeholder(","));
-    assert!(!is_placeholder("-"));
+#[tokio::test]
+async fn test_completed_status_output_contains_status_text() {
+    // hook 检测 output 中的 "Status: Completed" 来触发 TaskCompleted 事件
+    let store = Arc::new(TaskStore::new());
+    let task_id = setup_task(&store).await;
+
+    let tool = TaskUpdateTool {
+        store: store.clone(),
+    };
+    let result = tool
+        .call(
+            serde_json::json!({"taskId": task_id, "key": "status", "value": "completed"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert!(
+        result.text.contains("Status: Completed"),
+        "output 应包含 'Status: Completed' 以触发 hook: {}",
+        result.text
+    );
 }
 
-#[test]
-fn test_is_placeholder_valid_values() {
-    assert!(!is_placeholder("原始标题"));
-    assert!(!is_placeholder("Fix bug"));
-    assert!(!is_placeholder("A-1"));
-    assert!(!is_placeholder("50% 完成"));
+#[tokio::test]
+async fn test_blocked_by_id_adds_dependency() {
+    let store = Arc::new(TaskStore::new());
+    let blocking_task = store
+        .create("阻塞任务".into(), "描述".into())
+        .await;
+    let blocked_task = setup_task(&store).await;
+
+    let tool = TaskUpdateTool {
+        store: store.clone(),
+    };
+    let result = tool
+        .call(
+            serde_json::json!({"taskId": blocked_task, "key": "blocked_by_id", "value": blocking_task.id}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(!result.is_error);
+    let task = store.get(&blocked_task).await.unwrap();
+    assert!(task.blocked_by.contains(&blocking_task.id));
+}
+
+#[tokio::test]
+async fn test_blocked_by_id_nonexistent_returns_error() {
+    let store = Arc::new(TaskStore::new());
+    let task_id = setup_task(&store).await;
+
+    let tool = TaskUpdateTool {
+        store: store.clone(),
+    };
+    let result = tool
+        .call(
+            serde_json::json!({"taskId": task_id, "key": "blocked_by_id", "value": "nonexistent"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("not found"));
 }

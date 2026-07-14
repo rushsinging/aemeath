@@ -81,7 +81,7 @@ fn test_output_assembler_renders_task_update_tool_call() {
         &mut conversation,
         "tool-tu",
         "TaskUpdate",
-        r#"{"taskId":"1","status":"completed"}"#,
+        r#"{"taskId":"1","key":"status","value":"completed"}"#,
         "Task #1 updated",
     );
 

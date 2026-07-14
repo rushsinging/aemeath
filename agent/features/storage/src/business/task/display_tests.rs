@@ -12,17 +12,12 @@ async fn add_task(store: &TaskStore, id: &str, batch: u64, status: TaskStatus) {
         description: String::new(),
         status,
         batch,
-        active_form: None,
         owner: None,
         blocked_by: vec![],
-        blocks: vec![],
         priority: TaskPriority::Normal,
-        progress: 0,
-        progress_message: None,
         created_at: 0,
         updated_at: 0,
         session_id: None,
-        tags: vec![],
     };
     store.tasks.lock().await.insert(task.id.clone(), task);
 }

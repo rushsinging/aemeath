@@ -116,46 +116,47 @@ impl ToolDisplay for TaskUpdateDisplay {
 }
 impl TaskUpdateDisplay {
     /// 构建 header 摘要片段（subject 紧跟 id，其余按重要性排序）。
-    /// `result_payload` 非空时优先从 typed result 取 subject（store 回填），
-    /// 回退到 input.subject。
+    /// `result_payload` 非空时优先从 typed result 取 subject（store 回填）。
+    /// key-value 模式：从 `key` + `value` 提取变更摘要。
     fn header_summary(
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> String {
         let args = parse_input::<TaskUpdateInput>(input);
-        let blocked_by = args
-            .add_blocked_by
-            .as_ref()
-            .map(|v| v.join(","))
-            .unwrap_or_default();
-        // subject 优先从 typed result 取（store 回填），回退 input.subject
+
+        // subject 优先从 typed result 取（store 回填）
         let typed: Option<TaskUpdateResult> = typed_data(result_payload);
         let subject = typed
             .as_ref()
             .map(|r| r.subject.as_str())
             .filter(|s: &&str| !s.is_empty())
-            .unwrap_or(args.subject.as_deref().unwrap_or(""));
-        let priority = args.priority.as_deref().unwrap_or("");
+            .unwrap_or("");
 
-        // subject 紧跟 id，便于识别是哪个任务（issue #486）
         let mut parts = Vec::new();
         if !subject.is_empty() {
             parts.push(truncate_ellipsis(subject, 40));
         }
-        if let Some(status) = args.status.as_deref() {
-            if !status.is_empty() {
-                parts.push(format!("→ {status}"));
+        match args.key.as_str() {
+            "status" => {
+                if let Some(s) = args.value.as_str() {
+                    parts.push(format!("→ {s}"));
+                }
             }
-        }
-        if !blocked_by.is_empty() {
-            parts.push(format!("blocked by [{blocked_by}]"));
-        }
-        if !priority.is_empty() {
-            parts.push(format!("p={priority}"));
-        }
-        if let Some(pct) = args.progress {
-            parts.push(format!("{pct}%"));
+            "priority" => {
+                if let Some(s) = args.value.as_str() {
+                    parts.push(format!("p={s}"));
+                }
+            }
+            "blocked_by_id" => {
+                if let Some(s) = args.value.as_str() {
+                    parts.push(format!("blocked by #{s}"));
+                }
+            }
+            "subject" | "description" | "owner" => {
+                // 这些字段变更不额外展示在 header，subject 从 result 回填即可
+            }
+            _ => {}
         }
         parts.join(", ")
     }

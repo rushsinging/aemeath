@@ -66,7 +66,6 @@ impl TaskStore {
         &self,
         subject: String,
         description: String,
-        active_form: Option<String>,
         priority: TaskPriority,
     ) -> Task {
         let id = self.next_task_id().await;
@@ -77,17 +76,12 @@ impl TaskStore {
             subject,
             description,
             status: TaskStatus::Pending,
-            active_form,
             owner: None,
             blocked_by: Vec::new(),
-            blocks: Vec::new(),
             priority,
-            progress: 0,
-            progress_message: None,
             created_at: now,
             updated_at: now,
             session_id: None,
-            tags: Vec::new(),
             batch,
         }
     }

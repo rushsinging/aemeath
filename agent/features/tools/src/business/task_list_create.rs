@@ -147,9 +147,7 @@ mod tests {
             &test_ctx(),
         )
         .await;
-        let task = store
-            .create("任务".to_string(), "描述".to_string(), None)
-            .await;
+        let task = store.create("任务".to_string(), "描述".to_string()).await;
 
         assert_eq!(store.active_list().await.unwrap().id, task.batch);
     }

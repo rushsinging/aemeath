@@ -120,9 +120,7 @@ mod tests {
         let list = store
             .create_list("当前".to_string(), "当前请求".to_string())
             .await;
-        let task = store
-            .create("任务".to_string(), "描述".to_string(), None)
-            .await;
+        let task = store.create("任务".to_string(), "描述".to_string()).await;
         let tool = TaskListCompleteTool {
             store: store.clone(),
         };
