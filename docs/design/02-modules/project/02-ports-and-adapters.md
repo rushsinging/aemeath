@@ -315,7 +315,7 @@ project/src/
 
 - crate root **MUST** 是 Project 的唯一跨 capability 公开 façade。面向业务消费者的稳定表面 **MUST** 只发布 `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist` 及其 Published Language；`wire_production_workspace` 与 opaque handle 是仅供 Composition Root 的 wiring 例外，**NEVER** 成为业务契约。新增 `api.rs` / `api/` **MUST** 先满足[代码组织规范](../../01-system/06-code-organization.md)的独立升级条件，不能因“跨模块公开”自动生成。
 - `workspace.rs` 与 `workspace/` **MUST** 共同拥有 workspace 状态、转换规则、用例和三个窄 view；稳定 trait **MUST** 靠近其消费用例定义，**NEVER** 为对称性创建空泛 `port.rs`。每个 Main / Sub workspace context **MUST** 各有且仅有一个 `WorkspaceService`，同一 context 内 **NEVER** 复制第二份可变状态或缓存。
-- `git.rs` **MUST** 先将 `GitWorktreeOps` 与当前唯一 `GitCli` adapter 共置在 Project 内部；只有出现多个独立 adapter 或独立演进压力时才升级为 `git/` 技术子目录，**NEVER** 为单文件集成预建目录，也 **NEVER** 把 git CLI 或 wire detail 泄漏到对外 façade。
+- `git.rs` **MUST** 将 `GitWorktreeOps` 与单一 `GitCli` adapter 共置在 Project 内部；只有出现多个独立 adapter 或独立演进压力时才升级为 `git/` 技术子目录，**NEVER** 为单文件集成预建目录，也 **NEVER** 把 git CLI 或 wire detail 泄漏到对外 façade。
 - 该结构 **MUST** 遵循 [代码组织规范](../../01-system/06-code-organization.md) 的 capability-first、use-case colocation 与 ports on demand 判据，**NEVER** 被解释为其他 feature 统一复制的通用目录模板。
 
 ## 8. 相关文档
