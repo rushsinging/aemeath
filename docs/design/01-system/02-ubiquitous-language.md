@@ -14,7 +14,7 @@
 
 | 术语 | 定义 |
 |---|---|
-| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step，直到完成 / 失败 / 取消 / 等待用户。全系统唯一的 **Agent 执行生命周期状态机**，**内存态、不持久化**。标识 `RunId`。 |
+| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step；可在 `AwaitingUser` 暂停并由匹配答复恢复，最终进入完成 / 失败 / 取消之一。全系统唯一的 **Agent 执行生命周期状态机**，**内存态、不持久化**。标识 `RunId`。 |
 | **Run Step** | Run 内的一次「模型调用 → 应用响应 →（可选）工具执行」往返。 |
 | **Model Invocation** | 一次具体的 LLM 调用（请求 + 流式响应 + usage）。 |
 | **Tool Call** | 一次工具调用。双 ID：领域 `ToolCallId`（UUIDv7）+ provider 边界标识。 |
@@ -29,8 +29,9 @@
 ```
 Created → PreparingContext → InvokingModel → ApplyingResponse
         → AwaitingToolApproval → ExecutingTools → (下一 Run Step)
-        → AwaitingUser（暂停，内存存活，不落盘）
-        → Compacting → Finishing → Completed / Failed / Cancelled
+        → AwaitingUser（可恢复暂停，内存存活，不落盘）→ 原 continuation
+        → Compacting → Finishing → Completed / Failed
+任意非终态（除 Cancelling）→ Cancelling → Cancelled
 ```
 
 > 崩溃后不恢复中间状态；用户重新发起即新建 Run。
@@ -65,7 +66,7 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | **Registry Scope** | 一次 Run 实际装配的 Tool 与资源集合，回答“有什么”。 |
 | **Tool Profile** | 允许的 Tool Capability 集合，回答“能用什么”；只能收缩 Scope，不能扩权。 |
 | **Tool Capability** | Tool 执行所需的安全能力标签，例如读写工作区、执行进程、用户交互或 Agent Dispatch。 |
-| **Tool Outcome** | Tool 调用的领域结果：Success / Failure / Cancelled，包含模型可见内容、结构化数据与安全错误分类。 |
+| **Tool Outcome** | Tool 调用的领域结果：Success / Failure / Cancelled / Suspended；Suspended 表示完成同一调用前需要 Runtime 协调外部交互，其他结果包含模型可见内容、结构化数据与安全错误分类。 |
 | **Skill** | 可发现、可物化的提示资产；产出 Prompt Fragment，不作为 Tool 执行。 |
 | **Prompt Fragment** | Skill 或 PromptInjection Command 提供给 Context Management 的提示片段 Published Language。 |
 | **Slash Command** | 用户发起的命令；按 PromptInjection / SnapshotQuery / ApplicationControl 三种机制路由。 |
@@ -93,6 +94,8 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 |---|---|
 | **Workspace** | worktree 工作区上下文，单一可变状态源。 |
 | **Workspace Frame** | 工作区上下文栈的一帧（进入 / 退出 worktree）。 |
+| **Project Identity** | Project 发布的稳定项目身份：canonical initial cwd + optional canonical git common dir；Session resume 与项目级 Memory 分区以它为准，普通非 git 目录合法。 |
+| **Workspace ID** | Project 发布的当前 canonical workspace root 标识；由 Project Identity + root 确定，进入 / 退出 worktree 后可变化。 |
 
 ## 8. 通用域术语
 
@@ -105,7 +108,7 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | **Cost / Usage** | 成本与 token 用量追踪，含 pricing。 | Audit |
 | **Hook** | 生命周期钩子脚本。 | Hook |
 | **Config Snapshot** | 只读配置快照（Config 的 Published Language）。 | Config |
-| **ID（UUIDv7）** | 领域标识 newtype。 | 全域（Shared Kernel） |
+| **Domain ID** | 由所属 BC 发布的强类型标识；需要全局时间有序的新实体可采用 UUIDv7，但格式不是全域 Shared Kernel。TaskId / BatchId 在 v0.1.0 是单 Session 十进制标识，WorkspaceId 是 Project 派生的 opaque 标识。 | 各 BC Published Language |
 
 ## 9. 术语辨析（易混淆）
 
@@ -139,3 +142,4 @@ Created → PreparingContext → InvokingModel → ApplyingResponse
 | 2026-07-11 | Workflow 降为支撑域（第 2 节标题），移除不做的 Workflow Graph 编排术语 | #760 |
 | 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
 | 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |
+| 2026-07-14 | 新增 Project Identity / Workspace ID，统一 Session resume、Memory 分区与 Tool Scope 的身份语言 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

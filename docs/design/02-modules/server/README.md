@@ -1,19 +1,19 @@
-# Server（通用域 · 入站适配器）
+# Server（Future · 入站适配器边界）
 
 > 层级：02-modules / server（模块战术设计）
-> 状态：**⏸ Deferred — 暂不设计**｜Milestone：v0.1.0 之后
-> 对应 Issue：#794（S2，暂缓）｜伞 Issue：#743
-> Server 是远端客户端接入 Agent Runtime 的入站适配器，与 TUI 同级共享 `AgentClient` 端口契约。战术设计暂缓至实际需要时再启动。
+> 状态：Future Boundary Decision｜不属于 v0.1.0 Target
+> 对应 Issue：#794｜父 Issue：#743
+> Server 是远端客户端接入 Agent Runtime 的入站适配器，与 TUI 同级共享 `AgentClient` 端口契约。本文只固定 Future 边界和正式设计门禁，**NEVER** 把草案当作已批准的实现规范。
 
-## 1. 为什么暂缓
+## 1. 范围决定
 
-Server Foundation 属于 **v0.1.0 之后**的能力，当前里程碑（Context Engineering + 架构重构）不落地 Server 代码。伞 issue #743 的 S2 全模块设计中，Server 是唯一纯远期模块——没有运行时代码、没有消费方依赖、不阻塞 S3–S7 任一阶段。
+Server Foundation 是 **v0.1.0 Out of scope** 的 Future 能力。v0.1.0 的 Runtime / SDK 设计 **MUST** 保持可由本地 TUI 消费的 `AgentClient` OHS，但 **NEVER** 为尚未批准的远端拓扑、协议或部署形态预建 Server 类型。
 
-在 Runtime 核心（#761）、Context Management（#786）、Tool（#787）、Provider（#788）、Workflow + Config（#792）等模块战术设计已定型的前提下，Server 设计可以安全推迟，不会引起上游端口返工。
+未来启动 Server 交付前，#794 **MUST** 完成独立战术设计、威胁建模与依赖边界评审；任何实现 **NEVER** 仅凭本页或草案开工。
 
-## 2. 已有草案
+## 2. 非规范性设计输入
 
-`docs/design/02-modules/server/01-design.md` 已包含完整设计草案，涵盖：
+[`01-design.md`](01-design.md) 是正式设计时的输入，涵盖：
 
 - 六边形端口定位（入站适配器，与 TUI 同级）
 - 进程拓扑（控制面 + worker，单一 `aemeath` 二进制三种角色）
@@ -23,26 +23,23 @@ Server Foundation 属于 **v0.1.0 之后**的能力，当前里程碑（Context 
 - CLI 双模式（`--server` flag）
 - 多 Agent 维度（`AgentId` 预留，Single 模式退化无感）
 - 失败处理与存储 MVP 策略
-- 新增 crate 规划（`packages/agent-wire`、`apps/server`）
+- 候选 crate 边界（`packages/agent-wire`、`apps/server`）
 
-待正式启动时，以此草案为基础，按其他模块（如 provider/、tools/）的战术设计深度拆分为多份文档。
+这些内容 **MAY** 被正式设计修改或拒绝；只有经 #794 审批并写入 Target 文档的部分才成为约束。
 
-## 3. 启动条件
+## 3. 正式设计门禁
 
-Server 战术设计在以下任一条件满足时启动：
+开始实现前 **MUST**：
 
-- v0.1.0 发布后进入 Server Foundation MVP 开发里程碑
-- 上游端口（`AgentClient`、SDK Published Language）发生 breaking change，需要同步评估 Server 影响
+- 为 #794 关联明确 milestone 与 release branch；
+- 重新确认 `Call` / `Resp` 是否复用 SDK Published Language；
+- 让 `AgentId`、Run 生命周期与 Runtime Target 对齐；
+- 定义认证、授权、租户隔离、重放保护、限流、断连与恢复语义；
+- 按 [代码组织规范](../../01-system/06-code-organization.md) §3.6 证明任何新增 crate 的强边界收益。
 
-启动时需重新确认：
+## 4. Future 设计边界
 
-- `Call`/`Resp` 协议是否仍复用现有 SDK 类型
-- `AgentId` 多 agent 维度是否与 Runtime S3（#700）Run 模型对齐
-- Worker 进程隔离策略是否与恢复语义（#762）一致
-
-## 4. 设计边界（草案已确认的约束）
-
-以下约束在草案中已明确，正式设计时 **MUST** 继承：
+正式设计 **MUST** 保持以下边界；若需改变，必须先更新系统级 Context Map：
 
 - **MUST** 与 TUI 同级，共享 `AgentClient` 端口契约，不引入第二套入站接口。
 - **MUST** 控制面保持薄——只做路由 / 调度 / 隔离 / 代理，**NEVER** 承载领域实体或业务规则。
@@ -62,4 +59,5 @@ Server 战术设计在以下任一条件满足时启动：
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-12 | 初稿：占位文档，标注暂缓设计，继承草案约束 | #794 |
+| 2026-07-12 | 初稿：记录 Future Server 边界与草案输入 | #794 |
+| 2026-07-14 | 将进度型占位改为 Future boundary decision，并增加正式设计 / 安全 / crate 门禁 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

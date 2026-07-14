@@ -1,8 +1,8 @@
 # Context Management · Memory 注入
 
 > 层级：02-modules / context-management（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#786（S2）
-> 本文定义 MemoryPort OHS——记忆检索与注入的单一入口、注入评分算法、semantic retrieval 演进路径、Reflection 集成与 `top_for_inject` 退役。
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#786（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
+> 本文定义 Context Management 对 Memory-owned `MemoryPort` OHS 的 integration：已排序条目的 render / placement、token budget、跨轮去重与 Reflection 时序。检索、评分、排序、mutation 与 persistence error 的唯一真相在 Memory BC。
 
 ## 1. 定位
 
@@ -10,74 +10,27 @@ Memory 注入是 ContextPort `build_window` 的内部步骤之一：
 
 ```
 build_window
-  ├─ L1-L4 compact 管线
+  ├─ L2-L4 compact 读模型投影（L1 已在 ToolResult 入链前完成）
+  ├─ await prompt 组装（PromptPipeline）
   ├─ memory 注入（MemoryPort）  ← 本文
-  ├─ prompt 组装（PromptPort）
+  ├─ active summary
   └─ → ContextWindow.system_blocks + messages
 ```
 
+物化的可观察顺序以 [Compact](02-compact.md) §2.1 为唯一真相：Prompt（含 Skill）→ Memory → active summary → final assembly。Memory 的最终 placement 固定在 cacheable prefix 的 user guidance 之后、active summary 之前；它不因物化发生在 Prompt 后而移动到 uncached suffix。
+
 - **MemoryPort 是独立端口**：被 ContextPort（注入）、Tool BC（Memory tool）、Reflection（写入）三方消费
-- **Memory BC 属支撑域**：持久化在 Storage，但检索/注入逻辑归 Context Management
+- **Memory BC 属支撑域**：Memory 独占检索与排序；Context Management 独占 Context Window 中的 render / placement / budget / dedup
 - **Sub Run 使用 `NoOpMemoryPort`**：Sub 不注入 memory，不写 reflection
 
-## 2. MemoryPort trait
+## 2. MemoryPort 消费边界
 
-```rust
-trait MemoryPort: Send + Sync {
-    /// 检索注入用记忆（readonly，不 touch access count）
-    fn retrieve_for_inject(&self, query: &MemoryQuery) -> Vec<MemoryEntry>;
+`MemoryPort` 的完整方法、`MemoryQuery` / `WriteResult`、NoOp 行为与 `ProjectMemoryOpener` **MUST** 只在 [Memory 端口与适配器](../memory/04-ports-and-adapters.md) 定义；本文 **NEVER** 复制第二份 trait。Context Management 只消费当前 Main Run shared lease 绑定的同一 `Arc<dyn MemoryPort>`，在 `build_window` 内调用 `retrieve_for_inject(&MemoryQuery)` 并把结果渲染为 SystemBlock。
 
-    /// 写入记忆（reflection 产出 / Memory tool 写入）
-    fn write(&self, entry: MemoryEntry) -> WriteResult;
-
-    /// 搜索记忆（LLM tool 调用用，支持 substring 匹配）
-    fn search(&self, query: &str, limit: usize) -> Vec<MemoryEntry>;
-
-    /// 删除记忆
-    fn delete(&self, id: &MemoryId) -> bool;
-
-    /// 标记过期
-    fn mark_outdated(&self, id: &MemoryId);
-}
-
-struct MemoryQuery {
-    /// 注入条数上限
-    limit: usize,                        // 默认 5
-    /// 过滤 layer（Global / Project）
-    layer: Option<MemoryLayer>,
-    /// 过滤 category
-    category: Option<String>,
-}
-
-enum WriteResult {
-    Added,
-    Merged,                              // Jaccard ≥ threshold，合并 tags
-    NeedsEviction,                       // 达到 max_entries，需 eviction
-}
-```
-
-### 2.1 替代关系
-
-| 现状 | 目标 |
-|---|---|
-| runtime 直接 `MemoryStore::new(...)` × 5 处 | `MemoryPort` trait，由 Composition Root 注入 |
-| `top_for_inject_readonly(limit)` | `MemoryPort.retrieve_for_inject(query)` |
-| `top_for_inject(limit)`（mutating） | **删除**（见 §6） |
-| `MemoryStore::add/delete/update/pin` | `MemoryPort.write/delete/mark_outdated` |
-
-### 2.2 NoOpMemoryPort
-
-```rust
-struct NoOpMemoryPort;
-
-impl MemoryPort for NoOpMemoryPort {
-    fn retrieve_for_inject(&self, _: &MemoryQuery) -> Vec<MemoryEntry> { vec![] }
-    fn write(&self, _: MemoryEntry) -> WriteResult { WriteResult::Added }
-    fn search(&self, _: &str, _: usize) -> Vec<MemoryEntry> { vec![] }
-    fn delete(&self, _: &MemoryId) -> bool { false }
-    fn mark_outdated(&self, _: &MemoryId) {}
-}
-```
+- `retrieve_for_inject` **MUST** 只读且不 touch access count；
+- Context Management **NEVER** 调用 Memory 写方法，也 **NEVER** 构造 / 打开 store；
+- Runtime Reflection 与 MemoryTool 若写入，**MUST** 使用同一 Run 绑定的 Arc；
+- Disabled Sub 使用 Memory 文档定义的 NoOp；显式 share 的 Sub clone 父 Run Arc，**NEVER** 重新 open。
 
 ## 3. 注入管线
 
@@ -91,7 +44,7 @@ ContextPort.build_window
   │   ├─ 计算 injection_score
   │   ├─ 按 score 降序排序
   │   ├─ 截取 top N
-  │   └─ 返回 Vec<MemoryEntry>（不 touch，不写盘）
+  │   └─ 返回 MemorySearchResult { mode: InjectionPriority, hits, .. }（不 touch，不写盘）
   │
   ├─ 渲染为 SystemBlock
   │   ┌─────────────────────────────────────┐
@@ -101,7 +54,8 @@ ContextPort.build_window
   │   │ </memory-context>                   │
   │   └─────────────────────────────────────┘
   │
-  └─ push 到 ContextWindow.system_blocks（属于 cacheable_prefix，通过 entry fingerprint 检测变化）
+  └─ 交给 Context assembler 放到 user_guidance 之后、active_summary 之前
+      （属于 cacheable_prefix，通过 entry fingerprint 检测变化）
 ```
 
 ### 3.2 注入时机
@@ -120,155 +74,28 @@ if config.memory.enabled && config.memory.inject_count > 0 {
 }
 ```
 
-## 4. 注入评分算法
+## 4. 已排序结果的消费规则
 
-### 4.1 injection_score
+评分公式、BM25 / fallback 选择、filtering、ranking 与 `similarity_threshold` 的唯一真相见 [Memory 检索与注入](../memory/02-retrieval-and-injection.md)。Context Management **MUST** 验证 `MemorySearchResult.mode == InjectionPriority`，保持 `hits` 返回顺序，并且只消费 `hits[*].entry`；mode 不匹配返回 typed integration error，**NEVER** 复制 `injection_score` 或按 recency / pinned 二次排序。
 
-```rust
-fn injection_score(entry: &MemoryEntry) -> i64 {
-    let mut score: i64 = 0;
+- Context 先按剩余 token budget 计算本轮最多可容纳条数，再把该上限放入 `MemoryQuery.limit`。
+- 返回后只允许按实际序列化 token 数截断尾部；**NEVER** 跳过高位条目后保留低位条目。
+- render 只使用 `hits[*].entry` 的稳定 `MemoryEntry` Published Language 字段；result/hit 的 retrieval mode、relevance、location、outdated、TTL、internal score / index metadata **NEVER** 进入 prompt。
+- 默认 `inject_count = 5` 是 Config 提供的静态上限，不是 Memory 相关性阈值；最终条数取 Config 上限与本轮 token budget 的较小值。
 
-    // 基础分
-    score += entry.access_count as i64 * 100;
+## 5. Active Memory 生命周期
 
-    // recency（越近越高）
-    let age_secs = now() - entry.accessed_at;
-    let recency = match age_secs {
-        0..=3600 => 1000,           // 1 小时内
-        3601..=86400 => 500,        // 1 天内
-        86401..=604800 => 200,      // 1 周内
-        _ => 50,                    // 更早
-    };
-    score += recency;
+生命周期与物理格式的唯一真相见 [Memory 端口与适配器](../memory/04-ports-and-adapters.md)。Context Management 只遵守以下消费约束：
 
-    // pinned 加权
-    if entry.pinned { score += 10_000; }
+- Memory key **MUST** 使用完整、版本化 `ProjectIdentity`，**NEVER** 只取 cwd / basename；
+- `ProjectMemoryOpener::open_for_project(identity, memory_config).await` **MUST** 在 resume prepare 中完成 dataset recovery、eager-read，并验证 active / archive、schema 与权限，无副作用地返回 candidate Arc；
+- 每个 Main Run 只在 shared session lease 下取得 active Arc，Context / Runtime / MemoryTool / Reflection 共享它；
+- Memory 查询与 mutation **MUST** 受同一 lease 保护，后台 Reflection 在 exclusive resume 前 join / cancel；
+- MemoryService 的 mutation **MUST** 由单一 async mutation permit 串行化：candidate state → Storage dataset CAS commit → 无失败 publish；query 只读已验证 in-memory state。同一 Composition / 进程的 active Main slot **NEVER** 为同一 identity 重复 open，而独立进程间的同 identity writer **MUST** 由 `DatasetRevision` CAS 检测冲突；任一实例都 **NEVER** 在未提交失败后暴露 candidate。
 
-    // 过期惩罚
-    if entry.ttl_expired { score -= 5_000; }
-    if entry.outdated { score -= 2_000; }
+## 6. 只读注入约束
 
-    score
-}
-```
-
-### 4.2 排序与截取
-
-```rust
-fn retrieve_for_inject(&self, query: &MemoryQuery) -> Vec<MemoryEntry> {
-    let mut entries: Vec<_> = self.read_active_entries()
-        .into_iter()
-        .filter(|e| match &query.layer {
-            Some(l) => e.layer == *l,
-            None => true,
-        })
-        .filter(|e| match &query.category {
-            Some(c) => e.category == *c,
-            None => true,
-        })
-        .collect();
-
-    entries.sort_by(|a, b| injection_score(b).cmp(&injection_score(a)));
-    entries.truncate(query.limit);
-    entries
-}
-```
-
-### 4.3 评分设计依据
-
-| 因子 | 权重 | 理由 |
-|---|---|---|
-| pinned | +10,000 | 用户显式标记重要，绝对优先 |
-| access_count × 100 | 100/次 | 高频访问的记忆更有用 |
-| recency | 50–1,000 | 近期记忆更相关 |
-| ttl_expired | -5,000 | 过期记忆大幅降权（但不删除） |
-| outdated | -2,000 | 标记过期但不如 ttl 严重 |
-
-**默认 inject_count = 5 的理由**：当前按 recency/pin 排序，相关性不高，5 条 ≈ 300 token。#551 落地语义检索后应提高此值或改为动态决定。
-
-## 5. Memory Store 生命周期
-
-### 5.1 持久化
-
-| 维度 | 说明 |
-|---|---|
-| 格式 | `serde_json::to_string_pretty` 数组 |
-| 布局 | `~/.agents/memory/{_global,_global_archive,<project>,<project>_archive}.json` |
-| Project 身份 | `canonicalize(project_root)` → 去前导 `/` → `/` 替换为 `-` |
-| 容量 | 100 entries/layer（`max_entries`） |
-| 去重 | Jaccard ≥ 0.8 over alphanumeric tokens |
-| 驱逐 | `eviction_score = access_count*10 + recency_weight`；pinned 不驱逐 |
-| 写入 | 全文件重写（无 append，无 lock，无 atomic-rename） |
-
-### 5.2 Factory 模式
-
-**当前问题**：5 处重复 `MemoryStore::new(memory_base_dir(), project_file_name(project_root), 100, 0.8)`。
-
-**目标**：
-
-```rust
-struct MemoryPortFactory {
-    base_dir: PathBuf,
-    config: MemoryConfig,
-}
-
-impl MemoryPortFactory {
-    fn for_project(&self, project_root: &Path) -> Box<dyn MemoryPort> {
-        let store = MemoryStore::new(
-            self.base_dir.clone(),
-            project_file_name(project_root),
-            self.config.max_entries,
-            self.config.similarity_threshold,
-        );
-        Box::new(store)
-    }
-
-    fn no_op() -> Box<dyn MemoryPort> {
-        Box::new(NoOpMemoryPort)
-    }
-}
-```
-
-由 Composition Root 持有 `MemoryPortFactory`，各消费方通过工厂获取实例，不再自行构造。
-
-### 5.3 project_root 一致性
-
-**当前问题**：`memory_inject` 使用 `WorkspaceRead::initial_cwd`（stable project root），但 `MemoryTool` 使用 `ToolExecutionContext.cwd`（runtime CWD）。worktree 场景下两者可能不同，导致同一项目的 memory 分裂到两个文件。
-
-**目标**：
-- **所有 memory 操作统一使用 project_root**（`WorkspaceRead::initial_cwd`）
-- `MemoryTool` 的 handler 从 `ToolExecutionContext` 获取 project_root 而非 runtime CWD
-- `MemoryPortFactory.for_project(project_root)` 统一构造
-
-### 5.4 并发安全
-
-**当前问题**：`MemoryStore` 的 `add/delete/update` 都是 read-modify-write 全文件，无 lock，无 atomic-rename。Reflection（异步）和 LLM turn（同步）可能并发写同一文件。
-
-**目标**（v0.1.0 不实现，记录为已知 gap）：
-- 引入 `RwLock` 或 `Mutex` 保护文件操作
-- 或改为 atomic write（write to temp + rename）
-
-## 6. `top_for_inject` 退役
-
-### 6.1 现状
-
-| 函数 | 状态 | 调用方 |
-|---|---|---|
-| `top_for_inject(&mut self, limit)` | **生产死代码**——touches every entry（写盘），但无生产调用方 | 仅 2 个单元测试 |
-| `top_for_inject_readonly(&self, limit)` | 生产路径 | `memory_inject::build_memory_block` |
-
-### 6.2 退役路径
-
-1. 将 `top_for_inject_readonly` 重命名为 `retrieve_for_inject`，纳入 `MemoryPort` trait
-2. 删除 `top_for_inject`（mutating 版本）
-3. 删除对应测试 `test_memory_store_top_for_inject_touches_entries`
-4. 保留 `test_memory_store_search_returns_top_for_inject_results`，重命名引用
-
-### 6.3 为什么 mutating 版本要删除
-
-- **每轮 touch 导致所有 entry 立即变"fresh"**——injection_score 的 recency 权重失效
-- **每轮写盘**——性能损耗
-- **破坏幂等性**——相同输入的 retrieve 操作产生 side effect
+Target API 只使用 `retrieve_for_inject`。任何会 touch access count、改变 recency 或触发写盘的 `top_for_inject` 变体 **NEVER** 进入注入路径：相同 Memory state + query **MUST** 产生相同结果且不修改持久化状态。
 
 ## 7. Memory Tool（LLM 调用）
 
@@ -277,75 +104,24 @@ Memory tool 是 LLM 主动调用的 tool，与自动注入是**互补关系**：
 | 维度 | 自动注入（MemoryPort） | Memory Tool（LLM 调用） |
 |---|---|---|
 | 触发 | 每轮 build_window | LLM 决定调用 |
-| 检索 | `retrieve_for_inject`（score 排序） | `search`（substring 匹配） |
+| 检索 | `retrieve_for_inject`（Memory-owned ranking） | `search`（BM25 primary / 显式 fallback） |
 | 条数 | inject_count（默认 5） | LLM 指定 limit |
 | 写入 | 不写入（只读） | 可写入（`Memory.tool` write 操作） |
 | 端口 | MemoryPort | MemoryPort（同一 trait） |
 
-**目标**：Memory tool 的 handler 也通过 `MemoryPort` trait 操作，不直接构造 `MemoryStore`。
+Memory tool 的 handler 也通过同一个 `MemoryPort` Arc 操作，不直接构造 store 或 service。
 
-## 8. Semantic Retrieval 演进（#551）
+## 8. Budget-aware inject limit
 
-### 8.1 当前局限
-
-- `search()` 是纯 substring 匹配（case-insensitive）
-- `retrieve_for_inject` 是纯 recency/pin 排序，无相关性
-- 无 embedding / BM25 / TF-IDF
-
-### 8.2 演进路径
-
-| 阶段 | 方案 | 成本 | 收益 |
-|---|---|---|---|
-| Phase 1 | TF-IDF + cosine similarity | 低（纯 Rust 实现） | 中（比 substring 好，比 embedding 差） |
-| Phase 2 | BM25 | 低 | 中（比 TF-IDF 更适合短文本） |
-| Phase 3 | Embedding（外部 API） | 高（需 embedding model + 向量存储） | 高（语义匹配） |
-
-### 8.3 Phase 1 目标设计（v0.1.0 之后）
+Context 可在调用 MemoryPort 前按本轮剩余 token budget 收缩 Config 上限：
 
 ```rust
-trait MemoryRetrieval {
-    /// 语义检索（#551 目标）
-    fn retrieve_semantic(&self, query: &str, limit: usize) -> Vec<MemoryEntry>;
-}
-
-impl MemoryRetrieval for MemoryStore {
-    fn retrieve_semantic(&self, query: &str, limit: usize) -> Vec<MemoryEntry> {
-        let query_vec = tfidf::vectorize(query, &self.idf_map);
-        let mut scored: Vec<_> = self.read_active_entries()
-            .into_iter()
-            .map(|e| {
-                let entry_vec = tfidf::vectorize(&e.content, &self.idf_map);
-                let sim = cosine_similarity(&query_vec, &entry_vec);
-                (e, sim)
-            })
-            .filter(|(_, sim)| *sim > self.similarity_threshold)
-            .collect();
-
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
-        scored.into_iter().map(|(e, _)| e).take(limit).collect()
-    }
+fn memory_query_limit(configured: usize, budget: TokenBudget) -> usize {
+    configured.min(budget.memory_entry_capacity())
 }
 ```
 
-### 8.4 inject_count 动态化
-
-#551 落地后，`inject_count` 应改为动态决定：
-
-```rust
-fn dynamic_inject_count(query: &MemoryQuery, entries: &[MemoryEntry]) -> usize {
-    // 基于 token 预算：每条 entry ≈ 60 tokens，总预算 500 tokens
-    let token_budget = 500;
-    let avg_tokens_per_entry = 60;
-    let max_by_budget = token_budget / avg_tokens_per_entry;
-
-    // 基于 relevance：高相关性时多注入，低相关性时少注入
-    let high_relevance_count = entries.iter()
-        .filter(|e| e.relevance_score > 0.7)
-        .count();
-
-    max_by_budget.min(high_relevance_count.max(query.limit))
-}
-```
+动态限额只表达“最多取多少条”，**NEVER** 在 Context 中读取 relevance score 或实现检索算法。Future embedding / semantic retrieval 的决策、模型与 index 仍完全归 Memory BC。
 
 ## 9. Reflection 集成
 
@@ -358,7 +134,7 @@ auto_compact
   ├─ run_precompact_reflection(messages)
   │   ├─ LLM 分析将 compact 的消息，提取值得记忆的信息
   │   ├─ 产出 MemorySuggestion
-  │   └─ MemoryPort.write(entry)  ← 写入 memory
+  │   └─ MemoryPort.write(entry).await  ← 写入 memory
   │
   ├─ compact_messages_with_llm(...)
   └─ apply_compact_outcome(...)
@@ -388,28 +164,19 @@ Reflection 产出 → MemoryPort.write → 下轮 build_window → retrieve_for_
 - Reflection 写入的 memory 在**下一轮** build_window 时被检索注入
 - PreCompact reflection 写入的 memory 在 **compact 后第一轮**被检索注入（因为 compact 改变了 messages，触发 fingerprint 变化）
 
-## 10. 现状端口缺口
-
-| 目标 | 现状 | 迁移动作 |
-|---|---|---|
-| `MemoryPort` trait | ❌ 无，runtime 直接调 `MemoryStore` | 抽 trait，实现移到 adapter |
-| `MemoryPortFactory` | ❌ 5 处重复构造 | 工厂模式，Composition Root 持有 |
-| `top_for_inject` 退役 | ⚠️ 生产死代码 | 删除 mutating 版本 |
-| project_root 一致性 | ⚠️ inject 用 initial_cwd, tool 用 cwd | 统一使用 project_root |
-| 语义检索 | ❌ 纯 substring | #551 演进路径 |
-| 并发安全 | ❌ 无 lock | 已知 gap，v0.1.0 不修 |
-| `trait_memory.rs` 误导命名 | ⚠️ 只含 `list_reminders` | 重命名或拆分 |
-
-## 11. 相关文档
+## 10. 相关文档
 
 - Compact 家族：[02-compact.md](02-compact.md)
 - Token Budget：[03-token-budget.md](03-token-budget.md)
 - Prompt & Guidance：[04-prompt-guidance.md](04-prompt-guidance.md)
-- Runtime 端口（MemoryPort = Runtime 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Runtime 消费的 Memory OHS 与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Project identity / WorkspaceRead：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 上下文地图（Memory BC = 支撑域）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- Current → Target 迁移责任：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：MemoryPort trait、注入管线、评分算法、top_for_inject 退役、semantic retrieval 演进、Reflection 集成 | #786 |
+| 2026-07-14 | 将 Memory project root 统一为 Project-owned ProjectIdentity，避免恢复后继续使用旧 cwd | [#972](https://github.com/rushsinging/aemeath/issues/972) |

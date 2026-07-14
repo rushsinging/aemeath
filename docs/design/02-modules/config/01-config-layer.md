@@ -1,47 +1,189 @@
 # Config · 分层与 Published Language
 
 > 层级：02-modules / config（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#792（S2）
-> 本文定义 Config 的分层优先级链、ConfigSnapshot 作为 Published Language、ConfigReader/ConfigAppService 端口边界、adapter 接入路径、reasoning 静态阈值。Config 是通用域 BC。
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#792（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
+> 本文定义 Config 的分层优先级链、ConfigSnapshot Published Language、Config-owned OHS、project-aware prepare / commit participant、adapter 接入与 reasoning 静态阈值。Config 是通用域 BC；本文**只描述目标态**，实现差距见 [迁移治理](../../03-engineering/migration-governance.md)。
 
 ## 1. 定位
 
 Config 是 **通用域 BC**——为所有其他 BC 提供配置真相：
 
-- **ConfigSnapshot 是 Published Language**：跨 BC 的配置契约，通过 watch channel 推送
-- **ConfigReader 是出站端口**：消费方（Runtime / TUI / Tool 等）通过此端口获取配置
+- **ConfigSnapshot 是 Published Language**：跨 BC 的只读配置契约；每个 Run 捕获一个不可变 snapshot
+- **ConfigReader 是 Config-owned committed-state view**：只给 Composition bootstrap 与 MainSession façade implementation；它 **NEVER** 直接进入 AgentClient、Run 或其他 BC
+- **ConfigQuery / ConfigWriter 是 gate-aware application façade**：非 Run 查询、订阅建立与更新先取得 MainSession shared / exclusive permit；TUI / CLI 只经 Runtime-owned `AgentClient` 命令和 SDK 投影访问配置
+- **ProjectConfigParticipant 是 composition-only 切换能力**：Config 自己持有唯一 active project config；Context Management 只协调 prepare / commit，**NEVER** 复制第二份 active Config slot
 - **ConfigAppService 是应用服务**：编排 adapter、合并配置、推送 snapshot
 - **不包含业务逻辑**——Config 只承载配置数据，不做业务决策
 
-## 2. ConfigPort / ConfigReader trait
+## 2. Config-owned 契约
 
 ```rust
 trait ConfigReader: Send + Sync {
-    /// 获取当前配置快照（同步）
-    fn snapshot(&self) -> ConfigSnapshot;
-    /// 订阅配置变更（异步 watch channel）
-    fn watch(&self) -> watch::Receiver<ConfigSnapshot>;
+    /// 只读 Config-owned 已提交 active state；调用方 MUST 处于 bootstrap，
+    /// 或已经由 MainSession façade 持有 shared/exclusive permit。
+    fn committed_snapshot(&self) -> ConfigSnapshot;
+    fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
+}
+
+#[async_trait]
+trait ConfigQuery: Send + Sync {
+    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError>;
+    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError>;
+}
+
+struct ConfigSubscription {
+    initial: ConfigSnapshot,
+    changes: watch::Receiver<ConfigSnapshot>,
+}
+
+enum ConfigQueryError {
+    MainSessionUnavailable,
+    SessionSwitchClosed,
 }
 ```
 
 ```rust
+#[async_trait]
 trait ConfigWriter: Send + Sync {
-    /// 更新配置（闭包修改 + 持久化 + push snapshot）
-    async fn update<F>(&self, f: F) -> Result<()>
-    where F: FnOnce(&mut Config) + Send;
-    /// 设置 CLI 覆盖（最高优先级）
-    fn set_cli_patch(&self, patch: ConfigPatch);
+    /// 应用类型化命令；其实现是 MainSessionWiring 提供的 gate-aware façade。
+    async fn update(&self, command: ConfigUpdate) -> Result<(), ConfigUpdateError>;
 }
 ```
+
+```rust
+struct MainSessionConfigFacade {
+    gate: Arc<SessionSwitchGate>,
+    reader: Arc<dyn ConfigReader>,
+    participant: Arc<dyn ProjectConfigParticipant>,
+}
+
+#[async_trait]
+impl ConfigQuery for MainSessionConfigFacade {
+    async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError> {
+        let _shared = self.gate.acquire_shared().await?;
+        Ok(self.reader.committed_snapshot())
+    }
+
+    async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError> {
+        let _shared = self.gate.acquire_shared().await?;
+        let changes = self.reader.subscribe_committed();
+        let initial = changes.borrow().clone();
+        Ok(ConfigSubscription { initial, changes })
+    }
+}
+```
+
+`ConfigReader` 本身不拥有 session gate，避免 Config → Context / Runtime 的反向依赖；Composition 只把它封装进 `MainSessionConfigFacade`。除 wiring 尚未发布的 bootstrap 外，production 调用 **MUST** 经该 async façade：shared permit 保证 query / subscribe 建立不会落在 resume 的 Project / Config / Memory / Task 无失败提交窗口。subscription 建立后只接收 Config commit 最后一步发布的完整 snapshot；`initial` 与 receiver 在同一 shared permit 下捕获，**NEVER** 丢失切换边界。
+
+每个 Main Run 在 admission 的 shared lease 内捕获一次 `BoundMainRun.config`，随后只使用该不可变值；Run **NEVER** 调用 `ConfigQuery`、`ConfigReader` 或 watch。非 Run 的 AgentClient query / event projection 只持 `ConfigQuery`；TUI / CLI **NEVER** 获得 `ConfigSubscription` 或 watch receiver，只接收 SDK DTO / event。
 
 ### 2.1 消费方接口
 
 | 方法 | 用途 | 消费方 |
 |---|---|---|
-| `snapshot()` | 获取当前配置 | Runtime 初始化、TUI 渲染、Tool 装配 |
-| `watch()` | 订阅配置变更 | Runtime 热更新、TUI 动态刷新 |
-| `set_cli_patch()` | CLI 参数覆盖 | CLI 启动 |
-| `update()` | 运行时修改配置 | `/config` 命令、设置面板 |
+| `ConfigReader::committed_snapshot / subscribe_committed` | 读取 Config-owned committed state | Composition bootstrap；MainSessionConfigFacade（已经持 permit） |
+| `ConfigQuery::snapshot()` | gate-aware 非 Run 配置查询 | AgentClient application implementation |
+| `ConfigQuery::subscribe()` | gate-aware 建立已提交配置订阅 | AgentClient event projection；先映射成 SDK/TUI-owned DTO |
+| `update()` | 运行时修改配置 | AgentClient application command → MainSession gate-aware façade |
+
+CLI 参数覆盖是 Composition bootstrap 的 `ConfigSources.cli_args` 输入，由 `CliArgsAdapter` 在 Config wiring 发布前转换为最高优先级 patch；它 **NEVER** 通过运行期 `ConfigWriter` 回灌。`/config` 或设置面板只产生 AgentClient application command，TUI / CLI **NEVER** 持有 `ConfigReader`、`ConfigQuery`、`ConfigWriter`、participant、subscription 或 watch receiver。
+
+### 2.2 #933 seam 与 #871 协调归属
+
+| Issue | 独占范围 | 验收边界 |
+|---|---|---|
+| [#933](https://github.com/rushsinging/aemeath/issues/933) | 定义 `ConfigQuery` / `ConfigWriter` application seam、AgentClient command/query 与 SDK config event 映射 | 交付层只见 async façade / SDK DTO；无 raw `ConfigReader`、participant 或 watch receiver 泄漏 |
+| [#871](https://github.com/rushsinging/aemeath/issues/871) | 实现 `SessionSwitchGate`、联合 resume / update coordinator 与 `MainSessionConfigFacade` shared/exclusive permit 协调 | query / subscribe 建立不能观察切换中间态；update/resume 的 watch **MUST** 最后发布 |
+| [#934](https://github.com/rushsinging/aemeath/issues/934) | Config 内部 layer / adapter / validation 与 durable file protocol | 不绕过 #871 gate，也不把 I/O 放入无失败 commit |
+
+#933 发布 seam 但 **NEVER** 自建第二把 gate 或复制 active snapshot；#871 消费该 seam 并提供唯一 gate-aware implementation，但 **NEVER** 重定义 AgentClient / SDK 配置语言。两者的依赖方向是“交付 seam 可先定义，联合协调器随后实现”；端到端验证 **MUST** 同时覆盖 DTO 映射与 shared/exclusive gate 时序。
+
+### 2.3 ProjectConfigParticipant
+
+`ProjectConfigParticipant` 是 Config 为 active Main session 切换发布的 composition-only 窄能力。Config **NEVER** 依赖 Project 类型：启动 / resume 的协调边界先把已验证的 Project identity 经 ACL 映射为 Config-owned `ProjectConfigLocation`（canonical search root + stable opaque key）。opaque token 的字段私有；它只允许协调器读取 location、候选 `ConfigSnapshot` 与 Memory 启动参数：
+
+```rust
+struct ProjectConfigLocation {
+    canonical_search_root: PathBuf,
+    key: ProjectConfigKey,
+}
+
+#[async_trait]
+trait ProjectConfigParticipant: Send + Sync {
+    async fn prepare_for_project(
+        &self,
+        location: &ProjectConfigLocation,
+    ) -> Result<PreparedProjectConfig, ProjectConfigError>;
+
+    fn snapshot(&self) -> ConfigSnapshot;
+    fn commit_project(&self, prepared: PreparedProjectConfig);
+
+    async fn prepare_update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<PreparedConfigUpdate, ConfigUpdateError>;
+    async fn persist_update(
+        &self,
+        prepared: PreparedConfigUpdate,
+    ) -> ConfigPersistOutcome;
+    fn commit_update(&self, ready: ReadyConfigCommit);
+}
+
+enum ConfigPersistOutcome {
+    /// Durable commit point 未跨越；active Config / Memory 必须保持旧值。
+    NotCommitted(ConfigPersistError),
+    /// Durable truth 已是 candidate；warning 不得阻止 live publish。
+    Committed(ReadyConfigCommit),
+}
+
+enum ConfigPersistError {
+    Serialization(ConfigSerializationError),
+    Storage(ConfigStorageErrorKind),
+}
+
+enum ConfigStorageErrorKind {
+    Io,
+    PermissionDenied,
+    UnsupportedDurability,
+    CorruptTransaction,
+}
+
+struct ReadyConfigCommit {
+    /* private candidate active state + committed receipt */
+    warning: Option<ConfigCommitWarning>,
+}
+
+#[derive(Clone, Copy)]
+enum ConfigCommitWarning {
+    PreviousPromotionPending,
+    JournalCleanupPending,
+}
+
+impl PreparedProjectConfig {
+    fn location(&self) -> &ProjectConfigLocation;
+    fn snapshot(&self) -> &ConfigSnapshot;
+    fn memory_config(&self) -> &MemoryConfig;
+}
+
+impl PreparedConfigUpdate {
+    fn snapshot(&self) -> &ConfigSnapshot;
+    fn memory_config(&self) -> &MemoryConfig;
+}
+
+impl ReadyConfigCommit {
+    fn warning(&self) -> Option<ConfigCommitWarning>;
+}
+```
+
+- `ProjectConfigLocation` 的 search root **MUST** canonicalize 后构造，key **MUST** 由完整 Project identity 经协调 ACL 做稳定、域分隔派生；Config 只把它当不透明 project scope。Config **NEVER** import `ProjectIdentity` / `WorkspaceRead`，也 **NEVER** 自行读取 cwd。
+- `prepare_for_project` 是 async fallible prepare：它 **MUST** 完成目标 location 下 `.agents/aemeath.json`、兼容配置、global / env / CLI layers 的读取、合并与 schema 校验，并验证候选 provider / tool / hook 装配所需输入；它 **NEVER** 修改 live state、发送 watch 事件或懒加载文件。
+- `commit_project` **MUST** 同步、无 I/O、无失败：一次替换 Config-owned `{ location, snapshot }`，再以 `send_replace` 发布同一个 snapshot。prepare 之后的任何 fallible 工作 **NEVER** 进入提交段。
+- `prepare_update` **MUST** 以当前 location 与完整 layer chain 生成候选 snapshot，并让 File adapter 准备尚未 publish 的 durable write token；它不修改 active state。协调器可先从 opaque token 读取 candidate `MemoryConfig` 并 eager-open Memory。
+- `persist_update` 只在所有受影响资源均 prepare 成功后执行 durable write，并返回 typed commitment outcome。`NotCommitted` **MUST** 只在 AtomicBlob 提交点前产生，此时 active Config / Memory 保持旧值；提交点后即使 previous promotion / journal cleanup 延迟，也 **MUST** 返回 `Committed(ReadyConfigCommit { warning })`。其后 `commit_update` 同步、无 I/O、无失败，warning 只在 live publish 后进入诊断，**NEVER** 触发回滚或 `?` 早退。
+- Config adapter 将 Storage / serialization 错误 ACL 为上述稳定 `ConfigPersistError`，**NEVER** 暴露文件 adapter error、路径或临时文件名。既有 journal 在新提交点前无法通过 digest 恢复时映射为 `CorruptTransaction` 并保留 Storage quarantine 诊断，**NEVER** 当作缺文件或默认配置继续。`ConfigPersistError` 全部表示本次更新未提交；本次提交点后的正常异常只能映射为 `ConfigCommitWarning`。
+- durable publish 与内存提交之间是 **cancellation-shielded critical section**：协调器把 owned exclusive permit、prepared token 与 candidate Memory 一次性交给独立 owned task 后，caller 取消只能停止等待，**NEVER** 取消该 task。task 必须把 `persist_update` 跑到明确失败，或在成功后连续完成 Memory install、Config active install 与 watch publish；取消只允许在 handoff 前生效。
+- `ConfigAppService` 是 active config 的唯一可变状态源。`MainSessionWiring` 只持 reader / participant view，在 shared lease 下捕获 snapshot；它 **NEVER** 再保存 active ConfigSnapshot 副本。
+- project switch 与可能改变 project-scoped Memory 参数的 `ConfigWriter` 命令 **MUST** 经 `MainSessionWiring` 的 exclusive session-switch gate 协调；非 Run query / subscribe **MUST** 经 `ConfigQuery` 取得 shared permit。TUI / CLI **NEVER** 直接调用 Config 契约。AgentClient event projection 收到的只可能是完整提交后的新 snapshot，并在 SDK ACL 转换后才发往 TUI。
 
 ## 3. Config 分层
 
@@ -71,7 +213,7 @@ Config (in-memory)
   ↓
 ConfigSnapshot::new(Arc::new(config))
   ↓
-watch::Sender::send_replace → 所有 watch Receiver
+watch::Sender::send_replace → composition-internal watch Receiver → SDK event projection
 ```
 
 ### 3.2 ConfigPatch
@@ -94,7 +236,7 @@ struct ConfigPatch {
 - 14 个 section 走 `apply_patch`（字段级合并）
 - `hooks` 和 `reasoning_graph` 是例外——整块覆盖，不走 patch 粒度
   - **hooks**：语义是合并事件表，key 级合并在 `merge_hooks` 中做
-  - **reasoning_graph**：后续粒度可能细化，当前占位
+  - **reasoning_graph**：v0.1.0 固定整块覆盖；未来若要字段级合并，**MUST** 先版本化其 merge 语义
 
 ### 3.3 合并算法
 
@@ -137,17 +279,23 @@ impl ConfigSnapshot {
 - **不采用裸 `Arc<Config>`**（暴露 pub 字段）
 - **不采用独立 struct**（字段重复维护）
 
-### 4.2 watch channel 推送
+### 4.2 active state 与 watch channel
 
 ```rust
 // ConfigAppService 内部
-fn push_snapshot(&self, config: Config) {
-    let snapshot = ConfigSnapshot::new(Arc::new(config));
-    self.tx.send_replace(snapshot);  // send_replace 而非 send
+struct ActiveProjectConfig {
+    location: ProjectConfigLocation,
+    snapshot: ConfigSnapshot,
+}
+
+fn commit_project(&self, prepared: PreparedProjectConfig) {
+    let snapshot = prepared.snapshot().clone();
+    *self.active.write().unwrap() = prepared.into_active();
+    self.tx.send_replace(snapshot);
 }
 ```
 
-> **关键**：使用 `send_replace` 而非 `send`——`send` 在无 receiver 时返回 Err 且值不更新（静默失败）。这是已修复的 bug（见 memory: `tokio::sync::watch::Sender::send` 坑）。
+`active` 是 Config 的唯一 current truth；watch channel 只是同一提交的通知投影，**NEVER** 形成第二份独立状态。使用 `send_replace` 而非 `send`，保证无 receiver 时 channel 内的最新值仍更新。新订阅 **MUST** 经 `ConfigQuery::subscribe` 在 shared permit 内同时捕获 initial + receiver；调用方 **NEVER** 直接调用同步 `subscribe_committed`。
 
 ## 5. ConfigAppService
 
@@ -155,92 +303,123 @@ fn push_snapshot(&self, config: Config) {
 
 ```rust
 struct ConfigAppService {
-    config: RwLock<Config>,
+    active: RwLock<ActiveProjectConfig>,
     tx: watch::Sender<ConfigSnapshot>,
     cli_patch: RwLock<ConfigPatch>,
+    adapters: ConfigAdapters,
 }
 ```
+
+`ConfigAppService` **NEVER** 以假 default project 构造。Config-owned async factory 先用未发布的 `ConfigBootstrap` 完成初始 prepare，再以已验证 candidate 一次构造 active state 与 watch sender，最后才返回 opaque wiring：
+
+```rust
+async fn wire_project_config(
+    sources: ConfigSources,
+    initial: &ProjectConfigLocation,
+) -> Result<ConfigWiring, ProjectConfigError> {
+    let bootstrap = ConfigBootstrap::new(sources);
+    let prepared = bootstrap.prepare_for_project(initial).await?;
+    Ok(ConfigWiring::from_prepared(bootstrap, prepared))
+}
+```
+
+因此 Config wiring / 内部 `ConfigReader` 一旦存在就必为 Active；内部 **NEVER** 使用 `Option<ActiveProjectConfig>`、假 snapshot 或 `snapshot() -> Result` 把 bootstrap 状态泄漏给消费者。wiring 发布后，reader **MUST** 只被 gate-aware façade / coordinator 持有，**NEVER** 作为通用依赖注入到业务 consumer。
 
 | 方法 | 职责 |
 |---|---|
-| `load()` | 编排 adapter 读取 → 合并 → resolve keys → push snapshot |
-| `update(closure)` | 闭包修改 Config → 写回 global_path → push snapshot |
-| `set_cli_patch(patch)` | 设置 CLI 覆盖 → 触发 reload |
+| `prepare_for_project(location)` | 编排 adapter 读取 → 合并 → resolve keys → 完整校验 → 返回 opaque candidate |
+| `commit_project(prepared)` | 无失败替换 Config-owned active state → `send_replace` 同一 snapshot |
+| `prepare_update / persist_update / commit_update` | 在 session gate 下分离候选验证、不可取消的 durable publish 与无失败 active commit；必要时与 Memory 重绑定共同提交 |
+| bootstrap CLI patch | 由 `ConfigSources` / `CliArgsAdapter` 在 wiring 发布前加入最高优先级 layer；不构成运行期 Writer 命令 |
 
-### 5.2 load() 目标流程
+### 5.2 prepare / commit 目标流程
 
 ```rust
-async fn load(&self) -> Result<()> {
+async fn prepare_for_project(
+    &self,
+    location: &ProjectConfigLocation,
+) -> Result<PreparedProjectConfig, ProjectConfigError> {
     let mut base = Config::default();
     let mut patches = Vec::new();
 
-    // 1. 外部 CLI 配置兼容层（ACL）——在寻找 aemeath.json 时同时寻找外部 CLI 配置
-    patches.extend(CompatibilityAdapter::read_global().await?);
-    patches.extend(CompatibilityAdapter::read_project(&project_root).await?);
+    // 所有 fallible I/O 都发生在 prepare；路径只从已验证 identity 派生。
+    patches.extend(self.adapters.compatibility.read_global().await?);
+    patches.extend(self.adapters.compatibility.read_project(location).await?);
 
-    // 2. aemeath 原生配置
-    if let Some(p) = FileAdapter::read(&global_config_path).await? { patches.push(p); }
-    if let Some(p) = FileAdapter::read(&project_config_path).await? { patches.push(p); }
+    if let Some(p) = self.adapters.file.read_global().await? { patches.push(p); }
+    if let Some(p) = self.adapters.file.read_project(location).await? { patches.push(p); }
 
-    // 3. env + cli
-    if let Some(p) = EnvAdapter::read() { patches.push(p); }
+    if let Some(p) = self.adapters.env.read() { patches.push(p); }
     patches.push(self.cli_patch.read().unwrap().clone());
 
-    // 4. 合并 + 后处理
     base = merge_config(base, patches);
-    resolve_provider_api_keys(&mut base);
+    self.adapters.driver_env.resolve_provider_api_keys(&mut base)?;
+    validate_project_config(&base)?;
 
-    // 5. 写入 + push
-    *self.config.write().unwrap() = base.clone();
-    self.push_snapshot(base);
-
-    Ok(())
+    Ok(PreparedProjectConfig::private_new(
+        location.clone(),
+        ConfigSnapshot::new(Arc::new(base)),
+    ))
 }
 ```
 
-### 5.3 update() 流程
+启动时，Composition 先把 Project factory 返回的已验证 identity 映射成 `ProjectConfigLocation`，再调用 async Config factory 返回已初始化 wiring，以其 active snapshot 的 `memory_config()` 打开 Memory，最后创建 `MainSessionWiring`。factory 的 bootstrap 与运行期 participant **MUST** 复用同一 layer / validation pipeline；运行期 resume 由 Context coordinator 在 exclusive gate 内对 Project prepare token 的 identity 做同一 ACL 映射并调用 participant prepare，**NEVER** 走第二套 load 语义。
+
+### 5.3 Config update 的联合协议
 
 ```rust
-async fn update<F>(&self, f: F) -> Result<()>
-where F: FnOnce(&mut Config)
-{
-    let mut config = self.config.read().unwrap().clone();
-    f(&mut config);
+async fn update_config(
+    session: &Arc<MainSessionWiring>,
+    command: ConfigUpdate,
+) -> Result<(), ConfigUpdateError> {
+    let exclusive: OwnedSessionSwitchPermit = session.acquire_owned_exclusive().await?;
+    let prepared = session.config().prepare_update(command).await?;
 
-    // 持久化（写整份 Config 到 global_path）
-    let global_path = paths::global_config_path();
-    if let Some(parent) = global_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    let json = serde_json::to_string_pretty(&config)?;
-    tokio::fs::write(&global_path, json).await?;
+    // 在 durable write 之前完成依赖资源的全部 fallible prepare。
+    let candidate_memory = session.memory_opener().open_for_project(
+        session.workspace().project_identity(),
+        prepared.memory_config(),
+    ).await?;
 
-    // push snapshot
-    *self.config.write().unwrap() = config.clone();
-    self.push_snapshot(config);
+    // 最后一个可取消点。handoff 后 owned task 即使 caller future 被 drop 也会继续。
+    session.cancellation().check_before_durable_handoff()?;
+    let completion = session.spawn_config_commit_critical_section(
+        exclusive,
+        prepared,
+        candidate_memory,
+    );
+    completion.await?
+}
 
+async fn config_commit_critical_section(
+    session: Arc<MainSessionWiring>,
+    exclusive: OwnedSessionSwitchPermit,
+    prepared: PreparedConfigUpdate,
+    candidate_memory: Arc<dyn MemoryPort>,
+) -> Result<(), ConfigUpdateError> {
+    // 此 task 不继承 caller cancellation；persist 内部所有 await 都必须跑完。
+    let ready = match session.config().persist_update(prepared).await {
+        ConfigPersistOutcome::NotCommitted(error) => return Err(error.into()),
+        ConfigPersistOutcome::Committed(ready) => ready,
+    };
+
+    // 无失败提交段：不 await、不做 I/O、不响应取消；Config watch 最后发布。
+    session.install_memory(candidate_memory);
+    let warning = ready.warning();
+    session.config().commit_update(ready);
+    drop(exclusive);
+    emit_config_commit_warning_best_effort(warning);
     Ok(())
 }
 ```
 
-> `update()` 总是写整份 Config 到 global_path——不管闭包改了什么。后续可能改为写 patch + 全量 fallback。
+`ConfigAppService` **NEVER** 直接调用 `tokio::fs`；native patch 的 staged / durable protocol 由 File adapter 承担。`ConfigWriter` 是 #933 定义、#871 实现的 gate-aware application façade，**NEVER** 直接委托成“持久化后立刻替换 Config”的 shortcut。若某类字段不影响 Memory，coordinator **MAY** 复用当前 Memory Arc，但仍必须走同一 prepare → shielded persist → no-fail commit 骨架，避免两套更新语义。
 
-## 6. adapter 接入
+可执行证明 **MUST** 在 handoff 前、`persist_update` 每个 await 点、durable rename / fsync 成功但 receipt 尚未返回、Memory install 与 Config install 之间注入取消或失败。提交点前只能返回 `NotCommitted` 且磁盘 / Config / Memory 全旧；提交点后必须返回 `Committed`（可带 warning），owned critical section 随后完成三者全新。**NEVER** 允许磁盘已新而 outcome 仍是 `NotCommitted`，也 **NEVER** 允许 watch 先于 Memory install 观察新 snapshot。进程崩溃后的 restart 仍由同一 bootstrap pipeline 从 durable state 恢复。
 
 ## 6. Adapter 接入与兼容层 ACL
 
-### 6.1 当前问题
-
-三个 adapter 是 stub，`ConfigAppService.load()` 直接调 `tokio::fs` 绕过 adapter：
-
-| Adapter | 状态 | 问题 |
-|---|---|---|
-| `EnvAdapter` | ✅ 完整实现 | 无 |
-| `FileAdapter` | ❌ stub | `load()` 直接读文件，不调 `FileAdapter::read()` |
-| `CliArgsAdapter` | ❌ stub | `load()` 用 `cli_patch` RwLock，不调 `CliArgsAdapter::read()` |
-| `ClaudeSettingsAdapter` | ❌ stub | `load()` 直接读文件，不调 adapter |
-
-### 6.2 CompatibilityAdapter — 外部 CLI 配置兼容层（ACL）
+### 6.1 CompatibilityAdapter — 外部 CLI 配置兼容层（ACL）
 
 外部 CLI 配置兼容不是简单的文件读取——它需要**检测格式 + 翻译**，是一层防腐蚀层（ACL）。
 
@@ -413,20 +592,19 @@ impl ConfigTranslator for ClaudeTranslator {
   .<其他cli>/config.json         ← 远期
 ```
 
-### 6.3 其他 adapter 目标
+### 6.2 其他 adapter 契约
 
 - `FileAdapter::read(path)` — 接收路径，读 aemeath.json → 反序列化 `ConfigPatch`
 - `CliArgsAdapter::read(args)` — 从 CLI 参数构造 `ConfigPatch`
-- `ConfigAppService.load()` 只编排 adapter + 合并，不做 fs IO
+- `ConfigAppService.prepare_for_project()` 只编排 adapter + 合并 + 校验，不做 fs I/O
+- `FileAdapter::prepare_native_patch / commit_native_patch` — 负责 durable 写入协议，application service 不拼接物理路径
 
-### 6.4 迁移动作
+### 6.3 扩展规则
 
-1. 实现 `CompatibilityAdapter`（提取现有 Claude 适配逻辑到 `ClaudeTranslator`）
-2. 实现 `FileAdapter::read(path) -> Option<ConfigPatch>`（从 AppService 的内联 fs IO 提取）
-3. 实现 `CliArgsAdapter::read(args) -> ConfigPatch`（从 `cli_patch` RwLock 提取）
-4. `ConfigAppService.load()` 改为调 adapter
-5. 删除 AppService 中的内联 `tokio::fs::read_to_string`
-6. 新增外部 CLI 格式时只加 translator，不改 adapter / AppService / 分层
+1. 新增外部 CLI 格式时只加 translator，不修改 application service 或分层顺序。
+2. adapter **MUST** 输出 Config-owned `ConfigPatch` 或结构化错误，外部 wire DTO **NEVER** 泄漏进 active state。
+3. 所有 project 路径只从 `ProjectConfigLocation` 的 canonical search root 派生；adapter **NEVER** import Project PL 或自行读取 process cwd。
+4. 所有会影响 active state 的读取与校验在 `prepare_for_project` 完成；`commit_project` **NEVER** 触发 adapter。
 
 ## 7. reasoning 静态阈值
 
@@ -448,9 +626,9 @@ struct NodeConfig {
 ### 7.2 静态阈值的含义
 
 - 节点 effort 映射是**静态配置**——从 config 文件读取，不动态计算
+- 有效节点集合由 Workflow Published Language 限定为 `Idle / Explore / Plan / Execute / Verify`；缺失条目使用 Workflow 公布的节点默认值，未知节点返回结构化校验错误
 - `max_reasoning` 是用户配置的 reasoning level 上限
-- **当前问题**：`max_reasoning` 已解析存储但从未生效——只有 provider ceiling 在 clamp
-- **目标**：`max_reasoning` 接入 ReasoningPort 的 clamp 链（见 [../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md) §5）
+- `max_reasoning` **MUST** 接入 ReasoningPort 的 clamp 链（见 [../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md) §5）
 
 ### 7.3 Config 中的 reasoning 相关字段
 
@@ -460,7 +638,7 @@ struct NodeConfig {
 | `model.reasoning_effort` | `ModelEntryConfig` | 默认 reasoning effort |
 | `reasoning_graph.enabled` | `ReasoningGraphConfig` | 是否启用 ReasoningGraph |
 | `reasoning_graph.nodes` | `ReasoningGraphConfig` | 节点 effort 映射 |
-| `reasoning_graph.max_reasoning` | `ReasoningGraphConfig` | 用户配置上限（目标接入 clamp） |
+| `reasoning_graph.max_reasoning` | `ReasoningGraphConfig` | 用户配置上限（参与 clamp） |
 
 ## 8. driver_env — 环境变量后处理
 
@@ -469,7 +647,7 @@ struct NodeConfig {
 `driver_env` 是 config 合并后的后处理步骤：
 
 ```rust
-fn resolve_provider_api_keys(config: &mut Config) {
+fn resolve_provider_api_keys(config: &mut Config) -> Result<(), ProjectConfigError> {
     // 对每个 provider，如果 API key 未在 config 中设置，
     // 从环境变量查找（AEMEATH_<PROVIDER>_API_KEY / <PROVIDER>_API_KEY）
     for provider in &mut config.providers {
@@ -477,36 +655,26 @@ fn resolve_provider_api_keys(config: &mut Config) {
             provider.api_key = driver_env::lookup_api_key(&provider.name);
         }
     }
+    Ok(())
 }
 ```
 
 - **不进 patch 层**——跨 adapter/domain 边界的后处理
-- 逻辑抽到 `domain/driver_env.rs`，干净独立
+- 逻辑与 Config 的 layer merge 用例共置；只在它已被多个用例共同消费时才抽为私有 `driver_env.rs`，**NEVER** 为此预建通用 `domain/` 层
 
-## 9. 现状缺口与迁移动作
-
-| 目标 | 现状 | 迁移动作 |
-|---|---|---|
-| `CompatibilityAdapter`（ACL） | ❌ 不存在，Claude 适配散落在 AppService 内联 | 新建 CompatibilityAdapter + ConfigTranslator trait + ClaudeTranslator |
-| adapter 接入调用链 | ⚠️ 三个 stub 未接入 | 实现 FileAdapter / CliArgsAdapter，AppService 改为调 adapter |
-| fs IO 移到 adapter | ⚠️ AppService 内联 `tokio::fs` | 从 AppService 提取 fs IO 到 adapter |
-| 外部 CLI 格式可扩展 | ❌ 硬编码 Claude | 新格式只加 translator，不改 adapter / AppService / 分层 |
-| `max_reasoning` 接入 clamp | ⚠️ 已解析未生效 | 接入 ReasoningPort clamp 链 |
-| `update()` 写整份 Config | ⚠️ 不分 patch | 后续可改为写 patch + 全量 fallback |
-| `LOG_TARGET` 未使用 | ⚠️ dead_code | S2 logging 合流时启用 |
-| `reasoning_graph` 无 patch 粒度 | ⚠️ 整块覆盖 | 后续细化，当前占位 |
-| `CliArgsAdapter::read()` 返回空 patch | ⚠️ `set_cli_patch` 手动注入 | 接入 clap 直接结果 |
-
-## 10. 相关文档
+## 9. 相关文档
 
 - Workflow 战术设计（ReasoningPort + clamp 链）：[../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md)
-- Runtime 端口（ConfigReader = Runtime 出站端口）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Runtime 装配（每 Run 捕获 ConfigSnapshot）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Provider 端口（模型 reasoning 配置）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - 上下文地图（Config = 通用域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 系统架构（Composition Root 装配 ConfigAppService）：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
+- Current → Target 迁移责任：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
 
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：Config 分层、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | #792 |
+| 2026-07-14 | 明确 Config-owned active state、project-aware prepare / commit participant，并与 Session gate、Memory candidate 装配闭环 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 将非 Run query / subscribe 收口到 async gate-aware façade，明确 #933 delivery seam 与 #871 coordinator 的所有权 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

@@ -58,7 +58,7 @@
 ## 1. check-cargo-dependency-graph.sh
 
 - **功能**：基于 `cargo metadata` 校验各 crate 的业务依赖是否落在显式白名单内。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律——固化 feature 依赖方向：cli→{composition, sdk}；runtime→全部 supporting；supporting→share；share/sdk→∅。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 / R4 / R6——固化当前 feature 依赖白名单、薄外部驱动与唯一生产装配入口。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 - **白名单（`business_allow`）**：
 
 | Crate | 允许依赖（workspace crate） |
@@ -81,14 +81,14 @@
 | `utils` | ∅ |
 
 - **例外**：
-  - `tools → {project, storage}`：横向依赖登记（[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.7），仅经各自 `api` facade 接入。
+  - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
 
 ## 2. check-cli-thin-entry.sh
 
 - **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + 纯技术库`。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §薄入口——CLI 不得直连 runtime 内部或任何 supporting feature，业务能力一律经 composition 装配 + `sdk::AgentClient` 契约接入。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
 - **白名单**：
   - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
   - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share}`
@@ -102,7 +102,7 @@
 ## 3. check-share-no-upstream-deps.sh
 
 - **功能**：检查 `agent/shared/Cargo.toml` 不依赖任何业务 feature。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律 `share → ∅`——share 是最底层共享内核，禁止反依赖上层。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——shared kernel 只能发布经证明的共享语言，禁止反依赖业务 capability。
 - **被禁上游 crate 列表**：`runtime, project, policy, context, provider, tools, storage, hook, audit, composition, cli, sdk`。
 - **例外**：无。
 - **检查方式**：单文件清单匹配 `[dependencies]` 段；命中即失败。
@@ -110,7 +110,7 @@
 ## 4. check-share-minimal-kernel.sh
 
 - **功能**：扫描 `agent/shared/src/`，禁止 kernel 出现行为/IO/并发/时钟/状态容器；并把 `agent/shared/Cargo.toml` 依赖限定在白名单内。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.5 rule6——kernel 只放数据契约与纯函数。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R3——kernel 只承载稳定共享语言与纯函数，禁止吸收行为、I/O 和业务状态。
 - **禁用模式（`forbidden_patterns`）**：
 
 | 模式 | 理由 |
@@ -186,7 +186,7 @@
 ## 6. check-crate-api-boundary.sh
 
 - **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透对方 Current `contract/gateway/core/business/utils` 内部路径；禁止 Current `api.rs` 暴露内部层。该脚本锁定迁移期物理结构，不定义 Target 通用 `api/` 目录。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
@@ -230,7 +230,7 @@
 ## 8. check-forbidden-imports.sh
 
 - **功能**：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.5 rule5——`share::adapter` / `shared::adapter` / `agent/shared/src/adapter` 只能在 composition 装配处引用，feature 与 cli 不得直接 import。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R6——shared adapter 只能由 Composition 装配；feature 与 CLI 不得直接 import 易变 detail。
 - **白名单（`RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS`）**——临时精确豁免：
 
 | 路径 | 说明 |
@@ -447,6 +447,8 @@
 | # | 规则 | 理由 |
 |---|---|---|
 | 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
+
+> 这是迁移期 **Current** 守卫事实，不是 Target API 上限。[#874](https://github.com/rushsinging/aemeath/issues/874) / [#878](https://github.com/rushsinging/aemeath/issues/878) 落地 Runtime-owned interaction identity 后，`AgentClient` **MUST** 增加 typed `reply_interaction` / `cancel_interaction` 命令；[#982](https://github.com/rushsinging/aemeath/issues/982) **MUST** 同步替换本守卫并用故意违规证明新的窄命令集合，旧守卫在替代证据齐备前 **MUST** 保持运行。
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 

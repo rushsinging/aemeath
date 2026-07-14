@@ -1,7 +1,7 @@
 # Agent Runtime · 领域模型
 
 > 层级：02-modules / runtime（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 Agent Runtime 核心域的领域模型：Run 聚合、RunSpec、RuntimeContext 三元组，及其实体/值对象、不变量、领域事件与 SubAgent 派生规则。**只描述目标态**；与现状的差距记入 `03-engineering/migration-governance`。
 
 ## 1. 三元组总览
@@ -22,9 +22,10 @@
 // —— 聚合根 ——
 struct Run {
     id: RunId,                 // UUIDv7
-    spec: RunSpec,             // 规格（可序列化，随 session 快照）
+    spec: RunSpec,             // 规格（可序列化 / 可复用；active RunSpec 不作 durable checkpoint）
     parent: Option<RunId>,     // Sub Run 指向父 Run（结果/事件回传）
     status: RunStatus,         // 状态机（含 Cancelling 过渡态，见 03-loop-and-state-machine）
+    pending_interaction: Option<PendingInteraction>, // 与 AwaitingUser 同步存活，不持久化
     steps: Vec<RunStep>,       // 内部实体序列
     started_at: Instant,
 }
@@ -64,6 +65,18 @@ struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 
     request: InvocationRequest,
     response: InvocationResponse,
 }
+
+struct PendingInteraction {
+    request_id: InteractionRequestId,
+    continuation: InteractionContinuation,
+}
+
+enum InteractionContinuation {
+    CompleteToolCall(ToolCallId),
+    ContinueToolApproval(ToolCallId),
+    ContinuePlanApproval,
+    ContinueAfterHardPause,
+}
 ```
 
 **实体 vs VO**：Run（聚合根）/ Run Step / Tool Call = 实体；Model Invocation = VO；`RunId/RunStepId/ToolCallId`、各 `*Status`、`RawUsageSnapshot`、`ToolCallArgs`、`ToolResult`、`ReasoningLevel` = VO。
@@ -80,10 +93,13 @@ struct ModelInvocation {               // VO：一次 LLM 调用记录，属于 
 6. `AwaitingToolApproval` 未决时，不可进入 `ExecutingTools`
 7. **timeout > 0 时**，墙钟超时强制迁移到 `Failed`（timeout=0 表示无限，见 §5）
 8. 每个 Run **必须独占**一个 cancellation scope；子 Run 从父 scope 派生，NEVER 共享可替换的 Session 级 token 槽
+9. `AwaitingUser` 与唯一 `PendingInteraction` **MUST** 同时存活；reply / cancel 必须匹配 `request_id`，每个 continuation 至多完成一次
+10. 一个 Run 任一时刻至多一个 PendingInteraction；并发 Tool suspension 必须按原 RunStep 的 ToolCall 顺序串行 resolve，**NEVER** 为同一 Run 同时注册多个 waiter
+11. 一个完成的 RunStep 恰好产生一次 `ContextAppend`；assistant 与全部最终 Tool result 按协议顺序一起提交，**NEVER** 逐 suspension 持久化半成品
 
 ## 4. 领域事件（→ Event Projection → SDK ChatEvent）
 
-`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser/Resumed · CompactionStarted/Completed · StuckDetected · RunCancellationRequested · RunCompleted/Failed/Cancelled`
+`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser{request_id}/Resumed{request_id} · CompactionStarted/Completed · StuckDetected · RunCancellationRequested · RunCompleted/Failed/Cancelled`
 
 > **取消事件分两阶段**：`RunCancellationRequested` 在同步取消入口接受请求并将 Run 迁移到 `Cancelling` 时产生；`RunCancelled` 仅在 Provider/Tool/Compact/Hook 等在途工作停止且回滚完成后产生。前者是即时请求事实，后者是异步完成确认。
 
@@ -107,14 +123,15 @@ struct RunSpec {
 
     // —— 执行约束 ——
     timeout: Duration,                // 墙钟上限；**0 = 无限**（Main 默认 0，Sub 可配有限值）
+    retry: RetryPolicy,               // Provider 单 invocation retry 上限 / backoff；context exceeded 不计 retry
 
     // —— 资源模式：驱动 Composition 与 RuntimeContext 装配 ——
     context:   ContextMode,           // SharedSession | Isolated
-    workspace: WorkspaceMode,         // Inherit | Snapshot（Composition Run scope 策略）
+    workspace: WorkspaceMode,         // Inherit | Snapshot（Composition workspace scope 策略）
     policy:    PolicyMode,            // v0.1.0: AllowAll
     memory:    MemoryMode,            // Enabled | Disabled(不读不写/不 reflection)
     hooks:     HookMode,              // Full | BoundaryOnly | Disabled
-    reasoning: ReasoningMode,         // GraphDriven | EffortOnly | Inherit
+    reasoning: ReasoningMode,         // GraphDriven | EffortOnly(level) | Inherit
     task:      TaskMode,              // Shared | Isolated
 }
 
@@ -123,7 +140,11 @@ enum WorkspaceMode { Inherit, Snapshot }              // Snapshot: 快照父 fra
 enum PolicyMode    { AllowAll }                         // CLI --yolo 的领域映射；Future 再扩规则模式
 enum MemoryMode    { Enabled, Disabled }
 enum HookMode      { Full, BoundaryOnly, Disabled }   // BoundaryOnly: 仅 start/stop
-enum ReasoningMode { GraphDriven, EffortOnly, Inherit } // Main: GraphDriven; Sub: EffortOnly/Inherit
+enum ReasoningMode {
+    GraphDriven,
+    EffortOnly(ReasoningLevel), // role / RunSpec 声明的固定 requested level
+    Inherit,
+} // Main: GraphDriven; Sub: EffortOnly/Inherit
 enum TaskMode      { Shared, Isolated }
 ```
 
@@ -139,38 +160,43 @@ struct RuntimeContext {
     tool_catalog:   Arc<dyn ToolCatalogPort>,   // 按 Registry Scope/Profile 投影 schemas
     tool_execution: Arc<dyn ToolExecutionPort>, // 不暴露 Tool/Registry，实现单次函数调用
     policy:    Arc<dyn PolicyPort>,     // v0.1.0: AllowAllPolicy
+    interaction: Arc<dyn InteractionPort>, // Runtime-owned 等待 / reply seam
     memory:    Arc<dyn MemoryPort>,     // Sub(Disabled): NoOpMemory
-    task:      Arc<dyn TaskPort>,       // Sub: 独立实例
+    reflection: Arc<dyn ReflectionPromptPort>, // 纯 prompt / parse / format；apply 仍走同一 memory Arc
+    task:      Arc<dyn TaskAccess>,     // Sub: 独立实例；NEVER 暴露 TaskPersist
     hooks:     Arc<dyn HookPort>,       // Sub: BoundaryOnly
-    reasoning: Arc<dyn ReasoningPort>,  // Sub: EffortOnly/Inherit
+    reasoning: Arc<dyn ReasoningPort>,  // 发布 requested level；Sub: EffortOnly/Inherit
     usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
     config:    ConfigSnapshot,          // Main/Sub 共享
+    clock:     Arc<dyn Clock>,          // request builder 冻结 CalendarDate；Prompt 不读全局时钟
     input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
     events:    Arc<dyn EventSink>,      // 出站：Main→TUI ; Sub→父 Run
     cancel:    RunCancellationScope,    // per-Run；Provider/Tool/Compact/Hook 共享或派生
 }
 ```
 
-`WorkspaceMode` 保留在 `RunSpec` 中作为声明式装配策略，但 RuntimeContext **NEVER** 持有 Workspace 端口、Project trait 或 wiring。Composition 为每个 Run 保留独立的 `CompositionRunScope`：Main scope 选择 Project production wiring，Sub scope 对父 wiring 执行 Project-owned isolated derivation；scope **NEVER** 进入 Runtime、Tool 或 Context 类型。
+`RunSpec` 可序列化是为了模板、默认值与 Sub 派生，不表示 active Run 可恢复。Session 只可在自身 metadata / preference 字段保存 model 等下次 Run 默认偏好，**NEVER** 持久化 active RunSpec、RunStatus、RunStep 或 cancellation scope；resume 后的新输入始终创建全新 Run。
 
-### RunSpec 模式 → RuntimeContext / CompositionRunScope 装配映射
+`WorkspaceMode` 保留在 `RunSpec` 中作为声明式装配策略，但 RuntimeContext **NEVER** 持有 Workspace 端口、Project trait 或 wiring。Composition 为 active Main session slot 保留一个跨多 Run / resume 复用的 `CompositionWorkspaceScope`，只在 Main agent 启动时选择 Project production wiring；Sub Run 对父 wiring 执行 Project-owned isolated derivation 并持有独立 child scope。scope **NEVER** 进入 Runtime、Tool 或 Context 类型。
+
+### RunSpec 模式 → RuntimeContext / CompositionWorkspaceScope 装配映射
 
 | RunSpec 字段 | Main | Sub | 装配 |
 |---|---|---|---|
 | `context` | SharedSession | Isolated | `ContextPort` 实例 |
-| `provider` | 可共享不可变 transport | 可共享不可变 transport | 每次调用创建独立 Invocation Scope，隔离 model/reasoning/max tokens |
-| `workspace` | Inherit | Snapshot | Composition：Main 建立 production scope；Sub 对 parent scope 执行 isolated derivation，并从同一 child wiring 向 Context / Tool backing implementation 分发窄 view；RuntimeContext 无 workspace 字段 |
+| `model` | 可共享不可变 provider transport | 可共享不可变 provider transport | 按 model 选择 adapter；每次调用创建独立 Invocation Scope，隔离 model/reasoning/max tokens |
+| `workspace` | Inherit | Snapshot | Composition：Main 复用 active-session-slot production scope；Sub 对 parent scope 执行 isolated derivation，并从同一 child wiring 向 Context / Tool backing implementation 分发窄 view；RuntimeContext 无 workspace 字段 |
 | `policy` | AllowAll | AllowAll | v0.1.0 同一 PolicyPort；Future 模式另行设计 |
-| `memory` | Enabled | Disabled | 真实 / `NoOpMemory` |
+| `memory` | Enabled | Disabled | Main 使用 active session slot 的同一 Arc；Sub 为 `NoOpMemory` 或显式共享父 Arc |
 | `hooks` | Full | BoundaryOnly | per-tool / 仅 start-stop |
-| `reasoning` | GraphDriven | EffortOnly/Inherit | 全 graph / 仅 effort（无设置继承父）|
+| `reasoning` | GraphDriven | EffortOnly(level)/Inherit | 全 graph / 固定 requested effort / 继承父 requested effort；model clamp 由 Provider resolver 完成 |
 | `task` | Shared | Isolated | 独立 `TaskStore` |
 | `tools` | Main Scope + 完整基线 Profile | Sub Scope + 收缩 Profile | Scope 决定装配资源，Profile 只按 capability 收缩 |
 | `cancel` | 新建 per-Run scope | 从父 scope 派生 | 父取消传播到子 Run；各 Run 独立终态收口 |
 
 ## 7. SubAgent 派生：控制权矩阵 + 安全铁律
 
-SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 composition-provided AgentDispatch 捕获或按 RunId 索引父 `CompositionRunScope` → 派生子 scope 并装配**子 RuntimeContext** → 启动子 Run，跑同一套 Loop（引擎零分支）。Runtime 只编排 Tool 调用并声明 `WorkspaceMode::Snapshot`，**NEVER** 接触 scope 或 Project 能力。
+SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 composition-provided AgentDispatch 捕获或按 RunId 索引父 `CompositionWorkspaceScope` → 派生子 scope 并装配**子 RuntimeContext** → 启动子 Run，跑同一套 Loop（引擎零分支）。Runtime 只编排 Tool 调用并声明 `WorkspaceMode::Snapshot`，**NEVER** 接触 scope 或 Project 能力。
 
 ### 安全铁律
 > **Sub 的权限/能力 NEVER 超过 Main 授予的范围。Main 只能"削弱或平移"，NEVER 让 Sub 越权。**
@@ -204,10 +230,11 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | memory | 读写 + reflection | **不读不写**（可由 main 开启注入）|
 | hooks | Full | BoundaryOnly（start/stop）|
 | policy | AllowAll | AllowAll |
-| reasoning | GraphDriven | EffortOnly（无 graph，无设置继承父）|
+| reasoning | GraphDriven | EffortOnly(level) / Inherit（无 graph，固定或继承 requested level）|
 | provider | 共享不可变 transport；独立 Invocation Scope | 共享不可变 transport；独立 Invocation Scope |
 | timeout | 默认 0（无限）| 可配有限值 |
 | 事件出口 | → TUI | → 父 Run（#612）|
+| interaction | SDK/TUI adapter | 显式 parent-mediated adapter；未装配则 unavailable |
 | 输入 | 常驻多轮 | 单次输入 |
 
 > **差异 100% 由 RunSpec + Composition 装配 + RuntimeContext + Event adapter 表达，Loop Engine 零分支。**
@@ -236,4 +263,5 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 2026-07-12 | 取消语义收敛：per-Run cancellation scope、Cancelling 不变量、取消请求/完成双事件 | #700 |
 | 2026-07-12 | RuntimeContext 的 ToolPort 拆为 Catalog/Execution；RunSpec tools 改为 Registry Scope + capability Profile | #787 |
 | 2026-07-12 | Provider 隔离语义收敛为共享不可变 transport + 每次调用独立 Invocation Scope | #788 |
-| 2026-07-14 | 移除 Runtime Workspace 端口；WorkspaceMode 仅驱动 composition-internal Run scope，Sub 从父 Project wiring 派生同一隔离实例供 Context / Tool 装配 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 移除 Runtime Workspace 端口；WorkspaceMode 仅驱动 composition-internal workspace scope，Main 在 Session 内复用，Sub 从父 Project wiring 派生同一隔离实例供 Context / Tool 装配；补齐 pending interaction identity / continuation | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 增加 PlanApproval continuation；冻结单 PendingInteraction、Tool suspension 串行化与每 RunStep 单次 ContextAppend 不变量 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

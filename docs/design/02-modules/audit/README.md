@@ -76,7 +76,7 @@ enum UsageDropReason {
 
 - Runtime hot path 只做 try_record，永不 await Audit IO；
 - Runtime 不重试、不改变 Run 状态；
-- queue bounded，容量从 `ConfigReader.snapshot()` 获得 ConfigSnapshot，再经 `usage_queue_capacity()` 只读 accessor 读取；不得访问裸 Config 字段；
+- queue bounded；Composition 在 bootstrap / active wiring 发布前从已验证 `ConfigSnapshot` 提取 `UsageQueueConfig { capacity }` 并按值注入 sink，Audit worker **NEVER** 持有 `ConfigReader`、`ConfigQuery` 或裸 Config 字段；
 - Dropped 由 sink 计数，并通过 Logging 低频聚合 warn；
 - enqueue Accepted 只表示进入队列，不表示 worker 已接收或已经落盘；Accepted 到 flush 完成之间存在进程异常导致的静默丢失窗口，这是尽力审计的明确语义。
 

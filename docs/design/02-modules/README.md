@@ -1,32 +1,32 @@
 # 02-modules · 模块级设计
 
 > 层级：02-modules（模块 / BC 战术设计）
-> 状态：Target｜Milestone：v0.1.0（S2 #761 填充实质内容）
+> 状态：Target｜Milestone：v0.1.0｜对应 Issue：#761 / [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本层承载各 Bounded Context 的**战术设计**：聚合、实体、值对象、不变量、领域服务、模块内端口与内部结构。**只描述目标态。** 总体战略设计见 [../01-system/](../01-system/)。
 
 ## 模块文档
 
 每个 BC / 模块一份文档，用数字前缀命名：
 
-| 目标文档 | 内容 | 状态 |
-|---|---|---|
-| [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 | ✅ S2 |
-| [context-management/](context-management/README.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt/Guidance、Memory 注入 | ✅ S2 |
-| [tools/](tools/README.md) | Tool Catalog/Execution 双端口、Scope/Profile、Skill、Slash Command 与 MCP 生命周期 | ✅ S2 |
-| [task/](task/README.md) | Task 聚合根、状态机、依赖图不变量、Batch 领域服务、TaskPort、Published Language | ✅ S2 |
-| [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离范式、三端口、GitWorktreeOps、git 上下文供给 | ✅ S2 |
-| [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入(#551)、Reflection 引擎、MemoryPort | ✅ S2 |
-| [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope | ✅ S2 |
-| [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | ✅ S2 |
-| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、ConfigReader/ConfigAppService、CompatibilityAdapter ACL（外部 CLI 配置兼容层）、adapter 接入、reasoning 静态阈值 | ✅ S2 |
-| [tui/](tui/README.md) | 八层 TEA 管线、三条信息流、3+3 Context Model、Msg/Intent/Change/Effect 枚举、SDK DTO 边界、架构门禁、死代码清单、reducer 纯化目标态、Model 层完整字段与投影状态机、SpinnerPhase 派生函数、ConfigProjection、WorkspaceProjection、出站端口适配器（Local + WSS）、单一真相规则、纯净性约束、事件流两层转换 ACL、agent_id 缺口 R8、sub-agent 事件路由 #612、10 种 block 类型、ViewAssembler 组装、三层缓存（BlockCache/GuttedCache/force_repaint）、ViewState 状态机、Render 管线、选区复制 | ✅ S2 |
-| [storage/](storage/README.md) | 原子读写、backup/quarantine、路径安全及数据所有权边界 | ✅ S2 摘要 |
-| [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink/rotation 与 Audit 分离 | ✅ S2 摘要 |
-| [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 | ✅ S2 摘要 |
-| [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 | ✅ S2 |
-| [hook/](hook/README.md) | 单 HookPort、类型化协议、3 次执行重试与 Stop/Run 15 次阻断语义 | ✅ S2 |
-| [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink/Query 与独立 JSONL 存储 | ✅ S2 |
-| [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑 | ⏸ 占位（#794 暂缓） |
+| 目标文档 | 内容 |
+|---|---|
+| [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 |
+| [context-management/](context-management/README.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt / Guidance、Memory 注入 |
+| [tools/](tools/README.md) | Tool Catalog / Execution 双端口、Scope / Profile、Skill、Slash Command 与 MCP 生命周期 |
+| [task/](task/README.md) | Task 聚合根、状态机、依赖图不变量、Batch 领域服务、TaskAccess / TaskPersist、Published Language |
+| [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离、三端口、GitWorktreeOps、git 上下文供给 |
+| [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort |
+| [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |
+| [workflow/](workflow/README.md) | ReasoningGraph 节点状态机、effort 调节、ReasoningPort OHS 与 clamp 不变量 |
+| [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、CompatibilityAdapter ACL |
+| [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与四类 Interaction 资源隔离 |
+| [storage/](storage/README.md) | 原子读写、backup / quarantine、路径安全及数据所有权边界 |
+| [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink / rotation 与 Audit 分离 |
+| [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 |
+| [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 |
+| [hook/](hook/README.md) | 单 HookPort、类型化协议、3 次执行重试与 Stop / Run 15 次阻断语义 |
+| [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink / Query 与独立 JSONL 存储 |
+| [server/](server/README.md) | WSS 协议、控制面 / worker 拓扑的 Future 设计边界 |
 
 ## 编写原则
 
@@ -37,6 +37,7 @@
 
 - 系统级总体设计：[../01-system/](../01-system/)
 - 横切工程：[../03-engineering/README.md](../03-engineering/README.md)
+- Current → Target 迁移治理：[../03-engineering/migration-governance.md](../03-engineering/migration-governance.md)
 - 目录总览：[../README.md](../README.md)
 
 ## 修改历史

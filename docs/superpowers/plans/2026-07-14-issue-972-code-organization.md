@@ -19,19 +19,20 @@
 
   State the adopted shape as `capability-first modular monolith + use-case colocation + ports on demand`. Explicitly distinguish DDD strategic design, Hexagonal inside/outside isolation, Clean dependency direction, and Vertical Slice change locality from directory templates.
 
-- [x] **Step 2: Define the progressive structure ladder**
+- [x] **Step 2: Define independent evidence-triggered structure options**
 
-  Document the promotion sequence:
+  Document the base granularity and independent options:
 
   ```text
-  flat capability module
-    -> cohesive use-case/capability submodules
-    -> optional shared model for cross-use-case invariants
-    -> optional ports for real external seams
-    -> optional crate boundary for compiler isolation or stable published language
+  base: flat capability module OR cohesive use-case/capability submodules
+  independent options:
+    - shared model for proven cross-use-case invariants
+    - ports for real outbound seams or supplier-owned OHS
+    - provider/protocol directories for multi-file technical integrations
+    - crate boundary for compiler isolation or stable published language
   ```
 
-  Include explicit entry and exit criteria for `model/`, ports, technology-specific directories, and new crates.
+  Include explicit entry and exit criteria for each option, and state that none is a prerequisite for the others or a maturity level.
 
 - [x] **Step 3: Add aemeath examples**
 
@@ -101,31 +102,88 @@
 - Modify: `docs/design/01-system/04-system-architecture.md`
 - Modify: `docs/design/02-modules/project/README.md`
 - Modify: `docs/design/02-modules/project/01-domain-model.md`
+- Modify: `docs/design/02-modules/project/02-ports-and-adapters.md`
 - Modify: `docs/design/03-engineering/architecture-guards.md`
 - Modify: `docs/design/03-engineering/migration-governance.md`
 
-- [ ] **Step 1: Align repository entry points and active instructions**
+- [x] **Step 1: Align repository entry points and active instructions**
 
   Replace stale root navigation with the three-level design index and code-organization source of truth. Reframe Update's current flat files as a migration-period implementation constraint, without treating the retired concept as architecture or hard-coding the guard count.
 
-- [ ] **Step 2: Eliminate duplicate Project target decisions**
+- [x] **Step 2: Eliminate duplicate Project target decisions**
 
-  Make `02-ports-and-adapters.md` the only Project physical-layout and port-contract source. Remove the duplicate tree and optional broad super-trait from the Project README, require Composition Root injection of `GitWorktreeOps`, and track the current self-construction gap in Migration Governance.
+  Make `02-ports-and-adapters.md` the only Project physical-layout and port-contract source. Remove the duplicate tree and optional broad super-trait from the Project README. Keep `GitWorktreeOps` and `GitCli` private to Project; expose a composition-only production wiring surface that returns narrow Workspace capabilities, and track the current self-construction gap in Migration Governance. Align `WorkspaceControl` consumers with the three worktree-capable Tools while Runtime remains the orchestrator.
 
-- [ ] **Step 3: Reconcile system-level criteria and guard runtime wording**
+- [x] **Step 3: Reconcile system-level criteria and guard runtime wording**
 
   Delegate crate promotion criteria to `06-code-organization.md` §3.6, keep DDD strategic identification separate from optional tactical aggregates, and describe the legacy guard's path-based test exclusion exactly.
 
-- [ ] **Step 4: Re-run independent specification and quality reviews**
+- [x] **Step 4: Re-run independent specification and quality reviews**
 
   Resolve all Critical and Important findings before repository verification.
+
+### Task 3.6: Align Workspace integration without redundant abstractions
+
+**Files:**
+- Modify: `docs/design/01-system/03-context-map.md`
+- Modify: `docs/design/02-modules/project/README.md`
+- Modify: `docs/design/02-modules/runtime/01-domain-model.md`
+- Modify: `docs/design/02-modules/runtime/06-ports-and-adapters.md`
+- Modify: `docs/design/02-modules/context-management/01-session.md`
+- Modify: `docs/design/02-modules/tools/01-domain-model.md`
+- Modify: `docs/design/02-modules/tools/02-ports-and-lifecycle.md`
+- Modify: `docs/design/02-modules/tui/02-model.md`
+- Modify: `docs/design/03-engineering/migration-governance.md`
+
+- [x] **Step 1: Keep Workspace isolation in the Composition-owned active Main slot / Sub run scope**
+
+  Retire the pass-through Runtime `WorkspacePort`: returning a frame cannot preserve the same isolated Project handle needed by Tool and Context Management. Keep the Main Project wiring in a composition-internal active-session-slot scope reused across runs / resume; only Sub derives an isolated run-lifetime wiring. RuntimeContext receives only the already-wired Context and Tool ports and never owns Project state or wiring.
+
+- [x] **Step 2: Bind Project capabilities directly where no second abstraction is justified**
+
+  Use `WorkspaceRead` / `WorkspaceControl` directly in Tool resource design and `WorkspacePersist` in Context Management. Limit Control to Bash, EnterWorktree, and ExitWorktree; each of those consumers receives Read and Control views from the same opaque wiring, while read-only Tools receive Read only. Record the Current-to-Target retirement of the generic Tool workspace wrapper without changing code in #972.
+
+- [x] **Step 3: Remove concrete implementation leakage from TUI target design**
+
+  Define WorkspaceProjection as an SDK-event / ACL projection. TUI must never name `WorkspaceService` or the composition-only wiring handle.
+
+- [x] **Step 4: Re-review the complete Workspace contract graph**
+
+  Verify that Target documents no longer introduce a generic `WorkspacePort` or `WorkspaceAccess`; every `WorkspaceRead`, `WorkspaceControl`, and `WorkspacePersist` occurrence has a single owner and purpose. Preserve explicitly marked Current/Migration facts until their leaf issue executes the code change.
+
+### Task 3.7: Close active-session resource and delivery-chain contracts
+
+**Files:**
+- Modify: `docs/design/02-modules/{config,context-management,memory,task,runtime,tui}/**`
+- Modify: `docs/design/01-system/03-context-map.md`
+- Modify: `docs/design/03-engineering/migration-governance.md`
+
+- [x] **Step 1: Define one atomic Main session switch protocol**
+
+  Give `MainSessionWiring` the shared/exclusive lease and stable Session / Memory ownership. Prepare Project, map its validated identity to Config-owned location, prepare Config, eager-open Memory with candidate MemoryConfig, then prepare Task; commit without I/O and publish Config watch last. Keep Config's active state in Config only.
+
+- [x] **Step 2: Close Project, Task, Config, and Memory failure semantics**
+
+  Serialize Project control operations without holding the state lock across Git I/O; split TaskAccess from TaskPersist over one backing state; propagate Memory persistence errors; and define recoverable legacy Memory key migration.
+
+- [x] **Step 3: Make Runtime consume only run-bound capabilities**
+
+  Bind ContextPort, the same active Memory Arc, TaskAccess, ReflectionPromptPort, and one immutable ConfigSnapshot under a MainRunLease. Prohibit global current-config reads and active-resource arcs escaping the lease.
+
+- [x] **Step 4: Close the TUI event/effect chain**
+
+  Require SDK event → TUI-owned DTO → context Intent → pure reducer Change → Coordinator Effect → effect runner → result Intent. Runtime generates the interaction request ID and keeps the pending continuation; TUI carries only its own lossless ID/DTO projection and replies through AgentClient commands.
+
+- [x] **Step 5: Move all Current facts into Migration Governance**
+
+  Remove implementation status, legacy type names, and progress tables from touched Target documents; preserve exact Current paths, responsible native sub-issues, verification, and exit conditions in Migration Governance only.
 
 ### Task 4: Validate the documentation set
 
 **Files:**
 - Verify all files changed in Tasks 1-3.5.
 
-- [ ] **Step 1: Check the retired concept is absent from target design prose**
+- [x] **Step 1: Check the retired concept is absent from target design prose**
 
   Run:
 
@@ -135,7 +193,7 @@
 
   Expected: the only permitted match is the exact legacy script identifier in `architecture-guards.md` and `migration-governance.md`; no target architecture prose uses the concept.
 
-- [ ] **Step 2: Check required coverage and source traceability**
+- [x] **Step 2: Check required coverage and source traceability**
 
   Run:
 
@@ -145,7 +203,7 @@
 
   Expected: every ecosystem and the decision traceability section is present.
 
-- [ ] **Step 3: Check Markdown whitespace and links mechanically**
+- [x] **Step 3: Check Markdown whitespace and links mechanically**
 
   Run:
 
@@ -154,10 +212,17 @@
   python3 - <<'PY'
   from pathlib import Path
   import re
+  import subprocess
 
-  root = Path('docs/design')
+  changed = subprocess.check_output(
+      ['git', 'diff', '--name-only', 'origin/release/v0.1.0...HEAD'],
+      text=True,
+  ).splitlines()
   failures = []
-  for path in root.rglob('*.md'):
+  for raw_path in changed:
+      path = Path(raw_path)
+      if path.suffix != '.md':
+          continue
       text = path.read_text()
       for target in re.findall(r'\[[^]]+\]\(([^)]+)\)', text):
           if '://' in target or target.startswith('#'):
@@ -171,20 +236,21 @@
   PY
   ```
 
-  Expected: no whitespace errors and no missing relative Markdown targets.
+  Expected: no whitespace errors and no missing relative Markdown targets in #972's changed files. A separate full-tree audit may still report only the baseline Server Foundation link described below.
 
-  Result: all 10 changed Markdown files pass. The full-tree scan still reports the pre-existing Server Foundation link missing from `docs/design/02-modules/server/01-design.md`; the same link is present on `origin/release/v0.1.0` and is outside #972.
+  Result: all Markdown files changed by #972 pass. The full-tree scan still reports the pre-existing Server Foundation link missing from `docs/design/02-modules/server/01-design.md`; the same link is present on `origin/release/v0.1.0` and is outside #972.
 
-- [ ] **Step 4: Run architecture and repository verification**
+- [x] **Step 4: Run architecture and repository verification**
 
   Run:
 
   ```bash
-  .agents/hooks/check-architecture-guards.sh
+  PATH="/opt/homebrew/bin:$PATH" .agents/hooks/check-architecture-guards.sh
   cargo test --workspace
+  cargo clippy --workspace --all-targets
   ```
 
-  Expected: both commands exit 0.
+  Expected: all three commands exit 0 and clippy emits no warning.
 
   Result: architecture guards pass with Homebrew Python on `PATH` because the existing script uses Python 3.10+ union syntax while macOS `/usr/bin/python3` is 3.9.6; `cargo test --workspace` and `cargo clippy --workspace --all-targets` pass.
 
@@ -202,7 +268,7 @@
   Run:
 
   ```bash
-  git add docs/design docs/superpowers/plans/2026-07-14-issue-972-code-organization.md AGENTS.md specs/project.md
+  git add README.md AGENTS.md specs docs/design docs/superpowers/plans/2026-07-14-issue-972-code-organization.md
   git commit -m "docs(architecture): define adaptive code organization (#972)"
   ```
 
