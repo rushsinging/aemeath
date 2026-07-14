@@ -193,9 +193,9 @@ where
         &hook_ui,
         &hook_runner,
         &call,
-        &execution.outcome.text,
-        execution.outcome.is_error,
+        &execution,
         workspace_root,
+        ag_ctx,
     )
     .await;
     send_tool_result(&sink, context, &execution).await;
@@ -308,6 +308,7 @@ mod tests {
                 allow_all: true,
             },
             workspace: project::api::WorkspaceService::new(cwd),
+            run_id: sdk::RunId::new_v7().to_string(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),
             session_reminders: None,

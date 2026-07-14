@@ -57,6 +57,10 @@ impl TypedTool for TaskListCreateTool {
         let subject = args.subject;
         let summary = args.summary;
 
+        if summary.is_empty() {
+            return TypedToolResult::error("missing required field: summary");
+        }
+
         let batch = self.store.create_list(subject.clone(), summary).await;
         TypedToolResult::success(
             format!("Task list #{} created. Subject: {}", batch.id, subject),
@@ -74,6 +78,7 @@ mod tests {
     fn test_ctx() -> ToolExecutionContext {
         ToolExecutionContext {
             workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
+            run_id: "test-run".to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),

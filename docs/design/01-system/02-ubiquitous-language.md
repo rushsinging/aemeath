@@ -1,0 +1,141 @@
+# 统一语言（Ubiquitous Language）
+
+> 层级：01-system（系统级总体设计）
+> 状态：Target（目标术语体系）｜Milestone：v0.1.0
+> 本文定义跨 BC 通用的核心术语。**只描述目标术语与定义，不记录当前代码命名。** 术语在 BC 之间跨界时，经端口翻译（见 [03-context-map.md](03-context-map.md) 的 ACL / PL）。
+
+## 0. 命名总则
+
+- 术语首先服务**领域表达**。
+- 层级对齐业界成熟模型：`Session → Run → Run Step`（≈ OpenAI Assistants API 的 `Thread → Run → Run Step`）。
+- 同名不同义的术语（如领域 `Message` 与 provider 线格式消息）**必须**经 ACL 隔离，禁止跨界直接复用。
+
+## 1. Agent Runtime（核心域）
+
+| 术语 | 定义 |
+|---|---|
+| **Run** | 一次由用户输入（或父 Run 派生 SubAgent）触发的**一轮 agent 执行**，包含多个 Run Step，直到完成 / 失败 / 取消 / 等待用户。全系统唯一的 **Agent 执行生命周期状态机**，**内存态、不持久化**。标识 `RunId`。 |
+| **Run Step** | Run 内的一次「模型调用 → 应用响应 →（可选）工具执行」往返。 |
+| **Model Invocation** | 一次具体的 LLM 调用（请求 + 流式响应 + usage）。 |
+| **Tool Call** | 一次工具调用。双 ID：领域 `ToolCallId`（UUIDv7）+ provider 边界标识。 |
+| **Loop Engine** | 驱动 Run 前进的 ReAct 循环骨架（推理 → 行动 → 观察 + 停止条件），Main Agent 与 SubAgent 共用。 |
+| **Main Agent** | 发起顶层 Run（**Main Run**）的主体，由用户输入直接触发，拥有完整交互（可 ask_user）与工具能力，是 SubAgent 的父级。 |
+| **SubAgent** | 由 Main Agent（或另一 SubAgent）经工具派生的子执行主体，其执行是一个 **Sub Run**；共用同一状态机与 Loop，差异由 `ExecutionPolicy` 表达（受限交互、独立轮次 / timeout、结果回传父级）。 |
+| **ExecutionPolicy** | 表达 Main Agent / SubAgent 差异的策略：输入源、交互能力、轮次上限、timeout、结果出口。 |
+| **Interaction** | Run 执行中断、等待外部（人）决策、再恢复的**用例族**（非 BC）：ask_user / 权限审批 / plan mode / pause-resume。对应状态 `AwaitingUser` / `AwaitingToolApproval`。 |
+
+### Run 状态机（内存态）
+
+```
+Created → PreparingContext → InvokingModel → ApplyingResponse
+        → AwaitingToolApproval → ExecutingTools → (下一 Run Step)
+        → AwaitingUser（暂停，内存存活，不落盘）
+        → Compacting → Finishing → Completed / Failed / Cancelled
+```
+
+> 崩溃后不恢复中间状态；用户重新发起即新建 Run。
+
+## 2. Workflow（支撑域）
+
+> 仅承载 reasoning effort 调节，经端口被 Agent Runtime 消费；不做多-agent 图编排（无此长期计划）。
+
+| 术语 | 定义 |
+|---|---|
+| **Reasoning Node** | reasoning graph 的阶段节点：IDLE / EXPLORE / PLAN / EXECUTE / VERIFY，用于调节 effort。 |
+| **Reasoning Level** | 统一的推理强度抽象：Off / Low / Medium / High / Xhigh / Max，经三层 clamp（graph.desired ∩ provider.max ∩ user.max）。静态阈值归 Config。 |
+
+## 3. Context Management（支撑域）
+
+| 术语 | 定义 |
+|---|---|
+| **Session** | 用户协作会话**容器**，持有对话历史（ChatChain）、workspace、tasks 快照、元数据，跨多次用户输入。**数据聚合，非状态机**。 |
+| **ChatChain** | Session 内的对话历史链，由多个 ChatSegment 组成（compact 产生新段）。 |
+| **ChatSegment** | 对话历史的一个压缩段。 |
+| **Context Window** | 单次 Model Invocation 实际喂给模型的上下文（历史 + 注入记忆 + 提示装配后的结果）。 |
+| **Compact** | 压缩历史以回收 token 的能力族：auto-compact（整链）/ micro-compact（陈旧工具结果）/ snip（历史级回收）。 |
+| **Token Budget** | 上下文 token 预算估算与决策。 |
+| **Memory Injection** | 把 Memory 检索结果注入 Context Window 的动作。 |
+| **Prompt / Guidance** | 系统提示与按模型前缀匹配的 guidance 装配。 |
+
+## 4. Tool & Skill & Command（支撑域）
+
+| 术语 | 定义 |
+|---|---|
+| **Tool** | 模型发起的函数或外部能力调用；经 Tool Catalog 发现、经 Tool Execution 执行。 |
+| **Registry Scope** | 一次 Run 实际装配的 Tool 与资源集合，回答“有什么”。 |
+| **Tool Profile** | 允许的 Tool Capability 集合，回答“能用什么”；只能收缩 Scope，不能扩权。 |
+| **Tool Capability** | Tool 执行所需的安全能力标签，例如读写工作区、执行进程、用户交互或 Agent Dispatch。 |
+| **Tool Outcome** | Tool 调用的领域结果：Success / Failure / Cancelled，包含模型可见内容、结构化数据与安全错误分类。 |
+| **Skill** | 可发现、可物化的提示资产；产出 Prompt Fragment，不作为 Tool 执行。 |
+| **Prompt Fragment** | Skill 或 PromptInjection Command 提供给 Context Management 的提示片段 Published Language。 |
+| **Slash Command** | 用户发起的命令；按 PromptInjection / SnapshotQuery / ApplicationControl 三种机制路由。 |
+| **MCP Tool** | 经 MCP adapter 与 ACL 转换为统一 Tool 语义的外部工具；MCP 不是独立 BC。 |
+
+## 5. Memory（支撑域）
+
+| 术语 | 定义 |
+|---|---|
+| **Memory Entry** | 一条持久化记忆，带 Layer（global / project）与 archive 状态。 |
+| **Reflection** | 反思引擎：跑独立 LLM 调用，产出 Memory Suggestion（记忆建议）。 |
+| **Memory Suggestion** | Reflection 产出的候选记忆。 |
+
+## 6. Task Management（支撑域）
+
+| 术语 | 定义 |
+|---|---|
+| **Task** | 任务聚合根：状态机 pending→in_progress→completed，含依赖（blocked_by）。类型是 Task BC 的 Published Language。 |
+| **Batch** | 一批相关任务（任务列表）。 |
+| **Task Snapshot** | Task 的可持久化快照（内嵌 Session 落盘）。 |
+
+## 7. Project / Workspace（支撑域）
+
+| 术语 | 定义 |
+|---|---|
+| **Workspace** | worktree 工作区上下文，单一可变状态源。 |
+| **Workspace Frame** | 工作区上下文栈的一帧（进入 / 退出 worktree）。 |
+
+## 8. 通用域术语
+
+| 术语 | 定义 | 所属 BC |
+|---|---|---|
+| **Message** | 领域对话消息（role + content + tool calls）。**与 provider 线格式经 ACL 隔离**。 | Agent Runtime / Context Management（Shared Kernel） |
+| **Provider** | LLM 供应商适配器，内部 ACL 吸收各家差异。 | Provider |
+| **Policy Decision** | 工具执行前的权限判断结果。 | Policy |
+| **Audit Event** | 审计事件（执行 / 成本 / 用量）。 | Audit |
+| **Cost / Usage** | 成本与 token 用量追踪，含 pricing。 | Audit |
+| **Hook** | 生命周期钩子脚本。 | Hook |
+| **Config Snapshot** | 只读配置快照（Config 的 Published Language）。 | Config |
+| **ID（UUIDv7）** | 领域标识 newtype。 | 全域（Shared Kernel） |
+
+## 9. 术语辨析（易混淆）
+
+| A | B | 区别 |
+|---|---|---|
+| **Session** | **Run** | Session=长生命周期数据容器（对话历史）；Run=单次执行的状态机（内存态）。一个 Session 含多个 Run。 |
+| **Run Step** | **Model Invocation** | Run Step=一次「调模型 + 用响应 + 执行工具」往返；Model Invocation=其中那一次具体的 LLM 调用。一个 Run Step 通常含一次 Model Invocation。 |
+| **Main Agent** | **SubAgent** | 前者是用户输入直接触发的顶层执行主体（发起 Main Run）；后者是父级经工具派生的子执行主体（发起 Sub Run）。共用状态机与 Loop，差异在 ExecutionPolicy。 |
+| **领域 Message** | **provider 线格式消息** | 前者是领域内部模型；后者是各家 API 的传输格式。经 Provider 内部 ACL 转换，禁止跨界直用。 |
+| **Reasoning Node** | **Run 状态** | 前者是 effort 调节状态机（Workflow）；后者是执行生命周期状态机（Agent Runtime）。职责不同，不可混淆。 |
+| **Memory Injection** | **Memory Entry** | 前者是"注入动作"（Context Management）；后者是"记忆数据"（Memory）。 |
+| **Tool** | **Skill** | Tool 调用函数并返回 Tool Outcome；Skill 物化 Prompt Fragment，由 Context Management 注入。 |
+| **Registry Scope** | **Tool Profile** | Scope 决定本次 Run 装配了什么；Profile 决定其中哪些 capability 被允许。 |
+| **Slash Command** | **Tool Call** | Slash Command 由用户发起并路由应用用例；Tool Call 由模型发起并调用函数。 |
+
+## 10. 相关文档
+
+- 产品与子域：[01-product-and-domain.md](01-product-and-domain.md)
+- 集成关系与端口：[03-context-map.md](03-context-map.md)
+- 系统架构：[04-system-architecture.md](04-system-architecture.md)
+- 依赖规则：[05-dependency-rules.md](05-dependency-rules.md)
+- 目录总览：[../README.md](../README.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-11 | 初稿：核心术语表、AgentRun 状态机、术语辨析 | #760 |
+| 2026-07-11 | 改为纯目标态（移除"当前代码命名 / 迁移说明"列）、文档引用链接化、新增修改历史 | #760 |
+| 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、Turn→Run Step；补 Main Agent 与 SubAgent 对照 | #760 |
+| 2026-07-11 | Workflow 降为支撑域（第 2 节标题），移除不做的 Workflow Graph 编排术语 | #760 |
+| 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
+| 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |

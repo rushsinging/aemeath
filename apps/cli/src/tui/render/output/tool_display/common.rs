@@ -15,28 +15,6 @@ pub(super) fn typed_data<T: DeserializeOwned>(payload: Option<&ToolResultPayload
     serde_json::from_value(payload.content.clone()).ok()
 }
 
-pub(super) fn str_arg<'a>(input: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
-    input
-        .get(key)
-        .and_then(|value| value.as_str())
-        .unwrap_or(default)
-}
-
-pub(super) fn u64_arg(input: &serde_json::Value, key: &str) -> Option<u64> {
-    input.get(key).and_then(|value| value.as_u64())
-}
-
-pub(super) fn bool_arg(input: &serde_json::Value, key: &str, default: bool) -> bool {
-    input
-        .get(key)
-        .and_then(|value| value.as_bool())
-        .unwrap_or(default)
-}
-
-pub(super) fn file_path(input: &serde_json::Value) -> &str {
-    str_arg(input, "file_path", "")
-}
-
 pub(super) fn truncate_ellipsis(text: &str, max_width: usize) -> String {
     if text.len() > max_width {
         let (prefix, _) = safe_text::truncate_unicode_width(text, max_width);

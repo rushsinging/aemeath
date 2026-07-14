@@ -4,14 +4,19 @@ use serde::{Deserialize, Serialize};
 
 /// Typed result returned by the `task_update` tool.
 ///
-/// `subject` 由工具从 store 回填（LLM 调用时通常不传 subject），供 TUI 渲染
-/// header 使用（issue #486）：`Task N — <subject> → <status>`。
+/// 回填完整 task 状态，供 LLM 获得上下文、TUI 渲染 header 使用（#979）。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct TaskUpdateResult {
     pub task_id: String,
     pub status: String,
     #[serde(default)]
     pub subject: String,
+    /// 当前优先级（如 "high"）
+    #[serde(default)]
+    pub priority: String,
+    /// 当前被阻塞的任务 id 列表
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
 }
 
 /// Typed input for the `task_update` tool.
@@ -21,6 +26,7 @@ pub struct TaskUpdateResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]

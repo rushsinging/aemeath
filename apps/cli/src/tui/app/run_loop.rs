@@ -198,6 +198,7 @@ impl App {
                     interrupted.store(false, Ordering::Relaxed);
                     self.chat.clear_tool_activity();
                     self.spinner_phase(SpinnerPhase::Thinking);
+                    self.chat.expect_run_start();
                     self.chat.start_processing();
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::UserMessage {

@@ -16,7 +16,7 @@ pub enum Effect {
     SendChatInputEvent {
         event: sdk::ChatInputEvent,
     },
-    CancelAgentChat,
+    CancelCurrentRun,
     /// 保存当前会话。`notify=true`（/save 手动触发）时经 UiEvent 回灌
     /// `[session saved: id]` / 失败反馈；`false`（MessagesSync 后台自动保存）静默。
     SaveSession {

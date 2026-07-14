@@ -13,6 +13,7 @@ pub struct WriteResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct WriteInput {
     /// Absolute or workspace-relative path of the file to create or overwrite. Required.
     pub file_path: String,

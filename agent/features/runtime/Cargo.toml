@@ -9,7 +9,7 @@ provider = { path = "../provider" }
 tools = { path = "../tools" }
 project = { path = "../project" }
 policy = { path = "../policy" }
-prompt = { path = "../prompt" }
+context = { path = "../context" }
 storage = { path = "../storage" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }

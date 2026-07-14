@@ -83,6 +83,7 @@ pub enum AppEvent {
         elapsed_secs: f64,
     },
     Error(String),
+    RunCancelled,
     Cancelled {
         context: UiTurnContext,
     },

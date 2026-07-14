@@ -5,6 +5,11 @@ use share::tool::types::task_create::{TaskCreateInput, TaskCreateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStore};
 
+/// 判断是否为占位符值：纯空白（如 `""` `"  "`）。
+fn is_placeholder(val: &str) -> bool {
+    val.trim().is_empty()
+}
+
 pub struct TaskCreateTool {
     pub store: Arc<TaskStore>,
 }
@@ -92,14 +97,18 @@ impl TypedTool for TaskCreateTool {
             .create_with_priority(subject, description, priority)
             .await;
 
-        // Set additional fields if provided
+        // Set additional fields if provided — skip blank/placeholder strings to avoid dirty data (#979)
         if let Some(session_id) = args.session_id {
-            self.store
-                .update(&task.id, |t| t.session_id = Some(session_id))
-                .await;
+            if !is_placeholder(&session_id) {
+                self.store
+                    .update(&task.id, |t| t.session_id = Some(session_id))
+                    .await;
+            }
         }
         if let Some(owner) = args.owner {
-            self.store.update(&task.id, |t| t.owner = Some(owner)).await;
+            if !is_placeholder(&owner) {
+                self.store.update(&task.id, |t| t.owner = Some(owner)).await;
+            }
         }
 
         // Get updated task for response
@@ -121,7 +130,17 @@ impl TypedTool for TaskCreateTool {
 
         TypedToolResult::success(
             format!("Task #{} created: {}", display_id, task.subject),
-            TaskCreateResult { task_id: task.id },
+            TaskCreateResult {
+                task_id: task.id,
+                display_id,
+                subject: task.subject.clone(),
+                status: format!("{:?}", task.status).to_lowercase(),
+                priority: format!("{:?}", task.priority).to_lowercase(),
+            },
         )
     }
 }
+
+#[cfg(test)]
+#[path = "task_create_tests.rs"]
+mod tests;

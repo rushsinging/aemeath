@@ -138,14 +138,24 @@ impl TypedTool for TaskUpdateTool {
             Some(task) => {
                 let display_id = self.store.format_display_id(&task.id).await;
                 let status = format!("{:?}", task.status);
+                let priority = task.priority.as_str().to_string();
+                let blocked_by = self
+                    .store
+                    .to_display_ids(&task.blocked_by)
+                    .await
+                    .into_iter()
+                    .map(|id| format!("#{id}"))
+                    .collect::<Vec<_>>();
 
-                let message = format!("Task #{} updated", display_id);
+                let message = format!("Task #{} updated. Status: {}", display_id, status);
                 TypedToolResult::success(
                     message,
                     TaskUpdateResult {
                         task_id: display_id,
                         status,
                         subject: task.subject.clone(),
+                        priority,
+                        blocked_by,
                     },
                 )
             }

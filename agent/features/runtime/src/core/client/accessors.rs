@@ -35,19 +35,15 @@ pub struct RuntimeHandle {
     pub(crate) current_client: std::sync::RwLock<Arc<provider::api::LlmClient>>,
 
     // ─── SDK 状态 ───
-    /// 会话级取消令牌槽（常驻 actor 可重建）。
-    ///
-    /// 不再用 `Option`：槽内始终持有一个有效 token。chat loop 每回合从此槽读取
-    /// 「当前 token」，并在处理完一次取消后把槽**重置为新 token**（见 `loop_runner`），
-    /// 以免常驻 loop 中被取消的 token 永久污染后续回合。`cancel_impl` 锁此槽对当前
-    /// token 调 `cancel()` 触发取消。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
-    pub(crate) current_cancel: Arc<Mutex<tokio_util::sync::CancellationToken>>,
+    /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、
+    /// 标记 Cancelling 并触发该 Run 的 token。
+    pub(crate) active_run: Arc<crate::core::active_run::ActiveRunRegistry>,
     /// 会话历史唯一活跃真相——按 user turn 分段的 `ChatChain` 聚合。
     ///
     /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。
-    pub(crate) current_chain: Arc<Mutex<crate::business::session::ChatChain>>,
+    pub(crate) current_chain: Arc<Mutex<context::api::session::ChatChain>>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    pub(crate) frozen_chats: Arc<Mutex<Vec<crate::business::session::ChatSegment>>>,
+    pub(crate) frozen_chats: Arc<Mutex<Vec<context::api::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
     pub(crate) active_summary: Arc<Mutex<Option<String>>>,
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。

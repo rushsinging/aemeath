@@ -7,6 +7,7 @@ fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext
     read_files.insert(read_file);
     ToolExecutionContext {
         workspace: project::api::WorkspaceService::new(root),
+        run_id: "test-run".to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(Mutex::new(read_files)),
         resources: crate::api::ToolResources {

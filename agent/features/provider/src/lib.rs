@@ -12,6 +12,7 @@ mod business;
 pub mod contract;
 mod core;
 pub mod gateway;
+pub mod published_language;
 
 pub use contract::ProviderDriverKind;
 

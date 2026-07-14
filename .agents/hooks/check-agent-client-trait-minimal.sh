@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 功能：检查 AgentClient trait 只有 chat() 方法。
-# 作用：守住 #567 事件流收口——所有 TUI↔runtime 交互走 ChatInputEvent/ChatEvent，
-#       不允许在 trait 上新增 RPC 方法（绕过事件流）。
-# 例外：无。
+# 功能：检查 AgentClient trait 只有 chat() + cancel_run() 方法。
+# 作用：守住 #567 事件流收口；内容输入与结果回传走 ChatInputEvent/ChatEvent。
+#       #700 唯一例外是同步、out-of-band 的 cancel_run(run_id)，用于即时触发 per-Run scope。
+# 例外：cancel_run 必须按 RunId 定位，不允许扩展为无标识的会话级取消。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
@@ -14,6 +14,11 @@ CLIENT_RS="packages/sdk/src/client.rs"
 if [ ! -f "$CLIENT_RS" ]; then
   echo "skip: $CLIENT_RS not found"
   exit 0
+fi
+
+if grep -RIn --include='*.rs' 'ChatInputEvent::Cancel' agent packages apps; then
+  echo '{"decision":"block","reason":"旧 ChatInputEvent::Cancel 入口禁止恢复；取消必须只走同步 cancel_run(run_id)。"}'
+  exit 2
 fi
 
 python3 - "$CLIENT_RS" <<'PY'
@@ -47,7 +52,7 @@ trait_body = text[start:end]
 methods = re.findall(r'(?:async\s+)?fn\s+(\w+)', trait_body)
 
 # 允许的方法
-ALLOWED = {"chat"}
+ALLOWED = {"chat", "cancel_run"}
 
 violations = [m for m in methods if m not in ALLOWED]
 
@@ -56,17 +61,18 @@ if violations:
     print(json.dumps({
         "decision": "block",
         "reason": (
-            f"AgentClient trait 只能有 chat()，不允许新增 RPC 方法。\n"
-            f"新交互请走 ChatInputEvent 事件流。\n"
+            f"AgentClient trait 只能有 chat() 与 cancel_run(run_id)，不允许新增其它 RPC 方法。\n"
+            f"内容输入与结果回传请走 ChatInputEvent/ChatEvent；取消仅允许同步 per-Run 入口。\n"
             f"违规方法: {violations}\n"
             f"文件: {path}"
         )
     }, ensure_ascii=False))
     sys.exit(2)
 
-# sanity check: chat 必须存在
-if "chat" not in methods:
-    print("ERROR: AgentClient trait 缺少 chat() 方法")
+# sanity check: required methods 必须存在
+missing = ALLOWED.difference(methods)
+if missing:
+    print(f"ERROR: AgentClient trait 缺少 required methods: {sorted(missing)}")
     sys.exit(2)
 
 print("AgentClient trait minimal guard OK.")

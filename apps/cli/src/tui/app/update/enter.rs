@@ -32,6 +32,7 @@ impl App {
         // 首条（非忙）提交：进入 Thinking 态、给出即时反馈，再统一经事件通道提交。
         self.chat.clear_tool_activity();
         self.spinner_phase(crate::tui::model::conversation::spinner::SpinnerPhase::Thinking);
+        self.chat.expect_run_start();
         self.chat.start_processing();
         self.submit_user_input_event(submission)
     }

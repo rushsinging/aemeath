@@ -8,7 +8,6 @@ use crate::business::chat::looping::input_gate::InputEventDrainPort;
 use crate::business::chat::looping::queue::QueueDrainPort;
 use crate::business::reasoning_graph::ReasoningGraph;
 use std::sync::Arc;
-use tokio_util::sync::CancellationToken;
 use tools::api::ToolRegistry;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
@@ -26,6 +25,15 @@ pub type SwitchClientFn = Arc<
                     > + Send,
             >,
         > + Send
+        + Sync,
+>;
+
+pub type SaveChainFn = Arc<
+    dyn Fn(
+            &context::api::session::ChatChain,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
+        + Send
         + Sync,
 >;
 
@@ -48,7 +56,7 @@ where
     pub system_blocks: Vec<provider::api::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
-    pub chain: crate::business::session::ChatChain,
+    pub chain: context::api::session::ChatChain,
     pub context_size: usize,
     pub workspace: Arc<project::api::WorkspaceService>,
     pub session_id: String,
@@ -56,13 +64,7 @@ where
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
     pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
     pub allow_all: bool,
-    /// 会话级取消令牌槽（常驻 actor 可重建）。
-    ///
-    /// loop 在每个回合开始时从该槽读取「当前 token」用于本回合的 LLM 调用、
-    /// tool 执行；外部（`cancel_impl`）锁该槽对当前 token 调 `cancel()` 触发取消。
-    /// 处理完一次取消后，loop 把槽**重置为新 token** 供下个回合，避免常驻 loop
-    /// 中被取消的 token 永久污染后续回合。`std::sync::Mutex` —— NEVER 跨 `.await` 持有。
-    pub cancel: Arc<std::sync::Mutex<CancellationToken>>,
+    pub(crate) active_run: Arc<dyn crate::business::agent_run::ActiveRunPort>,
     pub task_store: Arc<storage::api::TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
@@ -74,7 +76,7 @@ where
     /// loop 在 4 个集成点调 transition 调节 effort。
     pub reasoning_graph: Option<ReasoningGraph>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    pub frozen_chats: Arc<std::sync::Mutex<Vec<crate::business::session::ChatSegment>>>,
+    pub frozen_chats: Arc<std::sync::Mutex<Vec<context::api::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
     pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
     /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。
@@ -82,14 +84,7 @@ where
     /// 返回新 `LlmClient` + `ModelSwitchResult`；解析失败返回 `String` 错误信息。
     pub build_switched_client: SwitchClientFn,
     /// 会话保存闭包（#688）。由 core 层注入，直接接受 chain 引用保存。
-    pub save_chain: Arc<
-        dyn Fn(
-                &crate::business::session::ChatChain,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>,
-            > + Send
-            + Sync,
-    >,
+    pub save_chain: SaveChainFn,
     /// 运行 reflection（#567）。由 core 层注入。
     pub run_reflection_on_demand: Arc<
         dyn Fn() -> std::pin::Pin<

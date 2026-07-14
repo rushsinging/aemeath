@@ -57,6 +57,35 @@ pub(crate) fn convert_messages(messages: &[Message]) -> Vec<serde_json::Value> {
     messages.iter().map(convert_message).collect()
 }
 
+/// 在 messages 倒数第二条消息的最后一个 content block 上注入
+/// `cache_control: {"type": "ephemeral"}` 断点，让 Anthropic 缓存
+/// 整个对话历史前缀。
+///
+/// Agentic loop 每 turn 新增 2 条消息，penultimate 消息不断前移，
+/// 使前一 turn 的缓存前缀与当前 turn 的请求前缀匹配 → cache hit。
+///
+/// 配合 system static block（断点①）和 tools 数组（断点②），
+/// 共使用 3/4 个 Anthropic 允许的 cache_control 断点。
+pub(crate) fn apply_message_cache_breakpoint(messages: &mut [serde_json::Value]) {
+    if messages.len() < 2 {
+        return;
+    }
+    let penultimate = messages.len() - 2;
+    if let Some(content) = messages[penultimate]
+        .get_mut("content")
+        .and_then(|c| c.as_array_mut())
+    {
+        if let Some(last_block) = content.last_mut() {
+            if let Some(obj) = last_block.as_object_mut() {
+                obj.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+            }
+        }
+    }
+}
+
 fn convert_message(msg: &Message) -> serde_json::Value {
     let role = match msg.role {
         Role::User => "user",
@@ -215,7 +244,8 @@ pub(crate) async fn send_message_non_stream(
     tool_schemas: &[serde_json::Value],
     handler: &mut dyn StreamHandler,
 ) -> Result<StreamResponse, crate::LlmError> {
-    let api_messages = convert_messages(messages);
+    let mut api_messages = convert_messages(messages);
+    apply_message_cache_breakpoint(&mut api_messages);
 
     let request = CreateMessageRequest::new(
         params.model,
@@ -353,7 +383,7 @@ pub(crate) async fn send_message_non_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_messages, sanitize_tool_schemas};
+    use super::{apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas};
     use share::message::{
         ContentBlock, ImageSource, Message, MessageMetadata, MessageSource, Role,
     };
@@ -591,5 +621,64 @@ mod tests {
         };
         let result = convert_messages(&[msg]);
         assert_eq!(result[0]["role"], "assistant");
+    }
+
+    // --- apply_message_cache_breakpoint tests ---
+
+    #[test]
+    fn cache_breakpoint_injected_on_penultimate_message() {
+        let messages = vec![
+            Message::user("first"),
+            Message::user("second"),
+            Message::user("third"),
+        ];
+        let mut api = convert_messages(&messages);
+        apply_message_cache_breakpoint(&mut api);
+
+        // penultimate = index 1
+        let penultimate_content = api[1]["content"].as_array().unwrap();
+        let last_block = penultimate_content.last().unwrap();
+        assert_eq!(last_block["cache_control"]["type"], "ephemeral");
+
+        // last message (index 2) should NOT have cache_control
+        let last_content = api[2]["content"].as_array().unwrap();
+        assert!(
+            last_content.last().unwrap().get("cache_control").is_none(),
+            "last message must not have cache_control"
+        );
+    }
+
+    #[test]
+    fn cache_breakpoint_single_message_noop() {
+        let messages = vec![Message::user("only")];
+        let mut api = convert_messages(&messages);
+        apply_message_cache_breakpoint(&mut api);
+
+        let content = api[0]["content"].as_array().unwrap();
+        assert!(
+            content.last().unwrap().get("cache_control").is_none(),
+            "single message should not get cache_control"
+        );
+    }
+
+    #[test]
+    fn cache_breakpoint_empty_messages_noop() {
+        let mut api: Vec<serde_json::Value> = vec![];
+        apply_message_cache_breakpoint(&mut api);
+        assert!(api.is_empty());
+    }
+
+    #[test]
+    fn cache_breakpoint_two_messages_hits_first() {
+        let messages = vec![Message::user("a"), Message::user("b")];
+        let mut api = convert_messages(&messages);
+        apply_message_cache_breakpoint(&mut api);
+
+        // penultimate = index 0
+        let content = api[0]["content"].as_array().unwrap();
+        assert_eq!(
+            content.last().unwrap()["cache_control"]["type"],
+            "ephemeral"
+        );
     }
 }

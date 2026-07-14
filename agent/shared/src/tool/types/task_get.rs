@@ -16,6 +16,7 @@ pub struct TaskGetResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct TaskGetInput {
     /// The ID of the task to retrieve
     #[serde(alias = "taskId")]

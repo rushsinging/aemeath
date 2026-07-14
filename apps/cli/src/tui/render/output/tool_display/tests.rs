@@ -643,3 +643,67 @@ fn test_format_tool_call_grep_path_relativized() {
         "Grep header 不应包含绝对路径: {text}"
     );
 }
+
+// ── issue #839：snake_case task_id 应正确渲染（alias 生效） ──
+
+#[test]
+fn test_task_update_snake_case_task_id_shows_id() {
+    // build.rs 生成的 schema 暴露 snake_case，LLM 发 task_id 而非 taskId。
+    // 旧 str_arg(input, "taskId", "") 取不到 → 空值 → 裸 display name。
+    // 反序列化后 serde alias 自动接受两种 key。
+    let raw = serde_json::json!({
+        "task_id": "42",
+        "status": "completed"
+    })
+    .to_string();
+    let (header, _) = format_tool_call("TaskUpdate", &raw, None, None);
+    let text = line_to_string(&header);
+    assert!(
+        text.contains("42"),
+        "TaskUpdate header 应包含 task_id '42'，实际: {text}"
+    );
+    assert_ne!(text, "● Task", "header 不应退化为裸 display name: {text}");
+}
+
+#[test]
+fn test_task_update_camel_case_task_id_shows_id() {
+    // 旧路径只查 camelCase taskId；确保不回归。
+    let raw = serde_json::json!({
+        "taskId": "99",
+        "status": "in_progress"
+    })
+    .to_string();
+    let (header, _) = format_tool_call("TaskUpdate", &raw, None, None);
+    let text = line_to_string(&header);
+    assert!(
+        text.contains("99"),
+        "TaskUpdate header 应包含 taskId '99'，实际: {text}"
+    );
+}
+
+#[test]
+fn test_task_get_snake_case_task_id_shows_id() {
+    let raw = serde_json::json!({"task_id": "7"}).to_string();
+    let (header, _) = format_tool_call("TaskGet", &raw, None, None);
+    let text = line_to_string(&header);
+    assert!(
+        text.contains("7"),
+        "TaskGet header 应包含 task_id '7'，实际: {text}"
+    );
+}
+
+#[test]
+fn test_lsp_snake_case_file_path_shows_path() {
+    // LSP Input 有 #[serde(alias = "filePath")]，snake_case file_path 也应生效。
+    let raw = serde_json::json!({
+        "operation": "diagnostics",
+        "file_path": "/repo/src/lib.rs"
+    })
+    .to_string();
+    let (header, _) = format_tool_call("LSP", &raw, None, None);
+    let text = line_to_string(&header);
+    assert!(
+        text.contains("lib.rs"),
+        "LSP header 应包含 file_path，实际: {text}"
+    );
+}

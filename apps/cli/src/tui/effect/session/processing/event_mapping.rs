@@ -116,6 +116,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             context: context.into(),
             duration: std::time::Duration::from_millis(duration_ms),
         },
+        sdk::ChatEvent::RunStarted { .. } | sdk::ChatEvent::RunCancelling { .. } => {
+            UiEvent::SystemMessage(String::new())
+        }
+        sdk::ChatEvent::RunCancelled { .. } => UiEvent::RunCancelled,
         sdk::ChatEvent::Cancelled { context } => UiEvent::Cancelled {
             context: context.into(),
         },

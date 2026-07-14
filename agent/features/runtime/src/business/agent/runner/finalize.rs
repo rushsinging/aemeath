@@ -10,9 +10,9 @@ use std::time::Duration;
 pub enum AgentRunStatus {
     Completed,        // 正常完成
     Cancelled,        // 用户打断
-    TimedOut,         // 子 agent 超时（10 分钟）
-    ApiError(String), // LLM API 错误
-    MaxTurns,         // 子 agent 达到 max turns
+    Failed(String),   // shared loop failure
+    TimedOut,         // shared loop timeout
+    ApiError(String), // legacy main-loop API error status
 }
 
 /// Agent 循环统一结果
@@ -62,7 +62,10 @@ pub(crate) async fn finalize_sub_agent(
 
     let is_error = matches!(
         outcome.status,
-        AgentRunStatus::Cancelled | AgentRunStatus::TimedOut | AgentRunStatus::ApiError(_)
+        AgentRunStatus::Cancelled
+            | AgentRunStatus::Failed(_)
+            | AgentRunStatus::TimedOut
+            | AgentRunStatus::ApiError(_)
     );
     let hook_results = hook_runner
         .on_subagent_stop(

@@ -14,8 +14,8 @@ use crate::business::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
 
 use message_conversion::{
-    convert_messages, sanitize_tool_schemas, send_message_non_stream, RequestParams,
-    TrackingHandler,
+    apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas,
+    send_message_non_stream, RequestParams, TrackingHandler,
 };
 
 pub struct AnthropicProvider {
@@ -118,7 +118,12 @@ impl LlmProvider for AnthropicProvider {
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let api_messages = convert_messages(messages);
+        let mut api_messages = convert_messages(messages);
+
+        // 断点③：在 messages 倒数第二条消息上注入 cache_control，
+        // 让 Anthropic 缓存整个对话历史前缀。配合断点①（system static）
+        // 和断点②（tools），共使用 3/4 个允许的断点。
+        apply_message_cache_breakpoint(&mut api_messages);
 
         // 先清洗 tool schema（移除 data_schema 等内部扩展字段），再为
         // 最后一个 tool 追加 cache_control 断点，让 Anthropic 缓存整个

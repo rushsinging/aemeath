@@ -38,7 +38,7 @@ When a task requires understanding a large codebase (review, refactor, audit, et
  Phase 2 — Launch FOCUSED agents:
   - Each agent reviews 1-3 SPECIFIC files (give exact paths)
   - Give each agent a SPECIFIC question to answer
-  - Do NOT set max_turns unless you have a specific reason — the default (50) works well for most tasks
+  - Set a finite timeout only when the task needs a wall-clock limit; StuckGuard handles repeated loops.
   - Example: Agent("Review error handling in compact.rs and token_estimation.rs — check edge cases in compaction_urgency and needs_compaction")
  NEVER launch an agent with a vague prompt like "review the core module" or "review all files in X directory".
 
@@ -106,7 +106,7 @@ When a task requires understanding a large codebase (review, refactor, audit, et
  Phase 2 — Launch FOCUSED agents:
   - Each agent reviews 1-3 SPECIFIC files (give exact paths)
   - Give each agent a SPECIFIC question to answer
-  - Do NOT set max_turns unless you have a specific reason — the default (50) works well for most tasks
+  - Set a finite timeout only when the task needs a wall-clock limit; StuckGuard handles repeated loops.
   - Example: Agent("Review error handling in compact.rs and token_estimation.rs — check edge cases in compaction_urgency and needs_compaction")
  NEVER launch an agent with a vague prompt like "review the core module" or "review all files in X directory".
 

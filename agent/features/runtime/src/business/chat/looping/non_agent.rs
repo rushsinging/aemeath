@@ -344,9 +344,9 @@ where
             hook_ui,
             hook_runner,
             &owned_call,
-            &ex.outcome.text,
-            is_error,
+            &ex,
             workspace_root,
+            &agent.ctx,
         )
         .await;
         run_task_hooks(
@@ -474,6 +474,7 @@ mod tests {
                 allow_all: true,
             },
             workspace: project::api::WorkspaceService::new(cwd),
+            run_id: sdk::RunId::new_v7().to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
             session_reminders: None,
