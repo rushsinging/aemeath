@@ -215,13 +215,13 @@ Release Gate issue 模板：
 4. **标注依赖与并行性**：父 Issue **MUST** 对每个直接 sub-issue 标明可否并行、被谁 block / block 谁，并据此排执行顺序。依赖关系 **MUST** 使用 GitHub 原生 blocked-by / blocking 关系；正文可保留说明，但 **NEVER** 作为唯一依赖记录。
 5. **跟进进度**：父 Issue **MUST** 通过原生 sub-issue 状态和正文摘要维护进度（未开始 / 进行中 / 已合入）。sub-issue 状态变化时 **MUST** 同步父 Issue 的范围、阻断项和验收结论。
 6. **范围调整同步**：执行中若发现更根本的问题需重做或移动范围，**MUST** 调整相关原生 parent / sub-issue 与依赖关系，保持层级、依赖图和实际交付始终一致。
-7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 7 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
+7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 10 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
 8. **必有收尾能力**：大型工作 **MUST** 在最合适的父层级覆盖以下三类交付；若多个模块共享同一全局收尾，**MUST** 复用同一 sub-issue，**NEVER** 在每个模块重复创建：
    - **Guard + Verify sub-issue**：落地架构守卫锁定新边界，故意制造违规验证拦截生效；端到端验收测试覆盖核心场景。
    - **收尾退役 sub-issue**：清理全项目的旧路径、散点读取和死代码（不限于本次改动引入）；去除 `cargo clippy --workspace --all-targets` 全部 warning；更新 `specs/` 分片和 `docs/design/`。
    - **大文件拆分 sub-issue**：对本次改动涉及的核心大文件进行模块边界整理，确保每个文件只承担单一职责。
 9. **依赖顺序**：其余 sub-issues **MUST** 按领域模型 → Port / Published Language → Adapter → 消费方 → Guard / 退役的方向拆分。依赖方向严格从内到外，**NEVER** 反向。
-10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 7 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
+10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 10 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
 
 ### Git 工作流
 

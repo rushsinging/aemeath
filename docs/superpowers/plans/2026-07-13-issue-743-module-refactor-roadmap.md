@@ -16,10 +16,10 @@
 
 大型模块使用 GitHub 原生 parent / sub-issue 层级，禁止新建或使用“伞 Issue”概念：
 
-- 模块重构 Issue 必须位于 #743 的原生 sub-issue 树中；直接子项超过 7 个时，先按稳定能力边界建立中间父 Issue。
+- 模块重构 Issue 必须位于 #743 的原生 sub-issue 树中；直接子项超过 10 个时，先按稳定能力边界建立中间父 Issue。
 - 模块内原子交付任务是该模块 Issue 的原生 sub-issues。
 - 叶子 sub-issue 对应一个独立 PR 和独立验收边界。
-- 每层直接 sub-issues 原则上不超过 7 个。
+- 每层直接 sub-issues 原则上不超过 10 个。
 - Runtime Port、SDK Event 和 Composition 接线只保留一份全局任务，禁止各模块重复创建。
 - Guard + Verify、退役和大文件拆分放在最合适的公共父层级，避免每个模块重复建设。
 
@@ -61,7 +61,7 @@
 
 ## 4. #743 原生 Sub-issue 树
 
-为满足每层直接 sub-issues 不超过 7 个，#743 采用三级结构。中间父 Issue 只管理稳定能力组，不直接承载代码 PR。
+为满足每层直接 sub-issues 不超过 10 个，#743 采用三级结构。中间父 Issue 只管理稳定能力组，不直接承载代码 PR。
 
 ### 4.1 #743 直接 Sub-issues（7 项）
 
