@@ -1,9 +1,8 @@
-//! 消息压缩 — 本地文本摘要和 LLM 摘要
+//! 消息压缩 — LLM 摘要与本地回退
 //!
-//! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
-//! 请求构建 / 响应解析 / 摘要文本生成。
+//! 提供 LLM 压缩请求构建、响应解析和本地摘要回退。
 
-use super::CompactStage;
+use super::{CompactStage, TokenBudgetConfig};
 use crate::compact::restore::sanitize_tool_pairs;
 use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
@@ -94,38 +93,6 @@ Here is the conversation to summarize:
 /// 单个 compact chunk 的目标 token 数。
 /// 超过此值的 early_messages 会触发 map-reduce（分块独立摘要 → 合并）。
 const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
-
-/// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
-///
-/// 返回 `Some(CompactResult)` 表示发生了压缩（summary + recent tail）；
-/// `None` 表示无需压缩。summary 不再注入 messages，走 system 通道。
-pub fn compact_messages(
-    messages: &[Message],
-    system_prompt: &str,
-    context_size: usize,
-) -> Option<CompactResult> {
-    if !needs_compaction(messages, system_prompt, context_size) {
-        return None;
-    }
-
-    let total = messages.len();
-    let window = compact_window(total)?;
-    if total <= 4 {
-        return None;
-    }
-
-    let early_messages = &messages[window.head_protect..window.split_point];
-    let summary = build_summary_text(early_messages);
-
-    // recent tail：split_point 到末尾的原始消息
-    let mut recent = messages[window.split_point..].to_vec();
-    sanitize_tool_pairs(&mut recent);
-
-    Some(CompactResult {
-        summary,
-        recent_messages: recent,
-    })
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompactWindow {
@@ -262,12 +229,12 @@ pub fn build_summary_text(messages: &[Message]) -> String {
 pub async fn compact_messages_with_llm(
     messages: &[Message],
     system_prompt: &str,
-    context_size: usize,
+    budget: &TokenBudgetConfig,
     client: Option<&provider::api::LlmClient>,
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
-    if !needs_compaction(messages, system_prompt, context_size) {
+    if !needs_compaction(messages, system_prompt, budget) {
         return None;
     }
 

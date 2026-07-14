@@ -77,13 +77,7 @@ impl<'a> SubAgentRun<'a> {
         last_output_tokens: u64,
         turn_number: usize,
     ) {
-        if !needs_compaction_actual(
-            api_input,
-            last_output_tokens,
-            None,
-            None,
-            self.ctx_context_size,
-        ) {
+        if !needs_compaction_actual(api_input, last_output_tokens, &self.token_budget) {
             return;
         }
 
@@ -95,8 +89,7 @@ impl<'a> SubAgentRun<'a> {
                 "[microcompact] sub-agent cleared {} stale tool results", mc_cleared);
             // 清理后重新检查是否还需要 compact
             let mc_input = context::api::compact::estimate_messages_tokens(&self.messages);
-            let remaining_budget =
-                context::api::compact::autocompact_threshold(self.ctx_context_size, 8192);
+            let remaining_budget = self.token_budget.autocompact_threshold();
             // 估算下一轮 input ≈ 当前 mc_input + system + tool schemas
             // 用 api_input 作为上界（microcompact 前），减去已清理部分
             if mc_input + (api_input as usize) <= remaining_budget {
@@ -116,7 +109,7 @@ impl<'a> SubAgentRun<'a> {
             result = context::api::compact::compact_messages_with_llm(
                 &self.messages,
                 &self.system,
-                self.ctx_context_size,
+                &self.token_budget,
                 Some(&self.client),
                 None,
                 &self.agent.ctx.cancel,

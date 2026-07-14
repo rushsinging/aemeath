@@ -94,6 +94,8 @@ impl AgentRunner for CliAgentRunner {
         );
 
         let restore_max_tokens = max_tokens_override.is_some();
+        let token_budget =
+            crate::business::chat::looping::token_budget_config(context_size, client.max_tokens());
 
         // Extract hook_runner to avoid borrow conflicts with closure
         let hook_runner = self.hook_runner.clone();
@@ -283,7 +285,7 @@ impl AgentRunner for CliAgentRunner {
             previous_reasoning_level,
             restore_max_tokens,
             progress: Box::new(progress),
-            ctx_context_size: context_size,
+            token_budget,
         }
         .run_loop()
         .await

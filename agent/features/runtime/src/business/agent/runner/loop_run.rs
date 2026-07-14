@@ -78,7 +78,7 @@ pub(super) struct SubAgentRun<'a> {
     pub previous_reasoning_level: provider::contract::ReasoningLevel,
     pub restore_max_tokens: bool,
     pub progress: Box<dyn Fn(Option<usize>, &str) + Send + Sync + 'a>,
-    pub ctx_context_size: usize,
+    pub token_budget: context::api::compact::TokenBudgetConfig,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -303,9 +303,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         Ok(context::api::compact::needs_compaction_actual(
             self.last_api_input_tokens,
             self.last_api_output_tokens,
-            None,
-            None,
-            self.ctx_context_size,
+            &self.token_budget,
         ))
     }
 

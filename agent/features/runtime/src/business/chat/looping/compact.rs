@@ -6,6 +6,14 @@ use share::config::hooks::HookEvent;
 use share::message::Message;
 use std::sync::Arc;
 
+/// Build the Context budget snapshot from resolved Runtime model settings.
+pub(crate) fn token_budget_config(
+    context_size: usize,
+    max_output_tokens: u32,
+) -> context::api::compact::TokenBudgetConfig {
+    context::api::compact::TokenBudgetConfig::new(context_size, max_output_tokens as usize)
+}
+
 /// compact 结果：summary 走 system 通道，messages 为 recent tail。
 pub(crate) struct CompactOutcome {
     /// 早期对话摘要（调用方拼入 system_blocks）
@@ -29,12 +37,10 @@ pub(crate) async fn auto_compact<S>(
     turn_count: usize,
     messages: &[Message],
     system_prompt_text: &str,
-    context_size: usize,
+    budget: &context::api::compact::TokenBudgetConfig,
     tool_schema_tokens: usize,
     last_api_input_tokens: u64,
     last_api_output_tokens: u64,
-    cached_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
@@ -96,20 +102,9 @@ where
     }
 
     let should_compact = if last_api_input_tokens > 0 {
-        compact::needs_compaction_actual(
-            last_api_input_tokens,
-            last_api_output_tokens,
-            cached_tokens,
-            reasoning_tokens,
-            context_size,
-        )
+        compact::needs_compaction_actual(last_api_input_tokens, last_api_output_tokens, budget)
     } else {
-        compact::needs_compaction_full(
-            messages,
-            system_prompt_text,
-            context_size,
-            tool_schema_tokens,
-        )
+        compact::needs_compaction_full(messages, system_prompt_text, tool_schema_tokens, budget)
     };
 
     if !should_compact || messages.len() <= 4 {
@@ -140,7 +135,7 @@ where
     let result = compact::compact_messages_with_llm(
         messages,
         system_prompt_text,
-        context_size,
+        budget,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
         cancel,
@@ -224,7 +219,7 @@ pub(crate) async fn manual_compact<S>(
     turn_count: usize,
     messages: &[Message],
     system_prompt_text: &str,
-    context_size: usize,
+    budget: &context::api::compact::TokenBudgetConfig,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::api::LlmClient>,
@@ -307,16 +302,15 @@ where
             .await;
     }
 
-    // full compact：summary + recent tail（手动场景绕过 token 阈值不太合适，
-    // 但 compact_messages_with_llm 内部的 needs_compaction 会基于 system_prompt + context_size
-    // 判断；手动 compact 时用户明确要求，若消息太少会返回 None）。
+    // full compact：summary + recent tail。手动场景仍复用统一预算配置，
+    // 阈值绕过语义由后续 manual compact 专项收口。
     let progress = make_progress_sink(sink);
     let manual_cancel = tokio_util::sync::CancellationToken::new();
 
     let result = compact::compact_messages_with_llm(
         messages,
         system_prompt_text,
-        context_size,
+        budget,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
         &manual_cancel,
@@ -366,4 +360,25 @@ where
         summary: result.summary,
         messages: result.recent_messages,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::token_budget_config;
+
+    #[test]
+    fn test_token_budget_config_projects_runtime_model_limits() {
+        let budget = token_budget_config(200_000, 16_000);
+
+        assert_eq!(budget.context_size(), 200_000);
+        assert_eq!(budget.max_output_tokens(), 16_000);
+    }
+
+    #[test]
+    fn test_token_budget_config_preserves_zero_output_limit() {
+        let budget = token_budget_config(128_000, 0);
+
+        assert_eq!(budget.context_size(), 128_000);
+        assert_eq!(budget.max_output_tokens(), 0);
+    }
 }
