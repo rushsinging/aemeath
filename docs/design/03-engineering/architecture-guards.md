@@ -80,6 +80,10 @@
 | `logging` | ∅ |
 | `utils` | ∅ |
 
+> **Memory BC 当前物理落点**：Memory 领域逻辑当前位于 `share` crate（`share::memory::*`），不是独立 crate。Runtime 经 `share` 间接消费 Memory 能力。独立 Memory crate 的升塑见 [migration-governance.md](migration-governance.md) M5/M8。
+>
+> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）领域逻辑当前位于 `runtime` crate 内部（`runtime::business::reasoning_graph::*`），不是独立 crate。独立 Workflow crate 的升塑取决于 #972 目录调整后是否拆出。
+
 - **例外**：
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
@@ -206,23 +210,23 @@
 
 - **功能**：守护 agent context 所有权重构（project 拥有 `WorkspaceState`）的架构不变量。
 - **守护**：`docs/superpowers/specs/2026-06-07-agent-context-ownership-redesign.md`——workspace 真相单一所有者在 project，tools 只用读/控能力，持久化 DTO 留 session 边界，git 收敛在 `GitCli`。
-- **规则**：
+- **规则**（CTX-R 前缀为 context ownership 局部规则编号，与 [05-dependency-rules.md](../01-system/05-dependency-rules.md) 的全局铁律 R1–R7 **无对应关系**）：
 
 | 编号 | 规则 | 守护目标 |
 |---|---|---|
-| R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
-| R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
-| R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
-| R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
-| R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
-| R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 R2 重叠的兜底 |
+| CTX-R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
+| CTX-R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
+| CTX-R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
+| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
+| CTX-R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
+| CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 CTX-R2 重叠的兜底 |
 
 - **白名单**（路径级 allowlist）：
 
 | 规则 | 允许 | 说明 |
 |---|---|---|
-| R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
-| R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
+| CTX-R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
+| CTX-R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
 | 测试放行 | `*_test.rs`, `*_tests.rs`, `tests/` 目录, `#[cfg(test)]` 区域 | R4 / R5 / R6 对测试代码放行 |
 
 - **范围缩窄**：R3 的 triple-bundle 检测**限定 `agent/features/`**（不含 `agent/shared/`, `packages/sdk/`）——这两处是设计允许的序列化/投影形态（`PersistedWorkspaceContext` / `WorkspaceContextView`），不是运行期可变三元组。
@@ -427,32 +431,39 @@
 
 | 编号 | 检查 | 详情 |
 |---|---|---|
-| 19.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
-| 19.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
-| 19.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
-| 19.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
-| 19.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
-| 19.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
-| 19.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
-| 19.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
-| 19.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
-| 19.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
-| 19.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
-| 19.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
+| 20.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
+  | 20.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
+  | 20.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
+| 20.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
+| 20.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
+| 20.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
+| 20.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
+| 20.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
+| 20.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
+| 20.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
+| 20.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
+| 20.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
 
-### 20. AgentClient trait 最小化（#567 事件流收口）
+### 21. AgentClient trait 最小化（#567 事件流收口）
 
 `check-agent-client-trait-minimal.sh`
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
+| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
 
 > 这是迁移期 **Current** 守卫事实，不是 Target API 上限。[#874](https://github.com/rushsinging/aemeath/issues/874) / [#878](https://github.com/rushsinging/aemeath/issues/878) 落地 Runtime-owned interaction identity 后，`AgentClient` **MUST** 增加 typed `reply_interaction` / `cancel_interaction` 命令；[#982](https://github.com/rushsinging/aemeath/issues/982) **MUST** 同步替换本守卫并用故意违规证明新的窄命令集合，旧守卫在替代证据齐备前 **MUST** 保持运行。
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 
-## 22. check-config-reader-injection.sh
+## 22. check-shared-run-loop.sh
+
+- **功能**：验证 Runtime 内只有一个共享 Loop Engine 实现，禁止在 `agent/shared/` 或其他 feature crate 中出现平行 run-loop 实现。
+- **守护**：确保 Loop Engine 的单一真相——所有 Main / Sub Run 共用同一驱动骨架（[03-loop-and-state-machine.md](../02-modules/runtime/03-loop-and-state-machine.md)）。
+- **检查方式**：扫描 `agent/shared/src/` 中是否存在 `run_loop` / `drive_loop` 等平行 loop 实现。
+- **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
+
+## 23. check-config-reader-injection.sh
 
 - **位置**：`.agents/hooks/check-config-reader-injection.sh`。
 - **功能**：runtime 消费方（`agent/features/runtime/src/`）不得直接调用 `ConfigAppService::new()`。配置应通过注入的 `Arc<dyn ConfigReader>` port 获取 `ConfigSnapshot`。

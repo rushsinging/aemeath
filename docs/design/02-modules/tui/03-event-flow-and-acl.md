@@ -168,8 +168,13 @@ enum AgentIntent {
 ```rust
 // app/event.rs — TUI 自有类型，NEVER import sdk::*
 
-/// TUI 自有的 ToolCall 状态（不依赖 sdk::ToolCallStatusView）
-enum ToolCallStatus { PendingArgs, Ready, Running }
+/// TUI 自有的 ToolCall 状态（不依赖 sdk::ToolCallStatusView）。
+/// 与 [02-model.md](02-model.md) §3.3 的 ToolCallStatus 7 变体保持一致。
+enum ToolCallStatus {
+    PendingArgs, Ready, Running,
+    Success, Error { message: String },
+    Cancelled, Orphaned,
+}
 
 /// TUI 自有的 Agent 进度事件（不依赖 sdk::AgentProgressEventView）
 struct AgentProgressEvent {

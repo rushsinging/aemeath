@@ -48,6 +48,12 @@ trait ConfigWriter: Send + Sync {
     /// 应用类型化命令；其实现是 MainSessionWiring 提供的 gate-aware façade。
     async fn update(&self, command: ConfigUpdate) -> Result<(), ConfigUpdateError>;
 }
+
+/// 跨 BC 写入命令——当前只有 session-switch gate 通知。
+/// 未来可扩展 model switch、permission mode change 等写入操作。
+enum ConfigUpdate {
+    SessionSwitchGate(SwitchGateCommand),
+}
 ```
 
 ```rust
@@ -228,6 +234,7 @@ struct ConfigPatch {
     permission_mode: Option<PermissionMode>,
     memory: Option<MemoryConfig>,
     reasoning_graph: Option<ReasoningGraphConfig>,
+    env: Option<HashMap<String, String>>,  // env 注入规则（过滤专有变量后）
     // ... 14 个 section
     hooks: Option<HooksConfig>,            // 整块覆盖（非 patch 粒度）
 }

@@ -64,6 +64,13 @@ enum MemoryError {
     Storage(MemoryStorageErrorKind),
 }
 
+struct MemoryStats {
+    global_count: usize,
+    global_archive_count: usize,
+    project_count: usize,
+    project_archive_count: usize,
+}
+
 enum MemoryStorageErrorKind {
     PermissionDenied,
     DiskFull,
@@ -146,7 +153,7 @@ impl MemoryPort for NoOpMemory {
     async fn archive(&self, _: &[MemoryId]) -> Result<(), MemoryError> { Ok(()) }
     async fn compact(&self) -> Result<CompactResult, MemoryError> { Ok(CompactResult { archived: 0, remaining: 0 }) }
     fn list(&self, _: Option<MemoryLayer>) -> Vec<MemoryEntry> { Vec::new() }
-    fn stats(&self) -> MemoryStats { MemoryStats { global_count: 0, global_archive_count: 0, project_count: 0, project_archive_count: 0, reminders_count: 0 } }
+    fn stats(&self) -> MemoryStats { MemoryStats { global_count: 0, global_archive_count: 0, project_count: 0, project_archive_count: 0 } }
 }
 ```
 

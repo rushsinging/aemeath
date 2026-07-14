@@ -64,7 +64,9 @@ AwaitingToolApproval / ExecutingTools / PreparingContext 之一。
 | Finishing | 收尾完成 | Completed |
 | 任意非终态（除 Cancelling） | InterruptRequested | Cancelling |
 | Cancelling | Provider/Tool/Compact/Hook 已停止且回滚完成 | Cancelled |
-| 任意非终态（除 Cancelling） | timeout>0 且超时 | Failed |
+| 任意非终态（除 Cancelling、AwaitingUser） | timeout>0 且超时 | Failed |
+
+> **AwaitingUser timeout 豁免**：`AwaitingUser` 状态 **MUST NOT** 计入 RunSpec.timeout 的墙钟计时。用户交互等待时间不可预测，timeout 在进入 `AwaitingUser` 时暂停、离开时恢复。`AwaitingToolApproval` 在全部自动放行时是**瞬时态**（不停留），仅在需人工确认时才进入 `AwaitingUser(ContinueToolApproval)`；因此自动放行路径不受 timeout 影响。
 
 **取消优先级**：一旦接受 `InterruptRequested`，Run 进入 `Cancelling`；后续到达的普通完成、timeout 或错误只能作为取消收口诊断，NEVER 把该 Run 改写为 `Completed`/`Failed`。重复取消必须幂等。
 
@@ -157,7 +159,7 @@ async fn run_loop(
             }
             Err(Fatal(e))         => { run.fail(e); break; }            // fatal/耗尽→Failed
         };
-        debug_assert_eq!(inv.effective_reasoning, request.effective_reasoning);
+        debug_assert_eq!(inv.effective_reasoning, request.options.effective_reasoning);
         let response_text = inv.text().to_owned();
         run.apply_response(step, inv);                       // → ApplyingResponse
         ctx.events.emit(run.drain_events());                 // event_projection

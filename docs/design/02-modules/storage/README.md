@@ -45,6 +45,21 @@ struct StorageKey {
     segments: Vec<SafePathSegment>,
 }
 
+/// SafePathSegment 是受约束的路径段（词法校验：禁止 `..` / `/` / `\` / 前导 `.`）。
+struct SafePathSegment(String);
+
+enum StorageNamespace {
+    Session,
+    Memory,
+    Task,
+    History,
+    ToolResult,
+    AuditUsage,
+    Config,
+    Workspace,
+    Cost,
+}
+
 struct WriteOptions {
     durability: Durability,
 }

@@ -201,8 +201,7 @@ enum ModelChange { OutputDirty, StatusDirty, InputDirty, DialogDirty }
 
 ```rust
 enum Effect {
-    StartRun { text: String },
-    SubmitInput { text: String },
+    StartRun { text: String },         // 用户提交输入 → 发起 Run
     RequestRunCancellation { run_id: RunId },
     SendInteractionReply { request_id: UiInteractionRequestId, reply: UiInteractionReply },
     CancelInteraction { request_id: UiInteractionRequestId },

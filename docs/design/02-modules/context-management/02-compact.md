@@ -26,9 +26,10 @@ trait ContextPort: Send + Sync {
     async fn build_window(
         &self,
         req: &ContextRequest,
-    ) -> Result<ContextWindow, ContextBuildError>;
+    ) -> Result<ContextWindow, ContextWindowError>;
 
     /// 判断是否需要 auto-compact（相同 backing revision + request → 相同决策）。
+    /// 内部从自身稳定 backing 构造 WindowCandidate，再调用纯函数 needs_compaction(req, candidate)。
     fn needs_compaction(&self, req: &ContextRequest) -> CompactionDecision;
 
     /// L5 执行 auto-compact（LLM 摘要）。实现只操作自身稳定 Session backing，
@@ -60,9 +61,18 @@ struct ContextRequest {
     config_snapshot: ConfigSnapshot,    // 本 Run shared lease 下的只读快照
     context_size: usize,                // 模型 context window
     max_output_tokens: usize,           // 与 InvocationRequest 相同的 resolved output limit
-    last_api_input_tokens: Option<u64>, // API 上报（None=首轮/估算）
+    last_api_input_tokens: Option<u64>, // API 上报（None=首轮/估算）；上一轮精确值，非本轮
     tool_schemas: Vec<ModelToolSchema>, // 本轮唯一 ToolCatalogSnapshot 的稳定投影
     tool_schema_tokens: usize,          // tool 定义占用
+    prev_system_tokens: Option<usize>,  // 上一轮 system_blocks token 数（用于 Actual API 增量计算）
+    prev_tool_schema_tokens: Option<usize>, // 上一轮 tool_schema_tokens（同上）
+}
+
+impl ContextRequest {
+    /// 转换为 PromptPipeline 输入。
+    fn prompt_request(&self) -> PromptRequest;
+    /// 转换为 Memory 检索查询。
+    fn memory_query(&self) -> MemoryQuery;
 }
 
 struct ContextWindow {
@@ -91,7 +101,14 @@ struct CompactionDecision {
     urgency: Urgency,                   // None / Monitor / Should / Must
     estimated_tokens: usize,
     threshold: usize,
-    reason: DecisionReason,             // ActualApi / Heuristic / Manual
+    reason: DecisionReason,             // ActualApiWithDelta / Heuristic / Manual
+}
+
+enum DecisionReason {
+    ActualApiWithDelta,                 // 基于上一轮 API 精确值 + 本轮增量估算
+    Heuristic,                          // 纯启发式估算（首轮 / API 未返回）
+    Manual,                             // 仅 manual compact 路径独立构造 Decision 时使用；
+                                        // needs_compaction 永远不会产出此值
 }
 
 enum Urgency {
@@ -104,6 +121,7 @@ enum Urgency {
 struct CompactResult {
     summary: String,
     recent_messages: Vec<Message>,
+    source_revision: SessionRevision,  // compact 基于的 backing revision（幂等键）
 }
 
 struct CalendarDate(String);             // ISO-8601 calendar date；一次 build 内冻结

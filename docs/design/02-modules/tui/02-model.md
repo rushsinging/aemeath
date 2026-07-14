@@ -146,15 +146,21 @@ enum RunProjectionStatus {
 
 ```
 Created ──RunStarted──→ Running ──RunCompleting──→ Completing ──RunCompleted──→ Completed
-                           │                           │
-                           ├──RunFailed───────────────→ Failed
-                           │
-                           ├──RunAwaitingUser──→ AwaitingUser ──RunResumed──→ Running
-                           │
-                           └──RunCancelling──→ Cancelling ──RunCancelled──→ Cancelled
+   │                        │                           │
+   │                        ├──RunFailed───────────────→ Failed
+   │                        │
+   │                        ├──RunAwaitingUser──→ AwaitingUser ──RunResumed──→ Running
+   │                        │
+   │                        └──RunCancelling──→ Cancelling ──RunCancelled──→ Cancelled
+   │
+   ├──RunFailed──→ Failed          // 创建即失败（如 admission 拒绝）
+   ├──RunCancelling──→ Cancelling  // 创建即取消
+   └──RunCancelled──→ Cancelled    // 创建即取消完成
 
 ResumeConversation ──→ Completed（恢复已结束会话，不触发 spinner）
 ```
+
+> **Created 是瞬态**：`Created` 在同一次 `ProjectRunStarted` 中立即推进到 `Running`（或失败/取消路径），不会在 UI 中可见地停留。`ResumeConversation` 不是 ConversationIntent 枚举中的变体，而是 `ensure_runtime_turn()` 内部的历史恢复路径。
 
 | 转换 | 触发 Intent | 方法 | 说明 |
 |---|---|---|---|
@@ -387,7 +393,7 @@ fn derive_spinner_phase(
                     // Hook 执行中
                     if let Some(h) = &spinner.last_hook {
                         if h.is_running() {
-                            return Some(SpinnerPhase::Hook { .. });
+                            return Some(SpinnerPhase::Hook { event: h.event.clone(), detail: h.detail.clone(), outcome: h.outcome.clone() });
                         }
                     }
                     // 默认：等待首 token 或准备上下文

@@ -63,6 +63,22 @@ PolicyRequest 的字段也是为三态接口冻结的最小评估上下文；All
 
 PolicyRequest 只携稳定 PL，不包含 RuntimeContext、Tool 实例、HookRunner、TUI channel 或具体配置对象。
 
+```rust
+/// Deny / RequireApproval 的原因码。
+enum PolicyReason {
+    CapabilityExceeded { required: ToolCapability },
+    RestrictedTool,
+    RestrictedWorkspace,
+    Custom(String),
+}
+
+/// 审批主体——标识由谁审批。
+enum ApprovalSubject {
+    UserInteraction,
+    Delegated,
+}
+```
+
 ## 4. Future 边界
 
 未来实现 Deny / RequireApproval 时，职责仍按以下边界：

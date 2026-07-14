@@ -256,7 +256,7 @@ Connected ──connection_lost──▶ Reconnecting
 Connected ──disable──▶ Stopping ──stopped──▶ Disabled
 Reconnecting ──success──▶ Connected
 Reconnecting ──exhausted──▶ Failed
-Failed ──retry──▶ Connecting
+Failed ──retry──▶ Connecting    // Target 转换；retry 触发机制（backoff / 手动）在 §10 之后落地
 Failed ──disable──▶ Disabled
 ```
 

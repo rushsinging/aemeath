@@ -182,6 +182,8 @@ fn compaction_urgency(req: &ContextRequest, candidate: &WindowCandidate) -> Urge
 
 ### 4.4 needs_compaction 决策
 
+> 以下纯函数是 `ContextPort::needs_compaction` trait 方法的内部实现 helper（trait 签名只接收 `&ContextRequest`，实现内部从稳定 backing 构造 `WindowCandidate` 后调用此函数）。
+
 ```rust
 fn needs_compaction(req: &ContextRequest, candidate: &WindowCandidate) -> CompactionDecision {
     let effective = effective_context_window(req.context_size, req.max_output_tokens);
@@ -246,8 +248,7 @@ struct ContextImplementation {
 async fn build_window(
     &self,
     req: &ContextRequest,
-) -> Result<ContextWindow, ContextWindowError> {
-    // 1. 先读取 Context-owned 稳定 backing（ChatChain），获得当前 revision。
+) -> Result<ContextWindow, ContextWindowError> {    // 1. 先读取 Context-owned 稳定 backing（ChatChain），获得当前 revision。
     let backing = self.session.read_backing().await?;
     let revision = backing.revision();
 

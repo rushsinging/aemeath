@@ -62,6 +62,11 @@ enum ToolCapability {
 
 Capability 表达安全权限，不表达 Tool 身份或装配位置。新增 Tool 未声明 required capabilities 时不得注册。
 
+```rust
+/// ToolCapabilities 是 ToolCapability 的 bitflag / HashSet 容器。
+type ToolCapabilities = Vec<ToolCapability>;
+```
+
 ### 1.3 ResourceRequirements
 
 Tool 所需活资源通过窄端口提供，例如：
@@ -204,6 +209,12 @@ struct UserInteractionSpec {
     questions: Vec<UserQuestion>,
 }
 
+struct UserQuestion {
+    prompt: String,                 // 向用户展示的问题文本
+    options: Vec<String>,           // 可选选项；空 = 自由文本回答
+    allow_multi: bool,              // 是否允许多选
+}
+
 struct ToolSuccess {
     content: Vec<ContentBlock>,
     data: Option<JsonValue>,
@@ -216,6 +227,16 @@ struct ToolFailure {
     retryable: bool,
     content: Vec<ContentBlock>,
     data: Option<JsonValue>,
+}
+
+enum ToolErrorKind {
+    ToolUnavailable,                // 工具未注册或已下线
+    InvalidInput,                   // schema 校验失败
+    PermissionDenied,               // 能力不足 / 权限拒绝
+    Internal,                       // 工具内部执行错误
+    Timeout,                        // 执行超时
+    Cancelled,                      // 被取消
+    Unsupported,                    // 平台 / 架构不支持
 }
 ```
 
