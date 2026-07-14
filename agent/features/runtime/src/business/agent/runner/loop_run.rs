@@ -328,7 +328,8 @@ impl RunLoopPort for SubAgentRun<'_> {
     async fn invoke_model(
         &mut self,
         _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<ModelStep, LoopEngineError> {
+    ) -> Result<(ModelStep, crate::business::loop_engine::StepTokenUsage), LoopEngineError> {
+        use crate::business::loop_engine::StepTokenUsage;
         self.turn_count += 1;
         let turn_number = self.turn_count;
         self.progress_turn_start(turn_number);
@@ -363,9 +364,6 @@ impl RunLoopPort for SubAgentRun<'_> {
         let resp = match response {
             Ok(resp) => resp,
             Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
-                // The shared engine recognizes cancellation through the run's
-                // cancellation token. Provider-originated cancellation joins
-                // that same path rather than creating an adapter-only terminal.
                 self.agent.ctx.cancel.cancel();
                 return Err(LoopEngineError::Cancelled);
             }
@@ -375,6 +373,23 @@ impl RunLoopPort for SubAgentRun<'_> {
         self.last_api_input_tokens = resp.usage.input_tokens as u64;
         self.last_api_output_tokens = resp.usage.output_tokens as u64;
         self.progress_api_ok(turn_number, &resp);
+
+        let usage = StepTokenUsage {
+            input_tokens: resp.usage.input_tokens as u64,
+            output_tokens: resp.usage.output_tokens as u64,
+            cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
+            cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
+            reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
+            total_tokens: resp.usage.total_tokens.map(u64::from).unwrap_or(0),
+            context_window: self.ctx_context_size as u64,
+            est_system_tokens: effective_blocks
+                .iter()
+                .map(|b| context::api::compact::estimate_tokens(&b.text))
+                .sum(),
+            est_tool_tokens: context::api::compact::estimate_tool_schemas_tokens(&self.sub_schemas),
+            est_message_tokens: context::api::compact::estimate_messages_tokens(&messages_for_api),
+        };
+
         self.messages.push(resp.assistant_message.clone());
         self.log_output(turn_number, &resp);
         self.send_text_progress(turn_number, &resp);
@@ -401,23 +416,32 @@ impl RunLoopPort for SubAgentRun<'_> {
                 self.last_api_output_tokens = 0;
                 // An empty tool phase advances the shared state machine while
                 // retaining the old behavior of retrying a truncated response.
-                return Ok(ModelStep::Tools {
-                    text: resp.assistant_message.text_content(),
-                    calls: Vec::new(),
-                });
+                return Ok((
+                    ModelStep::Tools {
+                        text: resp.assistant_message.text_content(),
+                        calls: Vec::new(),
+                    },
+                    usage,
+                ));
             }
         }
 
         if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-            return Ok(ModelStep::Complete {
-                text: resp.assistant_message.text_content(),
-            });
+            return Ok((
+                ModelStep::Complete {
+                    text: resp.assistant_message.text_content(),
+                },
+                usage,
+            ));
         }
 
-        Ok(ModelStep::Tools {
-            text: resp.assistant_message.text_content(),
-            calls: tool_calls,
-        })
+        Ok((
+            ModelStep::Tools {
+                text: resp.assistant_message.text_content(),
+                calls: tool_calls,
+            },
+            usage,
+        ))
     }
 
     async fn execute_tools(
