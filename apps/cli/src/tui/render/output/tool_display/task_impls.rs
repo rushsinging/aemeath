@@ -104,50 +104,57 @@ impl ToolDisplay for TaskUpdateDisplay {
 }
 impl TaskUpdateDisplay {
     /// 构建 header 摘要片段（subject 紧跟 id，其余按重要性排序）。
-    /// `result_payload` 非空时优先从 typed result 取 subject（store 回填），
-    /// 回退到 input.subject。
+    /// `result_payload` 非空时优先从 typed result 取 subject（store 回填）。
+    /// key-value 模式：从 `key` + `value` 提取变更摘要。
     fn header_summary(
         &self,
         input: &serde_json::Value,
         result_payload: Option<&ToolResultPayload>,
     ) -> String {
-        let status = str_arg(input, "status", "");
-        let blocked_by = input
-            .get("addBlockedBy")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            })
-            .unwrap_or_default();
-        // subject 优先从 typed result 取（store 回填），回退 input.subject
+        let key = str_arg(input, "key", "");
+        let value = input.get("value");
+
+        // subject 优先从 typed result 取（store 回填）
         let typed: Option<TaskUpdateResult> = typed_data(result_payload);
         let subject = typed
             .as_ref()
             .map(|r| r.subject.as_str())
             .filter(|s: &&str| !s.is_empty())
-            .unwrap_or_else(|| str_arg(input, "subject", ""));
-        let priority = str_arg(input, "priority", "");
-        let progress = input.get("progress").and_then(|v| v.as_u64());
+            .unwrap_or("");
 
-        // subject 紧跟 id，便于识别是哪个任务（issue #486）
         let mut parts = Vec::new();
         if !subject.is_empty() {
             parts.push(truncate_ellipsis(subject, 40));
         }
-        if !status.is_empty() {
-            parts.push(format!("→ {status}"));
-        }
-        if !blocked_by.is_empty() {
-            parts.push(format!("blocked by [{blocked_by}]"));
-        }
-        if !priority.is_empty() {
-            parts.push(format!("p={priority}"));
-        }
-        if let Some(pct) = progress {
-            parts.push(format!("{pct}%"));
+        match key {
+            "status" => {
+                if let Some(s) = value.and_then(|v| v.as_str()) {
+                    parts.push(format!("→ {s}"));
+                }
+            }
+            "priority" => {
+                if let Some(s) = value.and_then(|v| v.as_str()) {
+                    parts.push(format!("p={s}"));
+                }
+            }
+            "progress" => {
+                if let Some(n) = value.and_then(|v| v.as_u64()) {
+                    parts.push(format!("{n}%"));
+                }
+            }
+            "add_blocked_by" | "add_blocks" => {
+                if let Some(arr) = value.and_then(|v| v.as_array()) {
+                    let ids: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                    if !ids.is_empty() {
+                        parts.push(format!("{} [{}]", key, ids.join(",")));
+                    }
+                }
+            }
+            "subject" | "description" | "active_form" | "owner" | "progress_message"
+            | "add_tags" | "remove_tags" => {
+                // 这些字段变更不额外展示在 header，subject 从 result 回填即可
+            }
+            _ => {}
         }
         parts.join(", ")
     }

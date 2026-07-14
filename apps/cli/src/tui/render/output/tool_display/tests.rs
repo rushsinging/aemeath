@@ -82,7 +82,7 @@ fn test_format_tool_call_task_create_compact_no_description() {
 fn test_format_tool_call_task_update_compact_hides_details() {
     let (header, details) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"42","status":"completed"}"#,
+        r#"{"taskId":"42","key":"status","value":"completed"}"#,
         None,
         None,
     );
@@ -285,29 +285,30 @@ fn test_format_tool_call_task_update_with_id_no_status() {
 fn test_format_tool_call_task_update_shows_blocked_by() {
     let (header, _) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"7","addBlockedBy":["4","5","6"]}"#,
+        r#"{"taskId":"7","key":"add_blocked_by","value":["4","5","6"]}"#,
         None,
         None,
     );
     let text = line_to_string(&header);
     assert!(text.contains("7"), "应包含 taskId: {text}");
     assert!(
-        text.contains("blocked by [4,5,6]"),
+        text.contains("add_blocked_by [4,5,6]"),
         "应包含 blockedBy: {text}"
     );
 }
 
 #[test]
 fn test_format_tool_call_task_update_shows_status_and_blocked_by() {
+    // key-value 模式：每次只改一个字段，所以 status 和 blocked_by 不再同时出现
+    // 这里测试 status 单独更新的场景
     let (header, _) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"2","status":"InProgress","addBlockedBy":["1"]}"#,
+        r#"{"taskId":"2","key":"status","value":"in_progress"}"#,
         None,
         None,
     );
     let text = line_to_string(&header);
-    assert!(text.contains("→ InProgress"), "应包含 status: {text}");
-    assert!(text.contains("blocked by [1]"), "应包含 blockedBy: {text}");
+    assert!(text.contains("→ in_progress"), "应包含 status: {text}");
 }
 
 // ── Issue #486：TaskUpdate result 到达后 header 应带 task 标题 ──────
@@ -315,7 +316,7 @@ fn test_format_tool_call_task_update_shows_status_and_blocked_by() {
 #[test]
 fn test_format_tool_call_task_update_with_result_subject_shows_title() {
     use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
-    // LLM 只传 taskId + status（典型场景），subject 由 store 回填到 typed result
+    // LLM 只传 taskId + key + value（典型场景），subject 由 store 回填到 typed result
     let payload = ToolResultPayload::new(
         String::new(),
         serde_json::json!({ "task_id": "2", "status": "Completed", "subject": "修复渲染 bug" }),
@@ -324,7 +325,7 @@ fn test_format_tool_call_task_update_with_result_subject_shows_title() {
     );
     let (header, _) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"2","status":"completed"}"#,
+        r#"{"taskId":"2","key":"status","value":"completed"}"#,
         Some(&payload),
         None,
     );
@@ -339,7 +340,8 @@ fn test_format_tool_call_task_update_with_result_subject_shows_title() {
 
 #[test]
 fn test_format_tool_call_task_update_result_falls_back_to_input_subject() {
-    // result 无 typed subject 时回退到 input.subject
+    // key-value 模式下 subject 由 result 回填；input 不再有 subject 字段
+    // result 无 typed subject → header 不显示 subject（不再有 input.subject 回退）
     let payload = ToolResultPayload::new(
         String::new(),
         serde_json::json!({ "task_id": "3", "status": "InProgress" }),
@@ -348,15 +350,14 @@ fn test_format_tool_call_task_update_result_falls_back_to_input_subject() {
     );
     let (header, _) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"3","subject":"重构模块"}"#,
+        r#"{"taskId":"3","key":"status","value":"in_progress"}"#,
         Some(&payload),
         None,
     );
     let text = line_to_string(&header);
-    assert!(
-        text.contains("重构模块"),
-        "typed subject 缺失时应回退 input.subject: {text}"
-    );
+    // subject 缺失时 header 仍正常显示 taskId + status
+    assert!(text.contains("3"), "应包含 taskId: {text}");
+    assert!(text.contains("→ in_progress"), "应包含 status: {text}");
 }
 
 #[test]
@@ -370,7 +371,7 @@ fn test_format_tool_call_task_update_no_subject_anywhere_omits_title() {
     );
     let (header, _) = format_tool_call(
         "TaskUpdate",
-        r#"{"taskId":"4","status":"completed"}"#,
+        r#"{"taskId":"4","key":"status","value":"completed"}"#,
         Some(&payload),
         None,
     );

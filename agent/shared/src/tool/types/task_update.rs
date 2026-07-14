@@ -16,30 +16,17 @@ pub struct TaskUpdateResult {
 
 /// Typed input for the `task_update` tool.
 ///
+/// 采用 key-value 模式：每次只更新**一个**字段，从根本上消除 LLM
+/// 给可选参数填占位符的问题（#979 根因修复）。
+///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,
-    pub status: Option<String>,
-    pub subject: Option<String>,
-    pub description: Option<String>,
-    #[serde(alias = "activeForm")]
-    pub active_form: Option<String>,
-    pub owner: Option<String>,
-    pub priority: Option<String>,
-    /// Progress percentage (0-100)
-    pub progress: Option<u8>,
-    /// Progress status message
-    #[serde(alias = "progressMessage")]
-    pub progress_message: Option<String>,
-    #[serde(alias = "addBlockedBy")]
-    pub add_blocked_by: Option<Vec<String>>,
-    #[serde(alias = "addBlocks")]
-    pub add_blocks: Option<Vec<String>>,
-    #[serde(alias = "addTags")]
-    pub add_tags: Option<Vec<String>>,
-    #[serde(alias = "removeTags")]
-    pub remove_tags: Option<Vec<String>>,
+    /// Field to update. One of: status, subject, description, active_form, owner, priority, progress, progress_message, add_blocked_by, add_blocks, add_tags, remove_tags
+    pub key: String,
+    /// New value for the field. Type depends on key: string for most fields, integer (0-100) for progress, array of task-id strings for add_blocked_by/add_blocks, array of tag strings for add_tags/remove_tags
+    pub value: serde_json::Value,
 }

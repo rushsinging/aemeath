@@ -25,7 +25,9 @@ impl TypedTool for TaskUpdateTool {
         "TaskUpdate"
     }
     fn description(&self) -> &str {
-        "Update a task's status, subject, description, or dependencies.\n\n\
+        "Update a single field on a task.\n\n\
+         Pass `key` to select which field to change and `value` for the new value. \
+         Each call updates exactly one field.\n\n\
          Status workflow: pending → in_progress → completed. Use 'deleted' to remove.\n\n\
          When you mark a task as completed, the system will show which downstream tasks \
          are now unblocked and ready to execute. Use this to decide what to work on next.\n\n\
@@ -55,7 +57,6 @@ impl TypedTool for TaskUpdateTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskUpdateResult> {
-        let now = current_timestamp_millis();
         let args: TaskUpdateInput = match serde_json::from_value(input) {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
@@ -68,24 +69,66 @@ impl TypedTool for TaskUpdateTool {
             None => return TypedToolResult::error(format!("task not found: {input_id}")),
         };
 
+        // ── Validate key & extract typed value ──────────────────────────
+        let now = current_timestamp_millis();
+        let key = args.key.as_str();
+        let val = &args.value;
+
         // Pre-resolve dependency display numbers to global ids (must be async)
-        let resolved_blocked_by = if let Some(display_ids) = args.add_blocked_by.as_deref() {
-            self.store.resolve_display_ids(display_ids).await
-        } else {
-            Vec::new()
+        let resolved_deps: Vec<String> = match key {
+            "add_blocked_by" | "add_blocks" => {
+                let ids: Vec<String> = match val.as_array() {
+                    Some(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect(),
+                    None => {
+                        return TypedToolResult::error(format!(
+                            "value for '{key}' must be an array of strings"
+                        ))
+                    }
+                };
+                self.store.resolve_display_ids(&ids).await
+            }
+            _ => Vec::new(),
         };
-        let resolved_blocks = if let Some(display_ids) = args.add_blocks.as_deref() {
-            self.store.resolve_display_ids(display_ids).await
-        } else {
-            Vec::new()
-        };
+
+        // Validate value type per key before entering the closure
+        match key {
+            "status" | "subject" | "description" | "active_form" | "owner" | "priority"
+            | "progress_message" => {
+                if !val.is_string() {
+                    return TypedToolResult::error(format!("value for '{key}' must be a string"));
+                }
+            }
+            "progress" => {
+                if val.as_u64().is_none() {
+                    return TypedToolResult::error(format!(
+                        "value for '{key}' must be an integer (0-100)"
+                    ));
+                }
+            }
+            "add_blocked_by" | "add_blocks" | "add_tags" | "remove_tags" => {
+                if !val.is_array() {
+                    return TypedToolResult::error(format!(
+                        "value for '{key}' must be an array of strings"
+                    ));
+                }
+            }
+            _ => {
+                return TypedToolResult::error(format!(
+                    "unknown field '{key}'. Valid keys: status, subject, description, active_form, owner, priority, progress, progress_message, add_blocked_by, add_blocks, add_tags, remove_tags"
+                ));
+            }
+        }
 
         let result = self
             .store
-            .update(&task_id, |task| {
-                // Status update
-                if let Some(status) = args.status.as_deref() {
-                    task.status = match status {
+            .update(&task_id, |task| match key {
+                // ── String fields ───────────────────────────────────────
+                "status" => {
+                    let s = val.as_str().unwrap_or("");
+                    task.status = match s {
                         "pending" => TaskStatus::Pending,
                         "in_progress" => TaskStatus::InProgress,
                         "completed" => TaskStatus::Completed,
@@ -93,59 +136,62 @@ impl TypedTool for TaskUpdateTool {
                         _ => task.status.clone(),
                     };
                 }
-
-                // Basic field updates
-                if let Some(subject) = args.subject {
-                    task.subject = subject;
+                "subject" => {
+                    task.subject = val.as_str().unwrap_or("").to_string();
                 }
-                if let Some(desc) = args.description {
-                    task.description = desc;
+                "description" => {
+                    task.description = val.as_str().unwrap_or("").to_string();
                 }
-                if let Some(af) = args.active_form {
-                    task.active_form = Some(af);
+                "active_form" => {
+                    task.active_form = Some(val.as_str().unwrap_or("").to_string());
                 }
-                if let Some(owner) = args.owner {
-                    task.owner = Some(owner);
+                "owner" => {
+                    task.owner = Some(val.as_str().unwrap_or("").to_string());
                 }
-
-                // Priority update
-                if let Some(priority) = args.priority.as_deref() {
-                    if let Some(p) = TaskPriority::parse(priority) {
+                "priority" => {
+                    if let Some(p) = TaskPriority::parse(val.as_str().unwrap_or("")) {
                         task.priority = p;
                     }
                 }
-
-                // Progress update
-                if let Some(progress) = args.progress {
-                    task.progress = progress.min(100);
+                "progress_message" => {
+                    task.progress_message = Some(val.as_str().unwrap_or("").to_string());
                 }
-                if let Some(msg) = args.progress_message {
-                    task.progress_message = Some(msg);
+                // ── Integer fields ──────────────────────────────────────
+                "progress" => {
+                    task.progress = (val.as_u64().unwrap_or(0) as u8).min(100);
                 }
-
-                // Dependency updates — use pre-resolved global ids
-                for gid in &resolved_blocked_by {
-                    if !task.blocked_by.contains(gid) {
-                        task.blocked_by.push(gid.clone());
+                // ── Dependency fields (pre-resolved) ────────────────────
+                "add_blocked_by" => {
+                    for gid in &resolved_deps {
+                        if !task.blocked_by.contains(gid) {
+                            task.blocked_by.push(gid.clone());
+                        }
                     }
                 }
-                for gid in &resolved_blocks {
-                    if !task.blocks.contains(gid) {
-                        task.blocks.push(gid.clone());
+                "add_blocks" => {
+                    for gid in &resolved_deps {
+                        if !task.blocks.contains(gid) {
+                            task.blocks.push(gid.clone());
+                        }
                     }
                 }
-
-                // Tag updates
-                if let Some(add_tags) = args.add_tags {
-                    for tag in add_tags {
-                        task.add_tag(tag, now);
+                // ── Tag fields ──────────────────────────────────────────
+                "add_tags" => {
+                    if let Some(arr) = val.as_array() {
+                        for tag in arr.iter().filter_map(|v| v.as_str()) {
+                            task.add_tag(tag.to_string(), now);
+                        }
                     }
                 }
-                if let Some(remove_tags) = args.remove_tags {
-                    for tag in remove_tags {
-                        task.remove_tag(&tag, now);
+                "remove_tags" => {
+                    if let Some(arr) = val.as_array() {
+                        for tag in arr.iter().filter_map(|v| v.as_str()) {
+                            task.remove_tag(tag, now);
+                        }
                     }
                 }
+                // Unreachable — validated above
+                _ => {}
             })
             .await;
 

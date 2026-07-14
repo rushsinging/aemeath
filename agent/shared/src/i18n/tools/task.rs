@@ -97,7 +97,17 @@ pub fn task_stop(lang: &str) -> &'static str {
 pub fn task_update(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"更新任务的状态、主题、描述或依赖。
+            r#"更新任务的**单个**字段。每次调用只改一个字段。
+
+参数：task_id（任务 ID）、key（字段名）、value（新值）。
+
+可用 key：
+- status: 状态字符串（pending / in_progress / completed / deleted）
+- subject / description / active_form / owner / progress_message: 字符串
+- priority: 优先级（high / medium / low）
+- progress: 整数 0-100
+- add_blocked_by / add_blocks: 任务 ID 字符串数组
+- add_tags / remove_tags: 标签字符串数组
 
 状态工作流：pending → in_progress → completed。用 'deleted' 删除。
 
@@ -106,7 +116,17 @@ pub fn task_update(lang: &str) -> &'static str {
 完成任务后，检查解除阻塞列表或调用 TaskList 查找下一个可用任务。"#
         }
         _ => {
-            r#"Update a task's status, subject, description, or dependencies.
+            r#"Update a **single** field on a task. Each call changes exactly one field.
+
+Parameters: task_id (task ID), key (field name), value (new value).
+
+Valid keys:
+- status: status string (pending / in_progress / completed / deleted)
+- subject / description / active_form / owner / progress_message: string
+- priority: priority level (high / medium / low)
+- progress: integer 0-100
+- add_blocked_by / add_blocks: array of task ID strings
+- add_tags / remove_tags: array of tag strings
 
 Status workflow: pending → in_progress → completed. Use 'deleted' to remove.
 
