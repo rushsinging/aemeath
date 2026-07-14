@@ -60,7 +60,7 @@ provider/
 ├── invoke.rs                  # 单次 attempt 与统一流语义
 ├── error.rs                   # wire / HTTP 错误 → ProviderErrorKind
 ├── transport.rs               # 不可变 endpoint / auth / HTTP seam
-├── anthropic.rs               # request / stream / error ACL；当前先保持单文件
+├── anthropic.rs               # request / stream / error ACL（单一 adapter capability）
 ├── openai_compatible.rs       # 兼容协议骨架 + 厂商策略
 └── ollama.rs                  # 原生协议 ACL
 ```
