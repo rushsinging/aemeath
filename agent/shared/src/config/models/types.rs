@@ -88,6 +88,12 @@ pub struct ModelEntryConfig {
     /// 最终档位仍会被全局 max_reasoning 上限与各 provider 能力上限双重 clamp。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+
+    /// API 风格：`"responses"` 使用 OpenAI Responses API（/v1/responses），
+    /// 其他值或缺省使用 Chat Completions API（/v1/chat/completions）。
+    /// gpt-5.6-sol 等模型只支持 Responses API。
+    #[serde(default, rename = "apiStyle", skip_serializing_if = "Option::is_none")]
+    pub api_style: Option<String>,
 }
 
 impl ModelEntryConfig {

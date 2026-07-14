@@ -80,6 +80,8 @@ pub struct OpenAIProviderConfig {
     pub source_key: String,
     pub driver: ProviderDriverKind,
     pub chat_api_suffix: String,
+    /// 是否使用 Responses API（/v1/responses）替代 Chat Completions。
+    pub use_responses_api: bool,
 }
 
 impl OpenAIProviderConfig {
@@ -101,7 +103,13 @@ impl OpenAIProviderConfig {
                 | ProviderDriverKind::LiteLLM
                 | ProviderDriverKind::Ollama => "/v1/chat/completions".to_string(),
             },
+            use_responses_api: false,
         }
+    }
+
+    pub fn with_responses_api(mut self, enabled: bool) -> Self {
+        self.use_responses_api = enabled;
+        self
     }
 }
 

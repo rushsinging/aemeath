@@ -143,7 +143,13 @@ impl LlmClientPool {
             driver,
             ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama
         ) {
-            Some(OpenAIProviderConfig::from_driver(driver, provider_name))
+            let cfg = OpenAIProviderConfig::from_driver(driver, provider_name);
+            let use_responses = model_entry
+                .api_style
+                .as_deref()
+                .map(|s| s.eq_ignore_ascii_case("responses"))
+                .unwrap_or(false);
+            Some(cfg.with_responses_api(use_responses))
         } else {
             None
         };
@@ -209,6 +215,7 @@ mod tests {
                     max_tokens,
                     reasoning: None,
                     reasoning_effort: None,
+                    api_style: None,
                 }],
             },
         );
