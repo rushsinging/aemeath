@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）
-> 本文定义 Reflection 引擎的领域模型、触发条件、prompt 构建、output schema、apply 流程，以及与 Runtime 的职责边界。**只描述目标态**；现状 Reflection 代码散落在 `runtime/business/reflection/` 的差距记入 `03-engineering/migration-governance.md`。
+> 本文定义 Reflection 引擎的领域模型、触发条件、prompt 构建、output schema、apply 流程，以及与 Runtime 的职责边界。**只描述目标态**；现状 Reflection 代码散落在 `runtime/business/reflection/` 的差距记入 `03-engineering/03-migration-governance.md`。
 
 ## 1. 定位
 

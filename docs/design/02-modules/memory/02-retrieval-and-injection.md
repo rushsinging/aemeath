@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）
-> 本文定义 Memory BC 的检索策略、注入格式、`similarity_threshold` 双重用途，以及 #551 语义检索升级路径。**只描述目标态**；现状子串匹配的差距记入 `03-engineering/migration-governance.md`。
+> 本文定义 Memory BC 的检索策略、注入格式、`similarity_threshold` 双重用途，以及 #551 语义检索升级路径。**只描述目标态**；现状子串匹配的差距记入 `03-engineering/03-migration-governance.md`。
 
 ## 1. 检索模式
 

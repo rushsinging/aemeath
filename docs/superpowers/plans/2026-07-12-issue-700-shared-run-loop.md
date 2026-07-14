@@ -41,7 +41,7 @@ RunSpec → RuntimeContext → Run → shared Loop Engine
 1. `docs/design/02-modules/runtime/01-domain-model.md`
 2. `docs/design/02-modules/runtime/03-loop-and-state-machine.md`
 3. `docs/design/02-modules/runtime/06-ports-and-adapters.md`
-4. `docs/design/03-engineering/migration-governance.md`
+4. `docs/design/03-engineering/03-migration-governance.md`
 5. Issue #700 验收清单
 
 本 Issue 允许用薄 adapter 包装现有依赖，但不提前完成 #649 的最终物理模块迁移，也不抽取其他 BC 尚未定案的全部端口。SDK/TUI 的完整 Published Language 和状态投影分别由 #612/#742/#797 接续；本 Issue 只完成取消单入口和必要 Run 事件契约。
