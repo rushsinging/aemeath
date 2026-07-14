@@ -35,6 +35,7 @@ mod tests {
             max_tokens: 16_000,
             reasoning,
             reasoning_effort: None,
+            api_style: None,
         }
     }
 

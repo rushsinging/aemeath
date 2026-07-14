@@ -71,6 +71,13 @@ impl LlmProvider for OpenAICompatibleProvider {
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<crate::business::types::StreamResponse, crate::LlmError> {
+        // Responses API 分发（gpt-5.6-sol 等模型只支持 /v1/responses）
+        if self.config.use_responses_api {
+            return self
+                .stream_message_responses(system, messages, tool_schemas, handler, cancel)
+                .await;
+        }
+
         let openai_messages = self.convert_messages(system, messages)?;
         let tools = Self::convert_tools(tool_schemas);
 

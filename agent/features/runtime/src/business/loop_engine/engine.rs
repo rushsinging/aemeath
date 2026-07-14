@@ -17,6 +17,30 @@ pub struct LoopInput {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct StepTokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub total_tokens: u64,
+    pub context_window: u64,
+    /// 估算：system prompt tokens
+    pub est_system_tokens: usize,
+    /// 估算：tool schemas tokens
+    pub est_tool_tokens: usize,
+    /// 估算：messages tokens
+    pub est_message_tokens: usize,
+}
+
+impl StepTokenUsage {
+    /// 估算总量（system + tools + messages）
+    pub fn est_total(&self) -> usize {
+        self.est_system_tokens + self.est_tool_tokens + self.est_message_tokens
+    }
+}
+
 #[derive(Clone)]
 pub enum ModelStep {
     Complete { text: String },
@@ -61,7 +85,7 @@ pub trait RunLoopPort: Send {
     async fn invoke_model(
         &mut self,
         cancel: &CancellationToken,
-    ) -> Result<ModelStep, LoopEngineError>;
+    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
     async fn execute_tools(
         &mut self,
         calls: &[(ToolCall, ToolGuardDecision)],
@@ -185,21 +209,49 @@ where
         run.transition(RunTransition::ContextPrepared)?;
         let step_id = run.begin_step()?;
         emit_events(run, port).await?;
-        let model_step = match await_interruptible(run, cancel, port.invoke_model(cancel)).await {
-            Interrupt::Completed(Ok(step)) => step,
-            Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
-                cancel_run(run, port).await?;
-                return Ok(LoopDirective::Terminal);
-            }
-            Interrupt::Completed(Err(error)) => {
-                fail_run(run, port, error.to_string()).await?;
-                return Ok(LoopDirective::Terminal);
-            }
-            Interrupt::TimedOut => {
-                timeout_run(run, port).await?;
-                return Ok(LoopDirective::Terminal);
-            }
-        };
+        let (model_step, token_usage) =
+            match await_interruptible(run, cancel, port.invoke_model(cancel)).await {
+                Interrupt::Completed(Ok(result)) => result,
+                Interrupt::Completed(Err(LoopEngineError::Cancelled)) | Interrupt::Cancelled => {
+                    cancel_run(run, port).await?;
+                    return Ok(LoopDirective::Terminal);
+                }
+                Interrupt::Completed(Err(error)) => {
+                    fail_run(run, port, error.to_string()).await?;
+                    return Ok(LoopDirective::Terminal);
+                }
+                Interrupt::TimedOut => {
+                    timeout_run(run, port).await?;
+                    return Ok(LoopDirective::Terminal);
+                }
+            };
+
+        // Per-step token usage + context window 诊断日志
+        {
+            let ctx_win = token_usage.context_window;
+            let total = token_usage.total_tokens;
+            let pct = total
+                .checked_mul(100)
+                .and_then(|v| v.checked_div(ctx_win))
+                .map(|v| v as u32)
+                .unwrap_or(0);
+            log::info!(
+                target: "aemeath:agent:runtime",
+                "token usage: input={} (cached {}) | output={} (cache_write {}) | reasoning={} | total={} | context_window={} | {pct}% \
+                 | est: system={} tools={} messages={} total_est={}",
+                token_usage.input_tokens,
+                token_usage.cached_tokens,
+                token_usage.output_tokens,
+                token_usage.cache_creation_tokens,
+                token_usage.reasoning_tokens,
+                total,
+                ctx_win,
+                token_usage.est_system_tokens,
+                token_usage.est_tool_tokens,
+                token_usage.est_message_tokens,
+                token_usage.est_total(),
+            );
+        }
         if handle_interrupt(run, cancel, port).await? {
             return Ok(LoopDirective::Terminal);
         }

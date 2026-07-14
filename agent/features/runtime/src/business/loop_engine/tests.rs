@@ -47,7 +47,7 @@ impl RunLoopPort for ScriptedPort {
     async fn invoke_model(
         &mut self,
         cancel: &CancellationToken,
-    ) -> Result<ModelStep, LoopEngineError> {
+    ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
         self.calls.push("model");
         if self.block_model_forever {
             std::future::pending::<()>().await;
@@ -58,6 +58,7 @@ impl RunLoopPort for ScriptedPort {
         }
         self.model_steps
             .pop_front()
+            .map(|step| (step, StepTokenUsage::default()))
             .ok_or_else(|| LoopEngineError::Adapter("missing model step".to_string()))
     }
 
