@@ -14,6 +14,10 @@ fn sink_paths_in_logs_dir() {
         paths.provider,
         PathBuf::from("/tmp/logs/agent-provider.log")
     );
+    assert_eq!(
+        paths.llm_api_error,
+        PathBuf::from("/tmp/logs/llm-api-error.log")
+    );
     assert_eq!(paths.runtime, PathBuf::from("/tmp/logs/agent-runtime.log"));
     assert_eq!(paths.tools, PathBuf::from("/tmp/logs/agent-tools.log"));
     assert_eq!(paths.prompt, PathBuf::from("/tmp/logs/agent-prompt.log"));
@@ -32,6 +36,7 @@ fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> Unified
         shared: Mutex::new(None),
         composition: Mutex::new(None),
         provider: Mutex::new(None),
+        llm_api_error: Mutex::new(None),
         runtime: Mutex::new(None),
         tools: Mutex::new(None),
         prompt: Mutex::new(None),
@@ -131,6 +136,9 @@ fn route_returns_correct_sink_for_aemeath_targets() {
 
     let (_, path) = logger.route("aemeath:agent:provider");
     assert_eq!(path, &logger.paths.provider);
+
+    let (_, path) = logger.route("aemeath:llm-api-error");
+    assert_eq!(path, &logger.paths.llm_api_error);
 
     let (_, path) = logger.route("aemeath:agent:runtime");
     assert_eq!(path, &logger.paths.runtime);

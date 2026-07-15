@@ -5,6 +5,9 @@ use std::error::Error as StdError;
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
 
+use crate::business::error_log::{
+    sanitize_preview, source_chain, ErrorLogContext, LlmApiErrorRecord,
+};
 use crate::business::types::SystemBlock;
 use crate::core::provider::{LlmProvider, StreamHandler};
 use crate::LOG_TARGET;
@@ -148,6 +151,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             .unwrap_or(0);
 
         let mut last_error = None;
+        let invocation_started = std::time::Instant::now();
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
                 return Err(crate::LlmError::Cancelled);
@@ -206,6 +210,27 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 depth += 1;
                             }
                             let remaining = self.max_retries.saturating_sub(attempt + 1);
+                            let context = ErrorLogContext {
+                                driver: "openai_compatible",
+                                api: "chat_completions_stream",
+                                provider: &self.config.source_key,
+                                model: &self.model,
+                                endpoint: &url,
+                                attempt: attempt + 1,
+                                max_attempts: self.max_retries,
+                                elapsed_ms: invocation_started.elapsed().as_millis(),
+                                message_count: request_message_count,
+                                tool_count: request_tool_count,
+                                request_bytes: request_body_bytes,
+                            };
+                            let mut record = LlmApiErrorRecord::new(&context, detail);
+                            record.retryable = remaining > 0;
+                            record.elapsed_ms = invocation_started.elapsed().as_millis();
+                            record.message_count = request_message_count;
+                            record.tool_count = request_tool_count;
+                            record.request_bytes = request_body_bytes;
+                            record.source_chain = source_chain(&e);
+                            record.log(remaining == 0);
                             log::debug!(target: LOG_TARGET,
                                 "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
                                 self.config.source_key,
@@ -259,6 +284,30 @@ impl LlmProvider for OpenAICompatibleProvider {
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
                 let remaining = self.max_retries.saturating_sub(attempt + 1);
+                let context = ErrorLogContext {
+                    driver: "openai_compatible",
+                    api: "chat_completions_stream",
+                    provider: &self.config.source_key,
+                    model: &self.model,
+                    endpoint: &self.chat_url(),
+                    attempt: attempt + 1,
+                    max_attempts: self.max_retries,
+                    elapsed_ms: invocation_started.elapsed().as_millis(),
+                    message_count: request_message_count,
+                    tool_count: request_tool_count,
+                    request_bytes: request_body_bytes,
+                };
+                let mut record = LlmApiErrorRecord::new(&context, "http_server_error");
+                record.http_status = Some(status.as_u16());
+                record.error_code = Some("http_5xx");
+                record.retryable = remaining > 0;
+                record.elapsed_ms = invocation_started.elapsed().as_millis();
+                record.message_count = request_message_count;
+                record.tool_count = request_tool_count;
+                record.request_bytes = request_body_bytes;
+                record.response_bytes = error_body.len();
+                record.body_preview = Some(sanitize_preview(&error_body));
+                record.log(remaining == 0);
                 if remaining > 0 {
                     handler.on_error(&format!(
                         "server error ({}), retrying ({}/{})...",
@@ -280,6 +329,29 @@ impl LlmProvider for OpenAICompatibleProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
+                let context = ErrorLogContext {
+                    driver: "openai_compatible",
+                    api: "chat_completions_stream",
+                    provider: &self.config.source_key,
+                    model: &self.model,
+                    endpoint: &self.chat_url(),
+                    attempt: attempt + 1,
+                    max_attempts: self.max_retries,
+                    elapsed_ms: invocation_started.elapsed().as_millis(),
+                    message_count: request_message_count,
+                    tool_count: request_tool_count,
+                    request_bytes: request_body_bytes,
+                };
+                let mut record = LlmApiErrorRecord::new(&context, "http_client_error");
+                record.http_status = Some(status.as_u16());
+                record.error_code = Some("http_non_success");
+                record.elapsed_ms = invocation_started.elapsed().as_millis();
+                record.message_count = request_message_count;
+                record.tool_count = request_tool_count;
+                record.request_bytes = request_body_bytes;
+                record.response_bytes = body.len();
+                record.body_preview = Some(sanitize_preview(&body));
+                record.log(true);
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: body,
@@ -292,15 +364,40 @@ impl LlmProvider for OpenAICompatibleProvider {
                     return Err(crate::LlmError::Stream(msg.clone()));
                 }
                 Err(crate::LlmError::Stream(e)) => {
-                    let mut source_chain = String::new();
+                    let mut source_chain_text = String::new();
                     let stream_error = crate::LlmError::Stream(e.clone());
                     let mut source: Option<&dyn StdError> = StdError::source(&stream_error);
                     let mut depth = 1;
                     while let Some(cause) = source {
-                        source_chain.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                        source_chain_text.push_str(&format!("\n  Cause #{}: {}", depth, cause));
                         source = cause.source();
                         depth += 1;
                     }
+                    let fallback_planned = e.contains("upstream truncated");
+                    let context = ErrorLogContext {
+                        driver: "openai_compatible",
+                        api: "chat_completions_stream",
+                        provider: &self.config.source_key,
+                        model: &self.model,
+                        endpoint: &self.chat_url(),
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: request_message_count,
+                        tool_count: request_tool_count,
+                        request_bytes: request_body_bytes,
+                    };
+                    let mut record = LlmApiErrorRecord::new(&context, "stream_protocol_error");
+                    record.retryable = !fallback_planned;
+                    record.elapsed_ms = invocation_started.elapsed().as_millis();
+                    record.message_count = request_message_count;
+                    record.tool_count = request_tool_count;
+                    record.request_bytes = request_body_bytes;
+                    record.partial_output = true;
+                    record.fallback_planned = fallback_planned;
+                    record.body_preview = Some(sanitize_preview(&e));
+                    record.source_chain = source_chain(&stream_error);
+                    record.log(false);
                     log::debug!(target: LOG_TARGET,
                         "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
                         self.config.source_key,
@@ -312,7 +409,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                         request_message_count,
                         request_tool_count,
                         e,
-                        source_chain,
+                        source_chain_text,
                     );
                     // SSE 流被上游截断是稳定性失败（不是瞬时网络抖动），
                     // 重试流式请求无法解决——直接跳出重试循环走 non-stream fallback。

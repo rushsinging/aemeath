@@ -8,6 +8,7 @@
 
 use super::parse_responses_stream;
 use super::OpenAICompatibleProvider;
+use crate::business::error_log::{log_http_error, log_network_error, ErrorLogContext};
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::StreamHandler;
 use crate::LOG_TARGET;
@@ -37,6 +38,7 @@ impl OpenAICompatibleProvider {
             self.config.source_key, url, request_body_bytes,
         );
 
+        let invocation_started = std::time::Instant::now();
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
@@ -66,6 +68,24 @@ impl OpenAICompatibleProvider {
                 result = send_fut => match result {
                     Ok(resp) => resp,
                     Err(e) => {
+                        let remaining = self.max_retries.saturating_sub(attempt + 1);
+                        log_network_error(
+                            ErrorLogContext {
+                                driver: "openai_compatible",
+                                api: "responses_stream",
+                                provider: &self.config.source_key,
+                                model: &self.model,
+                                endpoint: &url,
+                                attempt: attempt + 1,
+                                max_attempts: self.max_retries,
+                                elapsed_ms: invocation_started.elapsed().as_millis(),
+                                message_count: messages.len(),
+                                tool_count: tool_schemas.len(),
+                                request_bytes: request_body_bytes,
+                            },
+                            &e,
+                            remaining > 0,
+                        );
                         log::debug!(target: LOG_TARGET,
                             "[responses-stream] HTTP send failed attempt={}/{}: {}",
                             attempt + 1, self.max_retries, e,
@@ -100,9 +120,23 @@ impl OpenAICompatibleProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                log::warn!(target: LOG_TARGET,
-                    "[responses-stream] HTTP {} body: {}",
-                    status, &body[..body.len().min(500)],
+                log_http_error(
+                    ErrorLogContext {
+                        driver: "openai_compatible",
+                        api: "responses_stream",
+                        provider: &self.config.source_key,
+                        model: &self.model,
+                        endpoint: &url,
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes: request_body_bytes,
+                    },
+                    status,
+                    &body,
+                    false,
                 );
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),

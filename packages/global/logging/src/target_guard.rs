@@ -12,6 +12,7 @@ const ALLOWED_TARGETS: &[&str] = &[
     "aemeath:tui",
     "aemeath:composition",
     "aemeath:shared",
+    "aemeath:llm-api-error",
     "aemeath:agent:policy",
     "aemeath:agent:project",
     "aemeath:agent:hook",

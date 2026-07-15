@@ -1,6 +1,7 @@
 //! 非流式请求：发送消息并等待完整响应
 
 use super::OpenAICompatibleProvider;
+use crate::business::error_log::{log_http_error, log_network_error, ErrorLogContext};
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::StreamHandler;
 use share::message::{ContentBlock, Message, Role};
@@ -26,18 +27,63 @@ impl OpenAICompatibleProvider {
 
         let headers = self.build_headers()?;
 
-        let response = self
+        let endpoint = self.chat_url();
+        let request_bytes = serde_json::to_string(&request_body)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let started = std::time::Instant::now();
+        let response = match self
             .http
-            .post(self.chat_url())
+            .post(&endpoint)
             .headers(headers)
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| crate::LlmError::Network(e.to_string()))?;
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log_network_error(
+                    ErrorLogContext {
+                        driver: "openai_compatible",
+                        api: "chat_completions_non_stream",
+                        provider: &self.config.source_key,
+                        model: &self.model,
+                        endpoint: &endpoint,
+                        attempt: 1,
+                        max_attempts: 1,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes,
+                    },
+                    &error,
+                    false,
+                );
+                return Err(crate::LlmError::Network(error.to_string()));
+            }
+        };
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
+            log_http_error(
+                ErrorLogContext {
+                    driver: "openai_compatible",
+                    api: "chat_completions_non_stream",
+                    provider: &self.config.source_key,
+                    model: &self.model,
+                    endpoint: &endpoint,
+                    attempt: 1,
+                    max_attempts: 1,
+                    elapsed_ms: started.elapsed().as_millis(),
+                    message_count: messages.len(),
+                    tool_count: tool_schemas.len(),
+                    request_bytes,
+                },
+                status,
+                &body,
+                false,
+            );
             return Err(crate::LlmError::Api {
                 error_type: status.to_string(),
                 message: body,
