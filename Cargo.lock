@@ -4334,6 +4334,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xtask"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "yoke"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
