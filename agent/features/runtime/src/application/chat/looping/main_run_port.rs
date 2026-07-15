@@ -35,7 +35,7 @@ use crate::application::loop_engine::{
 use crate::application::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::domain::agent_run::RunDomainEvent;
 use crate::LOG_TARGET;
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 
 /// Main-chat adapter for the shared run loop.
 ///
@@ -71,7 +71,7 @@ where
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) language: &'a str,
-    pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::api::session::ChatSegment>>>,
+    pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
     pub(crate) active_summary_arc: &'a Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) reasoning_graph: &'a mut Option<ReasoningGraph>,
@@ -85,7 +85,7 @@ where
     pub(crate) segment_id: &'a str,
     pub(crate) turn_context: RuntimeTurnContext,
     pub(crate) rollback_chain: ChatChain,
-    pub(crate) rollback_frozen_chats: Vec<context::api::session::ChatSegment>,
+    pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
     pub(crate) memory_cwd: PathBuf,
     pub(crate) last_api_input_tokens: &'a mut u64,
@@ -230,8 +230,8 @@ where
 
     async fn compact_impl(&mut self) {
         let tool_schemas = self.registry.schemas_for(self.language);
-        let tool_schema_tokens = context::api::compact::estimate_tool_schemas_tokens(&tool_schemas);
-        let cleared = context::api::compact::microcompact_chain(self.chain);
+        let tool_schema_tokens = context::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let cleared = context::compact::microcompact_chain(self.chain);
         if cleared > 0 {
             self.sink
                 .send_event(RuntimeStreamEvent::MicrocompactDone {
@@ -414,10 +414,10 @@ where
             context_window: self.context_size as u64,
             est_system_tokens: effective_system_blocks
                 .iter()
-                .map(|b| context::api::compact::estimate_tokens(&b.text))
+                .map(|b| context::compact::estimate_tokens(&b.text))
                 .sum(),
-            est_tool_tokens: context::api::compact::estimate_tool_schemas_tokens(&tool_schemas),
-            est_message_tokens: context::api::compact::estimate_messages_tokens(&messages_for_api),
+            est_tool_tokens: context::compact::estimate_tool_schemas_tokens(&tool_schemas),
+            est_message_tokens: context::compact::estimate_messages_tokens(&messages_for_api),
             stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
         };
 
@@ -735,6 +735,12 @@ where
                         .send_event(RuntimeStreamEvent::RunCancelled { run_id })
                         .await;
                 }
+                RunDomainEvent::Terminated { run_id, .. } => {
+                    self.rollback_cancelled().await;
+                    self.sink
+                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
+                        .await;
+                }
                 RunDomainEvent::CancellationRequested { run_id, .. } => {
                     self.sink
                         .send_event(RuntimeStreamEvent::RunCancelling { run_id })
@@ -762,7 +768,12 @@ where
                 | RunDomainEvent::AwaitingUser { .. }
                 | RunDomainEvent::Resumed { .. }
                 | RunDomainEvent::StepStarted { .. }
-                | RunDomainEvent::StepCompleted { .. } => {}
+                | RunDomainEvent::StepCompleted { .. }
+                | RunDomainEvent::StepCancellationRequested { .. }
+                | RunDomainEvent::StepFinalizationStarted { .. }
+                | RunDomainEvent::StepCancelled { .. }
+                | RunDomainEvent::DrainingInput { .. }
+                | RunDomainEvent::TerminationRequested { .. } => {}
             }
         }
         Ok(())

@@ -41,7 +41,7 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
     }
     match parts[0] {
         "list" => {
-            let sessions = context::api::session::list_sessions().await;
+            let sessions = context::session::list_sessions().await;
             let mut lines = String::from("📋 Sessions\n\n");
             for (i, s) in sessions.iter().take(15).enumerate() {
                 lines.push_str(&format!(
@@ -65,7 +65,7 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
             if parts.len() < 3 {
                 return ("Usage: /session rename <id> <name>".to_string(), true);
             }
-            match context::api::session::update_session_metadata(
+            match context::session::update_session_metadata(
                 parts[1],
                 Some(parts[2].to_string()),
                 None,
@@ -92,7 +92,7 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
             if parts.len() < 2 {
                 return ("Usage: /session export <id>".to_string(), true);
             }
-            match context::api::session::load_session(parts[1]).await {
+            match context::session::load_session(parts[1]).await {
                 Ok(session) => match serde_json::to_string_pretty(&session) {
                     Ok(json) => (json, false),
                     Err(e) => (format!("Failed to serialize session: {}", e), true),
@@ -105,15 +105,13 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
                 return ("Usage: /session import <file>".to_string(), true);
             }
             match tokio::fs::read_to_string(parts[1]).await {
-                Ok(content) => {
-                    match serde_json::from_str::<context::api::session::Session>(&content) {
-                        Ok(session) => match context::api::session::save_session(&session).await {
-                            Ok(_) => (format!("Session {} imported", session.id), false),
-                            Err(e) => (format!("Failed to save imported session: {}", e), true),
-                        },
-                        Err(e) => (format!("Failed to parse session file: {}", e), true),
-                    }
-                }
+                Ok(content) => match serde_json::from_str::<context::session::Session>(&content) {
+                    Ok(session) => match context::session::save_session(&session).await {
+                        Ok(_) => (format!("Session {} imported", session.id), false),
+                        Err(e) => (format!("Failed to save imported session: {}", e), true),
+                    },
+                    Err(e) => (format!("Failed to parse session file: {}", e), true),
+                },
                 Err(e) => (format!("Failed to read file: {}", e), true),
             }
         }

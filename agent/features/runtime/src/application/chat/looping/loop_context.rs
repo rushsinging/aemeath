@@ -30,7 +30,7 @@ pub type SwitchClientFn = Arc<
 
 pub type SaveChainFn = Arc<
     dyn Fn(
-            &context::api::session::ChatChain,
+            &context::session::ChatChain,
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
         + Send
@@ -56,7 +56,7 @@ where
     pub system_blocks: Vec<provider::api::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
-    pub chain: context::api::session::ChatChain,
+    pub chain: context::session::ChatChain,
     pub context_size: usize,
     pub workspace: Arc<project::api::WorkspaceService>,
     pub session_id: String,
@@ -76,7 +76,7 @@ where
     /// loop 在 4 个集成点调 transition 调节 effort。
     pub reasoning_graph: Option<ReasoningGraph>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    pub frozen_chats: Arc<std::sync::Mutex<Vec<context::api::session::ChatSegment>>>,
+    pub frozen_chats: Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
     pub active_summary: Arc<std::sync::Mutex<Option<String>>>,
     /// 模型切换构建器（#567）。由 core 层注入，避免 business 层反向依赖 core。

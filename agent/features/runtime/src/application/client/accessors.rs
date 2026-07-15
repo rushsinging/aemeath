@@ -41,9 +41,9 @@ pub struct RuntimeHandle {
     /// 会话历史唯一活跃真相——按 user turn 分段的 `ChatChain` 聚合。
     ///
     /// 持久化 / 给 LLM / TUI 均为派生投影（`messages_flat()` / `active_segments()`）。
-    pub(crate) current_chain: Arc<Mutex<context::api::session::ChatChain>>,
+    pub(crate) current_chain: Arc<Mutex<context::session::ChatChain>>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
-    pub(crate) frozen_chats: Arc<Mutex<Vec<context::api::session::ChatSegment>>>,
+    pub(crate) frozen_chats: Arc<Mutex<Vec<context::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。
     pub(crate) active_summary: Arc<Mutex<Option<String>>>,
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。

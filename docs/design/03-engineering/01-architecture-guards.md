@@ -18,12 +18,12 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 23 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 24 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 23 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 24 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
 
 ## 守卫索引
 
@@ -33,8 +33,8 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 锁定六边形目录，Storage 锁定 capability-first 目录并禁止旧固定层恢复 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime/Storage 仅开放登记的 crate-root 窄 façade |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 锁定六边形目录，Context 锁定 `capabilities/`，Storage 只禁止旧固定层恢复 |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -52,6 +52,7 @@
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
+| 24 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
 
@@ -152,7 +153,7 @@
 - **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；Runtime 使用目标结构规则。Storage 仅执行旧固定层负向断言，其正式 `capabilities/` 形状由 #1022 在目标切片落地后统一守护。依赖方向扫描跳过 Storage（其 #991 过渡布局已无横向层），其余规则按路径识别当前层，并对例外做 stale 自检。下方常量、扫描范围和例外表均与脚本保持一致。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Storage 仅以 `STORAGE_LEGACY_LAYERS = {api, business, contract, gateway}` 防旧层恢复，不登记过渡目录 allowlist。
-- **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature放行这些目录；其他未迁移 feature 仍受 `FEATURE_LAYERS` 限制。
+- **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {capabilities}`。Context 的稳定竖切只允许位于该容器；Session、Compact、Prompt 等旧根目录已由 #868 迁出并从白名单删除。其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -189,20 +190,23 @@
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：未迁移 feature 的跨 feature 访问继续经 `::<feature>::api`；Runtime 和 Storage 经登记的 crate-root 窄 façade 发布真实消费者所需入口。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层。该脚本同时锁定已迁移 feature 的精确根公开面。
+- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Context 使用根级窄 façade `context::{context_port, compact, guidance, skill, session}`；Storage 使用 #991 过渡期 crate-root 窄 façade。脚本同时禁止恢复 Context 的纯转发 `api/gateway`、Prompt `business/gateway` 与 Storage 内部固定层穿透。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
-  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`
+  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
-  - `ROOT_ACCESS_ALLOW.storage`：当前真实消费者使用的 Task/Memory/Tool Result façade 符号集合；History 未跨 crate 暴露。
+  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
+  - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory/Tool Result façade 符号集合；最终随 #880/#983/#883/#884 收敛。
+  - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities/prompt/business.rs, context/src/capabilities/prompt/business/, context/src/capabilities/prompt/gateway.rs}`
 - **检查方式**：
-  - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）。
-  - 对未迁移 feature，只允许 `::<feature>::api`；对 Runtime/Storage，只允许 `ROOT_ACCESS_ALLOW` 登记的 crate-root 符号。
-  - 对 `agent/features/*/src/api.rs` 的 `pub use crate::<segment>`，segment 必须位于 `API_FACADE_ALLOWED_SEGMENTS`。
-- **例外**：没有 path 级例外。Storage root 集合是结构化 façade policy，不是迁移 allowlist；新增符号必须证明真实消费者与稳定边界。
+  - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；
+  - 未迁移 feature 的跨 crate 入口仍必须是 `api`；Runtime、Context、Storage 只放行对应 `ROOT_ACCESS_ALLOW` 登记符号；Context `contract/capabilities` 与 Storage 私有模块 **NEVER** 直接跨 crate 访问；
+  - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
+  - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
+- **例外**：无 path 级白名单。Context 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
 
 ## 7. check-context-architecture.sh
 
@@ -477,6 +481,14 @@
 
 - **注**：`agent/composition/src/`（装配根）不在扫描范围内（守卫只扫 `runtime/src/`），天然放行。
 - **失败模式**：`❌ Config reader injection guard FAILED: runtime consumer directly new-ing ConfigAppService`
+
+## 24. check-production-reachability.sh
+
+- **位置**：`.agents/hooks/check-production-reachability.sh`，调用 `cargo run --quiet -p xtask -- source-guard`。
+- **功能**：扫描 `agent/`、`apps/`、`packages/` 的 Rust 源码，拦截非 `cfg(test)` 的公开 `*_for_test` / `test_only` 入口、未保护的 `testing` / `fixture(s)` / `fake(s)` 模块，以及超过集中 baseline 的生产 `allow(dead_code)`。
+- **baseline**：`.agents/dead-code-baseline.json` 当前上限 10，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
+- **public surface**：`source-guard <root> <output>` 可输出按路径和声明排序的 deterministic public surface，仅供 diff review，不承诺 crates.io semver。
+- **执行策略**：当前注册为本地 Stop 守卫，不新增 PR workflow；#1018 根据实测耗时决定后续在线、离线/定时或手动执行。
 
 ## 附：钩子体系（非架构守卫）
 

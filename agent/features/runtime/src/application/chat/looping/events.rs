@@ -1,5 +1,5 @@
 use crate::application::reasoning_graph::ReasoningNode;
-use context::api::session::PersistedWorkspaceContext;
+use context::session::PersistedWorkspaceContext;
 use provider::api::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
@@ -56,7 +56,7 @@ pub enum RuntimeToolCallStatus {
 }
 
 /// Compact 进度阶段（re-export from context crate）。
-pub use context::api::compact::CompactStage;
+pub use context::compact::CompactStage;
 
 #[derive(Debug)]
 pub enum RuntimeStreamEvent {

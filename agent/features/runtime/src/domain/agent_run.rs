@@ -19,8 +19,9 @@ pub use spec::{
     EventRoute, InputMode, InteractionMode, ResourceMode, RunKind, RunSpec, RunSpecError, ToolScope,
 };
 pub use state::{
-    RunCancellationRequest, RunStatus, RunStep, RunStepId, RunStepStatus, RunTransition,
-    RunTransitionError, RunTransitionReason,
+    DrainDecision, RunCancellationRequest, RunStatus, RunStep, RunStepCancellationRequest,
+    RunStepId, RunStepStatus, RunTerminationRequest, RunTransition, RunTransitionError,
+    RunTransitionReason,
 };
 pub use step::{ModelInvocation, RunToolCall, ToolCall, ToolCallStatus};
 
