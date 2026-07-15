@@ -1,36 +1,89 @@
 # 迁移治理 · Current → Target 追踪
 
 > 层级：03-engineering（横切工程）
-> 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 伞 / #761（S2 盘点）
-> **本文是唯一允许记录 Current 现状的文档**。设计文档（01-system / 02-modules）只写目标态，一切"现状缺陷 / 旧路径 / 死代码 / 迁移进度"集中在此追踪，避免设计内容与实现现状混淆。
+> 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 / #761（S2 盘点）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
+> **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](01-architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/project.md`](../../../specs/project.md)。
 
-## 1. Agent Runtime 现状缺口（S2 代码盘点）
+## 1. 代码组织、装配与守卫 Current → Target（#972）
+
+| # | Current | Target | 责任与退出条件 |
+|---|---|---|---|
+| O1 | 普通 feature 仍受迁移期固定层目录约束，context feature 保留脚本级精确顶层例外；完整脚本行为与常量见 [Architecture Guards](01-architecture-guards.md) | 按 [代码组织规范](../01-system/06-code-organization.md) 收敛为 capability-first modular monolith + use-case colocation + ports on demand，并使用 Rust 2018+ 无 `mod.rs` 形状 | 每个 feature **MUST** 在 #743 原生树内由其模块 leaf issue 独立迁移并验证；Project 由 [#892](https://github.com/rushsinging/aemeath/issues/892) 承担。leaf 正文未纳入 Target 路径与退役验收前 **NEVER** 开始目录迁移；[#763](https://github.com/rushsinging/aemeath/issues/763) 是治理父项，Guard 实现与故意违规证明归 [#982](https://github.com/rushsinging/aemeath/issues/982)，二者都 **NEVER** 承载模块业务代码 PR |
+| O2 | `check-cola-layer-purity.sh` 仍在 Stop 阶段运行；其检查行为、常量与白名单见 [Architecture Guards](01-architecture-guards.md) | 由守卫机械验证 capability-first 新规范的窄公开面、跨 feature 依赖、循环依赖与 Composition Root 装配 | [#982](https://github.com/rushsinging/aemeath/issues/982) 是 #763 的原生实现 leaf；替代守卫证据齐备前 legacy guard **MUST** 保持运行。#763 只汇总 Guard + Verify 状态，不直接承载 PR；退出证据见下 |
+| O3 | `WorkspaceService::new(cwd)` 内部选择 `GitCli`，`with_git(cwd, git)` 作为测试注入特例；`WorkspaceService`、`GitCli`、`GitWorktreeOps` 当前经 Project API 间接暴露 | `WorkspaceService` 只保留 crate-private 注入构造；`wire_production_workspace(cwd)` 是 composition-only opaque factory，在 Project 内构造私有 `GitCli` 并返回 `WorkspaceWiring`。Composition 独占 factory 选择 / 调用，Project factory 只负责私有构造，**NEVER** 读取全局配置或选择候选实现 | [#892](https://github.com/rushsinging/aemeath/issues/892) 收敛 Project 内部边界，[#893](https://github.com/rushsinging/aemeath/issues/893) 完成 Composition 消费切换；退出证据 **MUST** 包含 factory / handle 仅可由 `agent/composition` 消费，且 `WorkspaceService` / `GitCli` / `GitWorktreeOps` 不泄漏到 Project 外部。机械守卫与故意违规证明归 [#982](https://github.com/rushsinging/aemeath/issues/982) |
+| O4 | Runtime 已有未接线的 `core/ports/workspace_port.rs` 骨架；生产链的 `RuntimeHandle`、`ChatLoopContext` 与 `ToolExecutionContext` 仍持有或转发具体 workspace；当前启动构造的 workspace 跨回合复用 | 删除 Runtime `WorkspacePort` 与 RuntimeContext workspace 字段；Composition 为 active Main session slot 保留跨 Main Run / resume 复用的私有 `CompositionWorkspaceScope`，只在 Main agent 启动时建立 production wiring；Sub 从父 scope 派生 Run-lifetime 隔离 wiring，再把同一实例的窄 view 装配给 Context / Tool backing implementation | [#893](https://github.com/rushsinging/aemeath/issues/893) 负责 Runtime / Tool / Composition 消费方切换与 Main scope 生命周期；完成时 **MUST** 证明 Run N 的 cd / worktree 状态进入 Run N+1，并删除占位 port、旧具体引用与第二状态源。边界守卫实现归 #982，#763 汇总验收 |
+| O5 | `ToolExecutionContext` 直接持有 `Arc<WorkspaceService>`，并向统一执行上下文同时暴露 Read / Control；当前 guard 仅以调用点白名单限制 Control 消费者 | Composition 按 Tool 实例注入 Project-owned view：只读文件 Tool 只有 `WorkspaceRead`，Bash / EnterWorktree / ExitWorktree 才同时获得 `WorkspaceControl`；Tool **NEVER** 接收 `WorkspaceService` 或 `WorkspaceWiring` | [#893](https://github.com/rushsinging/aemeath/issues/893) 负责实现和逐 Tool 测试；[#982](https://github.com/rushsinging/aemeath/issues/982) **MUST** 用故意违规证明第四个 Control 消费者与全 Scope 广播均被拦截 |
+| O6 | TUI `UiEvent` 仍携带多种 SDK DTO 与 AskUser `oneshot::Sender`；AskUser 在第二层 ACL 返回空 mapping 后由 `ui_event.rs` 直接写 Model / input 并发送 reply；workspace mapper 同步执行 git；部分 mapper / reducer 可直接产生或执行 Effect；View / Model 尚有重复与越权写入面 | 唯一链路为 SDK event → `event_mapping` TUI DTO → `AgentEventMapping` intents → reducer Change → Coordinator Effect → effect runner → result Intent。Runtime 生成 interaction request id 并保有 waiter / continuation；SDK event 只携可序列化纯值，TUI Effect 经 AgentClient reply / cancel command 回传且全树零 sender / registry。command result 不推进 Run，Run 恢复 / 两阶段取消只投影 SDK 权威事件；六 Context 核心字段私有且 reducer 唯一写；结构化 Conversation 与 timeline 是原子维护的互补投影；Workspace metadata 由带 root + revision 的异步 Effect 回填 | Runtime / SDK identity 与 HardPause 归 [#874](https://github.com/rushsinging/aemeath/issues/874) / [#878](https://github.com/rushsinging/aemeath/issues/878)；TUI [#943](https://github.com/rushsinging/aemeath/issues/943) / [#944](https://github.com/rushsinging/aemeath/issues/944) / [#947](https://github.com/rushsinging/aemeath/issues/947) 的精确责任与退出条件见 §1.2；全局守卫实现归 #982 |
+| O7 | Task restore 当前不校验，并依次替换四个独立 async-mutex state；Project 只校验当前 root / path 存在后修改 live state，未完整校验 frame / repo；Config 的 global current / watch、Memory 打开与 Session 恢复缺少统一切换协议；旧 Workspace snapshot 缺少稳定 `WorkspaceId` / `ProjectIdentity`，跨项目 resume 可能继续沿用启动 identity | Task 使用 Task-owned `TaskId` / `BatchId` 与不含派生 `blocks` 的 `PersistedTask`，并把全部字段收进单一同步 `TaskStoreState` slot；resume 先取消 / join active shared lease holders，调用栈自身不持 shared lease，再取得 owned exclusive session-switch lease；读取 Session、Project → Config → Memory → Task 无副作用 prepare、无失败 commit 与最终 publish 全部在该同一 lease 内完成，Config watch 最后发布。Config update handoff 后由 owned cancellation-shielded task 完成 typed durable commit 与 live publish；非 Run Config query / subscribe 只经 async gate-aware façade取得 shared permit | [#890](https://github.com/rushsinging/aemeath/issues/890) 提供 Task 强类型 PL、单一 state slot / token、删除边清理与 snapshot round-trip，[#894](https://github.com/rushsinging/aemeath/issues/894) 提供 Project identity、完整 path / frame / repo 校验及旧 Session 兼容，[#933](https://github.com/rushsinging/aemeath/issues/933) 定义 ConfigQuery / ConfigWriter delivery seam，[#871](https://github.com/rushsinging/aemeath/issues/871) 实现联合协调器、participant 与唯一 gate-aware façade；退出证据 **MUST** 覆盖 shared → exclusive 升级为零、每个 prepare / durable await / publish 注入失败或取消点、任一 prepare 失败时全状态不变、captured empty 与 legacy absent 均清空旧 Task、新 writer 不再产生 absent、跨项目恢复后所有消费者只读写目标 Config / Memory / Task、Config watch 不早于 backing install、prepare token 与 commit 之间无外部 mutation、整个切换窗口不可被 Main Run、query、subscribe 或命令观察 |
+| O8 | Memory / Storage / Prompt / Workflow / Interaction / Config 的 Target 文档已有局部方向，但部分 leaf 正文未冻结 revision CAS、typed committed receipt、async materialization、ReasoningPort OHS 与 SDK interaction command | Memory mutation 采用 candidate + dataset CAS + committed receipt；Prompt 只经 Context-private async pipeline 与 supplier seams；Workflow graph 只经 ReasoningPort observe/current；Runtime interaction identity / waiter 权威且 SDK/TUI 只交换纯值；Config 只经 project-aware participant 与 AgentClient delivery | Memory [#895](https://github.com/rushsinging/aemeath/issues/895)–[#900](https://github.com/rushsinging/aemeath/issues/900) / [#984](https://github.com/rushsinging/aemeath/issues/984)，Storage [#880](https://github.com/rushsinging/aemeath/issues/880) / [#882](https://github.com/rushsinging/aemeath/issues/882) / [#983](https://github.com/rushsinging/aemeath/issues/983)，Prompt / Skill / Git [#870](https://github.com/rushsinging/aemeath/issues/870) / [#912](https://github.com/rushsinging/aemeath/issues/912) / [#894](https://github.com/rushsinging/aemeath/issues/894)，Workflow [#919](https://github.com/rushsinging/aemeath/issues/919)–[#921](https://github.com/rushsinging/aemeath/issues/921)，Interaction [#874](https://github.com/rushsinging/aemeath/issues/874) / [#878](https://github.com/rushsinging/aemeath/issues/878) / [#911](https://github.com/rushsinging/aemeath/issues/911)，Config [#871](https://github.com/rushsinging/aemeath/issues/871) / [#933](https://github.com/rushsinging/aemeath/issues/933) / [#934](https://github.com/rushsinging/aemeath/issues/934) 承接。**每个能力只有在以下可验证证据齐备后退出 O8**：唯一 owner / OHS 签名已在对应 Target 文档冻结；leaf PR 附契约或场景测试覆盖成功、pre-commit 失败、post-commit warning/取消竞争等其适用分支；旧 public path / duplicate trait / 第二状态源已删除；#982 对该边界的正例与故意违规反例均通过；父 Issue 和 Release Gate 已同步。任一能力未满足时 O8 保持未完成，#972 本身不承载代码 PR |
+
+#972 只对齐设计文档、责任映射与 issue 结构，**NEVER** 修改目录实现、守卫脚本或开始上述迁移。O1–O8 列出的执行 leaf **MUST** 在开工前以本表 Target 同步正文与父 Issue；迁移期固定层级守卫在 #982 替代守卫证据齐备前 **MUST** 保持运行。
+
+### 1.1 Legacy guard 替换退出证据
+
+legacy guard 替换的退出证据 **MUST** 包括：
+
+1. 新守卫已注册到 `check-architecture-guards.sh` 编排与 [Architecture Guards](01-architecture-guards.md) 守卫索引。
+2. 故意制造违规时，新守卫以 exit 2 阻断并命中预期规则。
+3. 恢复合规状态后，单守卫与完整 `check-architecture-guards.sh` 编排均 clean pass。
+4. 本文与 [Architecture Guards](01-architecture-guards.md) 已同步，legacy 引用与白名单已清理。
+
+上述证据未齐备时，现行迁移期守卫 **NEVER** 替换或退役。
+
+### 1.2 O6 TUI 单向事件链责任与退出条件
+
+从 Target 文档移出的 Current 清单集中如下；后续代码盘点发现新旁路时 **MUST** 只增补本表，**NEVER** 回写 `02-modules/tui/`：
+
+| # | Current | Target | 承接 |
+|---|---|---|---|
+| TUI-1 | SDK / Runtime 事件存在手工转换与类型擦除；UiEvent 直接携带多种 SDK DTO | Published Language 单一来源；第一层 ACL 转为 TUI-owned DTO，UiEvent 之后零 SDK DTO | #943 转换；#947 退役旧 DTO / convert 路径 |
+| TUI-2 | AskUser 在第二层 ACL 返回空 mapping，`ui_event.rs` 直接写 Model / input 并持有、发送 `oneshot::Sender`；reply / cancel 完成可与 Run resume / cancel 状态混淆；ToolApproval / PlanApproval / HardPause 无 TUI 闭环 | Runtime / SDK 先生成并注册 InteractionRequestId；processing 穷尽转换 UserQuestions / ToolApproval / PlanApproval / HardPause 纯值 body；DTO / UiEvent / Intent / Model 持 TUI-owned 无损 id；typed reply / cancel 严格走 Change → AgentClient Effect → result Intent，result 只结束 Interaction 块；仅 SDK `RunResumed` 恢复 Run，Interaction cancel 不取消 Run；并发 Tool suspension 由 Runtime 稳定串行发布 | #874/#878 提供 Runtime identity、waiter、continuation 与 command；#943 四类 DTO / 权威事件转换；#944 reducer / AgentClient effect / 状态机；#947 退役全部 TUI sender / registry / 旁路 |
+| TUI-3 | `AgentEventMapping` 可混合 Intent / Effect，reducer / update 路径仍可直接执行 runtime、副作用或依赖调用顺序；取消 accepted / terminal 未在投影中严格分离 | mapper 只产六 Context Intent；reducer 只产 Change；Coordinator 只产 Effect；runner 执行并回传 result Intent；SDK `RunCancelling` 投影非终态 Cancelling，只有 `RunCancelled` 投影终态 | #943 穷尽转换；#944 闭环与两阶段状态机；#947 退役旧 Effect 路径 |
+| TUI-4 | `WorkingDirectoryChanged` mapper 同步执行 git 补 branch / worktree kind，阻塞 ui_rx | ACL 只产 WorkspaceSnapshot；root + revision Change 驱动异步 metadata Effect，陈旧结果丢弃 | #943 DTO；#944 Effect；#947 同步路径退役 |
+| TUI-5 | spinner 业务态在 Model / ViewState / animation 多处同步；`update_ui` 混合 tool、spinner、AskUser、session cwd 与 dirty marking | Run / RunStep 投影是业务事实；ViewState 只存 scroll / selection / collapse / animation / cache 等瞬时状态；各 Context reducer 与 ViewAssembler 各守单一职责 | #944 Model / Change；#947 旧同步 helper 退役 |
+| TUI-6 | Conversation 结构化 `chats` 与 timeline 缺重叠事实 invariant；timeline 还包含 system / hook / error / AskUser 等结构化状态无法重建的事实，queued / progress 等重复投影也无关联证明；核心字段公开，resume、Chat / Run 术语及 Config / Workspace / Task 投影仍有越权写或双重真相 | 结构化 Conversation 投影（runs / queued / progress）与 `timeline` 是同一 reducer 事务原子维护的互补投影，只约束重叠稳定 ID、相对顺序、关联与终态；六 Context 核心字段私有，reducer 是唯一 mutation facade 调用方；resume 进入 Completed，六 Context 独立投影 | #944 私有化 / reducer / 互补 invariant；#947 旧字段、调用点与术语退役 |
+| TUI-7 | view_state 反向依赖 render；Input render model 与 ViewModel 重复；`follow_tail_hint` 无消费方；collapse 无输入闭环；QueuedUserMessage 被丢弃；BlockCache 无界；ToolResult display data 未参与 cache version；存在 no-op event / effect、无调用模块、临时全局 `allow(dead_code)`，且视图层门禁不完整 | ViewAssembler → ViewModel → Render 单向依赖；ViewState 只含瞬时交互态；queued / collapse / cache invalidation 均有封闭 Target 契约；缓存有容量上限；无重复模型、死字段、静默 event、no-op 变体或全局 dead-code 豁免；视图门禁全部可执行 | #947 统一退役、补闭环并启用守卫 |
+| TUI-8 | sub-agent progress 缺稳定 agent_id，部分 ToolOutput 被静默忽略 | Main/Sub 事件带 AgentId 并嵌套路由，所有进度变体显式映射 | #612 产品能力；#943 只保证 ACL 不静默丢弃 |
+
+| Issue | Current → Target 责任 | 必须具备的退出证据 |
+|---|---|---|
+| [#943](https://github.com/rushsinging/aemeath/issues/943) | 把第一层转换收口到 `adapter/event_mapping.rs`，将全部 SDK event / DTO（含 Runtime-owned `InteractionRequestId`、`RunResumed` / `RunCancelling` / `RunCancelled`）穷尽转换为 TUI-owned `UiEvent`；processing 只转发纯值 event，**NEVER** 生成协议 id 或注册 sender；第二层 `adapter/agent_event.rs` 按 Conversation / Input / Diagnostic / Session / Config / Workspace 六个 Context 显式产出 Intent | 每个 SDK event 与 UiEvent 变体都有转换 / mapping 单测；interaction id 可无损映回 AgentClient command；Run resume / 两阶段取消保留 run identity 与事件语义；整个 TUI 零 SDK channel/sender/pending waiter，UiEvent / Intent / Model 零 `sdk::*` DTO；禁止 wildcard、默认空 mapping 与“其余见 ui_event.rs”旁路 |
+| [#944](https://github.com/rushsinging/aemeath/issues/944) | 六 Context 核心字段私有，reducer 成为唯一 mutation facade 调用方并只返回 Change；Coordinator 只从 Change 生成 Effect；effect runner 调 `AgentClient::reply_interaction` / `cancel_interaction` 并把 typed outcome 变为 result Intent。四类 Interaction command result 只更新交互块，Run 只投影 Runtime 权威 resume / cancellation 事件；结构化 Conversation / timeline 作为互补投影原子维护；Workspace metadata 使用 root + revision 防陈旧覆盖 | 分层测试逐段覆盖四类 body 的 DTO → Intent、Intent → Change、Change → Effect、AgentClient outcome → result Intent，**NEVER** 只测首尾；有效 reply 恰好一次、InvalidReply 可修正重试、未知 / 重复 id 结构化失败；`InteractionReplySent` / `InteractionCancelled` 不改变 Run，`RunResumed` 才恢复 Running，`RunCancelling` 非终态且仅 `RunCancelled` 终结；两个并发 Tool suspension 按稳定顺序逐个展示且不覆盖；structured Conversation / timeline 仅对重叠 ID、顺序、关联、终态做 invariant；字段私有且非 reducer mutation 调用为零；Model 只接受匹配 request id / revision 的结果；`update/`、reducer、ACL 无 I/O / spawn / await / AgentClient 调用 |
+| [#947](https://github.com/rushsinging/aemeath/issues/947) | 退役 `ui_event.rs` 的 AskUser / workspace 特判、TUI 全部 reply sender / `PendingReplyRegistry` / 本地 request-id generator、mapper 直接 Effect、同步 git、错位 processing mapper、非 reducer Model 写入、旧 `chats` / Chat 术语、静默忽略分支、重复 DTO / InputRenderModel、`follow_tail_hint`、no-op / dead event 与临时 `allow(dead_code)`；闭合 collapse / queued message / bounded cache / cache-version 契约并启用 TUI 架构守卫 | legacy 路径、sender / registry / id generator、公开核心字段与非 reducer mutation 调用零引用；ViewState→Render 反向依赖、重复 render model、死字段、无界 cache、静默 queued item 与全局 dead-code 豁免均为零；故意把 SDK DTO / sender 放入 TUI、从 ACL 生成 Effect、从 update 执行 I/O、从非 reducer 写 Model、让 ViewState import Render、增加未映射 UiEvent 时守卫均以 exit 2 阻断；恢复后定向测试、全量 TUI 测试与 architecture guard clean pass |
+
+O6 只有在 Runtime #874/#878 与 TUI 三个 issue 的退出证据全部附于各自 PR、父 Issue 状态同步，且 #982 完成全局故意违规证明后才可标记完成。任何中间 PR **NEVER** 通过保留第二条 UiEvent 直达 Model 或 TUI-owned reply registry 路径换取兼容。
+
+## 2. Agent Runtime Current → Target
+
+[#700](https://github.com/rushsinging/aemeath/issues/700) / PR #823 已完成并由当前源码证明的基线，**NEVER** 再列为待迁移缺口：
+
+| 已完成基线 | Current 证据 |
+|---|---|
+| Main / Sub 共享唯一 Loop Engine 与显式 `Run` / `RunId` / `RunStatus` | Main `chat/looping/loop_runner.rs` 与 Sub `agent/runner/loop_run.rs` 都调用 `business::loop_engine::run_loop`；聚合位于 `business/agent_run` |
+| Main / Sub 共享 StuckGuard | `business/loop_engine/engine.rs` 在统一入口建立 `StuckGuard`，内部复用 stall / tool fuse |
+| 单一同步 `cancel_run(RunId)` 与 Cancelling → Cancelled | `packages/sdk/src/client.rs` 只发布 `cancel_run`；Runtime active-run registry、Run cancellation transition 与 SDK 两阶段事件已接线；旧 `ChatInputEvent::Cancel` 已无生产定义 |
+
+下表只保留当前仍真实存在的结构性缺口；后续实现若改变 Current，**MUST** 在合入时同步本表：
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
-| R1 | **两套 loop** | `process_chat_loop`(~1539行,Main) + `SubAgentRun::run_loop`(~209行,Sub) 各自实现 | 单一 `loop_engine`，Main/Sub 零分支 | S3/S5 |
 | R2 | **RuntimeContext 三层重叠**（#456）| `ChatRuntimeContext` + `RuntimeResources` + `ChatLoopContext` + `TuiLaunchContext` 字段大量重复复制 | 单一 `RuntimeContext`（出站端口 + config + event） | S5 |
-| R3 | **无 Run 聚合** | 一次执行 = `ChatLoopContext` 临时值 + 局部 `ChatLoopFsm`，无 `RunId`、崩溃即丢 | 显式 `Run` 聚合 + `RunId` + 单状态机 | S3 |
-| R4 | **Runtime 出站端口不完整** | 有：`TaskStorePort`/`ConfigReader`/`ChatEventSink`/`ProviderInfoPort`(只读)/`HookNotificationPort`(只通知) | 补 ContextPort、ToolCatalogPort、ToolExecutionPort、PolicyPort、MemoryPort、WorkspacePort、ReasoningPort + `UsageSink` + ProviderPort.invoke + HookPort.dispatch | S5 |
-| R5 | **Sub loop 无 stall/fuse 保护**（最大安全缺口）| Sub 无 StallDetector、无 ToolCallFuse，仅 3h timeout 兜底 | StuckGuard 内置 loop_engine，Main/Sub 统一 | S3 |
+| R4 | **Runtime 出站端口骨架未接线且含多余 WorkspacePort** | `core/ports/` 已有 Context / Tool / Policy / Memory / Workspace / Reasoning / Usage 等契约骨架，但 #873 明确未切换 legacy 路径；旧具体类型和部分历史端口仍在生产链 | 接线真实 Runtime seam；删除 `WorkspacePort`，由 active-main-session-slot composition scope 把 Project 窄 view 装配给 Context / Tool；补齐 Provider invoke、Hook dispatch 等行为 | S5（Workspace 见 #893 / #894） |
 | R6 | **共享 `Arc<LlmClient>` 隐患** | Sub 改 `reasoning_level`/`max_tokens` 靠 finalize 手动恢复，**并发 sub 互相踩踏** | 共享不可变 Transport；Main/Sub 每次 attempt 使用独立 Invocation Scope | S3/S5 |
 | R7 | **Sub 绕过统一 PolicyPort** | Sub tool 执行直接继承 `allow_all` bool，无统一决策入口 | v0.1.0 Main/Sub 都调用 AllowAllPolicy；Future Deny/Approval 另行设计 | S3/S5 |
 | R8 | **事件无 agent_id** | 事件上下文仅 `chat_id/turn_id`，无 main/sub 区分 | event_projection 补 `agent_id` + 路由 | #612 / S3 |
 | R9 | **RunSpec 配置散 4 处** | `AgentRoleConfig` + `AgentTool` 硬编码 system + 名称排除型 `ToolProfile::SubAgent` + `ModelEntryConfig`(effort) | 收敛为声明式 `RunSpec`，Tool 部分采用 Registry Scope + capability Profile | S3/S5 |
 | R10 | **Session `messages`/`chats` 双轨** | 旧扁平 `messages` + 新链 `chats` 并存，加载迁移 | 只保留 `chats`，旧 `messages` 退役 | S5/S7 |
-| R11 | **取消所有权跨 Session/Run 混淆** | SDK `CancelHandle` 捕获 Session 级 `Arc<Mutex<CancellationToken>>`，Main 每回合替换 token；另有 `ChatInputEvent::Cancel` 第二入口；旧 FSM 的 Cancel transition 仅测试使用 | `cancel_run(run_id)` 同步幂等入站命令 + `InterruptRequested → Cancelling → Cancelled`；每 Run 独占 scope | S3 (#700) |
-| R12 | **取消传播不完整** | Provider/Tool 监听当前 token；compact 内建新 token，Hook 只有 timeout；父/子 Run 没有显式取消树 | Provider/Tool/Compact/Hook 共享或派生 Run scope；父取消传播到全部活动子 Run | S3/S5 (#700) |
-| R13 | **TUI 两条取消路径** | Esc 在 update 内直接调用 handle；Ctrl+C 产生 Effect 后再调用；不符合 TEA 单向副作用流 | 统一 `InterruptCurrentRun → Effect::CancelCurrentRun → cancel_run(run_id)`；请求同步、终态 ACK 异步 | S3 (#700) |
 
-## 2. Tool & Skill & Command 现状缺口（S2 代码盘点）
+## 3. Tool & Skill & Command 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
 | T1 | **Runtime 直持 Registry / Tool 实例** | Runtime 从具体 ToolRegistry 按名称取得 Tool 并调用；目录查询与函数执行无端口隔离 | `ToolCatalogPort` + `ToolExecutionPort`；只交换 Descriptor/Invocation/Outcome | S5 |
 | T2 | **Profile 依赖 ToolName 黑名单** | `Full/SubAgent/NoAgent` 通过名称排除；NoAgent 与 SubAgent 非包含关系，新 Tool 容易意外扩权 | Registry Scope 表达装配；Profile 用 capability 允许集合，只收缩不扩权 | S3/S5 |
 | T3 | **Scope 与授权混合** | 是否有 Agent/Task/AskUser/Worktree 同时由注册列表和 Profile 名称约定表达 | `Effective Tools = Registry Scope ∩ Profile Allowed Capabilities`；Main/Sub 分别装配 Scope | S3/S5 |
-| T4 | **ToolExecutionContext 泄漏 Runtime 资源** | 执行上下文包含 registry、store、channel、semaphore 等具体活资源，构造点分散 | 最小 `ExecutionScope` + 对应 BC 的窄资源端口；禁止传 RuntimeContext/Registry/Store | S5 |
-| T5 | **Tool 调用职责分散** | schema、timeout、并发、Policy/Hook/审批与实际调用跨 Runtime/Tool 实现散落 | Tool BC 强制存在性/Scope/Profile/schema/函数调用；Runtime 编排 Policy/Hook/审批/timeout/并发/取消/重试 | S3/S5 |
+| T4 | **ToolExecutionContext 泄漏 Runtime / Project 资源** | 执行上下文包含 registry、store、channel、semaphore 与具体 `WorkspaceService` 等活资源，构造点分散 | 最小 `ExecutionScope` + 对应 BC 的窄资源端口；Project view 按 Tool 实例注入；AskUser 返回 typed suspension 而非注入 channel / `UserInteraction`；禁止传 RuntimeContext / Registry / Store / WorkspaceService | S5（Workspace 见 #893） |
+| T5 | **Tool 调用职责分散** | schema、timeout、并发、Policy/Hook/审批与实际调用跨 Runtime/Tool 实现散落 | Tool BC 强制存在性/Scope/Profile/schema/函数调用并可产生 `ToolSuspension`；Runtime 经唯一 `InteractionPort` 编排 Policy/Hook/审批/await-resume/timeout/并发/取消/重试 | S3/S5 |
 | T6 | **取消接口绑定实现细节** | Tool 执行依赖具体 cancellation/channel 形态，长进程/网络调用的协作停止不统一 | Tool PL 定义只读 `CancellationSignal`；Runtime 适配 cancellation tree 并拥有 timeout | S5 |
 | T7 | **Tool 结果责任混合** | Tool 字符串结果、结构化 data、错误、截断/落盘和 UI 展示边界不统一 | `ToolOutcome` 保留领域结果；token budget/截断归 Context Management，持久化归 Storage，渲染归 TUI | S5 |
 | T8 | **Skill 被包装成 Tool 且物化跨域** | SkillTool 只返回 loaded/path，实际内容由 prompt 路径物化；Skill 与 Tool 执行语义混合 | 独立 SkillCatalog/Materialization 端口，输出 PromptFragment 给 Context Management | S5 |
@@ -39,7 +92,7 @@
 | T11 | **MCP Tool Catalog 一致性不足** | disconnect 后目录撤销、动态上下线、annotations capability 映射及事件通知未形成统一契约 | MCP ACL 转 Tool PL；CatalogChanged 通知重新拉取 Snapshot；连接/投影一致 | MCP Ready 后 |
 | T12 | **MCP 稳定身份与版本未定** | 动态工具尚未形成可验证的稳定 ID、schema 版本和 Catalog revision 协议 | MCP 正式接线时单独设计 ToolId、rename、版本与 in-flight 兼容；当前不预设 | MCP Ready 后 |
 
-## 3. Provider 现状缺口（S2 代码盘点）
+## 4. Provider 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -56,48 +109,52 @@
 | P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
 | P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
 
-## 4. Memory 现状缺口（S2 代码盘点）
+## 5. Memory 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
-| M1 | **无 MemoryPort trait** | Runtime 直调 `MemoryStore` 具体类型（`storage::api::MemoryStore`）| 抽 `MemoryPort` trait，实现移到 adapter；Runtime 不接触 MemoryStore | S5 |
-| M2 | **领域逻辑与 I/O 混合** | `MemoryStore` 同时做 scoring/dedup/retrieval 和文件读写 | 拆分 MemoryService（领域）+ MemoryStorageAdapter（I/O）| S7 |
+| M1 | **无 MemoryPort trait** | Runtime 直调 `MemoryStore` 具体类型（`storage::api::MemoryStore`）| 抽 `MemoryPort` trait，实现移到 adapter；Runtime 不接触 MemoryStore | #895 |
+| M2 | **领域逻辑与 I/O 混合** | `MemoryStore` 同时做 scoring/dedup/retrieval 和文件读写 | 拆分 MemoryService（领域）+ MemoryStorageAdapter（I/O）| #896 |
 | M3 | **检索为子串匹配** | `entry_matches` 朴素小写 contains，无相关性排序 | Tier 1 BM25 关键词相关性排序 | #551 |
 | M4 | **similarity_threshold 仅用于去重** | 检索不接入 threshold | 检索也用 threshold 过滤低相关结果 | #551 |
-| M5 | **Reflection 代码在 Runtime** | `runtime/business/reflection/` 含 prompt/output/apply 领域逻辑 | 领域逻辑迁回 Memory BC，Runtime 只编排触发 + LLM 调用 | S5 |
-| M6 | **无 ReflectionPromptPort** | Runtime 直接调 reflection 模块函数 | 抽 trait，Memory BC 暴露领域服务 | S5 |
-| M7 | **memory_inject 硬编码参数** | `open_memory_store` 硬编码 `max_entries=100, threshold=0.8` | 从 ConfigSnapshot 读取 | S5 |
-| M8 | **SessionReminder 在 Memory** | `share::memory::session_reminder` 是会话级数据 | 迁移到 Context Management（Session 聚合）| S5/S7 |
-| M9 | **无 NoOpMemory** | Sub 无 Memory 隔离（可读写主记忆）| Sub 装配 NoOpMemory，不读不写不 reflection | S3/S5 |
+| M5 | **Reflection 代码在 Runtime** | `runtime/business/reflection/` 含 prompt/output/apply 领域逻辑 | 领域逻辑迁回 Memory BC，Runtime 只编排触发 + LLM 调用 | #898 |
+| M6 | **无 ReflectionPromptPort** | Runtime 直接调 reflection 模块函数 | 抽 trait，Memory BC 暴露领域服务 | #898 / #899 |
+| M7 | **memory_inject 硬编码参数** | `open_memory_store` 硬编码 `max_entries=100, threshold=0.8` | 从 ConfigSnapshot 读取 | #897 / #934 |
+| M8 | **SessionReminder 在 Memory** | `share::memory::session_reminder` 是会话级数据 | 迁移到 Context Management（Session 聚合）| #870 |
+| M9 | **无 NoOpMemory** | Sub 无 Memory 隔离（可读写主记忆）| Sub 装配 NoOpMemory，不读不写不 reflection | #897 |
+| M10 | **项目 key 只取旧 cwd / basename** | 同路径别名可能分裂，完整 Project identity 上线后旧 memory 会被误判为空 | `v2_<identity-hash>`；open 先探测 new / legacy / journal，冲突 fail-closed，迁移复用 Storage dataset transaction | #896 / #983 |
+| M11 | **查询夹带 I/O / mutation 错误不可传播** | concrete store 的读取、touch 与全文件写语义混合，plain Vec query 难以表达 retrieval mode、archive / outdated / TTL 状态与损坏 / 写失败 | opener eager-read verified in-memory state；query 纯内存只读并返回 `MemorySearchResult` / `MemorySearchHit` envelope；mutation candidate → shielded durable commit → publish，错误结构化传播 | #895 / #896 |
+| M12 | **active / archive 非联合事务** | read-modify-write 分别覆盖两个文件，archive / compact crash 可丢失或重复条目 | Storage `AtomicDatasetPort` 统一 dataset lock + journal / marker；受影响 members 同代提交，reopen 先恢复 | #983 / #896 |
+| M13 | **构造与 identity 选择散落** | 多处重复 `MemoryStore::new`，inject 与 MemoryTool 使用不同 cwd 口径 | Composition 按 ProjectIdentity + candidate MemoryConfig 只打开一个 service，同一 shared lease 向所有消费者分发同一 Arc | #897 |
+| M14 | **mutating 注入路径与死方法** | PR #575 已交付的 `top_for_inject_readonly` 仍绑定 legacy `MemoryStore`，而 `top_for_inject` 会 touch / 写盘且只被测试引用 | #984 将主动注入切到 active session lease 上同一只读 `retrieve_for_inject`；#900 删除两个 legacy top query。访问统计若需要必须是显式 fallible command | #984 / #900 |
+
+## 6. Context Management / Config 现状缺口
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
-| P1 | **Runtime 依赖具体 client/pool** | Runtime 直接持有并调用 `LlmClient` / `LlmClientPool`，ProviderInfoPort 只覆盖元数据 | Runtime 只依赖自有 `ProviderPort` 与稳定 Invocation PL；具体 provider 仅在 Composition Root 装配 | S3/S5 |
-| P2 | **调用期配置为共享可变状态** | model client 上以 `set_max_tokens` / `set_reasoning_level` 原地修改，再由 Sub finalize 手动恢复 | 共享不可变 Transport；每次 attempt 构造不可变 Invocation Scope，无 `set_*` 与 restore | S3/S5 |
-| P3 | **Main/Sub client 并发踩踏** | 多个 Sub 可拿到同一 `Arc<LlmClient>`，setup/read-modify/finalize restore 非原子，取消或 panic 会遗留污染 | Main/Sub 只共享只读 Transport，各自持有调用期状态；任一调用 drop 不影响其他调用 | S3/S5 |
-| P4 | **流协议依赖多方法回调** | `StreamHandler` 通过 text/thinking/tool/error 等回调把 Provider 与 Runtime handler 生命周期耦合，错误主要为字符串 | pull-based `InvocationStream` + 封闭 `InvocationDelta` + 结构化终结错误；Runtime 自行组装 ModelInvocation | S5 |
-| P5 | **wire DTO 发布面过宽** | Provider contract/api re-export 含供应商 request/stream payload、client config 和具体构造类型 | wire request/response/SSE DTO 全部留在 driver adapter；跨 BC 只交换 Invocation PL、ModelCapability 与 Message | S5/S7 |
-| P6 | **跨调用重试下沉到 Provider** | 各 provider 内部自行 attempt/backoff，策略与日志不一致，Runtime 无法完整拥有 attempt 事件 | Provider 一次 invoke 只做一次上游语义请求并分类错误；Runtime 统一 retry/backoff/compact/final failure | S3/S5 |
-| P7 | **stream → non-stream fallback 隐式重发** | 部分 driver 在流失败后于 Provider 内再次请求；已输出内容时存在重复或归因不清风险 | fallback 必须由 Runtime 作为新 attempt 显式编排；每次 attempt 独立事件、usage 与取消 | S5 |
-| P8 | **reasoning 能力与 clamp 分散** | driver、provider、Runtime 与 model 配置分别处理上限/字段；Anthropic、OpenAI-compatible、Ollama 路径不统一 | Workflow desired ∩ Config user max ∩ Provider/model max；Provider 统一能力解析与 wire 映射 | S3/S5 |
-| P9 | **错误分类不稳定** | HTTP、网络、stream、取消和 context 超限在多路径转换，部分上层依赖字符串判断 | `ProviderErrorKind + retryable + safe provider code`；Runtime 只按结构化语义编排 | S5 |
-| P10 | **Usage 与成本边界未显式** | Provider 返回 usage，但流中累计语义、cache/reasoning token 与 Audit 成本归属未形成统一契约 | Provider 标准化 RawUsageSnapshot；Runtime 关联 attempt；Audit 独占 pricing、cost 与聚合 | S5 |
-| P11 | **能力查询粒度不足** | reasoning 上限主要按 driver 固定返回，缺少 driver + model + 配置覆盖的完整解析 | 发布只读 ModelCapability，未知能力保守处理，并在编码前再次复核 | S3/S5 |
-| P12 | **具体 Provider 构造点分散** | client/provider/pool 工厂与默认 fallback 可在 Provider/Runtime 路径内发生，缺少唯一装配边界 | Composition Root 独占 Transport、driver、凭证与 ProviderPort adapter 构造；缺失配置显式失败 | S5/S7 |
+| CM1 | **Compact 管线完成度与所有权混杂** | L2 / L4 未接线；L3 直接改 `ChatChain`；AutoCompact circuit breaker 未进主循环 | L1 在 ToolResult 进入 `ChatChain` 前完成；L2-L4 只变换 `ContextWindow` 读模型，L5 经 ContextPort 修改稳定 Session backing；fingerprint / circuit breaker / manual bypass 语义唯一 | #548 / #552 / #554 / #870 |
+| CM2 | **Token budget 常量和触发散落** | 多处硬编码 max output `8192`、重复阈值检查、PreCompact 可无条件触发、长 Session 全量重算 | Provider capability 提供模型上限；TokenBudgetConfig 单一来源；manual / auto 入口分明；fingerprint 增量估算且 Hook 只在真实 compact 时触发 | #550 / #553 / #870 |
+| CM3 | **Prompt 多入口且无私有 capability seam** | Runtime 直接调用 prompt 自由函数；static / dynamic 组装重复，空 marker 与 sync drift 路径存在 | Prompt 是 Context-private capability；ContextPort build_window 是唯一对外入口；单一 async guidance / prompt pipeline | #870 |
+| CM4 | **Guidance / Skill / Git Context 边界不完整** | SKILL.md 扫描缺失；Prompt 散点执行 git / 读 cwd；user guidance 只取首个文件且 alias / canonical 去重不统一 | Skill-owned materialization + 全覆盖扫描；Project WorkspaceRead snapshot 经 ACL 注入；每目录 AGENTS-first / CLAUDE fallback、多层有序、canonical 去重 | #870 / #912 / #894 / #965 |
+| CFG1 | **Config adapter stub 与 application I/O 混合** | File / CLI / compatibility adapter 未完整接线，ConfigAppService 内联 `tokio::fs` 且兼容格式硬编码 | adapter 输出 ConfigPatch；Application 只编排 layer / validation；外部 CLI 经 translator ACL | #934 |
+| CFG2 | **reasoning 上限解析未进入 clamp** | `max_reasoning` 可读取但 effective level 仍由分散路径决定 | Workflow desired ∩ Config user max ∩ Provider/model capability；Run scope 固化 effective value，Prompt 只消费纯值 | #921 |
+| CFG3 | **active Config 非 project-aware 联合切换** | global current / watch / project file load 与 Memory 打开缺少单一 gate 和 participant protocol，运行期 writer 可在 durable await 取消后留下磁盘 / live 分裂，同步 query / watch 可观察切换中间态 | Config 独占 `{location,snapshot}`；Project→Config ACL；Project→Config→Memory→Task prepare；update handoff 后由 owned cancellation-shielded task 完成 durable Config persist、Memory install、Config install、watch 最后发布；非 Run `ConfigQuery::snapshot/subscribe` 先取得 shared permit | #933 / #871 |
+| CFG4 | **交付层直连 Config 风险** | raw ConfigReader / writer / watch / CLI patch 入口可被 TUI / CLI 或 AgentClient application 直接消费 | #933 定义 async `ConfigQuery` / `ConfigWriter` 与 SDK delivery seam；#871 提供唯一 gate-aware implementation。TUI / CLI 经 AgentClient command + SDK event，CLI args 只作 bootstrap source | #933 / #871 |
 
-## 5. Storage 现状缺口（S2 摘要盘点）
+## 7. Storage 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
-| S1 | **Storage 同时拥有业务模型** | Task/Batch 状态、依赖图、Memory 查询与 History 策略寄居 storage crate | Task/Memory/History 所属 BC 独占模型和不变量；Storage 只实现物理端口 | S5/S7 |
-| S2 | **原子写机制未复用** | Session 自带 tmp/fsync/.bak；Memory、History、Tool Result 等路径直接 `fs::write` | 通用 AtomicBlob adapter；数据 BC 的窄持久化端口复用同一机制 | S5 |
-| S3 | **backup/恢复协议不完整** | Session 有一代 `.bak`，但备份旋转失败被忽略；其他路径无 previous/quarantine | 原子可见、机械代际读取、领域验证后显式 promote/quarantine | S5 |
-| S4 | **路径与任意物理 Path 耦合** | 多处业务代码拼接 `~/.agents` 路径或直接持有 PathBuf | StorageKey + SafePathSegment；物理根和路径解析只在 adapter | S5/S7 |
-| S5 | **Tool Result 策略落入 Storage** | 50K 阈值、head/tail preview、inline reference 格式和写盘混在一个模块 | Config 提供阈值；Tool/Context Management 决定替换语义；Storage 只写 blob | S5 |
-| S6 | **错误与损坏处理不统一** | String/Option/领域错误混用，部分失败静默跳过或仅日志 | StorageErrorKind + Generation ReadOutcome；数据 BC 验证并显式恢复 | S5 |
-| S7 | **并发写与临时文件协议未统一** | 固定 `.tmp/.new`，跨实例互斥和残留清扫语义不一致 | 随机 create-new、跨进程锁、commit marker crash recovery | S5 |
+| S1 | **Storage 同时拥有业务模型** | Task/Batch 状态、依赖图、Memory 查询与 History 策略寄居 storage crate | Task/Memory/History 所属 BC 独占模型和不变量；Storage 只实现物理端口 | #883 |
+| S2 | **原子写机制未复用** | Session 自带 tmp/fsync/.bak；Memory、History、Tool Result 等路径直接 `fs::write` | 通用 AtomicBlob adapter；数据 BC 的窄持久化端口复用同一机制 | #880 / #883 / #884 |
+| S3 | **backup/恢复协议不完整** | Session 有一代 `.bak`，但备份旋转失败被忽略；其他路径无 previous/quarantine | 原子可见、机械代际读取、领域验证后显式 promote/quarantine | #881 / #882 |
+| S4 | **路径与任意物理 Path 耦合** | 多处业务代码拼接 `~/.agents` 路径或直接持有 PathBuf | StorageKey + SafePathSegment；物理根和路径解析只在 adapter | #880 / #883 |
+| S5 | **Tool Result 策略落入 Storage** | 50K 阈值、head/tail preview、inline reference 格式和写盘混在一个模块 | Config 提供阈值；Tool/Context Management 决定替换语义；Storage 只写 blob | #884 |
+| S6 | **错误与损坏处理不统一** | String/Option/领域错误混用，journal / primary / member digest 歧义可能被当作缺文件、空 dataset 或仅日志 | `StorageErrorKind::CorruptTransaction` + typed reason / transaction scope / quarantine disposition；blob / dataset crash-protocol 矛盾 fail-closed，领域 payload/schema 损坏仍由所属 BC 分类 | #880 / #881 / #882 / #983 |
+| S7 | **并发写与临时文件协议未统一** | 固定 `.tmp/.new`，跨实例互斥和残留清扫语义不一致 | 随机 create-new、跨进程锁、commit marker crash recovery | #882 |
+| S8 | **只有单 blob 原子性** | active / archive 等多文件 dataset 各自写入，无法证明跨文件 crash 一致 | Storage-owned `AtomicDatasetPort`：dataset lock、全 member stage、journal / commit marker、read-before-recovery；领域 adapter 复用同一 primitive | #983 |
 
-## 6. Logging 现状缺口（S2 摘要盘点）
+## 8. Logging 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -109,7 +166,7 @@
 | L6 | **Config 参数接线不完整** | retention/logs_dir 未形成单一闭环 | ConfigSnapshot 注入 Filter/Sink/RotationPolicy | S5 |
 | L7 | **schema/规范漂移** | 实现为 14 字段，部分注释仍称 13 | 14 字段 v1 契约 + consistency guard | S5/S7 |
 
-## 7. Application Version Control 现状缺口（S2 摘要盘点）
+## 9. Application Version Control 现状缺口（S2 摘要盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -122,7 +179,7 @@
 | V7 | **Release Source ACL 不完整** | DTO/URL/状态码直通且缺 host/size 约束 | 私有 DTO + source 安全校验 | 独立安全 issue |
 | V8 | **检查与执行端口混合** | 单一 UpdateService，perform 内再次检查 | Runtime ApplicationVersionPort；模块内 plan/apply 分离 | S5 |
 
-## 8. Policy / Hook / Audit 现状缺口（S2 代码盘点）
+## 10. Policy / Hook / Audit 现状缺口（S2 代码盘点）
 
 | # | 缺口 | 现状 | 目标 | 迁移阶段 |
 |---|---|---|---|---|
@@ -139,18 +196,15 @@
 | PHA11 | **Audit crate 为空壳** | 只有 AuditApiMarker / empty gateway | MVP 建 UsageRecord、UsageSink、UsageQueryPort、worker | S5 |
 | PHA12 | **Usage/Cost/Pricing 混在 Runtime** | CostTracker 同时记录 usage、计算 cost、读写全量 cost_history.json | Audit MVP 只迁 raw Usage；Cost/Pricing 保留 Future，不进入 MVP | S5/S7 |
 | PHA13 | **Usage 缺统一关联 ID** | 记录主要含 session/model/tokens/cost，无 Run/Step/Invocation | 使用 SessionId + RunId + RunStepId + ModelInvocationId | S3/S5 |
-| PHA14 | **Usage 写入阻塞且全量重写** | Runtime 直接 fs read/write JSON 数组 | 非阻塞 bounded UsageSink；worker 经 Storage AppendLogPort 写 JSONL | S5 |
+| PHA14 | **Usage 写入阻塞且全量重写** | Runtime 直接 fs read/write JSON 数组 | 非阻塞 bounded UsageSink；worker 经 Audit UsageAppendStorePort 写 JSONL | S5 |
 | PHA15 | **Usage 与 Session 存储边界不清** | cost_history 为全局混合文件，缺独立 Audit 分区语义 | `~/.agents/audit/usage/{session_id}.jsonl`；Session 删除不级联 | S5 |
 | PHA16 | **Audit/Logging 混淆风险** | Usage/Hook 信息依赖诊断日志展示，无事实查询端口 | Logging 只做诊断；UsageQueryPort 读取 Audit 事实，不解析日志 | S5 |
 
-## 9. 死代码 / 退役清单
+## 11. 死代码 / 退役清单
 
 | 项 | 现状 | 处理 | 阶段 |
 |---|---|---|---|
 | **Scheduler** | `TaskScheduler` 全仓库仅内部 5 处引用，无生产实例化 | 判定死代码，删除 | S7 |
-| 旧 `ChatLoopState` FSM | 仅 Main，Sub 无 FSM；Cancel/Abort transition 无生产调用 | 收敛进含 `Cancelling` 的 Run 单状态机后退役 | S3/S5 |
-| Session 级可替换 cancel token 槽 | 为常驻 ChatStream 跨多个回合命中“当前 token”而引入，取消后需 reset，存在 stale/race 兜底 | 改为 per-Run scope + `cancel_run(run_id)` 后删除 | S3 (#700) |
-| `ChatInputEvent::Cancel` | 与 SDK `CancelHandle` 并存，TUI 无生产调用 | 迁移期映射到唯一 cancel command，随后退役 | S3/S5 (#700) |
 | 6 个 core 注入闭包 | `ChatLoopContext` 的 `save_chain`/`run_reflection`/`list_models` 等，为打破 business→core 反向依赖的临时注入 | 收敛后由对应 Port 替代 | S5 |
 | 旧扁平 `Session.messages` | 迁移期双轨 | 退役 | S7 |
 | ToolName 排除型 `ToolProfile` | 新 Tool 易意外扩权，`NoAgent` 与 `SubAgent` 语义正交 | 用 Registry Scope + capability Profile 替代后删除 | S5/S7 |
@@ -173,18 +227,23 @@
 | `cost_history.json` 全量写路径 | 每次保存重写数组，记录含派生 cost 且缺 Run IDs | 后续 importer 只迁可验证 raw token；旧路径有计划退役 | S5/S7 |
 | Stop Hook 超限强制 Done | Stop 未放行却伪造 Completed | 改为第 16 次 RunFailed 后删除旧 helper | S3/S5 |
 
-## 10. 已正确隔离（可作参考范式）
+## 12. 已正确隔离（可作参考范式）
 
 | 项 | 现状 | 说明 |
 |---|---|---|
 | **Workspace 隔离** | `seed_isolated()`：继承 cwd/root，空栈+新锁，子 worktree 进出不影响父 | ✅ 子资源隔离范式 |
 | **Task 隔离** | Sub 用全新 `TaskStore::new()` | ✅ |
 
-## 11. 相关文档
+## 13. 相关文档
 
+- 系统级代码组织规范：[../01-system/06-code-organization.md](../01-system/06-code-organization.md)
+- Project 目标端口与代码组织：[../02-modules/project/02-ports-and-adapters.md](../02-modules/project/02-ports-and-adapters.md)
+- 守卫运行时真相：[architecture-guards.md](01-architecture-guards.md)
 - 领域模型（目标态）：[../02-modules/runtime/01-domain-model.md](../02-modules/runtime/01-domain-model.md)
 - 模块边界：[../02-modules/runtime/02-module-boundaries.md](../02-modules/runtime/02-module-boundaries.md)
-- 端口缺口：[../02-modules/runtime/06-ports-and-adapters.md](../02-modules/runtime/06-ports-and-adapters.md)
+- Runtime 端口与装配：[../02-modules/runtime/06-ports-and-adapters.md](../02-modules/runtime/06-ports-and-adapters.md)
+- Workspace 端口与装配：[../02-modules/project/02-ports-and-adapters.md](../02-modules/project/02-ports-and-adapters.md)
+- TUI Model 与 Workspace 投影：[../02-modules/tui/02-model.md](../02-modules/tui/02-model.md)
 - Tool & Skill & Command 目标设计：[../02-modules/tools/README.md](../02-modules/tools/README.md)
 - Provider 目标设计：[../02-modules/provider/README.md](../02-modules/provider/README.md)
 - Memory 目标设计：[../02-modules/memory/README.md](../02-modules/memory/README.md)
@@ -207,3 +266,5 @@
 | 2026-07-12 | 新增 Memory 缺口 M1-M9 与 SessionReminders、MemoryStore 领域方法退役项 | #789 |
 | 2026-07-12 | 新增 Storage S1-S7、Logging L1-L7、Application Version Control V1-V8 缺口与退役项 | #793 |
 | 2026-07-12 | 新增 Policy/Hook/Audit 缺口 PHA1-PHA16 与 Audit/Cost/Stop Hook 退役项 | #790 |
+| 2026-07-14 | 新增代码组织与 legacy guard 迁移记录；将跨 capability Target 映射到执行 leaf；#763 明确为治理父项，#982 承接机械守卫实现与故意违规证明 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 补充 Memory M10-M14、Context / Config CM1-CM4 与 CFG1-CFG4、Storage S8；细化 Task-owned PL、Project → Config → Memory → Task prepare 顺序、Config durable cancellation shield，以及 TUI 单向事件链的逐 issue 退出证据 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

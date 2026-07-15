@@ -8,27 +8,35 @@
 
 Compact 家族是 Context Management 的**核心能力**：在 LLM context window 耗尽前，以最小代价回收 token 预算。
 
-- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调 3 个方法（见 §2）
+- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 3 个稳定方法
 - **策略分层**：从零成本（规则）到高成本（LLM），逐级升级
-- **幂等性**：相同输入状态 → 相同压缩决策（#550）
-- **非破坏优先**：读模型变换策略（L1/L2/L3/L4）先于持久层策略（L5）
+- **幂等性**：相同 Context backing revision + 相同 request → 相同压缩决策（#550）
+- **非破坏优先**：L1 先限制尚未进入 ChatChain 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化对话链
 
 ## 2. ContextPort 签名
 
 ```rust
+#[async_trait]
 trait ContextPort: Send + Sync {
     /// 构建本轮 Context Window。
     /// 内部按序执行：L2 snip → L3 microcompact → L4 context collapse
-    ///              → memory 注入 → prompt 组装
+    ///              → prompt/skill 物化 → memory 检索 → 最终 block 编排
     /// L1 budget reduction 在 tool 出站时已完成（不入 build_window）。
     /// L2/L3/L4 均为读模型变换——不修改 ChatChain，只影响 ContextWindow.messages。
-    fn build_window(&self, req: &ContextRequest) -> ContextWindow;
+    async fn build_window(
+        &self,
+        req: &ContextRequest,
+    ) -> Result<ContextWindow, ContextWindowError>;
 
-    /// 判断是否需要 auto-compact（幂等：相同输入 → 相同决策）。
-    fn needs_compaction(&self, req: &ContextRequest) -> CompactionDecision;
+    /// L5 执行 auto-compact（LLM 摘要）。实现只操作自身稳定 Session backing，
+    /// NEVER 向调用方暴露 ChatChain 的可变引用。
+    async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError>;
 
-    /// L5 执行 auto-compact（LLM 摘要）。返回 summary + recent tail。
-    fn compact(&self, chain: &mut ChatChain, req: &ContextRequest) -> CompactResult;
+    /// 追加当前 RunStep 产出、收集跨 BC snapshot 并原子持久化。
+    async fn append_and_persist(
+        &self,
+        append: ContextAppend,
+    ) -> Result<(), ContextPersistError>;
 }
 ```
 
@@ -36,20 +44,53 @@ trait ContextPort: Send + Sync {
 
 ```rust
 struct ContextRequest {
+    request_id: ContextRequestId,       // 一次 PreparingContext 冻结输入的 identity
     run_id: RunId,
-    messages: Vec<Message>,             // 当前扁平历史
-    system_prompt: String,              // 已组装的静态 prompt
+    pending_messages: Vec<Message>,     // 当前 RunStep 尚未提交的增量输入；历史仍由 Context backing 独占
+    system_prompt: SystemPromptSpec,    // RunSpec.system_prompt 原值；不得在 Runtime 丢失
+    model_id: String,                   // PromptPipeline 的 guidance 前缀选择
+    effective_reasoning: ReasoningLevel,// Provider resolver 在 build 前冻结的最终纯值
+    current_date: CalendarDate,         // 本轮冻结的日期；Prompt 不自行读时钟
+    task_reminder: TaskReminderSnapshot, // Task query 经 context_coordination 原样传入；空态由 PL 表达
+    language: Language,
+    agent_roles: HashMap<String, AgentRoleConfig>,
+    config_snapshot: ConfigSnapshot,    // 本 Run shared lease 下的只读快照
     context_size: usize,                // 模型 context window
-    max_output_tokens: usize,           // 模型真实 max_tokens（修 8192 硬编码）
-    last_api_input_tokens: Option<u64>, // API 上报（None=首轮/估算）
+    max_output_tokens: usize,           // 与 InvocationRequest 相同的 resolved output limit
+    last_api_input_tokens: Option<u64>, // API 上报（None=首轮/估算）；上一轮精确值，非本轮
+    tool_schemas: Vec<ModelToolSchema>, // 本轮唯一 ToolCatalogSnapshot 的稳定投影
     tool_schema_tokens: usize,          // tool 定义占用
+    prev_system_tokens: Option<usize>,  // 上一轮 system_blocks token 数（用于 Actual API 增量计算）
+    prev_tool_schema_tokens: Option<usize>, // 上一轮 tool_schema_tokens（同上）
+}
+
+impl ContextRequest {
+    /// 转换为 PromptPipeline 输入。
+    fn prompt_request(&self) -> PromptRequest;
+    /// 转换为 Memory 检索查询。
+    fn memory_query(&self) -> MemoryQuery;
 }
 
 struct ContextWindow {
     system_blocks: Vec<SystemBlock>,    // 系统+memory+summary+reminder
     messages: Vec<Message>,             // 发给 LLM 的消息序列
-    tool_schemas: Vec<Value>,           // tool 定义
+    tool_schemas: Vec<ModelToolSchema>, // req.tool_schemas 原样透传；Context 不重拉 Catalog
     token_estimation: TokenBudget,      // 预算快照
+    compaction_decision: CompactionDecision, // build_window 内计算，替代独立 needs_compaction
+}
+
+struct ContextAppend {
+    run_id: RunId,
+    step_id: RunStepId,                 // append 幂等键的一部分
+    source_request_id: ContextRequestId,
+    messages: Vec<Message>,             // pending inputs → assistant → 原 ToolCall 顺序的最终 results
+    api_input_tokens: Option<u64>,
+}
+
+struct CompactRequest {
+    run_id: RunId,
+    source: ContextRequest,             // 与 build_window 内的 compaction_decision 计算使用同一冻结输入
+    trigger: CompactTrigger,            // Automatic | Manual
 }
 
 struct CompactionDecision {
@@ -57,7 +98,14 @@ struct CompactionDecision {
     urgency: Urgency,                   // None / Monitor / Should / Must
     estimated_tokens: usize,
     threshold: usize,
-    reason: DecisionReason,             // ActualApi / Heuristic / Manual
+    reason: DecisionReason,             // ActualApiWithDelta / Heuristic / Manual
+}
+
+enum DecisionReason {
+    ActualApiWithDelta,                 // 基于上一轮 API 精确值 + 本轮增量估算
+    Heuristic,                          // 纯启发式估算（首轮 / API 未返回）
+    Manual,                             // 仅 manual compact 路径独立构造 Decision 时使用；
+                                        // compaction_decision 计算永远不会产出此值
 }
 
 enum Urgency {
@@ -70,18 +118,66 @@ enum Urgency {
 struct CompactResult {
     summary: String,
     recent_messages: Vec<Message>,
+    source_revision: SessionRevision,  // compact 基于的 backing revision（幂等键 + CAS 校验值）
 }
+
+/// compact 调用的完整 outcome——Runtime 据此区分"已提交"与"被跳过"。
+enum CompactOutcome {
+    Committed(CompactResult),       // compact 已提交
+    Skipped(CompactSkipReason),     // compact 被跳过（Runtime 无需 continue 重试）
+    Failed(CompactError),           // compact 失败
+}
+
+enum CompactSkipReason {
+    ResumeProtection,               // resume 第一轮保护
+    HookBlocked,                    // PreCompact hook 阻止
+    CircuitBreakerOpen,             // 连续失败次数达上限
+}
+
+struct CalendarDate(String);             // ISO-8601 calendar date；一次 build 内冻结
+```
+
+`ContextRequest` 只承载一次 window build 的不可变输入。Runtime 的 `context_coordination` 从 `TaskAccess::reminder_snapshot` 读取 Task-owned PL 后原样传入；Context Management 独占最终文本、位置与 token budget。PromptPipeline **NEVER** 读取 Task，Context Management 也 **NEVER** 因 reminder 获得 Task mutation / restore authority。`CalendarDate` 由 Runtime request builder 从注入的时钟取得并在本次 build 冻结，Prompt capability **NEVER** 读取进程全局时钟。
+
+Runtime **NEVER** 把 Session 历史塞回 request：Context implementation 从自身稳定 backing 读取已提交历史，再在本次 candidate 尾部拼接 `pending_messages`。每个完成的 RunStep 恰好调用一次 `append_and_persist`；实现以 `(run_id, step_id)` 幂等，重复相同 append 返回成功，内容冲突的重复键返回 typed error。`ContextAppend.messages` 只有在 model response、全部 Tool suspension/approval 都收敛为 final result 后才提交，因此不会持久化半个 step。
+
+`ContextRequest → PromptRequest` 的映射是 Context-owned 纯函数，字段不得旁路重取：
+
+| ContextRequest | PromptRequest |
+|---|---|
+| `system_prompt` | `system_prompt` |
+| `model_id` | `model_id` |
+| `effective_reasoning` | `effective_reasoning` |
+| `current_date` | `current_date` |
+| `language` / `agent_roles` / `config_snapshot` | `lang` / `agents_roles` / `config_snapshot` |
+
+`PromptRequest.project_root / git_context` 不由 Runtime 伪造：run-bound Context implementation 在 `build_window` 开始时从 Composition 注入的同一 Project-owned read view 读取一次 snapshot，经 Context ACL 映射后同时填入两个字段；同一次 build **NEVER** 重探测。这样 `RuntimeContext` 仍不获得 Workspace / Project 能力。
+
+Tool schema 也只有一条数据流：`ToolCatalogSnapshot` → Runtime 稳定投影 → `ContextRequest.tool_schemas` → `ContextWindow.tool_schemas` → `InvocationRequest.window`。Context / Provider **NEVER** 重新查询 Catalog、重算 Profile 或改变顺序。
+
+### 2.1 最终 system block 顺序（唯一真相）
+
+无论各 supplier 的 I/O 实现如何，`build_window` 的可观察物化顺序固定为 **Prompt（含 Guidance + Skill）→ Memory → active summary → final assembly**；失败按该顺序返回第一个 typed error。最终 blocks 的位置则固定如下，物化先后与 placement **NEVER** 混为一谈：
+
+```text
+cacheable_prefix:
+  1 system_prompt          2 execution_discipline  3 model_guidance
+  4 skills                5 agent_roles           6 user_guidance
+  7 memory_context        8 active_summary
+cache breakpoint
+uncached_suffix:
+  9 current_date         10 git_context           11 task_reminder
 ```
 
 ## 3. 五级管线总览
 
-| 级别 | 策略 | 触发时机 | 成本 | 破坏性 | 可逆 | 现状 | 实现 Issue |
-|---|---|---|---|---|---|---|---|
-| L1 | **Budget reduction** | tool 执行完成、结果入 ChatChain 前 | 零 | 无 | 是 | ✅ 已实现 | — |
-| L2 | **Snip** | `build_window` 扫描全历史 | 零 | 无（跳过 ContextWindow 中过时 content） | 是 | ❌ 未实现 | #552 |
-| L3 | **Microcompact** | `build_window` 读模型变换 | 零 | 无（移除 ContextWindow 中的探索类 content） | 是 | ✅ 已实现（待迁移读模型层，见 §6.3） | #548 |
-| L4 | **Context collapse** | `build_window` 投影折叠 | 零 | 无（投影层折叠） | 是 | ❌ 未实现 | #554 |
-| L5 | **Auto-compact** | token 超阈值 | LLM 调用 | 有（摘要替换历史） | 否 | ✅ 已实现 | — |
+| 级别 | 策略 | 触发时机 | 成本 | 破坏性 | 可逆 | 关联 |
+|---|---|---|---|---|---|---|
+| L1 | **Budget reduction** | tool 执行完成、结果入 ChatChain 前 | 零 | 有（超限尾部不进入 ChatChain） | 否 | Context baseline |
+| L2 | **Snip** | `build_window` 扫描全历史 | 零 | 无（跳过 ContextWindow 中过时 content） | 是 | #552 |
+| L3 | **Microcompact** | `build_window` 读模型变换 | 零 | 无（移除 ContextWindow 中的探索类 content） | 是 | #548 |
+| L4 | **Context collapse** | `build_window` 投影折叠 | 零 | 无（投影层折叠） | 是 | #554 |
+| L5 | **Auto-compact** | token 超阈值 | LLM 调用 | 有（摘要替换历史） | 否 | Context baseline / #671 |
 
 ### 执行序
 
@@ -96,14 +192,16 @@ ExecutingTools
   ├─ L2 snip（扫描全历史，标记隐藏陈旧段）
   ├─ L3 microcompact（移除 ContextWindow 中探索类 tool result content）
   ├─ L4 context collapse（投影折叠，生成压缩读模型）
+  ├─ await prompt 组装（PromptPipeline.build_system_prompt，含 Skill 物化）
   ├─ memory 注入（MemoryPort.retrieve_for_inject）
-  ├─ prompt 组装（PromptPort.build_system_prompt）
+  ├─ active summary 读取
+  ├─ 按 §2.1 唯一顺序编排 blocks，并原样携带 tool_schemas
   │
-  ▼ ContextWindow 就绪
+  ▼ ContextWindow 就绪（含 compaction_decision）
   │
-  ├─ needs_compaction 判定
-  │   ├─ 不需要 → InvokingModel
-  │   └─ 需要 → L5 compact → 重建 ContextWindow → InvokingModel
+  ├─ window.compaction_decision.needed 判定
+  │   ├─ false → InvokingModel
+  │   └─ true  → L5 compact → 重建 ContextWindow → InvokingModel
   │
   ▼
 ```
@@ -121,11 +219,9 @@ ExecutingTools
 - 超限时截断尾部，替换为 `[truncated: original N tokens]` 标记
 - 截断只作用于 tool result content，不影响 user/assistant message
 
-**现状**：已实现。tool result 在写入 ChatChain 前经过 size 检查。
-
 **幂等性**：对已截断的结果二次执行无效果（已短于上限）。
 
-## 5. L2 Snip（#552 目标设计）
+## 5. L2 Snip（#552）
 
 **目标**：历史级扫描回收——遍历整个 ChatChain，隐藏已过期的探索类内容，不限于当前 tool batch。
 
@@ -184,19 +280,18 @@ const EXPLORATORY_TOOLS: &[&str] = &[
 - 替换为 `[microcompacted: N tool results removed]` 标记
 - **ChatChain 中的原始 message 不受影响**——下一轮 `build_window` 重新计算
 
-### 6.3 现状
+### 6.3 读模型约束
 
-已实现（#548, PR #568）。当前实现操作 `&mut ChatChain`——**目标态应改为操作 `ContextWindow.messages`**（读模型变换），迁移动作：
-- `microcompact_chain(&mut chain, protect_last)` → `microcompact_window(&mut messages, protect_last)`
-- `microcompact_messages(&mut messages, protect_last)` — 已存在，可直接复用
-- 保护窗口：Main=3 segments, Sub=2 user turns
+- `microcompact_window(&mut messages, protect_last)` **MUST** 只操作本次 `ContextWindow.messages` candidate。
+- L3 **NEVER** 接收 `&mut ChatChain`，也 **NEVER** 通过另一条 helper 回写 Session backing。
+- 保护窗口：Main=3 segments，Sub=2 user turns；该差异来自 RunSpec / ContextRequest，**NEVER** 读取进程级 role。
 
 ### 6.4 幂等性
 
 - 对已移除 content 的消息二次执行无效果（EXPLORATORY_TOOLS 结果已不在 ContextWindow 中）
 - 保护窗口随 segment 增长滑动——之前在保护窗口内的 segment 可能滑出窗口被移除
 
-## 7. L4 Context Collapse（#554 目标设计）
+## 7. L4 Context Collapse（#554）
 
 **目标**：非破坏性投影折叠——将对话历史中的多轮交互"折叠"为压缩表示，在 build_window 时生成，不修改原始 ChatChain。
 
@@ -332,41 +427,55 @@ effective = context_size - min(max_output_tokens, max_summary_output_tokens)
 threshold = effective - autocompact_buffer_tokens
 ```
 
-**关键修复**：`max_output_tokens` 从 ProviderPort 获取真实值，替代当前硬编码的 `8192`。
+`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
 
 ### 8.3 Summary 生成
 
 ```rust
-fn compact(&self, chain: &mut ChatChain, req: &ContextRequest) -> CompactResult {
-    // 1. 切分窗口
-    let window = compact_window(&req.messages);
+async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError> {
+    // 1. 从自身稳定 Session backing 取得一致性快照并切分窗口
+    let source = self.session.compaction_source()?;
+    let window = compact_window(&source.messages);
     // head = 前两条（system + 首条 user），tail = 最近 30%（max 4 条）
 
     // 2. 选择策略
     let result = if early_tokens > 30_000 {
         // 大窗口：map-reduce 分块摘要
-        compact_messages_map_reduce(&window.early, req).unwrap_or_else(|_| {
-            // fallback：本地文本摘要
-            build_summary_text(&window.early)
-        })
+        compact_messages_map_reduce(&window.early, req).await?
     } else {
         // 小窗口：单次 LLM 调用
-        llm_compact(&window.early, req).unwrap_or_else(|_| {
-            build_summary_text(&window.early)
-        })
+        llm_compact(&window.early, req).await?
     };
 
     // 3. 修复 tail 中的 orphan tool pairs
     let recent = sanitize_tool_pairs(window.tail);
 
-    CompactResult { summary: result.summary, recent_messages: recent }
+    // 4. CAS 校验：确认 backing revision 未变（compact 跨多个 LLM await，期间可能有并发写入）
+    let current_revision = self.session.backing_revision();
+    if current_revision != source.revision {
+        return Err(CompactError::BackingChanged {
+            expected: source.revision,
+            actual: current_revision,
+        });
+    }
+
+    // 5. ChatChain::compact 一次性提交（三参数版：summary, recent_messages, source_revision）
+    //    内部完成 freeze_active → 创建 Compact segment → 记录 source_revision
+    //    定义见 01-session.md §3.1
+    self.session.compact(result.summary.clone(), recent.clone(), source.revision);
+
+    Ok(CompactResult {
+        summary: result.summary,
+        recent_messages: recent,
+        source_revision: source.revision,
+    })
 }
 ```
 
 **Map-reduce 策略**：
 - `early_tokens > 30,000` 时分块（每块 ≤ 30,000 tokens）
 - 每块独立 LLM 摘要 → 合并后再 LLM 摘要
-- 失败时静默 fallback 到本地 `build_summary_text`——**调用方无法区分质量**（已知 gap，设计文档标注）
+- LLM 摘要失败返回结构化 `CompactError`；若产品选择本地降级，结果 **MUST** 带显式 quality / fallback 标记，**NEVER** 静默伪装成 LLM 摘要成功。
 
 ### 8.4 compact_window 切分
 
@@ -414,96 +523,74 @@ impl AutoCompactState {
 }
 ```
 
-**现状**：已实现但**未接入主循环**——`auto_compact` 函数从未引用 `AutoCompactState`。
-
-**目标**：
 - `auto_compact` 调用前检查 `should_attempt()`
 - LLM 失败后调 `record_failure()`
 - 成功后调 `record_success()`
 - Circuit breaker 触发后，跳过 compact，直接进入 InvokingModel（由 provider 报 context error 再触发）
 
-### 8.7 CompactResult → ChatChain 集成
+### 8.7 Compact 提交协议（统一入口）
+
+Compact 提交由 `ChatChain::compact(summary, recent_messages, source_revision)` 一次性完成（三参数版，定义见 [01-session.md](01-session.md) §3.1）：
 
 ```rust
-fn apply_compact_outcome(chain: &mut ChatChain, result: CompactResult) {
-    // 1. 冻结旧链
-    let old_segments = chain.active_segments().to_vec();
-    chain.frozen_chats.lock().unwrap().extend(old_segments);
-
-    // 2. 创建新 Compact segment
-    chain.compact(result.summary, result.recent_messages);
-
-    // 3. 发出 CompactFinished 事件
-    // events.emit(RuntimeStreamEvent::CompactFinished { messages: chain.messages_flat() });
-}
+// ChatChain 唯一提交入口——不再有 apply_compact_outcome 或 commit_compaction 独立函数
+chain.compact(result.summary, result.recent_messages, source.revision);
+// 内部等价于：freeze_active() → 创建 Compact segment → 记录 source_revision
+// 幂等保护：若 compact_source_revision + compact_committed marker 匹配则跳过（见 03-token-budget.md §5.5）
 ```
 
 - summary 作为 `CompactSegment.summary`（走 system 通道，不会被 future compact 二次损耗）
 - recent_messages 保留在新 segment 的 `messages` 中
 - 旧 segment 冻结保留供审计
+- `ChatChain::compact` 是唯一提交入口——`apply_compact_outcome`、`commit_compaction` 等独立函数皆已退役
 
 ### 8.8 Manual Compact
 
 用户 `/compact` 命令触发：
 - **绕过 token 阈值检查**（但保留 `messages.len() > 4` 检查）
-- **当前问题**：`compact_messages_with_llm` 内部的 `needs_compaction` 会再次判断——双层检查导致语义模糊
-- **目标**：manual compact 不经过 `needs_compaction`，直接调 `compact_messages_with_llm`，内层也不检查阈值
+- manual compact 不经过 `compaction_decision` 判定，直接进入 compact use case；内部 **NEVER** 重复检查自动阈值
 
 ## 9. 幂等性设计（#550）
 
-### 9.1 问题
+### 9.1 Fingerprint 契约
 
-当前 `auto_compact` 在每轮**无条件**进入 `Compact` 状态并执行：
-- PreCompact hook 每轮触发（即使不需要 compact）
-- microcompact 每轮扫描（即使无新 tool result）
-- 这些副作用破坏"相同输入 → 相同输出"的幂等性
-
-### 9.2 目标
-
-```rust
-struct CompactionFingerprint {
-    messages_hash: u64,                // messages 内容 hash（to_llm_view 后）
-    last_api_input_tokens: Option<u64>,
-    context_size: usize,
-    max_output_tokens: usize,
-    tool_schema_count: usize,          // tool 定义变化时 fingerprint 变化
-}
-```
+字段、构造与缓存范围的唯一真相见 [Token Budget](03-token-budget.md) §5。本文只定义 Compact 对该契约的使用规则，**NEVER** 复制类型字段。
 
 - **fingerprint 不变**时跳过 PreCompact hook 和 microcompact 扫描
-- `needs_compaction` 是纯函数（已满足）
+- `compaction_decision` 计算对相同 backing revision + request 是确定性函数
 - `compact` 的效果对相同 ChatChain + 相同 ContextRequest 是确定性的
 
-### 9.3 落地
+### 9.2 生命周期
 
 - `CompactionFingerprint` 存储在 Run 内存态（不落盘）
-- 每轮 `build_window` 后计算 fingerprint
+- 每轮 `build_window` 从纯 compact 输入计算 fingerprint
 - 下一轮进入 `PreparingContext` 时比对：相同则跳过 L2/L3 的重复扫描
+- fingerprint 命中只复用 L2-L4 投影，**NEVER** 跳过 Prompt / Skill / Memory 物化或复用整个 ContextWindow
 
 ## 10. 常量统一来源
 
-当前散落的魔法常量收口到 [03-token-budget.md](03-token-budget.md) 定义的 `TokenBudgetConfig`：
+全部常量只由 [03-token-budget.md](03-token-budget.md) 定义的 `TokenBudgetConfig` 或本 Run 已解析 capability 提供：
 
-| 常量 | 当前值 | 当前位置 | 目标 |
-|---|---|---|---|
-| `max_output_tokens` | 8192（硬编码） | `token_estimation.rs` ×3 | `ProviderPort.max_output_tokens()` |
-| `max_summary_output_tokens` | 20,000 | `summary.rs` | `TokenBudgetConfig.max_summary_output_tokens` |
-| `autocompact_buffer_tokens` | 13,000 | `token_estimation.rs` | `TokenBudgetConfig.autocompact_buffer_tokens` |
-| `estimation_safety_factor` | 1.33 | `token_estimation.rs` | `TokenBudgetConfig.estimation_safety_factor` |
+| 常量 | 默认值 / 来源 | 唯一所有者 |
+|---|---|---|
+| `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Invocation / ContextRequest |
+| `max_summary_output_tokens` | 20,000 | `TokenBudgetConfig.max_summary_output_tokens` |
+| `autocompact_buffer_tokens` | 13,000 | `TokenBudgetConfig.autocompact_buffer_tokens` |
+| `estimation_safety_factor` | 1.33 | `TokenBudgetConfig.estimation_safety_factor` |
 
 ## 11. 与 #547 的映射
 
-| #547 子 issue | 策略 | 本文档章节 | 状态 |
-|---|---|---|---|
-| #548 Microcompact | L3 | §6 | ✅ 已实现 |
-| #546 Edit diff 分离 | L1 | §4 | ✅ 已实现 |
-| #549 Memory `top_for_inject` 注入 | memory 注入 | [05-memory-injection.md](05-memory-injection.md) | ⏳ |
-| #550 Tool result budget 幂等化 | 幂等性 | §9 | ⏳ |
-| #551 Memory 语义检索 | memory 注入 | [05-memory-injection.md](05-memory-injection.md) §8 | ⏳ |
-| #552 Snip 历史级回收 | L2 | §5 | ⏳ |
-| #553 Auto-compact 阈值优化 | L5 阈值 | [03-token-budget.md](03-token-budget.md) | ⏳ |
-| #671 摘要失真 | L5 summary 质量 | §8.3 | ⏳ |
-| #554 Context collapse | L4 | §7 | 暂缓 |
+| #547 子 issue | 策略 | 目标契约位置 |
+|---|---|---|
+| #548 Microcompact | L3 | §6 |
+| #546 Edit diff 分离 | L1 | §4 |
+| #549 Memory injection | memory integration | [05-memory-injection.md](05-memory-injection.md) |
+| #550 Tool result budget 幂等化 | 幂等性 | §9 |
+| #551 Memory 语义检索 | Memory-owned retrieval | [../memory/02-retrieval-and-injection.md](../memory/02-retrieval-and-injection.md) |
+| #552 Snip 历史级回收 | L2 | §5 |
+| #553 Auto-compact 阈值优化 | L5 阈值 | [03-token-budget.md](03-token-budget.md) |
+| #671 摘要失真 | L5 summary 质量 | §8.3 |
+| #554 Context collapse | L4 | §7 |
 
 ## 12. 相关文档
 
@@ -513,6 +600,7 @@ struct CompactionFingerprint {
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Run 状态机（Compacting 状态）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 - 上下文地图（ContextPort = OHS）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

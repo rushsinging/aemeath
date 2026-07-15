@@ -3,11 +3,11 @@
 > 状态：**已落地** · 维护人：架构组
 > 对应实现：`.agents/aemeath.json` + `.agents/hooks/check-*.sh` + `.agents/hooks/no_mod_rs.sh`
 >
-> 本文档是架构守卫的**唯一设计真相**。任何守卫脚本内常量与白名单的变更，**MUST** 同步更新本文档；本文档与脚本不一致时，以脚本为准并在本文档 PR 中说明。
+> 守卫脚本本身是**可执行的运行时真相**——真正的行为、常量与白名单以脚本代码为准。本文档是配套的**人类可读索引**，梳理已启用守卫的脚本行为、常量与白名单，便于查阅、评审与 PR 描述引用；它不覆盖脚本、也不是脚本之外的第二真相源。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档对应小节；本文档与脚本不一致时，**以脚本的可执行语义为准**，并在本文档 PR 中说明差异原因。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](03-migration-governance.md) 为唯一治理真相。
 
 ## 概述
 
-架构守卫是仓库的"机械式宪法"——把 [01-product-and-domain.md](../01-system/01-product-and-domain.md) 中"依赖铁律 / COLA 分层 / 薄入口 / 单一真相"等设计原则固化为可执行的静态检查。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
+架构守卫是仓库的"机械式宪法"——把 [依赖铁律](../01-system/05-dependency-rules.md)、[能力优先代码组织](../01-system/06-code-organization.md)、薄入口和单一真相等规则固化为可执行的静态检查。已启用但只反映迁移期实现的守卫 **MUST** 在本文单独标记，**NEVER** 冒充 Target 原则。所有守卫通过 `.agents/aemeath.json` 的 `Stop` 钩子触发，串联执行，**任一失败即阻断会话**。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -33,9 +33,9 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
-| 5 | `check-cola-layer-purity.sh` | COLA 分层 | 业务/utils 不得反依赖 core/gateway/contract |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 暂时约束业务/utils 对 core/gateway/contract 的依赖方向 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 跨 feature 仅经 `::<crate>::api` |
-| 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 R1–R6 |
+| 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
 | 10 | `check-tui-toplevel-layout.sh` | TUI 架构 | 顶层模块白名单 + feature #57 旧路径守卫 |
@@ -58,40 +58,44 @@
 ## 1. check-cargo-dependency-graph.sh
 
 - **功能**：基于 `cargo metadata` 校验各 crate 的业务依赖是否落在显式白名单内。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律——固化 feature 依赖方向：cli→{composition, sdk}；runtime→全部 supporting；supporting→share；share/sdk→∅。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 / R4 / R6——固化当前 feature 依赖白名单、薄外部驱动与唯一生产装配入口。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 - **白名单（`business_allow`）**：
 
 | Crate | 允许依赖（workspace crate） |
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `update`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share` |
+| `context` | `share`, `provider`, `storage`, `sdk` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage` |
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
-| `update` | `share`, `sdk` |
-| `sdk` | `utils` |
+| `update` | `share`, `sdk`, `logging` |
+| `sdk` | `share`, `utils` |
 | `logging` | ∅ |
 | `utils` | ∅ |
 
+> **Memory BC 当前物理落点**：Memory 领域逻辑当前位于 `share` crate（`share::memory::*`），不是独立 crate。Runtime 经 `share` 间接消费 Memory 能力。独立 Memory crate 的升塑见 [migration-governance.md](03-migration-governance.md) M5/M8。
+>
+> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）领域逻辑当前位于 `runtime` crate 内部（`runtime::business::reasoning_graph::*`），不是独立 crate。独立 Workflow crate 的升塑取决于 #972 目录调整后是否拆出。
+
 - **例外**：
-  - `tools → {project, storage}`：横向依赖登记（[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.7），仅经各自 `api` facade 接入。
+  - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
 
 ## 2. check-cli-thin-entry.sh
 
 - **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + 纯技术库`。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §薄入口——CLI 不得直连 runtime 内部或任何 supporting feature，业务能力一律经 composition 装配 + `sdk::AgentClient` 契约接入。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
 - **白名单**：
   - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk}`
-  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share}`
+  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share, update}`
   - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
 - **例外**：无。
 - **检查范围**：
@@ -102,7 +106,7 @@
 ## 3. check-share-no-upstream-deps.sh
 
 - **功能**：检查 `agent/shared/Cargo.toml` 不依赖任何业务 feature。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §依赖铁律 `share → ∅`——share 是最底层共享内核，禁止反依赖上层。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——shared kernel 只能发布经证明的共享语言，禁止反依赖业务 capability。
 - **被禁上游 crate 列表**：`runtime, project, policy, context, provider, tools, storage, hook, audit, composition, cli, sdk`。
 - **例外**：无。
 - **检查方式**：单文件清单匹配 `[dependencies]` 段；命中即失败。
@@ -110,7 +114,7 @@
 ## 4. check-share-minimal-kernel.sh
 
 - **功能**：扫描 `agent/shared/src/`，禁止 kernel 出现行为/IO/并发/时钟/状态容器；并把 `agent/shared/Cargo.toml` 依赖限定在白名单内。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.5 rule6——kernel 只放数据契约与纯函数。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R3——kernel 只承载稳定共享语言与纯函数，禁止吸收行为、I/O 和业务状态。
 - **禁用模式（`forbidden_patterns`）**：
 
 | 模式 | 理由 |
@@ -143,9 +147,12 @@
 
 ## 5. check-cola-layer-purity.sh
 
-- **功能**：检查每个 feature 内部 COLA 分层的依赖方向。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.8 分层纯度——内层只能内→外、不能外→内；domain/business 不得依赖 core 编排 / gateway / contract；utils 保持叶子。
+- **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
+- **功能**：检查普通 feature 的迁移期固定层目录与层间依赖方向，并对 context feature 应用下述精确顶层目录例外。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS`、且文件路径未被 `is_test_path` 判定为测试路径的 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非空且不以 `//` 或 `*` 开头的行中的 `crate::<layer>` 引用（`use` 可选）。脚本不解析普通文件内的 `#[cfg(test)]` block，因此其中符合匹配条件的行仍会被扫描；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
+- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **层定义**：`FEATURE_LAYERS = {contract, gateway, core, business, utils}`。
+- **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature 放行这七个目录；其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -156,8 +163,8 @@
 | `gateway` | `business`, `utils` |
 
 - **检查方式**：
-  - 扫描 `agent/features/*/src/*` 的子目录名必须在 `FEATURE_LAYERS` 内（顶层非层目录即违规）。
-  - 在所有 `*.rs` 中匹配 `use crate::<layer>`，对非测试路径按上表核查。
+  - 扫描 `agent/features/*/src/*` 的顶层子目录：普通 feature 的目录名必须在 `FEATURE_LAYERS` 内；context feature 另放行 `CONTEXT_DOMAIN_DIRS`。
+  - 依赖方向扫描按路径跳过 `*_test.rs`、`*_tests.rs`、文件 stem 为 `tests` 或路径段含 `tests` 的 Rust 文件，且只对 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的文件按层分类；逐行跳过空行及以 `//` 或 `*` 开头的行，再匹配 `crate::<layer>` 引用（`use` 可选）并按上表核查。普通文件中的 `#[cfg(test)]` block **NEVER** 获得额外豁免。
   - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**（已迁到 `agent/features/*`）。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
 
@@ -183,7 +190,7 @@
 ## 6. check-crate-api-boundary.sh
 
 - **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.2——禁止穿透对方 `contract/gateway/core/business/utils` 内部路径；禁止 `api.rs` 暴露内部层。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透对方 Current `contract/gateway/core/business/utils` 内部路径；禁止 Current `api.rs` 暴露内部层。该脚本锁定迁移期物理结构，不定义 Target 通用 `api/` 目录。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
@@ -203,23 +210,23 @@
 
 - **功能**：守护 agent context 所有权重构（project 拥有 `WorkspaceState`）的架构不变量。
 - **守护**：`docs/superpowers/specs/2026-06-07-agent-context-ownership-redesign.md`——workspace 真相单一所有者在 project，tools 只用读/控能力，持久化 DTO 留 session 边界，git 收敛在 `GitCli`。
-- **规则**：
+- **规则**（CTX-R 前缀为 context ownership 局部规则编号，与 [05-dependency-rules.md](../01-system/05-dependency-rules.md) 的全局铁律 R1–R7 **无对应关系**）：
 
 | 编号 | 规则 | 守护目标 |
 |---|---|---|
-| R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
-| R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
-| R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
-| R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
-| R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
-| R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 R2 重叠的兜底 |
+| CTX-R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
+| CTX-R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
+| CTX-R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
+| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
+| CTX-R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
+| CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 CTX-R2 重叠的兜底 |
 
 - **白名单**（路径级 allowlist）：
 
 | 规则 | 允许 | 说明 |
 |---|---|---|
-| R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
-| R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
+| CTX-R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
+| CTX-R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
 | 测试放行 | `*_test.rs`, `*_tests.rs`, `tests/` 目录, `#[cfg(test)]` 区域 | R4 / R5 / R6 对测试代码放行 |
 
 - **范围缩窄**：R3 的 triple-bundle 检测**限定 `agent/features/`**（不含 `agent/shared/`, `packages/sdk/`）——这两处是设计允许的序列化/投影形态（`PersistedWorkspaceContext` / `WorkspaceContextView`），不是运行期可变三元组。
@@ -227,12 +234,12 @@
 ## 8. check-forbidden-imports.sh
 
 - **功能**：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
-- **守护**：[01-product-and-domain.md](../01-system/01-product-and-domain.md) §6.4.5 rule5——`share::adapter` / `shared::adapter` / `agent/shared/src/adapter` 只能在 composition 装配处引用，feature 与 cli 不得直接 import。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R6——shared adapter 只能由 Composition 装配；feature 与 CLI 不得直接 import 易变 detail。
 - **白名单（`RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS`）**——临时精确豁免：
 
 | 路径 | 说明 |
 |---|---|
-| `agent/features/runtime/src/utils/adapter.rs` | runtime 拥有把 shared adapter newtype 适配到 runtime-local port 的 impl 块。保留至 port impl 切到 feature-owned gateway factory 之后 |
+| `agent/features/runtime/src/utils/adapter.rs` | runtime 拥有把 shared adapter newtype 适配到 runtime-local port 的 impl 块。保留到对应消费方-owned outbound port 由供应 adapter 直接实现、Composition 完成接线且 #982 故意违规证明生效；具体迁移责任与退出证据见 Migration Governance O2/O8 |
 
 - **检查方式**：扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `*_test.rs` / `*_tests.rs` / `tests/` / `agent/composition/src/`），匹配 `\bshare::adapter\b | \bshared::adapter\b | agent/shared/src/adapter`。
 - **自检**：脚本会校验 exception 表中所有路径仍被命中；未命中即报"stale"并要求清理。
@@ -424,30 +431,39 @@
 
 | 编号 | 检查 | 详情 |
 |---|---|---|
-| 19.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
-| 19.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
-| 19.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
-| 19.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
-| 19.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
-| 19.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
-| 19.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
-| 19.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
-| 19.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
-| 19.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
-| 19.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
-| 19.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
+| 20.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
+  | 20.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
+  | 20.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
+| 20.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
+| 20.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
+| 20.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
+| 20.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
+| 20.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
+| 20.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
+| 20.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
+| 20.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
+| 20.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
 
-### 20. AgentClient trait 最小化（#567 事件流收口）
+### 21. AgentClient trait 最小化（#567 事件流收口）
 
 `check-agent-client-trait-minimal.sh`
 
 | # | 规则 | 理由 |
 |---|---|---|
-| 20.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
+| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只能有 `chat()` 与同步 `cancel_run(run_id)` | #567 后内容输入与结果回传走 `ChatInputEvent` + `ChatEvent`；#700 为即时打断增加唯一 out-of-band 例外，必须按 `RunId` 定位并同步触发 per-Run cancellation scope，禁止新增其它 RPC 或无标识会话级取消 |
+
+> 这是迁移期 **Current** 守卫事实，不是 Target API 上限。[#874](https://github.com/rushsinging/aemeath/issues/874) / [#878](https://github.com/rushsinging/aemeath/issues/878) 落地 Runtime-owned interaction identity 后，`AgentClient` **MUST** 增加 typed `reply_interaction` / `cancel_interaction` 命令；[#982](https://github.com/rushsinging/aemeath/issues/982) **MUST** 同步替换本守卫并用故意违规证明新的窄命令集合，旧守卫在替代证据齐备前 **MUST** 保持运行。
 
 - **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
 
-## 22. check-config-reader-injection.sh
+## 22. check-shared-run-loop.sh
+
+- **功能**：验证 Runtime 内只有一个共享 Loop Engine 实现，禁止在 `agent/shared/` 或其他 feature crate 中出现平行 run-loop 实现。
+- **守护**：确保 Loop Engine 的单一真相——所有 Main / Sub Run 共用同一驱动骨架（[03-loop-and-state-machine.md](../02-modules/runtime/03-loop-and-state-machine.md)）。
+- **检查方式**：扫描 `agent/shared/src/` 中是否存在 `run_loop` / `drive_loop` 等平行 loop 实现。
+- **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
+
+## 23. check-config-reader-injection.sh
 
 - **位置**：`.agents/hooks/check-config-reader-injection.sh`。
 - **功能**：runtime 消费方（`agent/features/runtime/src/`）不得直接调用 `ConfigAppService::new()`。配置应通过注入的 `Arc<dyn ConfigReader>` port 获取 `ConfigSnapshot`。
@@ -476,7 +492,7 @@
   2. 解析 `git rev-parse --show-toplevel`，项目外文件放行；
   3. 用 git 原生检测（`git rev-parse --absolute-git-dir` vs `--git-common-dir`）判断是否在 worktree 中，worktree 放行；
   4. 否则输出 "Edit/Write rejected: 在 main 工作区直接修改" 错误并以 exit 2 阻断。
-- **设计意图**：强制 [AGENTS.md](../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
+- **设计意图**：强制 [AGENTS.md](../../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
 
 ### check-unit-tests.sh（Stop）
 
@@ -493,3 +509,16 @@
 - **调整白名单**：直接修改脚本中常量；**MUST** 在同一 PR 中同步本文档对应小节。
 - **清理 stale exception**：脚本自检会提示"exception list is stale"——按提示删除未命中的精确路径。
 - **冲突解决**：本文档与脚本不一致时，**以脚本为准**——脚本是运行时真相源；本文档跟随脚本迁移。
+
+## 相关文档
+
+- 系统级代码组织规范：[../01-system/06-code-organization.md](../01-system/06-code-organization.md)
+- 依赖规则与铁律：[../01-system/05-dependency-rules.md](../01-system/05-dependency-rules.md)
+- Current → Target 迁移跟踪：[migration-governance.md](03-migration-governance.md)
+- 仓库级工作约束：[../../../AGENTS.md](../../../AGENTS.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |

@@ -1,14 +1,14 @@
 # docs/design/
 
-> 本目录是 aemeath 的**设计真相源**。自 v0.1.0（#743 DDD 重构）起，采用**三层信息架构**：`01-system` 总体战略 → `02-modules` 模块战术 → `03-engineering` 横切工程。**设计文档只记录目标态（Target），不记录当前代码状态**——过渡期的旧文档去向与迁移追踪集中在 `03-engineering/migration-governance`，避免设计内容与实现现状混淆。
+> 本目录是 aemeath 的**设计真相源**。自 v0.1.0（#743 DDD 重构）起，采用**三层信息架构**：`01-system` 总体战略 → `02-modules` 模块战术 → `03-engineering` 横切工程。**设计文档只记录目标态（Target），不记录当前代码状态**——旧路径、退役清单与迁移进度集中在 `03-engineering/migration-governance`，避免设计内容与实现现状混淆。
 
 ## 三层信息架构
 
-| 层 | 目录 | 承载 | 进度 |
-|---|---|---|---|
-| **01 · 系统级** | [`01-system/`](01-system/) | 产品与领域、统一语言、上下文地图、系统架构、依赖规则 | ✅ S1 已落地 |
-| **02 · 模块级** | [`02-modules/`](02-modules/) | 各 BC 战术设计（聚合 / 不变量 / 领域服务 / 模块端口） | 🚧 S2 填充 |
-| **03 · 横切** | [`03-engineering/`](03-engineering/) | 架构守卫、agent 工程、reasoning graph、可观测性、迁移治理 | 🚧 S2+ 填充 |
+| 层 | 目录 | 承载 |
+|---|---|---|
+| **01 · 系统级** | [`01-system/`](01-system/) | 产品与领域、统一语言、上下文地图、系统架构、依赖规则、代码组织 |
+| **02 · 模块级** | [`02-modules/`](02-modules/) | 各 BC 战术设计（聚合 / 不变量 / 领域服务 / 公开 façade / 真实外部 seam） |
+| **03 · 横切** | [`03-engineering/`](03-engineering/) | 架构守卫、agent 工程、reasoning graph、可观测性、迁移治理 |
 
 ## 01-system 导航
 
@@ -17,16 +17,13 @@
 | [01-product-and-domain.md](01-system/01-product-and-domain.md) | 产品目标、核心问题、子域三分类、15 BC 责任章程与判断规则 |
 | [02-ubiquitous-language.md](01-system/02-ubiquitous-language.md) | 统一语言术语表、术语辨析 |
 | [03-context-map.md](01-system/03-context-map.md) | 15 BC 集成关系（C/S · ACL · Pub/Sub · OHS · PL · SK）、交付层、Future 预留 |
-| [04-system-architecture.md](01-system/04-system-architecture.md) | 模块化单体 + Hexagonal + 组合根 + crate 映射 + 传输透明 |
-| [05-dependency-rules.md](01-system/05-dependency-rules.md) | Clean 依赖方向、7 条依赖铁律、COLA 重定位、Agent 执行生命周期状态机原则 |
+| [04-system-architecture.md](01-system/04-system-architecture.md) | capability-first 模块化单体 + 选择性 Hexagonal seam + 唯一组合根 + crate 映射 + 传输透明 |
+| [05-dependency-rules.md](01-system/05-dependency-rules.md) | Clean 策略 / 细节依赖方向、7 条依赖铁律、跨能力边界、Agent 执行生命周期状态机原则 |
+| [06-code-organization.md](01-system/06-code-organization.md) | 系统级代码组织真相：能力优先、用例共置、按需 port 与渐进 crate 边界 |
 
-## 旧文档过渡说明
+## 迁移治理入口
 
-旧扁平编号文档（`01-outline.md` ~ `07-server-design.md`）已整理完毕：
-
-- **已归档**（已被三层结构替代）：`01-outline.md` / `03-runtime-design.md` / `04-tui-design.md` / `06-agent-reasoning-graph.md` → `docs/snapshot/design/`
-- **已迁移**：`02-01-architecture-guards.md` → [`03-engineering/01-architecture-guards.md`](03-engineering/01-architecture-guards.md)；`05-02-agent-orchestration.md` → [`03-engineering/02-agent-orchestration.md`](03-engineering/02-agent-orchestration.md)；`07-server-design.md` → [`02-modules/server/01-design.md`](02-modules/server/01-design.md)
-- 迁移追踪与退役清单统一在 [`03-engineering/migration-governance`](03-engineering/03-migration-governance.md)
+旧路径、退役清单与 Current → Target 迁移进度 **MUST** 只记录在 [`03-engineering/migration-governance`](03-engineering/03-migration-governance.md)；本目录的 Target 导航 **NEVER** 复刻这些状态。
 
 ## 阅读路径
 
@@ -40,7 +37,9 @@
 | 理解持久化、诊断日志与应用自更新的通用域边界 | [Storage](02-modules/storage/README.md) · [Logging](02-modules/logging/README.md) · [Application Version Control](02-modules/application-version-control/README.md) |
 | 理解 Memory 检索、注入与 Reflection 引擎 | [02-modules/memory/](02-modules/memory/README.md) |
 | 理解 Policy、Hook、Stop/Run Loop 与 Usage Audit 边界 | [02-modules/policy/](02-modules/policy/README.md) + [02-modules/hook/](02-modules/hook/README.md) + [02-modules/audit/](02-modules/audit/README.md) |
-| 理解依赖方向 / 六边形 | [04-system-architecture.md](01-system/04-system-architecture.md) + [05-dependency-rules.md](01-system/05-dependency-rules.md) |
+| 理解 capability-first 系统形态、选择性 Hexagonal seam 与唯一组合根 | [04-system-architecture.md](01-system/04-system-architecture.md) + [06-code-organization.md](01-system/06-code-organization.md) |
+| 决定代码应保持扁平、按用例拆分，或何时引入 model / port / 技术目录 / crate | [06-code-organization.md](01-system/06-code-organization.md) |
+| 审查外部 detail、跨能力调用与具体实现装配的依赖方向 | [05-dependency-rules.md](01-system/05-dependency-rules.md) + [06-code-organization.md](01-system/06-code-organization.md) |
 | 新增 / 调整架构守卫、Stop 钩子失败排查 | [03-engineering/01-architecture-guards.md](03-engineering/01-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
 
@@ -57,6 +56,15 @@
 - 新增 / 撤销文档时 **MUST** 更新本 README 的导航。
 - 迁移旧文档时 **MUST** 同步更新 CLAUDE.md 触发表中对应的路径引用，避免断链。
 
+## 相关文档
+
+- 系统架构：[01-system/04-system-architecture.md](01-system/04-system-architecture.md)
+- 依赖规则与铁律：[01-system/05-dependency-rules.md](01-system/05-dependency-rules.md)
+- 代码组织规范：[01-system/06-code-organization.md](01-system/06-code-organization.md)
+- 架构守卫注册表：[03-engineering/01-architecture-guards.md](03-engineering/01-architecture-guards.md)
+- 迁移治理：[03-engineering/03-migration-governance.md](03-engineering/03-migration-governance.md)
+- 仓库级工作约束：[../../AGENTS.md](../../AGENTS.md)
+
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
@@ -69,4 +77,5 @@
 | 2026-07-12 | 阅读路径新增 Storage、Logging、Application Version Control 摘要入口 | #793 |
 | 2026-07-12 | 阅读路径新增 Memory 战术设计入口 | #789 |
 | 2026-07-12 | 阅读路径新增 Policy/Hook/Audit 战术设计入口 | #790 |
-| 2026-07-12 | 旧扁平文档整理：4 篇归档到 snapshot/、3 篇迁移到 03-engineering 和 02-modules/server；更新全部交叉引用 | #743 |
+| 2026-07-12 | 三层设计导航交叉引用收敛，并统一指向对应 Target 文档 | #743 |
+| 2026-07-14 | 注册系统级代码组织真相源，更新架构与依赖阅读路径，移除 Target 导航中的迁移进度复刻 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

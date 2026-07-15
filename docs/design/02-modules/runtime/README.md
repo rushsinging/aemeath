@@ -9,14 +9,14 @@
 | 概念 | 回答 | 性质 |
 |---|---|---|
 | **RunSpec** | 跑什么（prompt/tools/model/timeout/资源模式）| 声明式、可序列化 |
-| **RuntimeContext** | 用什么资源跑（出站端口 + config + event sink）| 装配的活资源 |
-| **Run** | 一次执行实例 | 内存态聚合 + 唯一状态机 |
+| **RuntimeContext** | 用什么资源跑（供应能力 OHS + Runtime-owned detail ports + config）| 装配的活资源 |
+| **Run** | 一次执行实例 | 内存态聚合 + 唯一 Agent 执行生命周期状态机 |
 
 因果链：`RunSpec ──装配──▶ RuntimeContext ──注入──▶ Run`；层级 `Session → Run → Run Step`。
 
 ## 核心设计约束
 
-1. **单状态机**：全系统只有 `Run`（内存态、不持久化、崩溃从头开始）
+1. **单执行生命周期状态机**：全系统只有 `Run` 驱动 Agent 执行生命周期（内存态、不持久化、崩溃从头开始）；其他 BC 可拥有不驱动 Run 的局部状态机
 2. **Loop Engine 零分支**：Main/Sub 共用一套 Loop，差异 100% 在 RunSpec + RuntimeContext + Event adapter
 3. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
 4. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
@@ -31,7 +31,7 @@
 | [03-loop-and-state-machine.md](03-loop-and-state-machine.md) | Run 单状态机、Loop Engine 零分支骨架、单 Run vs Session 多 Run 序列 |
 | [04-stuck-prevention.md](04-stuck-prevention.md) | StuckGuard 四层防线、分级响应、状态机集成 |
 | [05-recovery-semantics.md](05-recovery-semantics.md) | 从头开始恢复、持久化边界、无 durable |
-| [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站端口、出站端口、RuntimeContext 装配、Composition Root |
+| [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站 OHS、Runtime 消费的能力契约、RuntimeContext 装配、Composition Root |
 
 ## 相关文档
 

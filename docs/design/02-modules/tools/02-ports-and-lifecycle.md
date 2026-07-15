@@ -1,7 +1,7 @@
 # Tool & Skill & Command · 端口与生命周期
 
 > 层级：02-modules / tools（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 Tool 双端口、ExecutionScope、协作取消、Skill/Command 协作边界与 MCP 生命周期。签名用于表达职责，不锁定具体 Rust API。
 
 ## 1. Tool 双端口
@@ -78,9 +78,10 @@ Runtime 拥有业务编排：
 5. 按 ToolDescriptor 的 concurrency declaration 编排多个调用；
 6. 建立 cancellation 与 timeout；
 7. 调用 ToolExecutionPort；
-8. 触发 PostTool Hook、发布 Audit/Domain Event；
-9. 处理重试与失败策略；
-10. 将 ToolOutcome 转为 Run Step 结果，并交给 Context Management 做预算和窗口处理。
+8. 若并发结果包含一个或多个 `ToolOutcome::Suspended`，先收集全部 outcome，再按原始 RunStep 的稳定 ToolCallId / 调用顺序逐个映射为 Runtime-owned interaction request；Run 任一时刻只能有一个 PendingInteraction；
+9. 每个 reply / cancellation 收敛为对应 ToolCall 的最终 outcome 后才处理下一个 suspension；全部调用均终结后，Runtime 按原调用顺序触发 PostTool Hook、发布 Audit/Domain Event；
+10. 处理重试与失败策略；
+11. 将全部最终 ToolOutcome 转为 Run Step 结果，逐条做 L1 budget reduction，再以一次 `ContextPort::append_and_persist` 原子追加 assistant + 有序 tool results。
 
 ### 2.2 Tool BC
 
@@ -89,6 +90,7 @@ Tool BC 只拥有局部调用正确性：
 - Scope/Profile/schema 再验证；
 - required resources 解析；
 - Tool 函数调用；
+- 对 AskUser 等特殊函数产生 typed `ToolSuspension`，但不等待交互；
 - 协作取消；
 - ToolOutcome 标准化。
 
@@ -108,19 +110,28 @@ struct ExecutionScope {
 }
 ```
 
-ExecutionScope 是 Tool PL，只携稳定标识和值对象。禁止包含 RuntimeContext、Session、Registry、具体 TaskStore、WorkspaceService 或 channel。
+ExecutionScope 是 Tool PL，**MUST** 只携稳定标识和值对象，**NEVER** 包含 RuntimeContext、Session、Registry、具体 Store、Project 实现类型、composition-only handle 或 channel。`workspace_id` / `workspace_root` 是调用开始时从 `WorkspaceRead` 取得的只读快照，**NEVER** 替代 live capability。
 
-Composition Root 按 Registry Scope 装配窄资源端口：
+Project 已发布 `WorkspaceRead` / `WorkspaceControl`，Tool BC **MUST** 直接消费所需的 trait view，**NEVER** 定义第二层 Workspace façade。其精确签名以 [Project Workspace 端口](../project/02-ports-and-adapters.md) 为唯一真相；本文 **MUST** 只定义 Tool 的消费约束。其他资源仍按能力拥有者发布的窄端口装配：
 
 ```rust
-trait WorkspaceAccess { /* 活跃 frame / worktree 操作 */ }
 trait FileAccess      { /* 工作区内文件能力 */ }
 trait TaskAccess      { /* Task BC 发布能力 */ }
 trait AgentDispatch   { /* 派生 Sub Run 的窄入口 */ }
-trait UserInteraction { /* AskUser 等交互入口 */ }
 ```
 
-资源端口的具体签名由对应 BC 拥有；Tool BC 只消费其 Published Language/OHS。缺少 required resource 时，Tool 不进入该 Scope 的 Catalog 投影。
+AskUser 只需 `ToolCapability::UserInteraction` 授权，不需交互活资源：其 Tool adapter 将输入验证后返回 `ToolSuspension::UserInteraction`。Runtime 是 `InteractionPort`、等待状态、reply identity 与 cancellation 的唯一所有者；Tool Scope **NEVER** 注入第二套 `UserInteraction` trait。
+
+Composition Root **MUST** 从当前 composition-internal workspace scope 的同一 Project wiring 取得窄 view，并按 Tool 实例而非整个 Registry Scope 广播能力；Tool adapter **NEVER** 接收 composition scope / wiring：
+
+| Tool 实例 | 注入的 Project view |
+|---|---|
+| 文件 Tool（Read / Write / Edit / Glob / Grep） | `Arc<dyn WorkspaceRead>` |
+| Bash | `Arc<dyn WorkspaceRead>` + `Arc<dyn WorkspaceControl>` |
+| EnterWorktree / ExitWorktree | `Arc<dyn WorkspaceRead>` + `Arc<dyn WorkspaceControl>` |
+| 其他 Tool | 仅 descriptor 明确声明且通过 capability 校验的 view |
+
+只有 Bash、EnterWorktree、ExitWorktree **MAY** 获得 `WorkspaceControl`；只读文件 Tool **MUST** 只获得 `WorkspaceRead`。缺少 required resource 时，Tool 不进入该 Scope 的 Catalog 投影；Execution 时仍 **MUST** 重验 resource 与 capability。Tool adapter **NEVER** 接收 Project 的 production wiring handle。
 
 ## 4. Cancellation 与 timeout
 
@@ -164,12 +175,22 @@ trait SkillCatalogPort: Send + Sync {
     fn list(&self, query: SkillQuery) -> Vec<SkillDescriptor>;
 }
 
+#[async_trait]
 trait SkillMaterializationPort: Send + Sync {
-    fn materialize(&self, name: &SkillName) -> Result<PromptFragment, SkillError>;
+    /// 为一次 Context Window 构建返回已物化、已验证的快照。
+    async fn materialize_available(
+        &self,
+        query: SkillMaterializationQuery,
+    ) -> Result<SkillMaterializationSnapshot, SkillError>;
+}
+
+struct SkillMaterializationSnapshot {
+    fragments: Vec<PromptFragment>,
+    revision: SkillMaterializationRevision,
 }
 ```
 
-Skill Materializer 负责读取、解析与验证 Skill，输出 PromptFragment。Context Management 接收 Fragment 后决定注入位置、预算、去重、缓存分段和顺序。
+Skill Materializer 负责异步读取、解析与验证 Skill，输出带单调 revision 的 PromptFragment 快照。Context Management 接收 Fragment 后决定注入位置、预算、去重、缓存分段和顺序。
 
 Skill 不是 Tool，不走 ToolExecutionPort；Context Management 不直接读取 Skill 文件或依赖其 adapter。
 
@@ -235,7 +256,7 @@ Connected ──connection_lost──▶ Reconnecting
 Connected ──disable──▶ Stopping ──stopped──▶ Disabled
 Reconnecting ──success──▶ Connected
 Reconnecting ──exhausted──▶ Failed
-Failed ──retry──▶ Connecting
+Failed ──retry──▶ Connecting    // Target 转换；retry 触发机制（backoff / 手动）在 §10 之后落地
 Failed ──disable──▶ Disabled
 ```
 
@@ -262,27 +283,28 @@ Composition Root 负责：
 - 注册 built-in Tool adapter；
 - 根据 ConfigSnapshot 构造 Skill/Command catalog；
 - 根据 RunSpec 构造 Registry Scope 和 Tool Profile；
-- 为 Scope 注入资源端口；
+- 从当前 `CompositionWorkspaceScope` 的 Project wiring 取得 `WorkspaceRead` / `WorkspaceControl` 窄 view，并按 Tool 实例注入；scope / wiring **NEVER** 进入 Tool 类型，且 **NEVER** 预建通用 Workspace wrapper；
+- 为 Scope 注入其他资源端口；
 - MCP 动态接线阶段构造连接聚合与 adapter；
 - 向 Runtime/Context Management/交付层提供各独立端口。
 
-架构守卫的目标规则在 #763 落地并故意违规验证：
+架构守卫的目标规则在 #982 落地并故意违规验证，由 #763 汇总验收：
 
 ```text
 Rule: tool-registry-construction-owned-by-composition
 Scan: production Rust AST/path references to RegistryScopeBuilder::build,
       ToolRegistry::new and concrete Tool adapter constructors
 Allow: agent/composition/** only
-Deny: agent/features/** domain/application modules and apps/**
+Deny: agent/features/** production code and apps/**
 ```
 
 配套策略：
 
 1. Registry、Scope builder 与具体 Tool adapter 构造器保持模块私有或 `pub(crate)`；composition 通过专用 adapter factory 访问，禁止公开 re-export；
-2. Domain/Application 模块不得依赖 composition 或具体 adapter；
+2. capability policy 与用例代码不得依赖 composition 或具体 adapter；
 3. 守卫的唯一白名单是 composition root 路径，新增白名单必须带 owner 与退出条件；
 4. 装配测试断言 Sub Scope 的 Tool 集与 capability 集均不超过父 Scope/Profile；
-5. #763 必须临时增加第二构造点证明守卫失败，再撤销违规。
+5. #982 **MUST** 临时增加第二构造点证明守卫失败，再撤销违规。
 
 ## 12. 相关文档
 
@@ -290,7 +312,9 @@ Deny: agent/features/** domain/application modules and apps/**
 - 领域模型：[01-domain-model.md](01-domain-model.md)
 - Runtime Tool Coordination：[../runtime/02-module-boundaries.md](../runtime/02-module-boundaries.md)
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
+- Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 依赖规则：[../../01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
@@ -298,3 +322,4 @@ Deny: agent/features/** domain/application modules and apps/**
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：双 Tool 端口、ExecutionScope、取消、Skill/Command 协作与 MCP 生命周期 | #787 |
+| 2026-07-14 | Tool 资源改为直接消费 Project-owned WorkspaceRead / WorkspaceControl，移除宽包装并将 Control 注入限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |

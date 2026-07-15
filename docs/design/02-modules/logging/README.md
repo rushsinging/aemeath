@@ -98,7 +98,7 @@ struct TargetSpec {
 }
 ```
 
-目标 catalog 至少覆盖：TUI、Shared、Composition、Provider、Runtime、Tools、Prompt、Hook、Storage、Project、Policy、Update。Audit 不作为诊断 target 模拟审计存储；若 Audit BC 需要自身诊断日志，应注册诊断 target，但 Audit Event 仍走独立 `AuditSink`。
+目标 catalog 至少覆盖：TUI、Shared、Composition、Provider、Runtime（含 Agent Execution / Loop Engine 子 target）、Tools、Prompt、Hook、Storage、Project、Policy、Update、Audit（诊断）、Config、Memory、Context、Task。Audit 不作为诊断 target 模拟审计存储；若 Audit BC 需要自身诊断日志，应注册诊断 target，但 Audit Event 仍走独立 `AuditSink`。
 
 路由规则：
 

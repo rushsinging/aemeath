@@ -8,7 +8,7 @@
 
 | 编号 | 文档 | 内容 |
 |---|---|---|
-| 01 | [01-architecture-guards.md](01-architecture-guards.md) ✅ | 守卫注册表、依赖铁律拦截、17 个 guard 脚本 |
+| 01 | [01-architecture-guards.md](01-architecture-guards.md) ✅ | 守卫注册表、依赖铁律拦截、守卫脚本注册表 |
 | 02 | [02-agent-orchestration.md](02-agent-orchestration.md) ✅ | Agent 工程五主线（Context / Harness / Loop / Workflow / Graph）、演进决策框架 |
 | 03 | [03-migration-governance.md](03-migration-governance.md) ✅ | Current→Target 迁移追踪、Runtime 现状缺口(R1-R10)、死代码退役清单 |
 | 04 | [04-testing-and-coverage.md](04-testing-and-coverage.md) ✅ | L0-L5 测试分层、目录组织、fixture/替身、覆盖率、生产可达性、dead-code 与 CI 门禁 |

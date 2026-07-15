@@ -12,13 +12,20 @@
 struct InvocationRequest {
     model: ModelId,
     window: ContextWindow,
-    tools: Vec<ModelToolSchema>,
-    options: InvocationOptions,
+    options: ResolvedInvocationOptions,
 }
 
-struct InvocationOptions {
+struct RequestedInvocationOptions {
+    requested_max_output_tokens: Option<OutputTokenLimit>,
+    reasoning: ReasoningLevel, // Workflow 已应用 Config user maximum
+}
+
+struct ResolvedInvocationOptions {
+    context_size: TokenCount,
     max_output_tokens: OutputTokenLimit,
-    reasoning: ReasoningLevel, // Workflow 已应用 Config 静态上限
+    requested_reasoning: ReasoningLevel,
+    effective_reasoning: ReasoningLevel,
+    capability_fingerprint: CapabilityFingerprint,
 }
 
 struct ProviderCompletion {
@@ -34,7 +41,7 @@ struct ProviderAssistantOutput {
 }
 ```
 
-边界对象只包含稳定值：领域 Message 组成的 Context Window 发布视图、模型可见 Tool schema、调用选项和 Provider Completion。最终 output 在 Provider 边界保留 `ProviderToolCallId`；Runtime 消费 delta/completion 时创建领域 `ToolCallId`、维护双 ID 映射，并组装自己的 `InvocationResponse.message` 与 Run Step ToolCall。Provider 不自行生成领域 ID。这些对象不得携带 Session、Run、RuntimeContext、HTTP client、driver、provider config 或回调 handler。
+边界对象只包含稳定值：领域 Message、system blocks 与模型可见 Tool schema 组成的 Context Window 发布视图、已解析调用选项和 Provider Completion。`ContextWindow.tool_schemas` 是 Tool Catalog 单次快照经 Context Management 原样带入的唯一 schema 集；`InvocationRequest` **NEVER** 再复制第二个 `tools` 字段。最终 output 在 Provider 边界保留 `ProviderToolCallId`；Runtime 消费 delta/completion 时创建领域 `ToolCallId`、维护双 ID 映射，并组装自己的 `InvocationResponse.message` 与 Run Step ToolCall。Provider 不自行生成领域 ID。这些对象不得携带 Session、Run、RuntimeContext、HTTP client、driver、provider config 或回调 handler。
 
 ### 1.1 所有权
 
@@ -87,7 +94,7 @@ enum ReasoningMappingKind {
 
 `ModelCapability` 是只读 Published Language。Runtime 可用于前置校验和展示，但 Provider 在请求编码前仍必须复核，防止陈旧快照或绕过调用。
 
-## 3. Reasoning 三层 clamp
+## 3. Reasoning 两阶段 clamp 与冻结
 
 统一职责链：
 
@@ -100,13 +107,25 @@ Effective Reasoning = greatest supported level <= Requested Reasoning
 
 - Config 拥有用户默认值、静态上限及来源优先级；
 - Workflow 消费 ConfigSnapshot，把动态 desired 裁剪为 requested reasoning；
-- Runtime 把 requested reasoning 放入 InvocationRequest，不再次解释配置；
-- Provider 根据 driver + model 的 `supported` 档位集合选择不高于 requested 的最高档位，并映射为 wire 字段；
+- Runtime 在构建 Context Window **之前**调用 Provider-owned `resolve_invocation_options`；
+- resolver 根据 driver + model 的 `supported` 档位集合选择不高于 requested 的最高档位，同时解析 context/output limits（`context_size` 来源：`ModelCapability.context_limit`，若为 None 则 fallback 到 ConfigSnapshot 提供的 `context_size` 默认值），并返回不可变 `ResolvedInvocationOptions`；
+- Runtime 把同一个 `effective_reasoning` 同时放入 `ContextRequest`（供 Prompt guidance）与 `InvocationRequest.options`；
+- Provider `invoke` 只校验 `capability_fingerprint` 后映射 wire 字段，**NEVER** 静默再次 clamp。若 capability 已变化则返回 `CapabilityChanged`，Runtime 丢弃旧 window，重新 resolve + build；
 - Provider 在最终响应中回报 effective level，便于审计和诊断。
+
+因此单次模型调用只有一条 reasoning 数据流：
+
+```text
+ReasoningPort.current_requested_level
+  → ProviderPort.resolve_invocation_options
+  → ResolvedInvocationOptions.effective_reasoning
+       ├─ ContextRequest.effective_reasoning → PromptRequest.effective_reasoning
+       └─ InvocationRequest.options.effective_reasoning → InvocationScope
+```
 
 ### 3.1 映射规则
 
-ReasoningLevel 是跨 BC 的统一抽象：`Off / Low / Medium / High / Xhigh / Max`。driver 必须把 effective level 映射为本协议支持的形式，例如 effort 字符串、thinking 开关、token budget 或 adaptive mode。
+Shared Kernel 的 `ReasoningLevel` 是跨 BC 统一抽象：`Off / Low / Medium / High / Xhigh / Max`；Provider 只消费该类型并拥有 model-capability clamp 与 wire 映射，**NEVER** 再定义副本。driver 必须把 effective level 映射为本协议支持的形式，例如 effort 字符串、thinking 开关、token budget 或 adaptive mode。
 
 - 不支持的档位必须在有序 `supported` 集合中向下选择，禁止向上扩大；
 - `Off` 不得被默认开启逻辑反向提升；
@@ -148,7 +167,17 @@ ACL 对每个 ContentBlock 显式映射：
 
 ### 5.2 Tool schema
 
-`ModelToolSchema` 是 Tool Catalog 的模型可见投影。driver 转换时只保留供应商允许字段：名称、描述、输入 schema 及明确支持的 cache hint；内部 capability、resource、data schema、函数引用与 Registry 信息不得出站。
+`ModelToolSchema` 是 Tool Catalog 的模型可见投影（归属：**Tools Published Language**，由 ToolDescriptor.model_schemas() 生成）。Runtime 每次 PreparingContext 只拉取一个 `ToolCatalogSnapshot`，按 snapshot 稳定顺序生成 schema 集并放入 `ContextRequest`；Context Management 在预算后把同一集合原样放入 `ContextWindow.tool_schemas`。driver 转换时只保留供应商允许字段：名称、描述、输入 schema 及明确支持的 cache hint；内部 capability、resource、data schema、函数引用与 Registry 信息不得出站。Context 与 Provider **NEVER** 再查询 Catalog 或重新排序。
+
+```rust
+/// Tool Catalog → LLM 可见投影。归属：Tools PL。
+struct ModelToolSchema {
+    name: String,
+    description: String,
+    input_schema: JsonSchema,
+    cache_hint: Option<CacheHint>,
+}
+```
 
 ### 5.3 System 与缓存提示
 
@@ -166,6 +195,26 @@ enum InvocationDelta {
     ToolArgumentsDelta(ProviderToolArgumentsDelta),
     ToolCallCompleted(ProviderToolCall),
     UsageSnapshot(RawUsageSnapshot),
+}
+
+/// Tool call 首次出现的元数据。
+struct ProviderToolCallStart {
+    provider_call_id: ProviderToolCallId, // 供应商侧 call ID
+    name: String,                         // 工具名称
+    index: usize,                         // stream 中的位置索引
+}
+
+/// Tool call 参数增量。
+struct ProviderToolArgumentsDelta {
+    provider_call_id: ProviderToolCallId, // 关联到 start 的 call ID
+    delta: String,                        // JSON 参数片段增量
+}
+
+/// 完成的 tool call（最终态）。
+struct ProviderToolCall {
+    provider_call_id: ProviderToolCallId,
+    name: String,
+    arguments: String,                    // 完整 JSON 参数
 }
 ```
 
@@ -210,7 +259,7 @@ struct RawUsageSnapshot {
 规则：
 
 1. 所有字段都区分“未报告”与真实零值；供应商完全不返回 usage 时，最终响应的 usage 为 `None`；
-2. `UsageSnapshot` 一律表示当前 attempt 的累计快照，不发布增量计数；driver 必须在 ACL 内把供应商的累计/增量 wire 语义转换为累计值；
+2. `RawUsageSnapshot` 一律表示当前 attempt 的累计快照，不发布增量计数；driver 必须在 ACL 内把供应商的累计/增量 wire 语义转换为累计值；
 3. 新快照不得让已知计数倒退；重复快照按覆盖而非相加处理；
 4. 最终响应至多有一个 final usage snapshot，并与最后一次 delta 快照一致；
 5. Provider 不读取价格表、不计算货币成本；
@@ -224,7 +273,8 @@ enum ProviderErrorKind {
     Authentication,
     PermissionDenied,
     RateLimited,
-    ContextTooLong,
+    ContextTooLong,       // Runtime 侧匹配为 ContextExceeded
+    CapabilityChanged,    // Model capability 在 invoke 时已变化；Runtime 需重新 resolve
     InvalidRequest,
     ModelUnavailable,
     UpstreamUnavailable,
@@ -241,8 +291,16 @@ struct ProviderError {
     safe_message: String,
     provider_code: Option<ProviderErrorCode>,
     retry_after: Option<Duration>,
+    /// 仅 CapabilityChanged 时携带：变化后的新 fingerprint
+    new_capability_fingerprint: Option<CapabilityFingerprint>,
 }
+
+/// 模型能力指纹——用于检测 capability 是否在 resolve → invoke 之间发生变化。
+/// 来源：ModelCapability 的关键字段 hash（context_limit / output_limit / reasoning.supported）。
+struct CapabilityFingerprint(String);
 ```
+
+> **Runtime 侧匹配**：Runtime 在 `invoke` 返回 `Err(ProviderError { kind: CapabilityChanged, .. })` 时丢弃旧 window 并重新 resolve + build。`kind: ContextTooLong` 匹配为 `ContextExceeded` → compact 后重跑。其余不可恢复错误匹配为 `Fatal`。
 
 - `retryable` 是 Provider 对失败性质的提示，不是重试命令；
 - `retry_after` 只承载经校验的协议等待 hint，Runtime 决定是否采用并施加自身上限；
@@ -255,13 +313,13 @@ struct ProviderError {
 
 ## 9. 核心不变量
 
-1. 一个 InvocationRequest 固定一个 model 和一份不可变 options；
+1. 一个 InvocationRequest 固定一个 model、一份不可变 resolved options 和一个已完整构建的 ContextWindow；
 2. Provider 每次 invoke 最多执行一次上游语义请求；
 3. delta 顺序与供应商流顺序一致，单流不并发重排；
 4. 每个 provider tool call 的 start/arguments/complete 关联一致；
 5. invoke 只能以一个 ProviderCompletion 或一个 ProviderError 终结；
 6. 终结后不再输出 delta；
-7. effective reasoning 是 Provider/model `supported` 集合中不高于 requested reasoning 的最高档位；
+7. effective reasoning 是 Provider/model `supported` 集合中不高于 requested reasoning 的最高档位，且必须与同一请求的 ContextWindow prompt 所用值相同；
 8. wire DTO 不得出现在 Provider adapter 之外；
 9. RawUsageSnapshot 保留原始计量语义，不混入 cost；
 10. Runtime 不需要依据 provider 名称解释任何响应。
@@ -279,3 +337,4 @@ struct ProviderError {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：调用边界语言、模型能力、三层 clamp、双向 ACL、usage 与错误分类 | #788 |
+| 2026-07-14 | 在 Context build 前解析并冻结 model capability；InvocationRequest 直接复用 ContextWindow 的唯一 Tool schema 集 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

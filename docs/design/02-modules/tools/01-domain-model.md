@@ -1,7 +1,7 @@
 # Tool & Skill & Command · 领域模型
 
 > 层级：02-modules / tools（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文只描述目标态；实现差距统一记录在 `03-engineering/03-migration-governance.md`。
 
 ## 1. Tool 语言
@@ -62,17 +62,32 @@ enum ToolCapability {
 
 Capability 表达安全权限，不表达 Tool 身份或装配位置。新增 Tool 未声明 required capabilities 时不得注册。
 
+```rust
+/// ToolCapabilities 是 ToolCapability 的 bitflag / HashSet 容器。
+type ToolCapabilities = Vec<ToolCapability>;
+```
+
 ### 1.3 ResourceRequirements
 
 Tool 所需活资源通过窄端口提供，例如：
 
-- `WorkspaceAccess`
+- Project-owned `WorkspaceRead`
+- Project-owned `WorkspaceControl`
 - `FileAccess`
 - `TaskAccess`
 - `AgentDispatch`
-- `UserInteraction`
 
-Descriptor 声明 required resources，Registry Scope 装配时验证资源齐备。资源端口不等同 capability：capability 决定“能否授权”，resource 决定“是否有实现可用”。
+Descriptor 声明 required resources，Registry Scope 装配时验证资源齐备。资源端口不等同 capability：capability 决定“能否授权”，resource 决定“是否有实现可用”。Tool BC **MUST** 直接消费 Project 发布的窄 trait，**NEVER** 再定义或预装配覆盖读写控制的通用 Workspace wrapper。
+
+| Tool 类别 | Project 能力 | 约束 |
+|---|---|---|
+| 文件 Tool（Read / Write / Edit / Glob / Grep） | `WorkspaceRead` | 用于路径解析；其中只读文件 Tool **NEVER** 获得 Control |
+| Bash | `WorkspaceRead` + `WorkspaceControl` | **MUST** 仅在同步 `cd` / path base 时使用 Control |
+| EnterWorktree / ExitWorktree | `WorkspaceRead` + `WorkspaceControl` | 由 Project 守护状态转换，并在转换后从同一 wiring 的 Read 获取 path / root / branch 生成 Tool 结果 |
+| AskUser | 无活资源 | 只解析为 `ToolSuspension::UserInteraction`；交互、等待与 Run 恢复归 Runtime |
+| 其他 Tool | 按 descriptor 声明 | 未声明 workspace resource 时 **NEVER** 注入任一 Project 能力 |
+
+`WorkspaceControl` 的 resource 与同名 `ToolCapability::WorkspaceControl` 权限 **MUST** 同时满足：前者证明实现已装配，后者证明调用被授权。只有 Bash、EnterWorktree、ExitWorktree **MAY** 声明该 resource；增加第四个消费者 **MUST** 先修改 Project 消费方契约与架构测试。
 
 ## 2. Registry Scope 与 Tool Profile
 
@@ -142,7 +157,7 @@ struct ToolCatalogSnapshot {
 }
 ```
 
-Snapshot 是只读投影。Tool Catalog 内部可由 built-in 与 MCP 来源组合，但消费者只看到统一 Descriptor。
+Snapshot 是只读投影。Tool Catalog 内部可由 built-in 与 MCP 来源组合，但消费者只看到统一 Descriptor。`tools` 顺序在 snapshot 生命周期内稳定；Tool BC 发布唯一的纯 `model_schemas()` 投影，把每个 descriptor 映射为 `ModelToolSchema` 且保持该顺序。Runtime 每次 invocation 只调用一次该投影，Context / Provider 不再从 descriptor 重建第二份 schema。
 
 Catalog 变化发布以下生命周期事件；本阶段只承诺重新拉取语义，不定义 revision：
 
@@ -183,6 +198,21 @@ enum ToolOutcome {
     Success(ToolSuccess),
     Failure(ToolFailure),
     Cancelled(ToolCancelled),
+    Suspended(ToolSuspension),
+}
+
+enum ToolSuspension {
+    UserInteraction(UserInteractionSpec),
+}
+
+struct UserInteractionSpec {
+    questions: Vec<UserQuestion>,
+}
+
+struct UserQuestion {
+    prompt: String,                 // 向用户展示的问题文本
+    options: Vec<String>,           // 可选选项；空 = 自由文本回答
+    allow_multi: bool,              // 是否允许多选
 }
 
 struct ToolSuccess {
@@ -198,9 +228,19 @@ struct ToolFailure {
     content: Vec<ContentBlock>,
     data: Option<JsonValue>,
 }
+
+enum ToolErrorKind {
+    ToolUnavailable,                // 工具未注册或已下线
+    InvalidInput,                   // schema 校验失败
+    PermissionDenied,               // 能力不足 / 权限拒绝
+    Internal,                       // 工具内部执行错误
+    Timeout,                        // 执行超时
+    Cancelled,                      // 被取消
+    Unsupported,                    // 平台 / 架构不支持
+}
 ```
 
-ToolOutcome 是领域结果，不依赖 SDK/TUI View。错误只公开可安全暴露的信息，不泄漏密钥、完整进程环境或 adapter 私有协议内容。
+ToolOutcome 是领域结果，不依赖 SDK/TUI View。错误只公开可安全暴露的信息，不泄漏密钥、完整进程环境或 adapter 私有协议内容。`Suspended` 只是 Tool 对“完成该调用前需要外部回答”的 typed 表达；Tool BC **NEVER** 等待 UI、持有 reply channel 或改变 Run 状态。Runtime 将 reply 映射为同一 ToolCall 的最终 `ToolSuccess` 或 cancellation。
 
 Tool BC 不负责 token budget、截断、超大结果持久化、Context Window 格式或 TUI 渲染。这些由 Runtime Tool Coordination、Context Management 与 Storage 协作。
 
@@ -355,7 +395,9 @@ enum McpConnectionState {
 - 模块入口：[README.md](README.md)
 - 端口与生命周期：[02-ports-and-lifecycle.md](02-ports-and-lifecycle.md)
 - Runtime 领域模型：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
+- Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+- 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
@@ -363,3 +405,4 @@ enum McpConnectionState {
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：Tool PL、Scope/Profile、Outcome、Skill/Command 机制与 MCP 聚合 | #787 |
+| 2026-07-14 | 移除通用 Workspace resource 包装，改为 Tool 按需直接消费 WorkspaceRead / WorkspaceControl，并将 Control 限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |

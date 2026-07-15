@@ -130,7 +130,7 @@ Stop block count 是确定性的协议上限，不并入通用 StuckGuard 计分
 - [ ] Main 失败后可由新用户输入创建新 Run。
 - [ ] Sub 失败终态回传父 Run。
 - [ ] cancellation 能终止 Hook 子进程及重试等待。
-- [ ] 普通 Hook 执行失败重试耗尽后 Continue。
+- [ ] 普通 Hook 执行失败重试耗尽后：未配置 failure_policy → Continue；配置 failure_policy=Block → Block。
 
 ## 修改历史
 

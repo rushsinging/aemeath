@@ -2,25 +2,25 @@
 
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）
-> 本文定义 Loop Engine 内置的 StuckGuard 四层防线。**核心改进：防 stuck 内置 Loop Engine，Main/Sub 统一获得保护**——补上现状 Sub loop 完全无 stall/fuse 保护的最大缺口。现状差距记入 `03-engineering/migration-governance`。
+> 本文定义 Loop Engine 内置的 StuckGuard 四层防线。Main / Sub 通过同一 Loop Engine 获得一致保护；实现差距与退役责任只在 [迁移治理](../../03-engineering/03-migration-governance.md) 维护。
 
 ## 1. 四层防线总览
 
 ```
 Loop Engine 内置 StuckGuard（Main/Sub 共用）
-├── L1 StallGuard      LLM 文本重复检测（保留现 StallDetector 逻辑）
-├── L2 ToolLoopGuard   工具调用循环熔断（保留现 ToolCallFuse 逻辑，含周期检测）
+├── L1 StallGuard      LLM 文本重复检测
+├── L2 ToolLoopGuard   工具调用循环熔断（含周期检测）
 ├── L3 TimeoutGuard    墙钟时间兜底（替代 max_turns；timeout=0 无限）
 └── L4 StopHookGuard   Stop hook 反复阻断上限
 ```
 
-**统一收益**：现状 L1/L2 仅在 Main loop，Sub 裸奔（只有 3h timeout 兜底）。目标把 StuckGuard 内置 `run_loop`，Sub 自动获得 L1/L2 保护。
+**统一不变量**：StuckGuard 内置 `run_loop`；Main / Sub **MUST** 同时经过 L1-L4，差异只允许来自 `RunSpec` 的显式策略值。
 
 ## 2. L1 · StallGuard（文本重复）
 
 - **检测**：assistant 输出文本指纹（trim 后前 N 字符）
 - **触发**：最近窗口内同一指纹重复达阈值
-- **默认参数**（沿用现状实测值）：窗口 `4`，指纹长度 `200 字符`，重复阈值 `3`
+- **默认参数**：窗口 `4`，指纹长度 `200 字符`，重复阈值 `3`
 - **触发处理**：标记 stuck → 分级响应（§6）
 
 ## 3. L2 · ToolLoopGuard（工具循环熔断）
@@ -29,7 +29,7 @@ Loop Engine 内置 StuckGuard（Main/Sub 共用）
 - **两种模式**：
   - **连续重复**：同一指纹连续出现
   - **周期循环**：period 长度 `2-5`、重复 `3` 次的循环模式（如 `A→B→C→A→B→C→A→B→C`）
-- **默认参数**（沿用现状）：连续 soft `≥3` / hard `≥5`；周期重复 `3`；`blocked_count≥3` → hard；recent 窗口 `64`
+- **默认参数**：连续 soft `≥3` / hard `≥5`；周期重复 `3`；`blocked_count≥3` → hard；recent 窗口 `64`
 - **触发处理**：
   - **SoftBlock**：阻断本次调用，喂回错误结果提示 LLM"不要重复、换策略/总结/问用户"
   - **HardPause**：升级为暂停
@@ -73,13 +73,14 @@ StuckGuard 触发是 Run 状态机的一等公民，而非散落的 `if`：
 阈值经 `RunSpec` / `ConfigSnapshot` 配置：
 - **Sub 建议更严阈值**（更快熔断，因为无人盯着）
 - Main 阈值可宽松（有人实时观察 + 可 ask_user 介入）
-- 默认值沿用现状实测参数（见 §2-§5）
+- 默认值以 §2-§5 为单一配置基线
 
 ## 9. 相关文档
 
 - 状态机与 Loop：[03-loop-and-state-machine.md](03-loop-and-state-machine.md)
 - 模块边界（StuckGuard 归 loop_engine / ToolLoopGuard 归 tool_coordination）：[02-module-boundaries.md](02-module-boundaries.md)
 - 领域模型（timeout 字段）：[01-domain-model.md](01-domain-model.md)
+- Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 
