@@ -12,7 +12,7 @@
 
 1. 仓库与 crate 内部首先按稳定业务能力组织，让顶层名称直接表达系统做什么；
 2. 单个能力内部优先把同一用例一起变化的代码共置，而不是先拆成横向技术层；
-3. 技术外部 seam 出现时按证据定义消费方-owned outbound port；BC boundary seam 出现时按 Context Map 定义供应方-owned façade/OHS。只有 §3.6 至少一个强边界收益成立时才拆 crate。
+3. 技术外部 seam 出现时按证据定义消费方-owned outbound port；BC boundary seam 出现时按 Context Map 定义供应方-owned façade/OHS。只有 §3.8 至少一个强边界收益成立时才拆 crate。
 
 Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 说明了能力优先组织、窄组件入口和减少公开类型的价值。aemeath **MUST** 让依赖图、Rust 可见性和公开 façade 证明边界；目录名称只能帮助导航，**NEVER** 单独充当架构证据。
 
@@ -58,9 +58,18 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
   └── 可选：满足至少一个强边界收益的 crate
 ```
 
-这是一组按证据触发的升格选项，**NEVER** 是每个模块必须走完的成熟度等级。基础粒度先在扁平模块与用例 / 能力子模块之间选择；model、port、技术目录和 crate **MUST** 分别独立评估，可以任意组合，也可以永远不出现。证据消失后结构 **SHOULD** 降级或合并。
+这是一组按证据触发的升格选项，**NEVER** 是每个模块必须走完的成熟度等级。基础粒度先递归选择扁平模块或用例 / 能力子模块；model、port、CQRS-lite、REPR、技术目录和 crate **MUST** 分别独立评估，可以任意组合，也可以永远不出现。证据消失后结构 **SHOULD** 降级或合并。
 
-### 3.1 第一级：扁平能力模块
+### 3.1 递归选择能力粒度
+
+能力优先不是只在仓库顶层执行一次。一个 feature、crate 或模块内部若仍包含多个可独立演进的稳定能力，**MUST** 继续按同一判据递归划分，直到叶子只承载一个主要用例或一组紧密行为：
+
+1. **MUST** 先识别候选能力是否拥有独立词汇、变化原因、状态所有权和测试夹具；仅文件多或函数多 **NEVER** 构成子能力。
+2. 当一个模块已有三个或更多候选能力时，**SHOULD** 触发递归竖切评审；“三个”只是防止大包被横向铺开的启发式信号，**NEVER** 替代上述能力证据。
+3. 两个候选能力若总是锁步变化、共享同一状态所有权且无法形成窄入口，**MUST** 先保持同一叶子，**NEVER** 为满足数量阈值强拆。
+4. 递归竖切只决定 module / use-case 粒度；是否增加 model、port、技术目录、CQRS-lite、REPR 或 crate **MUST** 分别按后续小节独立判断。
+
+### 3.2 叶子：扁平能力模块
 
 单一职责、少量文件、一个主要用例或一组紧密行为 **MUST** 先保持扁平：
 
@@ -73,9 +82,9 @@ capability/
 
 - **MUST** 把测试放在被测行为附近。
 - **NEVER** 为对称美观预建空目录。
-- 当一次修改经常跨越三个以上互不相关的职责，或不同用例拥有独立词汇、状态与测试夹具时，**SHOULD** 进入第二级。
+- 当一次修改经常跨越三个以上互不相关的职责，或不同用例拥有独立词汇、状态与测试夹具时，**SHOULD** 回到 §3.1 递归划分能力。
 
-### 3.2 第二级：用例或稳定能力子模块
+### 3.3 叶子：用例或稳定能力子模块
 
 子模块名称 **MUST** 表达用例或稳定能力，例如 `start_run`、`tool_coordination`、`stream_completion`，**NEVER** 只表达代码的技术形态。
 
@@ -94,7 +103,7 @@ capability/
 - 只有一个函数或只有文件长度变化、但无独立词汇与行为边界时，**NEVER** 为其创建子模块。
 - 两个切片出现相似代码时，**MUST** 先判断它是偶然相似还是共同不变量；**NEVER** 仅为消除几行重复就建立共享核心。
 
-### 3.3 可选 `model.rs` / `model/`
+### 3.4 可选 `model.rs` / `model/`
 
 `model` 是共享业务不变量的家，不是类型垃圾桶。
 
@@ -114,7 +123,7 @@ capability/
 
 共享不变量缩回单一用例后，类型与行为 **SHOULD** 回到该用例，空壳 `model` **MUST** 删除。
 
-### 3.4 可选 port
+### 3.5 可选 port
 
 Port 表达能力边界上一段有业务目的的对话，所有权分两类：隔离易变外部 detail 的**出站 port**由消费策略拥有；供其他能力调用的**入站 façade / OHS**由供应能力拥有并发布稳定 Published Language。出现下列信号时 **SHOULD** 评估对应边界，但信号本身 **NEVER** 自动要求增加抽象。
 
@@ -138,7 +147,23 @@ Port 表达能力边界上一段有业务目的的对话，所有权分两类：
 
 以下情况 **NEVER** 引入 port：纯模块内 helper、稳定且确定的语言库调用、只包一层同签名转发、没有替换或隔离需求的“以防将来”。当 port 不再保护策略、测试或演进 seam 时，**SHOULD** 内联并删除。
 
-### 3.5 可选技术目录
+### 3.6 可选 CQRS-lite 与 REPR
+
+CQRS-lite 与 REPR 是彼此独立、只在证据成立时启用的组织选项，**NEVER** 是 capability-first 或 Hexagonal 的默认配套。
+
+**CQRS-lite 判据**：
+
+- 当读侧与写侧已经拥有不同模型、数据源、性能目标或生命周期时，**SHOULD** 分离 command/query façade 与对应 port/repository；两侧 **MUST** 各自拥有契约，**NEVER** 共用一个假统一 repository。
+- 读写仍围绕同一模型、同一存取语义和同一变化原因时，**MUST** 保持统一存取契约；方法数量多或名称含 `get`/`save` **NEVER** 构成 CQRS 证据。
+- 纯内存状态机、过程编排或仅有事件投影的能力，若没有独立读模型，**NEVER** 为结构对称引入 command/query 双套类型。
+
+**REPR 判据**：
+
+- REPR 只适用于 HTTP/API delivery 层。只有端点数量多、协议与授权/校验差异显著，且端点频繁独立增删时，才 **MAY** 采用 request-endpoint-response 共置。
+- 端点较少、协议同质、共同变化明显时，**MUST** 优先使用按能力或资源分组的 route 模块；框架已有 route 分组能力时，**NEVER** 为“一端点一目录”增加仪式。
+- 领域能力、应用编排和非 HTTP 入站 façade **NEVER** 根据端点数量选择 REPR。
+
+### 3.7 可选技术目录
 
 外部实现 **SHOULD** 诚实地按 provider、协议或产品名称组织，例如 `anthropic/`、`openai_compatible/`、`sse/`、`git/`，而不是用含义不明的总括目录隐藏变化来源。
 
@@ -146,11 +171,11 @@ Port 表达能力边界上一段有业务目的的对话，所有权分两类：
 
 - 同一技术拥有多个共同变化的 wire type、错误映射、连接生命周期或协议测试；
 - 目录边界 **MUST** 把技术依赖与其余能力隔离；
-- 已形成 §3.4 的明确 seam 时，技术实现 **MUST** 终止在该 seam：出站 adapter 实现消费策略拥有的 port，入站 adapter 调用供应能力拥有的 façade / OHS；边界尚未形成时，具体依赖 **MUST** 保持私有。三种情况对外都 **NEVER** 泄漏 wire type。
+- 已形成 §3.5 的明确 seam 时，技术实现 **MUST** 终止在该 seam：出站 adapter 实现消费策略拥有的 port，入站 adapter 调用供应能力拥有的 façade / OHS；边界尚未形成时，具体依赖 **MUST** 保持私有。三种情况对外都 **NEVER** 泄漏 wire type。
 
 单文件即可讲清的集成 **MUST** 保持为 `anthropic.rs` 之类的文件；纯业务代码、跨技术共享策略和只有名称相同的 helper **NEVER** 放入技术目录。技术被移除后，其专属目录 **MUST** 连同死转换与配置入口一起退役。
 
-### 3.6 可选 crate
+### 3.8 可选 crate
 
 模块只有在至少一个强边界收益成立时才 **MAY** 升格为 crate。这些收益 **MUST** 分两类看待，**NEVER** 混用判据：
 
@@ -231,7 +256,7 @@ runtime/
 └── event_projection.rs
 ```
 
-此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名。`agent_client` 是稳定入站能力，不是通用 `api` 层；`agent_run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordination / invocation 模块封装独立编排能力。它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。外部 seam 的 port **SHOULD** 靠近实际消费方；只有多个模块共享同一 Run 不变量时才 **MAY** 抽取共享 model。
+此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名。Runtime 已有三个以上具备独立词汇、变化原因、状态或测试边界的能力，因此在 feature 内递归竖切；这不表示每个子能力都升级为 BC 或 crate。`agent_client` 是稳定入站能力，不是通用 `api` 层；`agent_run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordination / invocation 模块封装独立编排能力。它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。每个叶子按证据引入 model、port 或技术 adapter：`agent_run` 有真实领域不变量，`event_projection` 则保持扁平转换；Runtime 当前没有独立读模型和 HTTP delivery 端点，因此 **NEVER** 引入 CQRS-lite 或 REPR。
 
 ## 5. 跨生态参照
 
@@ -289,7 +314,7 @@ project/
 ```
 
 - **边界机制**：[Go 官方布局指南](https://go.dev/doc/modules/layout) 从根目录单 package 起步，复杂度增长后才增加 supporting package；`internal` 由工具链禁止其父目录树之外的代码导入。对 server project，指南进一步示范把已经适合跨项目复用的 package 拆为独立 module；这是一种适用场景，**NEVER** 被提升为 Go module 的唯一拆分门槛。
-- **借鉴**：aemeath **MUST** 先保持扁平，并把编译器可见性当作边界；只有 §3.6 至少一个强边界收益成立时才 **MAY** 拆 crate。
+- **借鉴**：aemeath **MUST** 先保持扁平，并把编译器可见性当作边界；只有 §3.8 至少一个强边界收益成立时才 **MAY** 拆 crate。
 - **未照搬**：aemeath **NEVER** 复制 `cmd` / `internal` 名称或 Go 的“一目录一 package”约束。
 
 ### 5.4 Rust：rust-analyzer
@@ -305,7 +330,7 @@ crates/
 
 - **边界机制**：[rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html) 明确标注哪些 crate 是 API Boundary、哪些永远不是；`hir` / `ide` 作为 façade，内部 crate 按语义计算和 IDE 能力拆分。
 - **借鉴**：aemeath **SHOULD** 为公开边界给出明确语言，并让内部能力依赖图服务于不变量与增量变化。
-- **未照搬**：aemeath **NEVER** 按 rust-analyzer 的 crate 数量、编译器流水线或 Salsa 约束拆分；crate 升格仍需满足 §3.6。
+- **未照搬**：aemeath **NEVER** 按 rust-analyzer 的 crate 数量、编译器流水线或 Salsa 约束拆分；crate 升格仍需满足 §3.8。
 
 ### 5.5 Rust：Helix
 
@@ -347,20 +372,22 @@ components/foo/
 ### 6.1 先选基础粒度
 
 1. **MUST** 先用统一语言说明能力所有者；无法说明所有者时，**MUST** 停止并重新划定边界。
-2. 单一用例或紧密行为 **MUST** 选择扁平模块；已有独立词汇、共同变化与测试边界时，才 **SHOULD** 选择用例 / 能力子模块。
+2. 单一用例或紧密行为 **MUST** 选择扁平模块；已有独立词汇、共同变化与测试边界时，才 **SHOULD** 选择用例 / 能力子模块。大包若出现三个或更多候选能力，**SHOULD** 按 §3.1 递归复查，但最终仍以能力证据而非数量决定。
 
-这一步只决定扁平或子模块粒度，**NEVER** 预先决定是否需要 model、port、技术目录或 crate。
+这一步只决定扁平或子模块粒度，**NEVER** 预先决定是否需要 model、port、CQRS-lite、REPR、技术目录或 crate。
 
-### 6.2 独立评估四类可选结构
+### 6.2 独立评估六类可选结构
 
 | 结构 | 独立问题 | 结论 |
 |---|---|---|
 | model | 是否已有跨用例共享业务不变量 | 是则 **MAY** 引入；否则 **NEVER** 引入 |
 | port | 是隔离易变 detail 的出站 seam，还是供应能力的真实入站 OHS | 出站由消费策略拥有；入站由供应能力拥有；两者都无真实边界则 **NEVER** 预建 |
+| CQRS-lite | 读写是否已拥有不同模型、数据源、性能目标或生命周期 | 是则 **SHOULD** 拆 command/query 契约；否则 **MUST** 保持统一存取契约 |
+| REPR | HTTP/API 端点是否多、异构且频繁独立增删 | 是则 **MAY** 一端点一切片；否则 **MUST** 按能力或资源分组 route |
 | 技术目录 | 同一 provider / protocol 是否已有多文件共同变化与隔离价值 | 是则 **MAY** 引入；否则 **MUST** 保持单文件 |
-| crate | 是否满足 §3.6 至少一个强边界收益 | 是则 **MAY** 升格；否则 **MUST** 保持同 crate 私有模块 |
+| crate | 是否满足 §3.8 至少一个强边界收益 | 是则 **MAY** 升格；否则 **MUST** 保持同 crate 私有模块 |
 
-四项 **MUST** 分别依据 §3 的证据判断；任一项为“否”只表示不引入该结构，**NEVER** 阻断其他三项。
+六项 **MUST** 分别依据 §3 的证据判断；任一项为“否”只表示不引入该结构，**NEVER** 阻断其他选项。
 
 ### 6.3 最后验证边界
 
@@ -374,9 +401,11 @@ components/foo/
 | 用例代码沿变化轴共置 | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/) | 切片内高内聚、切片间低耦合 | 强制 CQRS / Mediator；禁止共享真实不变量 |
 | 真实 seam 形成时按方向确定 port 所有权 | [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture)；aemeath [Context Map](03-context-map.md) 的 OHS 关系 | Hexagonal 提供 inside/outside 与目的性 port；aemeath 综合 Context Map 决定出站 port 归消费策略、入站 façade / OHS 归供应能力 | 每用例一个 port、固定端口数量、固定外层目录；不把仓库综合决策冒充原文结论 |
 | 依赖由技术细节指向能力策略 | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html) | Dependency Rule、依赖反转、边界数据归内侧所有 | 固定圆环数量与名称、物理分层模板 |
-| 先 module privacy，存在强边界收益时再 crate | [Rust visibility](https://doc.rust-lang.org/reference/visibility-and-privacy.html)；[Go module layout](https://go.dev/doc/modules/layout)；aemeath §3.6 | 来源支持默认私有、受限公开与简单起步；生命周期、平台、发布、审计等强边界收益是 aemeath 的综合工程决策 | Go 目录约定；为每个能力预建 crate；不把本地判据冒充来源原文 |
-| crate **MUST** 承载 §3.6 的强边界收益 | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | rust-analyzer 的 façade / API boundary；Helix 的 subsystem-named crates 与 Cargo dependency graph；能力判定是 aemeath 的综合推论 | 按参考项目的 crate 数量或内部流水线照抄 |
+| 先 module privacy，存在强边界收益时再 crate | [Rust visibility](https://doc.rust-lang.org/reference/visibility-and-privacy.html)；[Go module layout](https://go.dev/doc/modules/layout)；aemeath §3.8 | 来源支持默认私有、受限公开与简单起步；生命周期、平台、发布、审计等强边界收益是 aemeath 的综合工程决策 | Go 目录约定；为每个能力预建 crate；不把本地判据冒充来源原文 |
+| crate **MUST** 承载 §3.8 的强边界收益 | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | rust-analyzer 的 façade / API boundary；Helix 的 subsystem-named crates 与 Cargo dependency graph；能力判定是 aemeath 的综合推论 | 按参考项目的 crate 数量或内部流水线照抄 |
 | 边界规则 **MUST** 机械验证 | [Spring Modulith verification](https://docs.spring.io/spring-modulith/reference/verification.html)；[Chromium components](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/README.md) | 环检查、允许依赖、公开面与构建图 | Spring / GN 专属工具和 Chromium 组织规模 |
+| 递归能力拆分，叶子按证据塑形 | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 大包继续按独立词汇、变化原因、状态与测试边界竖切；叶子按复杂度选择结构 | 固定层级深度；以文件数或“三个”阈值机械拆分 |
+| CQRS-lite / REPR 按证据启用 | [Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice)；[Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/) | 读写模型真实分叉时拆契约；异构且频繁变化的 HTTP 端点才按端点共置 | 默认双套 repository；所有 route 一端点一目录 |
 | **拒绝：所有能力采用固定横向目录模板** | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 保留依赖方向；复杂领域按需隔离 | 拒绝原因：把示意层误当目录，会给小模块增加仪式并掩盖能力边界 |
 | **拒绝：纯切片、永不共享 model** | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；[DDD Reference](https://www.domainlanguage.com/ddd/reference/) | 保留变化局部性 | 拒绝原因：跨用例真实不变量会复制并漂移，必须允许共同模型按证据出现 |
 | **拒绝：为所有依赖预建 port** | [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture) | 对真实外部参与者保持可替换和可测试 | 拒绝原因：无 seam 的转发抽象增加命名、装配与测试成本，却不隔离变化 |
@@ -398,5 +427,6 @@ components/foo/
 |---|---|---|
 | 2026-07-14 | 初稿：确立 capability-first、用例共置、按需 port 与渐进 crate 边界；补 aemeath 及跨生态示例和决策追溯 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 审查修订：统一 Rust 2018+ 模块布局、独立结构判据、port 强制边界、模块战术真相源与规范等级 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 修复评审 #14：§3.4 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-16 | §2/§3.4 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.4 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.6 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 修复评审 #14：§3.5 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-16 | §2/§3.5 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.5 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.8 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 投影明确递归竖切且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) |

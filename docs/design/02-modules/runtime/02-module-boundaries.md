@@ -4,10 +4,12 @@
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 Agent Runtime 内部的模块划分、各模块的状态所有权、消费的 Port 与依赖方向。**只描述目标态**；Current → Target 差距只见 [Migration Governance](../../03-engineering/03-migration-governance.md)。
 
-## 1. 内部模块总览（8 个）
+## 1. 单一能力与内部角色
+
+Runtime 当前只有一个完整业务能力：`agent_execution`。它拥有“按 RunSpec 创建并驱动 Run 到终态”的完整用例、Run 聚合与唯一执行生命周期状态机。下列八个名称描述该能力内部的领域、应用和边界角色，**NEVER** 表示八个平级 slice：
 
 ```
-                  agent_client（稳定入站能力）
+                  agent_client（稳定入站 façade）
                           │
                           ▼
               agent_run（Run 聚合 + 状态机 + 用例编排）
@@ -27,72 +29,60 @@
 
 ## 2. 物理目录与六边形边界
 
-仓库级 `agent/features/*` 已按业务 Feature / Bounded Context 形成垂直切片；`runtime` 自身就是一个 VSA feature，内部 **NEVER** 再复制第二层 capability-first 目录。Runtime feature 内采用 Hexagonal Architecture（Ports & Adapters）横向组织：
+仓库级 `agent/features/*` 已按业务 Feature / Bounded Context 形成垂直切片。按系统级代码组织判据复核源码后，Runtime 当前只有一个具备完整用例、状态所有权和独立生命周期的业务能力 `agent_execution`；`agent_run`、`loop_engine`、各 coordinator、`agent_client` 与 `event_projection` 都是该能力的内部角色。单能力再包装为 `capabilities/agent_execution/` 只会增加单元素目录，因此 **NEVER** 创建该包装，也 **NEVER** 创建没有真实共享内容的空 `shared/`。
+
+`agent_execution` 叶子包含 Run 聚合、状态机和真实外部 seam，故直接在 Runtime crate 根采用轻量 Hexagonal Architecture：
 
 ```text
 agent/features/runtime/src/
 ├── lib.rs                         # 窄 façade
 ├── domain.rs
 ├── domain/
-│   ├── agent_run.rs               # Run 聚合、RunStatus、RunSpec、Run Step
+│   ├── agent_run.rs               # Run 聚合、状态机与领域事件
 │   ├── agent_run/
+│   │   ├── spec.rs
 │   │   ├── state.rs
 │   │   ├── step.rs
 │   │   └── event.rs
-│   └── ...                        # 纯领域不变量与值对象
+│   └── error.rs                   # 仅领域错误
 ├── application.rs
 ├── application/
-│   ├── agent_client.rs            # 入站命令路由与应用用例
-│   ├── loop_engine.rs
+│   ├── agent_client.rs            # 入站命令路由与用例入口
+│   ├── agent_client/              # AgentClient trait 实现分片
+│   ├── loop_engine.rs             # ReAct 骨架 + StuckGuard
 │   ├── loop_engine/
 │   ├── model_invocation.rs
-│   ├── context_coordination.rs
 │   ├── tool_coordination.rs
+│   ├── context_coordination.rs
 │   ├── interaction.rs
-│   └── event_projection.rs
+│   └── runtime_context.rs         # 本 Run 的活契约容器
 ├── ports.rs
 ├── ports/
-│   ├── inbound.rs                 # Runtime 入站 OHS / Published Language 的内部接线
 │   ├── provider.rs
-│   ├── context.rs
-│   ├── tools.rs
 │   ├── interaction.rs
-│   ├── events.rs
-│   └── ...                        # 仅有真实 seam 的目的性 Port
+│   ├── event_sink.rs
+│   └── usage_sink.rs
 ├── adapters.rs
-├── adapters/
-│   ├── sdk_event_projection.rs
-│   ├── main_interaction.rs
-│   ├── sub_interaction.rs
-│   └── ...                        # Runtime-owned 边界转换
-├── shared.rs
-└── shared/
-    ├── runtime_context.rs
-    ├── cancellation.rs
-    └── ...                        # 跨层最小稳定基础
+└── adapters/
+    ├── sdk_event_projection.rs
+    ├── main_interaction.rs
+    └── sub_interaction.rs
 ```
 
-依赖方向：
+组织与依赖规则：
 
-```text
-adapters ───────▶ ports ◀────── application
-                       ▲              │
-                       │              ▼
-                       └────────── domain
-
-shared：可被其余层依赖，NEVER 反向依赖 domain/application/ports/adapters
-```
-
-- `domain` 拥有 `Run`、`RunStatus`、`RunSpec`、领域事件与状态迁移；它 **NEVER** 依赖 application、ports、adapters 或具体技术类型。
-- `application` 拥有 Loop Engine 与各 coordinator，用领域模型实现用例，并只经 Port 调用边界外能力；它 **NEVER** 依赖具体 adapter。
-- `ports` 只定义 Runtime-owned 且具有真实边界价值的入站/出站契约。其他 Feature 已发布 OHS / Published Language 时直接消费，**NEVER** 再包同义 Port。
-- `adapters` 只放 Runtime-owned 的协议/投影转换，例如 SDK event projection 与 Main/Sub interaction adapter；Provider、Storage、Tool 等 Feature 的生产实现仍由各自 Feature 提供。
-- `shared` 只承载 `RuntimeContext`、只读取消信号等跨层最小稳定基础；有明确语义所有者的类型 **MUST** 留在对应层，**NEVER** 用 shared 规避循环依赖。
-- `lib.rs` 只导出真实外部消费者需要的窄 façade；各层默认 crate-private。
+- `domain` 拥有 `Run`、`RunStatus`、`RunSpec`、Run Step、领域事件与状态迁移；它 **NEVER** 依赖 application、ports、adapters 或具体技术类型。
+- `application` 拥有 AgentClient 用例路由、Loop Engine 和各 coordinator，以领域模型实现同一个 Agent Execution 用例；coordinator 之间 **NEVER** 直接依赖，由 Loop Engine 统一编排。
+- `ports` 只定义 Runtime-owned 且具有真实边界价值的契约。供应 Feature 已发布 OHS / Published Language 时直接消费，**NEVER** 再包同义 Port。
+- `adapters` 只放 Runtime-owned 协议或投影转换；Provider、Storage、Tool 等 Feature 的生产实现仍由各自 Feature 提供，**NEVER** 搬入 Runtime。
+- `RuntimeContext` 是应用层按 Run 注入的活契约容器，不进领域模型，也不是 shared 类型垃圾桶。
+- 当前没有第二个一级 capability，因此 **NEVER** 创建 `capabilities/`；当前也没有无业务 owner、被多个一级 capability 稳定复用的内部类型，因此 **NEVER** 创建 `shared/`。未来至少出现多个拥有独立用例、状态所有权和变化轴的真实能力时，才按系统规范重新评估 `capabilities/ + shared/`。
+- Runtime 当前没有独立读模型，也没有 HTTP delivery 端点，因此 **NEVER** 引入 CQRS-lite 或 REPR；未来证据变化时重新评估。
+- `lib.rs` 只导出真实外部消费者需要的窄 façade；其余默认 crate-private。
 - 具体实现选择、factory 调用与生产对象图连接全部位于 `agent/composition`；Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root。
 - 使用 Rust 2018+ `layer.rs` + `layer/...` 形状，**NEVER** 新增 `mod.rs`。
 
-## 3. 各模块职责
+## 3. 内部角色职责
 
 ### agent_run（模块核心）
 - **状态所有权**：`Run` 聚合、`RunStatus` 状态机、Run Step / Tool Call 实体
@@ -137,9 +127,9 @@ shared：可被其余层依赖，NEVER 反向依赖 domain/application/ports/ada
 - Provider 返回 RawUsageSnapshot 后，model_invocation 构造带 SessionId / RunId / RunStepId / ModelInvocationId 的 UsageRecord
 - 经 `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态
 
-### agent_client（入站能力）
+### agent_client（入站 façade）
 - **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputBuffer`）；SubAgent 派生时装配子 RuntimeContext
-- **注**：真正的生产装配收敛在 Composition Root（见 `06-ports-and-adapters`），`agent_client` 只负责 Runtime 内的命令路由与接线；该名称表达稳定能力，**NEVER** 引入通用 `api/` 层
+- **注**：真正的生产装配收敛在 Composition Root（见 `06-ports-and-adapters`），`agent_client` 只负责 Runtime 内的命令路由与接线；它是 `agent_execution` 的入站 façade，**NEVER** 作为独立 slice，也 **NEVER** 引入通用 `api/` 层
 
 ### Runtime / Hook 边界（跨模块）
 Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtime 编排**：
@@ -163,17 +153,18 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 | RuntimeContext（活资源）| 由 agent_client / 派生逻辑发起装配，**流经各模块作参数** | 不属任何模块的持久状态 |
 | InputBuffer 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
 
-## 5. 依赖方向（Clean）
+## 5. 六边形依赖方向
 
-```
-agent_client → agent_run → loop_engine → {model_invocation, tool_coordination,
-                                        context_coordination, interaction} → *Port
-event_projection：被各模块调用（emit），不反向依赖业务
+```text
+adapters ───────▶ ports ◀────── application
+                       ▲              │
+                       │              ▼
+                       └────────── domain
 ```
 
-- **MUST** 依赖只指向稳定策略（agent_client 发起用例，外部 detail 实现相应 port）
-- **MUST NOT** coordinators 之间互相依赖（都经 loop_engine 编排）
-- **MUST NOT** 任何模块私自 `new` Port 实现（经 RuntimeContext 注入）
+- **MUST** 依赖只指向稳定策略：adapter 实现 Runtime-owned port，application 依赖 port 与 domain，domain 不依赖外层。
+- **MUST NOT** coordinators 之间互相依赖（都经 loop_engine 编排）。
+- **MUST NOT** 任何模块私自 `new` Port 实现（经 RuntimeContext 注入）。
 
 ## 6. 迁移边界
 
@@ -192,7 +183,8 @@ event_projection：被各模块调用（emit），不反向依赖业务
 |---|---|---|
 | 2026-07-11 | 初稿：8 个内部模块划分、状态所有权、依赖方向、收敛方向 | #761 |
 | 2026-07-14 | 移除 Target 文档中的 Current 类型清单，将迁移事实收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 明确仓库 `features/*` 为 VSA，Runtime feature 内采用 `domain/application/ports/adapters/shared` 六边形分层，生产装配留在 `agent/composition` | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-15 | 经源码、状态所有权与完整用例复核，确认 Runtime 当前只有一个 `agent_execution` 能力；撤销八模块平级竖切，crate 根直接采用 `domain/application/ports/adapters` 轻量六边形 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-15 | 曾把八个内部角色误判为稳定能力并递归竖切；此结论已由上一条复核记录取代 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputBuffer 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputBuffer 状态、Runtime/Hook 边界子节 | #761 |
 | 2026-07-11 | model_invocation 补错误重试职责（Retryable 退避 / context 超限 compact / Fatal fail）+ ModelInvocationRetrying | #761 |
 | 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
