@@ -9,6 +9,7 @@
 //! | `aemeath:tui`          | `tui.log`           |
 //! | `aemeath:shared`       | `shared.log`        |
 //! | `aemeath:composition`  | `composition.log`   |
+//! | `aemeath:llm-api-error` | `llm-api-error.log` |
 //! | `aemeath:agent:provider` | `agent-provider.log` |
 //! | `aemeath:agent:runtime` | `agent-runtime.log` |
 //! | `aemeath:agent:tools`  | `agent-tools.log`   |
@@ -22,7 +23,7 @@
 //!
 //! ## 输出模式
 //!
-//! - `File`（默认）：按 target 路由到 13 个日志文件。
+//! - `File`（默认）：按 target 路由到 14 个日志文件。
 //! - `Stderr`：所有日志统一输出到 stderr（JSON Lines 格式，`-q` 调试模式）。
 //!
 //! ## 过滤
@@ -45,18 +46,19 @@ use std::sync::{Mutex, OnceLock};
 /// 输出模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
-    /// 按 target 路由到 13 个日志文件。
+    /// 按 target 路由到 14 个日志文件。
     File,
     /// 所有日志统一输出到 stderr（JSON Lines 格式）。
     Stderr,
 }
 
-/// 合法日志 target 白名单（12 个）。
+/// 合法日志 target 白名单（13 个）。
 /// 所有 `log::xxx!` 调用的 target 值必须 ∈ 此列表或以此为前缀。
 pub const ALLOWED_TARGETS: &[&str] = &[
     "aemeath:tui",
     "aemeath:shared",
     "aemeath:composition",
+    "aemeath:llm-api-error",
     "aemeath:agent:provider",
     "aemeath:agent:runtime",
     "aemeath:agent:tools",
@@ -76,6 +78,7 @@ fn target_to_file(target: &str) -> &str {
                 "aemeath:tui" => "tui.log",
                 "aemeath:shared" => "shared.log",
                 "aemeath:composition" => "composition.log",
+                "aemeath:llm-api-error" => "llm-api-error.log",
                 "aemeath:agent:provider" => "agent-provider.log",
                 "aemeath:agent:runtime" => "agent-runtime.log",
                 "aemeath:agent:tools" => "agent-tools.log",
@@ -92,13 +95,14 @@ fn target_to_file(target: &str) -> &str {
     "aemeath.log" // 硬兜底（守卫会拦截，不应到达）
 }
 
-/// 12 个 sink 的文件路径（用于轮转时重开）
+/// 14 个 sink 的文件路径（含兜底，用于轮转时重开）
 #[derive(Debug, Clone)]
 struct SinkPaths {
     aemeath: PathBuf,
     tui: PathBuf,
     shared: PathBuf,
     composition: PathBuf,
+    llm_api_error: PathBuf,
     provider: PathBuf,
     runtime: PathBuf,
     tools: PathBuf,
@@ -117,6 +121,7 @@ impl SinkPaths {
             tui: logs_dir.join("tui.log"),
             shared: logs_dir.join("shared.log"),
             composition: logs_dir.join("composition.log"),
+            llm_api_error: logs_dir.join("llm-api-error.log"),
             provider: logs_dir.join("agent-provider.log"),
             runtime: logs_dir.join("agent-runtime.log"),
             tools: logs_dir.join("agent-tools.log"),
@@ -135,6 +140,7 @@ impl SinkPaths {
             "tui.log" => &self.tui,
             "shared.log" => &self.shared,
             "composition.log" => &self.composition,
+            "llm-api-error.log" => &self.llm_api_error,
             "agent-provider.log" => &self.provider,
             "agent-runtime.log" => &self.runtime,
             "agent-tools.log" => &self.tools,
@@ -158,6 +164,7 @@ pub struct UnifiedLogger {
     tui: Mutex<Option<BufWriter<File>>>,
     shared: Mutex<Option<BufWriter<File>>>,
     composition: Mutex<Option<BufWriter<File>>>,
+    llm_api_error: Mutex<Option<BufWriter<File>>>,
     provider: Mutex<Option<BufWriter<File>>>,
     runtime: Mutex<Option<BufWriter<File>>>,
     tools: Mutex<Option<BufWriter<File>>>,
@@ -184,6 +191,7 @@ const ALL_SINK_FILENAMES: &[&str] = &[
     "tui.log",
     "shared.log",
     "composition.log",
+    "llm-api-error.log",
     "agent-provider.log",
     "agent-runtime.log",
     "agent-tools.log",
@@ -230,6 +238,7 @@ impl UnifiedLogger {
             tui: open(&paths.tui)?,
             shared: open(&paths.shared)?,
             composition: open(&paths.composition)?,
+            llm_api_error: open(&paths.llm_api_error)?,
             provider: open(&paths.provider)?,
             runtime: open(&paths.runtime)?,
             tools: open(&paths.tools)?,
@@ -267,6 +276,7 @@ impl UnifiedLogger {
             "tui.log" => (&self.tui, &self.paths.tui),
             "shared.log" => (&self.shared, &self.paths.shared),
             "composition.log" => (&self.composition, &self.paths.composition),
+            "llm-api-error.log" => (&self.llm_api_error, &self.paths.llm_api_error),
             "agent-provider.log" => (&self.provider, &self.paths.provider),
             "agent-runtime.log" => (&self.runtime, &self.paths.runtime),
             "agent-tools.log" => (&self.tools, &self.paths.tools),
@@ -357,6 +367,7 @@ impl UnifiedLogger {
             "tui.log" => (&self.tui, &self.paths.tui),
             "shared.log" => (&self.shared, &self.paths.shared),
             "composition.log" => (&self.composition, &self.paths.composition),
+            "llm-api-error.log" => (&self.llm_api_error, &self.paths.llm_api_error),
             "agent-provider.log" => (&self.provider, &self.paths.provider),
             "agent-runtime.log" => (&self.runtime, &self.paths.runtime),
             "agent-tools.log" => (&self.tools, &self.paths.tools),

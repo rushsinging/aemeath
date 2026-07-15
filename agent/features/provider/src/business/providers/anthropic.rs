@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+use crate::business::error_log::{log_http_error, log_network_error, ErrorLogContext};
 use crate::business::stream::parse_stream;
 use crate::business::types::{CreateMessageRequest, StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
@@ -157,6 +158,12 @@ impl LlmProvider for AnthropicProvider {
 
         let headers = self.build_headers()?;
 
+        let request_json = request.clone().into_json();
+        let request_bytes = serde_json::to_string(&request_json)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let endpoint = format!("{}/v1/messages", self.base_url);
+        let invocation_started = std::time::Instant::now();
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
@@ -177,9 +184,9 @@ impl LlmProvider for AnthropicProvider {
 
             let send_fut = self
                 .http
-                .post(format!("{}/v1/messages", self.base_url))
+                .post(&endpoint)
                 .headers(headers.clone())
-                .json(&request.clone().into_json())
+                .json(&request_json)
                 .send();
 
             let response = tokio::select! {
@@ -216,6 +223,23 @@ impl LlmProvider for AnthropicProvider {
                                 depth += 1;
                             }
                             let remaining = self.max_retries.saturating_sub(attempt + 1);
+                            log_network_error(
+                                ErrorLogContext {
+                                    driver: "anthropic",
+                                    api: "messages_stream",
+                                    provider: "anthropic",
+                                    model: &self.model,
+                                    endpoint: &endpoint,
+                                    attempt: attempt + 1,
+                                    max_attempts: self.max_retries,
+                                    elapsed_ms: invocation_started.elapsed().as_millis(),
+                                    message_count: messages.len(),
+                                    tool_count: tool_schemas.len(),
+                                    request_bytes,
+                                },
+                                &e,
+                                remaining > 0,
+                            );
                             if remaining > 0 {
                                 handler.on_error(&format!(
                                     "network error ({detail}), retrying ({}/{})...",
@@ -247,6 +271,24 @@ impl LlmProvider for AnthropicProvider {
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
                 let remaining = self.max_retries.saturating_sub(attempt + 1);
+                log_http_error(
+                    ErrorLogContext {
+                        driver: "anthropic",
+                        api: "messages_stream",
+                        provider: "anthropic",
+                        model: &self.model,
+                        endpoint: &endpoint,
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes,
+                    },
+                    status,
+                    &error_body,
+                    remaining > 0,
+                );
                 if remaining > 0 {
                     handler.on_error(&format!(
                         "server error ({}), retrying ({}/{})...",
@@ -268,6 +310,24 @@ impl LlmProvider for AnthropicProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
+                log_http_error(
+                    ErrorLogContext {
+                        driver: "anthropic",
+                        api: "messages_stream",
+                        provider: "anthropic",
+                        model: &self.model,
+                        endpoint: &endpoint,
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes,
+                    },
+                    status,
+                    &body,
+                    false,
+                );
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: body,
