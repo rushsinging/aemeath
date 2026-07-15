@@ -107,11 +107,63 @@ Session（对话历史容器，跨多次输入）
 - **Run 读写 Session**：经 `ContextPort` 读历史构建 Context Window；每个 RunStep 结束后对话追加并落盘到 Session
 - Run 是内存态执行；Session 是持久化数据——两者生命周期不同（Run 短、Session 长）
 
-## 6. 恢复边界
+## 6. RunStep 持久化边界
 
-- **落盘**：ChatChain（每个 RunStep 结束后落盘）+ 内嵌 Task/Workspace 快照
-- **不落盘**：Run 执行状态（内存态）
-- **恢复语义**：加载 Session 恢复**对话历史**，新输入开**全新 Run**（从头开始）——见 [../runtime/05-recovery-semantics.md](../runtime/05-recovery-semantics.md)
+Session 采用 **per completed RunStep** 提交：一个 RunStep 的 model response 与该 response 发起的全部 Tool Call 都收敛为最终 outcome 后，Runtime 构造唯一不可变 `ContextAppend`，Context Management 以 `(run_id, step_id)` 为幂等键追加 ChatChain、收集跨 BC snapshot 并原子落盘。RunStep 是否继续下一次 model invocation 与 Session 是否保存已完成对话事实是两件事；Tool 业务失败是可持久化的最终 outcome，**NEVER** 等同于整批提交失败。
+
+### 6.1 落盘内容
+
+每次成功提交 **MUST** 保存：
+
+- Session identity、完整 metadata、`created_at`、`updated_at` 与 schema version；
+- ChatChain / ChatSegment、提交后的 `SessionRevision`；
+- 当前 Step 已纳入上下文的 pending user inputs；
+- model 产生的完整 assistant message 与 Tool Call 声明；
+- 每个 Tool Call 的最终 `ToolOutcome`，包括 Success、业务 Failure、Denied、Cancelled 等可发送给下一次 model invocation 的稳定结果，并按原 ToolCall 顺序排列；
+- Plan approval 等已经收敛为对话事实的 typed decision；
+- 已提交 Compact segment、summary 与 source revision；
+- `(RunId, RunStepId)` 幂等键、内容 fingerprint 与 committed revision/receipt；
+- 本次提交时收集的 Task Published Snapshot 与 Workspace Published Snapshot；Target writer 即使为空也 **MUST** 显式写出。
+
+`RunId` / `RunStepId` 在这里仅作为对话事实的关联与幂等 identity，**NEVER** 表示 Session 拥有或可恢复 Runtime 状态机。
+
+### 6.2 不落盘内容
+
+以下执行中间态 **NEVER** 进入 Session：
+
+- Run 聚合、RunSpec active instance、RunStatus 与 RunStepStatus；
+- ToolCall 的 PendingArgs、Ready、AwaitingApproval、Running 等进行态；
+- partial assistant stream、尚未形成完整 assistant message 的 delta；
+- 尚未收敛为最终 outcome 的 Tool future、Tool suspension 与半个并发 batch；
+- PendingInteraction、typed continuation、waiter、channel 与 UI 临时状态；
+- cancellation token/scope、deadline、retry/backoff attempt 与 Provider HTTP/SSE 连接；
+- RuntimeContext、各 Port 活实例、lease 与 Composition scope；
+- StuckGuard / ToolLoopGuard 计数、临时 token 估算 cache；
+- Sub Run 的执行状态；Sub 最终结果只有作为父 Run Tool Call 的稳定 `ToolOutcome` 时才随父 Step 提交；
+- Stop Hook Block 后尚未获准提交的 assistant response 与 feedback 驱动的 pending Step。
+
+### 6.3 并发 Tool 混合结果
+
+同一 RunStep 的 Tool Call **MAY** 并发执行，但收集与提交 **MUST NOT** fail-fast。Runtime 必须等待每个调用收敛为稳定 outcome，再按原 ToolCall 顺序构造单个 `ContextAppend`：
+
+- 一个调用失败 **NEVER** 丢弃、回滚或覆盖同批其他调用已经成功的结果；
+- 尤其 Agent Tool / Sub Run 已消耗大量 token 后成功返回时，即使兄弟 Agent Tool 失败，成功结果仍 **MUST** 作为该 Tool Call 的 final result 进入本 Step 并落盘，使下一次 model invocation 可直接复用；
+- 失败调用也 **MUST** 以 typed Tool failure result 入链，让模型看到哪些工作失败及原因，而不是因整批返回 `Err` 丢失全部观察；
+- completion 顺序只影响等待时机，**NEVER** 改变 Provider 协议顺序；最终消息顺序固定为 assistant tool calls → 原 ToolCall 顺序的 final results；
+- L1 budget reduction 或大结果外置 **MAY** 改变成功结果的内联表示，但 **NEVER** 把成功事实变成缺失；外置时 Session 必须保存稳定引用与足够的摘要/metadata，供后续读取与判断；
+- 只有 Context 自身的 revision conflict、内容冲突或 durable write 失败才使整个 `append_and_persist` 失败；单个 Tool 的业务 Failure 不属于 Session commit failure。
+
+如果进程在全部 Tool outcome 收敛并完成原子提交前崩溃，该未提交 Step 整体不属于可恢复 Session；系统仍遵循“不持久化 Run 中间态”，**NEVER** 为保住进行中调用引入 Tool/Run checkpoint。这里保证的是正常并发收口和单个调用失败时不浪费其他成功结果，不承诺崩溃下的 exactly-once。
+
+### 6.4 提交与恢复语义
+
+- 相同 `(run_id, step_id)` 与相同 fingerprint 的重试 **MUST** 幂等返回原 committed receipt；
+- 相同幂等键但内容不同 **MUST** 返回 typed conflict，**NEVER** 覆盖已提交结果；
+- durable handoff 前允许取消；handoff 后提交由 cancellation-shielded owned task 跑到明确结果；
+- commit 成功后 Runtime 才能 `mark_step_persisted`，该 Step 不再属于 cancellation rollback 的 partial；
+- 恢复只加载最后一个完整 committed revision。未提交 Step 不重放，新输入创建全新 Run。
+
+## 7. Session 恢复边界
 
 启动 resume 与运行期 `/resume` **MUST** 调用同一个联合恢复协调器：
 
@@ -123,7 +175,7 @@ Session（对话历史容器，跨多次输入）
 
 进程若在内存提交段崩溃，Run 状态本就不持久化；重启后仍从未修改的持久化 Session source 重新走同一协调器，因此 **NEVER** 把半提交内存态发布为可恢复真相。该协议提供对 Runtime / Tool 观察者的原子切换语义，**NEVER** 假装跨多个锁存在底层数据库事务。
 
-### 6.1 Context-owned MainSessionWiring
+### 7.1 Context-owned MainSessionWiring
 
 Context Management **MUST** 从 crate-root 窄 façade 发布仅供 Composition 调用的 opaque factory；这是 active Main session slot 的所有权真相，不意味着建立固定 `api/` 目录，Runtime 文档只展示接线：
 
@@ -153,15 +205,15 @@ struct BoundMainRun {
 
 `MainSessionWiring` 字段私有，拥有稳定 Session backing、唯一 `SessionSwitchCoordinator`、async shared / exclusive gate、`TaskPersist`、active Memory slot、Config participant view，以及构造私有 PromptPipeline 所需的稳定 Guidance / Skill seam；它 **NEVER** 保存第二份 active Config slot。Guidance / Skill adapter 每次按 request 的 project/config materialize，因而 resume 后 **NEVER** 静态捕获旧项目内容。`bind_main_run` **MUST** 是 async admission：await 一个 owned shared lease 后，才从 Memory slot 与 Config participant 的同一已提交版本读取资源并构造 run-bound `ContextPort` view；它 **NEVER** 用同步 read lock 跨越 resume 的 await。该 ContextPort 复用稳定 Session / ChatChain backing，但只捕获本 lease 对应的 Memory Arc 与 ConfigSnapshot，**NEVER** 静态捕获启动时实例。`BoundMainRun` 的资源不能越过 lease 存活。
 
-`MainSessionWiring::resume` 是唯一 exclusive project-switch 入口，执行 §6 的 prepare / commit 协议；可能改变 active project-scoped resource 的 Config command 也 **MUST** 经 wiring 使用同一 gate 与 candidate protocol。ordinary ContextPort、Runtime 与 Tool **NEVER** 获得 coordinator、active slot setter、`TaskPersist`、Config participant commit authority 或 exclusive lease。无 Run 的 Session / Memory / Workspace / Config query 或 mutation 也必须经 gate-aware async façade await 同一 owned shared lease；因此同一 gate 同时证明 Run admission、资源读取与 resume 的原子边界。
+`MainSessionWiring::resume` 是唯一 exclusive project-switch 入口，执行 §7 的 prepare / commit 协议；可能改变 active project-scoped resource 的 Config command 也 **MUST** 经 wiring 使用同一 gate 与 candidate protocol。ordinary ContextPort、Runtime 与 Tool **NEVER** 获得 coordinator、active slot setter、`TaskPersist`、Config participant commit authority 或 exclusive lease。无 Run 的 Session / Memory / Workspace / Config query 或 mutation 也必须经 gate-aware async façade await 同一 owned shared lease；因此同一 gate 同时证明 Run admission、资源读取与 resume 的原子边界。
 
 Config update 还有 durable state：在 Config / Memory candidate 均 prepare 后，wiring **MUST** 把 owned exclusive permit 与全部 candidate 一次性交给 cancellation-shielded owned task。handoff 是最后一个取消点；一旦开始 durable publish，即使调用方 future 被丢弃，owned task 仍必须跑完 fallible persist，并在成功后无 await 地依次安装 Memory、提交 Config active state、最后发布 Config watch。逐 await / rename / fsync / commit 点的故障注入与二选一不变量见 [Config §5.3](../config/01-config-layer.md#53-config-update-的联合协议)。
 
-## 7. 会话身份管理
+## 8. 会话身份管理
 
 Context Management 还负责会话 identity：session 列表、元数据、`/resume` 选择、切换。这是**数据管理，不是状态机**。
 
-## 8. 相关文档
+## 9. 相关文档
 
 - Run 聚合（读写 Session）：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - 恢复语义：[../runtime/05-recovery-semantics.md](../runtime/05-recovery-semantics.md)
@@ -182,3 +234,4 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 | 2026-07-11 | 初稿：Session 聚合、ChatChain/ChatSegment、跨 BC 快照组装、与 Run 关系、恢复边界 | #761 |
 | 2026-07-12 | 补充 ContextPort 相关文档交叉引用 | #786 |
 | 2026-07-14 | Session 快照组装改为直接消费 Project-owned WorkspacePersist；以联合 prepare / gate 内无失败 commit 原子切换 Task、Workspace、Memory 与 Session identity，并复用 active Main session slot scope | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 明确 per completed RunStep 的落盘/不落盘矩阵、幂等提交与恢复语义；并发 Tool 混合结果必须保留同批成功 outcome，尤其不得丢弃已消耗 token 的成功 Agent Tool 结果 | [#868](https://github.com/rushsinging/aemeath/issues/868) |

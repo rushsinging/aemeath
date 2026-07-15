@@ -2,7 +2,7 @@
 
 > 层级：02-modules / context-management（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#786（S2）
-> 本文定义 Compact 家族——ContextPort 的压缩管线，五级策略从零成本规则到 LLM 摘要的完整分层。ContextPort 是 Context Management BC 对 Agent Runtime 的 OHS（见 [01-session.md](01-session.md) §6）。
+> 本文定义 Compact 家族——ContextPort 的压缩管线，五级策略从零成本规则到 LLM 摘要的完整分层。ContextPort 是 Context Management BC 对 Agent Runtime 的 OHS（见 [01-session.md](01-session.md) §7）。
 
 ## 1. 定位
 
