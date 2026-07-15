@@ -5,5 +5,5 @@ pub mod prompt;
 pub(crate) mod session_search;
 pub(crate) mod session_storage;
 
-pub use in_memory_session::InMemorySessionBacking;
-pub use memory_injection::NoOpMemoryMaterializer;
+pub use in_memory_session::InMemorySessionRepository;
+pub use memory_injection::NoOpContextMemorySource;

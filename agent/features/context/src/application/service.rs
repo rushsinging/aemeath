@@ -6,27 +6,22 @@ use crate::domain::{
     AppendReceipt, CompactOutcome, CompactRequest, CompactionDecision, ContextAppend,
     ContextAppendError, ContextPortError, ContextRequest, ContextWindow, SystemBlock,
 };
-use crate::ports::{
-    ContextPort, MemoryMaterializer, PromptMaterializer, SessionBacking, WindowProjector,
-};
+use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
 pub struct ContextApplicationService {
-    session: Arc<dyn SessionBacking>,
-    projector: Arc<dyn WindowProjector>,
-    prompt: Arc<dyn PromptMaterializer>,
-    memory: Arc<dyn MemoryMaterializer>,
+    session: Arc<dyn SessionRepository>,
+    prompt: Arc<dyn ContextPromptSource>,
+    memory: Arc<dyn ContextMemorySource>,
 }
 
 impl ContextApplicationService {
     pub fn new(
-        session: Arc<dyn SessionBacking>,
-        projector: Arc<dyn WindowProjector>,
-        prompt: Arc<dyn PromptMaterializer>,
-        memory: Arc<dyn MemoryMaterializer>,
+        session: Arc<dyn SessionRepository>,
+        prompt: Arc<dyn ContextPromptSource>,
+        memory: Arc<dyn ContextMemorySource>,
     ) -> Self {
         Self {
             session,
-            projector,
             prompt,
             memory,
         }
@@ -40,10 +35,9 @@ impl ContextApplicationService {
             .session
             .snapshot(&request.session_id)
             .await
-            .map_err(ContextPortError::SessionBacking)?;
+            .map_err(ContextPortError::SessionRepository)?;
         let mut messages = snapshot.messages;
         messages.extend(request.pending_messages.clone());
-        let projection = self.projector.project(messages);
 
         let prompt = self
             .prompt
@@ -80,12 +74,11 @@ impl ContextApplicationService {
         }
 
         let token_estimation =
-            crate::domain::context_decision::token_budget(request, &projection.messages, &blocks);
-        let decision =
-            crate::domain::context_decision::calculate(request, &projection.messages, &blocks);
+            crate::domain::context_decision::token_budget(request, &messages, &blocks);
+        let decision = crate::domain::context_decision::calculate(request, &messages, &blocks);
         Ok(ContextWindow {
             system_blocks: blocks,
-            messages: projection.messages,
+            messages,
             tool_schemas: request.tool_schemas.clone(),
             token_estimation,
             compaction_decision: decision,
@@ -110,13 +103,13 @@ impl ContextPort for ContextApplicationService {
     }
 
     async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
-        self.session.compact(request).await
+        self.session.commit_compaction(request).await
     }
 
     async fn append_and_persist(
         &self,
         append: &ContextAppend,
     ) -> Result<AppendReceipt, ContextAppendError> {
-        self.session.append(append).await
+        self.session.append_finalized(append).await
     }
 }

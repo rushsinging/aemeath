@@ -10,8 +10,8 @@ mod types;
 pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
 pub use restore::SessionRestore;
 pub use types::{
-    extract_project_name, new_session_id, now_iso, sessions_dir, validate_session_id,
-    PersistedWorkspaceContext, PersistedWorkspaceFrame, Session, SessionFilter, SessionMetadata,
+    extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,
+    PersistedWorkspaceFrame, Session, SessionFilter, SessionMetadata,
 };
 
 #[cfg(test)]

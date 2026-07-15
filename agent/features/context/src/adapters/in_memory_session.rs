@@ -8,7 +8,7 @@ use crate::domain::{
     ContextAppend, ContextAppendError, ContextMessage, ContextPortError, RunStepId, SessionId,
     SessionRevision,
 };
-use crate::ports::{SessionBacking, SessionSnapshot};
+use crate::ports::{SessionRepository, SessionSnapshot};
 
 #[derive(Default)]
 struct SessionState {
@@ -20,11 +20,11 @@ struct SessionState {
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
 #[derive(Default)]
-pub struct InMemorySessionBacking {
+pub struct InMemorySessionRepository {
     sessions: Mutex<HashMap<String, SessionState>>,
 }
 
-impl InMemorySessionBacking {
+impl InMemorySessionRepository {
     pub fn new() -> Self {
         Self::default()
     }
@@ -61,7 +61,7 @@ impl InMemorySessionBacking {
 }
 
 #[async_trait]
-impl SessionBacking for InMemorySessionBacking {
+impl SessionRepository for InMemorySessionRepository {
     async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String> {
         let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
         let state = sessions
@@ -74,7 +74,10 @@ impl SessionBacking for InMemorySessionBacking {
         })
     }
 
-    async fn append(&self, append: &ContextAppend) -> Result<AppendReceipt, ContextAppendError> {
+    async fn append_finalized(
+        &self,
+        append: &ContextAppend,
+    ) -> Result<AppendReceipt, ContextAppendError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -111,7 +114,10 @@ impl SessionBacking for InMemorySessionBacking {
         Ok(Self::receipt(append, committed_revision))
     }
 
-    async fn compact(&self, _request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
+    async fn commit_compaction(
+        &self,
+        _request: &CompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 }

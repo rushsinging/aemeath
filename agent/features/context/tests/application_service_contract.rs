@@ -3,13 +3,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use context::application::ContextApplicationService;
 use context::domain::{
-    CalendarDate, ContextAppend, ContextMessage, ContextRequest, ContextRequestId, FinalizeCause,
-    Language, RunStepId, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
-    TaskReminderSnapshot,
+    CalendarDate, ContextAppend, ContextRequest, ContextRequestId, FinalizeCause, Language,
+    RunStepId, SessionId, SessionRevision, SystemBlock, SystemPromptSpec, TaskReminderSnapshot,
 };
 use context::ports::{
-    ContextPort, MemoryMaterialization, MemoryMaterializer, PromptMaterialization,
-    PromptMaterializer, SessionBacking, SessionSnapshot, WindowProjection, WindowProjector,
+    ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
+    PromptMaterialization, SessionRepository, SessionSnapshot,
 };
 use provider::api::ReasoningLevel;
 use sdk::RunId;
@@ -20,7 +19,7 @@ use share::message::Message;
 struct FakeSession;
 
 #[async_trait]
-impl SessionBacking for FakeSession {
+impl SessionRepository for FakeSession {
     async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(2),
@@ -29,7 +28,7 @@ impl SessionBacking for FakeSession {
         })
     }
 
-    async fn append(
+    async fn append_finalized(
         &self,
         append: &ContextAppend,
     ) -> Result<context::domain::AppendReceipt, context::domain::ContextAppendError> {
@@ -41,7 +40,7 @@ impl SessionBacking for FakeSession {
         })
     }
 
-    async fn compact(
+    async fn commit_compaction(
         &self,
         _request: &context::domain::CompactRequest,
     ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
@@ -51,16 +50,9 @@ impl SessionBacking for FakeSession {
     }
 }
 
-struct IdentityProjection;
-impl WindowProjector for IdentityProjection {
-    fn project(&self, messages: Vec<ContextMessage>) -> WindowProjection {
-        WindowProjection { messages }
-    }
-}
-
 struct FakePrompt;
 #[async_trait]
-impl PromptMaterializer for FakePrompt {
+impl ContextPromptSource for FakePrompt {
     async fn materialize(
         &self,
         _request: &ContextRequest,
@@ -75,7 +67,7 @@ impl PromptMaterializer for FakePrompt {
 
 struct FakeMemory;
 #[async_trait]
-impl MemoryMaterializer for FakeMemory {
+impl ContextMemorySource for FakeMemory {
     async fn materialize(
         &self,
         _request: &ContextRequest,
@@ -124,7 +116,6 @@ fn request() -> ContextRequest {
 fn service() -> ContextApplicationService {
     ContextApplicationService::new(
         Arc::new(FakeSession),
-        Arc::new(IdentityProjection),
         Arc::new(FakePrompt),
         Arc::new(FakeMemory),
     )

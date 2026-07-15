@@ -1,9 +1,9 @@
-use context::adapters::InMemorySessionBacking;
+use context::adapters::InMemorySessionRepository;
 use context::domain::{
     ContentFingerprint, ContextAppend, ContextAppendError, ContextRequestId, FinalizeCause,
     RunStepId, SessionId, SessionRevision,
 };
-use context::ports::SessionBacking;
+use context::ports::SessionRepository;
 use sdk::RunId;
 use share::message::Message;
 
@@ -24,15 +24,15 @@ fn append(fingerprint: &str) -> ContextAppend {
 
 #[tokio::test]
 async fn same_step_and_fingerprint_is_idempotent() {
-    let backing = InMemorySessionBacking::new();
+    let backing = InMemorySessionRepository::new();
     backing.seed(
         &SessionId::new("session"),
         SessionRevision::new(0),
         vec![],
         None,
     );
-    let first = backing.append(&append("same")).await.unwrap();
-    let second = backing.append(&append("same")).await.unwrap();
+    let first = backing.append_finalized(&append("same")).await.unwrap();
+    let second = backing.append_finalized(&append("same")).await.unwrap();
     assert_eq!(first, second);
     assert_eq!(
         backing
@@ -47,16 +47,16 @@ async fn same_step_and_fingerprint_is_idempotent() {
 
 #[tokio::test]
 async fn same_step_and_different_fingerprint_conflicts() {
-    let backing = InMemorySessionBacking::new();
+    let backing = InMemorySessionRepository::new();
     backing.seed(
         &SessionId::new("session"),
         SessionRevision::new(0),
         vec![],
         None,
     );
-    backing.append(&append("first")).await.unwrap();
+    backing.append_finalized(&append("first")).await.unwrap();
     assert!(matches!(
-        backing.append(&append("other")).await,
+        backing.append_finalized(&append("other")).await,
         Err(ContextAppendError::ContentConflict { .. })
     ));
 }

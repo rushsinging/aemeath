@@ -16,19 +16,16 @@ pub struct SessionSnapshot {
 }
 
 #[async_trait]
-pub trait SessionBacking: Send + Sync {
+pub trait SessionRepository: Send + Sync {
     async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String>;
-    async fn append(&self, append: &ContextAppend) -> Result<AppendReceipt, ContextAppendError>;
-    async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError>;
-}
-
-#[derive(Debug, Clone)]
-pub struct WindowProjection {
-    pub messages: Vec<ContextMessage>,
-}
-
-pub trait WindowProjector: Send + Sync {
-    fn project(&self, messages: Vec<ContextMessage>) -> WindowProjection;
+    async fn append_finalized(
+        &self,
+        append: &ContextAppend,
+    ) -> Result<AppendReceipt, ContextAppendError>;
+    async fn commit_compaction(
+        &self,
+        request: &CompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError>;
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +36,7 @@ pub struct PromptMaterialization {
 }
 
 #[async_trait]
-pub trait PromptMaterializer: Send + Sync {
+pub trait ContextPromptSource: Send + Sync {
     async fn materialize(&self, request: &ContextRequest) -> Result<PromptMaterialization, String>;
 }
 
@@ -50,6 +47,6 @@ pub struct MemoryMaterialization {
 }
 
 #[async_trait]
-pub trait MemoryMaterializer: Send + Sync {
+pub trait ContextMemorySource: Send + Sync {
     async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String>;
 }

@@ -332,7 +332,7 @@ pub enum ContextPortError {
     #[error("Session 不存在：{0}")]
     SessionNotFound(SessionId),
     #[error("Session backing 读取失败：{0}")]
-    SessionBacking(String),
+    SessionRepository(String),
     #[error("Prompt 物化失败：{0}")]
     PromptMaterialization(String),
     #[error("Memory 物化失败：{0}")]

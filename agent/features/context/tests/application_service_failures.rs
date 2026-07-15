@@ -8,8 +8,8 @@ use context::domain::{
     SessionRevision, SystemPromptSpec, TaskReminderSnapshot,
 };
 use context::ports::{
-    MemoryMaterialization, MemoryMaterializer, PromptMaterialization, PromptMaterializer,
-    SessionBacking, SessionSnapshot, WindowProjection, WindowProjector,
+    ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
+    SessionRepository, SessionSnapshot,
 };
 use provider::api::ReasoningLevel;
 use sdk::RunId;
@@ -18,7 +18,7 @@ use share::config::Config;
 
 struct Session;
 #[async_trait]
-impl SessionBacking for Session {
+impl SessionRepository for Session {
     async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
         Ok(SessionSnapshot {
             revision: SessionRevision::new(0),
@@ -27,14 +27,14 @@ impl SessionBacking for Session {
         })
     }
 
-    async fn append(
+    async fn append_finalized(
         &self,
         _append: &ContextAppend,
     ) -> Result<context::domain::AppendReceipt, context::domain::ContextAppendError> {
         unreachable!()
     }
 
-    async fn compact(
+    async fn commit_compaction(
         &self,
         _request: &context::domain::CompactRequest,
     ) -> Result<context::domain::CompactOutcome, context::domain::ContextPortError> {
@@ -42,16 +42,9 @@ impl SessionBacking for Session {
     }
 }
 
-struct Projection;
-impl WindowProjector for Projection {
-    fn project(&self, messages: Vec<context::domain::ContextMessage>) -> WindowProjection {
-        WindowProjection { messages }
-    }
-}
-
 struct FailingPrompt;
 #[async_trait]
-impl PromptMaterializer for FailingPrompt {
+impl ContextPromptSource for FailingPrompt {
     async fn materialize(
         &self,
         _request: &ContextRequest,
@@ -62,7 +55,7 @@ impl PromptMaterializer for FailingPrompt {
 
 struct CountingMemory(Arc<AtomicUsize>);
 #[async_trait]
-impl MemoryMaterializer for CountingMemory {
+impl ContextMemorySource for CountingMemory {
     async fn materialize(
         &self,
         _request: &ContextRequest,
@@ -106,7 +99,6 @@ async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
     let memory_calls = Arc::new(AtomicUsize::new(0));
     let service = ContextApplicationService::new(
         Arc::new(Session),
-        Arc::new(Projection),
         Arc::new(FailingPrompt),
         Arc::new(CountingMemory(memory_calls.clone())),
     );

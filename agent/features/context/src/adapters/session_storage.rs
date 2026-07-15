@@ -9,13 +9,18 @@
 //! `load_session` 在主文件解析失败时依次尝试 `.bak` 回退、`.corrupt`
 //! 转存，确保损坏的会话文件不会被静默丢弃。
 
-use crate::domain::session::{now_iso, sessions_dir, validate_session_id, ChatSegment, Session};
+use crate::domain::session::{now_iso, validate_session_id, ChatSegment, Session};
+use share::config::paths;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
 /// Session 存储日志 target（迁移到 context crate 后用 `context::session::LOG_TARGET`）。
 const LOG_TARGET: &str = "aemeath:agent:storage";
+
+fn sessions_dir() -> PathBuf {
+    paths::global_sessions_dir()
+}
 
 /// `load_session` 的结构化错误。上层据此区分「不存在 / 损坏 / IO」三类。
 #[derive(Debug, Error)]
