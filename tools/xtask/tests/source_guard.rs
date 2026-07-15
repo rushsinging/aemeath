@@ -9,6 +9,15 @@ fn test_only_api_guard_accepts_cfg_test_helper() {
 }
 
 #[test]
+fn test_only_api_guard_accepts_test_only_source_file() {
+    let source = "#![cfg(test)]\nmod fixture;";
+    assert!(
+        xtask::source_guard::find_test_only_api_violations(Path::new("testing.rs"), source)
+            .is_empty()
+    );
+}
+
+#[test]
 fn test_only_api_guard_rejects_production_helper() {
     let source = "pub(crate) fn helper_for_test() {}";
     let violations = xtask::source_guard::find_test_only_api_violations(Path::new("x.rs"), source);
