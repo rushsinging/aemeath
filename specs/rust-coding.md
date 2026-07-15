@@ -128,7 +128,8 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 - 小型 L1 测试 **SHOULD** 放在生产文件末尾的 `#[cfg(test)] mod tests`。
 - 单一模块的较大 L1 测试 **MAY** 放同级 `*_tests.rs`，由生产文件以 `#[cfg(test)] #[path = "*_tests.rs"] mod tests;` 挂载。
 - L2 模块协作测试 **SHOULD** 使用 `src/<owning-layer>/<module>/tests/` 普通模块树，一个文件聚焦一个稳定行为；不分层 crate 可省略 `<owning-layer>`。
-- 测试模块与 fixture **MUST** 跟随被测能力的架构层和模块。对于 `domain/application/ports/adapters/shared` 等六边形分层，**NEVER** 为测试便利建立跨层万能 `testing` 层。
+- 测试模块与 fixture **MUST** 跟随被测能力的真实架构层和模块。六边形 crate 的 owning layer 可为 `domain`、`application`、`ports`、`adapters` 或按真实共享内容创建的 `shared`；**NEVER** 为目录对称预建空层，或为测试便利建立跨层万能 `testing` 层。
+- `shared` **MAY** 按需创建，但内容 **MUST** 被多个稳定 owner 使用、没有更明确的业务 owner，且保持正确依赖方向；**NEVER** 将暂时无法归类的代码、领域类型、Port、Adapter 或测试 fixture 塞入 `shared`。
 - L3 契约测试 **SHOULD** 放 crate 根 `tests/`；共享契约逻辑定义一次，通过 factory/fixture 复用。
 - L4 场景测试 **MUST** 将 Harness/fixture 与场景分离，例如 `testing/` 与 `scenario_tests/`，并受 `cfg(test)` 约束。
 - **NEVER** 新增 `include!("tests/*.rs")` 拼接测试文件；现存用法在相关模块变更时渐进迁移。
@@ -136,7 +137,7 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 
 ### Fixture 与测试替身
 
-- fixture 与替身 **SHOULD** 按 crate、架构层和领域模块归属，优先放在被测模块相邻的 `testing/` 或测试模块内；**NEVER** 建立知道所有领域类型或跨越架构层的万能 `test_utils` / `testing`。
+- fixture 与替身 **SHOULD** 按 crate、架构层和领域模块归属，优先放在被测模块相邻的 `testing/` 或测试模块内；测试 fixture 不因复用自动归入 `shared`。**NEVER** 建立知道所有领域类型或跨越架构层的万能 `test_utils` / `testing`。
 - `StubX` 返回固定结果；`FakeX` 提供简化可工作实现；`SpyX` 记录调用；`ScriptedX` 按预设队列执行；`MockX` 仅用于 mock framework 生成对象。
 - 测试辅助 constructor、setter、状态读取器和 adapter **MUST** 受 `cfg(test)` 或批准的 test-only feature 约束，**NEVER** 因测试方便扩大生产 API。
 
