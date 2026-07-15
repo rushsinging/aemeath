@@ -47,7 +47,10 @@ pub use error::SdkError;
 pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, RunId, ToolCallId};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
-pub use run::CancelRunOutcome;
+pub use run::{
+    CancelRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
+    TerminateRunOutcome,
+};
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
 };

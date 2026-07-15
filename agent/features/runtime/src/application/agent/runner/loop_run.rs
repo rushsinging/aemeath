@@ -281,11 +281,18 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
         RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
             error: error.clone(),
         }),
-        RunDomainEvent::Cancelled { .. } => Some(AgentRunTerminal::Cancelled),
+        RunDomainEvent::Cancelled { .. } | RunDomainEvent::Terminated { .. } => {
+            Some(AgentRunTerminal::Cancelled)
+        }
         RunDomainEvent::Transitioned { .. }
         | RunDomainEvent::Started { .. }
         | RunDomainEvent::StepStarted { .. }
         | RunDomainEvent::StepCompleted { .. }
+        | RunDomainEvent::StepCancellationRequested { .. }
+        | RunDomainEvent::StepFinalizationStarted { .. }
+        | RunDomainEvent::StepCancelled { .. }
+        | RunDomainEvent::DrainingInput { .. }
+        | RunDomainEvent::TerminationRequested { .. }
         | RunDomainEvent::CancellationRequested { .. }
         | RunDomainEvent::AwaitingUser { .. }
         | RunDomainEvent::Resumed { .. }

@@ -735,6 +735,12 @@ where
                         .send_event(RuntimeStreamEvent::RunCancelled { run_id })
                         .await;
                 }
+                RunDomainEvent::Terminated { run_id, .. } => {
+                    self.rollback_cancelled().await;
+                    self.sink
+                        .send_event(RuntimeStreamEvent::RunCancelled { run_id })
+                        .await;
+                }
                 RunDomainEvent::CancellationRequested { run_id, .. } => {
                     self.sink
                         .send_event(RuntimeStreamEvent::RunCancelling { run_id })
@@ -762,7 +768,12 @@ where
                 | RunDomainEvent::AwaitingUser { .. }
                 | RunDomainEvent::Resumed { .. }
                 | RunDomainEvent::StepStarted { .. }
-                | RunDomainEvent::StepCompleted { .. } => {}
+                | RunDomainEvent::StepCompleted { .. }
+                | RunDomainEvent::StepCancellationRequested { .. }
+                | RunDomainEvent::StepFinalizationStarted { .. }
+                | RunDomainEvent::StepCancelled { .. }
+                | RunDomainEvent::DrainingInput { .. }
+                | RunDomainEvent::TerminationRequested { .. } => {}
             }
         }
         Ok(())

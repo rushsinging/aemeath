@@ -13,7 +13,18 @@
 ```rust
 trait AgentClient {
     // 其他命令省略
-    fn cancel_run(&self, run_id: RunId) -> CancelRunOutcome;
+    fn cancel_run_step(
+        &self,
+        run_id: RunId,
+        step_id: Option<RunStepId>,
+        deadline: ControlDeadline,
+    ) -> CancelRunStepOutcome;
+    fn terminate_run(
+        &self,
+        run_id: RunId,
+        reason: RunTerminationReason,
+        deadline: ControlDeadline,
+    ) -> TerminateRunOutcome;
     fn reply_interaction(
         &self,
         request_id: InteractionRequestId,
@@ -38,12 +49,32 @@ enum ReasoningLevelOutcome {
     Unsupported,
 }
 
-enum CancelRunOutcome {
-    Accepted,       // 调用返回前已进入 Cancelling 且 cancellation scope 已触发
+enum CancelRunStepOutcome {
+    Accepted,              // 返回前当前 Step 已进入 CancellingStep，Step scope 已触发
     AlreadyCancelling,
+    NoActiveStep,
+    RunTerminating,
+    RunTerminal,
+    NotFound,
+}
+
+enum TerminateRunOutcome {
+    Accepted,              // 返回前 Run 已进入 Terminating，Run root scope 已触发
+    AlreadyTerminating,
     AlreadyTerminal,
     NotFound,
 }
+
+enum RunTerminationReason {
+    UserExit,
+    DoubleCtrlC,
+    QuitCommand,
+    ProcessSignal,
+    SessionShutdown,
+    ParentStepCancelled,
+}
+
+struct ControlDeadline { unix_millis: u64 } // wire-only absolute deadline
 
 enum InteractionCommandOutcome {
     Accepted,                       // waiter 已在返回前完成一次性解析
@@ -54,10 +85,11 @@ enum InteractionCommandOutcome {
 }
 ```
 
-- `cancel_run` 是同步、幂等、out-of-band 的控制命令，NEVER 经 `InputBuffer` 排队。
-- TUI 只持 `Arc<dyn AgentClient>` 或 SDK 提供的、绑定 `run_id` 的薄 `CancelHandle`；NEVER 持有 Runtime 实例、Run 聚合或 `CancellationToken`。
-- `CancelHandle::cancel()` 只是 `cancel_run(run_id)` 的语法便利，生命周期绑定单个 Run，NEVER 捕获 Session 级可替换 token 槽。
-- 返回 `Accepted` 只确认取消请求已即时生效；取消完成由 `RunCancelled` 事件异步确认。
+- `cancel_run_step` 与 `terminate_run` 是同步、幂等、out-of-band 的控制命令，NEVER 经 `InputBuffer` 排队。
+- `ControlDeadline` 是 wire-only 绝对时间；Runtime 在控制边界转换到注入的 monotonic clock，嵌套 Sub **NEVER** 重新分配 5s/10s。
+- TUI 只持 `Arc<dyn AgentClient>` 或 SDK 提供的、绑定 `run_id` / `step_id` 的薄控制 handle；NEVER 持有 Runtime 实例、Run 聚合或 `CancellationToken`。
+- `CancelRunStepOutcome::Accepted` 只确认 Step scope 已即时停止调度；完成由 `RunStepCancelled` / `RunDrainingInput` 异步确认。`TerminateRunOutcome::Accepted` 只确认 Run root scope 已触发；完成由 `RunTerminated` 确认。
+- 迁移期旧 `cancel_run` / `CancelRunOutcome` 只允许为当前 TUI 生产兼容保留；#878 原子切换后由 #879 删除，**NEVER** 作为目标 OHS 的第二套语义。
 - interaction reply / cancel 同样是同步、幂等、out-of-band command；它们只完成 Runtime-owned pending request，**NEVER** 经输入队列排队，也 **NEVER** 由 TUI 持有 channel sender。
 - SDK Published Language 的 `InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
 
@@ -174,7 +206,7 @@ enum InteractionCompletion {
 
 `InteractionPort` 只承载一次 request/reply 交换，**NEVER** 自行修改 Run 或发布 `RunResumed`。Runtime interaction coordinator 在调用前以 request id + continuation 进入 `AwaitingUser`，收到匹配 reply 后恢复 continuation并发布权威事件；取消与 reply 竞争时 cancellation 优先，陈旧 / 重复 id 返回结构化错误。Main adapter 把 request 映射为 SDK event 并等待 TUI / Server 回复；Sub 只能使用 Composition 明确装配的 parent-mediated adapter，否则返回 unavailable，**NEVER** 暗中共用 Main UI channel。
 
-reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`InteractionCompletion::Cancelled` 是“取消这次交互”，不是 `cancel_run` 的别名；Runtime 按 continuation 穷尽映射 typed 结果：
+reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`InteractionCompletion::Cancelled` 是“取消这次交互”，不是 `CancelRunStep` / `TerminateRun` 的别名；Runtime 按 continuation 穷尽映射 typed 结果：
 
 | continuation | Replied | Cancelled(reason) | 恢复后的 Run 状态 |
 |---|---|---|---|
@@ -183,7 +215,7 @@ reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`In
 | `ContinuePlanApproval` | Approve → `PlanApproved`；Deny → `PlanRejected` feedback；决定随当前无 tool_calls 的 step 恰好一次提交 | `RunFailed(PlanApprovalCancelled(reason))` | reply 回 `PreparingContext` 并启动下一 invocation；cancel 回 `Failed` |
 | `ContinueAfterHardPause` | `HardPauseContinue` | `RunFailed(HardPauseCancelled(reason))` | reply 回 `ExecutingTools` 并继续 continuation 记录的未完成 tool phase；cancel 回 `Failed` |
 
-Run cancellation scope 若与 reply/cancel 竞争则永远优先：Run 进入 `Cancelling`，interaction waiter 以 RunCancelling 收口，最终只有 `RunCancelled`，**NEVER** 套用上表的普通 completion。
+Run root / Step cancellation scope 若与 reply/cancel 竞争则永远优先：`CancelRunStep` 进入 `CancellingStep` 并收口到 `DrainingInput`；`TerminateRun` 进入 `Terminating` 并最终 `Terminated`，**NEVER** 套用上表的普通 completion。
 
 并发 Tool execution 可以同时产生多个 `ToolOutcome::Suspended`，但 Runtime **MUST** 先收集 outcomes，再按 RunStep 原始 ToolCallId / 调用顺序逐个注册 request。前一个 continuation resolve 并清空 PendingInteraction 后才能注册下一个；全部调用得到 final outcome 后，按原调用顺序做 L1 budget reduction，并以一次 `append_and_persist` 提交 assistant + tool results。
 
@@ -389,6 +421,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
 | 2026-07-12 | 定义同步幂等 `cancel_run(run_id)`、per-Run cancellation scope 及 Provider/Tool/Compact/Hook 传播边界 | #700 |
+| 2026-07-15 | OHS 目标从旧 `cancel_run` 修正为 `cancel_run_step` + `terminate_run`，冻结 pure DTO、绝对 deadline 与迁移兼容边界 | [#700](https://github.com/rushsinging/aemeath/issues/700) / [PR #1036](https://github.com/rushsinging/aemeath/pull/1036) |
 | 2026-07-12 | ToolPort 拆为 Catalog/Execution 双端口，补 Skill/Command 独立端口边界与 Scope/Profile 装配 | #787 |
 | 2026-07-12 | ProviderPort 补能力查询、取消、结构化错误与单 attempt InvocationStream 契约 | #788 |
 | 2026-07-12 | ContextPort 签名收敛为 4 方法（build_window / needs_compaction / compact / append_and_persist），详见 context-management/02-compact.md | #786 |
