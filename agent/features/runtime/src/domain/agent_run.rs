@@ -20,7 +20,7 @@ pub use spec::{
 };
 pub use state::{
     RunCancellationRequest, RunStatus, RunStep, RunStepId, RunStepStatus, RunTransition,
-    RunTransitionError,
+    RunTransitionError, RunTransitionReason,
 };
 pub use step::{ModelInvocation, RunToolCall, ToolCall, ToolCallStatus};
 
