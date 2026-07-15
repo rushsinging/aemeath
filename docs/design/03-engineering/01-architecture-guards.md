@@ -34,7 +34,7 @@
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 只允许 `domain/application/ports/adapters` 与按需 `shared`，并禁止旧层恢复 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 跨 feature 仅经 `::<crate>::api` |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 跨 feature 经其稳定 façade；Context 使用根级窄 façade |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -188,22 +188,21 @@
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透对方 Current `contract/gateway/core/business/utils` 内部路径；禁止 Current `api.rs` 暴露内部层。该脚本锁定迁移期物理结构，不定义 Target 通用 `api/` 目录。
+- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Context 使用根级窄 façade `context::{context_port, compact, guidance, skill, session}`，并禁止恢复纯转发 `api/gateway` 与 Prompt `business/gateway` 固定层。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透对方 Current `contract/gateway/core/business/utils` 内部路径；禁止 Current `api.rs` 暴露内部层；锁定 Context capability-first Target 的唯一 façade。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
-  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`
-  - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`（project 可在根级 `pub use project::ProjectContext`，如 `sdk` 投影）
+  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
+  - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
+  - `ROOT_ACCESS_ALLOW = {runtime: {AgentClientImpl, from_args}, context: {context_port, compact, guidance, skill, session}}`
+  - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities/prompt/business.rs, context/src/capabilities/prompt/business/, context/src/capabilities/prompt/gateway.rs}`
 - **检查方式**：
   - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；
-  - 对每个文件，匹配 `<feature>::<segment>` 形态：
-    - `segment == "api"`：放行（这是入口）；
-    - `segment ∈ INTERNAL_SEGMENTS`：违规（需改走 `api`）；
-    - `segment ∈ ROOT_REEXPORT_ALLOW[target]` 且是 `pub use`：放行。
-  - 对 `agent/features/*/src/api.rs` 的 `pub use crate::<segment>`：`segment` 必须在 `API_FACADE_ALLOWED_SEGMENTS`。
-- **例外**：`ROOT_REEXPORT_ALLOW` 表中登记的符号（当前仅 `project::ProjectContext`）；`share` crate 不受跨 crate 检查约束（它处于依赖底层）。
-- **说明**：旧的 `WorktreeContextExt` 投影豁免已随 context 所有权重构删除；当前脚本**没有任何** path 级豁免。
+  - 未迁移 feature 的跨 crate入口仍必须是 `api`；Context 只放行上列根 façade，`contract` 与 `capabilities` **NEVER** 直接跨 crate 访问；
+  - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
+  - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
+- **例外**：无 path 级白名单。Context 根 façade是结构化 Target policy，不是迁移 exception。
 
 ## 7. check-context-architecture.sh
 

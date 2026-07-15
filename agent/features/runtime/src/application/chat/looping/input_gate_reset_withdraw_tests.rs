@@ -7,7 +7,7 @@ use crate::application::chat::looping::events::RuntimeStreamEvent;
 use crate::application::chat::looping::input_gate::{
     run_loop_gate, EmptyQueueDrainPort, GateDecision, GateKind, PendingInputBuffer,
 };
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
 
