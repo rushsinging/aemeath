@@ -2,6 +2,7 @@ use sdk::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::render::display::safe_text::safe_char_slice;
 use crate::tui::view_model::LiveStatusViewModel;
+#[cfg(test)]
 use crate::tui::view_state::OutputViewState;
 
 impl super::OutputArea {
@@ -180,6 +181,7 @@ impl super::OutputArea {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn output_selection_view_for_test(
     start: (usize, CharIdx),
     end: (usize, CharIdx),

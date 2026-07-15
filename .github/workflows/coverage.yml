@@ -7,8 +7,7 @@ on:
       - '**/Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/coverage.sh'
-      - 'scripts/coverage_summary.py'
-      - 'scripts/coverage_summary_tests.py'
+      - 'tools/xtask/**'
       - '.github/workflows/coverage.yml'
   workflow_dispatch:
 
