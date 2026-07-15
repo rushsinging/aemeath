@@ -28,9 +28,9 @@ Project / Workspace BC 管理 Agent 执行时的"在哪里工作"——当前工
 
 ## 3. Target 物理目录
 
-判定依据见[代码组织规范](../../01-system/06-code-organization.md) §3.1 / §3.2 / §3.7 与 [02-modules 目录结构决策](../README.md#目录结构决策)：`WorkspaceState`、Frame 栈、候选规则与 switch / enter / exit / restore 用例始终共享同一个 `WorkspaceService` 状态所有权、锁步变化，不构成三个以上可独立测试演进的候选能力；因此 Workspace **MUST** 保持单能力扁平叶子（§3.2），**NEVER** 建立私有 `capabilities/` 竖切容器。git 命令执行是 Workspace 内部的技术外部 seam，由消费策略（`WorkspaceService`）以私有出站端口 `GitWorktreeOps` + 单一 `GitCli` adapter 隔离，与能力叶子共置为局部 `git.rs`，而非模块级横向技术目录；只有出现多个共同变化的 adapter 或独立演进压力时才升级为 `git/` 子目录（§3.7），目前仍是单文件。
+判定依据见[代码组织规范](../../01-system/06-code-organization.md) Hexagonal 默认分层：`WorkspaceState`、Frame 栈、候选规则与 switch / enter / exit / restore 用例始终共享同一个 `WorkspaceService` 状态所有权、锁步变化，不构成三个以上可独立测试演进的候选能力；因此 Workspace **MUST** 保持 Hexagonal 最简形态（`domain + adapters`），**NEVER** 建立私有 `capabilities/` 竖切容器。git 命令执行是 Workspace 内部的技术外部 seam，由消费策略（`WorkspaceService`）以私有出站端口 `GitWorktreeOps` + 单一 `GitCli` adapter 隔离，终止在 `adapters/git.rs`；只有出现多个共同变化的 adapter 或独立演进压力时才升级为 `adapters/git/` 子目录，目前仍是单文件。
 
-Project 的目标物理布局、三个公开 trait 的精确方法与类型、消费方映射及内部 `GitWorktreeOps` seam **MUST** 只以 [Workspace 端口与适配器](02-ports-and-adapters.md) 为真相源。本文 **NEVER** 复制物理树或 trait 签名，只记录结构决策本身：单能力扁平 `workspace` + `git` 局部技术 seam，明确不建 `capabilities/`。
+Project 的目标物理布局、三个公开 trait 的精确方法与类型、消费方映射及内部 `GitWorktreeOps` seam **MUST** 只以 [Workspace 端口与适配器](02-ports-and-adapters.md) 为真相源。本文 **NEVER** 复制物理树或 trait 签名，只记录结构决策本身：Hexagonal 最简形态 `domain + adapters`，明确不建 `capabilities/`。
 
 ## 4. 稳定公开能力概览
 

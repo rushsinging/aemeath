@@ -258,21 +258,25 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 
 ## 12. Target 物理目录
 
-Hook 拥有单一 Hook dispatch 能力：匹配、重试、directive 语义和类型化协议围绕同一 `HookPort.dispatch` 用例紧密变化，不构成可独立演进的子能力，因此 Hook **NEVER** 创建 `capabilities/`——该目录只用于已证明的业务竖切（[代码组织规范 §3.3](../../01-system/06-code-organization.md)）。进程执行（spawn/wait/timeout/kill、env_clear 白名单）和类型化协议（HookInvocation 枚举与各 point payload）是同一 dispatch 能力的技术 detail，按 [§3.7](../../01-system/06-code-organization.md) 组织为诚实命名的技术目录：
+Hook 采用 Hexagonal + Clean 组织（`domain + adapters`）。单一 Hook dispatch 能力的匹配、重试、directive 语义和类型化协议围绕同一 `HookPort.dispatch` 用例紧密变化，收在 `domain/`；进程执行（spawn/wait/timeout/kill）和类型化协议（HookInvocation 枚举与各 point payload）是技术 detail，终止在 `adapters/`：
 
 ```text
-hook.rs                    # 窄 façade：HookPort trait + dispatch 入口
-hook/
-├── dispatch.rs            # 订阅匹配、order 排序、Block 短路、context 合并、UpdatedInput 串联
-├── metadata.rs            # HookPointMetadata / HookClass / 能力矩阵
-├── subscription.rs        # HookSubscription / HookMatcher / HookFailurePolicy
-├── protocol.rs            # HookInvocation 枚举 + HookOutcome / HookDirective / HookExecution
-├── protocol/              # 仅在各 point typed payload 已独立变化时展开
-├── executor.rs            # 单 Hook 子进程执行：spawn/wait/timeout/kill 回收
-└── executor/              # 仅在 env_clear / stdout·stderr 截断 / 回收已独立变化时展开
+src/
+├── lib.rs                 # 窄 façade：HookPort trait + dispatch 入口 + composition-only wiring
+├── domain.rs              # 领域策略入口
+├── domain/
+│   ├── dispatch.rs         #   订阅匹配、order 排序、Block 短路、context 合并、UpdatedInput 串联
+│   ├── metadata.rs         #   HookPointMetadata / HookClass / 能力矩阵
+│   └── subscription.rs     #   HookSubscription / HookMatcher / HookFailurePolicy
+├── ports.rs               # 对外端口定义（HookPort trait 签名）
+└── adapters/
+    ├── protocol.rs         #   HookInvocation 枚举 + HookOutcome / HookDirective / HookExecution
+    ├── protocol/           #   仅在各 point typed payload 已独立变化时展开
+    ├── executor.rs         #   单 Hook 子进程执行：spawn/wait/timeout/kill 回收
+    └── executor/           #   仅在 env_clear / stdout·stderr 截断 / 回收已独立变化时展开
 ```
 
-扁平核心（`dispatch.rs`、`metadata.rs`、`subscription.rs`）承载 dispatch 的匹配、排序、directive 聚合与失败策略语义。`protocol/` 是类型化协议的技术实现：HookInvocation 变体与各 point input payload 的 wire 映射；`executor/` 是进程执行的技术实现：子进程 spawn、timeout kill 回收、env_clear 白名单与输出截断。两者 **MUST** 私有，hook wire type 和进程安全 detail **NEVER** 泄漏到 façade 之外。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录（[§3.7](../../01-system/06-code-organization.md)）。
+`domain/` 承载 dispatch 的匹配、排序、directive 聚合与失败策略语义。`adapters/protocol/` 是类型化协议的技术实现：HookInvocation 变体与各 point input payload 的 wire 映射；`adapters/executor/` 是进程执行的技术实现：子进程 spawn、timeout kill 回收、env_clear 白名单与输出截断。两者 **MUST** 私有，hook wire type 和进程安全 detail **NEVER** 泄漏到 façade 之外。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录。
 
 ## 13. 相关文档
 

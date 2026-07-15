@@ -37,25 +37,29 @@ Storage 是数据 BC 与物理介质之间的机制边界：
 
 ## 3. Target 物理目录
 
-物理粒度判定见[代码组织规范](../../01-system/06-code-organization.md) §3.1 / §3.3 与 [02-modules 目录结构决策](../README.md#目录结构决策)：Storage 已有三个拥有独立协议、独立故障测试边界与独立词汇的候选能力——`safe_path`（路径词法校验与受约束根目录句柄解析）、`atomic_blob`（整值 blob 原子替换协议）、`atomic_dataset`（多 member dataset 事务协议）——因此不停留在扁平叶子，**MUST** 递归竖切进入私有 `capabilities/`：
+Storage 采用 Hexagonal + Clean 组织（`domain + adapters`）。三个拥有独立协议、独立故障测试边界与独立词汇的能力——`safe_path`（路径词法校验）、`atomic_blob`（整值 blob 原子替换协议）、`atomic_dataset`（多 member dataset 事务协议）——收在 `domain/` 各自展开；文件系统技术 detail 终止在 `adapters/`：
 
 ```text
-storage.rs                       # 窄 façade：发布 AtomicBlobPort / AtomicDatasetPort OHS，composition-only wiring
-capabilities.rs                  # 私有切片注册，不承载业务逻辑
-capabilities/
-├── safe_path.rs                 # SafePathSegment 词法校验、受约束根目录句柄解析
-├── atomic_blob.rs                # AtomicBlobPort 用例：write_atomic / read / promote_previous / quarantine / delete_all_generations / list_primary
-├── atomic_blob/
-│   └── filesystem.rs            # 局部私有技术 detail：stage/fsync/rename/journal 的文件系统实现，仅本切片内部可见
-├── atomic_dataset.rs             # AtomicDatasetPort 用例：read_manifest / read_consistent / read_previous / commit_atomic / promote_previous / quarantine
-└── atomic_dataset/
-    └── filesystem.rs            # 局部私有技术 detail：dataset lock / journal 的文件系统实现，仅本切片内部可见
+src/
+├── lib.rs                       # 窄 façade：发布 AtomicBlobPort / AtomicDatasetPort OHS，composition-only wiring
+├── domain.rs                    # 领域策略入口
+├── domain/
+│   ├── safe_path.rs             #   SafePathSegment 词法校验、受约束根目录句柄解析
+│   ├── atomic_blob.rs           #   AtomicBlobPort 用例策略：write_atomic / read / promote_previous / quarantine
+│   ├── atomic_dataset.rs        #   AtomicDatasetPort 用例策略：read_manifest / read_consistent / commit_atomic
+│   └── published_language.rs    #   StorageKey / DatasetKey / Quarantine PL
+├── ports.rs                     # 对外端口定义
+│   ├── atomic_blob_port.rs      #   AtomicBlobPort OHS
+│   └── atomic_dataset_port.rs   #   AtomicDatasetPort OHS
+└── adapters/
+    ├── blob_filesystem.rs       #   blob stage/fsync/rename/journal 文件系统实现
+    └── dataset_filesystem.rs    #   dataset lock / journal 文件系统实现
 ```
 
-- `capabilities.rs` 与 `capabilities/` **MUST** 私有；`storage.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型，**NEVER** 转发切片内部结构。
-- `filesystem.rs` 是各切片内部的局部私有技术 detail，**NEVER** 提升为模块级横向 `adapters/` 或 `backend/` 目录：`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；这正是 §3.5 所述"Storage 私有 backend SPI"的物理落点——driver 只在持有它的切片内部实现该私有 SPI，切片对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
-- `safe_path` 是被 `atomic_blob` / `atomic_dataset` 消费的独立切片而非 model：它拥有自己的校验协议与测试夹具，**NEVER** 因"看似工具函数"被内联进另外两个切片。
-- Storage **NEVER** 建立按存储技术命名的模块级技术目录（§3.7）；sled 等未来 backend 若引入，仍 **MUST** 落在持有它的切片私有 detail 内，不形成跨切片横向替换层。
+- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型，**NEVER** 转发内部结构。
+- `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；这正是 §3.5 所述"Storage 私有 backend SPI"的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
+- `safe_path` 是被 `atomic_blob` / `atomic_dataset` 消费的独立 domain 子模块：它拥有自己的校验协议与测试夹具，**NEVER** 因"看似工具函数"被内联进另外两个模块。
+- Storage **NEVER** 建立按存储技术命名的模块级横向技术目录；sled 等未来 backend 若引入，仍 **MUST** 落在 `adapters/` 内，不形成横向替换层。
 
 ## 4. Published Language
 
