@@ -758,7 +758,8 @@ where
                         )))
                         .await;
                 }
-                RunDomainEvent::AwaitingUser { .. }
+                RunDomainEvent::Transitioned { .. }
+                | RunDomainEvent::AwaitingUser { .. }
                 | RunDomainEvent::Resumed { .. }
                 | RunDomainEvent::StepStarted { .. }
                 | RunDomainEvent::StepCompleted { .. } => {}

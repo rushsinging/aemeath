@@ -6,7 +6,7 @@ use super::event::{RunDomainEvent, RunId};
 use super::spec::RunSpec;
 use super::state::{
     RunCancellationRequest, RunStatus, RunStep, RunStepId, RunStepStatus, RunTransition,
-    RunTransitionError,
+    RunTransitionError, RunTransitionReason,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
@@ -145,11 +145,18 @@ impl Run {
             (RunStatus::Finishing, RunTransition::Finish) => RunStatus::Completed,
             (RunStatus::Cancelling, RunTransition::CancellationFinished) => RunStatus::Cancelled,
             (from, transition) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "run state transition rejected: run_id={} parent_run_id={} from={from:?} requested_transition={transition:?} reason={:?}",
+                    self.id,
+                    self.parent_id_display(),
+                    RunTransitionReason::from(transition),
+                );
                 return Err(RunTransitionError::IllegalTransition { from, transition });
             }
         };
 
-        self.status = next;
+        self.apply_state_transition(next, RunTransitionReason::from(transition));
         if transition == RunTransition::Start {
             self.started_at = Some(Instant::now());
             self.events.push(RunDomainEvent::Started {
@@ -168,6 +175,31 @@ impl Run {
             });
         }
         Ok(next)
+    }
+
+    fn parent_id_display(&self) -> String {
+        self.parent_id
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "-".to_string())
+    }
+
+    fn apply_state_transition(&mut self, to: RunStatus, reason: RunTransitionReason) {
+        let from = self.status;
+        self.status = to;
+        self.events.push(RunDomainEvent::Transitioned {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            from,
+            to,
+            reason,
+        });
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "run state transition: run_id={} parent_run_id={} from={from:?} to={to:?} reason={reason:?}",
+            self.id,
+            self.parent_id_display(),
+        );
     }
 
     pub fn begin_step(&mut self) -> Result<RunStepId, RunTransitionError> {
@@ -312,12 +344,24 @@ impl Run {
 
     pub fn request_cancellation(&mut self) -> RunCancellationRequest {
         if self.status.is_terminal() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} parent_run_id={} from={:?} requested_to={:?} reason={:?}",
+                self.id,
+                self.parent_id_display(),
+                self.status,
+                RunStatus::Cancelling,
+                RunTransitionReason::InterruptRequested,
+            );
             return RunCancellationRequest::AlreadyTerminal;
         }
         if self.status == RunStatus::Cancelling {
             return RunCancellationRequest::AlreadyCancelling;
         }
-        self.status = RunStatus::Cancelling;
+        self.apply_state_transition(
+            RunStatus::Cancelling,
+            RunTransitionReason::InterruptRequested,
+        );
         self.events.push(RunDomainEvent::CancellationRequested {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -348,9 +392,18 @@ impl Run {
 
     pub fn fail(&mut self, error: impl Into<String>) -> Result<(), RunTransitionError> {
         if self.status.is_terminal() || self.status == RunStatus::Cancelling {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} parent_run_id={} from={:?} requested_to={:?} reason={:?}",
+                self.id,
+                self.parent_id_display(),
+                self.status,
+                RunStatus::Failed,
+                RunTransitionReason::Failed,
+            );
             return Err(RunTransitionError::RunNotActive(self.status));
         }
-        self.status = RunStatus::Failed;
+        self.apply_state_transition(RunStatus::Failed, RunTransitionReason::Failed);
         self.close_active_steps(RunStepStatus::Failed);
         self.events.push(RunDomainEvent::Failed {
             run_id: self.id.clone(),

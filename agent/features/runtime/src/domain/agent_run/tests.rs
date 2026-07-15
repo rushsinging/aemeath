@@ -28,6 +28,79 @@ fn run_follows_the_happy_path_to_completed() {
 }
 
 #[test]
+fn every_state_change_emits_transitioned_with_reason() {
+    let mut run = run();
+
+    run.transition(RunTransition::Start).unwrap();
+    run.fail("provider failed").unwrap();
+
+    let transitions: Vec<_> = run
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            RunDomainEvent::Transitioned {
+                from, to, reason, ..
+            } => Some((*from, *to, *reason)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        transitions,
+        vec![
+            (
+                RunStatus::Created,
+                RunStatus::PreparingContext,
+                RunTransitionReason::Start,
+            ),
+            (
+                RunStatus::PreparingContext,
+                RunStatus::Failed,
+                RunTransitionReason::Failed,
+            ),
+        ]
+    );
+}
+
+#[test]
+fn cancellation_and_completion_use_the_same_transition_event() {
+    let mut cancelled = run();
+    cancelled.transition(RunTransition::Start).unwrap();
+    cancelled.request_cancellation();
+    cancelled.finish_cancellation().unwrap();
+
+    assert!(cancelled.events().iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Transitioned {
+            from: RunStatus::PreparingContext,
+            to: RunStatus::Cancelling,
+            reason: RunTransitionReason::InterruptRequested,
+            ..
+        }
+    )));
+    assert!(cancelled.events().iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Transitioned {
+            from: RunStatus::Cancelling,
+            to: RunStatus::Cancelled,
+            reason: RunTransitionReason::CancellationFinished,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn rejected_transition_does_not_emit_transitioned_event() {
+    let mut run = run();
+
+    let _ = run.transition(RunTransition::ModelInvoked);
+
+    assert!(!run
+        .events()
+        .iter()
+        .any(|event| matches!(event, RunDomainEvent::Transitioned { .. })));
+}
+#[test]
 fn run_rejects_illegal_transition_without_mutating_status() {
     let mut run = run();
 
@@ -63,9 +136,15 @@ fn cancellation_is_two_phase_and_idempotent() {
         run.request_cancellation(),
         RunCancellationRequest::AlreadyTerminal
     );
+    let lifecycle: Vec<_> = run
+        .events()
+        .iter()
+        .filter(|event| !matches!(event, RunDomainEvent::Transitioned { .. }))
+        .cloned()
+        .collect();
     assert_eq!(
-        run.events(),
-        &[
+        lifecycle,
+        vec![
             RunDomainEvent::Started {
                 run_id: run.id().clone(),
                 parent_run_id: None,
