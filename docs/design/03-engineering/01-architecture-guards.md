@@ -33,7 +33,7 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 暂时约束业务/utils 对 core/gateway/contract 的依赖方向 |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 只允许 `domain/application/ports/adapters` 与按需 `shared`，并禁止旧层恢复 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 跨 feature 仅经 `::<crate>::api` |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
@@ -148,10 +148,10 @@
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查普通 feature 的迁移期固定层目录与层间依赖方向，并对 context feature 应用下述精确顶层目录例外。
+- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 已迁入目标六边形，因此单独限制其顶层目录为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`，并拒绝恢复 `business/core/gateway/contract/utils` 旧目录；context feature 继续使用精确顶层目录例外。
 - **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS`、且文件路径未被 `is_test_path` 判定为测试路径的 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非空且不以 `//` 或 `*` 开头的行中的 `crate::<layer>` 引用（`use` 可选）。脚本不解析普通文件内的 `#[cfg(test)]` block，因此其中符合匹配条件的行仍会被扫描；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
-- **层定义**：`FEATURE_LAYERS = {contract, gateway, core, business, utils}`。
+- **层定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`，其中 `shared` 仅按真实复用需要创建。
 - **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature 放行这七个目录；其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
@@ -181,11 +181,9 @@
 | `agent/features/provider/src/business/providers/openai_compatible/request_body.rs` | `core` | OpenAI 兼容请求体 |
 | `agent/features/provider/src/business/providers/openai_compatible/stream.rs` | `core` | OpenAI 兼容流式 |
 | `agent/features/provider/src/business/stream.rs` | `core` | Provider 通用 stream |
-| `agent/features/runtime/src/utils/adapter.rs` | `core` | runtime 临时 wiring |
-| `agent/features/runtime/src/utils/bootstrap/runtime_support.rs` | `business` | bootstrap 临时 wiring |
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 
-- **自检**：脚本会校验所有登记的 exception 仍被命中；未命中即报"stale"并要求清理。
+- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：4 个精确 `path + target layer` 例外，均为 #995 只迁目录而不改变接线语义后仍存在的 Current 倒置：`application/client/accessors.rs → adapters`、`application/client/from_args.rs → adapters`、`ports/input_buffer.rs → application`、`ports/legacy.rs → application`。脚本对其做 stale 自检；由 #874–#879 删除，禁止扩张。
 
 ## 6. check-crate-api-boundary.sh
 
@@ -239,7 +237,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `agent/features/runtime/src/utils/adapter.rs` | runtime 拥有把 shared adapter newtype 适配到 runtime-local port 的 impl 块。保留到对应消费方-owned outbound port 由供应 adapter 直接实现、Composition 完成接线且 #982 故意违规证明生效；具体迁移责任与退出证据见 Migration Governance O2/O8 |
+| `agent/features/runtime/src/adapters/runtime.rs` | Runtime-owned ACL 暂时把 shared adapter newtype 适配到 runtime-local port。保留到对应消费方-owned outbound port 由供应 adapter 直接实现、Composition 完成接线且 #982 故意违规证明生效；具体迁移责任与退出证据见 Migration Governance O2/O8 |
 
 - **检查方式**：扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `*_test.rs` / `*_tests.rs` / `tests/` / `agent/composition/src/`），匹配 `\bshare::adapter\b | \bshared::adapter\b | agent/shared/src/adapter`。
 - **自检**：脚本会校验 exception 表中所有路径仍被命中；未命中即报"stale"并要求清理。

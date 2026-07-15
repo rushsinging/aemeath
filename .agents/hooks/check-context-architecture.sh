@@ -171,7 +171,7 @@ def check_r7(violations: list[str]) -> None:
     """R7: ToolExecutionContext / ChatLoopContext must not carry `cwd` field."""
     targets = {
         Path("agent/features/tools/src/contract/context.rs"): "ToolExecutionContext",
-        Path("agent/features/runtime/src/business/chat/looping/loop_runner.rs"): "ChatLoopContext",
+        Path("agent/features/runtime/src/application/chat/looping/loop_runner.rs"): "ChatLoopContext",
     }
     for path, target_name in targets.items():
         full = root / path

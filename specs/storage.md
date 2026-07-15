@@ -16,7 +16,7 @@
 
 ## Session 落盘策略（#636 / #680）
 
-会话状态由 `agent/features/runtime/src/business/session/` 管理（注意：session 不在 `agent/features/storage/**` 下）。落盘策略如下：
+会话编排位于 `agent/features/runtime/src/application/chat/`，会话领域与持久化能力由 Context/Storage Published Language 提供（注意：Runtime 不拥有独立 Session 状态机）。落盘策略如下：
 
 - **turn-level save（核心）**：每轮 turn 完成进入 Idle 前，同步调用 `save_chain(&chain)`，保证已完成 turn 立即落盘。即使进程被 `kill -TERM` 或意外退出，最多丢失正在跑的那一轮。
 - **loop-exit save（兜底）**：`process_chat_loop` 返回最终 chain → spawn task 写回 `current_chain` → `save_session_from_handle` 落盘。

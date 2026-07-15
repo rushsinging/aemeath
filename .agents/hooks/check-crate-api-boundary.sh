@@ -34,6 +34,10 @@ API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
+# Runtime 的目标 façade 位于 crate 根；只放行 Composition 实际消费的窄入口。
+ROOT_ACCESS_ALLOW = {
+    "runtime": {"AgentClientImpl", "from_args"},
+}
 
 path_pattern = re.compile(
     r"(?<![A-Za-z0-9_:])(?:::)?("
@@ -113,6 +117,8 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
             continue
+        if segment in ROOT_ACCESS_ALLOW.get(target, set()):
+            continue
         if segment != "api":
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use {target}::api"
@@ -136,6 +142,8 @@ def check_cross_crate_line(
             if not item_name:
                 continue
             if item_name in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
+                continue
+            if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
             if item_name != "api":
                 violations.append(

@@ -1,6 +1,6 @@
 # 配置分层 / Claude Code 兼容
 
-**Scope**：`agent/shared/src/config/**`、`agent/features/runtime/src/core/config_app_service.rs`、`agent/features/runtime/src/core/config_port.rs`——配置分层、provider 默认值（base URL / 默认 model / env 名）、Claude Code 兼容、运行时路径。
+**Scope**：`agent/shared/src/config/**`、`agent/features/runtime/src/application/config_app_service.rs`、`agent/features/runtime/src/ports/config.rs`——配置分层、provider 默认值（base URL / 默认 model / env 名）、Claude Code 兼容、运行时路径。
 **主触发**：改 `agent/shared/src/config/**` 或 `config_app_service.rs` / `config_port.rs`。
 **次触发**：新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级。
 
@@ -16,7 +16,7 @@ Domain 层 (share/config/domain/)
   - ConfigPatch + PriorityChain 合并策略
   - driver_env driver→API key env name 映射
 
-Port 层 (runtime/core/config_port.rs)
+Port 层 (runtime/ports/config.rs)
   ConfigReader trait（async snapshot + watch）
   ※ async_trait 是行为，不属于 share kernel
 
@@ -25,7 +25,7 @@ Adapter 层 (share/config/adapter/)
   - EnvAdapter 唯一业务 env 读取点
   - CliArgsAdapter / FileAdapter / ClaudeSettingsAdapter（stub）
 
-Application Service (runtime/core/config_app_service.rs)
+Application Service (runtime/application/config_app_service.rs)
   ConfigAppService 编排 adapter 链 load/merge/watch/update/reload
   resolve_provider_api_keys：per-provider API key 从 env 注入
 ```
