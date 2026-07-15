@@ -269,7 +269,23 @@ Rule: update-apply-requires-verified-plan
 Deny: installer accepting raw URL/version or publicly constructible plan without VerifiedUpdatePlan
 ```
 
-## 11. 相关文档
+## 11. Target 目录决策
+
+| 属性 | 值 |
+|---|---|
+| Target 结构 | 扁平 update 能力 + source/installer 技术目录 |
+| 父级判据 | [02-modules/README.md](../README.md) 目录结构决策矩阵 |
+| 系统级依据 | [代码组织规范](../../01-system/06-code-organization.md) §3.1–§3.7；扁平叶子 §3.2 + 技术目录 §3.7 |
+
+**理由**：
+
+`check`、`plan`、`apply` 共同守护同一 `VerifiedUpdatePlan` 与安装事务，三者总是锁步变化——没有独立词汇、独立状态所有权或独立测试夹具，因此 **MUST** 保持单能力扁平，**NEVER** 递归竖切。
+
+Release Source（GitHub Releases / 签名 manifest）和平台 installer 是两个独立的外部技术 seam：不同 Release Source 拥有不同的 wire type、rate-limit header 和 DTO 映射；不同平台的 installer 拥有不同的原子替换原语、临时路径策略和跨进程锁。两者各自形成多文件共同变化且需与其余能力隔离，因此 **MAY** 采用 `source/` 与 `installer/` 技术目录。目录边界 **MUST** 私有，wire type 不得泄漏到模块 façade。
+
+模块根 `lib.rs`（或等效 façade）只受控 re-export `VersionCheck`、`UpdateResult`、`UpdateError` 等 Published Language；CLI/TUI **NEVER** 直接依赖 Release Source adapter 或 platform installer 内部类型。
+
+## 12. 相关文档
 
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
 - Config 目标设计：[../config/README.md](../config/README.md)
@@ -282,3 +298,4 @@ Deny: installer accepting raw URL/version or publicly constructible plan without
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 摘要初稿：typed channel、检查缓存、Release ACL、可信 UpdatePlan 与安装事务 | #793 |
+| 2026-07-16 | 新增 Target 目录决策：扁平 update 能力 + source/installer 技术目录，理由与边界 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

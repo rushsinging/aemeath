@@ -5,7 +5,7 @@
 //! actively calling `TaskList`.
 
 use share::message::{ContentBlock, Message, Role};
-use storage::api::{TaskStatus, TaskStore};
+use storage::{TaskStatus, TaskStore};
 
 /// How many turns since last TaskCreate/TaskUpdate before injecting the FIRST reminder.
 /// Shorter than TURNS_SINCE_WRITE so early follow-ups trigger a reminder sooner.
@@ -161,7 +161,7 @@ impl Default for TaskReminderState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use storage::api::TaskStatus;
+    use storage::TaskStatus;
 
     fn reminder_text(message: &Message) -> String {
         message.text_content()

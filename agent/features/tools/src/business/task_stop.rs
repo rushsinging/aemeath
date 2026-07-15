@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_stop::{TaskStopInput, TaskStopResult};
 use std::sync::Arc;
-use storage::api::{TaskStatus, TaskStore};
+use storage::{TaskStatus, TaskStore};
 
 pub struct TaskStopTool {
     pub store: Arc<TaskStore>,

@@ -267,11 +267,8 @@ pub async fn execute_memory(args: &str, cwd: &str, mem: &MemoryConfig) -> (Strin
 ///
 /// 接收已由调用方（composition 层）解析好的 `MemoryConfig`，避免 business 层
 /// 反向依赖 core 的 ConfigAppService（COLA 分层：business 不得依赖 core）。
-async fn open_memory_store(
-    cwd: &str,
-    mem: &MemoryConfig,
-) -> Result<storage::api::MemoryStore, String> {
-    use storage::api::{memory_base_dir, project_file_name, MemoryStore};
+async fn open_memory_store(cwd: &str, mem: &MemoryConfig) -> Result<storage::MemoryStore, String> {
+    use storage::{memory_base_dir, project_file_name, MemoryStore};
 
     if !mem.enabled {
         return Err("Memory 系统已禁用。".to_string());

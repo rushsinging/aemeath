@@ -256,7 +256,25 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 - **MUST NOT** 让用户配置非法 HookPoint 能力组合。
 - **MUST NOT** timeout 后遗留未回收子进程。
 
-## 10. 相关文档
+## 12. Target 物理目录
+
+Hook 拥有单一 Hook dispatch 能力：匹配、重试、directive 语义和类型化协议围绕同一 `HookPort.dispatch` 用例紧密变化，不构成可独立演进的子能力，因此 Hook **NEVER** 创建 `capabilities/`——该目录只用于已证明的业务竖切（[代码组织规范 §3.3](../../01-system/06-code-organization.md)）。进程执行（spawn/wait/timeout/kill、env_clear 白名单）和类型化协议（HookInvocation 枚举与各 point payload）是同一 dispatch 能力的技术 detail，按 [§3.7](../../01-system/06-code-organization.md) 组织为诚实命名的技术目录：
+
+```text
+hook.rs                    # 窄 façade：HookPort trait + dispatch 入口
+hook/
+├── dispatch.rs            # 订阅匹配、order 排序、Block 短路、context 合并、UpdatedInput 串联
+├── metadata.rs            # HookPointMetadata / HookClass / 能力矩阵
+├── subscription.rs        # HookSubscription / HookMatcher / HookFailurePolicy
+├── protocol.rs            # HookInvocation 枚举 + HookOutcome / HookDirective / HookExecution
+├── protocol/              # 仅在各 point typed payload 已独立变化时展开
+├── executor.rs            # 单 Hook 子进程执行：spawn/wait/timeout/kill 回收
+└── executor/              # 仅在 env_clear / stdout·stderr 截断 / 回收已独立变化时展开
+```
+
+扁平核心（`dispatch.rs`、`metadata.rs`、`subscription.rs`）承载 dispatch 的匹配、排序、directive 聚合与失败策略语义。`protocol/` 是类型化协议的技术实现：HookInvocation 变体与各 point input payload 的 wire 映射；`executor/` 是进程执行的技术实现：子进程 spawn、timeout kill 回收、env_clear 白名单与输出截断。两者 **MUST** 私有，hook wire type 和进程安全 detail **NEVER** 泄漏到 façade 之外。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录（[§3.7](../../01-system/06-code-organization.md)）。
+
+## 13. 相关文档
 
 - Run Loop 集成：[01-run-loop-integration.md](01-run-loop-integration.md)
 - Runtime 状态机：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
@@ -269,3 +287,4 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：单 HookPort、类型化协议、失败策略与 3 次执行重试 | #790 |
+| 2026-07-16 | 冻结 Hook Target 物理目录：扁平核心 + `protocol/`（类型化协议）与 `executor/`（进程执行）技术目录；明确不建 `capabilities/`（单一 dispatch 能力无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

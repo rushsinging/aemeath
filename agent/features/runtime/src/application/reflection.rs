@@ -61,21 +61,21 @@ impl ReflectionEngine {
 
     pub fn apply_suggestions(
         suggestions: &[MemorySuggestion],
-        store: &mut storage::api::MemoryStore,
+        store: &mut storage::MemoryStore,
     ) -> ReflectionResult<usize> {
         apply::apply_suggestions(suggestions, store)
     }
 
     pub fn apply_output(
         output: &ReflectionOutput,
-        store: &mut storage::api::MemoryStore,
+        store: &mut storage::MemoryStore,
     ) -> ReflectionResult<ReflectionApplyResult> {
         apply::apply_output(output, store)
     }
 
     pub fn apply_outdated(
         ids: &[String],
-        store: &mut storage::api::MemoryStore,
+        store: &mut storage::MemoryStore,
     ) -> ReflectionResult<usize> {
         apply::apply_outdated(ids, store)
     }

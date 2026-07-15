@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 /// #567 S5：gate 测试用 task_store（run_loop_gate 新增参数）
-pub(super) fn test_task_store() -> storage::api::TaskStore {
-    storage::api::TaskStore::new()
+pub(super) fn test_task_store() -> storage::TaskStore {
+    storage::TaskStore::new()
 }
 
 /// Mock port backed by tokio mpsc; supports both drain and blocking recv.

@@ -52,7 +52,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use storage::api::TaskStore;
+    use storage::TaskStore;
     use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
     #[derive(Default)]

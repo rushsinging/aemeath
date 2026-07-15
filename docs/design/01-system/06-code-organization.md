@@ -40,7 +40,7 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 1. **MUST** 先确定能力所有者，再决定文件位置。无法说清所有者的代码 **NEVER** 进入通用共享目录。
 2. 能力模块 **MUST** 默认私有，只通过一个窄 façade 暴露稳定命令、查询、事件或 Published Language。
 3. 模块内部条目 **SHOULD** 默认使用私有或受限可见性；只有真实消费者需要的稳定表面才 **MAY** `pub`。Rust 的默认私有、`pub(crate)` / `pub(super)` 与受控 `pub use` 规则见 [Rust Reference](https://doc.rust-lang.org/reference/visibility-and-privacy.html)。
-4. 一次用例变化需要共同修改的策略、校验、局部类型和测试 **SHOULD** 共置；仅因代码“类型相同”而分散到全局技术目录是 **NEVER** 允许的组织依据。
+4. 一次用例变化需要共同修改的策略、校验、局部类型和测试 **SHOULD** 共置；仅因代码“类型相同”而分散到全局技术目录是 **NEVER** 允许的组织依据。一个 BC 经 §3.1 证明需要递归竖切时，业务切片 **MUST** 统一收在该模块的 `capabilities/` 下；单能力模块 **NEVER** 为形式一致预建空 `capabilities/`。
 5. 跨能力依赖 **MUST** 只指向对方公开 façade 或 Published Language，**NEVER** 直接引用对方内部实现。
 6. 当确认稳定能力策略若不抽象便会依赖易变外部细节时，该策略 **MUST** 定义目的性出站 port；供其他能力调用的入站 façade / OHS **MUST** 由供应能力发布。尚未形成真实边界时，模块 **MAY** 保持私有具体依赖，但**该私有具体 detail 只能由持有它的 adapter / detail 内部代码使用**，模块的稳定策略层 **NEVER** 依赖它；该依赖也 **NEVER** 让其越过能力 façade，也 **NEVER** 预建 port。
 7. 具体实现选择与 factory 调用 **MUST** 收敛到 Composition Root；能力 **MAY** 用 composition-only opaque factory 构造模块私有 detail，但内部 **NEVER** 自行读取全局配置、选择候选生产实现或从业务路径触发 factory；**factory 只限生产代码路径**，测试代码 **MAY** 绕过 factory 与 Composition Root 直接构造轻量 fake / stub 实现注入被测策略。
@@ -50,7 +50,7 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 ## 3. 按证据启用的结构选项
 
 ```text
-基础粒度：扁平能力模块 → 内聚的用例 / 能力子模块
+基础粒度：扁平能力模块 → capabilities/ 下的内聚用例 / 稳定能力切片
 独立选项：
   ├── 可选：跨用例共享不变量的 model
   ├── 可选：真实外部 seam 的 port
@@ -58,7 +58,9 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
   └── 可选：满足至少一个强边界收益的 crate
 ```
 
-这是一组按证据触发的升格选项，**NEVER** 是每个模块必须走完的成熟度等级。基础粒度先递归选择扁平模块或用例 / 能力子模块；model、port、CQRS-lite、REPR、技术目录和 crate **MUST** 分别独立评估，可以任意组合，也可以永远不出现。证据消失后结构 **SHOULD** 降级或合并。
+这是一组按证据触发的升格选项，**NEVER** 是每个模块必须走完的成熟度等级。基础粒度先递归选择扁平模块或 `capabilities/` 下的用例 / 稳定能力切片；model、port、CQRS-lite、REPR、技术目录和 crate **MUST** 分别独立评估，可以任意组合，也可以永远不出现。证据消失后结构 **SHOULD** 降级或合并。
+
+`capabilities/` 是**已决定递归竖切之后**的统一物理容器，不是判定能力是否成立的证据，也不是 Hexagonal 的同义词。Hexagonal 只决定 inside/outside、port 所有权与依赖方向；它 **NEVER** 自动要求 `domain/application/ports/adapters` 目录。Agent Runtime 是经模块战术设计冻结的显式例外：其单一执行能力继续使用 `domain/application/ports/adapters` 物理结构；该例外 **NEVER** 推导为其他 BC 的模板。
 
 ### 3.1 递归选择能力粒度
 
@@ -68,6 +70,7 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 2. 当一个模块已有三个或更多候选能力时，**SHOULD** 触发递归竖切评审；“三个”只是防止大包被横向铺开的启发式信号，**NEVER** 替代上述能力证据。
 3. 两个候选能力若总是锁步变化、共享同一状态所有权且无法形成窄入口，**MUST** 先保持同一叶子，**NEVER** 为满足数量阈值强拆。
 4. 递归竖切只决定 module / use-case 粒度；是否增加 model、port、技术目录、CQRS-lite、REPR 或 crate **MUST** 分别按后续小节独立判断。
+5. 一旦判定需要递归竖切，切片 **MUST** 位于模块私有 `capabilities/` 下；模块根 façade 只受控 re-export 稳定 Published Language，切片之间 **NEVER** 穿透内部实现。
 
 ### 3.2 叶子：扁平能力模块
 
@@ -84,14 +87,15 @@ capability/
 - **NEVER** 为对称美观预建空目录。
 - 当一次修改经常跨越三个以上互不相关的职责，或不同用例拥有独立词汇、状态与测试夹具时，**SHOULD** 回到 §3.1 递归划分能力。
 
-### 3.3 叶子：用例或稳定能力子模块
+### 3.3 叶子：`capabilities/` 下的用例或稳定能力切片
 
-子模块名称 **MUST** 表达用例或稳定能力，例如 `start_run`、`tool_coordination`、`stream_completion`，**NEVER** 只表达代码的技术形态。
+切片名称 **MUST** 表达用例或稳定能力，例如 `session`、`compact`、`atomic_blob`，**NEVER** 只表达代码的技术形态。凡 §3.1 判定为递归竖切，**MUST** 使用统一容器：
 
 ```text
-capability.rs
-capability/
-├── create_item.rs
+lib.rs                         # 模块窄 façade
+capabilities.rs                # 私有切片注册，不承载业务逻辑
+capabilities/
+├── create_item.rs             # 切片 façade、用例及局部类型
 ├── create_item/
 │   └── validation.rs
 ├── inspect_item.rs
@@ -99,9 +103,12 @@ capability/
     └── projection.rs
 ```
 
-- 当一组文件因同一业务变化共同修改、可独立测试且对外只需一个入口时，**SHOULD** 引入用例子模块。
-- 只有一个函数或只有文件长度变化、但无独立词汇与行为边界时，**NEVER** 为其创建子模块。
+- `capabilities.rs` 与 `capabilities/` **MUST** 私有；跨 BC 消费只经 crate/module 根 façade 或所有者发布的 PL。
+- 当一组文件因同一业务变化共同修改、可独立测试且对外只需一个入口时，**SHOULD** 引入切片。
+- 只有一个函数或只有文件长度变化、但无独立词汇与行为边界时，**NEVER** 为其创建切片。
 - 两个切片出现相似代码时，**MUST** 先判断它是偶然相似还是共同不变量；**NEVER** 仅为消除几行重复就建立共享核心。
+- 切片内部仍 **MAY** 按证据拥有局部 model、目的性 port 或技术 adapter；**NEVER** 把这些局部 seam 提升为模块级固定横向目录。
+- Agent Runtime 不适用本物理容器；其经批准的 `domain/application/ports/adapters` 结构以 Runtime 模块战术设计为唯一真相源。
 
 ### 3.4 可选 `model.rs` / `model/`
 
@@ -372,9 +379,9 @@ components/foo/
 ### 6.1 先选基础粒度
 
 1. **MUST** 先用统一语言说明能力所有者；无法说明所有者时，**MUST** 停止并重新划定边界。
-2. 单一用例或紧密行为 **MUST** 选择扁平模块；已有独立词汇、共同变化与测试边界时，才 **SHOULD** 选择用例 / 能力子模块。大包若出现三个或更多候选能力，**SHOULD** 按 §3.1 递归复查，但最终仍以能力证据而非数量决定。
+2. 单一用例或紧密行为 **MUST** 选择扁平模块；已有独立词汇、共同变化与测试边界时，才 **SHOULD** 选择 `capabilities/` 下的用例 / 稳定能力切片。大包若出现三个或更多候选能力，**SHOULD** 按 §3.1 递归复查，但最终仍以能力证据而非数量决定。
 
-这一步只决定扁平或子模块粒度，**NEVER** 预先决定是否需要 model、port、CQRS-lite、REPR、技术目录或 crate。
+这一步只决定扁平或 `capabilities/` 切片粒度，**NEVER** 预先决定是否需要 model、port、CQRS-lite、REPR、技术目录或 crate；Runtime 的已冻结例外结构不在此步骤重新判定。
 
 ### 6.2 独立评估六类可选结构
 
@@ -404,7 +411,7 @@ components/foo/
 | 先 module privacy，存在强边界收益时再 crate | [Rust visibility](https://doc.rust-lang.org/reference/visibility-and-privacy.html)；[Go module layout](https://go.dev/doc/modules/layout)；aemeath §3.8 | 来源支持默认私有、受限公开与简单起步；生命周期、平台、发布、审计等强边界收益是 aemeath 的综合工程决策 | Go 目录约定；为每个能力预建 crate；不把本地判据冒充来源原文 |
 | crate **MUST** 承载 §3.8 的强边界收益 | [rust-analyzer architecture](https://rust-analyzer.github.io/book/contributing/architecture.html)；[Helix workspace](https://github.com/helix-editor/helix/blob/master/Cargo.toml) | rust-analyzer 的 façade / API boundary；Helix 的 subsystem-named crates 与 Cargo dependency graph；能力判定是 aemeath 的综合推论 | 按参考项目的 crate 数量或内部流水线照抄 |
 | 边界规则 **MUST** 机械验证 | [Spring Modulith verification](https://docs.spring.io/spring-modulith/reference/verification.html)；[Chromium components](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/components/README.md) | 环检查、允许依赖、公开面与构建图 | Spring / GN 专属工具和 Chromium 组织规模 |
-| 递归能力拆分，叶子按证据塑形 | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 大包继续按独立词汇、变化原因、状态与测试边界竖切；叶子按复杂度选择结构 | 固定层级深度；以文件数或“三个”阈值机械拆分 |
+| 递归能力拆分，竖切统一进入 `capabilities/`，叶子按证据塑形；Runtime 保留经战术设计冻结的 Hexagonal 物理结构例外 | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 大包继续按独立词汇、变化原因、状态与测试边界竖切；统一容器改善导航，叶子仍按复杂度选择结构 | 以文件数或“三个”阈值机械拆分；把 `capabilities/` 当成边界证据；把 Runtime 例外推广成全仓模板 |
 | CQRS-lite / REPR 按证据启用 | [Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice)；[Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/) | 读写模型真实分叉时拆契约；异构且频繁变化的 HTTP 端点才按端点共置 | 默认双套 repository；所有 route 一端点一目录 |
 | **拒绝：所有能力采用固定横向目录模板** | [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)；[Microsoft DDD guidance](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/ddd-oriented-microservice) | 保留依赖方向；复杂领域按需隔离 | 拒绝原因：把示意层误当目录，会给小模块增加仪式并掩盖能力边界 |
 | **拒绝：纯切片、永不共享 model** | [Vertical Slice Architecture](https://www.jimmybogard.com/vertical-slice-architecture/)；[DDD Reference](https://www.domainlanguage.com/ddd/reference/) | 保留变化局部性 | 拒绝原因：跨用例真实不变量会复制并漂移，必须允许共同模型按证据出现 |
@@ -430,3 +437,4 @@ components/foo/
 | 2026-07-15 | 修复评审 #14：§3.5 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §2/§3.5 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.5 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.8 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 投影明确递归竖切且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-16 | 统一递归竖切的物理容器为私有 `capabilities/`；明确 Hexagonal 不等于目录模板，Runtime 保留经战术设计冻结的 `domain/application/ports/adapters` 例外 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
