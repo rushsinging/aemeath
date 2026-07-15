@@ -83,7 +83,9 @@ struct ContextAppend {
     run_id: RunId,
     step_id: RunStepId,                 // append 幂等键的一部分
     source_request_id: ContextRequestId,
-    messages: Vec<Message>,             // pending inputs → assistant → 原 ToolCall 顺序的最终 results
+    finalize_cause: FinalizeCause,      // Completed | UserCancelledStep | RunTerminated
+    messages: Vec<Message>,             // finalized projection：inputs → assistant → 原序 terminal results
+    receipts: Vec<StepReceipt>,         // deterministic Tool/Agent receipt；可含 CancellationUnconfirmed
     api_input_tokens: Option<u64>,
 }
 
@@ -139,7 +141,9 @@ struct CalendarDate(String);             // ISO-8601 calendar date；一次 buil
 
 `ContextRequest` 只承载一次 window build 的不可变输入。Runtime 的 `context_coordination` 从 `TaskAccess::reminder_snapshot` 读取 Task-owned PL 后原样传入；Context Management 独占最终文本、位置与 token budget。PromptPipeline **NEVER** 读取 Task，Context Management 也 **NEVER** 因 reminder 获得 Task mutation / restore authority。`CalendarDate` 由 Runtime request builder 从注入的时钟取得并在本次 build 冻结，Prompt capability **NEVER** 读取进程全局时钟。
 
-Runtime **NEVER** 把 Session 历史塞回 request：Context implementation 从自身稳定 backing 读取已提交历史，再在本次 candidate 尾部拼接 `pending_messages`。每个完成的 RunStep 恰好调用一次 `append_and_persist`；实现以 `(run_id, step_id)` 幂等，重复相同 append 返回成功，内容冲突的重复键返回 typed error。`ContextAppend.messages` 只有在 model response、全部 Tool suspension/approval 都收敛为 final result 后才提交，因此不会持久化半个 step。
+Runtime **NEVER** 把 Session 历史塞回 request：Context implementation 从自身稳定 backing 读取已提交历史，再在本次 candidate 尾部拼接 `pending_messages`。每个 finalized RunStep 恰好调用一次 `append_and_persist`；finalized projection 由 Runtime 唯一 `StepFinalizer` 在 `Completed | UserCancelledStep | RunTerminated` 三种原因下生成。实现以 `(run_id, step_id)` 幂等，重复相同 append 返回成功，内容冲突的重复键返回 typed error。
+
+普通完成路径必须在 model response 与全部 Tool suspension/approval 收敛为 final result 后提交。控制路径可提交 finalizer 明确冻结的 partial assistant 与 deterministic Tool/Agent receipts，并为 deadline 内未确认停止的工作保存 `CancellationUnconfirmed`；这类内容已是协议完整的 finalized partial，而不是 Run checkpoint。`ContextAppend` **NEVER** 携带 RunStatus、RunStepStatus、活跃 future、Sub 完整消息链或 cancellation scope。
 
 `ContextRequest → PromptRequest` 的映射是 Context-owned 纯函数，字段不得旁路重取：
 

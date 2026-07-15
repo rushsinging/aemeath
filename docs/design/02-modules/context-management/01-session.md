@@ -104,12 +104,14 @@ Session（对话历史容器，跨多次输入）
 ```
 
 - **一个 Session 含多个 Run 的对话产出**（Main 每次用户输入 → 一个 Run → 追加一个 Normal 段）
-- **Run 读写 Session**：经 `ContextPort` 读历史构建 Context Window；每个 RunStep 结束后对话追加并落盘到 Session
+- **Run 读写 Session**：经 `ContextPort` 读历史构建 Context Window；每个 RunStep 经唯一 `StepFinalizer` 收口为 finalized projection 后追加并落盘到 Session
 - Run 是内存态执行；Session 是持久化数据——两者生命周期不同（Run 短、Session 长）
 
 ## 6. RunStep 持久化边界
 
-Session 采用 **per completed RunStep** 提交：一个 RunStep 的 model response 与该 response 发起的全部 Tool Call 都收敛为最终 outcome 后，Runtime 构造唯一不可变 `ContextAppend`，Context Management 以 `(run_id, step_id)` 为幂等键追加 ChatChain、收集跨 BC snapshot 并原子落盘。RunStep 是否继续下一次 model invocation 与 Session 是否保存已完成对话事实是两件事；Tool 业务失败是可持久化的最终 outcome，**NEVER** 等同于整批提交失败。
+Session 采用 **per finalized RunStep** 提交：一个 RunStep 无论普通完成、接受 `CancelRunStep`，还是随 `TerminateRun` 收口，都先由 Runtime 唯一 `StepFinalizer` 形成不可变 finalized projection，再构造唯一 `ContextAppend`。Context Management 以 `(run_id, step_id)` 为幂等键追加 ChatChain、收集跨 BC snapshot 并原子落盘。`FinalizeCause` 只允许 `Completed | UserCancelledStep | RunTerminated`；它描述本次对话事实为何收口，不把 Run 状态机迁入 Session。
+
+普通完成路径必须等待 model response 与该 response 发起的全部 Tool Call 收敛为 final outcome。控制路径则在共享绝对 deadline 内尽力收口，允许把已确认事实、finalizer 明确冻结的 partial assistant、deterministic Tool/Agent receipt 与 `CancellationUnconfirmed` 作为协议完整的 finalized projection 提交。**finalized partial Step 是已提交对话事实，不是可恢复的 Runtime 中间态。**
 
 ### 6.1 落盘内容
 
@@ -117,10 +119,12 @@ Session 采用 **per completed RunStep** 提交：一个 RunStep 的 model respo
 
 - Session identity、完整 metadata、`created_at`、`updated_at` 与 schema version；
 - ChatChain / ChatSegment、提交后的 `SessionRevision`；
-- 当前 Step 已纳入上下文的 pending user inputs；
-- model 产生的完整 assistant message 与 Tool Call 声明；
-- 每个 Tool Call 的最终 `ToolOutcome`，包括 Success、业务 Failure、Denied、Cancelled 等可发送给下一次 model invocation 的稳定结果，并按原 ToolCall 顺序排列；
-- Plan approval 等已经收敛为对话事实的 typed decision；
+- 当前 Step 已绑定并由 finalizer 纳入本次提交的 user inputs；尚在 InputBuffer、未绑定 Step 的内容不提升为 Session 事实；
+- 普通完成时的完整 assistant message，或控制收口时由 finalizer 明确冻结的 partial assistant projection；原始 stream delta 不直接落盘；
+- assistant 已声明的 Tool Calls，以及按原 ToolCall 顺序排列的协议完整 terminal results；
+- 普通完成路径中每个 Tool Call 的最终 `ToolOutcome`，包括 Success、业务 Failure、Denied、Cancelled；
+- 控制收口路径中的 deterministic Tool/Agent summary 和 terminal receipt；Safety receipt 至少保留 child/run/tool identity、terminal status、artifact references、可能副作用、未完成调用与 `CancellationUnconfirmed`，Full receipt再包含 completed actions、verified facts 与 remaining work；
+- `FinalizeCause`、适用的 finalization detail，以及 Plan approval 等已经收敛为对话事实的 typed decision；
 - 已提交 Compact segment、summary 与 source revision；
 - `(RunId, RunStepId)` 幂等键、内容 fingerprint 与 committed revision/receipt；
 - 本次提交时收集的 Task Published Snapshot 与 Workspace Published Snapshot；Target writer 即使为空也 **MUST** 显式写出。
@@ -131,20 +135,20 @@ Session 采用 **per completed RunStep** 提交：一个 RunStep 的 model respo
 
 以下执行中间态 **NEVER** 进入 Session：
 
-- Run 聚合、RunSpec active instance、RunStatus 与 RunStepStatus；
-- ToolCall 的 PendingArgs、Ready、AwaitingApproval、Running 等进行态；
-- partial assistant stream、尚未形成完整 assistant message 的 delta；
-- 尚未收敛为最终 outcome 的 Tool future、Tool suspension 与半个并发 batch；
+- Run 聚合、active RunSpec、RunStatus 与 RunStepStatus；`FinalizeCause` 是已提交 projection 的原因标签，不是状态机快照；
+- ToolCall 的 PendingArgs、Ready、AwaitingApproval、Running 等进行态；finalizer 只保存其确定性 terminal projection/receipt；
+- 原始 partial assistant stream 与 delta；只有控制收口时由 finalizer 冻结后的 partial assistant projection 才可落盘；
+- 尚未被 finalizer 收敛或补齐 terminal result 的 Tool future、Tool suspension 与并发 batch；
 - PendingInteraction、typed continuation、waiter、channel 与 UI 临时状态；
 - cancellation token/scope、deadline、retry/backoff attempt 与 Provider HTTP/SSE 连接；
 - RuntimeContext、各 Port 活实例、lease 与 Composition scope；
 - StuckGuard / ToolLoopGuard 计数、临时 token 估算 cache；
-- Sub Run 的执行状态；Sub 最终结果只有作为父 Run Tool Call 的稳定 `ToolOutcome` 时才随父 Step 提交；
+- Sub Run 的执行状态与完整消息链；父 Agent Tool 只保存 child terminal receipt 形成的稳定 Tool result，**NEVER** 把 Sub 私有对话链注入父 Session；
 - Stop Hook Block 后尚未获准提交的 assistant response 与 feedback 驱动的 pending Step。
 
 ### 6.3 并发 Tool 混合结果
 
-同一 RunStep 的 Tool Call **MAY** 并发执行，但收集与提交 **MUST NOT** fail-fast。Runtime 必须等待每个调用收敛为稳定 outcome，再按原 ToolCall 顺序构造单个 `ContextAppend`：
+同一 RunStep 的 Tool Call **MAY** 并发执行，但普通完成路径的收集与提交 **MUST NOT** fail-fast。Runtime 必须等待每个调用收敛为稳定 outcome，再按原 ToolCall 顺序构造单个 `ContextAppend`：
 
 - 一个调用失败 **NEVER** 丢弃、回滚或覆盖同批其他调用已经成功的结果；
 - 尤其 Agent Tool / Sub Run 已消耗大量 token 后成功返回时，即使兄弟 Agent Tool 失败，成功结果仍 **MUST** 作为该 Tool Call 的 final result 进入本 Step 并落盘，使下一次 model invocation 可直接复用；
@@ -153,15 +157,18 @@ Session 采用 **per completed RunStep** 提交：一个 RunStep 的 model respo
 - L1 budget reduction 或大结果外置 **MAY** 改变成功结果的内联表示，但 **NEVER** 把成功事实变成缺失；外置时 Session 必须保存稳定引用与足够的摘要/metadata，供后续读取与判断；
 - 只有 Context 自身的 revision conflict、内容冲突或 durable write 失败才使整个 `append_and_persist` 失败；单个 Tool 的业务 Failure 不属于 Session commit failure。
 
-如果进程在全部 Tool outcome 收敛并完成原子提交前崩溃，该未提交 Step 整体不属于可恢复 Session；系统仍遵循“不持久化 Run 中间态”，**NEVER** 为保住进行中调用引入 Tool/Run checkpoint。这里保证的是正常并发收口和单个调用失败时不浪费其他成功结果，不承诺崩溃下的 exactly-once。
+控制路径复用相同顺序与“成功事实不可丢”不变量，但不无限等待：`CancelRunStep` 最长 10s，`TerminateRun` 最长 5s，嵌套 Agent 共用控制请求创建的同一绝对 deadline。deadline 内成功返回的 Tool/Agent 结果 **MUST** 保留；未确认停止的调用由 finalizer 补齐 `CancellationUnconfirmed` receipt，而不是删除整个 batch。父 Step 取消对 Agent Tool 传播 child `TerminateRun`；父 Session 只保存 child terminal receipt 形成的 Tool result，不保存 child 完整消息链，也不为摘要额外调用 LLM。
+
+如果进程在 finalized projection 完成原子提交前崩溃，该未提交 Step 不属于可恢复 Session；系统仍遵循“不持久化 Run 中间态”，**NEVER** 为保住进行中调用引入 Tool/Run checkpoint。这里的 finalized partial 只有在 `StepFinalizer` 收口且 `append_and_persist` 成功后才成为 durable 对话事实，不承诺崩溃下的 exactly-once。
 
 ### 6.4 提交与恢复语义
 
 - 相同 `(run_id, step_id)` 与相同 fingerprint 的重试 **MUST** 幂等返回原 committed receipt；
 - 相同幂等键但内容不同 **MUST** 返回 typed conflict，**NEVER** 覆盖已提交结果；
-- durable handoff 前允许取消；handoff 后提交由 cancellation-shielded owned task 跑到明确结果；
-- commit 成功后 Runtime 才能 `mark_step_persisted`，该 Step 不再属于 cancellation rollback 的 partial；
-- 恢复只加载最后一个完整 committed revision。未提交 Step 不重放，新输入创建全新 Run。
+- durable handoff 前允许取消并转入 StepFinalizer；finalizer 完成 handoff 后提交由 cancellation-shielded owned task 跑到明确结果；
+- commit 成功后 Runtime 才能 `mark_step_persisted`，普通完成或 finalized partial Step 从此都不再属于 cancellation rollback；
+- `CancelRunStep` 提交成功后回 `DrainingInput`；`TerminateRun` 还必须 flush 已提交 Session content，未绑定 Step 的 InputBuffer **MAY** 丢弃；
+- 恢复只加载最后一个完整 committed revision，其中可以包含已提交的 finalized partial Step。未提交 Step 不重放，新输入创建全新 Run。
 
 ## 7. Session 恢复边界
 
@@ -234,4 +241,4 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 | 2026-07-11 | 初稿：Session 聚合、ChatChain/ChatSegment、跨 BC 快照组装、与 Run 关系、恢复边界 | #761 |
 | 2026-07-12 | 补充 ContextPort 相关文档交叉引用 | #786 |
 | 2026-07-14 | Session 快照组装改为直接消费 Project-owned WorkspacePersist；以联合 prepare / gate 内无失败 commit 原子切换 Task、Workspace、Memory 与 Session identity，并复用 active Main session slot scope | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 明确 per completed RunStep 的落盘/不落盘矩阵、幂等提交与恢复语义；并发 Tool 混合结果必须保留同批成功 outcome，尤其不得丢弃已消耗 token 的成功 Agent Tool 结果 | [#868](https://github.com/rushsinging/aemeath/issues/868) |
+| 2026-07-15 | 明确 per finalized RunStep 的落盘/不落盘矩阵、幂等提交与恢复语义；普通 mixed outcomes 与控制收口都必须保留同批成功 Agent Tool 结果，并以 deterministic receipt 表达 cancelled/unconfirmed 工作 | [#868](https://github.com/rushsinging/aemeath/issues/868) / [#700](https://github.com/rushsinging/aemeath/issues/700) |
