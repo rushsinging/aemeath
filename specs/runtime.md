@@ -27,6 +27,15 @@
 - **SHOULD** 成本追踪逻辑更新时同步更新 `pricing.rs`。
 - 成本历史落盘在 `~/.agents/cost_history.json`。
 
+## Run Step 控制与 Session 回放（#700）
+
+- **MUST** 日常停止只使用 `CancelRunStep`：立即停止当前 Step scope，异步共用 StepFinalizer 收口，最长 10s，然后固定进入 `DrainingInput`；有输入继续下一 Step，无输入正常 Completed。
+- **MUST** 真正退出使用 `TerminateRun`：取消 Run root scope，共用同一 deterministic Tool/Agent summary 与 StepFinalizer，最长 5s，随后 flush Session 并进入 Terminated。
+- **NEVER** 在 CancelRunStep 或 TerminateRun 收尾时调用 LLM 生成摘要；摘要只能来自 typed Tool/Agent receipts、已确认 partial output、artifact 与固定模板。
+- **MUST** CancelRunStep 与 TerminateRun 使用同一 summary schema、价值门禁、原 ToolCall 顺序和 partial Step 持久化语义。
+- **MUST** Session committed content 是 resume/replay 的唯一数据源；TUI 临时 projection、future/token/waiter 与 InputBuffer 都不是回放源。
+- **MAY** TerminateRun 丢弃尚未进入 Session 的 InputBuffer 内容；这些内容不持久化、不恢复。已经绑定 Step 并提交 Session 的输入不属于 InputBuffer，必须可回放。
+- **MUST** 当前不实现 Force Terminate；deadline 到达后把未确认工作写为 `CancellationUnconfirmed`，继续持久化与 Session flush。
 ## slash 命令系统
 
 - slash 命令的 SDK/TUI 入站路由属于 `application/client`；具体命令能力由对应 Feature 的 Published Language / Tool 提供。
