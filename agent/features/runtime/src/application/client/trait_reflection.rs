@@ -292,7 +292,6 @@ mod tests {
             verbose: false,
             resume: None,
         };
-        let (change_tx, _) = tokio::sync::watch::channel(sdk::ChangeSet::empty());
         let handle = super::super::accessors::RuntimeHandle {
             context,
             cwd,
@@ -314,7 +313,7 @@ mod tests {
             frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_summary: Arc::new(std::sync::Mutex::new(None)),
             workspace: project::api::WorkspaceService::new(std::env::temp_dir()),
-            change_tx,
+            event_sink_factory: Arc::new(|_| panic!("测试不应构造 SDK event sink")),
             session_reminders: Arc::new(std::sync::RwLock::new(
                 share::memory::SessionReminders::new(),
             )),

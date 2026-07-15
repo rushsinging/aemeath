@@ -100,7 +100,7 @@ pub(crate) fn session_summary_from_runtime(session: context::session::Session) -
     }
 }
 
-pub(super) fn workspace_context_to_sdk(
+pub(crate) fn workspace_context_to_sdk(
     workspace: context::session::PersistedWorkspaceContext,
 ) -> WorkspaceContextView {
     WorkspaceContextView {
