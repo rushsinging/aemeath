@@ -127,9 +127,9 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 1. **阅读 Issue**：用 `gh issue view <编号> --repo rushsinging/aemeath` 拉取 issue 标题、labels、完整 body（body 顶部有 `<!-- Migrated from: <source> -->` 标记，可追溯到原 `docs/bug/archived/<id>-<slug>.md` 或 `docs/active.md#<id>`）。设计稿类 issue **SHOULD** 配套阅读 `docs/snapshot/specs/<file>.md`，每份 spec 顶部已写入 `> 对应 Issue: <url>` 指针。
    - **MUST** 检查 issue 是否关联 milestone。未关联 milestone 的 issue **MUST** 先提醒用户关联，**NEVER** 在无 milestone 的情况下直接开 worktree 修改。
    - **MUST** 根据 milestone 版本号定位对应的 `release/vX.Y.Z` 集成分支（见下方「Git 工作流」）。分支不存在时 **MUST** 提醒用户从 `origin/main` 创建并 push。
-2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。方案中的任务必须拆分为单一、具体、可验证的最小步骤（如“修改 A 文件的 B 函数”“为 C 场景添加测试”“运行 cargo clippy”），**NEVER** 使用“实施并验证”这类宽泛任务概括多个步骤。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划；即使是简单改动，也 **MUST** 先给出简明方案，禁止直接开始修改。
+2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。方案 **MUST** 包含测试策略——按 `docs/design/03-engineering/04-testing-and-coverage.md` 的 L0-L5 六层模型选择覆盖证据；bug 修复 MUST 先写复现测试，feature 实现 MUST 先写 TDD 测试。方案中的任务必须拆分为单一、具体、可验证的最小步骤（如“修改 A 文件的 B 函数”“为 C 场景添加测试”“运行 cargo clippy”），**NEVER** 使用“实施并验证”这类宽泛任务概括多个步骤。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划；即使是简单改动，也 **MUST** 先给出简明方案，禁止直接开始修改。
 3. **等待用户明确同意**：在获得用户的明确书面同意（如“同意”、“开始改”）前，**NEVER** 调用 Edit/Write/Bash 等会修改文件或系统状态的工具。如果用户只给出笼统意图（如“修一下”）而未确认具体方案，**MUST** 先呈现方案并等待确认。
-4. **执行与验证**：在 worktree 中实施，worktree **MUST** 基于 issue 所属 milestone 的 `release/vX.Y.Z` 集成分支创建（**NEVER** 直接基于 `main` 开 feature 分支，除非是无 milestone 的紧急修复且经用户确认）。通过编译、测试、clippy 验证后 PR 合入对应 release 分支。
+4. **执行与验证**：在 worktree 中实施，worktree **MUST** 基于 issue 所属 milestone 的 `release/vX.Y.Z` 集成分支创建（**NEVER** 直接基于 `main` 开 feature 分支，除非是无 milestone 的紧急修复且经用户确认）。涉及 `docs/design/**` 目标文档的改动 **MUST** 逐项执行三阶段文档校验：开发前（列出 Target 文档章节与不符合点）→ 开发中（类型/端口/状态机变化时同步校对文档）→ 完成前（差异清单逐项更新为已对齐/已修正/延期；PR Test plan 列出已核对文档）。通过编译、测试、clippy 验证后 PR 合入对应 release 分支。
 5. **用户确认后关闭 Issue**：agent **NEVER** 自行关闭 issue。合并完成后，由用户确认是否关闭；用户确认后，可用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
 
 修复 bug 或实现 feature 时，**MUST** 做根因层面的修正（fact-check），而不是只做最小化补丁绕过症状。应评估相关代码路径、数据流和状态机，确保同类问题不再复发。
