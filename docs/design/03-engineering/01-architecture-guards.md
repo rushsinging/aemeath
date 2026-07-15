@@ -483,7 +483,7 @@
 
 - **位置**：`.agents/hooks/check-production-reachability.sh`，调用 `cargo run --quiet -p xtask -- source-guard`。
 - **功能**：扫描 `agent/`、`apps/`、`packages/` 的 Rust 源码，拦截非 `cfg(test)` 的公开 `*_for_test` / `test_only` 入口、未保护的 `testing` / `fixture(s)` / `fake(s)` 模块，以及超过集中 baseline 的生产 `allow(dead_code)`。
-- **baseline**：`.agents/dead-code-baseline.json` 当前上限 11，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
+- **baseline**：`.agents/dead-code-baseline.json` 当前上限 10，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
 - **public surface**：`source-guard <root> <output>` 可输出按路径和声明排序的 deterministic public surface，仅供 diff review，不承诺 crates.io semver。
 - **执行策略**：当前注册为本地 Stop 守卫，不新增 PR workflow；#1018 根据实测耗时决定后续在线、离线/定时或手动执行。
 
