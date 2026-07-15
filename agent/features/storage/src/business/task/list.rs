@@ -105,17 +105,12 @@ mod tests {
                 subject: format!("task-{id}"),
                 description: String::new(),
                 status: TaskStatus::Pending,
-                active_form: None,
                 owner: None,
                 blocked_by: vec![],
-                blocks: vec![],
                 priority: TaskPriority::Normal,
-                progress: 0,
-                progress_message: None,
                 created_at: 0,
                 updated_at: 0,
                 session_id: None,
-                tags: vec![],
                 batch: 0,
             }
         };

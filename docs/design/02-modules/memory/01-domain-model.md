@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）
-> 本文定义 Memory BC 的领域模型：MemoryEntry 聚合、Layer/Category/Source 枚举、不变量、评分函数、去重与淘汰策略。**只描述目标态**；实现差距记入 `03-engineering/migration-governance.md`。
+> 本文定义 Memory BC 的领域模型：MemoryEntry 聚合、Layer/Category/Source 枚举、不变量、评分函数、去重与淘汰策略。**只描述目标态**；实现差距记入 `03-engineering/03-migration-governance.md`。
 
 ## 1. MemoryEntry 聚合
 

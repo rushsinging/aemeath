@@ -388,8 +388,8 @@ components/foo/
 - 依赖规则与铁律：[05-dependency-rules.md](05-dependency-rules.md)
 - 上下文地图：[03-context-map.md](03-context-map.md)
 - 模块级设计导航：[../02-modules/README.md](../02-modules/README.md)
-- 架构守卫注册表：[../03-engineering/architecture-guards.md](../03-engineering/architecture-guards.md)
-- 迁移治理：[../03-engineering/migration-governance.md](../03-engineering/migration-governance.md)
+- 架构守卫注册表：[../03-engineering/01-architecture-guards.md](../03-engineering/01-architecture-guards.md)
+- 迁移治理：[../03-engineering/03-migration-governance.md](../03-engineering/03-migration-governance.md)
 - 设计目录总览：[../README.md](../README.md)
 
 ## 修改历史

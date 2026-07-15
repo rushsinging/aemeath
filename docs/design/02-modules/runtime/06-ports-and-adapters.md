@@ -364,7 +364,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 ## 6. 契约治理
 
-本文 **MUST** 只定义 Target 契约。Runtime 能力契约、取消链路与 composition-internal workspace scope 的 Current → Target 差距、责任和退出条件 **MUST** 只在 [迁移治理](../../03-engineering/migration-governance.md) 维护，**NEVER** 在本文复制进度表。
+本文 **MUST** 只定义 Target 契约。Runtime 能力契约、取消链路与 composition-internal workspace scope 的 Current → Target 差距、责任和退出条件 **MUST** 只在 [迁移治理](../../03-engineering/03-migration-governance.md) 维护，**NEVER** 在本文复制进度表。
 
 ## 7. 相关文档
 
@@ -376,7 +376,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 - Provider 端口、流与 Invocation Scope：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - Project Workspace 端口与 wiring：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

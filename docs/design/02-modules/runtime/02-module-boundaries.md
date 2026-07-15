@@ -2,7 +2,7 @@
 
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文定义 Agent Runtime 内部的模块划分、各模块的状态所有权、消费的 Port 与依赖方向。**只描述目标态**；Current → Target 差距只见 [Migration Governance](../../03-engineering/migration-governance.md)。
+> 本文定义 Agent Runtime 内部的模块划分、各模块的状态所有权、消费的 Port 与依赖方向。**只描述目标态**；Current → Target 差距只见 [Migration Governance](../../03-engineering/03-migration-governance.md)。
 
 ## 1. 内部模块总览（8 个）
 
@@ -110,7 +110,7 @@ event_projection：被各模块调用（emit），不反向依赖业务
 
 ## 5. 迁移边界
 
-本文的 Target 模块图与依赖规则是验收目标；源码现状、迁移顺序、责任与退出条件 **MUST** 只在 [Migration Governance](../../03-engineering/migration-governance.md) 维护，本文 **NEVER** 复制 Current 类型或进度。
+本文的 Target 模块图与依赖规则是验收目标；源码现状、迁移顺序、责任与退出条件 **MUST** 只在 [Migration Governance](../../03-engineering/03-migration-governance.md) 维护，本文 **NEVER** 复制 Current 类型或进度。
 
 ## 6. 相关文档
 

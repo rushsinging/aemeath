@@ -5,7 +5,10 @@ use share::tool::types::task_create::{TaskCreateInput, TaskCreateResult};
 use std::sync::Arc;
 use storage::api::{TaskPriority, TaskStore};
 
-use super::task_update::is_placeholder;
+/// 判断是否为占位符值：纯空白（如 `""` `"  "`）。
+fn is_placeholder(val: &str) -> bool {
+    val.trim().is_empty()
+}
 
 pub struct TaskCreateTool {
     pub store: Arc<TaskStore>,
@@ -34,7 +37,7 @@ impl TypedTool for TaskCreateTool {
            3. Then create tasks one by one with TaskCreate\n\
            4. Use TaskUpdate to set dependencies and assign agents\n\n\
            After creating tasks, use TaskUpdate to:\n\
-           - Set dependencies (add_blocked_by/add_blocks) between tasks\n\
+           - Set dependencies (blocked_by_id) between tasks\n\
            - Mark as in_progress before starting work\n\
            - Mark as completed when done — the system will show which tasks are unblocked\n\n\
            Use TaskList to discover pending tasks with no unresolved dependencies.\n\
@@ -80,7 +83,6 @@ impl TypedTool for TaskCreateTool {
 
         let subject = args.subject;
         let description = args.description;
-        let active_form = args.active_form;
 
         // Parse priority
         let priority = args
@@ -92,7 +94,7 @@ impl TypedTool for TaskCreateTool {
         // Create task with priority
         let task = self
             .store
-            .create_with_priority(subject, description, active_form, priority)
+            .create_with_priority(subject, description, priority)
             .await;
 
         // Set additional fields if provided — skip blank/placeholder strings to avoid dirty data (#979)
@@ -107,9 +109,6 @@ impl TypedTool for TaskCreateTool {
             if !is_placeholder(&owner) {
                 self.store.update(&task.id, |t| t.owner = Some(owner)).await;
             }
-        }
-        if let Some(tags) = args.tags {
-            self.store.update(&task.id, |t| t.tags = tags).await;
         }
 
         // Get updated task for response

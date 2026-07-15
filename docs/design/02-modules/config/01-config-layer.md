@@ -2,7 +2,7 @@
 
 > 层级：02-modules / config（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#792（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文定义 Config 的分层优先级链、ConfigSnapshot Published Language、Config-owned OHS、project-aware prepare / commit participant、adapter 接入与 reasoning 静态阈值。Config 是通用域 BC；本文**只描述目标态**，实现差距见 [迁移治理](../../03-engineering/migration-governance.md)。
+> 本文定义 Config 的分层优先级链、ConfigSnapshot Published Language、Config-owned OHS、project-aware prepare / commit participant、adapter 接入与 reasoning 静态阈值。Config 是通用域 BC；本文**只描述目标态**，实现差距见 [迁移治理](../../03-engineering/03-migration-governance.md)。
 
 ## 1. 定位
 
@@ -721,7 +721,7 @@ fn resolve_provider_api_keys(config: &mut Config) -> Result<(), ProjectConfigErr
 - Provider 端口（模型 reasoning 配置）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - 上下文地图（Config = 通用域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 系统架构（Composition Root 装配 ConfigAppService）：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
-- Current → Target 迁移责任：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

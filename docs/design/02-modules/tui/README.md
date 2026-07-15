@@ -11,6 +11,7 @@
 | 02 | [model.md](02-model.md) | Conversation / Input / Diagnostic / Session / Config / Workspace 私有核心投影、Runtime 权威状态机、runs / timeline 互补投影、四类 Interaction request-id 状态与 Model 纯净性约束 |
 | 03 | [event-flow-and-acl.md](03-event-flow-and-acl.md) | 唯一 SDK event → TUI DTO → Intent → Change → Effect → result Intent 链、两层 ACL、六 Context 穷尽映射、Runtime-owned interaction id / AgentClient reply、agent_id / sub-agent 路由与门禁 |
 | 04 | [view-layer.md](04-view-layer.md) | block 类型、ViewAssembler 组装、OutputViewCache memo、ViewState（滚动/选区/折叠/动画）、缓存、Render、选区复制与主题 |
+| 05 | [e2e-scenario-testing.md](05-e2e-scenario-testing.md) | 基于 ratatui TestBackend、crossterm 与 insta 的进程内 E2E 场景测试边界、单帧驱动器、Harness、Effect Driver、确定性约束、快照治理、P0/P1 场景矩阵与 CI 门禁 |
 
 ## 定位
 

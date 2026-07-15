@@ -13,7 +13,7 @@
 
 ## 迁移期实现约束
 
-本节只承载开发者当前 **MUST** 遵守的 Project 操作约束。守卫的实际检查行为、常量与白名单见 [Architecture Guards](../docs/design/03-engineering/architecture-guards.md)；Current → Target 差距、责任、进度与退出条件见 [Migration Governance](../docs/design/03-engineering/migration-governance.md)；目标结构判据见 [代码组织规范](../docs/design/01-system/06-code-organization.md)。
+本节只承载开发者当前 **MUST** 遵守的 Project 操作约束。守卫的实际检查行为、常量与白名单见 [Architecture Guards](../docs/design/03-engineering/01-architecture-guards.md)；Current → Target 差距、责任、进度与退出条件见 [Migration Governance](../docs/design/03-engineering/03-migration-governance.md)；目标结构判据见 [代码组织规范](../docs/design/01-system/06-code-organization.md)。
 
 - 守卫替换前，Project 代码 **MUST** 继续使用现行 `business` / `contract` / `gateway` / `api` 边界：领域类型与能力端口归 `business/` 所有，`contract.rs` / `gateway.rs` 只做受控 re-export，`api.rs` 只经 `contract` / `gateway` 发布，`lib.rs` 保持 `business` 私有。
 - `business` **NEVER** 依赖 `contract`。

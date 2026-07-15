@@ -315,7 +315,7 @@ Deny: agent/features/** production code and apps/**
 - Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 依赖规则：[../../01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

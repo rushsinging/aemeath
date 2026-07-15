@@ -2,7 +2,7 @@
 
 > 层级：02-modules / provider（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#788（S2）
-> 本文只描述目标态；签名用于表达职责和不变量，不锁定具体 Rust API。实现差距统一记录在 `03-engineering/migration-governance.md`。
+> 本文只描述目标态；签名用于表达职责和不变量，不锁定具体 Rust API。实现差距统一记录在 `03-engineering/03-migration-governance.md`。
 
 ## 1. 边界语言
 
@@ -330,7 +330,7 @@ struct CapabilityFingerprint(String);
 - 端口、流与 Invocation Scope：[02-ports-stream-and-client-scope.md](02-ports-stream-and-client-scope.md)
 - Runtime Model Invocation：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - 依赖规则：[../../01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

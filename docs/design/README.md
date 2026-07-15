@@ -23,7 +23,7 @@
 
 ## 迁移治理入口
 
-旧路径、退役清单与 Current → Target 迁移进度 **MUST** 只记录在 [`03-engineering/migration-governance`](03-engineering/migration-governance.md)；本目录的 Target 导航 **NEVER** 复刻这些状态。
+旧路径、退役清单与 Current → Target 迁移进度 **MUST** 只记录在 [`03-engineering/migration-governance`](03-engineering/03-migration-governance.md)；本目录的 Target 导航 **NEVER** 复刻这些状态。
 
 ## 阅读路径
 
@@ -40,7 +40,7 @@
 | 理解 capability-first 系统形态、选择性 Hexagonal seam 与唯一组合根 | [04-system-architecture.md](01-system/04-system-architecture.md) + [06-code-organization.md](01-system/06-code-organization.md) |
 | 决定代码应保持扁平、按用例拆分，或何时引入 model / port / 技术目录 / crate | [06-code-organization.md](01-system/06-code-organization.md) |
 | 审查外部 detail、跨能力调用与具体实现装配的依赖方向 | [05-dependency-rules.md](01-system/05-dependency-rules.md) + [06-code-organization.md](01-system/06-code-organization.md) |
-| 新增 / 调整架构守卫、Stop 钩子失败排查 | [03-engineering/architecture-guards.md](03-engineering/architecture-guards.md) |
+| 新增 / 调整架构守卫、Stop 钩子失败排查 | [03-engineering/01-architecture-guards.md](03-engineering/01-architecture-guards.md) |
 | 理解 DDD 方法论 + aemeath 实战案例 | [../DDD/index.html](../DDD/index.html) |
 
 ## 状态约定
@@ -61,8 +61,8 @@
 - 系统架构：[01-system/04-system-architecture.md](01-system/04-system-architecture.md)
 - 依赖规则与铁律：[01-system/05-dependency-rules.md](01-system/05-dependency-rules.md)
 - 代码组织规范：[01-system/06-code-organization.md](01-system/06-code-organization.md)
-- 架构守卫注册表：[03-engineering/architecture-guards.md](03-engineering/architecture-guards.md)
-- 迁移治理：[03-engineering/migration-governance.md](03-engineering/migration-governance.md)
+- 架构守卫注册表：[03-engineering/01-architecture-guards.md](03-engineering/01-architecture-guards.md)
+- 迁移治理：[03-engineering/03-migration-governance.md](03-engineering/03-migration-governance.md)
 - 仓库级工作约束：[../../AGENTS.md](../../AGENTS.md)
 
 ## 修改历史

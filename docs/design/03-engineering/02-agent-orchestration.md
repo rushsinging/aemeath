@@ -2,7 +2,7 @@
 
 > 对应 Issue: https://github.com/rushsinging/aemeath/issues/358
 >
-> 本文档是 **知识储备** 类设计文档：整理 Agent 工程的几条主线（Context / Harness / Loop / Workflow / Graph）与业界取舍，并给出 Issue #358 的 PoC 评估框架。文档 **不直接约束代码**，也**不维护 Current 现状**；当前差距只见 [Migration Governance](migration-governance.md)，目标设计只见 `01-system` / `02-modules`。
+> 本文档是 **知识储备** 类设计文档：整理 Agent 工程的几条主线（Context / Harness / Loop / Workflow / Graph）与业界取舍，并给出 Issue #358 的 PoC 评估框架。文档 **不直接约束代码**，也**不维护 Current 现状**；当前差距只见 [Migration Governance](03-migration-governance.md)，目标设计只见 `01-system` / `02-modules`。
 
 ## 1. 背景与目的
 
@@ -71,7 +71,7 @@ ReAct 的贡献在于证明：**让模型边推理边行动**，比单纯 chain-
 - 循环推进由**代码保证**：`for turn in 0..max_turns`，每轮 = 一次模型调用 + 工具执行 + 结果回填。
 - 停止条件由**协议保证**：provider 返回 `stop_reason: end_turn` 或空 tool_calls 即结束。
 
-aemeath 的主循环整体上体现了这种工程化形态——推理隐式化、循环推进由代码保证、停止条件由协议保证；具体停止机制随迭代持续演进，**不再是**上文示意的有界 `max_turns`：当前 Loop Engine 内置 StuckGuard 用墙钟 TimeoutGuard 兜底替代了 `max_turns`（见 [04-stuck-prevention.md](../02-modules/runtime/04-stuck-prevention.md) L3），具体实现细节与差距 **MUST** 以 [Migration Governance](migration-governance.md) 为准，本文不逐版本追踪。它保留了 ReAct 「推理-行动-观察」循环的本质，但把推理外化为模型对工具的选择，把流程的机械推进交给代码——这正是 Loop Engineering 的核心权衡：**哪些交给模型自由度，哪些用代码锁死**。
+aemeath 的主循环整体上体现了这种工程化形态——推理隐式化、循环推进由代码保证、停止条件由协议保证；具体停止机制随迭代持续演进，**不再是**上文示意的有界 `max_turns`：当前 Loop Engine 内置 StuckGuard 用墙钟 TimeoutGuard 兜底替代了 `max_turns`（见 [04-stuck-prevention.md](../02-modules/runtime/04-stuck-prevention.md) L3），具体实现细节与差距 **MUST** 以 [Migration Governance](03-migration-governance.md) 为准，本文不逐版本追踪。它保留了 ReAct 「推理-行动-观察」循环的本质，但把推理外化为模型对工具的选择，把流程的机械推进交给代码——这正是 Loop Engineering 的核心权衡：**哪些交给模型自由度，哪些用代码锁死**。
 
 ### 2.4 Workflow（显式流程编排）
 
@@ -130,7 +130,7 @@ aemeath 的主循环整体上体现了这种工程化形态——推理隐式化
 
 ## 4. 历史调研盘点（Issue #358 PoC 阶段快照，非当前事实）
 
-> 本节是 Issue #358 PoC 阶段对 `main` 分支代码做的**一次性核对（2026-06）**，记录当时对五条主线成熟度的判断依据，**仅作历史调研留存**，**NEVER** 当作当前代码现状引用——代码持续演进，下表出现过的具体路径、常量、阈值与「基本空白」结论都可能已经过期，其中「Workflow 基本空白」的结论**已确认过期**（现有 `runtime` crate 内的 `reasoning_graph` 模块）。**当前** Current → Target 差距、责任、进度与退出条件 **MUST** 只以 [Migration Governance](migration-governance.md) 为唯一治理真相；Workflow 主线的**当前**设计真相见 [`docs/design/02-modules/workflow/01-reasoning-graph.md`](../02-modules/workflow/01-reasoning-graph.md)。
+> 本节是 Issue #358 PoC 阶段对 `main` 分支代码做的**一次性核对（2026-06）**，记录当时对五条主线成熟度的判断依据，**仅作历史调研留存**，**NEVER** 当作当前代码现状引用——代码持续演进，下表出现过的具体路径、常量、阈值与「基本空白」结论都可能已经过期，其中「Workflow 基本空白」的结论**已确认过期**（现有 `runtime` crate 内的 `reasoning_graph` 模块）。**当前** Current → Target 差距、责任、进度与退出条件 **MUST** 只以 [Migration Governance](03-migration-governance.md) 为唯一治理真相；Workflow 主线的**当前**设计真相见 [`docs/design/02-modules/workflow/01-reasoning-graph.md`](../02-modules/workflow/01-reasoning-graph.md)。
 
 | 主线 | 调研时（2026-06）的判断 | 判断依据（历史快照，不代表现状） |
 |---|---|---|

@@ -8,7 +8,7 @@ fn test_static_prompt_requires_task_update_for_direct_tools() {
 
     assert!(text.contains("BEFORE starting work on a task yourself"));
     assert!(text.contains("Read/Grep/Glob/Bash/Edit/Write"));
-    assert!(text.contains("TaskUpdate(task_id, status=\"in_progress\")"));
+    assert!(text.contains("TaskUpdate(task_id, \"status\", \"in_progress\")"));
     assert!(text.contains("AFTER completing a task yourself"));
     assert!(text.contains("TaskListCreate before TaskCreate"));
     assert!(text.contains("TaskListComplete"));

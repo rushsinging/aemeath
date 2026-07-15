@@ -282,7 +282,7 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 - 领域模型与 ACL：[01-domain-model-and-acl.md](01-domain-model-and-acl.md)
 - Runtime 模块边界：[../runtime/02-module-boundaries.md](../runtime/02-module-boundaries.md)
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

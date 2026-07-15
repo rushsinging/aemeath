@@ -2,7 +2,7 @@
 
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）
-> 本文定义 Run 单一状态机、统一 Loop Engine 骨架，以及"Main 常驻多轮 vs Sub 单次"的输入模型统一。实现差距与退役责任只在 [迁移治理](../../03-engineering/migration-governance.md) 维护。
+> 本文定义 Run 单一状态机、统一 Loop Engine 骨架，以及"Main 常驻多轮 vs Sub 单次"的输入模型统一。实现差距与退役责任只在 [迁移治理](../../03-engineering/03-migration-governance.md) 维护。
 
 ## 1. Run 状态机（唯一，内存态）
 

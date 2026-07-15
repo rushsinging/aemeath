@@ -3,7 +3,7 @@
 > 状态：**已落地** · 维护人：架构组
 > 对应实现：`.agents/aemeath.json` + `.agents/hooks/check-*.sh` + `.agents/hooks/no_mod_rs.sh`
 >
-> 守卫脚本本身是**可执行的运行时真相**——真正的行为、常量与白名单以脚本代码为准。本文档是配套的**人类可读索引**，梳理已启用守卫的脚本行为、常量与白名单，便于查阅、评审与 PR 描述引用；它不覆盖脚本、也不是脚本之外的第二真相源。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档对应小节；本文档与脚本不一致时，**以脚本的可执行语义为准**，并在本文档 PR 中说明差异原因。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](migration-governance.md) 为唯一治理真相。
+> 守卫脚本本身是**可执行的运行时真相**——真正的行为、常量与白名单以脚本代码为准。本文档是配套的**人类可读索引**，梳理已启用守卫的脚本行为、常量与白名单，便于查阅、评审与 PR 描述引用；它不覆盖脚本、也不是脚本之外的第二真相源。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档对应小节；本文档与脚本不一致时，**以脚本的可执行语义为准**，并在本文档 PR 中说明差异原因。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](03-migration-governance.md) 为唯一治理真相。
 
 ## 概述
 
@@ -80,7 +80,7 @@
 | `logging` | ∅ |
 | `utils` | ∅ |
 
-> **Memory BC 当前物理落点**：Memory 领域逻辑当前位于 `share` crate（`share::memory::*`），不是独立 crate。Runtime 经 `share` 间接消费 Memory 能力。独立 Memory crate 的升塑见 [migration-governance.md](migration-governance.md) M5/M8。
+> **Memory BC 当前物理落点**：Memory 领域逻辑当前位于 `share` crate（`share::memory::*`），不是独立 crate。Runtime 经 `share` 间接消费 Memory 能力。独立 Memory crate 的升塑见 [migration-governance.md](03-migration-governance.md) M5/M8。
 >
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）领域逻辑当前位于 `runtime` crate 内部（`runtime::business::reasoning_graph::*`），不是独立 crate。独立 Workflow crate 的升塑取决于 #972 目录调整后是否拆出。
 
@@ -150,7 +150,7 @@
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
 - **功能**：检查普通 feature 的迁移期固定层目录与层间依赖方向，并对 context feature 应用下述精确顶层目录例外。
 - **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS`、且文件路径未被 `is_test_path` 判定为测试路径的 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非空且不以 `//` 或 `*` 开头的行中的 `crate::<layer>` 引用（`use` 可选）。脚本不解析普通文件内的 `#[cfg(test)]` block，因此其中符合匹配条件的行仍会被扫描；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
-- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
+- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **层定义**：`FEATURE_LAYERS = {contract, gateway, core, business, utils}`。
 - **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature 放行这七个目录；其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
@@ -514,7 +514,7 @@
 
 - 系统级代码组织规范：[../01-system/06-code-organization.md](../01-system/06-code-organization.md)
 - 依赖规则与铁律：[../01-system/05-dependency-rules.md](../01-system/05-dependency-rules.md)
-- Current → Target 迁移跟踪：[migration-governance.md](migration-governance.md)
+- Current → Target 迁移跟踪：[migration-governance.md](03-migration-governance.md)
 - 仓库级工作约束：[../../../AGENTS.md](../../../AGENTS.md)
 
 ## 修改历史

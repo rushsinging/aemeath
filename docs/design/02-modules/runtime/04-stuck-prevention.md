@@ -2,7 +2,7 @@
 
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）
-> 本文定义 Loop Engine 内置的 StuckGuard 四层防线。Main / Sub 通过同一 Loop Engine 获得一致保护；实现差距与退役责任只在 [迁移治理](../../03-engineering/migration-governance.md) 维护。
+> 本文定义 Loop Engine 内置的 StuckGuard 四层防线。Main / Sub 通过同一 Loop Engine 获得一致保护；实现差距与退役责任只在 [迁移治理](../../03-engineering/03-migration-governance.md) 维护。
 
 ## 1. 四层防线总览
 
@@ -80,7 +80,7 @@ StuckGuard 触发是 Run 状态机的一等公民，而非散落的 `if`：
 - 状态机与 Loop：[03-loop-and-state-machine.md](03-loop-and-state-machine.md)
 - 模块边界（StuckGuard 归 loop_engine / ToolLoopGuard 归 tool_coordination）：[02-module-boundaries.md](02-module-boundaries.md)
 - 领域模型（timeout 字段）：[01-domain-model.md](01-domain-model.md)
-- Current → Target 迁移责任：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

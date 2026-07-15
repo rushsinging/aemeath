@@ -620,7 +620,7 @@ fn test_sdk_event_types_only_in_adapter() {
 
 ## 9. 迁移治理边界
 
-本文只定义 Target 契约。实现差距、[#943](https://github.com/rushsinging/aemeath/issues/943) / [#944](https://github.com/rushsinging/aemeath/issues/944) / [#947](https://github.com/rushsinging/aemeath/issues/947) 的责任与退出条件只在 [Migration Governance](../../03-engineering/migration-governance.md) O6 维护；sub-agent 实时事件与 `agent_id` 的产品范围由 [#612](https://github.com/rushsinging/aemeath/issues/612) 承接。
+本文只定义 Target 契约。实现差距、[#943](https://github.com/rushsinging/aemeath/issues/943) / [#944](https://github.com/rushsinging/aemeath/issues/944) / [#947](https://github.com/rushsinging/aemeath/issues/947) 的责任与退出条件只在 [Migration Governance](../../03-engineering/03-migration-governance.md) O6 维护；sub-agent 实时事件与 `agent_id` 的产品范围由 [#612](https://github.com/rushsinging/aemeath/issues/612) 承接。
 
 ## 10. 相关文档
 

@@ -2,7 +2,7 @@
 
 > 层级：02-modules / project（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#791（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文只描述 Project 模块的目标态；实现路径与迁移进度统一见 [Migration Governance](../../03-engineering/migration-governance.md)。
+> 本文只描述 Project 模块的目标态；实现路径与迁移进度统一见 [Migration Governance](../../03-engineering/03-migration-governance.md)。
 
 ## 1. 端口体系
 
@@ -326,8 +326,8 @@ project/src/
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md) §4 / §6 / §8
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Management Session：[../context-management/01-session.md](../context-management/01-session.md)
-- 架构守卫运行时真相：[../../03-engineering/architecture-guards.md](../../03-engineering/architecture-guards.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 架构守卫运行时真相：[../../03-engineering/01-architecture-guards.md](../../03-engineering/01-architecture-guards.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

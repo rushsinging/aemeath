@@ -274,7 +274,9 @@ where
         }
     }
 
-    async fn invoke_model_impl(&mut self) -> Result<ModelStep, LoopEngineError> {
+    async fn invoke_model_impl(
+        &mut self,
+    ) -> Result<(ModelStep, crate::business::loop_engine::StepTokenUsage), LoopEngineError> {
         self.task_reminder_state
             .update_from_messages(self.turn_count as u64, &self.chain.messages_flat());
         let messages_for_api: Vec<Message> = build_api_messages(
@@ -397,6 +399,27 @@ where
         *self.last_api_output_tokens = resp.usage.output_tokens as u64;
         *self.cached_tokens = resp.usage.cached_tokens.map(u64::from);
         *self.reasoning_tokens = resp.usage.reasoning_tokens.map(u64::from);
+
+        let token_usage = crate::business::loop_engine::StepTokenUsage {
+            input_tokens: resp.usage.input_tokens as u64,
+            output_tokens: resp.usage.output_tokens as u64,
+            cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
+            cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
+            reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
+            total_tokens: resp
+                .usage
+                .total_tokens
+                .map(u64::from)
+                .unwrap_or(resp.usage.input_tokens as u64 + resp.usage.output_tokens as u64),
+            context_window: self.context_size as u64,
+            est_system_tokens: effective_system_blocks
+                .iter()
+                .map(|b| context::api::compact::estimate_tokens(&b.text))
+                .sum(),
+            est_tool_tokens: context::api::compact::estimate_tool_schemas_tokens(&tool_schemas),
+            est_message_tokens: context::api::compact::estimate_messages_tokens(&messages_for_api),
+        };
+
         self.sink
             .send_event(RuntimeStreamEvent::Usage {
                 input: resp.usage.input_tokens,
@@ -418,10 +441,13 @@ where
         });
         log_llm_output_and_tool_calls(self.client.provider_name(), &resp, &calls, api_elapsed);
         if !calls.is_empty() {
-            return Ok(ModelStep::Tools {
-                text: resp.assistant_message.text_content(),
-                calls,
-            });
+            return Ok((
+                ModelStep::Tools {
+                    text: resp.assistant_message.text_content(),
+                    calls,
+                },
+                token_usage,
+            ));
         }
 
         if let Some(graph) = self.reasoning_graph.as_mut() {
@@ -484,13 +510,19 @@ where
                     messages: self.chain.messages_flat(),
                 })
                 .await;
-            return Ok(ModelStep::StopHookBlocked {
-                text: resp.assistant_message.text_content(),
-            });
+            return Ok((
+                ModelStep::StopHookBlocked {
+                    text: resp.assistant_message.text_content(),
+                },
+                token_usage,
+            ));
         }
-        Ok(ModelStep::Complete {
-            text: resp.assistant_message.text_content(),
-        })
+        Ok((
+            ModelStep::Complete {
+                text: resp.assistant_message.text_content(),
+            },
+            token_usage,
+        ))
     }
 }
 
@@ -538,7 +570,7 @@ where
     async fn invoke_model(
         &mut self,
         _cancel: &CancellationToken,
-    ) -> Result<ModelStep, LoopEngineError> {
+    ) -> Result<(ModelStep, crate::business::loop_engine::StepTokenUsage), LoopEngineError> {
         self.invoke_model_impl().await
     }
 

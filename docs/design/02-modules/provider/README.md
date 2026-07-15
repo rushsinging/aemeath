@@ -114,7 +114,7 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 - Agent Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - 上下文地图：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 统一语言：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

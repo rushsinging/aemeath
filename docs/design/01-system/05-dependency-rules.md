@@ -64,15 +64,15 @@ Git CLI / 子进程 detail ──实现 Project 消费方拥有的 git worktree 
 
 ## 6. 守卫可执行性
 
-每条铁律 **MUST** 配套可在 CI / Stop hook 运行的机械守卫后才算可执行。具体已覆盖项 **MUST** 以 [架构守卫注册表](../03-engineering/architecture-guards.md) 为真相源，待迁移项与覆盖缺口 **MUST** 由 [迁移治理](../03-engineering/migration-governance.md) 跟踪；本文 **NEVER** 宣称具体覆盖状态。
+每条铁律 **MUST** 配套可在 CI / Stop hook 运行的机械守卫后才算可执行。具体已覆盖项 **MUST** 以 [架构守卫注册表](../03-engineering/01-architecture-guards.md) 为真相源，待迁移项与覆盖缺口 **MUST** 由 [迁移治理](../03-engineering/03-migration-governance.md) 跟踪；本文 **NEVER** 宣称具体覆盖状态。
 
 ## 7. 相关文档
 
 - 系统架构：[04-system-architecture.md](04-system-architecture.md)
 - 代码组织规范：[06-code-organization.md](06-code-organization.md)
 - 上下文地图：[03-context-map.md](03-context-map.md)
-- 架构守卫注册表：[../03-engineering/architecture-guards.md](../03-engineering/architecture-guards.md)
-- 迁移治理：[../03-engineering/migration-governance.md](../03-engineering/migration-governance.md)
+- 架构守卫注册表：[../03-engineering/01-architecture-guards.md](../03-engineering/01-architecture-guards.md)
+- 迁移治理：[../03-engineering/03-migration-governance.md](../03-engineering/03-migration-governance.md)
 - 目录总览：[../README.md](../README.md)
 
 ## 修改历史

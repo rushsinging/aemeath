@@ -249,7 +249,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 - Session 聚合：[../context-management/01-session.md](../context-management/01-session.md)
 - Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 - 统一语言：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md)
 
 ## 修改历史

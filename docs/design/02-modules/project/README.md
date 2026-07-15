@@ -86,7 +86,7 @@ Config 通过只读 ConfigSnapshot 提供 Project 相关配置。Workspace BC �
 - Context Management Session：[../context-management/01-session.md](../context-management/01-session.md)
 - 系统架构：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

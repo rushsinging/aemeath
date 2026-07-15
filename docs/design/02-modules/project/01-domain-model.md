@@ -216,7 +216,7 @@ fn fork(&self) -> Arc<Self>:
 - 系统架构：[../../01-system/04-system-architecture.md](../../01-system/04-system-architecture.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - Runtime 领域模型（SubAgent / ExecutionPolicy）：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

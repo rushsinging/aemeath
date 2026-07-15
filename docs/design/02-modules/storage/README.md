@@ -426,7 +426,7 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
 - Context Map 持久化边：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - Context Management Session：[../context-management/01-session.md](../context-management/01-session.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

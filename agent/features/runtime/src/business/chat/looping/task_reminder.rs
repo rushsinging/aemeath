@@ -171,7 +171,7 @@ mod tests {
     async fn test_build_reminder_first_throttled_before_threshold() {
         let store = TaskStore::new();
         store
-            .create("遗留任务".to_string(), "old request".to_string(), None)
+            .create("遗留任务".to_string(), "old request".to_string())
             .await;
 
         let mut state = TaskReminderState::new();
@@ -184,7 +184,7 @@ mod tests {
     async fn test_build_reminder_first_triggers_at_threshold() {
         let store = TaskStore::new();
         store
-            .create("遗留任务".to_string(), "old request".to_string(), None)
+            .create("遗留任务".to_string(), "old request".to_string())
             .await;
 
         let mut state = TaskReminderState::new();
@@ -204,7 +204,7 @@ mod tests {
             .create_list("旧任务".to_string(), "修复 task 状态".to_string())
             .await;
         let task = store
-            .create("分析旧任务".to_string(), "修复 task 状态".to_string(), None)
+            .create("分析旧任务".to_string(), "修复 task 状态".to_string())
             .await;
         let mut state = TaskReminderState::new();
         let reminder = state
@@ -227,7 +227,7 @@ mod tests {
     async fn test_build_reminder_omits_all_completed_batches() {
         let store = TaskStore::new();
         let task = store
-            .create("完成任务".to_string(), "done".to_string(), None)
+            .create("完成任务".to_string(), "done".to_string())
             .await;
         store
             .update(&task.id, |task| task.status = TaskStatus::Completed)
@@ -245,7 +245,7 @@ mod tests {
     async fn test_build_reminder_mentions_use_tasklist_only_when_relevant() {
         let store = TaskStore::new();
         store
-            .create("遗留任务".to_string(), "old request".to_string(), None)
+            .create("遗留任务".to_string(), "old request".to_string())
             .await;
 
         let mut state = TaskReminderState::new();
@@ -263,7 +263,7 @@ mod tests {
     async fn test_build_reminder_zh_template() {
         let store = TaskStore::new();
         store
-            .create("遗留任务".to_string(), "old request".to_string(), None)
+            .create("遗留任务".to_string(), "old request".to_string())
             .await;
 
         let mut state = TaskReminderState::new();

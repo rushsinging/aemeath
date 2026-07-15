@@ -103,7 +103,7 @@ MCP transport、JSON-RPC、认证和协议 DTO 是 Tool BC 的 adapter 私有实
 - Runtime 领域模型：[../runtime/01-domain-model.md](../runtime/01-domain-model.md)
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

@@ -37,14 +37,14 @@
 | `specs/tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
 | `specs/provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `config-compat` 补默认值） |
 | `specs/prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |
-| `specs/project.md` | `agent/features/project/**` —— worktree 工作区所有权（`WorkspaceService` 单一可变状态源）、能力优先公开边界、git 出站端口 | 改 worktree 进入 / 退出 / 持久化（同步 `storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `runtime.md`） |
+| `specs/project.md` | `agent/features/project/**` —— worktree 工作区上下文（`WorkspaceService` 单一可变状态源、COLA 分层、git 出站端口） | 改 worktree 进入 / 退出 / 持久化（同步 `storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `runtime.md`） |
 | `specs/config-compat.md` | `agent/shared/src/config/**` —— 配置分层、provider 默认值 / env / base_url、Claude Code 兼容、运行时路径 | 新增 `AEMEATH_*` 配置项，或改指令 / 配置 / skills / hooks 的读取优先级 |
 | `specs/storage.md` | `agent/features/storage/**` —— memory、task、history、tool_result 持久化 | 改会话 / 记忆 / 任务 / 历史的落盘格式或路径 |
 | `specs/policy-hook-audit.md` | `agent/features/{policy,hook,audit}/**` —— 权限评估、hook 执行、审计 | 改 hook 执行环境变量注入（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`） |
 | `specs/update.md` | `agent/features/update/**` —— 版本检查（GitHub API + semver + 缓存）、`aemeath update` 子命令 | 改版本检查逻辑 / 缓存策略 / 更新渠道配置 |
 | `specs/bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；操作 GitHub Issues（迁移自 `docs/bug/`、`docs/snapshot/`） |
 | `specs/logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段、新增日志文件 |
-| `docs/design/03-engineering/architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 Guard 编排 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/architecture-guards.md` 本身 |
+| `docs/design/03-engineering/01-architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/01-architecture-guards.md` 本身 |
 
 > `agent/shared/**`（除 `config/`）、`agent/composition/**`、`packages/**` 的改动按内容落到最相关分片；纯横切改动至少加载 `rust-coding.md`。
 
@@ -215,13 +215,13 @@ Release Gate issue 模板：
 4. **标注依赖与并行性**：父 Issue **MUST** 对每个直接 sub-issue 标明可否并行、被谁 block / block 谁，并据此排执行顺序。依赖关系 **MUST** 使用 GitHub 原生 blocked-by / blocking 关系；正文可保留说明，但 **NEVER** 作为唯一依赖记录。
 5. **跟进进度**：父 Issue **MUST** 通过原生 sub-issue 状态和正文摘要维护进度（未开始 / 进行中 / 已合入）。sub-issue 状态变化时 **MUST** 同步父 Issue 的范围、阻断项和验收结论。
 6. **范围调整同步**：执行中若发现更根本的问题需重做或移动范围，**MUST** 调整相关原生 parent / sub-issue 与依赖关系，保持层级、依赖图和实际交付始终一致。
-7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 10 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
+7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 7 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
 8. **必有收尾能力**：大型工作 **MUST** 在最合适的父层级覆盖以下三类交付；若多个模块共享同一全局收尾，**MUST** 复用同一 sub-issue，**NEVER** 在每个模块重复创建：
    - **Guard + Verify sub-issue**：落地架构守卫锁定新边界，故意制造违规验证拦截生效；端到端验收测试覆盖核心场景。
    - **收尾退役 sub-issue**：清理全项目的旧路径、散点读取和死代码（不限于本次改动引入）；去除 `cargo clippy --workspace --all-targets` 全部 warning；更新 `specs/` 分片和 `docs/design/`。
    - **大文件拆分 sub-issue**：对本次改动涉及的核心大文件进行模块边界整理，确保每个文件只承担单一职责。
 9. **依赖顺序**：其余 sub-issues **MUST** 按领域模型 → Port / Published Language → Adapter → 消费方 → Guard / 退役的方向拆分。依赖方向严格从内到外，**NEVER** 反向。
-10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 10 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
+10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 7 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
 
 ### Git 工作流
 

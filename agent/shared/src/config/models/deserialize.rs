@@ -23,6 +23,8 @@ impl<'de> Deserialize<'de> for ModelEntryConfig {
             reasoning: Option<bool>,
             #[serde(default)]
             reasoning_effort: Option<String>,
+            #[serde(default, rename = "apiStyle")]
+            api_style: Option<String>,
         }
 
         let raw = Raw::deserialize(de)?;
@@ -34,6 +36,7 @@ impl<'de> Deserialize<'de> for ModelEntryConfig {
             max_tokens: raw.max_tokens,
             reasoning: raw.reasoning,
             reasoning_effort: raw.reasoning_effort,
+            api_style: raw.api_style,
         })
     }
 }

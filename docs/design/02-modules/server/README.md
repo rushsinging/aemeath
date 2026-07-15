@@ -90,7 +90,7 @@ Server Foundation 是 **v0.1.0 Out of scope** 的 Future 能力。v0.1.0 的 Run
 - 系统总体设计：[../../01-system/](../../01-system/)
 - Runtime 端口与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

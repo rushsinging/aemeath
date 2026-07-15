@@ -2,7 +2,7 @@
 
 > 层级：02-modules / memory（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#789（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文定义 Memory BC 的对外端口、NoOpMemory（Sub）、Storage 边界与 Composition Root 装配。**只描述目标态**；实现差距见 [迁移治理](../../03-engineering/migration-governance.md)。
+> 本文定义 Memory BC 的对外端口、NoOpMemory（Sub）、Storage 边界与 Composition Root 装配。**只描述目标态**；实现差距见 [迁移治理](../../03-engineering/03-migration-governance.md)。
 
 ## 1. MemoryPort
 
@@ -273,7 +273,7 @@ fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort>
 
 ## 7. 机械边界验收
 
-Target 要求机械守卫证明：production Memory wiring 只由 Composition Root 发起；业务调用方只接收 `MemoryPort` / `ReflectionPromptPort`，不能直接构造或获得 `MemoryService` / Storage adapter；Memory 不能直接使用文件 I/O。具体守卫脚本、启用状态、临时白名单与替换责任只见 [Architecture Guards](../../03-engineering/architecture-guards.md) 和 [Migration Governance](../../03-engineering/migration-governance.md)，本文 **NEVER** 声称尚未登记的规则已在 CI / Stop 生效。
+Target 要求机械守卫证明：production Memory wiring 只由 Composition Root 发起；业务调用方只接收 `MemoryPort` / `ReflectionPromptPort`，不能直接构造或获得 `MemoryService` / Storage adapter；Memory 不能直接使用文件 I/O。具体守卫脚本、启用状态、临时白名单与替换责任只见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 和 [Migration Governance](../../03-engineering/03-migration-governance.md)，本文 **NEVER** 声称尚未登记的规则已在 CI / Stop 生效。
 
 ## 8. 相关文档
 
@@ -284,7 +284,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 - Runtime 端口（MemoryPort 消费方）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Context Map（Memory 集成关系）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 依赖规则：[../../01-system/05-dependency-rules.md](../../01-system/05-dependency-rules.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

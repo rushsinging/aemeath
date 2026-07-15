@@ -174,7 +174,7 @@ Reflection 产出 → MemoryPort.write → 下轮 build_window → retrieve_for_
 - Runtime 消费的 Memory OHS 与装配：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Project identity / WorkspaceRead：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 上下文地图（Memory BC = 支撑域）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
-- Current → Target 迁移责任：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

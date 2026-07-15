@@ -2,7 +2,7 @@
 
 > 层级：02-modules / workflow（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#792（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文定义 Workflow 支撑域 BC 的 ReasoningGraph 状态机、effort 调节、ReasoningPort OHS 与 provider clamp 策略。**只描述目标态**；实现差距见 [迁移治理](../../03-engineering/migration-governance.md)。
+> 本文定义 Workflow 支撑域 BC 的 ReasoningGraph 状态机、effort 调节、ReasoningPort OHS 与 provider clamp 策略。**只描述目标态**；实现差距见 [迁移治理](../../03-engineering/03-migration-governance.md)。
 
 ## 1. 定位
 
@@ -339,7 +339,7 @@ Workflow Engine **暂缓实现**，原因：
 - Config 分层（ReasoningGraphConfig 静态阈值）：[../config/01-config-layer.md](../config/01-config-layer.md)
 - Run 状态机（Loop 集成点）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 - 上下文地图（Workflow = 支撑域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
-- Current → Target 迁移责任：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

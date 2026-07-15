@@ -142,7 +142,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 - 依赖规则：[05-dependency-rules.md](05-dependency-rules.md)
 - 代码组织规范：[06-code-organization.md](06-code-organization.md)
 - Project Workspace 端口：[../02-modules/project/02-ports-and-adapters.md](../02-modules/project/02-ports-and-adapters.md)
-- 迁移治理：[../03-engineering/migration-governance.md](../03-engineering/migration-governance.md)
+- 迁移治理：[../03-engineering/03-migration-governance.md](../03-engineering/03-migration-governance.md)
 - 目录总览：[../README.md](../README.md)
 
 ## 修改历史

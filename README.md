@@ -10,7 +10,7 @@
 |---|---|---|
 | **01 · 系统级** | [系统架构](docs/design/01-system/04-system-architecture.md) · [依赖规则](docs/design/01-system/05-dependency-rules.md) · [代码组织规范](docs/design/01-system/06-code-organization.md) | 整体架构形态、依赖方向与 capability-first 组织判据 |
 | **02 · 模块级** | [模块设计索引](docs/design/02-modules/README.md) | 各能力的战术模型、公开 façade 与真实外部 seam |
-| **03 · 横切工程** | [架构守卫注册表](docs/design/03-engineering/architecture-guards.md) · [迁移治理](docs/design/03-engineering/migration-governance.md) | 可执行守卫的运行时真相与 Current → Target 追踪 |
+| **03 · 横切工程** | [架构守卫注册表](docs/design/03-engineering/01-architecture-guards.md) · [迁移治理](docs/design/03-engineering/03-migration-governance.md) | 可执行守卫的运行时真相与 Current → Target 追踪 |
 
 ## 项目结构
 

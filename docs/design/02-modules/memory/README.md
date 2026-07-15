@@ -108,7 +108,7 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 - Context Map（Memory BC 集成关系）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md) §4.1
 - 统一语言（Memory 术语）：[../../01-system/02-ubiquitous-language.md](../../01-system/02-ubiquitous-language.md) §5
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 

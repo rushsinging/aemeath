@@ -2,7 +2,7 @@
 
 > 层级：02-modules / tools（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
-> 本文只描述目标态；实现差距统一记录在 `03-engineering/migration-governance.md`。
+> 本文只描述目标态；实现差距统一记录在 `03-engineering/03-migration-governance.md`。
 
 ## 1. Tool 语言
 
@@ -398,7 +398,7 @@ enum McpConnectionState {
 - Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
-- 迁移治理：[../../03-engineering/migration-governance.md](../../03-engineering/migration-governance.md)
+- 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
 
 ## 修改历史
 
