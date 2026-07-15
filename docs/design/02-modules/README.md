@@ -28,6 +28,32 @@
 | [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink / Query 与独立 JSONL 存储 |
 | [server/](server/README.md) | WS 协议、控制面 / worker 拓扑的 Future 设计边界 |
 
+## 目录结构决策
+
+系统级判据以[代码组织规范](../01-system/06-code-organization.md)为唯一真相源。所有 feature crate 内部统一采用 Hexagonal 依赖方向（`domain ← application ← ports ← adapters`）；小模块 MAY 只使用部分层（如 `domain + adapters`），**NEVER** 为对称预建空层。`capabilities/` 降格为仅在 §3.1 证据成立时的可选竖切结构。
+
+| 模块 | Target 结构 | 判定原因 |
+|---|---|---|
+| Agent Runtime | `domain/application/ports/adapters` 四层 | 核心执行模块的战术设计已冻结该 Hexagonal 物理结构 |
+| Context Management | `domain/application/ports/adapters` 四层 | Session、Compact、Token Budget、Prompt/Guidance、Memory Injection 按层共置 |
+| Memory | `domain/application/ports/adapters` 四层 | write、retrieve、compact、reflection 策略收在 domain，用例编排收在 application |
+| Tool & Skill & Command | `domain/application/ports/adapters` 四层 | catalog、execution、skill、command 策略在 domain；MCP 技术 detail 在 adapters |
+| Storage | `domain + adapters` 两层 | `safe_path`、`atomic_blob`、`atomic_dataset` 策略在 domain；文件系统 detail 在 adapters |
+| Task Management | `domain + adapters` 两层 | transition、dependency、batch、snapshot 共同守护同一 `TaskStoreState` 聚合 |
+| Project / Workspace | `domain + adapters` 两层 | Workspace 是唯一聚合与状态源；Git 仅是可替换外部 detail |
+| Workflow | `domain + adapters` 两层 | v0.1.0 仅有 Reasoning Graph / effort 调节，无第二个独立变化轴 |
+| Policy | `domain + adapters` 两层 | v0.1.0 只有 Policy evaluate 与 AllowAll 实现，无内部子能力或出站 seam |
+| Provider | `domain + ports + adapters` 三层 | invoke/capability/error 策略在 domain；Anthropic/OpenAI-compatible/Ollama 技术实现在 adapters |
+| Config | `domain + adapters` 两层 | 只有一条 effective-config 生命周期；File/Env/CLI/Compatibility 是不同外部来源 |
+| Hook | `domain + ports + adapters` 三层 | 单一 Hook dispatch 能力在 domain；进程执行与类型化协议在 adapters |
+| Audit | `domain + adapters` 两层 | v0.1.0 只拥有 Usage；ingest、append 与 query 是同一 schema 的处理管线 |
+| Logging | `domain + adapters` 两层 | 各目录是同一诊断记录流水线阶段，不具备独立业务状态所有权 |
+| Application Version Control | `domain + ports + adapters` 三层 | check/plan/apply 共享 `VerifiedUpdatePlan`；Release Source 和 installer 是外部 seam |
+| TUI（交付层） | adapter/model/update/effect/view/render TEA 技术目录 | 目录承载单向数据流和 import 隔离，不是 Bounded Context 内的业务竖切 |
+| Server（Future） | 暂不冻结 | 安全、部署和传输边界尚未完成正式设计，**NEVER** 由当前 sketch 预建目录 |
+
+采用 `capabilities/` 的模块 **MUST** 使用私有 `capabilities.rs` + `capabilities/<slice>.rs` 形状；其他模块 **NEVER** 为对称性创建该目录。局部 model、port、adapter 仍按真实不变量和 seam 独立判定。
+
 ## 编写原则
 
 - 只描述目标态，区分 Target / Decision，不记录当前代码状态。
@@ -61,3 +87,4 @@
 | 2026-07-12 | 新增 tui/02-model：3+3 Context 完整字段、投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束 | #796 |
 | 2026-07-12 | 新增 tui/03-event-flow-and-acl：事件流两层转换 ACL、SDK DTO 边界、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6 | #797 |
 | 2026-07-12 | 新增 policy/hook/audit 战术设计：AllowAll-only、Hook 3/15 两层重试、Usage-only Audit MVP | #790 |
+| 2026-07-16 | 增加模块 Target 目录结构决策矩阵：竖切统一进入 `capabilities/`，Runtime 保留已冻结 Hexagonal 结构，其余模块按能力证据选择扁平、竖切或技术目录 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

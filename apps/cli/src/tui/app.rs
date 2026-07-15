@@ -1,4 +1,5 @@
 pub mod event;
+pub(crate) mod frame_driver;
 mod resize;
 mod run_loop;
 mod runtime;
@@ -14,11 +15,10 @@ use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
-    backend::CrosstermBackend,
+    backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     Terminal,
 };
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -217,7 +217,7 @@ impl App {
     }
 
     /// Draw the TUI frame.
-    fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    pub(crate) fn draw<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<(), B::Error> {
         let draw_start = Instant::now();
         let mut output_rect = Rect::default();
         let mut input_rect = Rect::default();
@@ -351,10 +351,14 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod scenario_tests;
 pub mod slash;
 #[cfg(test)]
 mod slash_effect_tests;
 #[cfg(test)]
 mod slash_tests;
+#[cfg(test)]
+mod testing;
 pub mod update;
 pub mod util;

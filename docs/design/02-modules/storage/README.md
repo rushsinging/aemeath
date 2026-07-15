@@ -35,7 +35,33 @@ Storage 是数据 BC 与物理介质之间的机制边界：
 10. **多 writer 不丢更新**：dataset read 返回 opaque revision；commit 在同一跨进程锁内比较 expected revision，只有匹配时才进入 prepared。锁只提供串行执行，revision CAS 才证明两个先后获得锁的 writer 不会用陈旧快照覆盖新 generation。
 11. **事务损坏是独立 typed failure**：journal / primary / member digest 无法机械归入完整旧代或新代时返回 `StorageErrorKind::CorruptTransaction`，并携带 quarantine disposition；**NEVER** 降级为普通 `Io`、`NotFound` 或空 dataset。
 
-## 3. Published Language
+## 3. Target 物理目录
+
+Storage 采用 Hexagonal + Clean 组织（`domain + adapters`）。三个拥有独立协议、独立故障测试边界与独立词汇的能力——`safe_path`（路径词法校验）、`atomic_blob`（整值 blob 原子替换协议）、`atomic_dataset`（多 member dataset 事务协议）——收在 `domain/` 各自展开；文件系统技术 detail 终止在 `adapters/`：
+
+```text
+src/
+├── lib.rs                       # 窄 façade：发布 AtomicBlobPort / AtomicDatasetPort OHS，composition-only wiring
+├── domain.rs                    # 领域策略入口
+├── domain/
+│   ├── safe_path.rs             #   SafePathSegment 词法校验、受约束根目录句柄解析
+│   ├── atomic_blob.rs           #   AtomicBlobPort 用例策略：write_atomic / read / promote_previous / quarantine
+│   ├── atomic_dataset.rs        #   AtomicDatasetPort 用例策略：read_manifest / read_consistent / commit_atomic
+│   └── published_language.rs    #   StorageKey / DatasetKey / Quarantine PL
+├── ports.rs                     # 对外端口定义
+│   ├── atomic_blob_port.rs      #   AtomicBlobPort OHS
+│   └── atomic_dataset_port.rs   #   AtomicDatasetPort OHS
+└── adapters/
+    ├── blob_filesystem.rs       #   blob stage/fsync/rename/journal 文件系统实现
+    └── dataset_filesystem.rs    #   dataset lock / journal 文件系统实现
+```
+
+- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型，**NEVER** 转发内部结构。
+- `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；这正是 §3.5 所述"Storage 私有 backend SPI"的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
+- `safe_path` 是被 `atomic_blob` / `atomic_dataset` 消费的独立 domain 子模块：它拥有自己的校验协议与测试夹具，**NEVER** 因"看似工具函数"被内联进另外两个模块。
+- Storage **NEVER** 建立按存储技术命名的模块级横向技术目录；sled 等未来 backend 若引入，仍 **MUST** 落在 `adapters/` 内，不形成横向替换层。
+
+## 4. Published Language
 
 以下签名表达语义，不锁定具体 Rust API：
 
@@ -192,7 +218,7 @@ struct CorruptTransactionError {
     quarantine: QuarantineDisposition,
 }
 
-// ReadOutcome 统一定义在 §3 Published Language（第 84 行），此处不再重复。
+// ReadOutcome 统一定义在 §4 Published Language 前文（见 enum ReadOutcome 定义），此处不再重复。
 // StorageError 统一为 StorageErrorKind（见下）。
 
 enum StorageErrorKind {
@@ -211,7 +237,7 @@ enum StorageErrorKind {
 
 `CorruptTransaction` 只表示 **Storage 自己的 crash protocol 证据互相矛盾**；领域 decoder 拒绝一份机械完整的 JSON / bytes 仍由所属数据 BC 处理，并通过普通 `quarantine()` 命令隔离，**NEVER** 伪装成 Storage transaction corruption。错误不暴露绝对路径、nonce 或原始内容；quarantine 失败也 **MUST** 在 `QuarantineDisposition::Failed` 中保留原始 corruption reason。
 
-### 3.1 端口形态
+### 4.1 端口形态
 
 ```rust
 trait AtomicBlobPort: Send + Sync {
@@ -292,7 +318,7 @@ trait AtomicDatasetPort: Send + Sync {
 
 数据 BC 定义更窄端口，例如 `SessionSnapshotStore`、`MemoryDatasetStore`、`AuditEventStore`。这些端口的 integration adapter 依赖数据 BC Snapshot PL，并在内部调用 Storage 的 `AtomicBlobPort` 或 `AtomicDatasetPort`；它位于消费方 adapter 层或 Composition，不进入 Storage BC。两个 Storage port 都只认识 key / member / bytes，**NEVER** 携带 `Session`、`Task` 或 `MemoryEntry` 类型；同一多文件不变量 **MUST** 复用 `AtomicDatasetPort`，不得由各领域 adapter 重写一套 crash protocol。
 
-## 4. 原子写协议
+## 5. 原子写协议
 
 目标文件 adapter 对启用上一代恢复的 namespace 采用可验证协议：
 
@@ -313,7 +339,7 @@ trait AtomicDatasetPort: Send + Sync {
 
 `ProcessCrashSafe` 表示 stage 文件和提交目录项都完成所需同步；`BestEffort` 只保证进程内原子可见。namespace 规定最低 durability，逐次 WriteOptions 只能提高，不能降低；平台无法兑现时返回 `UnsupportedDurability`。
 
-### 4.1 关键不变量
+### 5.1 关键不变量
 
 - stage、primary 与 previous 位于同一文件系统；
 - 临时名称不可预测且使用 create-new；
@@ -325,7 +351,7 @@ trait AtomicDatasetPort: Send + Sync {
 - 残留 stage/previous.next 不参与普通读取；启动恢复必须按 journal phase + old/new digest 完成、回滚或隔离事务；
 - 所有 open/rename/delete 均相对受约束目录句柄执行，禁止跟随 symlink 越界。
 
-### 4.2 多 member dataset 事务
+### 5.2 多 member dataset 事务
 
 `AtomicDatasetPort` 用于 active + archive、index + payload 等必须共同换代的逻辑数据集：
 
@@ -348,7 +374,7 @@ prepared journal 是 recovery 必须 roll-forward 的逻辑提交点：此前失
 
 可执行 crash-state test **MUST** 在每个 stage / fsync / journal / member publish / committed-marker 点中断，再证明 reopen 只得到完整旧 generation 或完整新 generation。相同 primitive 同时服务 Memory active+archive 与 legacy key migration，**NEVER** 复制领域专属事务算法。
 
-## 5. 机械读取与领域恢复
+## 6. 机械读取与领域恢复
 
 Storage 不判断 opaque bytes 是否符合领域 schema。恢复由数据 BC 驱动：
 
@@ -365,7 +391,7 @@ consumer read Primary
 
 `promote_previous` 也遵循原子提交协议；成功后 Previous bytes 成为 Primary，损坏的原 Primary 进入 quarantine。Primary 缺失但 Previous 存在时，消费者同样可以验证后 promote，覆盖“提交边界外人工删除”等恢复场景。返回的 `WriteReceipt` 与 `write_atomic` 共用同一 committed+warning 语义：只要拿到 receipt 就必须发布新 primary，`warning` 表示某个提交后收尾步骤（例如旧 primary quarantine 归档、journal 清理）尚未完成，**NEVER** 因为出现 warning 而怀疑 promote 是否已提交。
 
-## 6. 责任分配
+## 7. 责任分配
 
 | 关注点 | 所有者 |
 |---|---|
@@ -380,7 +406,7 @@ consumer read Primary
 | Audit Event 的不可变语义与 retention policy | Audit；append-log 物理写入由 Audit adapter 以 file append detail 直接实现，只复用 Storage 路径安全 primitive |
 | 日志 rotation/retention | Logging，不复用 Storage 业务端口 |
 
-## 7. 生命周期与清理
+## 8. 生命周期与清理
 
 Storage 可以提供 `delete_all_generations/list_primary` 等机械能力，但不得自行猜测数据是否过期。`list_primary` 永远隐藏 stage/previous/quarantine；`delete_all_generations` 幂等删除 primary、previous 及本 key 可识别的未提交临时文件，`DeleteOptions.include_quarantine` 决定是否一并删除 quarantine，默认 true 以兑现用户业务删除。若 quarantine 需保留取证，数据 BC 必须显式 opt out 并给出独立 retention 命令；不能让隐藏副本无限期遗留。
 
@@ -394,7 +420,7 @@ Storage 可以提供 `delete_all_generations/list_primary` 等机械能力，但
 
 启动时对 `.tmp` 等未提交文件的清扫可以属于 Storage 机制，但只能识别本 adapter 自己的临时命名协议，不能删除未知文件。
 
-## 8. Composition Root
+## 9. Composition Root
 
 Composition Root 负责：
 
@@ -405,7 +431,7 @@ Composition Root 负责：
 - **Config bootstrap 例外**：Config 的 FileAdapter 在 Storage 尚未按 ConfigSnapshot 装配前读取自身配置，是获准直接访问配置文件的 bootstrap adapter；Config 的 merge / validation / update 策略仍不得直接做 I/O，该例外不得扩散到其他 BC。
 - Composition Root 保持测试中可替换为内存或临时目录 adapter。
 
-## 9. 架构守卫目标
+## 10. 架构守卫目标
 
 ```text
 Rule: storage-does-not-own-domain-models
@@ -421,7 +447,7 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 
 守卫不得阻止领域 BC 定义自己的 Snapshot 与 migration；它只约束物理 IO 和反向依赖。
 
-## 10. 相关文档
+## 11. 相关文档
 
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
 - Context Map 持久化边：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
@@ -436,3 +462,4 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-14 | 为 AtomicDataset 增加 expected-revision CAS 与 typed committed receipt，并移除 Task / Project 直连 Storage 路径 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 typed CorruptTransaction + quarantine disposition，统一 blob / dataset digest 歧义的 fail-closed 恢复语义 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 移除 Storage 端 AtomicAppendLogPort（append-log 归 Audit-owned adapter 直接实现）；read() 取消跨代自动 fallback；补 dataset manifest + previous read/promote/quarantine；promote/quarantine 补齐 committed+warning receipt 与 generation/scope/reason | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-16 | 新增 §3 Target 物理目录：Storage 递归竖切为私有 `capabilities/{safe_path,atomic_blob,atomic_dataset}`，`filesystem.rs` 是各切片局部私有技术 detail、不形成横向 adapter 层；后续章节顺延编号至 §4-§11 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

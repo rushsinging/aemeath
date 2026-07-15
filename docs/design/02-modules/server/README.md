@@ -84,7 +84,26 @@ Server Foundation 是 **v0.1.0 Out of scope** 的 Future 能力。v0.1.0 的 Run
 - **NEVER** 控制面直接依赖 Storage BC 或 Composition 业务——worker **MUST** 自行 `composition::build_agent_client()` + `load_session()`，控制面不参与 domain 对象的构建或存储读写。
 - **NEVER** 将 `session_id` 作为认证凭据——`session_id` 仅用于路由/会话定位，鉴权/授权必须基于独立 token/credential，不得以持有 `session_id` 即视为已认证。
 
-## 5. 相关文档
+## 5. Target 目录决策
+
+| 属性 | 值 |
+|---|---|
+| Target 结构 | 暂不冻结 |
+| 父级判据 | [02-modules/README.md](../README.md) 目录结构决策矩阵 |
+| 系统级依据 | [代码组织规范](../../01-system/06-code-organization.md) §3.2 扁平叶子准入条件——只有能说清能力所有者的模块才能选择结构形态 |
+
+**理由**：
+
+Server 是 v0.1.0 Out of scope 的 Future 能力。安全模型（TLS/WSS 全链路、mTLS、token 生命周期、session binding）、部署拓扑（控制面 + worker 进程边界）、传输协议（wire codec 版本协商、`Call`/`Resp`/`Frame` 闭合性）和资源治理（per-connection rate limit、backpressure、per-session 配额）均尚未完成正式设计。
+
+在正式设计门前（§3.1–§3.6）全部通过之前：
+- **NEVER** 由当前 `01-design.md` 中的研究 sketch 预建 crate、模块目录或端口结构；
+- **NEVER** 将草案中的 `Call`/`Resp`/`Frame`/`WsConn` 等非闭合枚举当作 Target 契约推导目录形状；
+- **NEVER** 为了对称性在 `packages/agent-wire` 或 `apps/server` 预建空壳。
+
+正式设计完成后，Server 的目录结构 **MUST** 按其最终确定的能力边界、技术 seam 和 [代码组织规范](../../01-system/06-code-organization.md) §3 独立评估——可能形成 control-plane / worker 两个独立能力的竖切、或按 transport / session / auth 技术管线组织，**NEVER** 在能力证据缺失时套用任何现有模块模板。
+
+## 6. 相关文档
 
 - 设计草案：[./01-design.md](./01-design.md)
 - 系统总体设计：[../../01-system/](../../01-system/)
@@ -98,3 +117,4 @@ Server Foundation 是 **v0.1.0 Out of scope** 的 Future 能力。v0.1.0 的 Run
 |---|---|---|
 | 2026-07-12 | 初稿：记录 Future Server 边界与草案输入 | #794 |
 | 2026-07-14 | 将进度型占位改为 Future boundary decision，并增加正式设计 / 安全 / crate 门禁 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-16 | 新增 Target 目录决策：暂不冻结，理由与正式设计完成后独立评估要求 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

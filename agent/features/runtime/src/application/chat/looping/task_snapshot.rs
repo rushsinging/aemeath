@@ -8,14 +8,14 @@ use std::collections::HashMap;
 
 use sdk::TaskStatusView;
 use share::config::TaskListConfig;
-use storage::api::{Task, TaskStatus};
+use storage::{Task, TaskStatus};
 
 /// 从 `task_store` 构造一份 `TaskStatusView` 快照（lines 已渲染好）。
 ///
 /// 用于事件推送链路：runtime 在 task 生命周期关键点取快照，
 /// 通过 `RuntimeStreamEvent::TasksSnapshot` 推送给前端，
 /// 替代已被删除的 `changes()` 轮询路径（见 #567 / #642）。
-pub(crate) async fn build_task_snapshot(task_store: &storage::api::TaskStore) -> TaskStatusView {
+pub(crate) async fn build_task_snapshot(task_store: &storage::TaskStore) -> TaskStatusView {
     let tasks = task_store.list_current_batch().await;
     let active: Vec<_> = tasks
         .iter()

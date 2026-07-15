@@ -9,7 +9,7 @@ use std::sync::Arc;
 use hook::api::HookRunner;
 use provider::api::LlmClient;
 use provider::api::SystemBlock;
-use storage::api::TaskStore;
+use storage::TaskStore;
 use tools::api::{AgentRunner, ToolRegistry};
 
 /// TUI 启动所需的过渡上下文。

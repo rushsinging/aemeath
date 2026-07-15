@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use provider::api::SystemBlock;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
-use storage::api::TaskStore;
+use storage::TaskStore;
 use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
 #[async_trait]

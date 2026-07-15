@@ -205,7 +205,27 @@ Rule: audit-events-do-not-use-diagnostic-log-contract
 Deny: Audit Event serialization through DiagnosticRecord/target routing
 ```
 
-## 10. 相关文档
+## 10. Target 物理目录
+
+Logging 采用 Hexagonal + Clean 组织（`domain + adapters`）。诊断记录流水线的领域策略（14 字段 schema、FilterPolicy、TargetCatalog 路由规则）收在 `domain`；文件 sink、rotation 与 retention 技术实现在 `adapters`：
+
+```text
+src/
+├── lib.rs                 # 窄 façade：DiagnosticRecord + record 入口 + composition-only wiring
+├── domain.rs              # 领域策略入口
+├── domain/
+│   ├── schema.rs           #   14 字段 DiagnosticRecord + LogContext / LogScope
+│   ├── filter.rs           #   FilterPolicy + 级别 / preview / 脱敏策略
+│   └── routing.rs          #   TargetCatalog + 最长前缀路由 + target 校验规则
+├── ports.rs               # DiagnosticSink trait 定义（消费方拥有的出站 seam）
+└── adapters/
+    ├── file_sink.rs        #   FileSinkLifecycle + stderr fallback（实现 DiagnosticSink）
+    └── lifecycle.rs        #   rotation + retention + shutdown
+```
+
+每个阶段是同一条 `DiagnosticRecord → 过滤 → 路由 → 写入 → 轮转` 管线的一个环节。`domain` 定义 schema、过滤策略和路由规则；`adapters` 实现具体的文件写入、rotation 与 retention 机械流程。各文件 **MUST** 私有，只通过 façade 暴露 `DiagnosticRecord` 与 `LogScope`；file writer 句柄、rotation 机械流程和 target wire type **NEVER** 泄漏到 façade 之外。跨阶段共享的 14 字段契约由 `domain/schema.rs` 唯一定义，**NEVER** 在其他文件重复字段定义。
+
+## 11. 相关文档
 
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
@@ -218,3 +238,5 @@ Deny: Audit Event serialization through DiagnosticRecord/target routing
 |---|---|---|
 | 2026-07-12 | 摘要初稿：14 字段 schema、TargetCatalog、scope-local context、sink 降级及 Audit 分离 | #793 |
 | 2026-07-15 | 增加 `aemeath:llm-api-error` 独立诊断 sink、受控 JSON payload 与 Provider-owned 脱敏边界 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
+| 2026-07-16 | 冻结 Logging Target 物理目录：`schema`/`filter`/`routing`/`sink`/`lifecycle` 技术管线；明确不建 `capabilities/`（各目录是同一诊断管线阶段，无独立业务状态所有权） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
+| 2026-07-15 | §10 Target 目录从扁平管线改为 Hexagonal（`domain + ports + adapters`），对齐 #972 v2 修订 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

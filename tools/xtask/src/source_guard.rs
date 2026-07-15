@@ -5,6 +5,9 @@ pub fn find_test_only_api_violations(path: &Path, source: &str) -> Vec<String> {
     let Ok(file) = syn::parse_file(source) else {
         return vec![format!("{}: Rust 语法解析失败", path.display())];
     };
+    if has_cfg_test(&file.attrs) {
+        return Vec::new();
+    }
     let mut violations = Vec::new();
     visit_items(&file.items, false, &mut |item, in_test| {
         if in_test {

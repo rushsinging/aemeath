@@ -2,7 +2,7 @@ use super::types::{
     MemorySuggestion, ReflectionApplyResult, ReflectionError, ReflectionOutput, ReflectionResult,
 };
 use share::memory::{AddResult, MemoryEntry, MemorySource};
-use storage::api::MemoryStore;
+use storage::MemoryStore;
 
 pub fn apply_suggestions(
     suggestions: &[MemorySuggestion],

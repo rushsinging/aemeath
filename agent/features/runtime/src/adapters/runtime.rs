@@ -9,7 +9,7 @@ pub use share::adapter::provider::LlmClientAdapter;
 
 use crate::ports::legacy::{HookNotificationPort, ProviderInfoPort, TaskStorePort};
 use std::collections::HashMap;
-use storage::api::{Task, TaskSnapshot, TaskStore};
+use storage::{Task, TaskSnapshot, TaskStore};
 
 impl ProviderInfoPort for LlmClientAdapter<provider::api::LlmClient> {
     fn provider_name(&self) -> &str {

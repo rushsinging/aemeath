@@ -82,7 +82,7 @@ pub(super) async fn apply_reflection_impl(
     apply_reflection_with_base_dir(
         &me.inner.context.resources.memory_config,
         &me.inner.cwd,
-        storage::api::memory_base_dir(),
+        storage::memory_base_dir(),
         output,
     )
 }
@@ -103,9 +103,9 @@ fn apply_reflection_with_base_dir(
     }
 
     let reflection_output = reflection_output_from_sdk(output)?;
-    let mut store = storage::api::MemoryStore::new(
+    let mut store = storage::MemoryStore::new(
         base_dir,
-        storage::api::project_file_name_from_path(cwd),
+        storage::project_file_name_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )
@@ -279,7 +279,7 @@ mod tests {
                 system_prompt_text: "真实 system prompt".to_string(),
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
-                task_store: Arc::new(storage::api::TaskStore::new()),
+                task_store: Arc::new(storage::TaskStore::new()),
                 skills_map: std::collections::HashMap::new(),
                 hook_runner: hook::api::HookRunner::empty(),
                 memory_config,
@@ -485,9 +485,9 @@ mod tests {
 
         let message =
             apply_reflection_with_base_dir(&config, &cwd, base_dir.clone(), output).unwrap();
-        let store = storage::api::MemoryStore::new(
+        let store = storage::MemoryStore::new(
             &base_dir,
-            storage::api::project_file_name_from_path(&cwd),
+            storage::project_file_name_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )
@@ -517,9 +517,9 @@ mod tests {
             std::env::temp_dir().join(format!("aemeath-sdk-apply-cwd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&cwd).unwrap();
         let base_dir = temp_memory_base_dir();
-        let mut store = storage::api::MemoryStore::new(
+        let mut store = storage::MemoryStore::new(
             &base_dir,
-            storage::api::project_file_name_from_path(&cwd),
+            storage::project_file_name_from_path(&cwd),
             config.max_entries,
             config.similarity_threshold,
         )

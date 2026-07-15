@@ -64,7 +64,7 @@ where
     pub(crate) session_reminders: &'a Arc<std::sync::Mutex<share::tool::SessionReminders>>,
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::api::AgentRunner>>,
     pub(crate) allow_all: bool,
-    pub(crate) task_store: &'a Arc<storage::api::TaskStore>,
+    pub(crate) task_store: &'a Arc<storage::TaskStore>,
     pub(crate) max_tool_concurrency: usize,
     pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
