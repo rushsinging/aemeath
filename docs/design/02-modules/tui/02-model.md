@@ -871,11 +871,11 @@ SaveFinished 清 dirty 逻辑：
 ```
 
 > **Dirty 时序安全（revision/generation 协议）**：`SaveFinished` 不能无脑 `dirty=false`。保存过程中若产生新修改，那些修改的 dirty 标记 **MUST** 保留。实现方式：
-> 
+>
 > 1. `SaveStarted` 时记录 `base_revision: u64`（当前 conversation revision）和 `save_id: u64`（单调递增）
 > 2. `SaveFinished { save_id }` 只有 `save_id` 匹配当前保存批次时才生效
 > 3. 生效时：如果 `conversation.revision() == base_revision`，则 `dirty = false`（保存期间无新修改）；否则保留 `dirty = true`（保存期间的修改仍未落盘）
-> 
+>
 > **NEVER** 使用 XOR 公式 `dirty = dirty_at_save_start ^ changes_since_save_start`——该公式在并发修改场景下有竞态窗口，且语义不清晰。
 
 ### 6.4 SessionResumeCandidate
