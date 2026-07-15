@@ -19,17 +19,19 @@ Workflow 是 **支撑域 BC**，独占 reasoning phase、effort 调节与 user-m
 
 ## Target 物理目录
 
-Workflow v0.1.0 只有 Reasoning Graph / effort 调节这一项稳定能力；node transition、observation、user-maximum clamp 和 `ReasoningPort` 共同守护同一局部状态机，不构成多个独立切片。因此 **MUST** 保持单能力扁平，**NEVER** 创建 `capabilities/`：
+Workflow 采用 Hexagonal + Clean 最简形态（`domain` only）。v0.1.0 只有 Reasoning Graph / effort 调节这一项稳定能力；node transition、observation、user-maximum clamp 和 `ReasoningPort` 共同守护同一局部状态机，收在 `domain`：
 
 ```text
-workflow.rs                     # 窄 façade：ReasoningPort 与稳定 PL
-workflow/
-├── reasoning_graph.rs          # node 状态与 transition
-├── effort.rs                   # effort 推断与 user-maximum clamp
-└── error.rs                    # 仅在多个文件共同消费时存在
+src/
+├── lib.rs                       # 窄 façade：ReasoningPort 与稳定 PL + composition-only wiring
+└── domain.rs                    # 领域策略入口
+    domain/
+    ├── reasoning_graph.rs       #   node 状态与 transition
+    ├── effort.rs                #   effort 推断与 user-maximum clamp
+    └── error.rs                 #   仅在多个文件共同消费时存在
 ```
 
-Workflow 当前没有易变技术外部 detail，故 **NEVER** 预建 `adapters/` 或出站 port。Future 若出现多个拥有独立词汇、状态与测试夹具的 workflow 能力，才重新按代码组织规范评估 `capabilities/`。
+Workflow 当前没有易变技术外部 detail，故 **NEVER** 预建 `adapters/` 或出站 port。Future 若出现多个拥有独立词汇、状态与测试夹具的 workflow 能力，才重新按代码组织规范评估 `capabilities/` 或 `application/` / `adapters/` 升格。
 
 ## 相关文档
 
