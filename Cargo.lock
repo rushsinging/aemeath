@@ -306,12 +306,13 @@ dependencies = [
  "base64",
  "clap",
  "composition",
- "console",
+ "console 0.15.11",
  "crossterm 0.28.1",
  "dirs",
  "env_logger",
  "futures",
  "indicatif",
+ "insta",
  "inventory",
  "log",
  "once_cell",
@@ -376,6 +377,17 @@ dependencies = [
  "once_cell",
  "unicode-width 0.2.0",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "console"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1506,7 +1518,7 @@ version = "0.17.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
 dependencies = [
- "console",
+ "console 0.15.11",
  "number_prefix",
  "portable-atomic",
  "unicode-width 0.2.0",
@@ -1520,6 +1532,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "insta"
+version = "1.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
+dependencies = [
+ "console 0.16.4",
+ "once_cell",
+ "similar",
+ "tempfile",
 ]
 
 [[package]]
