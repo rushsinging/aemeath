@@ -5,8 +5,9 @@ use crate::domain::agent_run::ToolCall;
 use super::event::{RunDomainEvent, RunId};
 use super::spec::RunSpec;
 use super::state::{
-    RunCancellationRequest, RunStatus, RunStep, RunStepId, RunStepStatus, RunTransition,
-    RunTransitionError, RunTransitionReason,
+    DrainDecision, RunCancellationRequest, RunStatus, RunStep, RunStepCancellationRequest,
+    RunStepId, RunStepStatus, RunTerminationRequest, RunTransition, RunTransitionError,
+    RunTransitionReason,
 };
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
 
@@ -16,6 +17,7 @@ pub struct Run {
     spec: RunSpec,
     parent_id: Option<RunId>,
     status: RunStatus,
+    termination: Option<(sdk::RunTerminationReason, sdk::ControlDeadline)>,
     steps: Vec<RunStep>,
     started_at: Option<Instant>,
     events: Vec<RunDomainEvent>,
@@ -32,6 +34,7 @@ impl Run {
             spec,
             parent_id,
             status: RunStatus::Created,
+            termination: None,
             steps: Vec::new(),
             started_at: None,
             events: Vec::new(),
@@ -112,6 +115,12 @@ impl Run {
         }
         let next = match (self.status, transition) {
             (RunStatus::Created, RunTransition::Start) => RunStatus::PreparingContext,
+            (RunStatus::Created, RunTransition::StartDraining) => RunStatus::DrainingInput,
+            (RunStatus::DrainingInput, RunTransition::DrainInputs)
+            | (RunStatus::DrainingInput, RunTransition::DrainInternalContinuation) => {
+                RunStatus::PreparingContext
+            }
+            (RunStatus::DrainingInput, RunTransition::DrainEmptyAndSealed) => RunStatus::Completed,
             (RunStatus::PreparingContext, RunTransition::BeginCompaction) => RunStatus::Compacting,
             (RunStatus::Compacting, RunTransition::CompactionCompleted) => {
                 RunStatus::PreparingContext
@@ -143,6 +152,8 @@ impl Run {
                 RunStatus::PreparingContext
             }
             (RunStatus::Finishing, RunTransition::Finish) => RunStatus::Completed,
+            (RunStatus::FinalizingStep, RunTransition::StepCancelled) => RunStatus::DrainingInput,
+            (RunStatus::Terminating, RunTransition::TerminationFinished) => RunStatus::Terminated,
             (RunStatus::Cancelling, RunTransition::CancellationFinished) => RunStatus::Cancelled,
             (from, transition) => {
                 log::warn!(
@@ -271,8 +282,18 @@ impl Run {
         Ok(())
     }
 
+    fn rejects_controlled_work(&self) -> bool {
+        matches!(
+            self.status,
+            RunStatus::Cancelling
+                | RunStatus::CancellingStep
+                | RunStatus::FinalizingStep
+                | RunStatus::Terminating
+        ) || self.status.is_terminal()
+    }
+
     fn ensure_accepts_step_work(&self) -> Result<(), RunTransitionError> {
-        if self.status.is_terminal() || self.status == RunStatus::Cancelling {
+        if self.rejects_controlled_work() {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
         Ok(())
@@ -286,7 +307,10 @@ impl Run {
             .ok_or(RunTransitionError::StepNotFound)?;
         if matches!(
             step.status,
-            RunStepStatus::Done | RunStepStatus::Failed | RunStepStatus::Cancelled
+            RunStepStatus::Done
+                | RunStepStatus::Failed
+                | RunStepStatus::Cancelled
+                | RunStepStatus::CancellationUnconfirmed
         ) {
             return Err(RunTransitionError::StepNotActive);
         }
@@ -294,7 +318,7 @@ impl Run {
     }
 
     pub fn complete_step(&mut self, step_id: &RunStepId) -> Result<(), RunTransitionError> {
-        if self.status.is_terminal() || self.status == RunStatus::Cancelling {
+        if self.rejects_controlled_work() {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
         let step = self
@@ -318,7 +342,7 @@ impl Run {
     }
 
     pub fn mark_stuck(&mut self, reason: impl Into<String>) -> Result<(), RunTransitionError> {
-        if self.status.is_terminal() || self.status == RunStatus::Cancelling {
+        if self.rejects_controlled_work() {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
         self.events.push(RunDomainEvent::StuckDetected {
@@ -338,6 +362,156 @@ impl Run {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
             result: result.into(),
+        });
+        Ok(())
+    }
+
+    pub fn start_draining(&mut self) -> Result<(), RunTransitionError> {
+        self.transition(RunTransition::StartDraining)?;
+        self.events.push(RunDomainEvent::DrainingInput {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+        });
+        Ok(())
+    }
+
+    pub fn apply_drain_decision(
+        &mut self,
+        decision: DrainDecision,
+    ) -> Result<(), RunTransitionError> {
+        let transition = match decision {
+            DrainDecision::Inputs => RunTransition::DrainInputs,
+            DrainDecision::InternalContinuation => RunTransition::DrainInternalContinuation,
+            DrainDecision::EmptyAndSealed => RunTransition::DrainEmptyAndSealed,
+        };
+        self.transition(transition)?;
+        Ok(())
+    }
+
+    pub fn request_step_cancellation(&mut self, step_id: &RunStepId) -> RunStepCancellationRequest {
+        if self.status.is_terminal() {
+            return RunStepCancellationRequest::RunTerminal;
+        }
+        if self.status == RunStatus::Terminating {
+            return RunStepCancellationRequest::RunTerminating;
+        }
+        let Some(step) = self.steps.iter_mut().find(|step| &step.id == step_id) else {
+            return RunStepCancellationRequest::NoActiveStep;
+        };
+        if matches!(
+            step.status,
+            RunStepStatus::Cancelling | RunStepStatus::Finalizing
+        ) {
+            return RunStepCancellationRequest::AlreadyCancelling;
+        }
+        if !step.is_active() {
+            return RunStepCancellationRequest::NoActiveStep;
+        }
+        step.status = RunStepStatus::Cancelling;
+        self.apply_state_transition(
+            RunStatus::CancellingStep,
+            RunTransitionReason::StepCancellationRequested,
+        );
+        self.events.push(RunDomainEvent::StepCancellationRequested {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            step_id: step_id.clone(),
+        });
+        RunStepCancellationRequest::Accepted
+    }
+
+    pub fn begin_step_finalization(
+        &mut self,
+        step_id: &RunStepId,
+    ) -> Result<(), RunTransitionError> {
+        let step = self.active_step_mut(step_id)?;
+        if step.status != RunStepStatus::Cancelling {
+            return Err(RunTransitionError::StepNotActive);
+        }
+        step.status = RunStepStatus::Finalizing;
+        self.apply_state_transition(
+            RunStatus::FinalizingStep,
+            RunTransitionReason::StepFinalizationStarted,
+        );
+        self.events.push(RunDomainEvent::StepFinalizationStarted {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            step_id: step_id.clone(),
+        });
+        Ok(())
+    }
+
+    pub fn finish_cancelled_step(&mut self, step_id: &RunStepId) -> Result<(), RunTransitionError> {
+        self.finish_controlled_step(step_id, RunStepStatus::Cancelled)
+    }
+
+    pub fn finish_unconfirmed_step(
+        &mut self,
+        step_id: &RunStepId,
+    ) -> Result<(), RunTransitionError> {
+        self.finish_controlled_step(step_id, RunStepStatus::CancellationUnconfirmed)
+    }
+
+    fn finish_controlled_step(
+        &mut self,
+        step_id: &RunStepId,
+        terminal: RunStepStatus,
+    ) -> Result<(), RunTransitionError> {
+        let step = self.active_step_mut(step_id)?;
+        if step.status != RunStepStatus::Finalizing {
+            return Err(RunTransitionError::StepNotActive);
+        }
+        let confirmed = terminal == RunStepStatus::Cancelled;
+        step.status = terminal;
+        self.transition(RunTransition::StepCancelled)?;
+        self.events.push(RunDomainEvent::StepCancelled {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            step_id: step_id.clone(),
+            confirmed,
+        });
+        self.events.push(RunDomainEvent::DrainingInput {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+        });
+        Ok(())
+    }
+
+    pub fn request_termination(
+        &mut self,
+        run_reason: sdk::RunTerminationReason,
+        deadline: sdk::ControlDeadline,
+    ) -> RunTerminationRequest {
+        if self.status.is_terminal() {
+            return RunTerminationRequest::AlreadyTerminal;
+        }
+        if self.status == RunStatus::Terminating {
+            return RunTerminationRequest::AlreadyTerminating;
+        }
+        self.termination = Some((run_reason, deadline));
+        self.apply_state_transition(
+            RunStatus::Terminating,
+            RunTransitionReason::TerminationRequested,
+        );
+        self.events.push(RunDomainEvent::TerminationRequested {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            reason: run_reason,
+            deadline,
+        });
+        RunTerminationRequest::Accepted
+    }
+
+    pub fn finish_termination(&mut self) -> Result<(), RunTransitionError> {
+        let (reason, _) = self
+            .termination
+            .ok_or(RunTransitionError::RunNotActive(self.status))?;
+        self.transition(RunTransition::TerminationFinished)?;
+        self.close_active_steps(RunStepStatus::CancellationUnconfirmed);
+        self.events.push(RunDomainEvent::Terminated {
+            run_id: self.id.clone(),
+            parent_run_id: self.parent_id.clone(),
+            reason,
         });
         Ok(())
     }
@@ -383,7 +557,10 @@ impl Run {
         for step in &mut self.steps {
             if !matches!(
                 step.status,
-                RunStepStatus::Done | RunStepStatus::Failed | RunStepStatus::Cancelled
+                RunStepStatus::Done
+                    | RunStepStatus::Failed
+                    | RunStepStatus::Cancelled
+                    | RunStepStatus::CancellationUnconfirmed
             ) {
                 step.status = status;
             }
@@ -391,7 +568,7 @@ impl Run {
     }
 
     pub fn fail(&mut self, error: impl Into<String>) -> Result<(), RunTransitionError> {
-        if self.status.is_terminal() || self.status == RunStatus::Cancelling {
+        if self.rejects_controlled_work() {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "run state transition rejected: run_id={} parent_run_id={} from={:?} requested_to={:?} reason={:?}",
