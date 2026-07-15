@@ -6,13 +6,12 @@ mod autocompact;
 mod microcompact;
 mod restore;
 mod summary;
-pub mod token_estimation;
 
+pub use crate::capabilities::token_budget::*;
 pub use autocompact::*;
 pub use microcompact::{microcompact_chain, microcompact_messages};
 pub use restore::*;
 pub use summary::*;
-pub use token_estimation::*;
 
 /// Compact 进度阶段。
 #[derive(Debug, Clone, PartialEq, Eq)]

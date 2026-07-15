@@ -8,7 +8,7 @@
 
 Compact 家族是 Context Management 的**核心能力**：在 LLM context window 耗尽前，以最小代价回收 token 预算。
 
-- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 3 个稳定方法
+- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 4 个稳定方法
 - **策略分层**：从零成本（规则）到高成本（LLM），逐级升级
 - **幂等性**：相同 Context backing revision + 相同 request → 相同压缩决策（#550）
 - **非破坏优先**：L1 先限制尚未进入 ChatChain 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化对话链
@@ -28,15 +28,24 @@ trait ContextPort: Send + Sync {
         req: &ContextRequest,
     ) -> Result<ContextWindow, ContextWindowError>;
 
+    /// 在与 build_window 相同的冻结输入上计算压缩决策。
+    async fn needs_compaction(
+        &self,
+        req: &ContextRequest,
+    ) -> Result<CompactionDecision, ContextPortError>;
+
     /// L5 执行 auto-compact（LLM 摘要）。实现只操作自身稳定 Session backing，
     /// NEVER 向调用方暴露 ChatChain 的可变引用。
-    async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError>;
+    async fn compact(
+        &self,
+        req: &CompactRequest,
+    ) -> Result<CompactOutcome, ContextPortError>;
 
-    /// 追加当前 RunStep 产出、收集跨 BC snapshot 并原子持久化。
+    /// 追加当前 finalized RunStep 产出、收集跨 BC snapshot 并原子持久化。
     async fn append_and_persist(
         &self,
-        append: ContextAppend,
-    ) -> Result<(), ContextPersistError>;
+        append: &ContextAppend,
+    ) -> Result<AppendReceipt, ContextAppendError>;
 }
 ```
 
@@ -80,13 +89,16 @@ struct ContextWindow {
 }
 
 struct ContextAppend {
+    session_id: SessionId,               // 当前稳定 backing identity
+    expected_revision: SessionRevision,  // append CAS 前置条件
     run_id: RunId,
-    step_id: RunStepId,                 // append 幂等键的一部分
+    step_id: RunStepId,                  // append 幂等键的一部分
     source_request_id: ContextRequestId,
-    finalize_cause: FinalizeCause,      // Completed | UserCancelledStep | RunTerminated
-    messages: Vec<Message>,             // finalized projection：inputs → assistant → 原序 terminal results
-    receipts: Vec<StepReceipt>,         // deterministic Tool/Agent receipt；可含 CancellationUnconfirmed
+    finalize_cause: FinalizeCause,       // Completed | UserCancelledStep | RunTerminated
+    messages: Vec<Message>,              // finalized projection：inputs → assistant → 原序 terminal results
+    receipts: Vec<StepReceipt>,          // deterministic Tool/Agent receipt；可含 CancellationUnconfirmed
     api_input_tokens: Option<u64>,
+    fingerprint: ContentFingerprint,     // 相同幂等键的内容一致性校验
 }
 
 struct CompactRequest {
@@ -134,6 +146,13 @@ enum CompactSkipReason {
     ResumeProtection,               // resume 第一轮保护
     HookBlocked,                    // PreCompact hook 阻止
     CircuitBreakerOpen,             // 连续失败次数达上限
+}
+
+struct AppendReceipt {
+    run_id: RunId,
+    step_id: RunStepId,
+    committed_revision: SessionRevision,
+    fingerprint: ContentFingerprint,
 }
 
 struct CalendarDate(String);             // ISO-8601 calendar date；一次 build 内冻结
@@ -611,3 +630,4 @@ chain.compact(result.summary, result.recent_messages, source.revision);
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：五级管线、ContextPort 签名、L1-L5 策略设计、幂等性、circuit breaker、常量统一 | #786 |
+| 2026-07-15 | #868 实现回写：ContextPort 冻结四方法与 provider-neutral PL；append 使用 revision/fingerprint CAS 并返回 typed receipt，Runtime 只消费 Context-owned 契约 | [#868](https://github.com/rushsinging/aemeath/issues/868) |

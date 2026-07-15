@@ -153,7 +153,7 @@
 - **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS`、且文件路径未被 `is_test_path` 判定为测试路径的 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非空且不以 `//` 或 `*` 开头的行中的 `crate::<layer>` 引用（`use` 可选）。脚本不解析普通文件内的 `#[cfg(test)]` block，因此其中符合匹配条件的行仍会被扫描；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
 - **层定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`，其中 `shared` 仅按真实复用需要创建。
-- **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {session, compact, budget, prompt, memory_inject, context_port, port}`。脚本只对 context feature 放行这七个目录；其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
+- **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {capabilities}`。Context 的稳定竖切只允许位于该容器；Session、Compact、Prompt 等旧根目录已由 #868 迁出并从白名单删除。其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |

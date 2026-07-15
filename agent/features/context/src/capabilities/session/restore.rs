@@ -9,7 +9,7 @@
 //! 获取活跃链相关数据。
 
 use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
-use crate::session::{ChatChain, ChatSegment, SegmentKind, Session};
+use crate::capabilities::session::{ChatChain, ChatSegment, SegmentKind, Session};
 use share::message::Message;
 
 /// 从 `Session` 还原出的活跃链运行时状态。
@@ -88,7 +88,7 @@ impl SessionRestore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::SessionMetadata;
+    use crate::capabilities::session::SessionMetadata;
     use share::message::Role;
 
     fn segment(parent: Option<String>, kind: SegmentKind, msgs: Vec<Message>) -> ChatSegment {

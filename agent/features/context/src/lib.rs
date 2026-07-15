@@ -4,11 +4,7 @@
 pub const LOG_TARGET: &str = "aemeath:context";
 
 pub mod api;
-pub mod budget;
-pub mod compact;
+pub(crate) mod capabilities;
 pub mod context_port;
 pub mod contract;
 pub mod gateway;
-pub mod memory_inject;
-pub mod prompt;
-pub mod session;

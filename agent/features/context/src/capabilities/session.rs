@@ -17,8 +17,8 @@ pub use storage::{
     SessionLoadError,
 };
 pub use types::{
-    extract_project_name, new_session_id, now_iso, sessions_dir, validate_session_id,
-    PersistedWorkspaceContext, PersistedWorkspaceFrame, Session, SessionFilter, SessionMetadata,
+    extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,
+    PersistedWorkspaceFrame, Session, SessionFilter, SessionMetadata,
 };
 
 #[cfg(test)]

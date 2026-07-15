@@ -7,7 +7,7 @@
 //! - **主循环**：`microcompact_chain(&mut ChatChain)` — 按 segment 边界保护最近 3 个大 loop。
 //! - **sub-agent**：`microcompact_messages(&mut [Message])` — 按 User turn 保护最近 2 轮。
 
-use crate::session::ChatChain;
+use crate::capabilities::session::ChatChain;
 use share::message::{ContentBlock, Message, MessageSource, Role};
 use std::collections::HashMap;
 
@@ -474,14 +474,14 @@ mod tests {
     // ── microcompact_chain ──────────────────────────────
 
     fn make_chain(num_segments: usize, tool_per_seg: usize) -> ChatChain {
-        use crate::session::ChatSegment;
+        use crate::capabilities::session::ChatSegment;
         let mut segments = Vec::new();
         let mut parent = None;
         for s in 0..num_segments {
             let mut seg = ChatSegment {
                 id: format!("seg-{s}"),
                 parent_id: parent.clone(),
-                kind: crate::session::SegmentKind::Normal,
+                kind: crate::capabilities::session::SegmentKind::Normal,
                 summary: None,
                 messages: vec![user_msg(&format!("turn{s}")), assistant_msg("reply")],
             };
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn test_microcompact_chain_preserves_non_exploratory() {
         // segment 中只有 Edit 结果 → 不折叠
-        use crate::session::{ChatChain, ChatSegment, SegmentKind};
+        use crate::capabilities::session::{ChatChain, ChatSegment, SegmentKind};
         let seg1 = ChatSegment {
             id: "seg-0".to_string(),
             parent_id: None,
