@@ -1,5 +1,4 @@
 mod accessors;
-mod event;
 mod from_args;
 mod mapping;
 mod trait_chat;
@@ -10,9 +9,6 @@ mod trait_reflection;
 mod trait_session;
 
 pub(crate) use accessors::*;
-// re-exports: 对内可见但部分类型仅通过 trait_impl 引用，属正常设计
-#[allow(unused_imports)]
-pub(crate) use event::*;
 #[allow(unused_imports)]
 pub(crate) use from_args::*;
 #[allow(unused_imports)]

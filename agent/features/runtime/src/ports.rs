@@ -43,6 +43,7 @@ pub use context_port::{
 pub use event_sink::EventSink;
 pub use hook_port::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use input_buffer::InputBuffer;
+pub(crate) use input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 pub use memory_port::{MemoryEntry, MemoryPort, MemoryQuery};
 pub use policy_port::{PolicyDecision, PolicyPort, PolicyRequest};
 pub use provider_port::{

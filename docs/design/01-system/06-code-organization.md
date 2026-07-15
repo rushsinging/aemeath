@@ -256,7 +256,7 @@ runtime/
 └── event_projection.rs
 ```
 
-此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名。Runtime 已有三个以上具备独立词汇、变化原因、状态或测试边界的能力，因此在 feature 内递归竖切；这不表示每个子能力都升级为 BC 或 crate。`agent_client` 是稳定入站能力，不是通用 `api` 层；`agent_run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordination / invocation 模块封装独立编排能力。它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。每个叶子按证据引入 model、port 或技术 adapter：`agent_run` 有真实领域不变量，`event_projection` 则保持扁平转换；Runtime 当前没有独立读模型和 HTTP delivery 端点，因此 **NEVER** 引入 CQRS-lite 或 REPR。
+此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名。源码事实复核后，Runtime 当前只有一个拥有完整用例、状态所有权与独立生命周期的能力 `agent_execution`；上述名称是该能力内部角色，不是平级 capability。Runtime 因此直接在 crate 根采用 `domain/application/ports/adapters` 轻量六边形，**NEVER** 为单一能力创建 `capabilities/agent_execution` 包装或空 `shared/`。`agent_client` 是稳定入站 façade，`agent_run` 拥有生命周期不变量，`loop_engine` 编排各 coordinator；coordinator 之间 **NEVER** 互相装配或穿透内部类型。`event_projection` 保持 Runtime-owned 的扁平纯转换 adapter；Runtime 当前没有独立读模型和 HTTP delivery 端点，因此 **NEVER** 引入 CQRS-lite 或 REPR。
 
 ## 5. 跨生态参照
 
@@ -429,4 +429,4 @@ components/foo/
 | 2026-07-14 | 审查修订：统一 Rust 2018+ 模块布局、独立结构判据、port 强制边界、模块战术真相源与规范等级 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 修复评审 #14：§3.5 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §2/§3.5 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.5 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.8 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 投影明确递归竖切且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 经事实复核确认为单一 `agent_execution` 能力，crate 根采用轻量六边形且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) / [#874](https://github.com/rushsinging/aemeath/issues/874) |
