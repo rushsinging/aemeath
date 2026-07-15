@@ -133,7 +133,29 @@ struct RunSpec {
     hooks:     HookMode,              // Full | BoundaryOnly | Disabled
     reasoning: ReasoningMode,         // GraphDriven | EffortOnly(level) | Inherit
     task:      TaskMode,              // Shared | Isolated
+    finalization: FinalizationSpec,   // deterministic summary / receipt 策略
 }
+
+struct FinalizationSpec {
+    summary: SummaryMode,
+    receipt: ReceiptDetail,
+}
+
+enum SummaryMode {
+    None,                            // 不生成下一轮 Context 文本投影
+    Deterministic {
+        per_tool_token_budget: u32,
+        total_token_budget: u32,
+        value_gate: SummaryValueGate,
+    },
+}
+
+enum ReceiptDetail {
+    Safety,                          // terminal identity / artifact / side effect / unconfirmed
+    Full,                            // 再含 completed actions / verified facts / remaining work
+}
+
+enum SummaryValueGate { ReusableWorkOnly }
 
 enum ContextMode   { SharedSession, Isolated }
 enum WorkspaceMode { Inherit, Snapshot }              // Snapshot: 快照父 frame，改目录不回写
@@ -147,6 +169,8 @@ enum ReasoningMode {
 } // Main: GraphDriven; Sub: EffortOnly/Inherit
 enum TaskMode      { Shared, Isolated }
 ```
+
+`SummaryMode` 只控制是否为下一轮 Context 生成 deterministic 文本投影，所有模式都 **NEVER** 调用 LLM summary。`ReceiptDetail::Safety` 是不可降低的安全下限：必须保留 child/run/tool identity、terminal status、artifact refs、可能副作用与 `CancellationUnconfirmed`；`None` 只表示没有 Context summary，**NEVER** 表示丢弃终态 receipt。Main 默认 `Deterministic + Full`；Sub 默认 `None + Safety`。只有明确需要自身 continuation 的特殊 Sub 才可声明 `Deterministic + Full`，且仍受父级预算收缩。
 
 **去掉 max_turns**：无限循环由 `timeout` + 防 stuck（`04-stuck-prevention`）双重兜底，不再用轮次上限。
 
@@ -192,7 +216,9 @@ struct RuntimeContext {
 | `reasoning` | GraphDriven | EffortOnly(level)/Inherit | 全 graph / 固定 requested effort / 继承父 requested effort；model clamp 由 Provider resolver 完成 |
 | `task` | Shared | Isolated | 独立 `TaskStore` |
 | `tools` | Main Scope + 完整基线 Profile | Sub Scope + 收缩 Profile | Scope 决定装配资源，Profile 只按 capability 收缩 |
-| `cancel` | 新建 per-Run scope | 从父 scope 派生 | 父取消传播到子 Run；各 Run 独立终态收口 |
+| `finalization.summary` | Deterministic（默认 per-tool 512、总计 `min(4096, context_window×2%)`） | None（默认不生成自身 Context 投影） | 固定模板消费 typed receipts；NEVER 调用 LLM |
+| `finalization.receipt` | Full | Safety（不可降低） | StepFinalizer 收集；父 Agent Tool 消费 Sub terminal receipt |
+| `cancel` | 新建 Run root + per-Step child scope | 从父 tool scope 派生 child Run root + per-Step child scope | 父 Step cancel 对 Agent Tool 传播 `TerminateRun(ParentStepCancelled)`；共享父绝对 deadline |
 
 ## 7. SubAgent 派生：控制权矩阵 + 安全铁律
 
@@ -236,6 +262,8 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 事件出口 | → TUI | → 父 Run（#612）|
 | interaction | SDK/TUI adapter | 显式 parent-mediated adapter；未装配则 unavailable |
 | 输入 | 常驻多轮 | 单次输入 |
+| Finalization summary | Deterministic + Full receipt | 默认 None + Safety receipt；特殊 continuation Sub 可显式提高 |
+| 父 Step 取消 | 取消 Main 当前 Step | 对关联 Sub 递归执行 TerminateRun，不允许 Sub 回 Drain 续跑 |
 
 > **差异 100% 由 RunSpec + Composition 装配 + RuntimeContext + Event adapter 表达，Loop Engine 零分支。**
 
@@ -265,3 +293,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 2026-07-12 | Provider 隔离语义收敛为共享不可变 transport + 每次调用独立 Invocation Scope | #788 |
 | 2026-07-14 | 移除 Runtime Workspace 端口；WorkspaceMode 仅驱动 composition-internal workspace scope，Main 在 Session 内复用，Sub 从父 Project wiring 派生同一隔离实例供 Context / Tool 装配；补齐 pending interaction identity / continuation | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 PlanApproval continuation；冻结单 PendingInteraction、Tool suspension 串行化与每 RunStep 单次 ContextAppend 不变量 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | RunSpec 增加 FinalizationSpec：Main 默认 deterministic summary + Full receipt，Sub 默认无 summary + Safety receipt；父 CancelRunStep 对 Agent Tool Sub 传播共享绝对 deadline 的 TerminateRun | [#700](https://github.com/rushsinging/aemeath/issues/700) |

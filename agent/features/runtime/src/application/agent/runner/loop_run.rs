@@ -282,7 +282,8 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
             error: error.clone(),
         }),
         RunDomainEvent::Cancelled { .. } => Some(AgentRunTerminal::Cancelled),
-        RunDomainEvent::Started { .. }
+        RunDomainEvent::Transitioned { .. }
+        | RunDomainEvent::Started { .. }
         | RunDomainEvent::StepStarted { .. }
         | RunDomainEvent::StepCompleted { .. }
         | RunDomainEvent::CancellationRequested { .. }

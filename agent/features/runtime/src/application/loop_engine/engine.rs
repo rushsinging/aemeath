@@ -549,15 +549,6 @@ where
     if events.is_empty() {
         return Ok(());
     }
-    for event in &events {
-        log::debug!(
-            target: "aemeath:agent:runtime",
-            "[run_domain] {} run_id={} parent={}",
-            event_name(event),
-            event_short_id(event),
-            event.parent_run_id().map(short).unwrap_or_else(|| "none".into()),
-        );
-    }
     if let Err(error) = port.emit(events.clone()).await {
         run.restore_events(events);
         return Err(error);
@@ -572,37 +563,6 @@ fn short(id: &sdk::RunId) -> String {
     } else {
         s
     }
-}
-
-fn event_name(event: &RunDomainEvent) -> &'static str {
-    match event {
-        RunDomainEvent::Started { .. } => "Started",
-        RunDomainEvent::StepStarted { .. } => "StepStarted",
-        RunDomainEvent::StepCompleted { .. } => "StepCompleted",
-        RunDomainEvent::CancellationRequested { .. } => "CancellationRequested",
-        RunDomainEvent::AwaitingUser { .. } => "AwaitingUser",
-        RunDomainEvent::Resumed { .. } => "Resumed",
-        RunDomainEvent::StuckDetected { .. } => "StuckDetected",
-        RunDomainEvent::Completed { .. } => "Completed",
-        RunDomainEvent::Failed { .. } => "Failed",
-        RunDomainEvent::Cancelled { .. } => "Cancelled",
-    }
-}
-
-fn event_short_id(event: &RunDomainEvent) -> String {
-    let id = match event {
-        RunDomainEvent::Started { run_id, .. }
-        | RunDomainEvent::StepStarted { run_id, .. }
-        | RunDomainEvent::StepCompleted { run_id, .. }
-        | RunDomainEvent::CancellationRequested { run_id, .. }
-        | RunDomainEvent::AwaitingUser { run_id, .. }
-        | RunDomainEvent::Resumed { run_id, .. }
-        | RunDomainEvent::StuckDetected { run_id, .. }
-        | RunDomainEvent::Completed { run_id, .. }
-        | RunDomainEvent::Failed { run_id, .. }
-        | RunDomainEvent::Cancelled { run_id, .. } => run_id,
-    };
-    short(id)
 }
 
 fn model_step_label(step: &ModelStep) -> &'static str {

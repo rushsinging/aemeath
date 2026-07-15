@@ -23,7 +23,7 @@
 5. **唯一生产装配**：具体实现选择、factory 调用和对象图连接全部位于 `agent/composition`，Runtime 内不建立第二个 Composition Root
 6. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
 7. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
-8. **无 durable**：恢复语义=从头开始，仅保留对话历史快照
+8. **Session 回放边界**：Session committed content 是唯一可回放数据源；Runtime 内存态与未入 Session 的 InputBuffer 不可回放，Terminate 时可丢弃
 
 ## 文档导航
 
@@ -49,3 +49,4 @@
 | 2026-07-12 | 出站端口数量改为开放表述，适配 Tool Catalog/Execution 拆分 | #787 |
 | 2026-07-15 | 经源码与用例边界复核，Runtime 当前只有一个 `agent_execution` 能力；撤销八模块平级竖切，改为 crate 根直接采用轻量六边形 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-15 | 曾将 Runtime 内部角色误判为多个平级能力并递归竖切；此结论已由上一条复核记录取代 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-15 | 明确 CancelRunStep/TerminateRun 共用 deterministic StepFinalizer；Session committed content 是唯一回放源，未入 Session 的 InputBuffer 在 Terminate 时可丢弃 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
