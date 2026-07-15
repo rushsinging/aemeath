@@ -1,9 +1,16 @@
-use super::state::RunStepId;
+use super::state::{RunStatus, RunStepId, RunTransitionReason};
 
 pub use sdk::RunId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunDomainEvent {
+    Transitioned {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        from: RunStatus,
+        to: RunStatus,
+        reason: RunTransitionReason,
+    },
     Started {
         run_id: RunId,
         parent_run_id: Option<RunId>,
@@ -54,7 +61,8 @@ pub enum RunDomainEvent {
 impl RunDomainEvent {
     pub fn parent_run_id(&self) -> Option<&RunId> {
         match self {
-            Self::Started { parent_run_id, .. }
+            Self::Transitioned { parent_run_id, .. }
+            | Self::Started { parent_run_id, .. }
             | Self::StepStarted { parent_run_id, .. }
             | Self::StepCompleted { parent_run_id, .. }
             | Self::CancellationRequested { parent_run_id, .. }

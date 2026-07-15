@@ -107,6 +107,51 @@ pub enum RunTransition {
     CancellationFinished,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTransitionReason {
+    Start,
+    BeginCompaction,
+    CompactionCompleted,
+    ContextPrepared,
+    RetryModel,
+    ModelContextExceeded,
+    ModelInvoked,
+    ResponseWithTools,
+    ResponseWithoutTools,
+    ContinueAfterResponse,
+    ToolsApproved,
+    AwaitUser,
+    UserResumed,
+    ToolsCompleted,
+    Finish,
+    InterruptRequested,
+    CancellationFinished,
+    Failed,
+}
+
+impl From<RunTransition> for RunTransitionReason {
+    fn from(transition: RunTransition) -> Self {
+        match transition {
+            RunTransition::Start => Self::Start,
+            RunTransition::BeginCompaction => Self::BeginCompaction,
+            RunTransition::CompactionCompleted => Self::CompactionCompleted,
+            RunTransition::ContextPrepared => Self::ContextPrepared,
+            RunTransition::RetryModel => Self::RetryModel,
+            RunTransition::ModelContextExceeded => Self::ModelContextExceeded,
+            RunTransition::ModelInvoked => Self::ModelInvoked,
+            RunTransition::ResponseWithTools => Self::ResponseWithTools,
+            RunTransition::ResponseWithoutTools => Self::ResponseWithoutTools,
+            RunTransition::ContinueAfterResponse => Self::ContinueAfterResponse,
+            RunTransition::ToolsApproved => Self::ToolsApproved,
+            RunTransition::AwaitUser => Self::AwaitUser,
+            RunTransition::UserResumed => Self::UserResumed,
+            RunTransition::ToolsCompleted => Self::ToolsCompleted,
+            RunTransition::Finish => Self::Finish,
+            RunTransition::CancellationFinished => Self::CancellationFinished,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RunTransitionError {
     #[error("非法 Run 状态迁移：{from:?} --{transition:?}-->")]

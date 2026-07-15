@@ -432,7 +432,13 @@ async fn failed_event_delivery_is_restored_to_the_run_outbox() {
     let error = run_loop(&mut run, &cancel, &mut port).await.unwrap_err();
 
     assert!(matches!(error, LoopEngineError::Adapter(_)));
-    assert!(matches!(run.events(), [RunDomainEvent::Started { .. }]));
+    assert!(matches!(
+        run.events(),
+        [
+            RunDomainEvent::Transitioned { .. },
+            RunDomainEvent::Started { .. }
+        ]
+    ));
 }
 
 #[tokio::test]
