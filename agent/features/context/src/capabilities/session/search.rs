@@ -1,7 +1,7 @@
 //! 会话搜索与过滤
 
-use crate::session::storage::list_sessions;
-use crate::session::types::{Session, SessionFilter};
+use crate::capabilities::session::storage::list_sessions;
+use crate::capabilities::session::types::{Session, SessionFilter};
 
 /// Search sessions with filter criteria
 pub async fn search_sessions(filter: &SessionFilter) -> Vec<Session> {
