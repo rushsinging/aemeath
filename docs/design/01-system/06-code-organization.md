@@ -207,31 +207,38 @@ provider/
 ### 4.3 复杂 Runtime：按 agent_run / loop_engine / coordination 能力组织
 
 ```text
-runtime.rs
-runtime/
-├── agent_client.rs
-├── agent_run.rs
-├── agent_run/
-│   ├── state.rs
-│   └── step.rs
-├── loop_engine.rs
-├── loop_engine/
-│   ├── drive.rs
-│   └── stuck_guard.rs
-├── model_invocation.rs
-├── model_invocation/
-│   └── retry.rs
-├── tool_coordination.rs
-├── tool_coordination/
-│   └── approval.rs
-├── context_coordination.rs
-├── context_coordination/
-│   └── window.rs
-├── interaction.rs
-└── event_projection.rs
+agent/features/runtime/src/
+├── lib.rs                         # 窄 façade
+├── capabilities.rs                # VSA 能力聚合入口
+├── capabilities/
+│   ├── agent_client.rs
+│   ├── agent_client/
+│   ├── agent_run.rs
+│   ├── agent_run/
+│   │   ├── state.rs
+│   │   └── step.rs
+│   ├── loop_engine.rs
+│   ├── loop_engine/
+│   │   ├── drive.rs
+│   │   └── stuck_guard.rs
+│   ├── model_invocation.rs
+│   ├── model_invocation/
+│   │   └── retry.rs
+│   ├── tool_coordination.rs
+│   ├── tool_coordination/
+│   │   └── approval.rs
+│   ├── context_coordination.rs
+│   ├── context_coordination/
+│   │   └── window.rs
+│   ├── interaction.rs
+│   ├── interaction/
+│   └── event_projection.rs
+├── shared.rs                      # crate 内最小共享内核
+└── shared/
+    └── runtime_context.rs
 ```
 
-此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名。`agent_client` 是稳定入站能力，不是通用 `api` 层；`agent_run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordination / invocation 模块封装独立编排能力。它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。外部 seam 的 port **SHOULD** 靠近实际消费方；只有多个模块共享同一 Run 不变量时才 **MAY** 抽取共享 model。
+此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的 `agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 战术命名，并用 `capabilities/` 将这些垂直切片与 crate 根 façade 分开。`shared/` 只允许承载多个能力共同消费、且没有单一能力语义所有者的最小稳定基础；它 **NEVER** 依赖 `capabilities/`，也 **NEVER** 用于规避循环依赖。`agent_client` 是稳定入站能力，不是通用 `api` 层；`agent_run` 拥有生命周期不变量，`loop_engine` 驱动单个 Run，各 coordination / invocation 模块封装独立编排能力。它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。外部 seam 的 port **SHOULD** 靠近实际消费方；只有多个模块共享同一 Run 不变量时才 **MAY** 抽取共享 model。具体生产实现选择、factory 调用与对象图连接只允许在 `agent/composition`，Runtime crate 内 **NEVER** 建立第二个 Composition Root。
 
 ## 5. 跨生态参照
 

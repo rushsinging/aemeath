@@ -18,9 +18,11 @@
 
 1. **单执行生命周期状态机**：全系统只有 `Run` 驱动 Agent 执行生命周期（内存态、不持久化、崩溃从头开始）；其他 BC 可拥有不驱动 Run 的局部状态机
 2. **Loop Engine 零分支**：Main/Sub 共用一套 Loop，差异 100% 在 RunSpec + RuntimeContext + Event adapter
-3. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
-4. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
-5. **无 durable**：恢复语义=从头开始，仅保留对话历史快照
+3. **能力优先目录**：8 个垂直切片统一位于 `capabilities/`，crate 内最小共享内核位于 `shared/`
+4. **唯一生产装配**：具体实现选择、factory 调用和对象图连接全部位于 `agent/composition`，Runtime 内不建立第二个 Composition Root
+5. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
+6. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
+7. **无 durable**：恢复语义=从头开始，仅保留对话历史快照
 
 ## 文档导航
 
@@ -44,3 +46,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：模块入口 + 三元组速览 + 文档导航 | #761 |
 | 2026-07-12 | 出站端口数量改为开放表述，适配 Tool Catalog/Execution 拆分 | #787 |
+| 2026-07-15 | 明确 `capabilities/`、最小 `shared/` 与 `agent/composition` 唯一生产装配边界 | [#995](https://github.com/rushsinging/aemeath/issues/995) |

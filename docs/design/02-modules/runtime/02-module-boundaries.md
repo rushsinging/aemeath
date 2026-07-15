@@ -25,7 +25,46 @@
         └────────────┴─── event_projection（横切：领域事件 → SDK ChatEvent）
 ```
 
-## 2. 各模块职责
+## 2. 物理目录与边界
+
+Runtime crate 使用 `capabilities/` 包裹 8 个垂直切片，避免 crate 根目录随能力增长而膨胀；crate 内跨多个能力共享、且无法归属单一语义所有者的最小基础代码放入 `shared/`：
+
+```text
+agent/features/runtime/src/
+├── lib.rs                         # 窄 façade
+├── capabilities.rs                # 8 个能力的私有聚合入口
+├── capabilities/
+│   ├── agent_client.rs
+│   ├── agent_client/
+│   ├── agent_run.rs
+│   ├── agent_run/
+│   ├── loop_engine.rs
+│   ├── loop_engine/
+│   ├── model_invocation.rs
+│   ├── model_invocation/
+│   ├── tool_coordination.rs
+│   ├── tool_coordination/
+│   ├── context_coordination.rs
+│   ├── context_coordination/
+│   ├── interaction.rs
+│   ├── interaction/
+│   ├── event_projection.rs
+│   └── event_projection/
+├── shared.rs                      # crate 内最小共享内核
+└── shared/
+    ├── runtime_context.rs
+    └── ...                        # 仅无单一能力所有者的稳定基础代码
+```
+
+- `capabilities` 与 `shared` 默认均为 crate-private；`lib.rs` 只重导出真实外部消费者需要的窄入口。
+- `shared` **NEVER** 依赖 `capabilities`；能力 **MAY** 依赖最小 `shared`。
+- 能力间 **MUST** 只依赖对方 façade / Published Language，**NEVER** 穿透内部文件。
+- `shared` **NEVER** 作为消除循环依赖、缩短 import 或收纳业务类型的兜底目录；`RunStatus`、compact 决策、Tool 编排等仍归语义所有者。
+- `RuntimeContext` 是多个能力共同消费的 Run-lifetime 活资源容器，因此归 `shared/runtime_context.rs`；它不拥有业务决策，也不构造任何具体生产实现。
+- 生产对象图、具体实现选择与 factory 调用全部位于 `agent/composition`；Runtime crate 内 **NEVER** 建立 `bootstrap/` 或第二个 Composition Root。
+- 使用 Rust 2018+ `capability.rs` + `capability/...` 形状，**NEVER** 新增 `mod.rs`。
+
+## 3. 各模块职责
 
 ### agent_run（模块核心）
 - **状态所有权**：`Run` 聚合、`RunStatus` 状态机、Run Step / Tool Call 实体
@@ -84,7 +123,7 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 
 触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubRunStart/Stop）。
 
-## 3. 状态所有权矩阵
+## 4. 状态所有权矩阵
 
 | 状态 | 所有者模块 | 说明 |
 |---|---|---|
@@ -96,7 +135,7 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 | RuntimeContext（活资源）| 由 agent_client / 派生逻辑发起装配，**流经各模块作参数** | 不属任何模块的持久状态 |
 | InputBuffer 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
 
-## 4. 依赖方向（Clean）
+## 5. 依赖方向（Clean）
 
 ```
 agent_client → agent_run → loop_engine → {model_invocation, tool_coordination,
@@ -108,11 +147,11 @@ event_projection：被各模块调用（emit），不反向依赖业务
 - **MUST NOT** coordinators 之间互相依赖（都经 loop_engine 编排）
 - **MUST NOT** 任何模块私自 `new` Port 实现（经 RuntimeContext 注入）
 
-## 5. 迁移边界
+## 6. 迁移边界
 
 本文的 Target 模块图与依赖规则是验收目标；源码现状、迁移顺序、责任与退出条件 **MUST** 只在 [Migration Governance](../../03-engineering/03-migration-governance.md) 维护，本文 **NEVER** 复制 Current 类型或进度。
 
-## 6. 相关文档
+## 7. 相关文档
 
 - 领域模型：[01-domain-model.md](01-domain-model.md)
 - 状态机与 Loop：[03-loop-and-state-machine.md](03-loop-and-state-machine.md)
@@ -125,6 +164,7 @@ event_projection：被各模块调用（emit），不反向依赖业务
 |---|---|---|
 | 2026-07-11 | 初稿：8 个内部模块划分、状态所有权、依赖方向、收敛方向 | #761 |
 | 2026-07-14 | 移除 Target 文档中的 Current 类型清单，将迁移事实收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 8 个垂直切片收拢到 `capabilities/`，增加最小 `shared/`，并明确 `agent/composition` 是唯一生产装配入口 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputBuffer 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputBuffer 状态、Runtime/Hook 边界子节 | #761 |
 | 2026-07-11 | model_invocation 补错误重试职责（Retryable 退避 / context 超限 compact / Fatal fail）+ ModelInvocationRetrying | #761 |
 | 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
