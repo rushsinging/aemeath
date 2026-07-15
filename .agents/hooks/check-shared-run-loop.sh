@@ -5,10 +5,10 @@ set -euo pipefail
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
-ENGINE="agent/features/runtime/src/business/loop_engine/engine.rs"
-MAIN="agent/features/runtime/src/business/chat/looping/loop_runner.rs"
-SUB="agent/features/runtime/src/business/agent/runner/loop_run.rs"
-OLD_FSM="agent/features/runtime/src/business/chat/looping/state.rs"
+ENGINE="agent/features/runtime/src/application/loop_engine/engine.rs"
+MAIN="agent/features/runtime/src/application/chat/looping/loop_runner.rs"
+SUB="agent/features/runtime/src/application/agent/runner/loop_run.rs"
+OLD_FSM="agent/features/runtime/src/application/chat/looping/state.rs"
 
 for path in "$ENGINE" "$MAIN" "$SUB"; do
   if [ ! -f "$path" ]; then
@@ -23,7 +23,7 @@ if [ -e "$OLD_FSM" ]; then
 fi
 
 engine_defs=$(grep -RInE 'pub[[:space:]]+async[[:space:]]+fn[[:space:]]+run_loop[[:space:]]*<' \
-  agent/features/runtime/src/business --include='*.rs' --exclude='*_tests.rs' | wc -l | tr -d ' ')
+  agent/features/runtime/src/application --include='*.rs' --exclude='*_tests.rs' | wc -l | tr -d ' ')
 if [ "$engine_defs" -ne 1 ]; then
   echo "{\"decision\":\"block\",\"reason\":\"生产代码必须恰有一个泛型共享 run_loop 定义，当前数量：$engine_defs\"}"
   exit 2
