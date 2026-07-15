@@ -37,6 +37,16 @@ ROOT_REEXPORT_ALLOW = {
 # Runtime 的目标 façade 位于 crate 根；只放行 Composition 实际消费的窄入口。
 ROOT_ACCESS_ALLOW = {
     "runtime": {"AgentClientImpl", "from_args"},
+    # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
+    "context": {"compact", "context_port", "guidance", "session", "skill"},
+}
+
+CONTEXT_FORBIDDEN_PATHS = {
+    "agent/features/context/src/api.rs",
+    "agent/features/context/src/gateway.rs",
+    "agent/features/context/src/capabilities/prompt/business.rs",
+    "agent/features/context/src/capabilities/prompt/business",
+    "agent/features/context/src/capabilities/prompt/gateway.rs",
 }
 
 path_pattern = re.compile(
@@ -192,6 +202,10 @@ def run_sanity() -> None:
 
 run_sanity()
 violations: list[str] = []
+for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
+    path = root / forbidden
+    if path.exists():
+        violations.append(f"{forbidden}: forbidden fixed-layer Context path exists")
 for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
     rel = api_path.relative_to(root)
     for lineno, line in enumerate(api_path.read_text().splitlines(), 1):

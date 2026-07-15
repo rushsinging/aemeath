@@ -40,8 +40,7 @@ pub async fn run_precompact_reflection(
     system_prompt_text: &str,
     lang: &str,
 ) -> Option<String> {
-    let compacted_messages =
-        context::api::compact::messages_selected_for_precompact_memory(messages);
+    let compacted_messages = context::compact::messages_selected_for_precompact_memory(messages);
     if compacted_messages.is_empty() {
         return None;
     }
