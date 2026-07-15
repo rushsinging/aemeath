@@ -173,12 +173,15 @@ enum ConversationIntent {
     ProjectRunCancelling { run_id },
     ProjectRunCancelled { run_id },
     RequestRunCancellation { run_id },
+    ResumeConversation { run_id, run_step_id },  // 显式 Intent；恢复历史会话为 Completed，NEVER 由内部 helper 绕过 reducer
     ShowInteraction { request_id, run_id, body },
     UpdateInteractionDraft { request_id, action },
     ConfirmInteraction { request_id },
     CancelInteraction { request_id },
     InteractionReplySent { request_id },
+    InteractionReplyRejected { request_id, reason },   // outcome=InvalidReply，回退 Collecting/Confirming 并保留 draft
     InteractionCancelled { request_id },
+    InteractionCancelRejected { request_id, reason },  // outcome=CancelRejected，回退 Collecting/Confirming 并保留 draft
     InteractionReplyFailed { request_id, message },
     // ...
 }
@@ -205,6 +208,7 @@ enum Effect {
     RequestRunCancellation { run_id: RunId },
     SendInteractionReply { request_id: UiInteractionRequestId, reply: UiInteractionReply },
     CancelInteraction { request_id: UiInteractionRequestId },
+    ResolveWorkspaceMetadata { root: String, revision: u64 },  // 异步解析 branch/kind → 结果回填为 WorkspaceIntent::ApplyMetadata（root/revision 匹配才生效），见 [02-model.md §8 WorkspaceProjection](02-model.md#8-workspaceprojection)
     RequestRender,
     SpawnTask { task: AsyncTask },
     // ...
@@ -285,7 +289,7 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 
 ## 9. 架构门禁
 
-门禁编号与 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §8 保持一致。
+门禁编号与 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §8 保持一致（同一体系，名称与证明逐条对齐）；[04-view-layer.md](04-view-layer.md) §8 使用独立的 `V1`–`V8` 视图层门禁编号，**NEVER** 复用本表 1–10 的数字，避免同一数字在两条不同规则间产生歧义。
 
 | # | 门禁 | Target 证明 |
 |---|---|---|
@@ -328,4 +332,6 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 | 2026-07-12 | DDD/Hexagonal/Clean 评审：收敛 reducer、ACL、event mapping 与 ViewAssembler 的职责边界 | #798 评审 |
 | 2026-07-14 | 事件主链统一为 TUI-owned DTO → Intent → Change → Coordinator Effect → result Intent；实现差距记录收口到 Migration Governance O6 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | Model 核心字段私有；Run 恢复 / 取消只投影 Runtime 权威事件；runs / timeline 明确为互补投影 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-14 | OutputViewCache memo key 统一为三元组 `(revision, workspace_root, collapsed_revision)`（#10 阻断修复） | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | OutputViewCache memo key 统一为三元组 `(revision, workspace_root, collapsed_revision)`（外部评审 finding #10，非架构门禁编号） | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | Effect 枚举补 `ResolveWorkspaceMetadata { root, revision }`，与 §8 WorkspaceProjection 的异步 branch/kind 解析对齐 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | Effect 枚举注释补充 `ApplyMetadata` 结果映射；ConversationIntent 补 `ResumeConversation` / `InteractionReplyRejected` / `InteractionCancelRejected`；门禁 #8 与 03 命名对齐，并补充与 04 `V1`–`V8` 独立编号体系的交叉引用说明 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

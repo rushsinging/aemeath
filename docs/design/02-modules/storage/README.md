@@ -25,7 +25,7 @@ Storage 是数据 BC 与物理介质之间的机制边界：
 
 1. **数据本体归原 BC**：Session、Memory Entry、Task Snapshot、Workspace Snapshot、Tool Result 与 Audit Event 的 schema、不变量、迁移和生命周期由各自 BC 拥有。
 2. **Storage 发布机制语言**：跨边界只交换 `StorageKey`、字节/序列化 payload、读写选项、结果和结构化错误；Storage 不 import 领域聚合。
-3. **端口分两层归属**：Storage 拥有机械 `AtomicBlobPort` OHS；数据 BC 拥有 `SessionSnapshotStore` 等窄出站端口，其 integration adapter 位于消费方外层或 Composition，不让 Storage 反向依赖领域模型。
+3. **端口分两层归属**：Storage 只拥有机械 `AtomicBlobPort` 与 `AtomicDatasetPort` 两个整值原子替换 OHS，**NEVER** 发布 append-log OHS——stage/fsync/rename 的整值替换协议无法安全拼出增量 append + 逐行 flush 语义（每次追加都要整值重写，durability 与并发追加顺序都不成立）；数据 BC 拥有 `SessionSnapshotStore`、`UsageAppendStorePort` 等窄出站端口，其 integration adapter 位于消费方外层或 Composition，不让 Storage 反向依赖领域模型。`UsageAppendStorePort` 由 Audit adapter 直接以 file append detail 实现，只复用 Storage 发布的路径安全 primitive（`SafePathSegment` 校验、受约束根目录句柄解析），不经过 `AtomicBlobPort`/`AtomicDatasetPort`。
 4. **原子可见**：单 blob 替换后，读者只能看见完整旧值或完整新值；由多个 member 构成的逻辑 dataset 必须经 dataset-level lock + journal / commit marker 作为一笔可恢复事务提交，领域 reader **NEVER** 看见成员混代。
 5. **保留上一代物理完整值**：启用恢复代际的 namespace 在替换已有值时保留上一代完整 bytes；是否符合领域 schema 只能由数据 BC 验证。
 6. **损坏不静默丢弃**：数据 BC 验证主值失败后可机械读取上一代，并显式请求 promote 或 quarantine；不得自动当作空数据继续。
@@ -81,12 +81,12 @@ struct BlobRead {
     bytes: Vec<u8>,
 }
 
-/// read() 返回的结果：Primary 不存在时返回 Previous（如有）或 NotFound。
+/// read() 只返回调用方在 `generation` 参数中显式请求的那一代机械字节；
+/// 请求的 generation 不存在时返回 NotFound，NEVER 在 read() 内部自动跨代 fallback。
+/// 领域需要检查 Previous 时，必须显式再次调用 read(key, Generation::Previous)。
 enum ReadOutcome {
     Found(BlobRead),
     NotFound,
-    /// primary 损坏但 previous 可读；adapter 已标记 quarantine。
-    PromotedToPrevious(BlobRead),
 }
 
 /// delete_all_generations() 的结果。
@@ -121,6 +121,12 @@ struct DatasetRead {
     members: Vec<DatasetMember>,
 }
 
+/// Storage 在提交时冻结的权威完整成员名集合；调用方不需要预先猜测成员名即可发现当前 generation 有哪些 member。
+struct DatasetManifest {
+    revision: DatasetRevision,
+    members: Vec<SafePathSegment>,
+}
+
 /// 返回该值即证明 primary 已逻辑提交；任何后提交点问题只能进入 warning。
 struct WriteReceipt {
     warning: Option<CommitWarning>,
@@ -146,6 +152,7 @@ enum CommitWarning {
 struct QuarantineId(SafePathSegment);
 
 struct QuarantinedArtifact {
+    scope: TransactionScope,
     generation: Generation,
     bytes: Vec<u8>,
     reason: QuarantineReason,
@@ -198,7 +205,7 @@ enum StorageErrorKind {
 }
 ```
 
-> **Audit UsageAppendStorePort 所有权**：`UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。Audit adapter 内部消费 Storage 的 `AtomicBlobPort` / `AtomicDatasetPort` 机制实现 append-log 语义（追加写入 + flush + 顺序读取 + namespace 枚举），但端口 trait 的定义、调用和语义归属 **MUST** 属于 Audit。Storage 只提供原子读写和损坏兜底**机制**，不发布 append-log OHS。这样保持 Storage 的 blob/dataset 级抽象不被 append 语义污染，也避免两个 BC 同时声称拥有同一端口。
+> **Audit UsageAppendStorePort 所有权**：`UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。`AtomicBlobPort`/`AtomicDatasetPort` 的原子性建立在“整值 stage → fsync → rename”协议上，天然拼不出增量 append + 逐行 flush 语义；因此 Audit adapter **MUST** 直接以 file append（open-append 等价物 + write + fsync）detail 实现 append-log，只复用 Storage 发布的路径安全 primitive（`SafePathSegment` 校验、受约束根目录句柄解析），**NEVER** 组合调用 `AtomicBlobPort`/`AtomicDatasetPort` 来模拟追加。端口 trait 的定义、调用和语义归属 **MUST** 属于 Audit；Storage 只提供原子读写、路径安全和损坏兜底**机制**，不发布 append-log OHS。这样保持 Storage 的 blob/dataset 级抽象不被 append 语义污染，也避免两个 BC 同时声称拥有同一端口。
 
 `StorageKey` 表达逻辑位置，不暴露用户主目录或绝对路径。物理路径由 adapter 根据 ConfigSnapshot 提供的根目录与 namespace policy 解析。namespace policy 固定是否保留上一代；调用方不能逐次关闭该安全属性。
 
@@ -219,8 +226,15 @@ trait AtomicBlobPort: Send + Sync {
         bytes: &[u8],
         options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError>;
-    async fn promote_previous(&self, key: &StorageKey) -> Result<(), StorageError>;
-    async fn quarantine(&self, key: &StorageKey) -> Result<QuarantineReceipt, StorageError>;
+    async fn promote_previous(&self, key: &StorageKey) -> Result<WriteReceipt, StorageError>;
+    /// 显式隔离某一 generation / transaction scope；reason 由调用方选择稳定 typed 类别。
+    async fn quarantine(
+        &self,
+        key: &StorageKey,
+        generation: Generation,
+        scope: TransactionScope,
+        reason: QuarantineReason,
+    ) -> Result<QuarantineReceipt, StorageError>;
     async fn delete_all_generations(
         &self,
         key: &StorageKey,
@@ -230,14 +244,25 @@ trait AtomicBlobPort: Send + Sync {
 }
 
 trait AtomicDatasetPort: Send + Sync {
-    /// 先恢复未结事务，再在同一 dataset lock 下读取请求的完整 member 集。
+    /// 先恢复未结事务，再返回当前 generation 的 Storage-owned 完整成员清单。
+    async fn read_manifest(&self, dataset: &DatasetKey) -> Result<DatasetManifest, StorageError>;
+
+    /// 先恢复未结事务，再在同一 dataset lock 下读取请求的完整 member 集。只服务当前（primary）generation。
     async fn read_consistent(
         &self,
         dataset: &DatasetKey,
         members: &[SafePathSegment],
     ) -> Result<DatasetRead, StorageError>;
 
-    /// 仅当当前 revision 等于 expected 时提交全部 member。
+    /// 读取 previous generation 的完整成员集；缺失返回 NotFound。NEVER 由 read_consistent 自动降级到这里。
+    async fn read_previous(
+        &self,
+        dataset: &DatasetKey,
+        members: &[SafePathSegment],
+    ) -> Result<DatasetRead, StorageError>;
+
+    /// 仅当当前 revision 等于 expected 时提交全部 member；members 是新 generation 的完整清单，
+    /// 当前 generation 中存在但未出现在 members 里的成员名视为显式 omitted=delete。
     /// Ok 永远表示新 generation 已逻辑 committed；Err 永远表示未提交。
     async fn commit_atomic(
         &self,
@@ -246,8 +271,22 @@ trait AtomicDatasetPort: Send + Sync {
         members: &[DatasetMember],
         options: WriteOptions,
     ) -> Result<DatasetCommitReceipt, StorageError>;
+
+    /// 跨越 previous → primary 互换这一提交点；成功后 previous 成为新的当前 generation。
+    async fn promote_previous(&self, dataset: &DatasetKey) -> Result<DatasetCommitReceipt, StorageError>;
+
+    /// 隔离指定 generation 的 dataset transaction / member 证据；领域 decoder reason 与 Storage crash reason 分离。
+    async fn quarantine(
+        &self,
+        dataset: &DatasetKey,
+        generation: Generation,
+        scope: TransactionScope,
+        reason: QuarantineReason,
+    ) -> Result<QuarantineReceipt, StorageError>;
 }
 ```
+
+`DatasetManifest` 是 Storage 在提交时冻结的权威完整成员名集合：调用方不需要预先知道全部成员名即可发现当前 generation 有哪些 member，也不能自行拼凑成员清单绕过 Storage 记录的边界。`commit_atomic` 的 `members` 参数永远是新 generation 的完整替换清单，不是增量 patch：未出现在 `members` 中但存在于当前 generation 的成员名，Storage **MUST** 在同一 dataset lock/journal 内一并物理删除，不留孤儿文件；调用方要保留某个成员必须把它连同 bytes 一起放进 `members`。`read_consistent`/`read_manifest` 只返回当前 generation，**NEVER** 因为部分成员缺失就自动降级读取 previous；需要上一代时必须显式调用 `read_previous`。dataset 的 `promote_previous` 与 blob port 同名操作共享 committed+warning 语义；blob / dataset `quarantine` 必须由调用方显式传入 `generation + TransactionScope + QuarantineReason`，receipt 原样记录这些 typed facts，adapter **NEVER** 猜测领域 decoder reason。
 
 `DatasetRevision` **MUST** 对规范排序后的 member name、存在性与 bytes 做域分隔摘要；空 dataset 也有稳定 revision。`read_consistent` 在恢复未结事务后返回它；消费方 **NEVER** 构造 revision。`commit_atomic` 在同一 dataset lock 内重新计算 committed revision，若与 `expected` 不同，必须在写 stage / prepared journal 前返回 `ConcurrentWrite`。因此跨进程锁负责串行，expected-revision CAS 负责防止 stale writer 覆盖。
 
@@ -294,15 +333,18 @@ trait AtomicDatasetPort: Send + Sync {
 1. 按 DatasetKey 获取进程内 + 跨进程排他锁；所有 dataset read 也先经该锁
 2. 恢复或结案既有 journal，计算 committed DatasetRevision；与 expected 不同则返回 ConcurrentWrite，且未提交
 3. 为全部 member create-new stage，write_all + fsync；校验 member 名称唯一并计算 new revision
-4. 写入含 transaction id、member digest、expected/new revision 与 phase=prepared 的 journal，并 fsync
-5. 逐 member 发布 staged generation；每步更新 journal phase，目录 fsync
-6. 校验全部 new member 后写 committed marker（member publish 完成；逻辑提交点仍是 prepared journal）
-7. 生成 previous generation、清理 stage / journal，释放锁
+4. 在覆盖任何 current member **之前**，从 manifest 指定的完整旧集合为每个 member 创建 `previous.next`（hard-link/copy-on-write/同文件系统 copy 均可，但必须 fsync）并写入 old manifest digest；任一失败仍处于 prepared 前，可清理并保留完整旧 generation
+5. 写入含 transaction id、old/new member digest、expected/new revision、完整新 manifest（含待物理删除的 omitted 成员）与 phase=prepared 的 journal，并 fsync（逻辑提交点）
+6. 逐 member 发布 staged generation（含物理删除 omitted 成员）；每步更新 journal phase并目录 fsync
+7. 校验全部 new member 后写 committed marker；原子 promote 已完整 fsync 的 `previous.next` 集合及 old manifest 为 previous generation
+8. 清理 stage / journal，释放锁
 ```
 
 prepared journal 是 recovery 必须 roll-forward 的逻辑提交点：此前失败清理 stage 并保留完整旧 generation；此后任何 crash / cancel 都必须在下次 `read_consistent` 前完成 new generation，**NEVER** 向 reader 暴露部分 old + 部分 new。prepared 之后 adapter **NEVER** 返回 `Err`：若本次调用已完成 member publish，返回 `Visible` receipt；若剩余发布只能由 journal recovery 完成，返回 `RecoveryPending` receipt 与 warning。两种 receipt 都携 new revision、都表示 committed，领域 service 必须发布 candidate；后续外部 reader 先 recovery 再读取。只有 prepared 之前的 I/O / CAS 失败可以返回普通 `StorageError` 并让上层保留旧 live state。
 
 上段“prepared 之后不返回 `Err`”约束适用于正常 I/O / crash recovery：它们 **MUST** 收敛为 committed receipt。若 journal 自身无效、已 fsync 的 staged member 丢失/摘要不符，或发布后的 member digest 与 journal 不一致，Storage 已无法证明完整 generation；此时 `read_consistent` / reopen **MUST** quarantine 整笔事务证据并返回 `StorageErrorKind::CorruptTransaction`（`InvalidJournal` / `DatasetMemberDigestMismatch`），**NEVER** 把它标成 `ConcurrentWrite`、普通 `Io`、`RecoveryPending` 或可用空 dataset。该错误表示“已提交事实无法安全物化”，不是 `NotCommitted`；上层 **MUST** 阻止 service 发布或开放，等待人工恢复。
+
+`commit_atomic` 的 `members` 永远是新 generation 的完整清单：Storage 按 `DatasetManifest` 比较新旧成员名集合，新清单中缺席的旧成员名在同一 journal 内标记为 omitted=delete 并随 generation 切换一起物理删除，不允许残留孤儿文件，也不允许因为调用方“忘记带上”而静默保留旧成员。previous generation 是切换前完整旧成员集合的物理快照，和 blob 的 previous 一样只在启用恢复代际的 namespace 保留，可通过 `read_previous` / `promote_previous` / `quarantine` 显式访问、回滚或隔离；`read_consistent` 与 `read_manifest` 只服务当前 generation，**NEVER** 因为当前 generation 部分缺失就自动去读 previous 拼凑结果。
 
 可执行 crash-state test **MUST** 在每个 stage / fsync / journal / member publish / committed-marker 点中断，再证明 reopen 只得到完整旧 generation 或完整新 generation。相同 primitive 同时服务 Memory active+archive 与 legacy key migration，**NEVER** 复制领域专属事务算法。
 
@@ -321,21 +363,21 @@ consumer read Primary
 
 `Generation::Primary/Previous` 都是机械 bytes。是否接受 payload、如何迁移旧 schema、是否自动 promote、如何提示用户或发 integration event，由数据 BC 决定。Storage 的 `quarantine` 只移动该 key 的物理代际并返回 receipt，不将 JSON 解析失败建模为通用 Storage 错误。
 
-`promote_previous` 也遵循原子提交协议；成功后 Previous bytes 成为 Primary，损坏的原 Primary 进入 quarantine。Primary 缺失但 Previous 存在时，消费者同样可以验证后 promote，覆盖“提交边界外人工删除”等恢复场景。
+`promote_previous` 也遵循原子提交协议；成功后 Previous bytes 成为 Primary，损坏的原 Primary 进入 quarantine。Primary 缺失但 Previous 存在时，消费者同样可以验证后 promote，覆盖“提交边界外人工删除”等恢复场景。返回的 `WriteReceipt` 与 `write_atomic` 共用同一 committed+warning 语义：只要拿到 receipt 就必须发布新 primary，`warning` 表示某个提交后收尾步骤（例如旧 primary quarantine 归档、journal 清理）尚未完成，**NEVER** 因为出现 warning 而怀疑 promote 是否已提交。
 
 ## 6. 责任分配
 
 | 关注点 | 所有者 |
 |---|---|
 | 原子写、fsync、replace、backup、quarantine | Storage |
-| 多 member generation、dataset lock、journal / commit recovery | Storage `AtomicDatasetPort` |
+| 多 member generation、dataset lock、journal / commit recovery、manifest 冻结、previous read/promote/quarantine | Storage `AtomicDatasetPort` |
 | 物理根目录与后端 adapter | Storage + ConfigSnapshot 静态值 |
 | Session / Memory schema | Context Management / Memory；Session 内嵌的 Task / Workspace DTO schema 仍分别由 Task / Project 发布 |
 | schema version 与 migration | 对应数据 BC |
 | 保存时机、turn-level save、级联删除 | 对应应用服务/数据 BC |
 | Tool Result 的落盘阈值和 preview | Config 静态值 + Tool/Context Management 策略 |
 | retention、compact、archive、eviction | 数据 BC；Storage 只执行明确命令 |
-| Audit Event 的不可变语义与 retention policy | Audit；物理写入可经 Storage |
+| Audit Event 的不可变语义与 retention policy | Audit；append-log 物理写入由 Audit adapter 以 file append detail 直接实现，只复用 Storage 路径安全 primitive |
 | 日志 rotation/retention | Logging，不复用 Storage 业务端口 |
 
 ## 7. 生命周期与清理
@@ -393,3 +435,4 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-12 | 摘要初稿：数据所有权、原子写/backup/quarantine 机制、窄端口与路径安全 | #793 |
 | 2026-07-14 | 为 AtomicDataset 增加 expected-revision CAS 与 typed committed receipt，并移除 Task / Project 直连 Storage 路径 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 typed CorruptTransaction + quarantine disposition，统一 blob / dataset digest 歧义的 fail-closed 恢复语义 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 移除 Storage 端 AtomicAppendLogPort（append-log 归 Audit-owned adapter 直接实现）；read() 取消跨代自动 fallback；补 dataset manifest + previous read/promote/quarantine；promote/quarantine 补齐 committed+warning receipt 与 generation/scope/reason | [#972](https://github.com/rushsinging/aemeath/issues/972) |

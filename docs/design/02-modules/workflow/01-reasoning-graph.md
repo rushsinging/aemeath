@@ -67,6 +67,15 @@ classify heuristic (~15% 误判率)
 
 `ReasoningGraph::observe(signal)` **MUST** 在一次同步 mutation 中应用上表转移并返回新节点的 desired effort；graph 与 `current_effort` 都保持 Workflow-private，只有 `ReasoningPort` 实现可以调用。
 
+```rust
+impl ReasoningGraph {
+    /// Workflow-private：应用 §2.3 转移表并返回新节点的 desired effort。
+    /// NEVER 公开——只有本模块内的 ReasoningPortImpl 可调用；
+    /// 与 §4 的公开 `ReasoningPort::observe`（返回 `()`，内部消费该值）是两个不同签名。
+    fn observe(&mut self, signal: ReasoningSignal) -> ReasoningLevel;
+}
+```
+
 ## 3. effort 映射
 
 ### 3.1 节点 → effort
@@ -109,11 +118,28 @@ use share::ReasoningLevel; // Off | Low | Medium | High | Xhigh | Max
 - 实现 `Ord` / `PartialOrd` / `clamp`——支持 `min()` 比较
 - per-provider 可能不支持全部级别（如 Ollama 只有 on/off）
 
+### 3.4 运行态 ReasoningGraph vs 配置态 ReasoningGraphConfig
+
+| 维度 | ReasoningGraph（运行态） | ReasoningGraphConfig（配置态） |
+|---|---|---|
+| 归属 | Workflow BC 私有（仅 `ReasoningPortImpl` 持有，Runtime 不可见） | Config BC（见 [../config/01-config-layer.md](../config/01-config-layer.md)） |
+| 生命周期 | 与 Main Run 绑定，崩溃从头开始 | 静态，由 `ConfigSnapshot` 在 Run 启动时一次性提供；resume 时可能随 Config prepare 刷新 |
+| 内容 | 当前节点（`ReasoningNode`）+ 转移逻辑 + 私有 `observe()` 方法 | 静态阈值（`complex_intent` 判定条件）、每节点 `default_effort` / `override_effort`、`user_max_reasoning` |
+| 可变性 | 可变（状态机随 `ReasoningSignal` 转移） | 不可变（Run 内不变） |
+| 构造 | `ReasoningGraph::new(config: &ReasoningGraphConfig)` | 由 `ConfigSnapshot` 读取，Composition Root 在 `reasoning_for()` 中组装并注入 Workflow-owned port 实现 |
+
+- `ReasoningGraphConfig` 是纯数据（阈值映射），不含行为。由 Config BC 定义，Workflow 直接消费。
+- `ReasoningGraph` 持有 `ReasoningGraphConfig`（克隆或 `Arc`），驱动状态转移和 `current_effort` 计算。
+- 两者 **MUST NOT** 合并为一个类型——运行态包含可变状态（当前节点），配置态是静态快照。
+- `NodeConfig`（`default_effort` + `override_effort`）属于 `ReasoningGraphConfig` 的一部分，不在运行态 `ReasoningGraph` 中独立可变。
+
 ## 4. ReasoningPort OHS
 
 ```rust
 trait ReasoningPort: Send + Sync {
     /// 输入 Runtime 已观察到的领域事实；Main 实现内部推进私有 graph。
+    /// 返回 `()`——内部消费私有 `ReasoningGraph::observe` 返回的 desired effort 并 clamp 落盘，
+    /// NEVER 把 desired 值透出给 Runtime。
     fn observe(&self, signal: ReasoningSignal);
     /// 当前 requested reasoning（已受 user maximum 限制，尚未按 model capability 裁剪）。
     fn current_requested_level(&self) -> ReasoningLevel;
@@ -266,6 +292,7 @@ reasoning_port.observe(ReasoningSignal::TurnBoundary);
 - 支持完整 6 级：`off` / `low` / `medium` / `high` / `xhigh` / `max`
 - 通过 `ReasoningPort.set_level()` 设置（受 clamp 保护）
 - 无参数时采用 Medium / Off binary toggle；显式参数总是优先
+- `set_level` 与命令确认反馈（CLI/TUI 回显）只暴露 `current_requested_level()`——即 §5.1 clamp 链中的 `requested` 值；**NEVER** 展示 provider `resolve_invocation_options` 产生的 model `effective` 值。同一 Run 尚未触发下一次 LLM 调用前不存在新的 effective reasoning，命令层没有能力提前得知它。
 
 ## 9. Workflow 远期方向
 
@@ -321,3 +348,5 @@ Workflow Engine **暂缓实现**，原因：
 | 2026-07-12 | 初稿：节点状态机、effort 映射、ReasoningPort OHS、clamp 统一、Workflow 远期方向 | #792 |
 | 2026-07-14 | 对齐 Context Map：Workflow 作为支撑域 BC 独占 ReasoningPort 与 clamp 不变量；将 Verify 收入五节点统一语言与状态机 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 拆分 Workflow user-maximum clamp 与 Provider model-capability clamp；Runtime 在 Context build 前冻结唯一 effective value | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 明确私有 `ReasoningGraph::observe` 返回 desired effort，公开 `ReasoningPort::observe` 返回 `()` 并内部消费；`/think` 命令反馈只暴露 requested 值，NEVER 暴露 model effective 值 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 新增 §3.4 运行态 ReasoningGraph vs 配置态 ReasoningGraphConfig 区分；两者 MUST NOT 合并为一个类型 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

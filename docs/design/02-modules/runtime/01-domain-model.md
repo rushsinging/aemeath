@@ -103,9 +103,9 @@ enum InteractionContinuation {
 
 > **取消事件分两阶段**：`RunCancellationRequested` 在同步取消入口接受请求并将 Run 迁移到 `Cancelling` 时产生；`RunCancelled` 仅在 Provider/Tool/Compact/Hook 等在途工作停止且回滚完成后产生。前者是即时请求事实，后者是异步完成确认。
 
-> **终态事件族统一带载荷**：`RunCompleted{ result }`（最后 assistant 文本/结构）/ `RunFailed{ error }` / `RunCancelled`。这是 Run 的产出，**统一经 `EventSink` 发出，不设独立 `RunResult` 类型/返回值**。Main→TUI 通知完成；**Sub→父 Run，父从终态事件统一提取**（成功取 `result`、失败取 `error`）继续。**靠终态领域事件识别，不靠遍历 message**。
+> **终态事实与业务返回分离**：`RunCompleted { result }`（最后 assistant 文本/结构）/ `RunFailed { error }` / `RunCancelled` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
 
-> Event Projection adapter 按 Main/Sub 路由与命名（Main→TUI，Sub→父 Run，详见 #612）。
+> Event Projection adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断投影，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
 
 ## 5. RunSpec —— 声明式规格
 
@@ -170,7 +170,7 @@ struct RuntimeContext {
     config:    ConfigSnapshot,          // Main/Sub 共享
     clock:     Arc<dyn Clock>,          // request builder 冻结 CalendarDate；Prompt 不读全局时钟
     input:     Arc<dyn InputBuffer>,    // 入站：Main=TUI通道+忙期buffer; Sub=固定初始队列
-    events:    Arc<dyn EventSink>,      // 出站：Main→TUI ; Sub→父 Run
+    events:    Arc<dyn EventSink>,      // 出站纯投影：Main→TUI；Sub→父级诊断（业务结果走 typed return）
     cancel:    RunCancellationScope,    // per-Run；Provider/Tool/Compact/Hook 共享或派生
 }
 ```

@@ -25,6 +25,7 @@ trait AgentClient {
         reason: InteractionCancelReason,
     ) -> InteractionCommandOutcome;
     /// /think 命令入站入口：设置下一个 Run 的 reasoning level 上限。
+    /// 返回 Workflow-owned requested 值（已受 user maximum clamp，NEVER 经 Provider resolver 计算 effective）。
     fn set_reasoning_level(
         &self,
         session_hint: SessionId,
@@ -33,7 +34,7 @@ trait AgentClient {
 }
 
 enum ReasoningLevelOutcome {
-    Accepted { effective: ReasoningLevel }, // 受 ModelCapability clamp 后的实际生效值
+    Accepted { requested: ReasoningLevel }, // Workflow user-max clamp 后的 requested 值
     Unsupported,
 }
 
@@ -75,12 +76,13 @@ enum InteractionCommandOutcome {
 | Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |
 | Config | `ConfigSnapshot` PL | 本 Run 的只读配置快照；见 [Config](../config/01-config-layer.md) |
 
-`ProviderPort`、`InteractionPort`、`EventSink` 与 `UsageSink` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有；完整 Provider 调用语言仍以 [Provider contract](../provider/02-ports-stream-and-client-scope.md) 为展开说明：
+`ProviderPort`、`InteractionPort`、`EventSink` 与 `UsageSink` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有。它们的**唯一签名真相源**分别是：`ProviderPort` 见本文 §2.1；`InteractionPort` 及其 Published Language 见本文 §2.2；`EventSink` / `UsageSink` 见本文 §2.3。Provider 文档只登记 adapter 实现面，本文其余章节和其他供应方文档只登记使用面或 adapter 行为，**NEVER** 复制第二份 trait：
+
+### 2.1 Runtime-owned ProviderPort
 
 ```rust
-trait ProviderPort: Send + Sync {                    // Provider BC（内部 ACL）
-    fn capabilities(&self, model: &ModelId)
-        -> Result<ModelCapability, ProviderError>;
+trait ProviderPort: Send + Sync {
+    fn capabilities(&self, model: &ModelId) -> Result<ModelCapability, ProviderError>;
     fn resolve_invocation_options(
         &self,
         model: &ModelId,
@@ -90,9 +92,15 @@ trait ProviderPort: Send + Sync {                    // Provider BC（内部 ACL
         &self,
         request: InvocationRequest,
         cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStream, ProviderError>;     // 单次 attempt 的有序流
+    ) -> Result<InvocationStream, ProviderError>;
 }
+```
 
+Provider BC 的 ACL / adapter 实现该 Runtime-owned SPI；完整 stream、client scope 与能力映射说明见 [Provider adapter design](../provider/02-ports-stream-and-client-scope.md)，但不得在那里复制 trait。
+
+### 2.2 Runtime-owned InteractionPort 与交互语言
+
+```rust
 #[async_trait]
 trait InteractionPort: Send + Sync {                 // Runtime-owned 出站端口
     async fn request(
@@ -162,16 +170,9 @@ enum InteractionCompletion {
     Replied(InteractionReply),
     Cancelled(InteractionCancelReason),
 }
-
-trait UsageSink: Send + Sync {                         // Runtime-owned outbound port；Audit adapter 实现
-    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
-}
-trait EventSink {                                    // 事件出口（Main→TUI / Sub→父）
-    fn emit(&self, events: Vec<DomainEvent>);
-}
 ```
 
-`InteractionPort` 只承载一次 request/reply 交换，**NEVER** 自行修改 Run 或发布 `RunResumed`。Runtime interaction coordinator 在调用前以 request id + continuation 进入 `AwaitingUser`，收到匹配 reply 后恢复 continuation 并发布权威事件；取消与 reply 竞争时 cancellation 优先，陈旧 / 重复 id 返回结构化错误。Main adapter 把 request 映射为 SDK event 并等待 TUI / Server 回复；Sub 只能使用 Composition 明确装配的 parent-mediated adapter，否则返回 unavailable，**NEVER** 暗中共用 Main UI channel。
+`InteractionPort` 只承载一次 request/reply 交换，**NEVER** 自行修改 Run 或发布 `RunResumed`。Runtime interaction coordinator 在调用前以 request id + continuation 进入 `AwaitingUser`，收到匹配 reply 后恢复 continuation并发布权威事件；取消与 reply 竞争时 cancellation 优先，陈旧 / 重复 id 返回结构化错误。Main adapter 把 request 映射为 SDK event 并等待 TUI / Server 回复；Sub 只能使用 Composition 明确装配的 parent-mediated adapter，否则返回 unavailable，**NEVER** 暗中共用 Main UI channel。
 
 reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`InteractionCompletion::Cancelled` 是“取消这次交互”，不是 `cancel_run` 的别名；Runtime 按 continuation 穷尽映射 typed 结果：
 
@@ -180,13 +181,26 @@ reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`In
 | `CompleteToolCall(id)` | answers → 同一 ToolCall 的 `ToolSuccess` | `ToolCancelled(UserInteractionCancelled(reason))` | `ExecutingTools`；继续下一个 suspension |
 | `ContinueToolApproval(id)` | Approve → Ready；Deny → `ToolCancelled(ApprovalDenied)` | `ToolCancelled(ApprovalCancelled(reason))` | `AwaitingToolApproval`；继续处理其余原始调用 |
 | `ContinuePlanApproval` | Approve → `PlanApproved`；Deny → `PlanRejected` feedback；决定随当前无 tool_calls 的 step 恰好一次提交 | `RunFailed(PlanApprovalCancelled(reason))` | reply 回 `PreparingContext` 并启动下一 invocation；cancel 回 `Failed` |
-| `ContinueAfterHardPause` | `HardPauseContinue` | `RunFailed(HardPauseCancelled(reason))` | reply 回 `PreparingContext`；cancel 回 `Failed` |
+| `ContinueAfterHardPause` | `HardPauseContinue` | `RunFailed(HardPauseCancelled(reason))` | reply 回 `ExecutingTools` 并继续 continuation 记录的未完成 tool phase；cancel 回 `Failed` |
 
 Run cancellation scope 若与 reply/cancel 竞争则永远优先：Run 进入 `Cancelling`，interaction waiter 以 RunCancelling 收口，最终只有 `RunCancelled`，**NEVER** 套用上表的普通 completion。
 
 并发 Tool execution 可以同时产生多个 `ToolOutcome::Suspended`，但 Runtime **MUST** 先收集 outcomes，再按 RunStep 原始 ToolCallId / 调用顺序逐个注册 request。前一个 continuation resolve 并清空 PendingInteraction 后才能注册下一个；全部调用得到 final outcome 后，按原调用顺序做 L1 budget reduction，并以一次 `append_and_persist` 提交 assistant + tool results。
 
 Main adapter **MUST** 在 Runtime-side interaction bridge 中先注册 `InteractionRequestId → pending waiter`，再发出纯值 `ChatEvent::InteractionRequested { request_id, run_id, body }`。`AgentClient::reply_interaction` / `cancel_interaction` 回到同一 bridge，校验 body-specific reply 后恰好一次完成 waiter；stream、TUI 与 SDK event **NEVER** 携带 sender。processing teardown 不拥有 waiter，Run cancellation 才由 Runtime drain 该 Run 的 pending request 并发布权威 cancellation 事件。
+
+### 2.3 Runtime-owned EventSink / UsageSink
+
+```rust
+trait UsageSink: Send + Sync {                         // Runtime-owned outbound port；Audit adapter 实现
+    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
+}
+trait EventSink: Send + Sync {                         // 纯投影出口；NEVER 承载 Sub Run 业务返回
+    fn emit(&self, events: Vec<DomainEvent>);
+}
+```
+
+`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
 
 ## 3. RuntimeContext、active Session 与 Workspace 装配
 
@@ -377,3 +391,4 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 | 2026-07-12 | Policy 装配收缩为 AllowAll；Hook 收敛单 dispatch；Audit 出站收缩为非阻塞 UsageSink | #790 |
 | 2026-07-14 | 移除 Runtime Workspace 端口；由 active-session-slot CompositionWorkspaceScope 保留 Main wiring，Sub 在 AgentDispatch 内派生；Context / Runtime / Tool 共享同一 Task、Memory 与 Project view；补齐 Runtime-owned InteractionPort | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 固化 Provider option resolver、reasoning_for 边界与四类 typed interaction continuation；并发 suspension 串行化为单 PendingInteraction | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | `ReasoningLevelOutcome::Accepted` 字段从 `effective` 改为 `requested`，对齐 Workflow 的 `/think` 反馈决策：命令层只暴露 user-max-clamped requested 值，NEVER 承诺尚未计算的 provider-ceiling-resolved effective 值 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

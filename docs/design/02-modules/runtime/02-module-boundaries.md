@@ -29,7 +29,7 @@
 
 ### agent_run（模块核心）
 - **状态所有权**：`Run` 聚合、`RunStatus` 状态机、Run Step / Tool Call 实体
-- **用例**：`start_run` / `resume_run`(ask_user 后) / `cancel_run` / `derive_sub_run`
+- **用例**：`start_run` / `cancel_run` / `derive_sub_run`。`AwaitingUser` 由同一次 `run_loop` 调用的同一 future 在内部 `.await` typed continuation；reply 到达后原地继续，既不是 Loop 退出边界，也不会二次入栈
 - **不持有** RuntimeContext（作为参数流转），**不直接调 Port**（经 loop_engine + coordinators）
 
 ### loop_engine（Main/Sub 共用）

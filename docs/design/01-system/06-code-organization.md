@@ -12,7 +12,7 @@
 
 1. 仓库与 crate 内部首先按稳定业务能力组织，让顶层名称直接表达系统做什么；
 2. 单个能力内部优先把同一用例一起变化的代码共置，而不是先拆成横向技术层；
-3. 只有真实外部 seam 出现时才定义 port，只有 §3.6 至少一个强边界收益成立时才拆 crate。
+3. 技术外部 seam 出现时按证据定义消费方-owned outbound port；BC boundary seam 出现时按 Context Map 定义供应方-owned façade/OHS。只有 §3.6 至少一个强边界收益成立时才拆 crate。
 
 Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 说明了能力优先组织、窄组件入口和减少公开类型的价值。aemeath **MUST** 让依赖图、Rust 可见性和公开 façade 证明边界；目录名称只能帮助导航，**NEVER** 单独充当架构证据。
 
@@ -42,8 +42,8 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 3. 模块内部条目 **SHOULD** 默认使用私有或受限可见性；只有真实消费者需要的稳定表面才 **MAY** `pub`。Rust 的默认私有、`pub(crate)` / `pub(super)` 与受控 `pub use` 规则见 [Rust Reference](https://doc.rust-lang.org/reference/visibility-and-privacy.html)。
 4. 一次用例变化需要共同修改的策略、校验、局部类型和测试 **SHOULD** 共置；仅因代码“类型相同”而分散到全局技术目录是 **NEVER** 允许的组织依据。
 5. 跨能力依赖 **MUST** 只指向对方公开 façade 或 Published Language，**NEVER** 直接引用对方内部实现。
-6. 当确认稳定能力策略若不抽象便会依赖易变外部细节时，该策略 **MUST** 定义目的性出站 port；供其他能力调用的入站 façade / OHS **MUST** 由供应能力发布。尚未形成真实边界时，模块 **MAY** 保持私有具体依赖，但 **NEVER** 让该依赖越过能力 façade，也 **NEVER** 预建 port。
-7. 具体实现选择与 factory 调用 **MUST** 收敛到 Composition Root；能力 **MAY** 用 composition-only opaque factory 构造模块私有 detail，但内部 **NEVER** 自行读取全局配置、选择候选生产实现或从业务路径触发 factory。
+6. 当确认稳定能力策略若不抽象便会依赖易变外部细节时，该策略 **MUST** 定义目的性出站 port；供其他能力调用的入站 façade / OHS **MUST** 由供应能力发布。尚未形成真实边界时，模块 **MAY** 保持私有具体依赖，但**该私有具体 detail 只能由持有它的 adapter / detail 内部代码使用**，模块的稳定策略层 **NEVER** 依赖它；该依赖也 **NEVER** 让其越过能力 façade，也 **NEVER** 预建 port。
+7. 具体实现选择与 factory 调用 **MUST** 收敛到 Composition Root；能力 **MAY** 用 composition-only opaque factory 构造模块私有 detail，但内部 **NEVER** 自行读取全局配置、选择候选生产实现或从业务路径触发 factory；**factory 只限生产代码路径**，测试代码 **MAY** 绕过 factory 与 Composition Root 直接构造轻量 fake / stub 实现注入被测策略。
 8. 公共抽象 **MUST** 有真实消费者与契约测试；没有行为差异的转发接口 **SHOULD** 内联或删除。
 9. 架构边界 **MUST** 尽可能由编译器和机械守卫验证；评审约定 **NEVER** 是循环依赖、越界 import 或公开面膨胀的唯一防线。
 
@@ -118,6 +118,8 @@ capability/
 
 Port 表达能力边界上一段有业务目的的对话，所有权分两类：隔离易变外部 detail 的**出站 port**由消费策略拥有；供其他能力调用的**入站 façade / OHS**由供应能力拥有并发布稳定 Published Language。出现下列信号时 **SHOULD** 评估对应边界，但信号本身 **NEVER** 自动要求增加抽象。
 
+这两类所有权对应两种性质不同、**NEVER** 混用判据的 seam：**技术外部 seam**（网络、文件系统、进程、时钟、第三方 SDK / 协议等易变技术细节）**MUST** 按下方"出站 port 的候选证据"评估，由消费该技术细节的能力策略拥有 port；**BC boundary seam**（两个 Bounded Context 之间的业务关系）**NEVER** 套用技术证据，而是由 [Context Map](03-context-map.md) 登记的供应方拥有入站 OHS / façade 并发布稳定语言，判据见下方"入站 façade / OHS 的候选证据"。当供应方 BC 恰好需要吸收易变外部技术差异时（例如 Provider 需要吸收各家 LLM API 差异），该技术细节仍由**消费方**定义并拥有隔离它的出站 port（如 Runtime-owned `ProviderPort`，签名以 [Runtime 端口与适配器](../02-modules/runtime/06-ports-and-adapters.md) 为真相源），供应方只负责实现——技术外部 seam 与 BC boundary seam 可在同一条边上共存，但所有权判据 **NEVER** 混用。Storage 同时示范两条不同边：其具体存储技术（driver，如 sled / 文件系统）是 Storage **私有**的技术外部 seam，由 Storage 自己定义并拥有一个私有 backend SPI 隔离，driver 只在 Storage 内部实现该私有 SPI；Storage 对外发布给其他数据 BC 的 `AtomicBlob` / `Dataset` OHS 则是 BC boundary seam 的入站服务，由消费方 integration adapter **调用**，**NEVER** 是由 driver 实现的 SPI——两条边所有权方向相反，**NEVER** 混同。
+
 出站 port 的候选证据：
 
 - 能力策略必须在无网络、文件系统、进程、时钟或 UI 的情况下运行和测试；
@@ -130,7 +132,7 @@ Port 表达能力边界上一段有业务目的的对话，所有权分两类：
 - 跨 Bounded Context 交互需要由供应方发布稳定语言，或需要在调用入口做防腐转换；
 - 两个以上消费者需要同一能力，但 **NEVER** 因此获得供应方内部类型。
 
-一旦确认稳定能力策略若不抽象就会依赖易变外部细节，该策略 **MUST** 定义出站 port。尚未形成这一策略 / 细节边界时，模块 **MAY** 保持私有具体依赖，并 **NEVER** 为假设中的未来替换预建 port。
+一旦确认稳定能力策略若不抽象就会依赖易变外部细节，该策略 **MUST** 定义出站 port。尚未形成这一策略 / 细节边界时，模块 **MAY** 保持私有具体依赖，但**该私有具体 detail 只能由持有它的 adapter / detail 内部代码使用**，模块的稳定策略 **NEVER** 依赖它，并 **NEVER** 为假设中的未来替换预建 port。
 
 已引入的出站 port **MUST** 由消费策略按目的命名并拥有，例如 `CompletionProvider`、`WorkspaceRepository`、`EventSink`；它 **SHOULD** 靠近消费外部交互的用例。入站 façade / OHS **MUST** 由供应能力拥有，例如 Runtime-owned `AgentClient` 与 Project-owned `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist`；消费方 **NEVER** 再包一层同义 façade。只有多个稳定 port 需要独立导航时才 **MAY** 建 `ports.rs` 或 `ports/`。
 
@@ -150,14 +152,21 @@ Port 表达能力边界上一段有业务目的的对话，所有权分两类：
 
 ### 3.6 可选 crate
 
-模块只有在至少一个强边界收益成立时才 **MAY** 升格为 crate：
+模块只有在至少一个强边界收益成立时才 **MAY** 升格为 crate。这些收益 **MUST** 分两类看待，**NEVER** 混用判据：
 
-- 必须由编译器禁止反向依赖或限制高成本依赖传播；
+**机械规则收益**（可由编译器 / 依赖检查工具直接证明，无需评审判断）：
+
+- 必须由编译器禁止反向依赖或限制高成本依赖传播——crate 边界与 `cargo` 依赖图能机械验证反向依赖确实被禁止。
+
+**需人工评审判定的收益**（无法由工具单独证明存在，**MUST** 由提议人在 crate 提案中给出证据并经评审确认）：
+
 - Published Language 已稳定，并被多个 crate、应用或独立进程消费；
 - 具有独立生命周期、构建目标、平台约束或 feature / dependency budget；
 - 独立发布、复用或安全审计边界已有明确需求。
 
-文件多、团队多人、测试慢、名称重要或“每个能力一个 crate” **NEVER** 单独构成拆分理由。提议新 crate 时 **MUST** 同时说明：所有者、公开 API、允许依赖、禁止依赖、消费者、循环检查与退役路径。若双方只有单一消费者、总是锁步变化，且本节列出的强边界收益均不成立，**MUST** 保持同 crate 私有模块。
+机械规则收益一旦成立即 **MAY** 升格，属于客观可验证条件；需人工评审判定的收益即使字面成立，也 **MUST** 经评审确认其证据（例如实际多消费者列表、真实平台约束、已批准的独立发布计划），**NEVER** 仅凭提案人自述即视为满足。
+
+文件多、团队多人、测试慢、名称重要或“每个能力一个 crate” **NEVER** 单独构成拆分理由。提议新 crate 时 **MUST** 同时说明：所有者、公开 API、允许依赖、禁止依赖、消费者、循环检查与退役路径，并标注所依据的收益属于机械规则还是需人工评审判定。若双方只有单一消费者、总是锁步变化，且本节列出的强边界收益均不成立，**MUST** 保持同 crate 私有模块。
 
 Rust visibility 与 Go module layout 支持“先用语言级隐私保持简单、确有编译边界后再拆”的方向；生命周期、构建目标、平台、feature / dependency budget、独立发布与安全审计则是 aemeath 根据自身交付约束形成的综合工程判据，**NEVER** 冒充任一来源的原文结论。
 
@@ -389,3 +398,5 @@ components/foo/
 |---|---|---|
 | 2026-07-14 | 初稿：确立 capability-first、用例共置、按需 port 与渐进 crate 边界；补 aemeath 及跨生态示例和决策追溯 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 审查修订：统一 Rust 2018+ 模块布局、独立结构判据、port 强制边界、模块战术真相源与规范等级 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 修复评审 #14：§3.4 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-16 | §2/§3.4 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.4 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.6 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

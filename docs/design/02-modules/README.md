@@ -13,7 +13,7 @@
 | [runtime/](runtime/README.md) | Run 聚合、单状态机、Loop Engine、防 stuck、恢复语义、端口与装配 |
 | [context-management/](context-management/README.md) | Session 聚合、Compact 家族（五级管线）、Token Budget、Prompt / Guidance、Memory 注入 |
 | [tools/](tools/README.md) | Tool Catalog / Execution 双端口、Scope / Profile、Skill、Slash Command 与 MCP 生命周期 |
-| [task/](task/README.md) | Task 聚合根、状态机、依赖图不变量、Batch 领域服务、TaskAccess / TaskPersist、Published Language |
+| [task/](task/README.md) | TaskStoreState 聚合根、Task 局部生命周期、依赖图不变量、Batch lifecycle、TaskAccess / TaskPersist、Published Language |
 | [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离、三端口、GitWorktreeOps、git 上下文供给 |
 | [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |

@@ -208,7 +208,7 @@ trait ProjectMemoryOpener: Send + Sync {
 
 enum MemoryOpenError {
     PermissionDenied,
-    StorageTransactionCorrupt,
+    CorruptTransaction,
     ActiveStoreCorrupt,
     ArchiveStoreCorrupt,
     UnsupportedSchema { version: u32 },
@@ -216,6 +216,8 @@ enum MemoryOpenError {
     LegacyMigrationFailed,
     Io,
 }
+
+**`CorruptTransaction` 区分**：`MemoryOpenError::CorruptTransaction` 表示 open / recovery 期间发现的既存 storage 损坏（journal crash residue、checksum 失败等）——此时尚无 transaction 运行，**NEVER** 适用 mutation 路径的 `Err = NotCommitted` 语义。该错误与 `MemoryStorageErrorKind::CorruptTransaction`（mutation 路径 storage 返回的 crash-protocol corruption）使用同名 `CorruptTransaction` 全链一致，但发生阶段不同：前者阻止 service 启动（fail closed），后者导致当次 mutation 失败并保留旧 state。领域 JSON/schema 校验失败使用 `ActiveStoreCorrupt` / `ArchiveStoreCorrupt`，**NEVER** 与 storage crash-protocol corruption 混为一类。
 
 fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort> {
     Arc::new(ReflectionEngine::new(config.reflection_config()))
@@ -292,3 +294,5 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 | 2026-07-14 | 将构造守卫语言对齐 capability-first 组织，移除固定横向层命名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 DatasetRevision CAS、committed receipt 发布语义与跨实例冲突刷新，移除 Current 路径和未登记守卫声明 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 查询统一返回带 retrieval mode、relevance 与 archive/outdated/TTL 状态的 MemorySearchResult envelope | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | `MemoryOpenError::StorageTransactionCorrupt` 重命名为 `CorruptTransaction`，与 [Storage `CorruptTransaction`](../storage/README.md) 及本文 §1 `MemoryStorageErrorKind::CorruptTransaction` 同名一致 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 新增 `CorruptTransaction` 区分说明：open/recovery 发现的既存损坏与 mutation 路径 `Err = NotCommitted` 语义互不适用；全链同名但发生阶段不同，前者 fail closed 阻止启动，后者保留旧 state | [#972](https://github.com/rushsinging/aemeath/issues/972) |

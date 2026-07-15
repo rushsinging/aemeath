@@ -58,11 +58,9 @@ Audit 只记录 metadata，禁止默认保存：
 
 ## 4. 非阻塞 UsageSink
 
-```rust
-trait UsageSink: Send + Sync {
-    fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome;
-}
+> `UsageSink` trait 由 **Runtime 拥有**并定义在 [runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)（`fn try_record(&self, record: UsageRecord) -> UsageEmitOutcome`）；Audit adapter 实现该 trait，但 Audit 本文档 **NEVER** 重复定义签名，只发布该签名引用的结果类型：
 
+```rust
 enum UsageEmitOutcome {
     Accepted,
     Dropped(UsageDropReason),
@@ -134,7 +132,7 @@ Audit 是尽力事实记录，不是 durable execution 或 Run checkpoint。
 
 ## 7. UsageAppendStorePort（Audit-owned 出站端口）
 
-> `UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**。Audit adapter 内部消费 Storage 的 `AtomicBlobPort` / `AtomicDatasetPort` 机制实现 append-log 语义。端口 trait 定义、调用和语义归属均属 Audit；Storage **不** 发布通用 AppendLogPort OHS。
+> `UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**。整值原子替换协议（Storage 的 `AtomicBlobPort`/`AtomicDatasetPort`）建立在 stage → fsync → rename 之上，拼不出增量 append + 逐行 flush 语义；因此 Audit 的默认 File AppendLog Adapter **MUST** 直接以 file append（open-append 等价物 + write + fsync）detail 实现追加写入，只复用 Storage 发布的路径安全 primitive（`SafePathSegment` 校验、受约束根目录句柄解析），**NEVER** 组合调用 `AtomicBlobPort`/`AtomicDatasetPort` 来模拟 append。端口 trait 定义、调用和语义归属均属 Audit；Storage **不** 发布通用 AppendLogPort OHS。
 
 ```rust
 struct AppendLogNamespace(String);      // Audit 使用 "usage"
@@ -162,25 +160,26 @@ trait UsageAppendStorePort: Send + Sync {
 }
 ```
 
-AppendLogStream 是 Storage PL 的不透明键，不暴露绝对路径。Audit adapter 负责 `SessionId → AppendLogStream` 映射，Storage adapter 负责 `namespace/stream → 物理路径` 映射。
+AppendLogStream 是 Audit adapter 自己解析出的不透明 stream key，不暴露绝对路径；Audit adapter 负责 `SessionId → AppendLogStream` 映射以及 `namespace/stream → 物理路径` 的安全解析，解析时复用 Storage 发布的路径安全 primitive，而不是把该映射交给某个 Storage 端口。
 
-Storage 负责机制：
+Audit adapter（detail 执行机制）负责：
 
-- 路径映射与目录创建；
-- append 与 flush；
+- 路径映射与目录创建（基于 Storage 路径安全 primitive，而非 Storage OHS）；
+- append 与 flush 的物理执行；
 - 顺序读取与 namespace 下的 stream 枚举；
-- 分段/轮转能力；
+- 轮转/分段的物理文件切分、rename 等执行机制；
 - 文件/IO 层错误隔离。
 
-Audit 负责：
+Audit（决策）负责：
 
 - Usage schema；
 - JSONL 编码语义；
 - SessionId 分区策略；
+- **何时/按何种策略触发轮转**（大小、时间、条数等阈值）——轮转是 Audit 的业务决策，adapter 只执行 Audit 下达的物理切分指令，不得自行决定是否轮转；
 - 查询与 token 聚合；
 - Future retention 策略。
 
-UsageAppendStorePort 是 Audit-owned 出站端口，adapter 内部消费 Storage 机制实现，不得命名为 SessionLogPort 或让 Storage 解释 Usage 字段。
+UsageAppendStorePort 是 Audit-owned 出站端口，adapter 直接以 file append detail 实现，不得命名为 SessionLogPort 或让 Storage 解释 Usage 字段。
 
 ## 8. UsageQueryPort
 
@@ -256,7 +255,7 @@ drain_abandoned_total
 
 Composition Root：
 
-1. 创建 Storage AppendLog adapter；
+1. 创建 Audit 自己的 File AppendLog adapter（`UsageAppendStorePort` 实现，直接以 file append detail 落盘，只复用 Storage 发布的路径安全 primitive）；
 2. 创建 bounded queue 和 Usage worker；
 3. 向 Runtime 注入 `Arc<dyn UsageSink>`；
 4. 向 CLI/TUI/Server 查询用例提供 UsageQueryPort；
@@ -267,11 +266,11 @@ Composition Root：
 ```text
 Runtime → UsageSink PL
 Audit worker → UsageAppendStorePort
-Storage adapter → filesystem
+Audit File AppendLog adapter → filesystem（direct file append detail）
 CLI/TUI → UsageQueryPort → Audit
 ```
 
-Audit 不依赖 Runtime、TUI、Logging 具体实现或文件系统。
+Audit domain/worker 不依赖 Runtime、TUI、Logging 具体实现或直接拼接文件路径；实际文件系统访问被封装在 Audit 自己的 File AppendLog adapter 内，只经由 `UsageAppendStorePort` 抽象暴露给 worker。
 
 ## 10. Future Cost/Pricing
 
@@ -309,3 +308,4 @@ Audit 不依赖 Runtime、TUI、Logging 具体实现或文件系统。
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：Usage-only Audit MVP、非阻塞 Sink、查询与独立 JSONL 分区 | #790 |
+| 2026-07-15 | UsageSink 改为只引用 Runtime-owned trait，不重复定义签名；UsageAppendStorePort 明确由 Audit adapter 直接以 file append detail 实现（不复用 Storage 整值替换端口）；轮转拆分为 Audit 决策 + adapter 执行 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

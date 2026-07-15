@@ -19,8 +19,8 @@
 ## 2. 上下文地图总览
 
 ```
-                    ┌─────────── 入站适配器（交付层，非 BC） ───────────┐
-                    │   CLI      TUI(+ACL)      REPL          Server     │
+                    ┌────────── 入站适配器（交付层，非 BC） ──────────┐
+                    │   CLI      TUI(+ACL)      REPL      Server(Future) │
                     └───────────────────┬───────────────────────────────┘
                                         │  AgentClient（入站端口 = OHS + PL，所有权属核心域）
                                         ▼
@@ -49,10 +49,11 @@
 
 | 消费方 | 供应方 | 模式 | 端口 / 契约 |
 |---|---|---|---|
-| Agent Runtime | CLI / TUI | C/S + **PL** + **ACL**(TUI) | 入站端口 `AgentClient`；TUI 用 `AgentEventMapper` 把领域事件转 Model |
-| Agent Runtime | Server | C/S + **PL** | 同 `AgentClient`，WSS 透传，worker 内核心不改 |
+| CLI / TUI / REPL | Agent Runtime | C/S + **PL** + **ACL**(TUI) | 入站端口 `AgentClient`；TUI 用 `AgentEventMapper` 把领域事件转 Model |
 
-> `AgentClient` trait + `ChatEvent / Command / Snapshot / Error` = **入站 Published Language**，**所有权属 Agent Runtime 核心域**；独立成 SDK 契约 crate 仅为依赖倒置（clients 依赖契约而非核心实现）。
+> `AgentClient` trait + `ChatEvent / Command / Snapshot / Error` = **入站 Published Language**，**所有权属 Agent Runtime 核心域**（作为该关系的 **Supplier**，发布稳定语言；CLI / TUI / REPL 作为 **Customer** 消费）；独立成 SDK 契约 crate 仅为依赖倒置（clients 依赖契约而非核心实现）。
+>
+> **v0.1.0 CLI / TUI / REPL 是 `AgentClient` 的 Customer**；Server 作为潜在 Customer 属于 **Future**（见 [§9 未来演进的地图预留](#9-未来演进的地图预留)），v0.1.0 **NEVER** 冻结其 WSS 或其他传输协议的正式边——具体传输协议、握手与序列化留给 Server 化时的独立设计。
 
 ## 4. Runtime 依赖的支撑能力契约
 
@@ -70,6 +71,8 @@
 | Hook | C/S | Hook-owned `HookPort` OHS | 一个类型化 façade；Hook 执行/重试归 Hook，触发时机和 directive 的 Run 状态迁移归调用方 |
 | Application Version Control | C/S | Runtime-owned outbound `ApplicationVersionPort` | 该 seam 隔离 Runtime 的 Application Control policy 与版本模块的 source/cache/installer detail；CLI/TUI 不直接持有更新模块内部端口 |
 | Audit | **Pub/Sub**（Runtime 是 Supplier） | Runtime-owned outbound `UsageSink`（MVP） | Runtime 非阻塞提交 Usage metadata；Audit adapter 独立持久化和查询，不影响 Runtime。**v0.1.0 范围：仅 Usage metadata 持久化与查询**；Cost / Pricing 聚合属 **Future** |
+
+> 本表只登记消费方 outbound SPI 的**关系与所有权**，**NEVER** 充当其战术签名真相源：`ProviderPort`（以及 `ApplicationVersionPort`、`UsageSink` 等同类 Runtime-owned outbound port）的唯一签名以 [Runtime 端口与适配器](../02-modules/runtime/06-ports-and-adapters.md) 为真相源；供应方模块设计（如 [Provider 模块设计](../02-modules/provider/README.md)）只描述其 adapter 如何实现该消费方签名与内部 ACL，**NEVER** 被视为签名真相源、**NEVER** 另行复制或改写该签名。
 
 > **SubAgent 不在此表**：SubAgent 的派生与执行是 Agent Runtime 的核心能力（子 Run 也是 Runtime 的执行实例），不是一条对外端口。
 
@@ -156,3 +159,5 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-12 | 补充 Runtime Application Control → Application Version Control 出站边界 | #793 |
 | 2026-07-12 | Policy 收缩为 AllowAll-only 实现；Hook 单端口；Audit MVP 收缩为非阻塞 UsageSink，并明确 Audit→Storage AppendLog 语义 | #790 |
 | 2026-07-14 | 移除不可闭合的 Runtime → Project 端口，改由 Composition internal Run scope 保留隔离 wiring，并补齐 Tool / Context Management 直连 Project 与 TUI ACL 投影边 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 修复评审 #11-#13：入站 C/S 表改为 CLI/TUI 是 Customer、Runtime 是 Supplier；Server 移出 v0.1.0 present 表、只保留于 §9 Future；新增 §4 表后说明，消费方 outbound SPI（如 `ProviderPort`）签名真相源统一指向 Runtime 端口与适配器，供应方模块设计不再称签名真相 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-16 | §3 入站 C/S 表补齐 REPL 为 `AgentClient` 的 v0.1.0 Customer（与 CLI / TUI 并列，Server 仍只在 §9 Future），统一 Agent Runtime 是 AgentClient Supplier 的措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

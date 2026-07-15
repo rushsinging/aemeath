@@ -29,13 +29,48 @@ Server Foundation 是 **v0.1.0 Out of scope** 的 Future 能力。v0.1.0 的 Run
 
 ## 3. 正式设计门禁
 
-开始实现前 **MUST**：
+开始实现前 **MUST** 逐项完成以下设计、评审与验证；**NEVER** 以本文件当前草案代码作为 Target 契约。
 
-- 为 #794 关联明确 milestone 与 release branch；
-- 重新确认 `Call` / `Resp` 是否复用 SDK Published Language；
-- 让 `AgentId`、Run 生命周期与 Runtime Target 对齐；
-- 定义认证、授权、租户隔离、重放保护、限流、断连与恢复语义；
-- 按 [代码组织规范](../../01-system/06-code-organization.md) §3.6 证明任何新增 crate 的强边界收益。
+### 3.1 协议与 Codec
+
+- wire codec 版本协商与向前兼容（`Call`/`Resp`/`Frame` 枚举不得在未定义 fallback 路径下做 breaking change）；
+- 确认 `AgentClient` trait 已冻结（Target freeze），`set_reasoning_level`/`reply_interaction`/`cancel_interaction`/`cancel_run` 等所有方法签名与语义不再变更；
+- `Call`/`Resp` 是否复用 SDK Published Language 的最终确认（不允许现有草案中的非闭合 enum 直接作为线协议 schema）；
+- `packages/agent-wire` crate 的独立强边界收益论证：独立编译单元、无环依赖、可独立版本化发布（按 [代码组织规范](../../01-system/06-code-organization.md) §3.6）。
+
+### 3.2 安全与传输
+
+- TLS/WSS 全链路 + 证书链校验 + 双向 mTLS（视场景），禁止明文 WS 生产路径；
+- token 签发/过期/吊销/scope 完整生命周期设计；
+- session binding：token 与 session 强绑定，防止跨会话越权复用；
+- nonce / timestamp + replay protection 防重放攻击；
+- UDS peer credential 校验（`SO_PEERCRED`/`LOCAL_PEERCRED`）+ socket 文件权限收紧 + worker capability 最小权限约束；
+- UDS 权限模型与 stale UDS socket 清理策略。
+
+### 3.3 流量与资源治理
+
+- 单帧/单连接消息大小上限；
+- per-connection / per-session rate limit；
+- backpressure 策略（慢消费者/慢 worker 处理、有界队列、禁止无界内存增长）；
+- per-session / per-tenant 配额与资源隔离（CPU/内存/磁盘/网络）；
+- worker 间公平调度。
+
+### 3.4 会话与多客户端
+
+- session ownership 模型：谁创建、谁可 attach、谁可销毁；
+- multi-client 并发接入同一 session 的语义与冲突仲裁；
+- role dispatch：不同角色（owner/observer/contributor）的帧能力矩阵；
+- environment allowlist：worker 可访问的 shell command/文件系统路径/网络出口白名单。
+
+### 3.5 边界与架构约束
+
+- 控制面 **NEVER** 直接依赖 Storage BC 或 Composition 业务——worker **MUST** 自行 `composition::build_agent_client()` + `load_session()`，控制面不参与 domain 对象构建或存储读写；
+- `session_id` **不是认证凭据**——仅用于路由/会话定位，鉴权/授权必须基于独立 token/credential，不得以持有 `session_id` 即视为已认证；
+- `AgentId`、Run 生命周期与 Runtime Target 对齐确认。
+
+### 3.6 代码草图清理
+
+当前 01-design.md 中出现的 `Call`/`Resp`/`Frame`/`WsConn`/`pipe_bidirectional` 等 Rust 代码片段 **全部为非规范研究 sketch**——enum 未闭合、trait 未冻结、错误类型未定义、边界语义未指定。它们在正式设计门禁全部通过前 **不得被视为 Target 契约，不得作为实现基线**。正式设计 **MAY** 选择完全不同的抽象或放弃这些草图，不承担兼容义务。
 
 ## 4. Future 设计边界
 
@@ -46,6 +81,8 @@ Server Foundation 是 **v0.1.0 Out of scope** 的 Future 能力。v0.1.0 的 Run
 - **MUST** `Call`/`Resp` 是唯一一套协议，控制面帧内容一律透传，不反序列化。
 - **MUST** Worker 侧 Runtime 核心一行不改，只加 WS server 适配层。
 - **NEVER** 将 Domain 聚合直接暴露给远端客户端。
+- **NEVER** 控制面直接依赖 Storage BC 或 Composition 业务——worker **MUST** 自行 `composition::build_agent_client()` + `load_session()`，控制面不参与 domain 对象的构建或存储读写。
+- **NEVER** 将 `session_id` 作为认证凭据——`session_id` 仅用于路由/会话定位，鉴权/授权必须基于独立 token/credential，不得以持有 `session_id` 即视为已认证。
 
 ## 5. 相关文档
 

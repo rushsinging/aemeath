@@ -49,21 +49,22 @@ trait ConfigWriter: Send + Sync {
     async fn update(&self, command: ConfigUpdate) -> Result<(), ConfigUpdateError>;
 }
 
-/// 跨 BC 写入命令。
+/// 跨 BC 写入命令；Config 域命令本身 NEVER 携带 session-switch 语义——
+/// session-switch gate 与联合 resume/update coordinator 完全属于 #871 composition-owned
+/// implementation（见 §2.2），不进入 ConfigUpdate。
 enum ConfigUpdate {
-    SessionSwitchGate(SwitchGateCommand),
-    /// 运行期切换 model（经 /model 命令或 Config 写端口）
+    /// 运行期切换 model（经 /model 命令或 Config 写端口）；进入 §3.1 的最高优先级 runtime_override layer
     SetModel { model: String },
-    /// 运行期切换 permission mode（经 /permissions 命令）
+    /// 运行期切换 permission mode（经 /permissions 命令）；进入 §3.1 的最高优先级 runtime_override layer
     SetPermissionMode { mode: PermissionMode },
-    /// 运行期切换 memory 配置
+    /// 运行期切换 memory 配置；进入 §3.1 的最高优先级 runtime_override layer
     SetMemoryConfig { config: MemoryConfig },
 }
 ```
 
 ```rust
 struct MainSessionConfigFacade {
-    gate: Arc<SessionSwitchGate>,
+    gate: Arc<SessionSwitchGate>,        // #871 composition-owned；Config 域 NEVER 定义或构造该类型
     reader: Arc<dyn ConfigReader>,
     participant: Arc<dyn ProjectConfigParticipant>,
 }
@@ -97,7 +98,7 @@ impl ConfigQuery for MainSessionConfigFacade {
 | `ConfigQuery::subscribe()` | gate-aware 建立已提交配置订阅 | AgentClient event projection；先映射成 SDK/TUI-owned DTO |
 | `update()` | 运行时修改配置 | AgentClient application command → MainSession gate-aware façade |
 
-CLI 参数覆盖是 Composition bootstrap 的 `ConfigSources.cli_args` 输入，由 `CliArgsAdapter` 在 Config wiring 发布前转换为最高优先级 patch；它 **NEVER** 通过运行期 `ConfigWriter` 回灌。`/config` 或设置面板只产生 AgentClient application command，TUI / CLI **NEVER** 持有 `ConfigReader`、`ConfigQuery`、`ConfigWriter`、participant、subscription 或 watch receiver。
+CLI 参数覆盖是 Composition bootstrap 的 `ConfigSources.cli_args` 输入，由 `CliArgsAdapter` 在 Config wiring 发布前转换为 bootstrap 来源中的最高优先级 patch；运行期若存在 project-scoped `RuntimeOverrideAdapter`，它仍按 §3.1 排在 CLI 之后。CLI patch **NEVER** 通过运行期 `ConfigWriter` 回灌。`/config` 或设置面板只产生 AgentClient application command，TUI / CLI **NEVER** 持有 `ConfigReader`、`ConfigQuery`、`ConfigWriter`、participant、subscription 或 watch receiver。
 
 ### 2.2 #933 seam 与 #871 协调归属
 
@@ -117,6 +118,18 @@ CLI 参数覆盖是 Composition bootstrap 的 `ConfigSources.cli_args` 输入，
 struct ProjectConfigLocation {
     canonical_search_root: PathBuf,
     key: ProjectConfigKey,
+}
+
+impl ProjectConfigLocation {
+    /// Config-owned ACL constructor：协调器传入 Project 已验证的 canonical root 与稳定 identity bytes；
+    /// constructor 复核绝对/canonical 约束并做域分隔 key 派生，字段仍保持私有。
+    fn try_from_project_identity(
+        canonical_search_root: PathBuf,
+        stable_identity: &[u8],
+    ) -> Result<Self, ProjectConfigLocationError>;
+
+    fn search_root(&self) -> &Path;
+    fn key(&self) -> &ProjectConfigKey;
 }
 
 #[async_trait]
@@ -186,7 +199,7 @@ impl ReadyConfigCommit {
 }
 ```
 
-- `ProjectConfigLocation` 的 search root **MUST** canonicalize 后构造，key **MUST** 由完整 Project identity 经协调 ACL 做稳定、域分隔派生；Config 只把它当不透明 project scope。Config **NEVER** import `ProjectIdentity` / `WorkspaceRead`，也 **NEVER** 自行读取 cwd。
+- `ProjectConfigLocation` 的 search root **MUST** 通过 Config-owned `try_from_project_identity` canonicalize / 复核后构造，key **MUST** 由协调 ACL 提供的完整稳定 identity bytes 经 Config constructor 做域分隔派生；Config 只把它当不透明 project scope。Config **NEVER** import `ProjectIdentity` / `WorkspaceRead`，也 **NEVER** 自行读取 cwd。adapter 只能经 `location.search_root()` 获取只读寻址起点，不能接收任意裸 project path。
 - `prepare_for_project` 是 async fallible prepare：它 **MUST** 完成目标 location 下 `.agents/aemeath.json`、兼容配置、global / env / CLI layers 的读取、合并与 schema 校验，并验证候选 provider / tool / hook 装配所需输入；它 **NEVER** 修改 live state、发送 watch 事件或懒加载文件。
 - `commit_project` **MUST** 同步、无 I/O、无失败：一次替换 Config-owned `{ location, snapshot }`，再以 `send_replace` 发布同一个 snapshot。prepare 之后的任何 fallible 工作 **NEVER** 进入提交段。
 - `prepare_update` **MUST** 以当前 location 与完整 layer chain 生成候选 snapshot，并让 File adapter 准备尚未 publish 的 durable write token；它不修改 active state。协调器可先从 opaque token 读取 candidate `MemoryConfig` 并 eager-open Memory。
@@ -217,6 +230,8 @@ FileAdapter (project)       ← <project>/.agents/aemeath.json
 EnvAdapter                  ← AEMEATH_* 环境变量
   ↓ apply_patch
 CliArgsAdapter              ← CLI 参数（--model 等）
+  ↓ apply_patch
+RuntimeOverrideAdapter      ← 运行期 ConfigUpdate（SetModel / SetPermissionMode / SetMemoryConfig）
   ↓
 resolve_provider_api_keys   ← driver_env 后处理
   ↓
@@ -226,6 +241,8 @@ ConfigSnapshot::new(Arc::new(config))
   ↓
 watch::Sender::send_replace → composition-internal watch Receiver → SDK event projection
 ```
+
+`RuntimeOverrideAdapter` 是链上唯一的最高优先级层，只由 `ConfigWriter::update` 的 `SetModel` / `SetPermissionMode` / `SetMemoryConfig` 命令经 `prepare_update` / `persist_update` 写入；调用方 **NEVER** 绕过这两步直接构造它的 patch。持久化范围严格限定为发起命令时的 active `ProjectConfigLocation`——project-scoped，**NEVER** 跨 project 复用、**NEVER** 落入 global 层。`persist_update` 把它写进独立于 `FileAdapter (project)` 的 durable override store（与项目原生配置物理隔离的 native patch 段/journal），因此 `prepare_for_project` / `prepare_update` 每次重放（含进程崩溃后 restart 的 bootstrap 重放）都固定把它排在 `CliArgsAdapter` 之后合并：同一 project 下新的 `EnvAdapter` 读数或新的 CLI 参数 **NEVER** 覆盖已持久化的 runtime override，只有新的 `ConfigUpdate` 或显式重置命令才能替换它。`ConfigSnapshot` **NEVER** 暴露这一层的存在——消费方只看到合并后的单一有效值。
 
 ### 3.2 ConfigPatch
 
@@ -241,14 +258,14 @@ struct ConfigPatch {
     reasoning_graph: Option<ReasoningGraphConfig>,
     env: Option<HashMap<String, String>>,  // env 注入规则（过滤专有变量后）
     // ... 14 个 section
-    hooks: Option<HooksConfig>,            // 整块覆盖（非 patch 粒度）
+    hooks: Option<HooksConfig>,            // 事件 key 级合并（见 merge_hooks，非整块覆盖）
 }
 ```
 
 - 14 个 section 走 `apply_patch`（字段级合并）
-- `hooks` 和 `reasoning_graph` 是例外——整块覆盖，不走 patch 粒度
-  - **hooks**：语义是合并事件表，key 级合并在 `merge_hooks` 中做
-  - **reasoning_graph**：v0.1.0 固定整块覆盖；未来若要字段级合并，**MUST** 先版本化其 merge 语义
+- `hooks` 和 `reasoning_graph` 都不走 14-section 的字段级 `apply_patch`，但合并算法刻意不同：
+  - **hooks**：语义是合并事件表——按事件 `key` 级合并；同 key 以 patch 覆盖 base，不同 key 累加保留，算法见 `merge_hooks`（§3.3）
+  - **reasoning_graph**：v0.1.0 固定整块覆盖（存在即整体替换）；未来若要字段级合并，**MUST** 先版本化其 merge 语义
 
 ### 3.3 合并算法
 
@@ -263,6 +280,16 @@ fn merge_config(base: Config, patches: Vec<ConfigPatch>) -> Config {
         config
     })
 }
+
+/// hooks 合并算法：按事件 key 级合并——overlay 命中的事件 key 覆盖 base 同 key，
+/// overlay 未提及的 base 事件 key 原样保留；NEVER 整块替换 events map。
+fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfig {
+    let mut events = base.events;
+    for (k, v) in overlay.events {
+        events.insert(k, v);
+    }
+    HooksConfig { events }
+}
 ```
 
 ## 4. ConfigSnapshot — Published Language
@@ -273,10 +300,12 @@ ConfigSnapshot 持有 `Arc<Config>`，但字段全私有，只暴露只读 acces
 
 ```rust
 struct ConfigSnapshot {
+    revision: ConfigRevision,
     inner: Arc<Config>,
 }
 
 impl ConfigSnapshot {
+    pub fn revision(&self) -> ConfigRevision { self.revision }
     pub fn model_name(&self) -> &str { &self.inner.model_name }
     pub fn context_size(&self) -> usize { self.inner.context_size }
     pub fn permission_mode(&self) -> PermissionMode { self.inner.permission_mode }
@@ -307,7 +336,7 @@ fn commit_project(&self, prepared: PreparedProjectConfig) {
 }
 ```
 
-`active` 是 Config 的唯一 current truth；watch channel 只是同一提交的通知投影，**NEVER** 形成第二份独立状态。使用 `send_replace` 而非 `send`，保证无 receiver 时 channel 内的最新值仍更新。新订阅 **MUST** 经 `ConfigQuery::subscribe` 在 shared permit 内同时捕获 initial + receiver；调用方 **NEVER** 直接调用同步 `subscribe_committed`。
+`active` 是 Config 的唯一 current truth；watch channel 保存的是同一 committed snapshot 的只读镜像，用于通知而非独立写入。每个 snapshot 带单调 `ConfigRevision`，commit 在同一临界区先生成一个 revision、写 active，再以 `send_replace` 发布**同一值**；新订阅在 shared permit 下断言 `receiver.borrow().revision() == committed_snapshot().revision()`，不一致属于 wiring invariant violation，必须 fail-fast / 记录 error，**NEVER** 静默选择其中一个。使用 `send_replace` 而非 `send`，保证无 receiver 时 channel 内的最新值仍更新。调用方 **NEVER** 直接调用同步 `subscribe_committed`。
 
 ## 5. ConfigAppService
 
@@ -341,8 +370,8 @@ async fn wire_project_config(
 |---|---|
 | `prepare_for_project(location)` | 编排 adapter 读取 → 合并 → resolve keys → 完整校验 → 返回 opaque candidate |
 | `commit_project(prepared)` | 无失败替换 Config-owned active state → `send_replace` 同一 snapshot |
-| `prepare_update / persist_update / commit_update` | 在 session gate 下分离候选验证、不可取消的 durable publish 与无失败 active commit；必要时与 Memory 重绑定共同提交 |
-| bootstrap CLI patch | 由 `ConfigSources` / `CliArgsAdapter` 在 wiring 发布前加入最高优先级 layer；不构成运行期 Writer 命令 |
+| `prepare_update / persist_update / commit_update` | 在 session gate 下分离候选验证、不可取消的 durable publish 与无失败 active commit；写入 §3.1 最高优先级 `RuntimeOverrideAdapter` 层（持久化范围仅限当前 active project）；必要时与 Memory 重绑定共同提交 |
+| bootstrap CLI patch | 由 `ConfigSources` / `CliArgsAdapter` 在 wiring 发布前加入 bootstrap 来源中的最高优先级 layer；不构成运行期 Writer 命令，运行期 project-scoped `RuntimeOverrideAdapter` 仍在其后覆盖 |
 
 ### 5.2 prepare / commit 目标流程
 
@@ -363,6 +392,9 @@ async fn prepare_for_project(
 
     if let Some(p) = self.adapters.env.read() { patches.push(p); }
     patches.push(self.cli_patch.read().unwrap().clone());
+    if let Some(p) = self.adapters.runtime_override.read_project(location).await? {
+        patches.push(p); // 运行期 project-scoped override 是最终 effective layer
+    }
 
     base = merge_config(base, patches);
     self.adapters.driver_env.resolve_provider_api_keys(&mut base)?;
@@ -427,7 +459,7 @@ async fn config_commit_critical_section(
 
 `ConfigAppService` **NEVER** 直接调用 `tokio::fs`；native patch 的 staged / durable protocol 由 File adapter 承担。`ConfigWriter` 是 #933 定义、#871 实现的 gate-aware application façade，**NEVER** 直接委托成“持久化后立刻替换 Config”的 shortcut。若某类字段不影响 Memory，coordinator **MAY** 复用当前 Memory Arc，但仍必须走同一 prepare → shielded persist → no-fail commit 骨架，避免两套更新语义。
 
-可执行证明 **MUST** 在 handoff 前、`persist_update` 每个 await 点、durable rename / fsync 成功但 receipt 尚未返回、Memory install 与 Config install 之间注入取消或失败。提交点前只能返回 `NotCommitted` 且磁盘 / Config / Memory 全旧；提交点后必须返回 `Committed`（可带 warning），owned critical section 随后完成三者全新。**NEVER** 允许磁盘已新而 outcome 仍是 `NotCommitted`，也 **NEVER** 允许 watch 先于 Memory install 观察新 snapshot。进程崩溃后的 restart 仍由同一 bootstrap pipeline 从 durable state 恢复。
+可执行证明按注入类型分两类点位。**可被 `Result` 捕获的取消或失败** **MUST** 只注入在 handoff 前与 `persist_update` 内部每个 await 点（含 durable rename / fsync 成功但 receipt 尚未返回这一跨越提交点前的最后 await）：提交点前注入 **MUST** 只返回 `NotCommitted` 且磁盘 / Config / Memory 全旧；跨越提交点后注入 **MUST** 返回 `Committed`（可带 warning），owned critical section 随后仍完成三者全新。Memory install 与 Config install 之间属于同步无失败提交段——不 await、不做 I/O、不响应取消——**NEVER** 在此注入可被 `Result` 捕获的失败或取消；验证只允许模拟进程级 panic / crash（如测试 harness 强制终止进程），验证路径是重启后由同一 bootstrap pipeline 从 durable state 恢复，**NEVER** 期待该函数以 `Err` 返回。**NEVER** 允许磁盘已新而 outcome 仍是 `NotCommitted`，也 **NEVER** 允许 watch 先于 Memory install 观察新 snapshot。
 
 ## 6. Adapter 接入与兼容层 ACL
 
@@ -442,11 +474,12 @@ async fn config_commit_critical_section(
 struct CompatibilityAdapter;
 
 impl CompatibilityAdapter {
-    /// 全局级：~/.claude/settings.json, ~/.<其他cli>/config.json
+    /// 全局级：按 Config 冻结的格式优先级排序；同格式再按规范化路径排序。
     async fn read_global() -> Result<Vec<ConfigPatch>> {
+        let paths = discover_external_configs(&paths::global_config_dir()).await?;
+        let paths = sort_by_format_precedence_then_canonical_path(paths);
         let mut patches = Vec::new();
-        // 在寻找 aemeath.json 的同目录下寻找外部 CLI 配置
-        for path in discover_external_configs(&paths::global_config_dir()).await? {
+        for path in paths {
             if let Some(patch) = Self::read_one(&path).await? {
                 patches.push(patch);
             }
@@ -454,11 +487,14 @@ impl CompatibilityAdapter {
         Ok(patches)
     }
 
-    /// 项目级：从 project_root 向上 N 级寻找 .claude/settings.json 等
-    async fn read_project(project_root: &Path) -> Result<Vec<ConfigPatch>> {
+    /// 项目级：只接收 Config-owned location。目录从最远 ancestor 到 nearest project 排序，
+    /// 每个目录内再按 format precedence + canonical path 排序，因此越近、越高优先级的 patch 越晚应用。
+    async fn read_project(location: &ProjectConfigLocation) -> Result<Vec<ConfigPatch>> {
+        let dirs = paths::project_config_dirs(location.search_root());
         let mut patches = Vec::new();
-        for dir in paths::project_config_dirs(project_root) {
-            for path in discover_external_configs(&dir).await? {
+        for dir in sort_ancestors_farthest_to_nearest(dirs) {
+            let paths = discover_external_configs(&dir).await?;
+            for path in sort_by_format_precedence_then_canonical_path(paths) {
                 if let Some(patch) = Self::read_one(&path).await? {
                     patches.push(patch);
                 }
@@ -512,6 +548,8 @@ enum ConfigFormat {
     Other(String),  // 未识别格式
 }
 ```
+
+`CompatibilityAdapter` 的顺序是协议的一部分，**NEVER** 依赖文件系统遍历顺序：global 先按格式优先级、再按 canonical path 稳定排序；project 先按最远 ancestor → nearest project，再在每层使用同一稳定排序。merge 仍遵循“后者覆盖前者”，因此 nearest project 和排序中更高优先级的格式最终获胜。新增 translator 时 **MUST** 同时把格式加入这张 precedence 表并补冲突用例。
 
 #### Translator trait
 
@@ -692,3 +730,4 @@ fn resolve_provider_api_keys(config: &mut Config) -> Result<(), ProjectConfigErr
 | 2026-07-12 | 初稿：Config 分层、ConfigSnapshot PL、ConfigReader/ConfigAppService、adapter 接入、reasoning 静态阈值 | #792 |
 | 2026-07-14 | 明确 Config-owned active state、project-aware prepare / commit participant，并与 Session gate、Memory candidate 装配闭环 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 将非 Run query / subscribe 收口到 async gate-aware façade，明确 #933 delivery seam 与 #871 coordinator 的所有权 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | 修复 review #5/#6/#18/#19：`ConfigUpdate` 删除 `SessionSwitchGate`（gate/coordinator 明确归属 #871 composition）；hooks 字段注释与 key 级 `merge_hooks` 算法对齐；新增最高优先级 `RuntimeOverrideAdapter` layer 并定义其 project-scoped 持久化范围；无失败提交段（Memory install 与 Config install 之间）只允许 panic/crash injection，失败/取消注入收口到 handoff 前与 `persist_update` await 点 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

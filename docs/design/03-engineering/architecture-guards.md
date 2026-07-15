@@ -3,7 +3,7 @@
 > 状态：**已落地** · 维护人：架构组
 > 对应实现：`.agents/aemeath.json` + `.agents/hooks/check-*.sh` + `.agents/hooks/no_mod_rs.sh`
 >
-> 本文档是已启用架构守卫**脚本行为、常量与白名单的唯一文档真相**。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档；本文档与脚本不一致时，以脚本的可执行语义为准并在本文档 PR 中说明。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](migration-governance.md) 为唯一治理真相。
+> 守卫脚本本身是**可执行的运行时真相**——真正的行为、常量与白名单以脚本代码为准。本文档是配套的**人类可读索引**，梳理已启用守卫的脚本行为、常量与白名单，便于查阅、评审与 PR 描述引用；它不覆盖脚本、也不是脚本之外的第二真相源。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档对应小节；本文档与脚本不一致时，**以脚本的可执行语义为准**，并在本文档 PR 中说明差异原因。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](migration-governance.md) 为唯一治理真相。
 
 ## 概述
 
@@ -239,7 +239,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `agent/features/runtime/src/utils/adapter.rs` | runtime 拥有把 shared adapter newtype 适配到 runtime-local port 的 impl 块。保留至 port impl 切到 feature-owned gateway factory 之后 |
+| `agent/features/runtime/src/utils/adapter.rs` | runtime 拥有把 shared adapter newtype 适配到 runtime-local port 的 impl 块。保留到对应消费方-owned outbound port 由供应 adapter 直接实现、Composition 完成接线且 #982 故意违规证明生效；具体迁移责任与退出证据见 Migration Governance O2/O8 |
 
 - **检查方式**：扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `*_test.rs` / `*_tests.rs` / `tests/` / `agent/composition/src/`），匹配 `\bshare::adapter\b | \bshared::adapter\b | agent/shared/src/adapter`。
 - **自检**：脚本会校验 exception 表中所有路径仍被命中；未命中即报"stale"并要求清理。

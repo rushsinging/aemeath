@@ -6,26 +6,11 @@
 
 ## 1. ProviderPort
 
-`ProviderPort` 是 Agent Runtime 拥有的出站端口，Provider adapter 实现：
+`ProviderPort` 是 Agent Runtime 拥有的出站端口（Runtime-owned），Provider adapter 只负责实现该签名。唯一权威 trait 定义在 [Runtime 端口与装配 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约)；本文 **NEVER** 复制第二份 trait 真相，只展开 Provider 侧调用语义、流事件类型与关联 Published Language：
 
 ```rust
-trait ProviderPort: Send + Sync {
-    fn capabilities(&self, model: &ModelId)
-        -> Result<ModelCapability, ProviderError>;
-
-    /// 在 Context build 前解析 limits 与 model-supported reasoning，返回一次调用的冻结值。
-    fn resolve_invocation_options(
-        &self,
-        model: &ModelId,
-        requested: RequestedInvocationOptions,
-    ) -> Result<ResolvedInvocationOptions, ProviderError>;
-
-    async fn invoke(
-        &self,
-        request: InvocationRequest,
-        cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStream, ProviderError>;
-}
+// 权威签名见 ../runtime/06-ports-and-adapters.md §2（trait ProviderPort），
+// 本文不重复定义：capabilities / resolve_invocation_options / invoke 三个方法。
 
 struct InvocationStream {
     events: ProviderEventStream,
@@ -305,3 +290,4 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 |---|---|---|
 | 2026-07-12 | 初稿：ProviderPort、流/取消、Runtime 重试边界、不可变 Transport 与 Invocation Scope | #788 |
 | 2026-07-14 | 增加 build 前 option resolution；Context prompt 与 InvocationScope 共享唯一 effective reasoning / limits 快照 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-14 | `ProviderPort` 明确 Runtime-owned；移除本文重复的 trait 定义，改为引用 [Runtime 06 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约) 的唯一签名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
