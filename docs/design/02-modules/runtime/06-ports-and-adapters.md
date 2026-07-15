@@ -347,10 +347,11 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 ## 4. Composition Root
 
-- **唯一生产装配入口**：`agent/composition`。Runtime feature 内的 `domain/application/ports/adapters/shared` 只定义领域行为、应用用例、边界契约、Runtime-owned 转换与跨层最小基础；各层都 **NEVER** 选择具体生产实现或触发生产 factory。
+- **唯一生产装配入口**：`agent/composition`。Runtime 内各能力只定义自身领域行为、用例、边界契约和 Runtime-owned 转换，**NEVER** 选择具体生产实现或触发生产 factory。
 - `agent/composition` 持有各 Port 的具体实现或模块提供的 composition-only opaque wiring（provider driver / tool registry / storage / workspace / hook …），提供 `assemble()` 所需的 `root.*()` 工厂。
-- Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，纯领域/应用/边界代码按六边形职责归位。
-- `adapters` 只能把外部协议或参与者映射到 Runtime Port，**NEVER** 负责选择生产实现；`shared` **NEVER** 反向依赖 domain/application/ports/adapters，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
+- Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root；现有 Runtime `utils/bootstrap` 的生产构造责任迁入 `agent/composition`，其余代码按 `agent_run`、`loop_engine`、各 coordination 等能力归位。
+- Runtime-owned Port 与 adapter **MUST** 靠近实际消费 seam；只有多个稳定契约确需独立导航时才 **MAY** 建聚合入口，**NEVER** 为横向目录对称集中到全局 `ports/` 或 `adapters/`。
+- `RuntimeContext` 只传递本 Run 的活资源；它 **NEVER** 成为通用 shared 层，也 **NEVER** 保存具体 Provider、Registry、Store 或全局 Config reader。
 - Project workspace 的生产装配 **MUST** 经 Project-owned factory 取得 `WorkspaceWiring`，并 **MUST** 只保存在 `CompositionWorkspaceScope`；Composition **NEVER** 向 Runtime 或业务模块分发 handle / scope。
 - Main agent：Composition Root 初次建立 active-session-slot 的 Workspace 与 MainSession 两组 wiring 并跨 Main Run 保留；每个 Main Run 只在 shared lease 下取得同一 Context / Task / Memory 实例。resume 在 exclusive lease 内更新完整 live state，**NEVER** 重建 wiring。
 - Config-owned `ConfigWiring` **MUST** 先按当前 Project identity 的 ACL location 准备 project-aware snapshot；Memory opener 再消费同一 candidate 的 MemoryConfig。Context-owned `MainSessionWiring` 把同一 Task / Memory Arc 与 Config participant snapshot 绑定到每个 Main Run；resume 复用相同 Config → Memory 顺序，全部 participant 成功后才进入无失败提交段。
@@ -395,4 +396,4 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 | 2026-07-14 | 移除 Runtime Workspace 端口；由 active-session-slot CompositionWorkspaceScope 保留 Main wiring，Sub 在 AgentDispatch 内派生；Context / Runtime / Tool 共享同一 Task、Memory 与 Project view；补齐 Runtime-owned InteractionPort | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 固化 Provider option resolver、reasoning_for 边界与四类 typed interaction continuation；并发 suspension 串行化为单 PendingInteraction | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | `ReasoningLevelOutcome::Accepted` 字段从 `effective` 改为 `requested`，对齐 Workflow 的 `/think` 反馈决策：命令层只暴露 user-max-clamped requested 值，NEVER 承诺尚未计算的 provider-ceiling-resolved effective 值 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-15 | 明确 `features/*` 为 VSA、Runtime feature 内采用六边形分层；各层不承担生产装配，`agent/composition` 是唯一对象图与 factory 入口 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-15 | 明确 Runtime 按稳定能力递归竖切；Port/adapter 靠近真实消费 seam 且不形成固定横向层，`agent/composition` 保持唯一对象图与 factory 入口 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
