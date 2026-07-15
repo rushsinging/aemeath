@@ -28,9 +28,10 @@ trap 'rm -f "$report_json"' EXIT
 
 cargo llvm-cov \
     --workspace \
+    --exclude xtask \
     --quiet \
     --json \
     --summary-only \
     --output-path "$report_json"
 
-python3 "$SCRIPT_DIR/coverage_summary.py" "$report_json" "$ROOT"
+cargo run --quiet -p xtask -- coverage-summary "$report_json" "$ROOT"

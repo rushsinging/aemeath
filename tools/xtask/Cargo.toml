@@ -1,0 +1,12 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+serde.workspace = true
+serde_json.workspace = true
+quote = "1"
+syn = { version = "2", features = ["full"] }
