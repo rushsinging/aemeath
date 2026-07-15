@@ -9,7 +9,7 @@
 //! `load_session` 在主文件解析失败时依次尝试 `.bak` 回退、`.corrupt`
 //! 转存，确保损坏的会话文件不会被静默丢弃。
 
-use crate::capabilities::session::types::*;
+use crate::domain::session::{now_iso, sessions_dir, validate_session_id, ChatSegment, Session};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
@@ -52,7 +52,7 @@ fn migrate_legacy_messages(session: &mut Session) {
             session.messages.len()
         );
         let messages = std::mem::take(&mut session.messages);
-        let mut seg = super::chat_chain::ChatSegment::normal(None);
+        let mut seg = ChatSegment::normal(None);
         seg.messages = messages;
         session.chats.push(seg);
         session.messages = Vec::new();
