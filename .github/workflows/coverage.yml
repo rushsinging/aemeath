@@ -1,0 +1,41 @@
+name: Coverage
+
+on:
+  pull_request:
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/coverage.sh'
+      - 'scripts/coverage_summary.py'
+      - 'scripts/coverage_summary_tests.py'
+      - '.github/workflows/coverage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Workspace coverage summary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+          workspaces: '. -> target/coverage'
+
+      - name: Install cargo-llvm-cov 0.8.7
+        run: cargo install cargo-llvm-cov --version 0.8.7 --locked
+
+      - name: Print workspace and per-crate coverage
+        run: ./scripts/coverage.sh
