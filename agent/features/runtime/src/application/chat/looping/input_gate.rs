@@ -1,7 +1,7 @@
 use crate::application::chat::looping::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::application::chat::looping::queue::{QueueDrainPort, QueueFuture};
 use crate::LOG_TARGET;
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
 use std::collections::VecDeque;
@@ -196,7 +196,7 @@ pub async fn run_loop_gate<Q, I, S>(
     sink: &S,
     chain: &mut ChatChain,
     segment_id: &str,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
 where
@@ -229,7 +229,7 @@ pub async fn apply_gate<S>(
     sink: &S,
     chain: &mut ChatChain,
     segment_id: &str,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
 where

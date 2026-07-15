@@ -125,7 +125,23 @@ Sub Run 可继承或收缩父 Run 的 Policy，但本期只有 AllowAll，因此
 - **MUST NOT** 把路径 helper 的存在描述为完整 Policy Engine。
 - **MAY** Future 扩展 Deny / RequireApproval，但必须另行设计规则与 Approval Gate。
 
-## 8. 相关文档
+## 8. Target 目录决策
+
+| 属性 | 值 |
+|---|---|
+| Target 结构 | 单能力扁平 |
+| 父级判据 | [02-modules/README.md](../README.md) 目录结构决策矩阵 |
+| 系统级依据 | [代码组织规范](../../01-system/06-code-organization.md) §3.2 扁平叶子 |
+
+**理由**：
+
+v0.1.0 Policy 拥有单一用例——Tool 执行前的权限评估——且只有 `AllowAll` 一种实现。没有第二个独立变化轴、没有内部子能力、没有需要隔离的出站 seam。`PolicyRequest`、`PolicyDecision` 与 `AllowAllPolicy` 共享同一变化原因，总是锁步修改。
+
+因此 **MUST** 保持单能力扁平（`policy.rs` + `policy/allow_all.rs`），**NEVER** 为尚不存在的规则引擎、审批门或 delegated approval 预建 `capabilities/`、`model/` 或 `port/`。
+
+Future 启用 Deny / RequireApproval 后，若出现多个独立决策用例（如基于路径约束的 deny 规则、基于 capability 的审批规则、基于 workspace 的隔离策略），且各用例拥有独立词汇、状态与测试夹具，届时 **SHOULD** 回到 [代码组织规范](../../01-system/06-code-organization.md) §3.1 递归评估是否需要 `capabilities/` 竖切。
+
+## 9. 相关文档
 
 - BC 责任章程：[../../01-system/01-product-and-domain.md](../../01-system/01-product-and-domain.md)
 - Context Map：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
@@ -138,3 +154,4 @@ Sub Run 可继承或收缩父 Run 的 Policy，但本期只有 AllowAll，因此
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：AllowAll-only 实现范围与三态 PolicyPort 扩展边界 | #790 |
+| 2026-07-16 | 新增 Target 目录决策：单能力扁平，理由与 Future 升级触发条件 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

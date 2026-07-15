@@ -175,7 +175,7 @@ impl TaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::business::task::BatchStatus;
+    use crate::task_store::BatchStatus;
 
     #[tokio::test]
     async fn test_create_list_resets_task_ids_for_new_batch() {

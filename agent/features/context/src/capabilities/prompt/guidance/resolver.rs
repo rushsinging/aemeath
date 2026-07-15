@@ -321,8 +321,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
     }
 
     let display_path = path.to_string_lossy();
-    let warnings =
-        crate::capabilities::prompt::business::security::scan_content(&display_path, &content);
+    let warnings = crate::capabilities::prompt::security::scan_content(&display_path, &content);
     for warning in &warnings {
         log::warn!(target: LOG_TARGET,
             "[Security] {} in {} line {}: {}",
@@ -332,7 +331,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
             warning.matched_text
         );
     }
-    let content = crate::capabilities::prompt::business::security::format_warnings(&warnings)
+    let content = crate::capabilities::prompt::security::format_warnings(&warnings)
         .map(|prefix| format!("{prefix}\n\n{content}"))
         .unwrap_or(content);
     Some(LoadedGuidance::file(path, content))

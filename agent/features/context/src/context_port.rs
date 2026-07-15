@@ -2,10 +2,7 @@
 
 use async_trait::async_trait;
 
-use crate::contract::{
-    AppendReceipt, CompactOutcome, CompactRequest, CompactionDecision, ContextAppend,
-    ContextAppendError, ContextPortError, ContextRequest, ContextWindow,
-};
+pub use crate::contract::*;
 
 /// Context Management 对 Agent Runtime 开放的唯一端口。
 ///

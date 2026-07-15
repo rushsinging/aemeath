@@ -28,6 +28,32 @@
 | [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink / Query 与独立 JSONL 存储 |
 | [server/](server/README.md) | WS 协议、控制面 / worker 拓扑的 Future 设计边界 |
 
+## 目录结构决策
+
+系统级判据以[代码组织规范](../01-system/06-code-organization.md)为唯一真相源。本表只冻结各模块应用判据后的 Target 形状；`capabilities/` 表示已证明的业务竖切，技术目录表示同一能力内部的外部协议或处理管线，二者 **NEVER** 混用。
+
+| 模块 | Target 结构 | 判定原因 |
+|---|---|---|
+| Agent Runtime | 保持 `domain/application/ports/adapters` | 核心执行模块的战术设计已冻结该 Hexagonal 物理结构；这是显式例外，**NEVER** 推广为其他模块模板 |
+| Context Management | `capabilities/` 竖切 | Session、Compact、Token Budget、Prompt/Guidance、Memory Injection 拥有独立词汇、变化原因与测试夹具 |
+| Memory | `capabilities/` 竖切 + 必要共享 model | write、retrieve、compact、reflection 规则可独立变化；`MemoryEntry` 不变量由共享 model 唯一维护 |
+| Tool & Skill & Command | `capabilities/` 竖切 | catalog、execution、skill、command、MCP 的契约、消费者和生命周期不同；MCP 技术 detail 留在所属切片 |
+| Storage | `capabilities/` 竖切 + 私有 filesystem 技术 detail | `safe_path`、`atomic_blob`、`atomic_dataset` 拥有不同协议与故障测试；文件 driver 是私有 seam，不形成横向 adapter 层 |
+| Task Management | 单能力扁平 | transition、dependency、batch、snapshot 共同守护同一 `TaskStoreState` 聚合，无独立能力所有权 |
+| Project / Workspace | 单能力扁平 + `git` 局部技术 seam | Workspace 是唯一聚合与状态源；Git 仅是可替换外部 detail |
+| Workflow | 单能力扁平 | v0.1.0 仅有 Reasoning Graph / effort 调节，无第二个独立变化轴 |
+| Policy | 单能力扁平 | v0.1.0 只有 Policy evaluate 与 AllowAll 实现，无内部子能力或出站 seam |
+| Provider | 扁平核心 + provider/protocol 技术目录 | invoke/capability/error 共同形成统一 ACL；Anthropic/OpenAI-compatible/Ollama 才是技术变化来源 |
+| Config | 扁平核心 +来源 adapter 技术目录 | 只有一条 effective-config 生命周期；File/Env/CLI/Compatibility 是不同外部来源，不是业务切片 |
+| Hook | 扁平核心 + executor/protocol 技术目录 | 单一 Hook dispatch 能力共享匹配、重试和 directive 语义；进程执行与安全边界属于技术 detail |
+| Audit | 扁平 Usage 能力 + append/query 技术实现 | v0.1.0 只拥有 Usage；ingest、append 与 query 是同一 schema 的处理管线，Cost/Pricing 仍是 Future |
+| Logging | schema/filter/routing/sink/lifecycle 技术管线 | 各目录是同一诊断记录流水线阶段，不具备独立业务状态所有权 |
+| Application Version Control | 扁平 update 能力 + source/installer 技术目录 | check/plan/apply 共享 `VerifiedUpdatePlan` 与同一安装事务；Release Source 和 installer 才是外部 seam |
+| TUI（交付层） | adapter/model/update/effect/view/render TEA 技术目录 | 目录承载单向数据流和 import 隔离，不是 Bounded Context 内的业务竖切 |
+| Server（Future） | 暂不冻结 | 安全、部署和传输边界尚未完成正式设计，**NEVER** 由当前 sketch 预建目录 |
+
+采用 `capabilities/` 的模块 **MUST** 使用私有 `capabilities.rs` + `capabilities/<slice>.rs` 形状；其他模块 **NEVER** 为对称性创建该目录。局部 model、port、adapter 仍按真实不变量和 seam 独立判定。
+
 ## 编写原则
 
 - 只描述目标态，区分 Target / Decision，不记录当前代码状态。
@@ -61,3 +87,4 @@
 | 2026-07-12 | 新增 tui/02-model：3+3 Context 完整字段、投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束 | #796 |
 | 2026-07-12 | 新增 tui/03-event-flow-and-acl：事件流两层转换 ACL、SDK DTO 边界、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6 | #797 |
 | 2026-07-12 | 新增 policy/hook/audit 战术设计：AllowAll-only、Hook 3/15 两层重试、Usage-only Audit MVP | #790 |
+| 2026-07-16 | 增加模块 Target 目录结构决策矩阵：竖切统一进入 `capabilities/`，Runtime 保留已冻结 Hexagonal 结构，其余模块按能力证据选择扁平、竖切或技术目录 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

@@ -3,7 +3,7 @@ use super::{ReflectionEngine, ReflectionOutput};
 use crate::LOG_TARGET;
 use share::i18n::runtime::reflection as t;
 use std::path::{Path, PathBuf};
-use storage::api::MemoryStore;
+use storage::MemoryStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionRunMode {
@@ -37,7 +37,7 @@ pub async fn run_complete_reflection(
         cwd,
         client,
         system_prompt_text,
-        storage::api::memory_base_dir(),
+        storage::memory_base_dir(),
         lang,
     )
     .await
@@ -60,7 +60,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
 
     let mut store = MemoryStore::new(
         base_dir.clone(),
-        storage::api::project_file_name_from_path(cwd),
+        storage::project_file_name_from_path(cwd),
         config.max_entries,
         config.similarity_threshold,
     )

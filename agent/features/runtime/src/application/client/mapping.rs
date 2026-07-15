@@ -3,7 +3,7 @@ use sdk::{
     SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
 };
 
-use context::api::skill::Skill;
+use context::skill::Skill;
 use share::memory::{MemoryCategory, MemoryLayer};
 
 pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> MemoryConfigView {
@@ -72,9 +72,7 @@ fn memory_category_to_sdk(category: MemoryCategory) -> &'static str {
     }
 }
 
-pub(crate) fn session_summary_from_runtime(
-    session: context::api::session::Session,
-) -> SessionSummary {
+pub(crate) fn session_summary_from_runtime(session: context::session::Session) -> SessionSummary {
     let preview = session
         .messages
         .iter()
@@ -103,7 +101,7 @@ pub(crate) fn session_summary_from_runtime(
 }
 
 pub(super) fn workspace_context_to_sdk(
-    workspace: context::api::session::PersistedWorkspaceContext,
+    workspace: context::session::PersistedWorkspaceContext,
 ) -> WorkspaceContextView {
     WorkspaceContextView {
         path_base: workspace.path_base.into(),

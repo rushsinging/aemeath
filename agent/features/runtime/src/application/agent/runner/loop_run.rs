@@ -158,7 +158,7 @@ impl<'a> SubAgentRun<'a> {
     }
 
     fn progress_turn_start(&self, turn_number: usize) {
-        let msg_tokens = context::api::compact::estimate_messages_tokens(&self.messages);
+        let msg_tokens = context::compact::estimate_messages_tokens(&self.messages);
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -281,11 +281,18 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
         RunDomainEvent::Failed { error, .. } => Some(AgentRunTerminal::Failed {
             error: error.clone(),
         }),
-        RunDomainEvent::Cancelled { .. } => Some(AgentRunTerminal::Cancelled),
+        RunDomainEvent::Cancelled { .. } | RunDomainEvent::Terminated { .. } => {
+            Some(AgentRunTerminal::Cancelled)
+        }
         RunDomainEvent::Transitioned { .. }
         | RunDomainEvent::Started { .. }
         | RunDomainEvent::StepStarted { .. }
         | RunDomainEvent::StepCompleted { .. }
+        | RunDomainEvent::StepCancellationRequested { .. }
+        | RunDomainEvent::StepFinalizationStarted { .. }
+        | RunDomainEvent::StepCancelled { .. }
+        | RunDomainEvent::DrainingInput { .. }
+        | RunDomainEvent::TerminationRequested { .. }
         | RunDomainEvent::CancellationRequested { .. }
         | RunDomainEvent::AwaitingUser { .. }
         | RunDomainEvent::Resumed { .. }
@@ -305,7 +312,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         if self.last_api_input_tokens == 0 && self.last_api_output_tokens == 0 {
             return Ok(false);
         }
-        Ok(context::api::compact::needs_compaction_actual(
+        Ok(context::compact::needs_compaction_actual(
             self.last_api_input_tokens,
             self.last_api_output_tokens,
             None,
@@ -391,10 +398,10 @@ impl RunLoopPort for SubAgentRun<'_> {
             context_window: self.ctx_context_size as u64,
             est_system_tokens: effective_blocks
                 .iter()
-                .map(|b| context::api::compact::estimate_tokens(&b.text))
+                .map(|b| context::compact::estimate_tokens(&b.text))
                 .sum(),
-            est_tool_tokens: context::api::compact::estimate_tool_schemas_tokens(&self.sub_schemas),
-            est_message_tokens: context::api::compact::estimate_messages_tokens(&messages_for_api),
+            est_tool_tokens: context::compact::estimate_tool_schemas_tokens(&self.sub_schemas),
+            est_message_tokens: context::compact::estimate_messages_tokens(&messages_for_api),
             stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
         };
 

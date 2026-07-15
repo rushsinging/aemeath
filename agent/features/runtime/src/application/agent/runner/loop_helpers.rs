@@ -5,7 +5,7 @@ use share::message::Message;
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
 use crate::LOG_TARGET;
-use context::api::compact::needs_compaction_actual;
+use context::compact::needs_compaction_actual;
 use provider::api::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
@@ -89,14 +89,14 @@ impl<'a> SubAgentRun<'a> {
 
         // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
         // 清理后重新判断是否还需要 LLM 摘要。
-        let mc_cleared = context::api::compact::microcompact_messages(&mut self.messages);
+        let mc_cleared = context::compact::microcompact_messages(&mut self.messages);
         if mc_cleared > 0 {
             log::info!(target: crate::LOG_TARGET,
                 "[microcompact] sub-agent cleared {} stale tool results", mc_cleared);
             // 清理后重新检查是否还需要 compact
-            let mc_input = context::api::compact::estimate_messages_tokens(&self.messages);
+            let mc_input = context::compact::estimate_messages_tokens(&self.messages);
             let remaining_budget =
-                context::api::compact::autocompact_threshold(self.ctx_context_size, 8192);
+                context::compact::autocompact_threshold(self.ctx_context_size, 8192);
             // 估算下一轮 input ≈ 当前 mc_input + system + tool schemas
             // 用 api_input 作为上界（microcompact 前），减去已清理部分
             if mc_input + (api_input as usize) <= remaining_budget {
@@ -113,7 +113,7 @@ impl<'a> SubAgentRun<'a> {
         let old_len = self.messages.len();
         let result = tokio::select! {
             _ = self.agent.ctx.cancel.cancelled() => None,
-            result = context::api::compact::compact_messages_with_llm(
+            result = context::compact::compact_messages_with_llm(
                 &self.messages,
                 &self.system,
                 self.ctx_context_size,
@@ -179,7 +179,7 @@ pub(super) fn append_tool_results(
             )
         })
         .collect();
-    storage::api::persist_oversized_results(session_id, &mut provider_results);
+    storage::persist_oversized_results(session_id, &mut provider_results);
     messages.push(Message::tool_results_rich(provider_results));
 }
 
@@ -187,7 +187,7 @@ pub(super) fn append_tool_results(
 mod tests {
     use super::*;
     use share::message::ContentBlock;
-    use storage::api::MAX_TOOL_RESULT_CHARS;
+    use storage::MAX_TOOL_RESULT_CHARS;
 
     #[test]
     fn test_append_tool_results_uses_provider_id_not_runtime_id() {

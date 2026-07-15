@@ -25,6 +25,37 @@ pub enum RunDomainEvent {
         parent_run_id: Option<RunId>,
         step_id: RunStepId,
     },
+    StepCancellationRequested {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        step_id: RunStepId,
+    },
+    StepFinalizationStarted {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        step_id: RunStepId,
+    },
+    StepCancelled {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        step_id: RunStepId,
+        confirmed: bool,
+    },
+    DrainingInput {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+    },
+    TerminationRequested {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        reason: sdk::RunTerminationReason,
+        deadline: sdk::ControlDeadline,
+    },
+    Terminated {
+        run_id: RunId,
+        parent_run_id: Option<RunId>,
+        reason: sdk::RunTerminationReason,
+    },
     CancellationRequested {
         run_id: RunId,
         parent_run_id: Option<RunId>,
@@ -65,6 +96,12 @@ impl RunDomainEvent {
             | Self::Started { parent_run_id, .. }
             | Self::StepStarted { parent_run_id, .. }
             | Self::StepCompleted { parent_run_id, .. }
+            | Self::StepCancellationRequested { parent_run_id, .. }
+            | Self::StepFinalizationStarted { parent_run_id, .. }
+            | Self::StepCancelled { parent_run_id, .. }
+            | Self::DrainingInput { parent_run_id, .. }
+            | Self::TerminationRequested { parent_run_id, .. }
+            | Self::Terminated { parent_run_id, .. }
             | Self::CancellationRequested { parent_run_id, .. }
             | Self::AwaitingUser { parent_run_id, .. }
             | Self::Resumed { parent_run_id, .. }

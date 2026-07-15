@@ -22,7 +22,7 @@ pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,
     turn_count: usize,
     sink: &S,
-    chain: &mut context::api::session::ChatChain,
+    chain: &mut context::session::ChatChain,
     language: &str,
     segment_id: &str,
 ) where
@@ -98,7 +98,7 @@ pub(crate) async fn build_api_messages(
     language: &str,
     task_reminder_state: &mut TaskReminderState,
     turn_count: u64,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
     messages: &[Message],
 ) -> Vec<Message> {
     let mut api_msgs = Vec::new();
@@ -145,7 +145,7 @@ mod tests {
             }],
             metadata: None,
         }];
-        let store = storage::api::TaskStore::new();
+        let store = storage::TaskStore::new();
         let mut reminder = TaskReminderState::new();
         let out = build_api_messages("", "en", &mut reminder, 1, &store, &messages).await;
 
@@ -176,7 +176,7 @@ mod tests {
             }],
             metadata: None,
         }];
-        let store = storage::api::TaskStore::new();
+        let store = storage::TaskStore::new();
         let mut reminder = TaskReminderState::new();
         let out = build_api_messages("", "en", &mut reminder, 1, &store, &messages).await;
         let block = out

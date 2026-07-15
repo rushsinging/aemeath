@@ -6,7 +6,7 @@ use crate::application::chat::looping::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
 use crate::LOG_TARGET;
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 
 pub(crate) async fn execute_set_thinking<S>(
     client: &provider::api::LlmClient,
@@ -62,7 +62,7 @@ pub(crate) async fn idle_until_resume_or_shutdown<I, S>(
     sink: &S,
     pending: &mut PendingInputBuffer,
     chain: &mut ChatChain,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
 ) -> IdleResult
 where
     I: InputEventDrainPort,

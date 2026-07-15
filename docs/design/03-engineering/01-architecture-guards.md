@@ -33,8 +33,8 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 只允许 `domain/application/ports/adapters` 与按需 `shared`，并禁止旧层恢复 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 跨 feature 仅经 `::<crate>::api` |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 锁定六边形目录，Context 锁定 `capabilities/`，Storage 只禁止旧固定层恢复 |
+| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -121,7 +121,7 @@
 | 模式 | 理由 |
 |---|---|
 | `\bToolRegistry\b` | 属于 `tools::api` |
-| `\bTaskStore\b` / `\bTaskStoreStats\b` | 属于 `storage::api` |
+| `\bTaskStore\b` / `\bTaskStoreStats\b` | 属于 Storage crate-root façade |
 | `\bstd::fs::` / `\btokio::fs::` / `\bFile::` / `read_to_string` / `write(` / `create_dir` | share 不得做 fs IO |
 | `\bstd::process::` / `\btokio::process::` / `Command::new` | share 不得 spawn process |
 | `\breqwest::` / `\bhyper::` / `\bureq::` / `\bhttp::` | share 不得做网络/http IO |
@@ -139,20 +139,20 @@
 
 | 路径 | 理由 |
 |---|---|
-| `agent/shared/src/task/batch.rs` | task 批处理行为属于 `storage::api` |
-| `agent/shared/src/task/display.rs` | task 展示行为属于 `storage::api` |
-| `agent/shared/src/task/list.rs` | task 列表行为属于 `storage::api` |
-| `agent/shared/src/task/store.rs` | task store 行为属于 `storage::api` |
+| `agent/shared/src/task/batch.rs` | task 批处理行为属于 Storage 当前 façade |
+| `agent/shared/src/task/display.rs` | task 展示行为属于 Storage 当前 façade |
+| `agent/shared/src/task/list.rs` | task 列表行为属于 Storage 当前 façade |
+| `agent/shared/src/task/store.rs` | task store 行为属于 Storage 当前 façade |
 
 - **依赖白名单（`allowed_dependencies`）**：`serde`, `serde_json`, `serde_yml`, `thiserror`, `tokio`, `tokio-util`, `uuid`, `log`, `logging`, `unicode-width`, `utils`。
 
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 已迁入目标六边形，因此单独限制其顶层目录为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`，并拒绝恢复 `business/core/gateway/contract/utils` 旧目录；context feature 继续使用精确顶层目录例外。
-- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；依赖方向检查只将 `src/` 下第一级目录属于 `FEATURE_LAYERS`、且文件路径未被 `is_test_path` 判定为测试路径的 Rust 文件归入对应层，再按 `FORBIDDEN_LAYER_DEPS` 匹配非空且不以 `//` 或 `*` 开头的行中的 `crate::<layer>` 引用（`use` 可选）。脚本不解析普通文件内的 `#[cfg(test)]` block，因此其中符合匹配条件的行仍会被扫描；脚本还确认三个已迁移 feature 的旧 crate 目录不存在，并对 `LAYER_MIGRATION_EXCEPTIONS` 做 stale 自检。下方层定义、被禁方向、扫描范围和例外表均与脚本保持一致。
+- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制顶层目录为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Storage 在 #991 只拒绝恢复 `api/business/contract/gateway` 固定层，不固化其过渡模块名称；context feature 继续使用精确顶层目录例外。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制，context feature 另放行 `CONTEXT_DOMAIN_DIRS`；Runtime 使用目标结构规则。Storage 仅执行旧固定层负向断言，其正式 `capabilities/` 形状由 #1022 在目标切片落地后统一守护。依赖方向扫描跳过 Storage（其 #991 过渡布局已无横向层），其余规则按路径识别当前层，并对例外做 stale 自检。下方常量、扫描范围和例外表均与脚本保持一致。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
-- **层定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`，其中 `shared` 仅按真实复用需要创建。
+- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Storage 仅以 `STORAGE_LEGACY_LAYERS = {api, business, contract, gateway}` 防旧层恢复，不登记过渡目录 allowlist。
 - **Context 顶层目录例外**：`CONTEXT_DOMAIN_DIRS = {capabilities}`。Context 的稳定竖切只允许位于该容器；Session、Compact、Prompt 等旧根目录已由 #868 迁出并从白名单删除。其他普通 feature（包括 Project）仍受 `FEATURE_LAYERS` 限制。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
@@ -164,9 +164,11 @@
 | `gateway` | `business`, `utils` |
 
 - **检查方式**：
-  - 扫描 `agent/features/*/src/*` 的顶层子目录：普通 feature 的目录名必须在 `FEATURE_LAYERS` 内；context feature 另放行 `CONTEXT_DOMAIN_DIRS`。
-  - 依赖方向扫描按路径跳过 `*_test.rs`、`*_tests.rs`、文件 stem 为 `tests` 或路径段含 `tests` 的 Rust 文件，且只对 `src/` 下第一级目录属于 `FEATURE_LAYERS` 的文件按层分类；逐行跳过空行及以 `//` 或 `*` 开头的行，再匹配 `crate::<layer>` 引用（`use` 可选）并按上表核查。普通文件中的 `#[cfg(test)]` block **NEVER** 获得额外豁免。
-  - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**（已迁到 `agent/features/*`）。
+  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Context 使用精确能力目录；Runtime 使用六边形目录；Storage 在 #991 阶段不限制过渡模块名称。
+  - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败。
+  - 依赖方向扫描跳过测试路径，并对未迁移横向层与 Runtime 六边形层按 `FORBIDDEN_LAYER_DEPS` 检查；Storage 不参与横向层依赖扫描。
+  - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**。
+- **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
 
 | 路径 | 目标层 | 上下文 |
@@ -188,22 +190,23 @@
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问只经 `::<feature>::api`，且 feature 的 `api.rs` 只 re-export `contract` / `gateway`。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透对方 Current `contract/gateway/core/business/utils` 内部路径；禁止 Current `api.rs` 暴露内部层。该脚本锁定迁移期物理结构，不定义 Target 通用 `api/` 目录。
+- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Context 使用根级窄 façade `context::{context_port, compact, guidance, skill, session}`；Storage 使用 #991 过渡期 crate-root 窄 façade。脚本同时禁止恢复 Context 的纯转发 `api/gateway`、Prompt `business/gateway` 与 Storage 内部固定层穿透。
+- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
-  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`
-  - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`（project 可在根级 `pub use project::ProjectContext`，如 `sdk` 投影）
+  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
+  - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
+  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
+  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
+  - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory/Tool Result façade 符号集合；最终随 #880/#983/#883/#884 收敛。
+  - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities/prompt/business.rs, context/src/capabilities/prompt/business/, context/src/capabilities/prompt/gateway.rs}`
 - **检查方式**：
   - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；
-  - 对每个文件，匹配 `<feature>::<segment>` 形态：
-    - `segment == "api"`：放行（这是入口）；
-    - `segment ∈ INTERNAL_SEGMENTS`：违规（需改走 `api`）；
-    - `segment ∈ ROOT_REEXPORT_ALLOW[target]` 且是 `pub use`：放行。
-  - 对 `agent/features/*/src/api.rs` 的 `pub use crate::<segment>`：`segment` 必须在 `API_FACADE_ALLOWED_SEGMENTS`。
-- **例外**：`ROOT_REEXPORT_ALLOW` 表中登记的符号（当前仅 `project::ProjectContext`）；`share` crate 不受跨 crate 检查约束（它处于依赖底层）。
-- **说明**：旧的 `WorktreeContextExt` 投影豁免已随 context 所有权重构删除；当前脚本**没有任何** path 级豁免。
+  - 未迁移 feature 的跨 crate 入口仍必须是 `api`；Runtime、Context、Storage 只放行对应 `ROOT_ACCESS_ALLOW` 登记符号；Context `contract/capabilities` 与 Storage 私有模块 **NEVER** 直接跨 crate 访问；
+  - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
+  - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
+- **例外**：无 path 级白名单。Context 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
 
 ## 7. check-context-architecture.sh
 

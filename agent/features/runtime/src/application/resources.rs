@@ -5,11 +5,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use context::api::skill::Skill;
+use context::skill::Skill;
 use hook::api::HookRunner;
 use provider::api::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
-use storage::api::TaskStore;
+use storage::TaskStore;
 use tools::api::{AgentRunner, ToolRegistry};
 
 /// Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。

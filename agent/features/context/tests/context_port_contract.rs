@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use context::api::context_port::{
+use context::context_port::{
     AppendReceipt, CalendarDate, CompactOutcome, CompactRequest, CompactResult, CompactTrigger,
     CompactionDecision, ContentFingerprint, ContextAppend, ContextAppendError, ContextMessage,
     ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,

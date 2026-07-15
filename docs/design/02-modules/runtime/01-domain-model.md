@@ -24,7 +24,8 @@ struct Run {
     id: RunId,                 // UUIDv7
     spec: RunSpec,             // 规格（可序列化 / 可复用；active RunSpec 不作 durable checkpoint）
     parent: Option<RunId>,     // Sub Run 指向父 Run（结果/事件回传）
-    status: RunStatus,         // 状态机（含 Cancelling 过渡态，见 03-loop-and-state-machine）
+    status: RunStatus,         // 唯一状态机；目标终态仅 Completed / Failed / Terminated
+    termination: Option<RunTermination>, // TerminateRun 接受后的 reason + absolute deadline
     pending_interaction: Option<PendingInteraction>, // 与 AwaitingUser 同步存活，不持久化
     steps: Vec<RunStep>,       // 内部实体序列
     started_at: Instant,
@@ -39,7 +40,7 @@ struct RunCancellationScope {
 // —— 聚合内实体（有标识+生命周期，归属 Run）——
 struct RunStep {
     id: RunStepId,
-    status: RunStepStatus,             // Pending/Invoking/Applying/ToolPhase/Done/Failed
+    status: RunStepStatus,             // Invoking/Applying/ToolPhase/Cancelling/Finalizing/Done/Failed/Cancelled/CancellationUnconfirmed
     invocation: Option<ModelInvocation>,
     tool_calls: Vec<ToolCall>,
 }
@@ -85,8 +86,8 @@ enum InteractionContinuation {
 
 ## 3. 不变量（Run 聚合守护）
 
-1. Run 进入 `Completed/Failed/Cancelled` 后**不可再加 Run Step**
-2. `Cancelling` 只接受取消收口，不可开始 Model Invocation、Tool Call 或 Compaction
+1. Run 进入 `Completed/Failed/Terminated` 后**不可再加 Run Step**
+2. `CancellingStep` / `FinalizingStep` 只接受当前 Step 的确定性收口；`Terminating` 只接受 Run 终止收口，三者均不可开始 Model Invocation、Tool Call、Compaction 或 Hook
 3. 每个 Tool Call **必须归属**某个 Run Step
 4. 每个 Run Step **至多一次** Model Invocation
 5. Tool Call 状态**单向推进**（不可从 Success 回到 Running）
@@ -99,11 +100,11 @@ enum InteractionContinuation {
 
 ## 4. 领域事件（→ Event Projection → SDK ChatEvent）
 
-`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser{request_id}/Resumed{request_id} · CompactionStarted/Completed · StuckDetected · RunCancellationRequested · RunCompleted/Failed/Cancelled`
+`RunStarted · RunStepStarted · ModelInvocationStarted/Delta/Retrying/Completed · ToolCallRequested/Approved/Executing/Completed/Failed · RunStepCompleted · RunAwaitingUser{request_id}/Resumed{request_id} · CompactionStarted/Completed · StuckDetected · RunStepCancellationRequested · RunStepFinalizationStarted · RunStepCancelled{confirmed} · RunDrainingInput · RunTerminationRequested{reason,deadline} · RunCompleted/Failed/Terminated{reason}`
 
-> **取消事件分两阶段**：`RunCancellationRequested` 在同步取消入口接受请求并将 Run 迁移到 `Cancelling` 时产生；`RunCancelled` 仅在 Provider/Tool/Compact/Hook 等在途工作停止且回滚完成后产生。前者是即时请求事实，后者是异步完成确认。
+> **Step 取消与 Run 终止分离**：`RunStepCancellationRequested` 在同步入口接受 `CancelRunStep` 时产生；`RunStepFinalizationStarted` / `RunStepCancelled` 描述确定性收口，随后 `RunDrainingInput`。`RunTerminationRequested` 在接受 `TerminateRun` 时产生，最终只有 `RunTerminated`。迁移期旧 `RunCancellationRequested/RunCancelled` 只用于现有生产兼容路径，必须由 #878/#879 与旧 `cancel_run` 一并退役。
 
-> **终态事实与业务返回分离**：`RunCompleted { result }`（最后 assistant 文本/结构）/ `RunFailed { error }` / `RunCancelled` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
+> **终态事实与业务返回分离**：目标终态 `RunCompleted { result }` / `RunFailed { error }` / `RunTerminated { reason }` 是 Run 聚合产生并经 `EventSink` 投影的权威领域事件；同时 `run_loop` / `derive_sub_run` 直接返回 typed `AgentRunTerminal`。Main 使用事件通知 TUI；Sub 的父 Run **MUST** 消费 typed return 继续业务编排，**NEVER** 反向订阅 EventSink 或遍历 message 提取结果。事件载荷与 typed return 来自同一次终态 mutation，必须一致。
 
 > Event Projection adapter 按 Main/Sub scope 路由与命名：Main terminal/event stream → TUI；Sub event 仅作父级诊断投影，业务 completion 走 typed `AgentRunTerminal` return（详见 #612）。
 
@@ -294,3 +295,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 2026-07-14 | 移除 Runtime Workspace 端口；WorkspaceMode 仅驱动 composition-internal workspace scope，Main 在 Session 内复用，Sub 从父 Project wiring 派生同一隔离实例供 Context / Tool 装配；补齐 pending interaction identity / continuation | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 PlanApproval continuation；冻结单 PendingInteraction、Tool suspension 串行化与每 RunStep 单次 ContextAppend 不变量 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | RunSpec 增加 FinalizationSpec：Main 默认 deterministic summary + Full receipt，Sub 默认无 summary + Safety receipt；父 CancelRunStep 对 Agent Tool Sub 传播共享绝对 deadline 的 TerminateRun | [#700](https://github.com/rushsinging/aemeath/issues/700) |
+| 2026-07-15 | Run 聚合与领域事件对齐 CancelRunStep/TerminateRun：目标终态改为 Completed/Failed/Terminated；旧 Cancelled 仅保留迁移兼容 | [#700](https://github.com/rushsinging/aemeath/issues/700) / [PR #1036](https://github.com/rushsinging/aemeath/pull/1036) |

@@ -6,6 +6,129 @@ fn run() -> Run {
 }
 
 #[test]
+fn new_control_path_drains_before_work_and_after_cancelled_step() {
+    let mut run = run();
+
+    run.start_draining().unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    run.apply_drain_decision(DrainDecision::Inputs).unwrap();
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+    run.transition(RunTransition::ContextPrepared).unwrap();
+    let step_id = run.begin_step().unwrap();
+
+    assert_eq!(
+        run.request_step_cancellation(&step_id),
+        RunStepCancellationRequest::Accepted
+    );
+    run.begin_step_finalization(&step_id).unwrap();
+    run.finish_cancelled_step(&step_id).unwrap();
+
+    assert_eq!(run.steps()[0].status(), RunStepStatus::Cancelled);
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed)
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::Completed);
+}
+
+#[test]
+fn scenario_cancelled_step_drains_input_then_starts_fresh_step() {
+    let mut run = run();
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs).unwrap();
+    run.transition(RunTransition::ContextPrepared).unwrap();
+    let cancelled = run.begin_step().unwrap();
+    run.request_step_cancellation(&cancelled);
+    run.begin_step_finalization(&cancelled).unwrap();
+    run.finish_cancelled_step(&cancelled).unwrap();
+
+    run.apply_drain_decision(DrainDecision::Inputs).unwrap();
+    run.transition(RunTransition::ContextPrepared).unwrap();
+    let next = run.begin_step().unwrap();
+
+    assert_ne!(cancelled, next);
+    assert_eq!(run.steps()[0].status(), RunStepStatus::Cancelled);
+    assert_eq!(run.steps()[1].status(), RunStepStatus::Invoking);
+}
+
+#[test]
+fn scenario_terminate_discards_controlled_step_and_closes_run() {
+    let mut run = run_at_status(RunStatus::InvokingModel);
+    let step_id = run.begin_step().unwrap();
+    let deadline = sdk::ControlDeadline::from_unix_millis(10_000);
+    run.request_step_cancellation(&step_id);
+
+    run.request_termination(sdk::RunTerminationReason::SessionShutdown, deadline);
+    run.finish_termination().unwrap();
+
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert_eq!(
+        run.steps()[0].status(),
+        RunStepStatus::CancellationUnconfirmed
+    );
+    assert!(run.events().iter().any(|event| matches!(
+        event,
+        RunDomainEvent::Terminated {
+            reason: sdk::RunTerminationReason::SessionShutdown,
+            ..
+        }
+    )));
+}
+#[test]
+fn internal_continuation_leaves_drain_for_preparing_context() {
+    let mut run = run();
+    run.start_draining().unwrap();
+
+    run.apply_drain_decision(DrainDecision::InternalContinuation)
+        .unwrap();
+
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+}
+
+#[test]
+fn termination_preempts_step_cancellation_and_is_idempotent() {
+    let mut run = run_at_status(RunStatus::InvokingModel);
+    let step_id = run.begin_step().unwrap();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1234);
+
+    assert_eq!(
+        run.request_step_cancellation(&step_id),
+        RunStepCancellationRequest::Accepted
+    );
+    assert_eq!(
+        run.request_termination(sdk::RunTerminationReason::UserExit, deadline),
+        RunTerminationRequest::Accepted
+    );
+    assert_eq!(
+        run.request_termination(sdk::RunTerminationReason::UserExit, deadline),
+        RunTerminationRequest::AlreadyTerminating
+    );
+    assert_eq!(run.status(), RunStatus::Terminating);
+    assert_eq!(
+        run.request_step_cancellation(&step_id),
+        RunStepCancellationRequest::RunTerminating
+    );
+
+    run.finish_termination().unwrap();
+    assert_eq!(run.status(), RunStatus::Terminated);
+    assert!(run.is_terminal());
+}
+
+#[test]
+fn cancellation_deadline_can_close_step_as_unconfirmed_then_drain() {
+    let mut run = run_at_status(RunStatus::InvokingModel);
+    let step_id = run.begin_step().unwrap();
+    run.request_step_cancellation(&step_id);
+    run.begin_step_finalization(&step_id).unwrap();
+
+    run.finish_unconfirmed_step(&step_id).unwrap();
+
+    assert_eq!(
+        run.steps()[0].status(),
+        RunStepStatus::CancellationUnconfirmed
+    );
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+}
+#[test]
 fn run_follows_the_happy_path_to_completed() {
     let mut run = run();
 
@@ -227,8 +350,9 @@ fn parent_identity_is_carried_by_every_domain_event() {
         .all(|event| event.parent_run_id() == Some(&parent)));
 }
 
-const ALL_RUN_STATUSES: [RunStatus; 13] = [
+const ALL_RUN_STATUSES: [RunStatus; 18] = [
     RunStatus::Created,
+    RunStatus::DrainingInput,
     RunStatus::PreparingContext,
     RunStatus::InvokingModel,
     RunStatus::ApplyingResponse,
@@ -237,14 +361,22 @@ const ALL_RUN_STATUSES: [RunStatus; 13] = [
     RunStatus::AwaitingUser,
     RunStatus::Compacting,
     RunStatus::Finishing,
+    RunStatus::CancellingStep,
+    RunStatus::FinalizingStep,
     RunStatus::Cancelling,
+    RunStatus::Terminating,
     RunStatus::Completed,
     RunStatus::Failed,
     RunStatus::Cancelled,
+    RunStatus::Terminated,
 ];
 
-const ALL_RUN_TRANSITIONS: [RunTransition; 16] = [
+const ALL_RUN_TRANSITIONS: [RunTransition; 22] = [
     RunTransition::Start,
+    RunTransition::StartDraining,
+    RunTransition::DrainInputs,
+    RunTransition::DrainInternalContinuation,
+    RunTransition::DrainEmptyAndSealed,
     RunTransition::BeginCompaction,
     RunTransition::CompactionCompleted,
     RunTransition::ContextPrepared,
@@ -259,6 +391,8 @@ const ALL_RUN_TRANSITIONS: [RunTransition; 16] = [
     RunTransition::UserResumed,
     RunTransition::ToolsCompleted,
     RunTransition::Finish,
+    RunTransition::StepCancelled,
+    RunTransition::TerminationFinished,
     RunTransition::CancellationFinished,
 ];
 
@@ -276,10 +410,14 @@ fn run_at_status(status: RunStatus) -> Run {
     if status == RunStatus::Created {
         return run;
     }
+    if status == RunStatus::DrainingInput {
+        run.start_draining().unwrap();
+        return run;
+    }
 
     run.transition(RunTransition::Start).unwrap();
     match status {
-        RunStatus::Created => unreachable!(),
+        RunStatus::Created | RunStatus::DrainingInput => unreachable!(),
         RunStatus::PreparingContext => {}
         RunStatus::Compacting => {
             run.transition(RunTransition::BeginCompaction).unwrap();
@@ -308,14 +446,38 @@ fn run_at_status(status: RunStatus) -> Run {
             invoke_to_applying(&mut run);
             run.transition(RunTransition::ResponseWithoutTools).unwrap();
         }
+        RunStatus::CancellingStep => {
+            run.transition(RunTransition::ContextPrepared).unwrap();
+            let step_id = run.begin_step().unwrap();
+            run.request_step_cancellation(&step_id);
+        }
+        RunStatus::FinalizingStep => {
+            run.transition(RunTransition::ContextPrepared).unwrap();
+            let step_id = run.begin_step().unwrap();
+            run.request_step_cancellation(&step_id);
+            run.begin_step_finalization(&step_id).unwrap();
+        }
         RunStatus::Cancelling => {
             assert_eq!(run.request_cancellation(), RunCancellationRequest::Accepted);
+        }
+        RunStatus::Terminating => {
+            run.request_termination(
+                sdk::RunTerminationReason::UserExit,
+                sdk::ControlDeadline::from_unix_millis(1),
+            );
         }
         RunStatus::Completed => {
             let step_id = invoke_to_applying(&mut run);
             run.transition(RunTransition::ResponseWithoutTools).unwrap();
             run.complete_step(&step_id).unwrap();
             run.transition(RunTransition::Finish).unwrap();
+        }
+        RunStatus::Terminated => {
+            run.request_termination(
+                sdk::RunTerminationReason::UserExit,
+                sdk::ControlDeadline::from_unix_millis(1),
+            );
+            run.finish_termination().unwrap();
         }
         RunStatus::Failed => {
             run.fail("failed").unwrap();
@@ -332,6 +494,14 @@ fn run_at_status(status: RunStatus) -> Run {
 fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<RunStatus> {
     match (from, transition) {
         (RunStatus::Created, RunTransition::Start) => Some(RunStatus::PreparingContext),
+        (RunStatus::Created, RunTransition::StartDraining) => Some(RunStatus::DrainingInput),
+        (RunStatus::DrainingInput, RunTransition::DrainInputs)
+        | (RunStatus::DrainingInput, RunTransition::DrainInternalContinuation) => {
+            Some(RunStatus::PreparingContext)
+        }
+        (RunStatus::DrainingInput, RunTransition::DrainEmptyAndSealed) => {
+            Some(RunStatus::Completed)
+        }
         (RunStatus::PreparingContext, RunTransition::BeginCompaction) => {
             Some(RunStatus::Compacting)
         }
@@ -367,6 +537,8 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
             Some(RunStatus::PreparingContext)
         }
         (RunStatus::Finishing, RunTransition::Finish) => Some(RunStatus::Completed),
+        (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
+        (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
         (RunStatus::Cancelling, RunTransition::CancellationFinished) => Some(RunStatus::Cancelled),
         _ => None,
     }

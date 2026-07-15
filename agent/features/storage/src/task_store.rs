@@ -1,8 +1,8 @@
-pub mod batch;
-pub mod display;
-pub mod list;
-pub mod store;
-pub mod types;
+mod batch;
+mod display;
+mod list;
+mod store;
+mod types;
 
 pub use types::{Batch, BatchStatus, Task, TaskPriority, TaskSnapshot, TaskStatus};
 

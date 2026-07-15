@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use storage::api::{TaskStatus, TaskStore};
+use storage::{TaskStatus, TaskStore};
 use tokio::sync::{Mutex, Notify};
 
 /// Background task scheduler

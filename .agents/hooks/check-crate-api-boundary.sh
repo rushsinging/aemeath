@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 功能：检查跨 feature 访问只经 `<feature>::api`，且 feature 的 api.rs 只 re-export
-#       contract / gateway。
-# 作用：守住 feature 发布语言边界（§6.4.2）——禁止穿透对方 contract/gateway/core/
-#       business/utils 内部路径，禁止 api.rs 暴露内部层。
-# 例外：无。（旧 WorktreeContextExt 投影豁免已随 context 所有权重构删除。）
+# 功能：检查未迁移 feature 访问只经 `<feature>::api`，并锁定已迁移 feature 的
+#       crate-root 窄 façade。
+# 作用：禁止穿透对方 contract/gateway/core/business/utils 内部路径；Storage 与 Runtime
+#       只允许经显式登记的 crate-root Published Language / production 入口访问。
+# 例外：无路径级白名单。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
@@ -34,9 +34,35 @@ API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
-# Runtime 的目标 façade 位于 crate 根；只放行 Composition 实际消费的窄入口。
+# 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
 ROOT_ACCESS_ALLOW = {
     "runtime": {"AgentClientImpl", "from_args"},
+    # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
+    "context": {"compact", "context_port", "guidance", "session", "skill"},
+    # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
+    "storage": {
+        "Batch",
+        "BatchStatus",
+        "MemoryStore",
+        "Task",
+        "TaskPriority",
+        "TaskSnapshot",
+        "TaskStatus",
+        "TaskStore",
+        "MAX_TOOL_RESULT_CHARS",
+        "memory_base_dir",
+        "persist_oversized_results",
+        "project_file_name",
+        "project_file_name_from_path",
+    },
+}
+
+CONTEXT_FORBIDDEN_PATHS = {
+    "agent/features/context/src/api.rs",
+    "agent/features/context/src/gateway.rs",
+    "agent/features/context/src/capabilities/prompt/business.rs",
+    "agent/features/context/src/capabilities/prompt/business",
+    "agent/features/context/src/capabilities/prompt/gateway.rs",
 }
 
 path_pattern = re.compile(
@@ -172,11 +198,13 @@ def run_sanity() -> None:
         ("provider", "use crate::core::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
         ("sdk", "pub use project::ProjectContext;"),
+        ("runtime", "use storage::{MemoryStore, TaskStore};"),
     ]
     blocked = [
         ("runtime", "use provider::core::client::LlmClient;"),
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
-        ("runtime", "use storage::{api::MemoryStore, MemoryStore as RootStore};"),
+        ("runtime", "use storage::memory_store::MemoryStore;"),
+        ("runtime", "use storage::HistoryManager;"),
     ]
     for current, line in allowed:
         if check_cross_crate_line(current, line):
@@ -192,6 +220,10 @@ def run_sanity() -> None:
 
 run_sanity()
 violations: list[str] = []
+for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
+    path = root / forbidden
+    if path.exists():
+        violations.append(f"{forbidden}: forbidden fixed-layer Context path exists")
 for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
     rel = api_path.relative_to(root)
     for lineno, line in enumerate(api_path.read_text().splitlines(), 1):

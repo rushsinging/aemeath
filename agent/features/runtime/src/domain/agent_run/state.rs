@@ -14,6 +14,7 @@ impl RunStepId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
     Created,
+    DrainingInput,
     PreparingContext,
     InvokingModel,
     ApplyingResponse,
@@ -22,15 +23,22 @@ pub enum RunStatus {
     AwaitingUser,
     Compacting,
     Finishing,
+    CancellingStep,
+    FinalizingStep,
     Cancelling,
+    Terminating,
     Completed,
     Failed,
     Cancelled,
+    Terminated,
 }
 
 impl RunStatus {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Terminated
+        )
     }
 }
 
@@ -39,9 +47,12 @@ pub enum RunStepStatus {
     Invoking,
     Applying,
     ToolPhase,
+    Cancelling,
+    Finalizing,
     Done,
     Failed,
     Cancelled,
+    CancellationUnconfirmed,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +67,10 @@ impl RunStep {
     pub(super) fn is_active(&self) -> bool {
         !matches!(
             self.status,
-            RunStepStatus::Done | RunStepStatus::Failed | RunStepStatus::Cancelled
+            RunStepStatus::Done
+                | RunStepStatus::Failed
+                | RunStepStatus::Cancelled
+                | RunStepStatus::CancellationUnconfirmed
         )
     }
 
@@ -90,6 +104,10 @@ impl RunStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTransition {
     Start,
+    StartDraining,
+    DrainInputs,
+    DrainInternalContinuation,
+    DrainEmptyAndSealed,
     BeginCompaction,
     CompactionCompleted,
     ContextPrepared,
@@ -104,12 +122,18 @@ pub enum RunTransition {
     UserResumed,
     ToolsCompleted,
     Finish,
+    StepCancelled,
+    TerminationFinished,
     CancellationFinished,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTransitionReason {
     Start,
+    DrainStarted,
+    DrainInputs,
+    DrainInternalContinuation,
+    DrainEmptyAndSealed,
     BeginCompaction,
     CompactionCompleted,
     ContextPrepared,
@@ -124,6 +148,11 @@ pub enum RunTransitionReason {
     UserResumed,
     ToolsCompleted,
     Finish,
+    StepCancellationRequested,
+    StepFinalizationStarted,
+    StepCancelled,
+    TerminationRequested,
+    TerminationFinished,
     InterruptRequested,
     CancellationFinished,
     Failed,
@@ -133,6 +162,10 @@ impl From<RunTransition> for RunTransitionReason {
     fn from(transition: RunTransition) -> Self {
         match transition {
             RunTransition::Start => Self::Start,
+            RunTransition::StartDraining => Self::DrainStarted,
+            RunTransition::DrainInputs => Self::DrainInputs,
+            RunTransition::DrainInternalContinuation => Self::DrainInternalContinuation,
+            RunTransition::DrainEmptyAndSealed => Self::DrainEmptyAndSealed,
             RunTransition::BeginCompaction => Self::BeginCompaction,
             RunTransition::CompactionCompleted => Self::CompactionCompleted,
             RunTransition::ContextPrepared => Self::ContextPrepared,
@@ -147,6 +180,8 @@ impl From<RunTransition> for RunTransitionReason {
             RunTransition::UserResumed => Self::UserResumed,
             RunTransition::ToolsCompleted => Self::ToolsCompleted,
             RunTransition::Finish => Self::Finish,
+            RunTransition::StepCancelled => Self::StepCancelled,
+            RunTransition::TerminationFinished => Self::TerminationFinished,
             RunTransition::CancellationFinished => Self::CancellationFinished,
         }
     }
@@ -178,6 +213,29 @@ pub enum RunTransitionError {
         from: ToolCallStatus,
         to: ToolCallStatus,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainDecision {
+    Inputs,
+    InternalContinuation,
+    EmptyAndSealed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStepCancellationRequest {
+    Accepted,
+    AlreadyCancelling,
+    NoActiveStep,
+    RunTerminating,
+    RunTerminal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTerminationRequest {
+    Accepted,
+    AlreadyTerminating,
+    AlreadyTerminal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

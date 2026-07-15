@@ -5,11 +5,11 @@
 use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
 
-use context::api::session::ChatChain;
+use context::session::ChatChain;
 
 fn test_save_chain() -> Arc<
     dyn Fn(
-            &context::api::session::ChatChain,
+            &context::session::ChatChain,
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sdk::SdkError>> + Send>>
         + Send
@@ -491,7 +491,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -605,7 +605,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -651,10 +651,10 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
     let workspace_root = tempfile::tempdir().unwrap();
     let marker = path_base.path().join("stop-hook-env.txt");
     let marker_path = marker.display().to_string();
-    let workspace_dto = context::api::session::PersistedWorkspaceContext {
+    let workspace_dto = context::session::PersistedWorkspaceContext {
         path_base: path_base.path().display().to_string(),
         workspace_root: workspace_root.path().display().to_string(),
-        context_stack: vec![context::api::session::PersistedWorkspaceFrame {
+        context_stack: vec![context::session::PersistedWorkspaceFrame {
             path_base: path_base.path().display().to_string(),
             workspace_root: path_base.path().display().to_string(),
         }],
@@ -721,7 +721,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -814,7 +814,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -981,7 +981,7 @@ async fn test_continue_false_json_treated_as_block() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1101,7 +1101,7 @@ async fn test_stall_triggers_stop_hook_check() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1260,7 +1260,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1445,7 +1445,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1662,7 +1662,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1782,7 +1782,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1882,7 +1882,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -1959,7 +1959,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2164,7 +2164,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         agent_runner: None,
         allow_all: false,
         active_run: active_run.clone(),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2418,7 +2418,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         agent_runner: None,
         allow_all: false,
         active_run: active_run.clone(),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2665,7 +2665,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2787,7 +2787,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2880,7 +2880,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -2953,7 +2953,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -3120,7 +3120,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         agent_runner: None,
         allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::api::TaskStore::new()),
+        task_store: Arc::new(storage::TaskStore::new()),
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),

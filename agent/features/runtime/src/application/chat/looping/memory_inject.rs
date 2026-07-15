@@ -31,8 +31,8 @@ pub fn build_memory_block(initial_cwd: &Path, inject_count: usize) -> Option<Sys
     )))
 }
 
-fn open_memory_store(initial_cwd: &Path) -> Result<storage::api::MemoryStore, String> {
-    use storage::api::{memory_base_dir, project_file_name, MemoryStore};
+fn open_memory_store(initial_cwd: &Path) -> Result<storage::MemoryStore, String> {
+    use storage::{memory_base_dir, project_file_name, MemoryStore};
     let base_dir = memory_base_dir();
     MemoryStore::new(
         base_dir,

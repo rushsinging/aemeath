@@ -332,7 +332,7 @@ pub(crate) fn tool_results_for_api(
             )
         })
         .collect();
-    storage::api::persist_oversized_results(session_id, &mut provider_results);
+    storage::persist_oversized_results(session_id, &mut provider_results);
     share::message::Message::tool_results_rich(provider_results)
 }
 
@@ -366,7 +366,7 @@ mod tests {
     use share::tool::ToolOutcome;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
-    use storage::api::MAX_TOOL_RESULT_CHARS;
+    use storage::MAX_TOOL_RESULT_CHARS;
     use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
     #[derive(Clone, Default)]
