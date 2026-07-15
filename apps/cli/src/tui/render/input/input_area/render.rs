@@ -26,6 +26,10 @@ impl InputArea {
         let inner_area = block.inner(area);
         block.render(area, buf);
 
+        // 用明确的 bg 覆盖 inner_area，确保旧 cursor 的 ACCENT bg 被替换。
+        // 不能用 Color::Reset（crossterm 不正确处理），用 BASE（终端底色）替代。
+        buf.set_style(inner_area, Style::default().bg(theme::BASE));
+
         let display_lines =
             wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
         let mut textarea = configured_textarea(view_model, &display_lines);
