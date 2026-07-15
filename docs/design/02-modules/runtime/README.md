@@ -18,9 +18,12 @@
 
 1. **单执行生命周期状态机**：全系统只有 `Run` 驱动 Agent 执行生命周期（内存态、不持久化、崩溃从头开始）；其他 BC 可拥有不驱动 Run 的局部状态机
 2. **Loop Engine 零分支**：Main/Sub 共用一套 Loop，差异 100% 在 RunSpec + RuntimeContext + Event adapter
-3. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
-4. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
-5. **无 durable**：恢复语义=从头开始，仅保留对话历史快照
+3. **两级组织**：仓库 `agent/features/*` 是 VSA；Runtime feature 内使用 `domain/application/ports/adapters/shared` 六边形分层，**NEVER** 再复制第二层 VSA
+4. **依赖向内**：adapter 依赖 Port，application 依赖 Port 与 domain，domain 不依赖外层，shared 不反向依赖任何层
+5. **唯一生产装配**：具体实现选择、factory 调用和对象图连接全部位于 `agent/composition`，Runtime 内不建立第二个 Composition Root
+6. **安全铁律**：Sub 能力 ≤ Main（只削弱不越权）
+7. **防 stuck 内置**：StuckGuard 四层防线 Main/Sub 统一保护
+8. **无 durable**：恢复语义=从头开始，仅保留对话历史快照
 
 ## 文档导航
 
@@ -44,3 +47,4 @@
 |---|---|---|
 | 2026-07-11 | 初稿：模块入口 + 三元组速览 + 文档导航 | #761 |
 | 2026-07-12 | 出站端口数量改为开放表述，适配 Tool Catalog/Execution 拆分 | #787 |
+| 2026-07-15 | 明确 `features/*` 为 VSA、Runtime feature 内采用六边形横向分层，并保留 `agent/composition` 唯一生产装配边界 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
