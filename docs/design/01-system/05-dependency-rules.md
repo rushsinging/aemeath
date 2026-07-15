@@ -37,6 +37,7 @@ Git CLI / 子进程 detail ──实现 Project 消费方拥有的 git worktree 
 | R5 | **Config 单向下发**：所有 BC 顺从消费只读 `ConfigSnapshot`，NEVER 反向依赖，NEVER 绕过快照读裸配置 / env 散点 | 业务代码里直接读环境变量 |
 | R6 | **Composition Root MUST 是唯一生产装配入口**：具体实现选择、factory 调用与跨能力接线只由组合根发起；模块可在 composition-only opaque factory 内构造私有 detail，但 NEVER 自行选择候选实现或从业务路径触发生产装配；“唯一”按每个 deployable production assembly（可独立构建 / 部署的生产制品）解释——同一 deployable 内 MUST 只有一个组合根，不同 deployable（如未来 Server 化的控制面与 worker）MAY 各自拥有独立的唯一组合根 | 能力在业务路径直接 `new` 存储实现，或根据全局配置自行挑选 adapter，或同一 deployable 内出现第二个装配入口 |
 | R7 | **边界模型 MUST 按 Context Map 转换或共享**：provider wire type **MUST** 经 Provider ACL 转为稳定 `Message`；`DomainEvent` **MUST** 经 TUI ACL 转为 TUI Model；只有 [Context Map](03-context-map.md) 登记的 Shared Kernel 类型 **MAY** 在其列明的参与 BC 间跨界（`Message` 用于 Runtime / Context Management / Provider，`ReasoningLevel` 用于 Workflow / Config / Runtime / Context Management / Provider），其他内部类型 **NEVER** 直通 | provider wire type 直接进入 Runtime，或 `DomainEvent` 直接进入 TUI Model，或未登记类型被多个 BC 各自复制 |
+| R8 | **同 crate 内 Hexagonal 层级依赖方向**：feature crate 内部 **MUST** 采用 Hexagonal 依赖方向（`domain ← application ← ports ← adapters`）。`domain` **NEVER** 依赖 `application` / `ports` / `adapters`；`application` 只依赖 `domain`（+ 经 `ports` 消费外部）；`ports` 只依赖 `domain`；`adapters` 可依赖 `ports` + `domain`。小模块 MAY 只使用部分层，**NEVER** 为对称预建空层。采用 `capabilities/` 递归竖切时，每个 capability 内部仍 **MUST** 遵守此方向 | `domain` 层 `use crate::adapters::xxx`；`application` 层直接 `use crate::adapters::xxx` 绕过 `ports`；`ports` 层依赖 `adapters` |
 
 ## 3. 目录名称不证明依赖方向
 
@@ -87,3 +88,4 @@ Git CLI / 子进程 detail ──实现 Project 消费方拥有的 git worktree 
 | 2026-07-14 | 以 external detail → capability policy 重写依赖语义，明确按证据强制 port、Context Map 的 ACL / Shared Kernel 例外、目录非证据原则，以及守卫覆盖状态的真相源职责 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 修复评审 #13-#15：模型调用战术端口签名真相源改指向 Runtime 端口与适配器；新增技术外部 seam 与 BC boundary seam 判据区分说明；R3 明确合法跨能力依赖面包含供应方 façade/PL 与外部/供应 adapter 实现消费方 owned outbound SPI | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略层 NEVER 依赖；技术外部 seam 与 BC boundary seam 说明补充 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（被消费方 adapter 调用的入站服务）的所有权对照示例；R6 明确 Composition Root “唯一”按 deployable production assembly 解释；factory 补充只限生产代码路径、测试可绕过直接构造 fake | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 新增 R8：同 crate 内 Hexagonal 层级依赖方向（`domain ← application ← ports ← adapters`），作为 crate 内部默认约束 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
