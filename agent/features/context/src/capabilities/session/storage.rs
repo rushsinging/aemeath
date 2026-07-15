@@ -9,7 +9,7 @@
 //! `load_session` 在主文件解析失败时依次尝试 `.bak` 回退、`.corrupt`
 //! 转存，确保损坏的会话文件不会被静默丢弃。
 
-use crate::session::types::*;
+use crate::capabilities::session::types::*;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;

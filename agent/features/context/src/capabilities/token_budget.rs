@@ -365,5 +365,5 @@ pub fn compaction_urgency(
 }
 
 #[cfg(test)]
-#[path = "token_estimation_tests.rs"]
-mod token_estimation_tests;
+#[path = "token_budget_tests.rs"]
+mod token_budget_tests;
