@@ -21,21 +21,23 @@ Config 是**通用域 BC**——为所有其他 BC 提供配置真相：
 
 ## Target 物理目录
 
-Config 只有一条 effective-config 生命周期：读取来源、按优先级 merge、校验、prepare/commit 并发布唯一 `ConfigSnapshot`。这些步骤共享同一 active state，不构成独立业务切片，因此 **NEVER** 创建 `capabilities/`。核心保持扁平；File、Env、CLI、Runtime Override 与 Compatibility 是不同外部来源/协议，按真实 seam 进入私有技术目录：
+Config 采用 Hexagonal + Clean 组织（`domain + adapters`）。effective-config 生命周期的领域策略（merge 优先级链、校验、prepare/commit 发布、`ConfigSnapshot` 不变量）收在 `domain`；File、Env、CLI、Runtime Override 与 Compatibility 等外部来源 I/O 终止在 `adapters`：
 
 ```text
-config.rs                       # 窄 façade：Config PL / OHS / composition-only wiring
-config/
-├── model.rs                    # Config / Snapshot / Patch / Revision 的共同不变量
-├── app_service.rs              # 唯一 active state 与 prepare/commit 发布
-├── merge.rs                    # 优先级链
-├── validation.rs               # 统一校验
+src/
+├── lib.rs                       # 窄 façade：Config PL / OHS / composition-only wiring
+├── domain.rs                    # 领域策略入口
+├── domain/
+│   ├── model.rs                 #   Config / Snapshot / Patch / Revision 的共同不变量
+│   ├── app_service.rs           #   唯一 active state 与 prepare/commit 发布
+│   ├── merge.rs                 #   优先级链
+│   └── validation.rs            #   统一校验
 └── adapters/
-    ├── file.rs
-    ├── env.rs
-    ├── cli_args.rs
-    ├── runtime_override.rs
-    └── compatibility.rs        # 外部配置格式 ACL；按 translator 证据再展开
+    ├── file.rs                  #   文件来源 I/O
+    ├── env.rs                   #   环境变量来源
+    ├── cli_args.rs              #   CLI 参数来源
+    ├── runtime_override.rs      #   运行时覆盖
+    └── compatibility.rs         #   外部配置格式 ACL；按 translator 证据再展开
 ```
 
 `adapters/` 只承载外部来源 I/O、wire DTO 与 ACL，**NEVER** 持有 active state 或 merge policy；`ConfigReader`、`ConfigQuery`、`ConfigWriter` 与 `ProjectConfigParticipant` 是同一能力的窄视图，不据此建立横向 `ports/`。单文件来源必须保持单文件，禁止为对称预建目录。
