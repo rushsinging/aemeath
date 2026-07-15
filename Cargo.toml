@@ -17,6 +17,7 @@ members = [
     "packages/sdk",
     "packages/global/logging",
     "packages/global/utils",
+    "tools/xtask",
 ]
 
 [workspace.dependencies]

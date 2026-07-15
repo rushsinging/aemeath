@@ -34,6 +34,7 @@ Thumbs.db
 #  AEMEATH_AGENTS_DIR overrides or historical artifacts like update_check.json)
 .agents/*
 !.agents/aemeath.json
+!.agents/dead-code-baseline.json
 !.agents/hooks/
 
 # Build artifacts
