@@ -1,5 +1,5 @@
 use super::*;
-use crate::business::task::{Batch, Task, TaskPriority};
+use crate::task_store::{Batch, Task, TaskPriority};
 
 async fn setup_store_with_batches() -> TaskStore {
     TaskStore::new()

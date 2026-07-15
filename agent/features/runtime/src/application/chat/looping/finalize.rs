@@ -5,7 +5,7 @@ use crate::LOG_TARGET;
 use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::{Path, PathBuf};
-use storage::api::{BatchStatus, TaskStore};
+use storage::{BatchStatus, TaskStore};
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 

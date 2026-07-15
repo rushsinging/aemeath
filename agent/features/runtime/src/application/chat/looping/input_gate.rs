@@ -196,7 +196,7 @@ pub async fn run_loop_gate<Q, I, S>(
     sink: &S,
     chain: &mut ChatChain,
     segment_id: &str,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
 where
@@ -229,7 +229,7 @@ pub async fn apply_gate<S>(
     sink: &S,
     chain: &mut ChatChain,
     segment_id: &str,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
     is_idle: bool,
 ) -> GateOutcome
 where

@@ -179,7 +179,7 @@ pub(super) fn append_tool_results(
             )
         })
         .collect();
-    storage::api::persist_oversized_results(session_id, &mut provider_results);
+    storage::persist_oversized_results(session_id, &mut provider_results);
     messages.push(Message::tool_results_rich(provider_results));
 }
 
@@ -187,7 +187,7 @@ pub(super) fn append_tool_results(
 mod tests {
     use super::*;
     use share::message::ContentBlock;
-    use storage::api::MAX_TOOL_RESULT_CHARS;
+    use storage::MAX_TOOL_RESULT_CHARS;
 
     #[test]
     fn test_append_tool_results_uses_provider_id_not_runtime_id() {

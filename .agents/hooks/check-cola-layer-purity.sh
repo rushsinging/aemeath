@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 功能：检查未迁移 feature 的 COLA 分层，并锁定 Runtime 六边形目标目录。
+# 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 只允许
-#       domain/application/ports/adapters，以及按需创建的 shared。
+#       domain/application/ports/adapters/shared；Storage 使用 capability-first 模块。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -18,6 +18,7 @@ import sys
 root = Path.cwd()
 FEATURE_LAYERS = {"contract", "gateway", "core", "business", "utils"}
 RUNTIME_HEX_LAYERS = {"domain", "application", "ports", "adapters", "shared"}
+STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
 FORBIDDEN_LAYER_DEPS = {
@@ -79,6 +80,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
     if len(parts) >= 4 and parts[1] == "src":
         if parts[0] == "runtime" and parts[2] in RUNTIME_HEX_LAYERS:
             return parts[0], parts[2]
+        if parts[0] == "storage":
+            return None
         if parts[2] in FEATURE_LAYERS:
             return parts[0], parts[2]
     return None
@@ -135,6 +138,12 @@ for feature_src in sorted(features_root.glob("*/src")):
             violations.append(
                 f"{child.relative_to(root)}: Runtime legacy COLA directory is forbidden; use {sorted(RUNTIME_HEX_LAYERS)}"
             )
+            continue
+        if crate_name == "storage":
+            if child.stem in STORAGE_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Storage legacy fixed layer is forbidden; use capability-first modules"
+                )
             continue
         if child.is_dir() and child.name not in FEATURE_LAYERS:
             # Runtime 已迁到单一 agent_execution 能力的六边形目标结构。

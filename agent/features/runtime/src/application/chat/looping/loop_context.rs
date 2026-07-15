@@ -65,7 +65,7 @@ where
     pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
     pub allow_all: bool,
     pub(crate) active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    pub task_store: Arc<storage::api::TaskStore>,
+    pub task_store: Arc<storage::TaskStore>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,

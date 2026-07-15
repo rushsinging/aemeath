@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_list_create::{TaskListCreateInput, TaskListCreateResult};
 use std::sync::Arc;
-use storage::api::TaskStore;
+use storage::TaskStore;
 
 pub struct TaskListCreateTool {
     pub store: Arc<TaskStore>,

@@ -4,7 +4,7 @@ use provider::api::{LlmProvider, StreamHandler};
 use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
 use share::memory::{MemoryCategory, MemoryLayer, MemorySource};
 use std::sync::Arc;
-use storage::api::MemoryStore;
+use storage::MemoryStore;
 use tokio_util::sync::CancellationToken;
 
 struct StaticReflectionProvider {
@@ -312,7 +312,7 @@ async fn test_run_reflection_auto_apply_suggestions_writes_memory() {
     let text = result.formatted_content.clone();
     let store = MemoryStore::new(
         &base_dir,
-        storage::api::project_file_name_from_path(&cwd),
+        storage::project_file_name_from_path(&cwd),
         config.max_entries,
         config.similarity_threshold,
     )
@@ -364,7 +364,7 @@ async fn test_run_reflection_auto_apply_false_does_not_write_memory() {
     .unwrap();
     let store = MemoryStore::new(
         &base_dir,
-        storage::api::project_file_name_from_path(&cwd),
+        storage::project_file_name_from_path(&cwd),
         config.max_entries,
         config.similarity_threshold,
     )

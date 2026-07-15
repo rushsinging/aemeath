@@ -1,7 +1,7 @@
 use crate::application::chat::request::{NoTuiChatLaunch, TuiChatLaunch};
 use async_trait::async_trait;
 use std::collections::HashMap;
-use storage::api::{Task, TaskSnapshot};
+use storage::{Task, TaskSnapshot};
 
 /// `ChatRuntimePort` 方法的入参——runtime 启动时的一次性配置包。
 ///
@@ -36,7 +36,7 @@ pub trait ChatRuntimePort {
 
 // ─── 细粒度 Port Trait（P16 新增） ───
 
-/// 任务持久化端口——core/ 层通过此 trait 访问任务存储，不直接依赖 storage::api::TaskStore 方法。
+/// 任务持久化端口——core/ 层通过此 trait 访问任务存储，不直接依赖 storage::TaskStore 方法。
 #[async_trait]
 pub trait TaskStorePort: Send + Sync {
     async fn snapshot(&self) -> TaskSnapshot;

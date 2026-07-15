@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_get::{TaskGetInput, TaskGetResult};
 use std::sync::Arc;
-use storage::api::{TaskStatus, TaskStore};
+use storage::{TaskStatus, TaskStore};
 
 pub struct TaskGetTool {
     pub store: Arc<TaskStore>,

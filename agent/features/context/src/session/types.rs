@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use share::config::paths;
 use share::message::{Message, Role};
 use std::path::PathBuf;
-use storage::api::TaskSnapshot;
+use storage::TaskSnapshot;
 use uuid::NoContext;
 use uuid::Timestamp;
 use uuid::Uuid;

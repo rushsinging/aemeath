@@ -62,7 +62,7 @@ pub(crate) async fn idle_until_resume_or_shutdown<I, S>(
     sink: &S,
     pending: &mut PendingInputBuffer,
     chain: &mut ChatChain,
-    task_store: &storage::api::TaskStore,
+    task_store: &storage::TaskStore,
 ) -> IdleResult
 where
     I: InputEventDrainPort,

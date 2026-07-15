@@ -26,7 +26,7 @@ pub async fn run_reflection(
         cwd,
         client,
         system_prompt_text,
-        storage::api::memory_base_dir(),
+        storage::memory_base_dir(),
         lang,
     )
     .await
@@ -51,7 +51,7 @@ pub async fn run_precompact_reflection(
         cwd,
         client,
         system_prompt_text,
-        storage::api::memory_base_dir(),
+        storage::memory_base_dir(),
         lang,
     )
     .await

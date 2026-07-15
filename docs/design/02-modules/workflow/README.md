@@ -17,8 +17,28 @@ Workflow 是 **支撑域 BC**，独占 reasoning phase、effort 调节与 user-m
 - 通过 Workflow-owned `ReasoningPort` OHS 向 Runtime 发布稳定能力，与 Provider detail 解耦
 - v0.1.0 只包含 effort 调节；通用控制流编排不在范围内
 
+## Target 物理目录
+
+Workflow v0.1.0 只有 Reasoning Graph / effort 调节这一项稳定能力；node transition、observation、user-maximum clamp 和 `ReasoningPort` 共同守护同一局部状态机，不构成多个独立切片。因此 **MUST** 保持单能力扁平，**NEVER** 创建 `capabilities/`：
+
+```text
+workflow.rs                     # 窄 façade：ReasoningPort 与稳定 PL
+workflow/
+├── reasoning_graph.rs          # node 状态与 transition
+├── effort.rs                   # effort 推断与 user-maximum clamp
+└── error.rs                    # 仅在多个文件共同消费时存在
+```
+
+Workflow 当前没有易变技术外部 detail，故 **NEVER** 预建 `adapters/` 或出站 port。Future 若出现多个拥有独立词汇、状态与测试夹具的 workflow 能力，才重新按代码组织规范评估 `capabilities/`。
+
 ## 相关文档
 
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Provider 端口：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - Config 分层：[../config/01-config-layer.md](../config/01-config-layer.md)
+
+## 修改历史
+
+| 日期 | 变更 | 关联 |
+|---|---|---|
+| 2026-07-16 | 冻结 Workflow Target 物理目录：Reasoning Graph 单能力扁平，明确不建 `capabilities/` 或无证据 adapter | [#972](https://github.com/rushsinging/aemeath/issues/972) |
