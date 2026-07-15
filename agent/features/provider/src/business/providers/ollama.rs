@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+use crate::business::error_log::{log_http_error, log_network_error, ErrorLogContext};
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::{LlmProvider, StreamHandler};
 use crate::LOG_TARGET;
@@ -145,6 +146,7 @@ impl LlmProvider for OllamaProvider {
             body_bytes,
         );
 
+        let invocation_started = std::time::Instant::now();
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
@@ -187,6 +189,24 @@ impl LlmProvider for OllamaProvider {
                         Err(e) => {
                             let msg = e.to_string();
                             if msg.contains("timed out") || msg.contains("timeout") {
+                                let remaining = self.max_retries.saturating_sub(attempt + 1);
+                                log_network_error(
+                                    ErrorLogContext {
+                                        driver: "ollama",
+                                        api: "chat_stream",
+                                        provider: "ollama",
+                                        model: &self.model,
+                                        endpoint: &url,
+                                        attempt: attempt + 1,
+                                        max_attempts: self.max_retries,
+                                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                                        message_count: messages.len(),
+                                        tool_count: tool_schemas.len(),
+                                        request_bytes: body_bytes,
+                                    },
+                                    &e,
+                                    remaining > 0,
+                                );
                                 // Ollama request timed out — will retry
                                 last_error = Some(crate::LlmError::Network(format!(
                                     "Ollama request timed out after {}s — is the model loaded?", self.timeout_secs
@@ -201,6 +221,23 @@ impl LlmProvider for OllamaProvider {
                                 source = cause.source();
                                 depth += 1;
                             }
+                            log_network_error(
+                                ErrorLogContext {
+                                    driver: "ollama",
+                                    api: "chat_stream",
+                                    provider: "ollama",
+                                    model: &self.model,
+                                    endpoint: &url,
+                                    attempt: attempt + 1,
+                                    max_attempts: self.max_retries,
+                                    elapsed_ms: invocation_started.elapsed().as_millis(),
+                                    message_count: messages.len(),
+                                    tool_count: tool_schemas.len(),
+                                    request_bytes: body_bytes,
+                                },
+                                &e,
+                                false,
+                            );
                             return Err(crate::LlmError::Network(detailed));
                         }
                     }
@@ -225,8 +262,25 @@ impl LlmProvider for OllamaProvider {
 
             if status.as_u16() >= 500 && status.as_u16() < 600 {
                 let error_body = response.text().await.unwrap_or_default();
-                log::debug!(target: LOG_TARGET, "[ollama stream] 5xx body: {}",
-                    if error_body.len() > 200 { format!("{}…", error_body.chars().take(200).collect::<String>()) } else { error_body.clone() });
+                let remaining = self.max_retries.saturating_sub(attempt + 1);
+                log_http_error(
+                    ErrorLogContext {
+                        driver: "ollama",
+                        api: "chat_stream",
+                        provider: "ollama",
+                        model: &self.model,
+                        endpoint: &url,
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes: body_bytes,
+                    },
+                    status,
+                    &error_body,
+                    remaining > 0,
+                );
                 last_error = Some(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: error_body,
@@ -236,8 +290,24 @@ impl LlmProvider for OllamaProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                log::debug!(target: LOG_TARGET, "[ollama stream] non-success body: {}",
-                    if body.len() > 200 { format!("{}…", body.chars().take(200).collect::<String>()) } else { body.clone() });
+                log_http_error(
+                    ErrorLogContext {
+                        driver: "ollama",
+                        api: "chat_stream",
+                        provider: "ollama",
+                        model: &self.model,
+                        endpoint: &url,
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes: body_bytes,
+                    },
+                    status,
+                    &body,
+                    false,
+                );
                 return Err(crate::LlmError::Api {
                     error_type: status.to_string(),
                     message: body,

@@ -2,6 +2,7 @@
 
 use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
+use crate::business::error_log::{log_http_error, log_network_error, ErrorLogContext};
 use crate::business::types::{StreamResponse, SystemBlock};
 use crate::core::provider::StreamHandler;
 use crate::LOG_TARGET;
@@ -41,6 +42,10 @@ impl OllamaProviderNonStream for OllamaProvider {
                 .unwrap_or(0),
         );
 
+        let request_bytes = serde_json::to_string(&request_body)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let started = std::time::Instant::now();
         let response = self
             .http
             .post(&url)
@@ -49,6 +54,23 @@ impl OllamaProviderNonStream for OllamaProvider {
             .send()
             .await
             .map_err(|e| {
+                log_network_error(
+                    ErrorLogContext {
+                        driver: "ollama",
+                        api: "chat_non_stream",
+                        provider: "ollama",
+                        model: &self.model,
+                        endpoint: &url,
+                        attempt: 1,
+                        max_attempts: 1,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes,
+                    },
+                    &e,
+                    false,
+                );
                 let detail = if e.is_connect() {
                     "connection failed"
                 } else if e.is_timeout() {
@@ -72,6 +94,24 @@ impl OllamaProviderNonStream for OllamaProvider {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
+            log_http_error(
+                ErrorLogContext {
+                    driver: "ollama",
+                    api: "chat_non_stream",
+                    provider: "ollama",
+                    model: &self.model,
+                    endpoint: &url,
+                    attempt: 1,
+                    max_attempts: 1,
+                    elapsed_ms: started.elapsed().as_millis(),
+                    message_count: messages.len(),
+                    tool_count: tool_schemas.len(),
+                    request_bytes,
+                },
+                status,
+                &body,
+                false,
+            );
             return Err(crate::LlmError::Api {
                 error_type: status.to_string(),
                 message: body,

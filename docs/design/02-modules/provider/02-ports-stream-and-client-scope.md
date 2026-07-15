@@ -257,6 +257,8 @@ Factory 是组合根接线概念，不进入 Runtime 领域模型。RuntimeConte
 
 Provider 诊断日志归 Logging；原始 usage 经 Runtime 发布给 Audit。二者不能混成一个 sink。
 
+Provider API 失败统一写注册 target `aemeath:llm-api-error`（`llm-api-error.log`），使用 14 字段 DiagnosticRecord 的 `msg` 承载受控 JSON payload。payload 由 Provider adapter 在错误事实最完整的边界构造；Logging 不解析 vendor body。应尽可能包含 driver/API、provider/model、调用关联、已清洗 endpoint、method/status、provider request ID、typed error kind/code、retryable、attempt/max attempts、retry-after、elapsed、请求/响应计数与字节统计、partial-output、截断脱敏 preview 和 source chain。取消不写错误日志；中间可重试失败为 debug，最终失败为 error；同一 attempt 同一失败只写一条。详细安全边界见 [Logging 设计](../logging/README.md#51-llm-api-error-payload-与脱敏边界)。
+
 ## 12. 架构守卫目标
 
 #982 落地时 **MUST** 加入并故意违规验证以下规则，由 #763 汇总验收：
@@ -291,3 +293,4 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 | 2026-07-12 | 初稿：ProviderPort、流/取消、Runtime 重试边界、不可变 Transport 与 Invocation Scope | #788 |
 | 2026-07-14 | 增加 build 前 option resolution；Context prompt 与 InvocationScope 共享唯一 effective reasoning / limits 快照 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | `ProviderPort` 明确 Runtime-owned；移除本文重复的 trait 定义，改为引用 [Runtime 06 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约) 的唯一签名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | Provider API 失败统一进入 `aemeath:llm-api-error` 独立 sink；冻结 attempt 级关联、脱敏 JSON payload、取消排除和单失败单记录规则 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
