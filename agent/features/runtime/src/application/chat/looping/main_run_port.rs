@@ -773,7 +773,9 @@ where
                 | RunDomainEvent::StepFinalizationStarted { .. }
                 | RunDomainEvent::StepCancelled { .. }
                 | RunDomainEvent::DrainingInput { .. }
-                | RunDomainEvent::TerminationRequested { .. } => {}
+                | RunDomainEvent::TerminationRequested { .. } => {
+                    self.sink.send_domain_event(event).await;
+                }
             }
         }
         Ok(())

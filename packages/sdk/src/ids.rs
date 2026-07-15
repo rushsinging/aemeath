@@ -87,9 +87,59 @@ macro_rules! impl_id_type {
         impl<'de> Deserialize<'de> for $ty {
             fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
                 let uuid = Uuid::deserialize(de)?;
+                if uuid.get_version_num() != 7 {
+                    return Err(serde::de::Error::custom(format!(
+                        "UUID 不是 version 7: {uuid}"
+                    )));
+                }
                 Ok(Self(uuid, cache(uuid)))
             }
         }
+    };
+}
+
+macro_rules! define_id_type {
+    ($ty:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone)]
+        pub struct $ty(Uuid, String);
+
+        impl $ty {
+            pub fn new_v7() -> Self {
+                let uuid = Uuid::now_v7();
+                Self(uuid, cache(uuid))
+            }
+
+            pub fn new(s: impl AsRef<str>) -> Self {
+                Self::from_legacy_or_new(s.as_ref())
+            }
+
+            pub fn parse_uuid7(s: &str) -> Result<Self, IdParseError> {
+                let uuid =
+                    Uuid::parse_str(s).map_err(|_| IdParseError::InvalidUuid(s.to_string()))?;
+                if uuid.get_version_num() != 7 {
+                    return Err(IdParseError::NotVersion7(s.to_string()));
+                }
+                Ok(Self(uuid, cache(uuid)))
+            }
+
+            pub fn from_legacy_or_new(s: &str) -> Self {
+                Self::parse_uuid7(s).unwrap_or_else(|_| {
+                    let uuid = deterministic_uuidv7(s);
+                    Self(uuid, cache(uuid))
+                })
+            }
+
+            pub fn as_uuid(&self) -> &Uuid {
+                &self.0
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.1
+            }
+        }
+
+        impl_id_type!($ty);
     };
 }
 
@@ -243,6 +293,16 @@ impl RunId {
 }
 
 impl_id_type!(RunId);
+
+define_id_type!(RunStepId, "Published Run Step identity (UUIDv7).");
+define_id_type!(
+    AgentId,
+    "Published Agent identity used for Main/Sub routing (UUIDv7)."
+);
+define_id_type!(
+    InteractionRequestId,
+    "Published identity for one Runtime-owned interaction request (UUIDv7)."
+);
 
 // ---------------------------------------------------------------------------
 // ToolCallId

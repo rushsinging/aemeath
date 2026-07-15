@@ -146,6 +146,77 @@ pub enum ChatEvent {
         run_id: crate::RunId,
         parent_run_id: Option<crate::RunId>,
     },
+    /// Runtime 已开始一个 Run Step。
+    RunStepStarted {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        step_id: crate::RunStepId,
+    },
+    /// Runtime 已完成一个 Run Step。
+    RunStepCompleted {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        step_id: crate::RunStepId,
+    },
+    RunStepCancellationRequested {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        step_id: crate::RunStepId,
+    },
+    RunStepFinalizationStarted {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        step_id: crate::RunStepId,
+    },
+    RunStepCancelled {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        step_id: crate::RunStepId,
+        confirmed: bool,
+    },
+    RunDrainingInput {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+    },
+    RunTerminationRequested {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        reason: crate::RunTerminationReason,
+        deadline: crate::ControlDeadline,
+    },
+    RunTerminated {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        reason: crate::RunTerminationReason,
+    },
+    RunCompleted {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        result: String,
+    },
+    RunFailed {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        error: String,
+    },
+    RunStuckDetected {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        reason: String,
+    },
+    RunTransitioned {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+        status: String,
+    },
+    RunAwaitingUser {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+    },
+    RunResumed {
+        run_id: crate::RunId,
+        parent_run_id: Option<crate::RunId>,
+    },
     /// 同步打断请求已接受，Run 已进入 Cancelling。
     RunCancelling {
         run_id: crate::RunId,
@@ -166,7 +237,11 @@ pub enum ChatEvent {
     CurrentTurnChanged(usize),
     /// Hook 事件。
     HookEvent(HookEventView),
-    /// AskUserQuestion 批量请求（一次携带多个问题）。
+    /// Runtime-owned pure-value interaction request. Production waiter cutover is tracked by #878.
+    InteractionRequested {
+        request: crate::InteractionRequest,
+    },
+    /// Legacy AskUser transport bridge. It remains reachable only until #878 switches production.
     AskUserBatch {
         items: Vec<AskUserQuestionItem>,
         /// 回传每个问题的答案（顺序与 items 一致）。

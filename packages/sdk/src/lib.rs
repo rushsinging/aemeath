@@ -29,6 +29,7 @@ pub mod types;
 pub mod update;
 
 pub mod ids;
+pub mod interaction;
 
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
@@ -44,7 +45,15 @@ pub use commands::{ContextEstimate, ModelSwitchResult};
 pub use config_view::ConfigView;
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
-pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, RunId, ToolCallId};
+pub use ids::{
+    AgentId, ChatId, ChatTurnId, IdParseError, InputId, InteractionRequestId, RunId, RunStepId,
+    ToolCallId,
+};
+pub use interaction::{
+    ApprovalDecision, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,
+    InteractionReplyError, InteractionRequest, InteractionRequestBody, PlanApprovalPrompt,
+    RiskLevel, StuckDiagnostic, ToolApprovalPrompt, UserAnswer, UserQuestion,
+};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
 pub use run::{
