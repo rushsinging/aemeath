@@ -25,7 +25,74 @@
         └────────────┴─── event_projection（横切：领域事件 → SDK ChatEvent）
 ```
 
-## 2. 各模块职责
+## 2. 物理目录与六边形边界
+
+仓库级 `agent/features/*` 已按业务 Feature / Bounded Context 形成垂直切片；`runtime` 自身就是一个 VSA feature，内部 **NEVER** 再复制第二层 capability-first 目录。Runtime feature 内采用 Hexagonal Architecture（Ports & Adapters）横向组织：
+
+```text
+agent/features/runtime/src/
+├── lib.rs                         # 窄 façade
+├── domain.rs
+├── domain/
+│   ├── agent_run.rs               # Run 聚合、RunStatus、RunSpec、Run Step
+│   ├── agent_run/
+│   │   ├── state.rs
+│   │   ├── step.rs
+│   │   └── event.rs
+│   └── ...                        # 纯领域不变量与值对象
+├── application.rs
+├── application/
+│   ├── agent_client.rs            # 入站命令路由与应用用例
+│   ├── loop_engine.rs
+│   ├── loop_engine/
+│   ├── model_invocation.rs
+│   ├── context_coordination.rs
+│   ├── tool_coordination.rs
+│   ├── interaction.rs
+│   └── event_projection.rs
+├── ports.rs
+├── ports/
+│   ├── inbound.rs                 # Runtime 入站 OHS / Published Language 的内部接线
+│   ├── provider.rs
+│   ├── context.rs
+│   ├── tools.rs
+│   ├── interaction.rs
+│   ├── events.rs
+│   └── ...                        # 仅有真实 seam 的目的性 Port
+├── adapters.rs
+├── adapters/
+│   ├── sdk_event_projection.rs
+│   ├── main_interaction.rs
+│   ├── sub_interaction.rs
+│   └── ...                        # Runtime-owned 边界转换
+├── shared.rs
+└── shared/
+    ├── runtime_context.rs
+    ├── cancellation.rs
+    └── ...                        # 跨层最小稳定基础
+```
+
+依赖方向：
+
+```text
+adapters ───────▶ ports ◀────── application
+                       ▲              │
+                       │              ▼
+                       └────────── domain
+
+shared：可被其余层依赖，NEVER 反向依赖 domain/application/ports/adapters
+```
+
+- `domain` 拥有 `Run`、`RunStatus`、`RunSpec`、领域事件与状态迁移；它 **NEVER** 依赖 application、ports、adapters 或具体技术类型。
+- `application` 拥有 Loop Engine 与各 coordinator，用领域模型实现用例，并只经 Port 调用边界外能力；它 **NEVER** 依赖具体 adapter。
+- `ports` 只定义 Runtime-owned 且具有真实边界价值的入站/出站契约。其他 Feature 已发布 OHS / Published Language 时直接消费，**NEVER** 再包同义 Port。
+- `adapters` 只放 Runtime-owned 的协议/投影转换，例如 SDK event projection 与 Main/Sub interaction adapter；Provider、Storage、Tool 等 Feature 的生产实现仍由各自 Feature 提供。
+- `shared` 只承载 `RuntimeContext`、只读取消信号等跨层最小稳定基础；有明确语义所有者的类型 **MUST** 留在对应层，**NEVER** 用 shared 规避循环依赖。
+- `lib.rs` 只导出真实外部消费者需要的窄 façade；各层默认 crate-private。
+- 具体实现选择、factory 调用与生产对象图连接全部位于 `agent/composition`；Runtime feature 内 **NEVER** 建立 `bootstrap/`、service locator 或第二个 Composition Root。
+- 使用 Rust 2018+ `layer.rs` + `layer/...` 形状，**NEVER** 新增 `mod.rs`。
+
+## 3. 各模块职责
 
 ### agent_run（模块核心）
 - **状态所有权**：`Run` 聚合、`RunStatus` 状态机、Run Step / Tool Call 实体
@@ -84,7 +151,7 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 
 触发点分布：loop_engine（Stop）、tool_coordination（Pre/PostToolCall）、agent_run（SubRunStart/Stop）。
 
-## 3. 状态所有权矩阵
+## 4. 状态所有权矩阵
 
 | 状态 | 所有者模块 | 说明 |
 |---|---|---|
@@ -96,7 +163,7 @@ Hook 是通用域 BC，Runtime 经 `HookPort` 消费——**Hook 判定，Runtim
 | RuntimeContext（活资源）| 由 agent_client / 派生逻辑发起装配，**流经各模块作参数** | 不属任何模块的持久状态 |
 | InputBuffer 入站缓冲（追问排队）| loop_engine（经 RuntimeContext 注入）| Main 忙期排队；Sub 固定队列 |
 
-## 4. 依赖方向（Clean）
+## 5. 依赖方向（Clean）
 
 ```
 agent_client → agent_run → loop_engine → {model_invocation, tool_coordination,
@@ -108,11 +175,11 @@ event_projection：被各模块调用（emit），不反向依赖业务
 - **MUST NOT** coordinators 之间互相依赖（都经 loop_engine 编排）
 - **MUST NOT** 任何模块私自 `new` Port 实现（经 RuntimeContext 注入）
 
-## 5. 迁移边界
+## 6. 迁移边界
 
 本文的 Target 模块图与依赖规则是验收目标；源码现状、迁移顺序、责任与退出条件 **MUST** 只在 [Migration Governance](../../03-engineering/03-migration-governance.md) 维护，本文 **NEVER** 复制 Current 类型或进度。
 
-## 6. 相关文档
+## 7. 相关文档
 
 - 领域模型：[01-domain-model.md](01-domain-model.md)
 - 状态机与 Loop：[03-loop-and-state-machine.md](03-loop-and-state-machine.md)
@@ -125,6 +192,7 @@ event_projection：被各模块调用（emit），不反向依赖业务
 |---|---|---|
 | 2026-07-11 | 初稿：8 个内部模块划分、状态所有权、依赖方向、收敛方向 | #761 |
 | 2026-07-14 | 移除 Target 文档中的 Current 类型清单，将迁移事实收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 明确仓库 `features/*` 为 VSA，Runtime feature 内采用 `domain/application/ports/adapters/shared` 六边形分层，生产装配留在 `agent/composition` | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-11 | agent_execution→agent_run；loop_engine 补 InputBuffer 门禁+HookPort；tool 补 HookPort；补 Memory 边界、InputBuffer 状态、Runtime/Hook 边界子节 | #761 |
 | 2026-07-11 | model_invocation 补错误重试职责（Retryable 退避 / context 超限 compact / Fatal fail）+ ModelInvocationRetrying | #761 |
 | 2026-07-11 | 重试收敛为 T0-T1 退避（≤10 次/5 分钟封顶），去掉 T2 降级/T3 故障转移 | #761 |
