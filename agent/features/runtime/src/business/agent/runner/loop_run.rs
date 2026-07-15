@@ -388,6 +388,7 @@ impl RunLoopPort for SubAgentRun<'_> {
                 .sum(),
             est_tool_tokens: context::api::compact::estimate_tool_schemas_tokens(&self.sub_schemas),
             est_message_tokens: context::api::compact::estimate_messages_tokens(&messages_for_api),
+            stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
         };
 
         self.messages.push(resp.assistant_message.clone());

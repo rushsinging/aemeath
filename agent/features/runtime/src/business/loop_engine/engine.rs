@@ -32,6 +32,8 @@ pub struct StepTokenUsage {
     pub est_tool_tokens: usize,
     /// 估算：messages tokens
     pub est_message_tokens: usize,
+    /// API 返回的 stop_reason（如 "end_turn" / "max_tokens" / "tool_use"）
+    pub stop_reason: String,
 }
 
 impl StepTokenUsage {
@@ -238,7 +240,7 @@ where
             log::info!(
                 target: "aemeath:agent:runtime",
                 "token usage: input={} (cached {}) | output={} (cache_write {}) | reasoning={} | total={} | context_window={} | {pct}% \
-                 | est: system={} tools={} messages={} total_est={}",
+                 | stop_reason={} | est: system={} tools={} messages={} total_est={}",
                 token_usage.input_tokens,
                 token_usage.cached_tokens,
                 token_usage.output_tokens,
@@ -246,6 +248,7 @@ where
                 token_usage.reasoning_tokens,
                 total,
                 ctx_win,
+                token_usage.stop_reason,
                 token_usage.est_system_tokens,
                 token_usage.est_tool_tokens,
                 token_usage.est_message_tokens,
