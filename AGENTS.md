@@ -130,7 +130,8 @@ bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按
 2. **定位问题并给出方案**：阅读相关源码，定位根因或设计点，**MUST** 向用户输出可执行的修复/实现方案（含改动范围、根因分析、验证计划）。方案中的任务必须拆分为单一、具体、可验证的最小步骤（如“修改 A 文件的 B 函数”“为 C 场景添加测试”“运行 cargo clippy”），**NEVER** 使用“实施并验证”这类宽泛任务概括多个步骤。复杂改动 **MUST** 调用 `superpowers:writing-plans` 制定详细计划；即使是简单改动，也 **MUST** 先给出简明方案，禁止直接开始修改。
 3. **等待用户明确同意**：在获得用户的明确书面同意（如“同意”、“开始改”）前，**NEVER** 调用 Edit/Write/Bash 等会修改文件或系统状态的工具。如果用户只给出笼统意图（如“修一下”）而未确认具体方案，**MUST** 先呈现方案并等待确认。
 4. **执行与验证**：在 worktree 中实施，worktree **MUST** 基于 issue 所属 milestone 的 `release/vX.Y.Z` 集成分支创建（**NEVER** 直接基于 `main` 开 feature 分支，除非是无 milestone 的紧急修复且经用户确认）。通过编译、测试、clippy 验证后 PR 合入对应 release 分支。
-5. **用户确认后关闭 Issue**：agent **NEVER** 自行关闭 issue。合并完成后，由用户确认是否关闭；用户确认后，可用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
+5. **创建 PR 并建立 Development 关联**：feature / bugfix PR 的 body **MUST** 使用 `Refs #<编号>` 记录对应 issue，**NEVER** 依赖 `Closes #<编号>` / `Fixes #<编号>` 建立关联——GitHub 会忽略目标非默认分支的关闭关键字。PR 创建后，操作者 **MUST** 在 PR 或 issue 侧栏的 **Development** 中手动关联二者，并通过 issue timeline 中对应 PR 的 `connected` 事件或页面侧栏确认关联成功；正文引用和 cross-reference **NEVER** 代替 Development 关联。
+6. **用户确认后关闭 Issue**：feature / bugfix PR 合入 release 分支不会自动关闭 issue。agent **NEVER** 自行关闭 issue；合并完成后，由用户确认是否关闭。用户确认后，可用 `gh issue close <编号> --repo rushsinging/aemeath --comment "..."` 关闭 issue，comment 引用合并 commit / PR。
 
 修复 bug 或实现 feature 时，**MUST** 做根因层面的修正（fact-check），而不是只做最小化补丁绕过症状。应评估相关代码路径、数据流和状态机，确保同类问题不再复发。
 
@@ -225,7 +226,7 @@ Release Gate issue 模板：
 milestone 开始时从 `origin/main` 最新 commit 切出 `release/vX.Y.Z` 集成分支，作为该 milestone 所有 feature / bugfix 的开发主线。各 release 分支互相独立、按版本号递进。
 
 - **MUST** 所有 feature / bugfix 在独立 worktree 中开发，worktree 基于 issue 所属 milestone 的 `release/vX.Y.Z` 分支创建；**NEVER** 直接 push 到 `release/*` 或 `main`（均受保护，只接受 PR）。
-- **MUST** feature / bugfix 分支完成后通过 **Pull Request** 提交到对应的 `release/vX.Y.Z` 分支（base: `release/vX.Y.Z`）。
+- **MUST** feature / bugfix 分支完成后通过 **Pull Request** 提交到对应的 `release/vX.Y.Z` 分支（base: `release/vX.Y.Z`）；PR body **MUST** 写 `Refs #<编号>`，创建后 **MUST** 在 GitHub **Development** 侧栏手动关联对应 issue 并验证关联可见。
 - **MUST** 合并 PR 时使用 **Squash merge**，将分支上的多个提交压缩为一个提交后合入；**NEVER** 使用 rebase merge 或普通 merge commit。
 - **MUST NEVER** 由 agent 自动合并 PR。PR 创建后由用户 review，用户确认后手动合并；agent 只能在用户明确授权后执行合并动作。
 - **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin release/vX.Y.Z` 拉取最新集成分支；若存在冲突，解决后重新通过验证门禁，才能推送分支并创建 PR。
