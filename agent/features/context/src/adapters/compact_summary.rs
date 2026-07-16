@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 /// 将 recent_messages 中所有 ToolResult 文本替换为占位符。
 /// recent tail 的工具结果内容已被 summary 涵盖，保留原始大块文本会浪费 context。
 /// 保留 tool_use_id 和消息结构（保证 LLM 能继续工具调用链路）。
-fn truncate_large_tool_results(messages: &mut [Message]) {
+fn placeholder_tool_results(messages: &mut [Message]) {
     for msg in messages.iter_mut() {
         for block in msg.content.iter_mut() {
             if let ContentBlock::ToolResult {
@@ -149,7 +149,7 @@ pub fn compact_messages(
     let mut recent = messages[window.split_point..].to_vec();
     sanitize_tool_pairs(&mut recent);
     // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
-    truncate_large_tool_results(&mut recent);
+    placeholder_tool_results(&mut recent);
 
     Some(CompactResult {
         summary,
@@ -345,7 +345,7 @@ pub async fn compact_messages_with_llm(
     let mut recent = messages[window.split_point..].to_vec();
     sanitize_tool_pairs(&mut recent);
     // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
-    truncate_large_tool_results(&mut recent);
+    placeholder_tool_results(&mut recent);
 
     Some(CompactResult {
         summary,
