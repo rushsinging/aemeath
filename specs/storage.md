@@ -4,6 +4,13 @@
 **主触发**：改 `agent/features/storage/**`。
 **次触发**：改会话 / 记忆 / 任务 / 历史的落盘格式或路径。
 
+## Target 机制结构
+
+- Storage 采用 `domain + ports + adapters` Hexagonal + Clean：`domain/` 只含 Published Language 与机械策略，`ports/` 只含 Storage-owned OHS，`adapters/` 终止文件系统 detail。
+- `domain/` **NEVER** 使用 `std::fs` / `tokio::fs`、持有物理 `PathBuf` 或依赖 `adapters`；跨 BC 只经 crate-root 窄 façade。
+- `memory_store/`、`task_store/` 与 `tool_result.rs` 是 #991 过渡实现，分别由 #883/#884 迁出或退役；**NEVER** 作为新增 Storage 机制的放置位置。
+- 选择 Hexagonal 的工程依据是易由静态 Guard 证明层间方向、I/O 归属和公开面，防止 adapter 细节向内漂移及长期结构劣化。
+
 ## 子域与落盘位置
 
 - **Memory**：`agent/features/storage/src/memory_store/`（`store.rs`、`path.rs`）→ `~/.agents/memory/`。

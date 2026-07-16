@@ -38,7 +38,7 @@
 | Context Management | `domain/application/ports/adapters` 四层 | Session、Compact、Token Budget、Prompt/Guidance、Memory Injection 按层共置 |
 | Memory | `domain/application/ports/adapters` 四层 | write、retrieve、compact、reflection 策略收在 domain，用例编排收在 application |
 | Tool & Skill & Command | `domain/application/ports/adapters` 四层 | catalog、execution、skill、command 策略在 domain；MCP 技术 detail 在 adapters |
-| Storage | `domain + adapters` 两层 | `safe_path`、`atomic_blob`、`atomic_dataset` 策略在 domain；文件系统 detail 在 adapters |
+| Storage | `domain + ports + adapters` 三层 | `safe_path`、`atomic_blob`、`atomic_dataset` 的 Published Language 与策略在 domain，OHS 在 ports，文件系统 detail 在 adapters；稳定层名和单向依赖可机械阻止路径/I/O 下沉、adapter 泄漏与 façade 漂移 |
 | Task Management | `domain + adapters` 两层 | transition、dependency、batch、snapshot 共同守护同一 `TaskStoreState` 聚合 |
 | Project / Workspace | `domain + adapters` 两层 | Workspace 是唯一聚合与状态源；Git 仅是可替换外部 detail |
 | Workflow | `domain + adapters` 两层 | v0.1.0 仅有 Reasoning Graph / effort 调节，无第二个独立变化轴 |
@@ -87,4 +87,5 @@
 | 2026-07-12 | 新增 tui/02-model：3+3 Context 完整字段、投影状态机、SpinnerPhase 派生函数、RunRuntimeState 6 子模块、ConfigProjection、WorkspaceProjection、单一真相规则、Model 纯净性约束 | #796 |
 | 2026-07-12 | 新增 tui/03-event-flow-and-acl：事件流两层转换 ACL、SDK DTO 边界、agent_id 缺口 R8、sub-agent 事件路由 #612、转换集中化、架构门禁 #6 | #797 |
 | 2026-07-12 | 新增 policy/hook/audit 战术设计：AllowAll-only、Hook 3/15 两层重试、Usage-only Audit MVP | #790 |
-| 2026-07-16 | 增加模块 Target 目录结构决策矩阵：竖切统一进入 `capabilities/`，Runtime 保留已冻结 Hexagonal 结构，其余模块按能力证据选择扁平、竖切或技术目录 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
+| 2026-07-16 | 增加模块 Target 目录结构决策矩阵：按 Hexagonal 默认依赖方向选择最小必要层，`capabilities/` 只在有独立能力证据和配套 Guard 时启用 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
+| 2026-07-16 | 将 Storage 冻结为 `domain + ports + adapters`：以稳定层名和单向依赖降低 Guard 成本，机械防止物理 I/O 下沉、adapter 类型泄漏与 façade 漂移 | [#880](https://github.com/rushsinging/aemeath/issues/880) |

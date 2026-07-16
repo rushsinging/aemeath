@@ -65,6 +65,8 @@ crate 内部默认分层（Hexagonal 依赖方向）：
 
 Hexagonal 依赖方向（`domain ← application ← ports ← adapters`）是所有 feature crate 的**默认内部组织方式**。小模块 MAY 只使用部分层（如仅 `domain + adapters`），**NEVER** 为对称预建空层。model、port、技术目录和 crate **MUST** 分别独立评估，可以任意组合，也可以永远不出现。证据消失后结构 **SHOULD** 降级或合并。
 
+选择该默认结构的首要工程理由是**易守卫、防漂移、防劣化**：顶层目录名和允许依赖方向稳定、有限，机械 Guard 可以直接拒绝 domain 依赖 adapters、业务策略直接做 I/O、adapter 类型泄漏进 Published Language、跨层循环依赖及 façade 公开面膨胀。目录结构 **MUST** 优先选择能由编译器或静态 Guard 证明的边界；若另一种组织只能靠评审者记忆约定、无法给出等价机械规则，**SHOULD** 保持 Hexagonal。任何模块采用例外结构时，**MUST** 在决定层写明收益、允许依赖矩阵、漂移风险与故意违规验证，不能只以“共置方便”作为理由。
+
 `capabilities/` 递归竖切不再是默认容器；它降格为**仅在 §3.1 证据成立时 MAY 引入的可选结构**。当 crate 内确实出现多个拥有独立词汇、独立变化轴、独立状态所有权和独立测试夹具的真实能力，且这些能力间存在循环依赖风险时，**MAY** 在 Hexagonal 分层之上叠加 `capabilities/` 竖切，但 **MUST** 同步提供 capability 间依赖矩阵与守卫。大多数单能力 crate **NEVER** 需要 `capabilities/`。
 
 ### 3.1 递归选择能力粒度
@@ -471,10 +473,6 @@ components/foo/
 | 2026-07-14 | 审查修订：统一 Rust 2018+ 模块布局、独立结构判据、port 强制边界、模块战术真相源与规范等级 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 修复评审 #14：§3.5 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §2/§3.5 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.5 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.8 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-<<<<<<< HEAD
+| 2026-07-16 | 在决定层明确 Hexagonal 默认结构的工程依据：稳定层名与单向依赖易由 Guard 证明，可阻止 domain→adapter、I/O 下沉、PL 泄漏、循环依赖与 façade 膨胀；例外结构必须提供等价依赖矩阵和故意违规证据 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
 | 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 经事实复核确认为单一 `agent_execution` 能力，crate 根采用轻量六边形且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) / [#874](https://github.com/rushsinging/aemeath/issues/874) |
-=======
-| 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 投影明确递归竖切且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) |
-| 2026-07-16 | 统一递归竖切的物理容器为私有 `capabilities/`；明确 Hexagonal 不等于目录模板，Runtime 保留经战术设计冻结的 `domain/application/ports/adapters` 例外 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
-| 2026-07-15 | **v2 修订**：Hexagonal 成为 crate 内部默认组织方式；`capabilities/` 降格为可选；COLA 层名退役映射；§4 投影全部改写为 Hexagonal 形状；§7 精确化"拒绝固定横向目录"措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
->>>>>>> ad310137a8bd6e4f441b09e354726fafdfd9c41a
+| 2026-07-15 | **v2 修订**：Hexagonal 成为 crate 内部默认组织方式；`capabilities/` 降格为可选；COLA 层名退役映射；§4 投影全部改写为 Hexagonal 形状；§7 精确化“拒绝固定横向目录”措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

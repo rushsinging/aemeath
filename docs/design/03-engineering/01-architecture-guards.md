@@ -149,11 +149,10 @@
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制顶层目录为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Storage 在 #991 只拒绝恢复 `api/business/contract/gateway` 固定层，不固化其过渡模块名称；context feature 继续使用精确顶层目录例外。
-- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime 与 Context 使用目标 Hexagonal 结构规则。Storage 仅执行旧固定层负向断言，其正式 `capabilities/` 形状由 #1022 在目标切片落地后统一守护。依赖方向扫描跳过 Storage（其 #991 过渡布局已无横向层），其余规则按路径识别当前层，并对例外做 stale 自检。下方常量、扫描范围和例外表均与脚本保持一致。
+- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}`，并暂时允许 #991 过渡目录 `memory_store/task_store`。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context 与 Storage 使用各自 Hexagonal 目标规则。Storage domain 额外禁止 `std::fs`/`tokio::fs`、`PathBuf` 与 `crate::adapters`，其过渡模块由 #883/#884 退出。其余规则按路径识别当前层，并对例外做 stale 自检。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
-- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Storage 仅以 `STORAGE_LEGACY_LAYERS = {api, business, contract, gateway}` 防旧层恢复，不登记过渡目录 allowlist。
-- **Context Target 层**：`CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`。Context 的领域策略、用例编排、出站/入站端口与技术 detail 必须遵循 `domain ← application ← ports ← adapters` 依赖方向；旧 `capabilities/` 已由 #870 迁出，禁止恢复。
+- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 使用 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Storage 使用 `STORAGE_HEX_LAYERS = {domain, ports, adapters}`、`STORAGE_TRANSITIONAL_MODULES = {memory_store, task_store}`，并以 `STORAGE_LEGACY_LAYERS = {api, business, contract, gateway}` 防旧层恢复。Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -164,9 +163,10 @@
 | `gateway` | `business`, `utils` |
 
 - **检查方式**：
-  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Context 使用精确能力目录；Runtime 使用六边形目录；Storage 在 #991 阶段不限制过渡模块名称。
-  - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败。
-  - 依赖方向扫描跳过测试路径，并对未迁移横向层与 Runtime 六边形层按 `FORBIDDEN_LAYER_DEPS` 检查；Storage 不参与横向层依赖扫描。
+  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Context 使用精确能力目录；Runtime 使用五层 Hexagonal；Storage 只允许三层 Hexagonal与两个登记的过渡目录。
+  - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败；新增其他未登记目录同样失败。
+  - Storage `domain.rs` / `domain/` 若出现物理 fs API、`PathBuf` 或依赖 `crate::adapters`，直接失败。
+  - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime/Storage Hexagonal 层。
   - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
