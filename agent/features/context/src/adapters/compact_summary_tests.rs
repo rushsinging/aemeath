@@ -10,8 +10,8 @@ fn test_compact_window_boundaries() {
         compact_window(100),
         Some(CompactWindow {
             head_protect: 2,
-            split_point: 70,
-            keep_recent: 30,
+            split_point: 95,
+            keep_recent: 5,
         })
     );
 }

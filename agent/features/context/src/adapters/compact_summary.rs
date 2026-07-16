@@ -138,7 +138,8 @@ pub fn compact_window(total: usize) -> Option<CompactWindow> {
         return None;
     }
     let head_protect = 2usize.min(total);
-    let tail_budget = total * 30 / 100;
+    // recent tail 保留尾部 5%（至少 4 条），其余压缩进 summary。
+    let tail_budget = total * 5 / 100;
     let keep_recent = tail_budget.max(4).min(total - head_protect);
     let split_point = (total - keep_recent).max(head_protect);
     if split_point <= head_protect {
