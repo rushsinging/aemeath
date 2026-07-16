@@ -494,15 +494,14 @@
 
 - **位置**：`.cargo/hooks/pre-commit`，通过 `core.hooksPath=.cargo/hooks` 启用。
 - **行为**：对 staged Rust 执行 `cargo fmt` 并重新暂存；相关源码/守卫变更执行 source guard；TUI scenario/snapshot 变更只检查 `.snap.new` / `.pending-snap`。
-- **边界**：不执行 production reachability、workspace/all-target、Coverage、完整 P0，也不执行依赖 GitHub 网络的 #677 issue-tree 校验。
+- **边界**：不执行 production reachability、workspace/all-target、Coverage、完整 P0 或任何依赖 GitHub 网络的 Issue 治理检查。
 - **绕过**：仅使用 Git 原生 `--no-verify`；PR Test plan 必须披露并补跑。
 
-### #677 Issue-tree 校验（显式关键节点命令）
+### #677 文档—代码双向校验（人工关键节点）
 
-- **命令**：`cargo run -p xtask -- verify-issue-tree 677`。
 - **时机**：sub-issue 创建/调整后、叶子 PR 创建前、叶子 PR 合入后、#677 关闭前。
-- **检查**：gate marker、开发前差异、无待对齐、实施结果与 PR/commit 证据、延期承接 Issue。
-- **边界**：依赖 `gh` 与网络，**NEVER** 进入通用 pre-commit。
+- **检查**：gate marker、开发前差异、无待对齐、实施结果与 PR/commit 证据、延期承接 Issue，以及原生 parent/sub-issue/blocked-by 状态。
+- **方式**：使用 `gh issue view` 与 GitHub 原生关系人工核验；该规则只服务 #677 有限生命周期，不沉淀为长期 xtask 或通用 pre-commit。
 
 ## 附：钩子体系（非架构守卫）
 

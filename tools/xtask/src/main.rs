@@ -48,23 +48,6 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Some("verify-issue-tree") => {
-            let root_number: u64 = args
-                .next()
-                .unwrap_or_else(|| "677".to_owned())
-                .parse()
-                .context("root issue 必须是数字")?;
-            let issue = xtask::issue_tree::load_from_github("rushsinging/aemeath", root_number)?;
-            let report = xtask::issue_tree::verify(&issue);
-            for error in &report.errors {
-                eprintln!("error: {error}");
-            }
-            if report.status == xtask::issue_tree::VerificationStatus::Failed {
-                anyhow::bail!("issue tree verification failed");
-            }
-            println!("issue tree #{root_number}: passed");
-            Ok(())
-        }
         Some("run-test") => {
             let retries: usize = args.next().unwrap_or_else(|| "1".into()).parse()?;
             let command: Vec<String> = args.collect();
