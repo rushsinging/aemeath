@@ -19,46 +19,19 @@ pub(crate) struct CompactOutcome {
 /// 返回 `Some(CompactOutcome)` 表示发生了压缩（summary + recent tail）。
 /// 返回 `None` 表示无需压缩。
 ///
-/// resume 保护：首 turn 无 API 反馈时跳过（`turn_count == 1 && last_api_input_tokens == 0`），
-/// 确保 resume 会话不会在第一轮被误判 compact。
 use context::compact;
 
 /// 纯 token 判定：是否需要 compact（不含 hook / resume 保护）。
 /// 供 needs_compaction() 状态机判定使用，避免无条件进 Compacting 状态。
 pub(crate) fn should_compact_now(
-    messages: &[Message],
-    last_api_input_tokens: u64,
-    last_api_output_tokens: u64,
-    cached_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
+    last_total_tokens: Option<u64>,
     context_size: usize,
-    system_prompt_text: &str,
-    tool_schema_tokens: usize,
-    turn_count: usize,
+    message_count: usize,
 ) -> bool {
-    // resume 保护
-    if turn_count == 1 && last_api_input_tokens == 0 {
+    if message_count <= 4 {
         return false;
     }
-    if messages.len() <= 4 {
-        return false;
-    }
-    if last_api_input_tokens > 0 {
-        compact::needs_compaction_actual(
-            last_api_input_tokens,
-            last_api_output_tokens,
-            cached_tokens,
-            reasoning_tokens,
-            context_size,
-        )
-    } else {
-        compact::needs_compaction_full(
-            messages,
-            system_prompt_text,
-            context_size,
-            tool_schema_tokens,
-        )
-    }
+    last_total_tokens.is_some_and(|total| compact::needs_compaction_total(total, context_size))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -70,11 +43,6 @@ pub(crate) async fn auto_compact<S>(
     messages: &[Message],
     system_prompt_text: &str,
     context_size: usize,
-    tool_schema_tokens: usize,
-    last_api_input_tokens: u64,
-    last_api_output_tokens: u64,
-    cached_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::LlmClient>,
@@ -85,12 +53,6 @@ pub(crate) async fn auto_compact<S>(
 where
     S: ChatEventSink,
 {
-    // resume 保护：首 turn 无 API 反馈时不 compact。
-    // resume 加载的是已精简的活跃链，第一轮直接原样发送，等拿到真实 token 数后再决定。
-    if turn_count == 1 && last_api_input_tokens == 0 {
-        return None;
-    }
-
     // PreCompact hook
     let pre_compact_results = hook_ui
         .run_json_with_cancel(
@@ -133,32 +95,9 @@ where
         return None;
     }
 
-    let should_compact = should_compact_now(
-        messages,
-        last_api_input_tokens,
-        last_api_output_tokens,
-        cached_tokens,
-        reasoning_tokens,
-        context_size,
-        system_prompt_text,
-        tool_schema_tokens,
-        turn_count,
-    );
-
-    log::debug!(
-        target: LOG_TARGET,
-        "auto_compact 判定: should_compact={} messages={} last_input_tokens={} last_output_tokens={} cached={:?} reasoning={:?} context_size={} turn={}",
-        should_compact,
-        messages.len(),
-        last_api_input_tokens,
-        last_api_output_tokens,
-        cached_tokens,
-        reasoning_tokens,
-        context_size,
-        turn_count,
-    );
-
-    if !should_compact || messages.len() <= 4 {
+    // should_compact 判定已在 needs_compaction() 状态机层完成。
+    // 进入 compact() 即直接执行 snip + microcompact + llm_compact，不再二次检查。
+    if messages.len() <= 4 {
         return None;
     }
 
@@ -433,4 +372,24 @@ where
         summary: result.summary,
         messages: result.recent_messages,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_compact_now;
+
+    #[test]
+    fn auto_compact_uses_latest_normalized_total() {
+        assert!(should_compact_now(Some(900_000), 1_048_576, 5));
+    }
+
+    #[test]
+    fn auto_compact_without_provider_usage_does_not_use_heuristic_fallback() {
+        assert!(!should_compact_now(None, 1_048_576, 100));
+    }
+
+    #[test]
+    fn auto_compact_requires_compressible_messages() {
+        assert!(!should_compact_now(Some(900_000), 1_048_576, 4));
+    }
 }

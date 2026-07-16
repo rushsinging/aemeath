@@ -5,7 +5,6 @@ use share::message::Message;
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
 use crate::LOG_TARGET;
-use context::compact::needs_compaction_actual;
 use provider::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
@@ -71,43 +70,12 @@ impl<'a> SubAgentRun<'a> {
         logging::context::set_current_turn(turn_number);
     }
 
-    pub(super) async fn compact_if_needed(
-        &mut self,
-        api_input: u64,
-        last_output_tokens: u64,
-        turn_number: usize,
-    ) {
-        if !needs_compaction_actual(
-            api_input,
-            last_output_tokens,
-            None,
-            None,
-            self.ctx_context_size,
-        ) {
-            return;
-        }
-
+    pub(super) async fn compact_now(&mut self, turn_number: usize) {
         // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
-        // 清理后重新判断是否还需要 LLM 摘要。
         let mc_cleared = context::compact::microcompact_messages(&mut self.messages);
         if mc_cleared > 0 {
             log::info!(target: crate::LOG_TARGET,
                 "[microcompact] sub-agent cleared {} stale tool results", mc_cleared);
-            // 清理后重新检查是否还需要 compact
-            let mc_input = context::compact::estimate_messages_tokens(&self.messages);
-            let remaining_budget =
-                context::compact::autocompact_threshold(self.ctx_context_size, 8192);
-            // 估算下一轮 input ≈ 当前 mc_input + system + tool schemas
-            // 用 api_input 作为上界（microcompact 前），减去已清理部分
-            if mc_input + (api_input as usize) <= remaining_budget {
-                (self.progress)(
-                    Some(turn_number),
-                    &format!(
-                        "[microcompact: cleared {mc_cleared} old tool result(s), skipped LLM compact]"
-                    ),
-                );
-                return;
-            }
         }
 
         let old_len = self.messages.len();

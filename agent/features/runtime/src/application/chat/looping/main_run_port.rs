@@ -89,13 +89,7 @@ where
     pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
     pub(crate) memory_cwd: PathBuf,
-    pub(crate) last_api_input_tokens: &'a mut u64,
-    pub(crate) last_api_output_tokens: &'a mut u64,
-    pub(crate) cached_tokens: &'a mut Option<u64>,
-    pub(crate) reasoning_tokens: &'a mut Option<u64>,
-    /// Run 级 compact 冷却标记：同一 Run 内 compact 成功后设为 true，
-    /// 防止 recent tail 仍超阈值时 engine loop 反复 compact（死循环抖动）。
-    pub(crate) compacted_this_run: bool,
+    pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
         &'a crate::application::chat::looping::tool_identity::ToolIdentityRegistry,
@@ -233,8 +227,6 @@ where
     }
 
     async fn compact_impl(&mut self) {
-        let tool_schemas = self.registry.schemas_for(self.language);
-        let tool_schema_tokens = context::compact::estimate_tool_schemas_tokens(&tool_schemas);
         let cleared = context::compact::microcompact_chain(self.chain);
         if cleared > 0 {
             self.sink
@@ -252,11 +244,6 @@ where
             &self.chain.messages_flat(),
             self.system_prompt_text,
             self.context_size,
-            tool_schema_tokens,
-            *self.last_api_input_tokens,
-            *self.last_api_output_tokens,
-            *self.cached_tokens,
-            *self.reasoning_tokens,
             self.memory_config,
             &self.memory_cwd,
             self.client,
@@ -275,14 +262,8 @@ where
                 self.active_summary_arc,
             )
             .await;
-            // compact 后重置 token 计数，避免下一轮 needs_compaction 用旧的大值误判。
-            // 这些字段会在下一次 invoke_model 成功后从 API 响应重新更新。
-            *self.last_api_input_tokens = 0;
-            *self.last_api_output_tokens = 0;
-            *self.cached_tokens = None;
-            *self.reasoning_tokens = None;
-            // 标记此 Run 已 compact，防止 recent tail 仍超阈值时死循环
-            self.compacted_this_run = true;
+            // compact 后清空最近 usage；只有下一次 Provider 响应才能再次触发。
+            *self.last_total_tokens = None;
         }
     }
 
@@ -417,10 +398,7 @@ where
             }
         }
 
-        *self.last_api_input_tokens = resp.usage.input_tokens as u64;
-        *self.last_api_output_tokens = resp.usage.output_tokens as u64;
-        *self.cached_tokens = resp.usage.cached_tokens.map(u64::from);
-        *self.reasoning_tokens = resp.usage.reasoning_tokens.map(u64::from);
+        *self.last_total_tokens = Some(u64::from(resp.usage.normalized_total_tokens(0)));
 
         let token_usage = crate::application::loop_engine::StepTokenUsage {
             input_tokens: resp.usage.input_tokens as u64,
@@ -428,11 +406,7 @@ where
             cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
             cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: resp
-                .usage
-                .total_tokens
-                .map(u64::from)
-                .unwrap_or(resp.usage.input_tokens as u64 + resp.usage.output_tokens as u64),
+            total_tokens: u64::from(resp.usage.normalized_total_tokens(0)),
             context_window: self.context_size as u64,
             est_system_tokens: effective_system_blocks
                 .iter()
@@ -578,27 +552,10 @@ where
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        // Run 级冷却：同一 Run compact 过就不再重复，防止 recent tail 仍超阈值时死循环。
-        if self.compacted_this_run {
-            return Ok(false);
-        }
-        // 真实判定：基于 token 阈值，而非无条件返回 true。
-        // 无条件 true 会导致状态机每次 iteration 都进 Compacting 状态（即使 token 未超阈值），
-        // 产生反复 PreparingContext ↔ Compacting 抖动。
-        let messages = self.chain.messages_flat();
-        let tool_schemas = self.registry.schemas_for(self.language);
-        let tool_schema_tokens =
-            context::compact::estimate_tool_schemas_tokens(&tool_schemas);
         let needed = super::super::compact::should_compact_now(
-            &messages,
-            *self.last_api_input_tokens,
-            *self.last_api_output_tokens,
-            *self.cached_tokens,
-            *self.reasoning_tokens,
+            *self.last_total_tokens,
             self.context_size,
-            self.system_prompt_text,
-            tool_schema_tokens,
-            self.turn_count,
+            self.chain.message_count(),
         );
         Ok(needed)
     }
