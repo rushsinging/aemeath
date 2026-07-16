@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 
-use crate::{Generation, ReadOutcome, StorageError, StorageKey, WriteOptions, WriteReceipt};
+use crate::{
+    DeleteOptions, DeleteOutcome, Generation, PromoteOutcome, QuarantineOutcome, QuarantineReason,
+    ReadOutcome, StorageError, StorageKey, TransactionScope, WriteOptions, WriteReceipt,
+};
 
 #[async_trait]
 pub trait AtomicBlobPort: Send + Sync {
@@ -16,4 +19,20 @@ pub trait AtomicBlobPort: Send + Sync {
         bytes: &[u8],
         options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError>;
+
+    async fn promote_previous(&self, key: &StorageKey) -> Result<PromoteOutcome, StorageError>;
+
+    async fn quarantine(
+        &self,
+        key: &StorageKey,
+        generation: Generation,
+        scope: TransactionScope,
+        reason: QuarantineReason,
+    ) -> Result<QuarantineOutcome, StorageError>;
+
+    async fn delete_all_generations(
+        &self,
+        key: &StorageKey,
+        options: DeleteOptions,
+    ) -> Result<DeleteOutcome, StorageError>;
 }

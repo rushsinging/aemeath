@@ -18,6 +18,12 @@ impl Durability {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PreviousPolicy {
+    Retain,
+    Discard,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum StorageNamespace {
     Session,
@@ -43,6 +49,20 @@ impl StorageNamespace {
             Self::Config => "config",
             Self::Workspace => "workspace",
             Self::Cost => "cost",
+        }
+    }
+
+    pub fn previous_policy(self) -> PreviousPolicy {
+        match self {
+            Self::AuditUsage => PreviousPolicy::Discard,
+            Self::Session
+            | Self::Memory
+            | Self::Task
+            | Self::History
+            | Self::ToolResult
+            | Self::Config
+            | Self::Workspace
+            | Self::Cost => PreviousPolicy::Retain,
         }
     }
 
