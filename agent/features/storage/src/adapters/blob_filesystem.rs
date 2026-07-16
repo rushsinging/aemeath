@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, OpenOptions};
-use cap_std::io_lifetimes::AsFilelike;
 use uuid::Uuid;
 
 use crate::{
@@ -84,9 +83,11 @@ impl FileSystemBlobAdapter {
                 .rename(&stage_name, &parent, &primary_name)
                 .map_err(map_io)?;
             if durability == Durability::ProcessCrashSafe {
+                let mut directory_options = OpenOptions::new();
+                directory_options.read(true);
                 parent
-                    .as_filelike_view::<std::fs::File>()
-                    .sync_all()
+                    .open_with(".", &directory_options)
+                    .and_then(|directory| directory.sync_all())
                     .map_err(map_durability)?;
             }
             Ok(WriteReceipt::committed(None))
