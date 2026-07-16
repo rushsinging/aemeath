@@ -98,11 +98,12 @@ impl OutputDocumentRenderer {
         // #329 契约：block 内部 wrap 宽度 = outer_width - gutter_width(depth)，
         // 保证 wrap 后 line 加回 gutter 总可见宽 ≤ outer_width（content_area.width）。
         // 窄屏模式：极窄屏完全移除 gutter；窄屏消除缩进（depth=0）。
-        let effective_depth = if gutter::is_gutter_suppressed(outer_width) || outer_width < 50 {
-            0
-        } else {
-            depth
-        };
+        let effective_depth =
+            if gutter::is_gutter_suppressed(outer_width) || outer_width < 50 {
+                0
+            } else {
+                depth
+            };
         let text_width = gutter::effective_block_width(outer_width, effective_depth);
 
         // 计算 gutted 缓存 key：运行中 ToolCall 的 marker_frame 随动画帧推进而变化，

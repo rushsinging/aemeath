@@ -111,11 +111,7 @@ impl StatusBar {
             let hint = "[窄屏] 窗口过窄，建议调整终端大小";
             let spans = vec![Span::styled(hint, base)];
             for row in 0..area.height {
-                let row_area = Rect {
-                    y: area.y + row,
-                    height: 1,
-                    ..area
-                };
+                let row_area = Rect { y: area.y + row, height: 1, ..area };
                 Paragraph::new(Line::from(spans.clone()))
                     .style(base)
                     .render(row_area, buf);

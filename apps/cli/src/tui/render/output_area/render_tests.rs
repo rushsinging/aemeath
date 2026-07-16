@@ -207,7 +207,11 @@ fn test_render_user_message_paints_full_visible_line_background() {
     assert_eq!(buf[(0, 0)].fg, theme::USER, "gutter 应使用深色用户消息前景");
     assert_eq!(buf[(2, 0)].bg, theme::USER_BG, "正文应有用户消息背景");
     assert_eq!(buf[(2, 0)].fg, theme::USER, "正文应使用深色用户消息前景");
-    assert_eq!(buf[(9, 0)].bg, theme::USER_BG, "行尾空白也应有用户消息背景");
+    assert_eq!(
+        buf[(9, 0)].bg,
+        theme::USER_BG,
+        "行尾空白也应有用户消息背景"
+    );
     // col 10..12 是右侧呼吸空间
     assert_ne!(buf[(11, 0)].bg, theme::USER_BG);
     assert_ne!(buf[(0, 1)].bg, theme::USER_BG, "非用户消息行不应被背景污染");

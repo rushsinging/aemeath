@@ -397,7 +397,9 @@ impl App {
     fn trim_document_to_max_lines(
         document: crate::tui::render::output::rendered::RenderedDocument,
     ) -> crate::tui::render::output::rendered::RenderedDocument {
-        use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
+        use crate::tui::render::output::rendered::{
+            RenderedBlock, RenderedLine,
+        };
         use ratatui::style::Style;
         use ratatui::text::Span;
         use std::rc::Rc;
@@ -423,7 +425,8 @@ impl App {
             } else {
                 // 部分保留
                 let start = block_len - kept;
-                let lines: Vec<RenderedLine> = block.lines[start..].to_vec();
+                let lines: Vec<RenderedLine> =
+                    block.lines[start..].to_vec();
                 new_blocks.push(RenderedBlock {
                     block_id: block.block_id,
                     lines: Rc::new(lines),
@@ -449,7 +452,9 @@ impl App {
             },
         );
 
-        crate::tui::render::output::rendered::RenderedDocument { blocks: new_blocks }
+        crate::tui::render::output::rendered::RenderedDocument {
+            blocks: new_blocks,
+        }
     }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {
