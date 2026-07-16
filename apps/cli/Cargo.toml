@@ -38,3 +38,5 @@ env_logger = "0.11"
 
 [dev-dependencies]
 insta = "1"
+portable-pty = "0.9"
+tempfile = "3"

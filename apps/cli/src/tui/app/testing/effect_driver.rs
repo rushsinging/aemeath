@@ -7,6 +7,8 @@ use crate::tui::update::msg::TuiMsg;
 pub(crate) enum ExpectedEffect {
     SendUserMessage { text: String, replies: Vec<TuiMsg> },
     CancelCurrentRun { replies: Vec<TuiMsg> },
+    ReadClipboardImage,
+    ProcessImageFile { path: String },
     QuitApplication,
 }
 
@@ -54,6 +56,11 @@ impl ScriptedEffectDriver {
                     Effect::CancelCurrentRun,
                     ExpectedEffect::CancelCurrentRun { replies: scripted },
                 ) => replies.extend(scripted),
+                (Effect::ReadClipboardImage, ExpectedEffect::ReadClipboardImage) => {}
+                (
+                    Effect::ProcessImageFile { path },
+                    ExpectedEffect::ProcessImageFile { path: expected },
+                ) => assert_eq!(path, &expected, "image path mismatch"),
                 (Effect::QuitApplication, ExpectedEffect::QuitApplication) => {}
                 (_, _) => panic!("effect did not match script: {effect:?}"),
             }

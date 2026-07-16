@@ -34,6 +34,13 @@ pub fn find_test_only_api_violations(path: &Path, source: &str) -> Vec<String> {
     violations
 }
 
+pub fn production_dead_code_allow_count_for_path(path: &Path, source: &str) -> usize {
+    if is_test_only_path(path) {
+        return 0;
+    }
+    production_dead_code_allow_count(source)
+}
+
 pub fn production_dead_code_allow_count(source: &str) -> usize {
     let Ok(file) = syn::parse_file(source) else {
         return 0;
@@ -140,10 +147,36 @@ fn item_kind(item: &Item) -> &'static str {
     }
 }
 
+fn is_test_only_path(path: &Path) -> bool {
+    path.components()
+        .any(|component| component.as_os_str() == "tests")
+        || path.file_stem().is_some_and(|stem| {
+            let stem = stem.to_string_lossy();
+            stem == "tests" || stem.ends_with("_test") || stem.ends_with("_tests")
+        })
+}
+
 fn has_cfg_test(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        attr.path().is_ident("cfg") && attr.meta.to_token_stream().to_string().contains("test")
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        attr.parse_args::<syn::Meta>()
+            .is_ok_and(|meta| cfg_meta_contains_test(&meta))
     })
+}
+
+fn cfg_meta_contains_test(meta: &syn::Meta) -> bool {
+    match meta {
+        syn::Meta::Path(path) => path.is_ident("test"),
+        syn::Meta::List(list) => {
+            let nested = list.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            );
+            nested.is_ok_and(|items| items.iter().any(cfg_meta_contains_test))
+        }
+        syn::Meta::NameValue(_) => false,
+    }
 }
 
 fn has_dead_code_allow(attrs: &[Attribute]) -> bool {
