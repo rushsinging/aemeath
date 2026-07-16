@@ -368,6 +368,11 @@ impl App {
                 return;
             }
         };
+        let document = if self.view_state.output.expanded {
+            document
+        } else {
+            Self::trim_document_to_max_lines(document)
+        };
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
@@ -383,6 +388,73 @@ impl App {
             need_rebuild
         );
         self.output_area.replace_document(document);
+    }
+
+    /// 最大渲染行数。超过此值的旧消息被裁剪，滚到顶部时懒加载展开。
+    const MAX_RENDER_LINES: usize = 5000;
+
+    /// 裁剪文档到最大行数，保留最新的行。如果裁剪了，顶部插入提示行。
+    fn trim_document_to_max_lines(
+        document: crate::tui::render::output::rendered::RenderedDocument,
+    ) -> crate::tui::render::output::rendered::RenderedDocument {
+        use crate::tui::render::output::rendered::{
+            RenderedBlock, RenderedLine,
+        };
+        use ratatui::style::Style;
+        use ratatui::text::Span;
+        use std::rc::Rc;
+
+        let total = document.total_lines();
+        if total <= Self::MAX_RENDER_LINES {
+            return document;
+        }
+
+        let mut kept = Self::MAX_RENDER_LINES;
+        let folded = total - kept;
+
+        // 从后向前保留 block 的行
+        let mut new_blocks: Vec<RenderedBlock> = Vec::new();
+        for block in document.blocks.into_iter().rev() {
+            if kept == 0 {
+                break;
+            }
+            let block_len = block.lines.len();
+            if block_len <= kept {
+                new_blocks.push(block);
+                kept -= block_len;
+            } else {
+                // 部分保留
+                let start = block_len - kept;
+                let lines: Vec<RenderedLine> =
+                    block.lines[start..].to_vec();
+                new_blocks.push(RenderedBlock {
+                    block_id: block.block_id,
+                    lines: Rc::new(lines),
+                });
+                kept = 0;
+            }
+        }
+        new_blocks.reverse();
+
+        // 顶部插入提示行
+        let hint_line = RenderedLine::with_plain(
+            vec![Span::styled(
+                format!("─── 更早的消息已折叠（{folded} 行）───"),
+                Style::default().fg(crate::tui::render::theme::TEXT_DIM),
+            )],
+            format!("─── 更早的消息已折叠（{folded} 行）───"),
+        );
+        new_blocks.insert(
+            0,
+            RenderedBlock {
+                block_id: "_folded_hint".into(),
+                lines: Rc::new(vec![hint_line]),
+            },
+        );
+
+        crate::tui::render::output::rendered::RenderedDocument {
+            blocks: new_blocks,
+        }
     }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {

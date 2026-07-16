@@ -105,11 +105,12 @@ fn test_output_area_paints_fill_style_for_short_and_empty_lines() {
 
     area.render(area_rect, &mut buf, &view, &no_live_status());
 
-    for x in 0..8 {
+    for x in 0..6 {
         assert_eq!(buf[(x, 0)].bg, ratatui::style::Color::Blue);
         assert_eq!(buf[(x, 1)].bg, ratatui::style::Color::Blue);
     }
-    assert_ne!(buf[(0, 2)].bg, ratatui::style::Color::Blue);
+    // col 6..8 是右侧呼吸空间，不填充
+    assert_ne!(buf[(7, 0)].bg, ratatui::style::Color::Blue);
 }
 
 #[test]
@@ -134,7 +135,9 @@ fn test_output_area_selection_overrides_fill_style_on_text_cells() {
     assert_eq!(buf[(0, 0)].bg, theme::SELECTION_BG);
     assert_eq!(buf[(1, 0)].bg, theme::SELECTION_BG);
     assert_eq!(buf[(2, 0)].bg, ratatui::style::Color::Blue);
-    assert_eq!(buf[(7, 0)].bg, ratatui::style::Color::Blue);
+    assert_eq!(buf[(5, 0)].bg, ratatui::style::Color::Blue);
+    // col 6..8 是右侧呼吸空间
+    assert_ne!(buf[(7, 0)].bg, ratatui::style::Color::Blue);
 }
 
 #[test]
@@ -205,10 +208,12 @@ fn test_render_user_message_paints_full_visible_line_background() {
     assert_eq!(buf[(2, 0)].bg, theme::USER_BG, "正文应有用户消息背景");
     assert_eq!(buf[(2, 0)].fg, theme::USER, "正文应使用深色用户消息前景");
     assert_eq!(
-        buf[(10, 0)].bg,
+        buf[(9, 0)].bg,
         theme::USER_BG,
         "行尾空白也应有用户消息背景"
     );
+    // col 10..12 是右侧呼吸空间
+    assert_ne!(buf[(11, 0)].bg, theme::USER_BG);
     assert_ne!(buf[(0, 1)].bg, theme::USER_BG, "非用户消息行不应被背景污染");
 }
 

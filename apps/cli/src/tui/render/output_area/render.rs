@@ -48,8 +48,7 @@ impl OutputArea {
 
         let visible_lines = view.last_visible_height;
         let total_lines = self.document.total_lines();
-        let needs_scrollbar = total_lines > visible_lines;
-        let content_area = content_area_for_scrollbar(area, needs_scrollbar);
+        let content_area = content_area_for_scrollbar(area, false);
         let (start, end) = visible_range(
             total_lines,
             visible_lines,
@@ -128,22 +127,21 @@ impl OutputArea {
         let line_fill_styles = trim_line_fill_styles(line_fill_styles, area.height as usize);
         let display_lines = self.trim_to_area_height(display_lines, area.height as usize);
         crate::tui::log_trace!(
-            "tui.output.render area={}x{} content={}x{} total_lines={} visible_lines={} auto_scroll={} scroll_offset={} range={}..{} needs_scrollbar={} spinner={} queued_lines={} task_lines={} before_status_lines={} after_status_lines={} after_trim_lines={} visible_overwide_lines={} max_visible_line_width={} first_visible={:?} last_visible={:?} last_doc={:?}",
-            area.width,
-            area.height,
-            content_area.width,
-            content_area.height,
-            total_lines,
-            visible_lines,
-            view.auto_scroll,
-            view.scroll_offset,
-            start,
-            end,
-            needs_scrollbar,
-            spinner_line.is_some(),
-            live_status.queued_lines.len(),
-            live_status.task_lines.len(),
-            before_status_lines,
+              "tui.output.render area={}x{} content={}x{} total_lines={} visible_lines={} auto_scroll={} scroll_offset={} range={}..{} spinner={} queued_lines={} task_lines={} before_status_lines={} after_status_lines={} after_trim_lines={} visible_overwide_lines={} max_visible_line_width={} first_visible={:?} last_visible={:?} last_doc={:?}",
+              area.width,
+              area.height,
+              content_area.width,
+              content_area.height,
+              total_lines,
+              visible_lines,
+              view.auto_scroll,
+              view.scroll_offset,
+              start,
+              end,
+              spinner_line.is_some(),
+              live_status.queued_lines.len(),
+              live_status.task_lines.len(),
+              before_status_lines,
             after_status_lines,
             display_lines.len(),
             visible_overwide_lines,
