@@ -3,55 +3,6 @@
 > 路径触发：无（不在代码路径下）。
 > 场景触发：任何 bug 修复 / feature 实现 / PR 创建 / 发版 / Hook 阻断处理。
 
-## 项目结构
-
-```
-aemeath/                    # workspace root
-├── apps/
-│   └── cli/                # CLI 二进制入口 + TUI (ratatui) + 旧版 REPL (rustyline)
-├── agent/
-│   ├── features/           # 业务 feature：runtime/tools/provider/prompt/project/storage/policy/hook/audit/update
-│   ├── shared/             # 横切基础设施 + 外部 adapter + 最小共享内核
-│   └── composition/        # 组合根：唯一生产装配入口
-├── packages/
-│   ├── sdk/                # AgentClient trait + 公共类型（CLI↔Runtime 通信契约）
-│   └── global/logging/     # 日志 projection 适配
-├── docs/                   # 设计真相与历史归档
-│   ├── design/             #   设计真相源
-│   ├── snapshot/           #   历史 spec 快照（已废弃、不参与运行时）
-│   └── superpowers/        #   brainstorm / superpowers 工作流产物
-├── specs/                  # 渐进式披露分片：按需加载的 detailed 规则
-├── TODO.md                 # 待办事项（通过 /todo 命令维护）
-└── AGENTS.md               # 根指令（CLAUDE.md 软链指向它）
-```
-
-> bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），**NEVER** 再向 `docs/` 写入新的 bug / feature 条目。
-
-## 运行时目录（`~/.agents`）
-
-```
-~/.agents/                   # 运行时根目录
-├── aemeath.json             # 全局配置
-├── AGENTS.md                # 全局指令
-├── guidance/                # 模型 Guidance 文件
-│   ├── _default.md          #   所有模型通用
-│   ├── _reasoning.md        #   reasoning 开启时附加
-│   └── {prefix}.md          #   按 model id 前缀匹配（最长优先）
-├── hooks/                   # 全局 Hook 脚本
-├── logs/                    # 日志文件（12 个 target 路由文件 + 兜底 + panic）
-├── memory/                  # 持久化记忆存储
-├── sessions/                # 会话持久化
-├── skills/                  # 全局 Skills
-├── mcp.json                 # MCP 工具配置
-├── history.json             # 用户输入历史
-├── cost_history.json          # 成本追踪历史
-└── settings.json              # 全局设置
-```
-
-> **终端测试**：`echo '{prompt}' | AEMEATH_VERSION= RUST_LOG= cargo run -p cli --bin aemeath -- -qv`。可在末尾追加 `--model Zhipu/glm-5.2` 等 CLI 参数。
->
-> **日志级别**：调试时用 `AEMEATH_LOG_LEVEL=debug cargo run -p cli --bin aemeath` 全局拉高到 debug；也可用 `RUST_LOG=aemeath:tui=debug,aemeath:agent:runtime=debug cargo run -p cli --bin aemeath` 按 target 单独拉高。详见 `specs/logging.md`。
-
 ## Bug / Feature 执行流程
 
 bug / feature 追踪改在 GitHub Issues（仓库 `rushsinging/aemeath`），按以下步骤执行，**NEVER** 跳过：
