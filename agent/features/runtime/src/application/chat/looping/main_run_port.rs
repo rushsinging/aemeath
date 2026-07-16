@@ -582,8 +582,25 @@ where
         if self.compacted_this_run {
             return Ok(false);
         }
-        // `auto_compact` is the existing source of truth (including resume protection and hooks).
-        Ok(true)
+        // 真实判定：基于 token 阈值，而非无条件返回 true。
+        // 无条件 true 会导致状态机每次 iteration 都进 Compacting 状态（即使 token 未超阈值），
+        // 产生反复 PreparingContext ↔ Compacting 抖动。
+        let messages = self.chain.messages_flat();
+        let tool_schemas = self.registry.schemas_for(self.language);
+        let tool_schema_tokens =
+            context::compact::estimate_tool_schemas_tokens(&tool_schemas);
+        let needed = super::super::compact::should_compact_now(
+            &messages,
+            *self.last_api_input_tokens,
+            *self.last_api_output_tokens,
+            *self.cached_tokens,
+            *self.reasoning_tokens,
+            self.context_size,
+            self.system_prompt_text,
+            tool_schema_tokens,
+            self.turn_count,
+        );
+        Ok(needed)
     }
 
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {

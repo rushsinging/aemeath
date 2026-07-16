@@ -21,6 +21,46 @@ pub(crate) struct CompactOutcome {
 ///
 /// resume 保护：首 turn 无 API 反馈时跳过（`turn_count == 1 && last_api_input_tokens == 0`），
 /// 确保 resume 会话不会在第一轮被误判 compact。
+use context::compact;
+
+/// 纯 token 判定：是否需要 compact（不含 hook / resume 保护）。
+/// 供 needs_compaction() 状态机判定使用，避免无条件进 Compacting 状态。
+pub(crate) fn should_compact_now(
+    messages: &[Message],
+    last_api_input_tokens: u64,
+    last_api_output_tokens: u64,
+    cached_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    context_size: usize,
+    system_prompt_text: &str,
+    tool_schema_tokens: usize,
+    turn_count: usize,
+) -> bool {
+    // resume 保护
+    if turn_count == 1 && last_api_input_tokens == 0 {
+        return false;
+    }
+    if messages.len() <= 4 {
+        return false;
+    }
+    if last_api_input_tokens > 0 {
+        compact::needs_compaction_actual(
+            last_api_input_tokens,
+            last_api_output_tokens,
+            cached_tokens,
+            reasoning_tokens,
+            context_size,
+        )
+    } else {
+        compact::needs_compaction_full(
+            messages,
+            system_prompt_text,
+            context_size,
+            tool_schema_tokens,
+        )
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn auto_compact<S>(
     sink: &S,
@@ -45,8 +85,6 @@ pub(crate) async fn auto_compact<S>(
 where
     S: ChatEventSink,
 {
-    use context::compact;
-
     // resume 保护：首 turn 无 API 反馈时不 compact。
     // resume 加载的是已精简的活跃链，第一轮直接原样发送，等拿到真实 token 数后再决定。
     if turn_count == 1 && last_api_input_tokens == 0 {
@@ -95,22 +133,17 @@ where
         return None;
     }
 
-    let should_compact = if last_api_input_tokens > 0 {
-        compact::needs_compaction_actual(
-            last_api_input_tokens,
-            last_api_output_tokens,
-            cached_tokens,
-            reasoning_tokens,
-            context_size,
-        )
-    } else {
-        compact::needs_compaction_full(
-            messages,
-            system_prompt_text,
-            context_size,
-            tool_schema_tokens,
-        )
-    };
+    let should_compact = should_compact_now(
+        messages,
+        last_api_input_tokens,
+        last_api_output_tokens,
+        cached_tokens,
+        reasoning_tokens,
+        context_size,
+        system_prompt_text,
+        tool_schema_tokens,
+        turn_count,
+    );
 
     log::debug!(
         target: LOG_TARGET,
