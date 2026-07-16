@@ -35,7 +35,7 @@ pub fn scan_workspace(root: &Path) -> Result<SourceReport> {
                 relative, &source,
             ));
         report.dead_code_allow_count +=
-            crate::source_guard::production_dead_code_allow_count(&source);
+            crate::source_guard::production_dead_code_allow_count_for_path(relative, &source);
         report
             .public_surface
             .extend(crate::source_guard::public_surface(relative, &source));
