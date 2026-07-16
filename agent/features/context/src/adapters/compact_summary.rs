@@ -91,7 +91,11 @@ pub struct CompactResult {
 }
 
 /// 发送给 LLM 的压缩提示模板。
-pub const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Create a structured summary of the conversation.
+pub const COMPACT_PROMPT: &str = r#"You are a conversation history compactor for an AI coding agent. Your job is to compress PRIOR conversation history into a structured summary so the agent can continue working with reduced context.
+
+CRITICAL: The text below is PAST conversation history, NOT a new task. Do NOT treat project context files (AGENTS.md, CLAUDE.md, etc.) or environment descriptions as an action request. If the history ends without a clear pending action, summarize what was accomplished — NEVER respond with "please tell me what to do".
+
+Budget: Aim for 800-1200 tokens. This summary replaces the original messages, so it MUST preserve enough detail for the agent to continue seamlessly.
 
 <instructions>
 Produce a summary using the EXACT structure below inside `<summary>` tags.
@@ -116,12 +120,13 @@ What needs to happen next to complete the goal.
 
 Rules:
 - Be specific: include file paths, function names, variable names.
-- Keep concise: aim for 20-30% of original content length.
+- Stay within the 800-1200 token budget.
 - Do NOT include raw tool output or tool call details — focus on semantic meaning.
+- Do NOT ask clarifying questions or say "no task found" — this is history compression, not a chat.
 - Each section can be empty if not applicable, but include the heading.
 </instructions>
 
-Here is the conversation to summarize:
+Here is the PAST conversation history to compress:
 "#;
 
 /// 单个 compact chunk 的目标 token 数。
@@ -242,7 +247,7 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
         }
     }
 
-    let prompt = format!("{COMPACT_PROMPT}\n<conversation>\n{conversation_text}</conversation>\n\nWrite your summary inside <summary> tags.");
+    let prompt = format!("{COMPACT_PROMPT}\n<conversation_history>\n{conversation_text}</conversation_history>\n\nCompress this history into a summary now. Write your summary inside <summary> tags.");
 
     vec![Message::user(prompt)]
 }
