@@ -35,6 +35,7 @@ Thumbs.db
 .agents/*
 !.agents/aemeath.json
 !.agents/dead-code-baseline.json
+!.agents/flaky-debt.json
 !.agents/hooks/
 
 # Build artifacts

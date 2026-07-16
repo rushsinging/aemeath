@@ -1,4 +1,8 @@
+pub mod changed_lines;
 pub mod coverage;
+pub mod flaky;
+pub mod issue_tree;
+pub mod pre_commit;
 pub mod reachability;
 pub mod source_guard;
 pub mod workspace_guard;
