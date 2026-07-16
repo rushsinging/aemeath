@@ -3,9 +3,11 @@ mod published_language;
 mod safe_path;
 
 pub use atomic_blob::{
-    BlobRead, CommitWarning, Generation, ReadOutcome, WriteOptions, WriteReceipt,
+    BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome,
+    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, TransactionScope,
+    WriteOptions, WriteReceipt,
 };
 pub use published_language::{
-    Durability, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
+    Durability, PreviousPolicy, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
 };
 pub use safe_path::SafePathSegment;
