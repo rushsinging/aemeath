@@ -241,7 +241,7 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
 // threshold = effective_window - buffer
 
 /// Reserved tokens for compaction summary output (p99.99 ≈ 17.4K, use 20K).
-const MAX_OUTPUT_TOKENS_FOR_SUMMARY: usize = 20_000;
+pub(crate) const MAX_OUTPUT_TOKENS_FOR_SUMMARY: usize = 20_000;
 
 /// Safety buffer below the effective window before triggering compaction.
 const AUTOCOMPACT_BUFFER_TOKENS: usize = 13_000;
