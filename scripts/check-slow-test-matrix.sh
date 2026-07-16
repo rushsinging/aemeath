@@ -11,9 +11,9 @@ run() { local label=$1; shift; local started=$SECONDS; echo "==> $label"; "$@"; 
 
 run fmt cargo fmt --all -- --check
 run clippy cargo clippy --workspace --all-targets -- -D warnings
-run workspace cargo test --workspace --locked
-run tui-p1 cargo test -p cli 'scenario_tests::p1'
+run workspace cargo test --workspace --locked --exclude cli
 run tui-p0 scripts/check-tui-snapshots.sh
+run tui-p1 cargo test -p cli 'scenario_tests::p1'
 run cli-build cargo build -p cli --bin aemeath --locked
 run pty env AEMEATH_PTY_BIN="$ROOT/target/debug/aemeath" cargo test -p cli --test pty_smoke -- --nocapture
 

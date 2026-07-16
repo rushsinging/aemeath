@@ -77,6 +77,7 @@ impl TuiScenarioHarness {
             &self.ui_tx,
             &SpawnContextRefs { agent_client: None },
         );
+        self.app.input.just_pasted = false;
         self.messages.extend(self.effects.record(outcome));
         true
     }

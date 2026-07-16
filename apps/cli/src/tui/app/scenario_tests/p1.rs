@@ -28,6 +28,7 @@ fn busy_paste_classifies_text_empty_and_image_without_real_clipboard() {
 
     harness.paste("queued text");
     assert_eq!(harness.input_text(), "queued text");
+    assert!(!harness.app.input.just_pasted);
 
     harness.expect_effect(ExpectedEffect::ReadClipboardImage);
     harness.paste("   ");
