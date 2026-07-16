@@ -262,7 +262,7 @@ fn test_build_llm_client_sets_reasoning_level() {
     );
 
     assert_eq!(
-        client.current_reasoning_level(),
+        client.default_scope().effective_reasoning(),
         provider::ReasoningLevel::Medium
     );
 }
@@ -284,7 +284,7 @@ fn test_build_llm_client_reasoning_false_sets_off() {
     );
 
     assert_eq!(
-        client.current_reasoning_level(),
+        client.default_scope().effective_reasoning(),
         provider::ReasoningLevel::Off
     );
 }
@@ -307,7 +307,7 @@ fn test_build_llm_client_reasoning_effort_overrides_bool_default() {
     );
 
     assert_eq!(
-        client.current_reasoning_level(),
+        client.default_scope().effective_reasoning(),
         provider::ReasoningLevel::Xhigh
     );
 }
@@ -330,7 +330,7 @@ fn test_build_llm_client_reasoning_effort_clamped_to_provider_ceiling() {
     );
 
     assert_eq!(
-        client.current_reasoning_level(),
+        client.default_scope().effective_reasoning(),
         provider::ReasoningLevel::High
     );
 }
@@ -353,7 +353,7 @@ fn test_build_llm_client_reasoning_effort_off_disables_thinking() {
     );
 
     assert_eq!(
-        client.current_reasoning_level(),
+        client.default_scope().effective_reasoning(),
         provider::ReasoningLevel::Off
     );
 }

@@ -20,8 +20,6 @@ pub struct CliAgentRunner {
     pub client: Arc<LlmClient>,
     /// Client pool for multi-LLM routing. `None` if only one model is configured.
     pub pool: Option<Arc<LlmClientPool>>,
-    /// Serializes fallback use of the shared default client because its runtime settings are mutable.
-    pub shared_client_lock: Arc<tokio::sync::Mutex<()>>,
     /// Shared per-Run registry used by Main and every Sub Run.
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     /// Agent config for role resolution.

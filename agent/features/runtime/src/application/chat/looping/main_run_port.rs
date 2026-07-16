@@ -75,6 +75,7 @@ where
     pub(crate) active_summary: &'a mut Option<String>,
     pub(crate) active_summary_arc: &'a Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) reasoning_graph: &'a mut Option<ReasoningGraph>,
+    pub(crate) session_reasoning: provider::ReasoningLevel,
     pub(crate) save_chain: &'a crate::application::chat::looping::loop_context::SaveChainFn,
     pub(crate) pending_input: &'a mut PendingInputBuffer,
     pub(crate) deferred_user_inputs: &'a mut VecDeque<sdk::ChatInputEvent>,
@@ -310,15 +311,24 @@ where
             &effective_system_blocks,
             &tool_schemas,
         );
-        if let Some(graph) = self.reasoning_graph.as_ref() {
-            if graph.enabled() && self.client.is_reasoning() {
-                self.client.set_reasoning_level(
-                    graph
-                        .current_effort()
-                        .clamped_to(self.client.max_reasoning_level()),
-                );
-            }
-        }
+        let requested_reasoning = if matches!(self.session_reasoning, provider::ReasoningLevel::Off)
+        {
+            provider::ReasoningLevel::Off
+        } else {
+            self.reasoning_graph
+                .as_ref()
+                .filter(|graph| graph.enabled())
+                .map(|graph| graph.current_effort())
+                .unwrap_or(self.session_reasoning)
+        };
+        let invocation_scope = self
+            .client
+            .invocation_scope(
+                self.client.default_scope().model(),
+                None,
+                requested_reasoning,
+            )
+            .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
 
         logging::context::set_current_model(self.client.model_name().to_string());
         logging::context::set_current_provider(self.client.provider_name().to_string());
@@ -335,6 +345,7 @@ where
             let progress_handle = handler.progress_handle();
             let stream_cancel = self.cancel.clone();
             let stream_fut = self.client.stream_message(
+                &invocation_scope,
                 &effective_system_blocks,
                 &messages_for_api,
                 &tool_schemas,

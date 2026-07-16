@@ -49,8 +49,6 @@ pub trait TaskStorePort: Send + Sync {
 pub trait ProviderInfoPort: Send + Sync {
     fn provider_name(&self) -> &str;
     fn model_name(&self) -> &str;
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel;
-    fn set_reasoning_level(&self, level: provider::ReasoningLevel);
 }
 
 /// Hook 通知端口——core/ 层通过此 trait 发送 hook 通知，不直接依赖 hook::HookRunner。

@@ -22,9 +22,11 @@ pub mod api {
 
 pub use adapters::FileSystemBlobAdapter;
 pub use domain::{
-    BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Durability, Generation, PreviousPolicy,
-    PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
-    SafePathSegment, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
+    decide_blob_recovery, decide_orphan_previous, BlobRead, CommitWarning, CorruptTransactionError,
+    CorruptionReason, DeleteOptions, DeleteOutcome, DigestObservation, Durability, Generation,
+    JournalPhase, PreviousPolicy, PromoteOutcome, QuarantineDisposition, QuarantineOutcome,
+    QuarantineReason, QuarantineReceipt, ReadOutcome, RecoveryDecision, SafePathSegment,
+    StorageError, StorageErrorKind, StorageKey, StorageNamespace, TransactionDigest,
     TransactionScope, WriteOptions, WriteReceipt,
 };
 pub use memory_store::{

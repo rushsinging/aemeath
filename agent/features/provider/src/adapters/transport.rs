@@ -33,9 +33,11 @@ pub trait LlmProviderGateway: Send + Sync {
         timeout_secs: u64,
     ) -> LlmClientPool;
 
+    #[allow(clippy::too_many_arguments)]
     async fn stream_message(
         &self,
         client: &LlmClient,
+        scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[Value],
@@ -71,9 +73,11 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
         LlmClientPool::new(default_client, models_config, timeout_secs)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn stream_message(
         &self,
         client: &LlmClient,
+        scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[Value],
@@ -81,7 +85,7 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, LlmError> {
         client
-            .stream_message(system, messages, tool_schemas, handler, cancel)
+            .stream_message(scope, system, messages, tool_schemas, handler, cancel)
             .await
     }
 }
@@ -91,13 +95,44 @@ mod tests {
     use super::*;
     use crate::CallbackHandler;
     use async_trait::async_trait;
+    use std::sync::Mutex;
+    use tokio::sync::{Barrier, Notify};
+
+    fn empty_response() -> StreamResponse {
+        StreamResponse {
+            assistant_message: Message {
+                role: share::message::Role::Assistant,
+                content: Vec::new(),
+                metadata: None,
+            },
+            usage: crate::domain::invoke::Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+                total_tokens: None,
+            },
+            stop_reason: crate::domain::invoke::StopReason::EndTurn,
+        }
+    }
+
+    fn scope(
+        model: &str,
+        max_tokens: u32,
+        reasoning: crate::ReasoningLevel,
+    ) -> crate::InvocationScope {
+        crate::InvocationScope::new(model, max_tokens, reasoning, reasoning).unwrap()
+    }
 
     struct DummyProvider;
 
     #[async_trait]
     impl LlmProvider for DummyProvider {
+        #[allow(clippy::too_many_arguments)]
         async fn stream_message(
             &self,
+            _scope: &crate::InvocationScope,
             _system: &[SystemBlock],
             messages: &[Message],
             _tool_schemas: &[Value],
@@ -137,8 +172,10 @@ mod tests {
 
         #[async_trait]
         impl LlmProvider for BlockingProvider {
+            #[allow(clippy::too_many_arguments)]
             async fn stream_message(
                 &self,
+                _scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
@@ -168,15 +205,208 @@ mod tests {
         });
         let mut handler = CallbackHandler::new(Box::new(|_| {}));
 
+        let scope = crate::InvocationScope::new(
+            "blocking-model",
+            1024,
+            crate::ReasoningLevel::Off,
+            crate::ReasoningLevel::Off,
+        )
+        .unwrap();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(1),
-            gateway.stream_message(&client, &[], &[], &[], &mut handler, &cancel),
+            gateway.stream_message(&client, &scope, &[], &[], &[], &mut handler, &cancel),
         )
         .await
         .expect("取消必须穿过 Gateway 唤醒 Provider future");
 
         canceller.await.unwrap();
         assert!(matches!(result, Err(LlmError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn shared_transport_keeps_concurrent_invocation_scopes_isolated() {
+        struct ScopeRecordingProvider {
+            barrier: Barrier,
+            observed: Mutex<Vec<(String, u32, crate::ReasoningLevel)>>,
+        }
+
+        #[async_trait]
+        impl LlmProvider for ScopeRecordingProvider {
+            #[allow(clippy::too_many_arguments)]
+            async fn stream_message(
+                &self,
+                scope: &crate::InvocationScope,
+                _system: &[SystemBlock],
+                _messages: &[Message],
+                _tool_schemas: &[Value],
+                _handler: &mut dyn StreamHandler,
+                _cancel: &CancellationToken,
+            ) -> Result<StreamResponse, LlmError> {
+                self.barrier.wait().await;
+                self.observed.lock().unwrap().push((
+                    scope.model().to_string(),
+                    scope.max_tokens(),
+                    scope.effective_reasoning(),
+                ));
+                Ok(empty_response())
+            }
+
+            fn model_name(&self) -> &str {
+                "shared-model"
+            }
+
+            fn provider_name(&self) -> &str {
+                "scope-recorder"
+            }
+        }
+
+        let provider = Arc::new(ScopeRecordingProvider {
+            barrier: Barrier::new(2),
+            observed: Mutex::new(Vec::new()),
+        });
+        let client = Arc::new(LlmClient::from_provider(provider.clone()));
+        let first_client = client.clone();
+        let second_client = client;
+        let first_scope = scope("main-model", 4_096, crate::ReasoningLevel::Low);
+        let second_scope = scope("sub-model", 16_384, crate::ReasoningLevel::High);
+
+        let first = tokio::spawn(async move {
+            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            first_client
+                .stream_message(
+                    &first_scope,
+                    &[],
+                    &[],
+                    &[],
+                    &mut handler,
+                    &CancellationToken::new(),
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            second_client
+                .stream_message(
+                    &second_scope,
+                    &[],
+                    &[],
+                    &[],
+                    &mut handler,
+                    &CancellationToken::new(),
+                )
+                .await
+        });
+
+        first.await.unwrap().unwrap();
+        second.await.unwrap().unwrap();
+        let mut observed = provider.observed.lock().unwrap().clone();
+        observed.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            observed,
+            vec![
+                ("main-model".to_string(), 4_096, crate::ReasoningLevel::Low),
+                ("sub-model".to_string(), 16_384, crate::ReasoningLevel::High),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_one_invocation_does_not_affect_another_on_shared_transport() {
+        struct CancellationIsolationProvider {
+            entered: Barrier,
+            survivor_release: Notify,
+        }
+
+        #[async_trait]
+        impl LlmProvider for CancellationIsolationProvider {
+            #[allow(clippy::too_many_arguments)]
+            async fn stream_message(
+                &self,
+                scope: &crate::InvocationScope,
+                _system: &[SystemBlock],
+                _messages: &[Message],
+                _tool_schemas: &[Value],
+                _handler: &mut dyn StreamHandler,
+                cancel: &CancellationToken,
+            ) -> Result<StreamResponse, LlmError> {
+                self.entered.wait().await;
+                if scope.model() == "cancelled-model" {
+                    cancel.cancelled().await;
+                    Err(LlmError::Cancelled)
+                } else {
+                    tokio::select! {
+                        () = self.survivor_release.notified() => Ok(empty_response()),
+                        () = cancel.cancelled() => Err(LlmError::Cancelled),
+                    }
+                }
+            }
+
+            fn model_name(&self) -> &str {
+                "shared-model"
+            }
+
+            fn provider_name(&self) -> &str {
+                "cancellation-isolation"
+            }
+        }
+
+        let provider = Arc::new(CancellationIsolationProvider {
+            entered: Barrier::new(3),
+            survivor_release: Notify::new(),
+        });
+        let client = Arc::new(LlmClient::from_provider(provider.clone()));
+        let cancelled_client = client.clone();
+        let survivor_client = client;
+        let cancelled_token = CancellationToken::new();
+        let cancelled_task_token = cancelled_token.clone();
+        let survivor_token = CancellationToken::new();
+
+        let cancelled = tokio::spawn(async move {
+            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            cancelled_client
+                .stream_message(
+                    &scope("cancelled-model", 2_048, crate::ReasoningLevel::Medium),
+                    &[],
+                    &[],
+                    &[],
+                    &mut handler,
+                    &cancelled_task_token,
+                )
+                .await
+        });
+        let survivor = tokio::spawn(async move {
+            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            survivor_client
+                .stream_message(
+                    &scope("survivor-model", 8_192, crate::ReasoningLevel::High),
+                    &[],
+                    &[],
+                    &[],
+                    &mut handler,
+                    &survivor_token,
+                )
+                .await
+        });
+
+        provider.entered.wait().await;
+        cancelled_token.cancel();
+        assert!(matches!(cancelled.await.unwrap(), Err(LlmError::Cancelled)));
+        provider.survivor_release.notify_one();
+        assert!(survivor.await.unwrap().is_ok());
+    }
+
+    #[test]
+    fn invocation_scopes_reuse_the_same_immutable_client_transport() {
+        let client = Arc::new(LlmClient::from_provider(Arc::new(DummyProvider)));
+        let main_transport = client.clone();
+        let sub_transport = client.clone();
+        let main_scope = scope("main-model", 4_096, crate::ReasoningLevel::Low);
+        let sub_scope = scope("sub-model", 16_384, crate::ReasoningLevel::High);
+
+        assert!(Arc::ptr_eq(&main_transport, &sub_transport));
+        assert_ne!(main_scope, sub_scope);
+        assert_eq!(main_transport.provider_name(), "dummy");
+        assert_eq!(sub_transport.provider_name(), "dummy");
     }
 
     #[test]

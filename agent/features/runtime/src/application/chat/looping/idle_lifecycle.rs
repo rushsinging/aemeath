@@ -9,21 +9,20 @@ use crate::LOG_TARGET;
 use context::session::ChatChain;
 
 pub(crate) async fn execute_set_thinking<S>(
-    client: &provider::LlmClient,
+    current: provider::ReasoningLevel,
     sink: &S,
     desired: Option<bool>,
-) where
+) -> provider::ReasoningLevel
+where
     S: ChatEventSink,
 {
     use provider::ReasoningLevel;
-    let current = client.current_reasoning_level();
     let new_state = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
     let level = if new_state {
         ReasoningLevel::Medium
     } else {
         ReasoningLevel::Off
     };
-    client.set_reasoning_level(level);
     let label = if new_state { "ON" } else { "OFF" };
     sink.send_event(RuntimeStreamEvent::ThinkingChanged { enabled: new_state })
         .await;
@@ -31,6 +30,7 @@ pub(crate) async fn execute_set_thinking<S>(
         "[thinking mode: {label}]"
     )))
     .await;
+    level
 }
 
 pub(crate) enum IdleResult {

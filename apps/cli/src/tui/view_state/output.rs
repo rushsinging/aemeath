@@ -17,6 +17,8 @@ pub struct OutputViewState {
     pub last_visible_height: usize,
     pub last_document_total_lines: usize,
     pub version: u64,
+    /// 是否已展开全部消息（懒加载：scroll_to_top 时设为 true，跳过 MAX_RENDER_LINES 裁剪）。
+    pub expanded: bool,
 }
 
 impl Default for OutputViewState {
@@ -32,7 +34,8 @@ impl Default for OutputViewState {
             selection_end: None,
             last_visible_height: 0,
             last_document_total_lines: 0,
-            version: 0,
+                version: 0,
+                expanded: false,
         }
     }
 }
@@ -69,7 +72,9 @@ impl OutputViewState {
     }
 
     /// 滚动到顶部：等价于向上滚动 `total_lines` 行（钳制后落在 max_offset）。
+    /// 同时展开懒加载（设置 expanded=true），下次 refresh 时跳过 MAX_RENDER_LINES 裁剪。
     pub fn scroll_to_top(&mut self, total_lines: usize) {
+        self.expanded = true;
         self.scroll_up(total_lines, total_lines);
     }
 

@@ -72,6 +72,10 @@ impl App {
         let mut event_stream = EventStream::new();
         let mut spinner_ticker = tokio::time::interval(std::time::Duration::from_millis(90));
         spinner_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // 独立 resize 轮询（500ms）：覆盖 Ghostty cmux / tmux 不发 SIGWINCH 的场景。
+        // SpinnerTick 保持纯动画职责，不承担 resize 检测。
+        let mut resize_ticker = tokio::time::interval(std::time::Duration::from_millis(500));
+        resize_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last_loop_iteration = Instant::now();
 
         // #636 D1: SIGTERM/SIGHUP graceful shutdown —— 收到信号后走正常 cleanup 路径，
@@ -143,6 +147,19 @@ impl App {
                     }
                 }
                 _ = spinner_ticker.tick() => { Some(TuiMsg::SpinnerTick) }
+                _ = resize_ticker.tick() => {
+                    // 检测终端实际尺寸是否变化（覆盖 Ghostty cmux / tmux 不发 SIGWINCH 的场景）
+                    if let Ok((w, h)) = crossterm::terminal::size() {
+                        let current = crate::tui::app::state::TerminalSize { width: w, height: h };
+                        if self.layout.last_terminal_size != Some(current) {
+                            Some(TuiMsg::Resize { width: w, height: h })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
             };
 
             let Some(msg) = msg else {

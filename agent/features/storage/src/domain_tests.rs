@@ -1,8 +1,10 @@
 use std::str::FromStr;
 
 use crate::domain::{
-    DeleteOptions, Durability, Generation, PreviousPolicy, QuarantineOutcome, QuarantineReason,
-    SafePathSegment, StorageKey, StorageNamespace, TransactionScope,
+    decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
+    DeleteOptions, DigestObservation, Durability, Generation, JournalPhase, PreviousPolicy,
+    QuarantineDisposition, QuarantineOutcome, QuarantineReason, RecoveryDecision, SafePathSegment,
+    StorageErrorKind, StorageKey, StorageNamespace, TransactionDigest, TransactionScope,
 };
 
 #[test]
@@ -27,7 +29,7 @@ fn storage_key_requires_at_least_one_segment() {
     let error = StorageKey::new(StorageNamespace::Session, Vec::new())
         .expect_err("empty keys must be rejected");
 
-    assert_eq!(error.kind(), crate::domain::StorageErrorKind::InvalidKey);
+    assert_eq!(error.kind(), &crate::domain::StorageErrorKind::InvalidKey);
 }
 
 #[test]
@@ -69,6 +71,91 @@ fn namespace_previous_policy_is_explicit() {
 #[test]
 fn delete_options_default_includes_quarantine() {
     assert!(DeleteOptions::default().include_quarantine());
+}
+
+#[test]
+fn prepared_recovery_decision_covers_new_old_absent_and_corrupt() {
+    assert_eq!(
+        decide_blob_recovery(JournalPhase::Prepared, DigestObservation::New),
+        RecoveryDecision::RollForward
+    );
+    assert_eq!(
+        decide_blob_recovery(JournalPhase::Prepared, DigestObservation::Old),
+        RecoveryDecision::RollBack
+    );
+    assert_eq!(
+        decide_blob_recovery(JournalPhase::Prepared, DigestObservation::Absent),
+        RecoveryDecision::RollBack
+    );
+    assert_eq!(
+        decide_blob_recovery(JournalPhase::Prepared, DigestObservation::Other),
+        RecoveryDecision::Corrupt(CorruptionReason::PrimaryDigestMatchesNeitherGeneration)
+    );
+}
+
+#[test]
+fn committed_recovery_requires_new_digest() {
+    assert_eq!(
+        decide_blob_recovery(JournalPhase::Committed, DigestObservation::New),
+        RecoveryDecision::RollForward
+    );
+    for observation in [
+        DigestObservation::Old,
+        DigestObservation::Absent,
+        DigestObservation::Other,
+    ] {
+        assert_eq!(
+            decide_blob_recovery(JournalPhase::Committed, observation),
+            RecoveryDecision::Corrupt(CorruptionReason::CommittedDigestMismatch)
+        );
+    }
+}
+
+#[test]
+fn orphan_previous_next_is_only_cleaned_when_it_matches_primary() {
+    assert_eq!(decide_orphan_previous(true), RecoveryDecision::CleanOrphan);
+    assert_eq!(
+        decide_orphan_previous(false),
+        RecoveryDecision::Corrupt(CorruptionReason::OrphanPreviousDigestMismatch)
+    );
+}
+
+#[test]
+fn transaction_digest_is_domain_separated_and_distinguishes_absent() {
+    assert_ne!(
+        TransactionDigest::blob_bytes(b"value"),
+        TransactionDigest::dataset_bytes(b"value")
+    );
+    assert_ne!(
+        TransactionDigest::blob_bytes(b""),
+        TransactionDigest::absent_blob()
+    );
+    assert_eq!(
+        TransactionDigest::blob_bytes(b"value"),
+        TransactionDigest::blob_bytes(b"value")
+    );
+}
+
+#[test]
+fn corrupt_transaction_error_preserves_typed_facts_without_paths() {
+    let corruption = CorruptTransactionError::new(
+        TransactionScope::Blob,
+        CorruptionReason::CommittedDigestMismatch,
+        QuarantineDisposition::EvidenceQuarantined,
+    );
+    let kind = StorageErrorKind::CorruptTransaction(corruption.clone());
+
+    assert_eq!(corruption.scope(), TransactionScope::Blob);
+    assert_eq!(
+        corruption.reason(),
+        CorruptionReason::CommittedDigestMismatch
+    );
+    assert_eq!(
+        corruption.quarantine_disposition(),
+        QuarantineDisposition::EvidenceQuarantined
+    );
+    assert_eq!(kind, StorageErrorKind::CorruptTransaction(corruption));
+    assert!(!format!("{kind:?}").contains('/'));
 }
 
 #[test]

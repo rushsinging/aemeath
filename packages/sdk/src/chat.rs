@@ -71,7 +71,8 @@ pub enum ChatInputEvent {
     /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
     ///
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
-    /// runtime idle 分支执行 set_reasoning_level，结果通过 `ThinkingChanged` 事件回传 TUI。
+    /// runtime idle 分支更新会话级 reasoning 状态，后续调用通过不可变 InvocationScope 读取；
+    /// 结果通过 `ThinkingChanged` 事件回传 TUI。
     SetThinking { desired: Option<bool> },
     /// 初始化项目。由 `/init` 触发。
     /// force = true 时强制重新初始化

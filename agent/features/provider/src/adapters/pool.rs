@@ -261,11 +261,11 @@ mod tests {
 
         let client = pool.get_client(Some("zhipu/glm-5.2")).await;
 
-        assert_eq!(client.max_tokens(), 16_000);
+        assert_eq!(client.default_scope().max_tokens(), 16_000);
     }
 
     #[test]
-    fn test_isolated_clients_do_not_share_mutable_provider_settings() {
+    fn test_isolated_clients_build_independent_invocation_scopes() {
         let pool = LlmClientPool::new(
             default_client(),
             Arc::new(models_config(16_000)),
@@ -274,10 +274,12 @@ mod tests {
 
         let first = pool.get_isolated_client("zhipu/glm-5.2").unwrap();
         let second = pool.get_isolated_client("zhipu/glm-5.2").unwrap();
-        first.set_max_tokens(1_024);
+        let first_scope = first
+            .invocation_scope("glm-5.2", Some(1_024), crate::ReasoningLevel::Off)
+            .unwrap();
 
-        assert_eq!(first.max_tokens(), 1_024);
-        assert_eq!(second.max_tokens(), 16_000);
+        assert_eq!(first_scope.max_tokens(), 1_024);
+        assert_eq!(second.default_scope().max_tokens(), 16_000);
     }
 
     #[tokio::test]
@@ -291,7 +293,7 @@ mod tests {
         let client = pool.get_client(Some("zhipu/glm-5.2")).await;
 
         assert_eq!(
-            client.max_tokens(),
+            client.default_scope().max_tokens(),
             share::config::models::DEFAULT_MAX_TOKENS
         );
     }

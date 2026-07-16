@@ -234,7 +234,7 @@ async fn filesystem_adapter_rejects_symlink_target_without_touching_outside_file
         .await
         .expect_err("symlink target must fail closed");
 
-    assert_eq!(error.kind(), StorageErrorKind::InvalidKey);
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
     assert_eq!(std::fs::read(outside_file).unwrap(), b"outside");
 
     std::fs::remove_dir_all(root).unwrap();

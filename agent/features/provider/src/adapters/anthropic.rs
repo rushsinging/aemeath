@@ -5,8 +5,6 @@ mod message_conversion;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use share::message::Message;
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
@@ -23,8 +21,6 @@ pub struct AnthropicProvider {
     api_key: String,
     base_url: String,
     model: String,
-    max_tokens: Arc<AtomicU32>,
-    reasoning_level: Arc<AtomicU8>,
     user_agent: String,
     http: reqwest::Client,
     /// Maximum retry attempts (default 3)
@@ -40,16 +36,14 @@ impl AnthropicProvider {
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
-        max_tokens: u32,
-        reasoning_level: crate::ports::ReasoningLevel,
+        _max_tokens: u32,
+        _reasoning_level: crate::ports::ReasoningLevel,
         timeout_secs: u64,
     ) -> Self {
         Self {
             api_key,
             base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
             model: model.unwrap_or_else(|| "claude-sonnet-4-6".to_string()),
-            max_tokens: Arc::new(AtomicU32::new(max_tokens)),
-            reasoning_level: Arc::new(AtomicU8::new(reasoning_level.as_u8())),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
@@ -79,10 +73,6 @@ impl AnthropicProvider {
         self
     }
 
-    pub(crate) fn current_max_tokens(&self) -> u32 {
-        self.max_tokens.load(Ordering::Relaxed)
-    }
-
     fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -109,6 +99,7 @@ impl AnthropicProvider {
 impl LlmProvider for AnthropicProvider {
     async fn stream_message(
         &self,
+        scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -135,15 +126,13 @@ impl LlmProvider for AnthropicProvider {
                 );
             }
         }
-        let level =
-            crate::ports::ReasoningLevel::from_u8(self.reasoning_level.load(Ordering::Relaxed));
-        let effort = match level {
+        let effort = match scope.effective_reasoning() {
             crate::ports::ReasoningLevel::Off => None,
-            l => Some(l.as_str().to_string()),
+            level => Some(level.as_str().to_string()),
         };
         let request = CreateMessageRequest::new(
-            self.model.clone(),
-            self.current_max_tokens(),
+            scope.model().to_string(),
+            scope.max_tokens(),
             effort,
             system.to_vec(),
             api_messages,
@@ -223,7 +212,7 @@ impl LlmProvider for AnthropicProvider {
                                     driver: "anthropic",
                                     api: "messages_stream",
                                     provider: "anthropic",
-                                    model: &self.model,
+                                    model: scope.model(),
                                     endpoint: &endpoint,
                                     attempt: attempt + 1,
                                     max_attempts: self.max_retries,
@@ -271,7 +260,7 @@ impl LlmProvider for AnthropicProvider {
                         driver: "anthropic",
                         api: "messages_stream",
                         provider: "anthropic",
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &endpoint,
                         attempt: attempt + 1,
                         max_attempts: self.max_retries,
@@ -310,7 +299,7 @@ impl LlmProvider for AnthropicProvider {
                         driver: "anthropic",
                         api: "messages_stream",
                         provider: "anthropic",
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &endpoint,
                         attempt: attempt + 1,
                         max_attempts: self.max_retries,
@@ -346,16 +335,13 @@ impl LlmProvider for AnthropicProvider {
                             "stream interrupted after partial output: {msg}"
                         )));
                     }
-                    let level = crate::ports::ReasoningLevel::from_u8(
-                        self.reasoning_level.load(Ordering::Relaxed),
-                    );
-                    let effort = match level {
+                    let effort = match scope.effective_reasoning() {
                         crate::ports::ReasoningLevel::Off => None,
-                        l => Some(l.as_str().to_string()),
+                        level => Some(level.as_str().to_string()),
                     };
                     let params = RequestParams {
-                        model: self.model.clone(),
-                        max_tokens: self.current_max_tokens(),
+                        model: scope.model().to_string(),
+                        max_tokens: scope.max_tokens(),
                         effort,
                         base_url: self.base_url.clone(),
                         headers: self.build_headers()?,
@@ -383,24 +369,6 @@ impl LlmProvider for AnthropicProvider {
 
     fn provider_name(&self) -> &str {
         "anthropic"
-    }
-
-    fn set_max_tokens(&self, max_tokens: u32) {
-        if max_tokens > 0 {
-            self.max_tokens.store(max_tokens, Ordering::Relaxed);
-        }
-    }
-
-    fn max_tokens(&self) -> u32 {
-        self.current_max_tokens()
-    }
-
-    fn set_reasoning_level(&self, level: crate::ports::ReasoningLevel) {
-        self.reasoning_level.store(level.as_u8(), Ordering::Relaxed);
-    }
-
-    fn current_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        crate::ports::ReasoningLevel::from_u8(self.reasoning_level.load(Ordering::Relaxed))
     }
 
     fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {

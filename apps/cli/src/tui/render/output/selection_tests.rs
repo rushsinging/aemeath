@@ -163,7 +163,7 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
     let area = Rect {
         x: 0,
         y: 0,
-        width: 40,
+        width: 80,
         height: 5,
     };
     set_assistant_markdown(

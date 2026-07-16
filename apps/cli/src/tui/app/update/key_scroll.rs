@@ -11,7 +11,14 @@ pub(super) fn handle_scroll_key(app: &mut App, key: KeyEvent, modifiers: KeyModi
         (KeyModifiers::NONE, KeyCode::PageDown) => view.scroll_down(10),
         (KeyModifiers::SHIFT, KeyCode::Up) => view.scroll_up(1, total_lines),
         (KeyModifiers::SHIFT, KeyCode::Down) => view.scroll_down(1),
-        (KeyModifiers::SHIFT, KeyCode::Home) => view.scroll_to_top(total_lines),
+        (KeyModifiers::SHIFT, KeyCode::Home) => {
+            let was_expanded = view.expanded;
+            view.scroll_to_top(total_lines);
+            // 懒加载：首次 scroll_to_top 展开裁剪，需要重建 document
+            if !was_expanded && view.expanded {
+                app.mark_output_dirty();
+            }
+        }
         (KeyModifiers::SHIFT, KeyCode::End) => view.scroll_to_bottom(),
         _ => return false,
     }
