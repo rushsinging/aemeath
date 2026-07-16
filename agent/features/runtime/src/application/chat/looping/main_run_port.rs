@@ -242,6 +242,7 @@ where
             self.hook_runner,
             self.turn_count,
             &self.chain.messages_flat(),
+            self.active_summary.as_deref(),
             self.system_prompt_text,
             self.context_size,
             self.memory_config,
@@ -398,7 +399,9 @@ where
             }
         }
 
-        *self.last_total_tokens = Some(u64::from(resp.usage.normalized_total_tokens(0)));
+        *self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
+            &resp.usage,
+        ));
 
         let token_usage = crate::application::loop_engine::StepTokenUsage {
             input_tokens: resp.usage.input_tokens as u64,
@@ -406,7 +409,7 @@ where
             cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
             cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: u64::from(resp.usage.normalized_total_tokens(0)),
+            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
             context_window: self.context_size as u64,
             est_system_tokens: effective_system_blocks
                 .iter()

@@ -106,6 +106,7 @@ where
                         &hook_runner,
                         turn_count,
                         &chain.messages_flat(),
+                        active_summary.as_deref(),
                         &system_prompt_text,
                         context_size,
                         &memory_config,

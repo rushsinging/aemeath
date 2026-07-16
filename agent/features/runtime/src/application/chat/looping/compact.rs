@@ -21,6 +21,25 @@ pub(crate) struct CompactOutcome {
 ///
 use context::compact;
 
+async fn run_full_compact(
+    messages: &[Message],
+    previous_summary: Option<&str>,
+    context_size: usize,
+    client: Option<&provider::LlmClient>,
+    progress: Option<&dyn compact::CompactProgressFn>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Option<compact::CompactResult> {
+    compact::compact_messages_with_llm(
+        messages,
+        previous_summary,
+        context_size,
+        client,
+        progress,
+        cancel,
+    )
+    .await
+}
+
 /// 纯 token 判定：是否需要 compact（不含 hook / resume 保护）。
 /// 供 needs_compaction() 状态机判定使用，避免无条件进 Compacting 状态。
 pub(crate) fn should_compact_now(
@@ -41,6 +60,7 @@ pub(crate) async fn auto_compact<S>(
     hook_runner: &HookRunner,
     turn_count: usize,
     messages: &[Message],
+    previous_summary: Option<&str>,
     system_prompt_text: &str,
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
@@ -122,9 +142,9 @@ where
     // full compact：summary + recent tail
     let progress = make_progress_sink(sink);
 
-    let result = compact::compact_messages_with_llm(
+    let result = run_full_compact(
         messages,
-        system_prompt_text,
+        previous_summary,
         context_size,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
@@ -229,6 +249,7 @@ pub(crate) async fn manual_compact<S>(
     hook_runner: &HookRunner,
     turn_count: usize,
     messages: &[Message],
+    previous_summary: Option<&str>,
     system_prompt_text: &str,
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
@@ -240,8 +261,6 @@ pub(crate) async fn manual_compact<S>(
 where
     S: ChatEventSink,
 {
-    use context::compact;
-
     if messages.len() <= 4 {
         let _ = sink
             .send_event(RuntimeStreamEvent::SystemMessage(
@@ -313,15 +332,14 @@ where
             .await;
     }
 
-    // full compact：summary + recent tail（手动场景绕过 token 阈值不太合适，
-    // 但 compact_messages_with_llm 内部的 needs_compaction 会基于 system_prompt + context_size
-    // 判断；手动 compact 时用户明确要求，若消息太少会返回 None）。
+    // full compact：summary + recent tail。手动场景由用户明确触发，绕过 token 阈值；
+    // 消息太少时 compact_messages_with_llm 返回 None。
     let progress = make_progress_sink(sink);
     let manual_cancel = tokio_util::sync::CancellationToken::new();
 
-    let result = compact::compact_messages_with_llm(
+    let result = run_full_compact(
         messages,
-        system_prompt_text,
+        previous_summary,
         context_size,
         Some(llm_client.as_ref()),
         Some(progress.as_ref()),
@@ -376,7 +394,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::should_compact_now;
+    use super::{run_full_compact, should_compact_now};
+    use share::message::Message;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn auto_compact_uses_latest_normalized_total() {
@@ -391,5 +411,26 @@ mod tests {
     #[test]
     fn auto_compact_requires_compressible_messages() {
         assert!(!should_compact_now(Some(900_000), 1_048_576, 4));
+    }
+
+    #[tokio::test]
+    async fn main_second_compact_passes_previous_summary_to_context() {
+        let messages = (0..10)
+            .map(|index| Message::user(format!("message-{index}")))
+            .collect::<Vec<_>>();
+        let cancel = CancellationToken::new();
+
+        let result = run_full_compact(
+            &messages,
+            Some("first main compact summary"),
+            100_000,
+            None,
+            None,
+            &cancel,
+        )
+        .await
+        .expect("second compact should run");
+
+        assert!(result.summary.contains("first main compact summary"));
     }
 }

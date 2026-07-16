@@ -224,9 +224,12 @@ pub struct Usage {
     /// or `usage.reasoning_tokens` (if provider supports it).
     #[serde(default)]
     pub reasoning_tokens: Option<u32>,
-    /// Total tokens for this request (`prompt_tokens + completion_tokens`).
-    /// Parsed from `usage.total_tokens` (OpenAI-compatible / Anthropic).
-    /// Falls back to `input_tokens + output_tokens` when the provider omits this field.
+    /// Provider-normalized total tokens for this request.
+    ///
+    /// OpenAI-compatible adapters prefer reported `total_tokens`, falling back to
+    /// `input_tokens + output_tokens` without re-adding cached tokens. Anthropic
+    /// adapters normalize `input_tokens + cache_read_input_tokens
+    /// + cache_creation_input_tokens + output_tokens`.
     #[serde(default)]
     pub total_tokens: Option<u32>,
 }
@@ -242,6 +245,14 @@ impl Usage {
 
     pub fn finalize_total_tokens(&mut self, additional_input_tokens: u32) {
         self.total_tokens = Some(self.normalized_total_tokens(additional_input_tokens));
+    }
+
+    pub fn finalize_anthropic_total_tokens(&mut self) {
+        let cache_tokens = self
+            .cached_tokens
+            .unwrap_or(0)
+            .saturating_add(self.cache_creation_tokens.unwrap_or(0));
+        self.finalize_total_tokens(cache_tokens);
     }
 }
 

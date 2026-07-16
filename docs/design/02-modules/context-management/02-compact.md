@@ -517,6 +517,9 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
 - Summary **MUST** 精确保留用户要求的动作层级，**NEVER** 把 inspect / diagnose / explain / review / design 升级为 implement / edit / commit / push / merge。
 - Summary **MUST** 分开记录 `User Requests`、`Work Completed`、`Problems / Findings`、`Current State` 与单一 `Next Action`，并区分已确认事实、推断与未知项。
 - Summary **MUST** 输出 `Continue | Waiting for User | Completed` 三态 continuation。`Continue` 表示下一轮模型直接执行 `Next Action`，不等待新用户输入；`Waiting for User` 只用于确实缺少批准、选择、输入或新权限；`Completed` 只用于用户请求已交付且没有剩余工作。
+- 连续 compact 时，上一轮 active summary **MUST** 作为 authoritative previous summary 显式进入下一轮 compact 输入；Runtime **MAY** 替换 summary block，但 **NEVER** 在生成新 summary 前丢弃旧 summary。
+- 单次 LLM compact 请求 **MUST** 只有一份带真实 history 的 compact prompt；**NEVER** 在尾部追加一条没有 history 的重复指令。
+- 本地 fallback **MUST** 把 assistant 文本和 ToolUse 标为未验证报告 / 已观察调用，**NEVER** 直接据此声称工作完成；只有最新 unresolved user request 可输出 `Continue`，assistant 的等待、普通报告或完成报告都保守输出 `Waiting for User`。`Completed` 只允许语义摘要在确认交付事实后输出。
 - Recent tail 的切分位置与 summary 覆盖范围是两个独立概念：调整 summary 输入 **NEVER** 隐式改变 tail 的预算、Run/Step 边界或 `split_point`。
 
 ### 8.4 compact_window 切分
@@ -610,23 +613,35 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 - **绕过 token 阈值检查**，但必须存在至少一个可进入 summary 的 finalized RunStep
 - manual compact 不经过 `compaction_decision` 判定，直接进入 compact use case；内部 **NEVER** 重复检查自动阈值
 
-### 8.9 当前最小战术修复（不实现 Step schema）
+### 8.9 Current 落地边界与 Deferred 迁移
 
 当前生产 `ChatChain` 只保留 Run/segment 边界，并在 compact 前调用
 `messages_flat()`；因此现状**无法正确按 RunStep 裁 recent tail**。在
-`CommittedRunStep` backing 落地前，允许以下最小安全修复：
+`CommittedRunStep` backing 落地前，Current 与 Target 必须明确区分：
+
+**Current（本次已实现）**：
 
 1. Provider ACL 先产出标准化 `last_total_tokens`，Runtime 仅以
    `last_total_tokens > threshold` 进入 `Compacting`，成功后清空该值；
-2. 把现有 segment-aware Microcompact 从 `compact()` 内移到每次
-   `PreparingContext` 的常驻投影阶段；保护最近 3 个 Run。Snip 复用同一
-   Run traversal，但保持自身“被后续 Edit/Write 覆盖”的规则；
-3. 删除 auto compact 各层重复阈值判断，`Compacting` 内只执行一次管线；
-4. recent tail 暂时按完整 `ChatSegment` / Run 从最远端移除到 30% 以内，
-   **NEVER** 根据 message role 或 ToolUse/ToolResult 猜 Step；
-5. 该降级 MAY 多移除一些历史，但 summary 覆盖被移除的完整 Run，且不会破坏
-   ToolUse/ToolResult 配对。Step-aware tail 必须等待 Session schema 保存
-   `RunId → RunStepId → messages` 后再实现。
+2. 删除 auto compact 各层重复阈值判断，`Compacting` 内只执行一次管线；
+3. 连续 compact 把上一轮 active summary 显式并入下一轮 summary 输入；
+4. recent tail **保持现有实现不变**：按 message 数保留约 10%（至少 4 条），
+   并在 tail 内修复 ToolUse/ToolResult 配对、占位 ToolResult；这不是
+   Run/Step-aware 算法；
+5. 现有 Microcompact 仍在 compact 管线内执行；本次未把它迁移为
+   `PreparingContext` 常驻投影，也未新增 micro 实验。
+
+**Deferred / Target（本次不实现）**：
+
+1. Snip / Microcompact 在每次 `PreparingContext` 常驻执行，并统一按完整 Run
+   保护最近 3 个 Run；
+2. recent tail 按完整 finalized RunStep 选择，使用 `context_size * 30%`
+   token 预算并从最远 Step 开始移出；
+3. Session schema 保存 `RunId → RunStepId → messages`，compact 提交前保持
+   Run / Step 结构，只在 Provider 出站时扁平化。
+
+在这些 Deferred 项落地前，文档中的 Run/Step-aware 30% 算法均为 Target，
+**NEVER** 作为 Current 行为或“已完成的最小修复”验收。
 
 ## 9. 幂等性设计（#550）
 
@@ -687,5 +702,5 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | 2026-07-12 | 初稿：五级管线、ContextPort 签名、L1-L5 策略设计、幂等性、circuit breaker、常量统一 | #786 |
 | 2026-07-15 | #868 实现回写：ContextPort 冻结四方法与 provider-neutral PL；append 使用 revision/fingerprint CAS 并返回 typed receipt，Runtime 只消费 Context-owned 契约 | [#868](https://github.com/rushsinging/aemeath/issues/868) |
 | 2026-07-16 | compact 战术修改：Run 级冷却（每 Run 最多 compact 一次，防死循环）；compact 后重置 token 计数；recent tail 10%（从 30% 调低）；recent tail ToolResult 全部占位符替换；summary_budget 动态计算（context_size * 2%） | #1110 |
-| 2026-07-17 | Snip/Microcompact 统一保护最近 3 个 Run；自动触发改为 Provider 标准化 last_total_tokens；recent tail 按完整 RunStep 且上限为 context window 30%；记录无 Step schema 时按完整 Run 降级的最小修复 | compact token reset design |
+| 2026-07-17 | 自动触发落地 Provider 标准化 last_total_tokens；明确 Snip/Microcompact 常驻、Run/Step-aware 30% recent tail 为 Deferred Target，Current tail 仍保持 message 10% | compact token reset design |
 | 2026-07-17 | 补充 L5 summary 保真度：所有被移除消息必须进入 summary；按序汇总用户输入且后续修正覆盖前述冲突要求；禁止动作层级升级；增加 continuation 三态 | [#671](https://github.com/rushsinging/aemeath/issues/671) |

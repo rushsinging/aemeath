@@ -238,3 +238,57 @@ git diff -- agent/features/context/src/adapters/compact_summary.rs \
 ```
 
 Result: recent tail 的 `split_point` 和 `messages[window.split_point..]` 行为未改变；microcompact 实验不在最终 diff 中。
+
+### Task 5: 合入前审查修复
+
+**Files:**
+- Modify: `agent/features/context/src/adapters/compact_summary.rs`
+- Modify: `agent/features/context/src/adapters/compact_summary_tests.rs`
+- Modify: `agent/features/provider/src/adapters/{anthropic,openai_compatible,stream}.rs`
+- Modify: `agent/features/runtime/src/application/{agent,chat,token_usage.rs}`
+- Modify: `docs/design/02-modules/context-management/{02-compact,03-token-budget}.md`
+
+- [x] **Step 1: 连续 compact 显式传入 previous active summary**
+
+Main 通过 `active_summary.as_deref()`、Sub 通过 tagged system block 提取上一轮
+summary；Context 在单次 compact、map-reduce 和 fallback 三条路径中都把它作为
+authoritative history 合并。
+
+- [x] **Step 2: 删除重复空历史 compact prompt**
+
+`llm_compact` 只发送 `build_compact_request` 生成的一条 user message；测试断言
+prompt 与 `<conversation_history>` 各出现一次。
+
+- [x] **Step 3: fallback 保守表达事实与 continuation**
+
+Assistant 文本标为 unverified report，ToolUse 标为 outcome not established；
+最新 unresolved user request 输出 Continue；assistant 的等待、普通报告或完成报告
+都保守输出 Waiting for User。`not completed` / `not merged` / `未完成` / `没有合入`
+等否定表达不会被识别为完成。fallback 不再固定 Continue，也不把调用行为或
+未验证报告写成已完成事实；权威 Completed 仅由语义 LLM 摘要在确认交付后输出。
+
+- [x] **Step 4: 补 Provider → Runtime 分层测试**
+
+Anthropic non-stream JSON 与 stream `message_start` fixture 覆盖
+`input + cache_read + cache_creation + output`；OpenAI chat / Responses usage
+fixture 覆盖 reported total 优先与 input+output fallback；Runtime 统一 helper
+消费 Provider 已标准化 total，Main / Sub 共用。
+
+- [x] **Step 5: 校正文档 Current / Target 边界**
+
+明确 Current recent tail 仍为 message 10%（至少 4 条）、既有 Microcompact 仍在
+compact 管线；Run/Step-aware 30% tail 与 PreparingContext 常驻 Snip/Microcompact
+均为 Deferred Target，本次不实现。
+
+- [x] **Step 6: 审查修复后完整验证**
+
+Result:
+
+- `cargo test -p provider`: 169 unit + 1 contract passed。
+- `cargo test -p context`: 121 unit + all contract/scenario tests passed。
+- `cargo test -p runtime`: 418 unit + 3 contract passed。
+- `cargo check --workspace`: passed。
+- `cargo clippy -p provider -p context -p runtime --all-targets`: passed。
+- `cargo fmt -p provider -p context -p runtime -- --check`: passed for touched crates；
+  unrelated pre-existing Runtime formatting difference was not included。
+- `git diff --check`: passed。

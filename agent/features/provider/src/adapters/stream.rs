@@ -251,11 +251,7 @@ pub async fn parse_stream(
         }
     }
 
-    let additional_input_tokens = usage
-        .cached_tokens
-        .unwrap_or(0)
-        .saturating_add(usage.cache_creation_tokens.unwrap_or(0));
-    usage.finalize_total_tokens(additional_input_tokens);
+    usage.finalize_anthropic_total_tokens();
 
     Ok(StreamResponse {
         assistant_message: Message {
@@ -266,4 +262,33 @@ pub async fn parse_stream(
         usage,
         stop_reason,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::invoke::StreamEvent;
+
+    #[test]
+    fn anthropic_message_start_deserializes_all_input_token_components() {
+        let event: StreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "message_start",
+            "message": {
+                "usage": {
+                    "input_tokens": 100,
+                    "cache_read_input_tokens": 80,
+                    "cache_creation_input_tokens": 30,
+                    "output_tokens": 0
+                }
+            }
+        }))
+        .expect("valid Anthropic message_start fixture");
+
+        let StreamEvent::MessageStart { message } = event else {
+            panic!("expected message_start");
+        };
+        assert_eq!(message.usage.input_tokens, 100);
+        assert_eq!(message.usage.cached_tokens, Some(80));
+        assert_eq!(message.usage.cache_creation_tokens, Some(30));
+        assert_eq!(message.usage.normalized_total_tokens(110), 210);
+    }
 }

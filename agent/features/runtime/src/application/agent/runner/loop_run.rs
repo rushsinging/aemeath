@@ -373,7 +373,9 @@ impl RunLoopPort for SubAgentRun<'_> {
             Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),
         };
 
-        self.last_total_tokens = Some(u64::from(resp.usage.normalized_total_tokens(0)));
+        self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
+            &resp.usage,
+        ));
         self.progress_api_ok(turn_number, &resp);
 
         let usage = StepTokenUsage {
@@ -382,7 +384,7 @@ impl RunLoopPort for SubAgentRun<'_> {
             cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
             cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: u64::from(resp.usage.normalized_total_tokens(0)),
+            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
             context_window: self.ctx_context_size as u64,
             est_system_tokens: effective_blocks
                 .iter()
