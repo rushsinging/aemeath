@@ -93,6 +93,9 @@ where
     pub(crate) last_api_output_tokens: &'a mut u64,
     pub(crate) cached_tokens: &'a mut Option<u64>,
     pub(crate) reasoning_tokens: &'a mut Option<u64>,
+    /// Run 级 compact 冷却标记：同一 Run 内 compact 成功后设为 true，
+    /// 防止 recent tail 仍超阈值时 engine loop 反复 compact（死循环抖动）。
+    pub(crate) compacted_this_run: bool,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
         &'a crate::application::chat::looping::tool_identity::ToolIdentityRegistry,
@@ -278,6 +281,8 @@ where
             *self.last_api_output_tokens = 0;
             *self.cached_tokens = None;
             *self.reasoning_tokens = None;
+            // 标记此 Run 已 compact，防止 recent tail 仍超阈值时死循环
+            self.compacted_this_run = true;
         }
     }
 
@@ -573,6 +578,10 @@ where
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
+        // Run 级冷却：同一 Run compact 过就不再重复，防止 recent tail 仍超阈值时死循环。
+        if self.compacted_this_run {
+            return Ok(false);
+        }
         // `auto_compact` is the existing source of truth (including resume protection and hooks).
         Ok(true)
     }

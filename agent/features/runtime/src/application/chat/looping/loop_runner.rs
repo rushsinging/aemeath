@@ -514,6 +514,7 @@ where
             last_api_output_tokens: &mut last_api_output_tokens,
             cached_tokens: &mut cached_tokens,
             reasoning_tokens: &mut reasoning_tokens,
+            compacted_this_run: false,
             task_reminder_state: &mut task_reminder_state,
             tool_identity: &tool_identity,
             started_at,
