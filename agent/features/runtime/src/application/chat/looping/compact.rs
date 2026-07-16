@@ -112,6 +112,19 @@ where
         )
     };
 
+    log::debug!(
+        target: LOG_TARGET,
+        "auto_compact 判定: should_compact={} messages={} last_input_tokens={} last_output_tokens={} cached={:?} reasoning={:?} context_size={} turn={}",
+        should_compact,
+        messages.len(),
+        last_api_input_tokens,
+        last_api_output_tokens,
+        cached_tokens,
+        reasoning_tokens,
+        context_size,
+        turn_count,
+    );
+
     if !should_compact || messages.len() <= 4 {
         return None;
     }
@@ -148,6 +161,29 @@ where
     .await?;
 
     let new_len = result.recent_messages.len();
+
+    // 估算 compact 前后 token，验证压缩效果（粗略：序列化字节数 / 4）
+    let estimate_tok = |msgs: &[Message]| -> usize {
+        msgs.iter()
+            .map(|m| {
+                let s = serde_json::to_string(m).unwrap_or_default();
+                s.len() / 4
+            })
+            .sum()
+    };
+    let old_tokens = estimate_tok(messages);
+    let new_recent_tokens = estimate_tok(&result.recent_messages);
+    let summary_tokens = result.summary.len() / 4;
+    log::debug!(
+        target: LOG_TARGET,
+        "auto_compact 完成: {} → {} messages, 估算 token {} → {} (recent) + {} (summary)",
+        old_len,
+        new_len,
+        old_tokens,
+        new_recent_tokens,
+        summary_tokens,
+    );
+
     let _ = sink
         .send_event(RuntimeStreamEvent::SystemMessage(format!(
             "[auto-compacted: {} → {} messages]",
