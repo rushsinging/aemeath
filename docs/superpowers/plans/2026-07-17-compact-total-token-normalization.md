@@ -21,7 +21,7 @@
 - Modify: `agent/features/provider/src/adapters/openai_compatible/responses_stream.rs`
 - Test: `agent/features/provider/src/domain/invoke.rs`
 
-- [ ] **Step 1: Write failing unit tests for provider-family normalization**
+- [x] **Step 1: Write failing unit tests for provider-family normalization**
 
 Add tests for:
 
@@ -62,7 +62,7 @@ fn anthropic_total_includes_cache_read_and_creation_tokens() {
 }
 ```
 
-- [ ] **Step 2: Run the provider tests and verify RED**
+- [x] **Step 2: Run the provider tests and verify RED**
 
 Run:
 
@@ -72,7 +72,7 @@ cargo test -p provider normalized_total_tokens
 
 Expected: compilation fails because `Usage::normalized_total_tokens` does not exist.
 
-- [ ] **Step 3: Add the shared normalization helper**
+- [x] **Step 3: Add the shared normalization helper**
 
 Implement one checked/saturating helper on `Usage`:
 
@@ -101,7 +101,7 @@ usage.cached_tokens.unwrap_or(0)
 
 This preserves OpenAI cached-token semantics and includes both Anthropic cache components.
 
-- [ ] **Step 4: Run provider tests and verify GREEN**
+- [x] **Step 4: Run provider tests and verify GREEN**
 
 Run:
 
@@ -111,7 +111,7 @@ cargo test -p provider normalized_total_tokens
 
 Expected: all matching tests pass.
 
-- [ ] **Step 5: Run all provider tests**
+- [x] **Step 5: Run all provider tests**
 
 Run:
 
@@ -127,7 +127,7 @@ Expected: all provider tests pass.
 - Modify: `agent/features/context/src/domain/token_budget.rs`
 - Modify: `agent/features/context/src/domain/token_budget_tests.rs`
 
-- [ ] **Step 1: Write failing threshold tests**
+- [x] **Step 1: Write failing threshold tests**
 
 Add tests that call the intended API directly:
 
@@ -144,7 +144,7 @@ fn normalized_total_at_or_below_threshold_does_not_need_compaction() {
 }
 ```
 
-- [ ] **Step 2: Run the context tests and verify RED**
+- [x] **Step 2: Run the context tests and verify RED**
 
 Run:
 
@@ -154,7 +154,7 @@ cargo test -p context needs_compaction_total
 
 Expected: compilation fails because `needs_compaction_total` does not exist.
 
-- [ ] **Step 3: Implement the provider-neutral comparison**
+- [x] **Step 3: Implement the provider-neutral comparison**
 
 Add:
 
@@ -167,7 +167,7 @@ pub fn needs_compaction_total(last_total_tokens: u64, context_size: usize) -> bo
 
 Retain the existing compatibility helper only if another production caller still needs it; otherwise migrate callers and remove the obsolete multi-field compact decision helper and its misleading cache comments.
 
-- [ ] **Step 4: Run context tests and verify GREEN**
+- [x] **Step 4: Run context tests and verify GREEN**
 
 Run:
 
@@ -185,7 +185,7 @@ Expected: both threshold tests pass.
 - Modify: `agent/features/runtime/src/application/chat/looping/compact.rs`
 - Test: `agent/features/runtime/src/application/chat/looping/loop_runner_tests.rs`
 
-- [ ] **Step 1: Write failing pure-decision tests**
+- [x] **Step 1: Write failing pure-decision tests**
 
 Add tests for `should_compact_now(last_total_tokens, context_size, message_count)`:
 
@@ -206,7 +206,7 @@ fn auto_compact_requires_compressible_messages() {
 }
 ```
 
-- [ ] **Step 2: Run the runtime tests and verify RED**
+- [x] **Step 2: Run the runtime tests and verify RED**
 
 Run:
 
@@ -216,7 +216,7 @@ cargo test -p runtime auto_compact_
 
 Expected: compilation fails because the old function has a different signature and still accepts raw token fields.
 
-- [ ] **Step 3: Replace Main compact state with `last_total_tokens`**
+- [x] **Step 3: Replace Main compact state with `last_total_tokens`**
 
 Use:
 
@@ -241,7 +241,7 @@ After a successful provider response:
 
 Preserve the existing uncommitted change that removes the duplicate threshold check inside the compact pipeline.
 
-- [ ] **Step 4: Run runtime tests and verify GREEN**
+- [x] **Step 4: Run runtime tests and verify GREEN**
 
 Run:
 
@@ -258,7 +258,7 @@ Expected: all matching tests pass.
 - Modify: `agent/features/runtime/src/application/agent/runner/setup.rs`
 - Test: `agent/features/runtime/src/application/agent/runner/loop_run.rs`
 
-- [ ] **Step 1: Write a failing Sub compact state test**
+- [x] **Step 1: Write a failing Sub compact state test**
 
 Add a focused unit test proving:
 
@@ -267,7 +267,7 @@ assert!(!sub_needs_compaction(None, 1_048_576));
 assert!(sub_needs_compaction(Some(900_000), 1_048_576));
 ```
 
-- [ ] **Step 2: Run the Sub test and verify RED**
+- [x] **Step 2: Run the Sub test and verify RED**
 
 Run:
 
@@ -277,11 +277,11 @@ cargo test -p runtime sub_needs_compaction
 
 Expected: compilation fails because the helper/state does not exist.
 
-- [ ] **Step 3: Replace Sub raw compact counters**
+- [x] **Step 3: Replace Sub raw compact counters**
 
 Store `last_total_tokens: Option<u64>`, update it from normalized provider usage, compare it through `needs_compaction_total`, and reset it to `None` after compact. Keep raw input/output/cache fields only inside `StepTokenUsage` and cost/audit records.
 
-- [ ] **Step 4: Run the Sub test and verify GREEN**
+- [x] **Step 4: Run the Sub test and verify GREEN**
 
 Run:
 
@@ -304,7 +304,7 @@ Run:
 cargo fmt --all
 ```
 
-- [ ] **Step 2: Run layer tests**
+- [x] **Step 2: Run layer tests**
 
 Run:
 
@@ -327,7 +327,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Expected: both commands exit successfully with no warnings.
 
-- [ ] **Step 4: Verify scope**
+- [x] **Step 4: Verify scope**
 
 Run:
 
@@ -337,3 +337,16 @@ git diff --name-only
 ```
 
 Expected: recent-tail selection logic and Session Step schema are unchanged; only token normalization, compact decision/reset, tests, and aligned design/plan documents appear.
+
+### Verification Notes
+
+- Targeted `rustfmt --check` passed for every modified Rust file. Repository-wide
+  `cargo fmt --all -- --check` remains blocked by pre-existing formatting differences
+  outside this change.
+- `cargo check --workspace` passed.
+- Strict `cargo clippy --workspace --all-targets -- -D warnings` is blocked only by
+  the pre-existing uncommitted `compact_summary.rs` change leaving `system_prompt`
+  unused. Re-running with only `unused-variables` allowed passed, proving there are
+  no additional clippy failures from this implementation.
+- `cargo test -p provider`, `cargo test -p context`, and `cargo test -p runtime`
+  passed after the final code changes.
