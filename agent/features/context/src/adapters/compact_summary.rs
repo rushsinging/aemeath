@@ -8,14 +8,9 @@ use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
-/// ToolResult 文本超过此字符数时替换为占位符（≈2000 token）。
-/// recent tail 保留的是原始消息，大 ToolResult（读大文件/grep 大量结果）
-/// 会让 compact 后 token 仍超阈值，导致死循环或 context 爆满。
-const TOOL_RESULT_MAX_CHARS: usize = 8000;
-
-/// 替换 recent_messages 中超阈值的 ToolResult 文本为占位符。
-/// 保留 tool_use_id 和消息结构（保证 LLM 能继续工具调用链路），
-/// 但 text 内容替换为简短占位符，大幅降低 token 占用。
+/// 将 recent_messages 中所有 ToolResult 文本替换为占位符。
+/// recent tail 的工具结果内容已被 summary 涵盖，保留原始大块文本会浪费 context。
+/// 保留 tool_use_id 和消息结构（保证 LLM 能继续工具调用链路）。
 fn truncate_large_tool_results(messages: &mut [Message]) {
     for msg in messages.iter_mut() {
         for block in msg.content.iter_mut() {
@@ -25,15 +20,11 @@ fn truncate_large_tool_results(messages: &mut [Message]) {
                 ..
             } = block
             {
-                let original_chars = text.chars().count();
-                if original_chars > TOOL_RESULT_MAX_CHARS {
-                    *text = format!(
-                        "[tool result omitted during compaction: {original_chars} chars]",
-                    );
+                if !text.is_empty() {
+                    *text = "[tool result omitted during compaction]".to_string();
                     log::debug!(
                         target: "aemeath:agent:storage",
-                        "compact placeholder ToolResult {tool_use_id}: {original_chars} → {} chars",
-                        text.chars().count()
+                        "compact placeholder ToolResult {tool_use_id}",
                     );
                 }
             }
