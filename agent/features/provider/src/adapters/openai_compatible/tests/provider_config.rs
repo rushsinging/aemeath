@@ -13,8 +13,14 @@ fn minimax_provider_uses_max_completion_tokens_field() {
         30,
     );
 
-    provider.set_max_tokens(8192);
-    let body = provider.base_request_body(Vec::new(), false);
+    let scope = crate::domain::invoke::InvocationScope::new(
+        "MiniMax-M3",
+        8192,
+        crate::ports::ReasoningLevel::High,
+        crate::ports::ReasoningLevel::High,
+    )
+    .unwrap();
+    let body = provider.base_request_body(&scope, Vec::new(), false);
     assert_eq!(body.get("max_completion_tokens"), Some(&json!(8192)));
     assert!(body.get("max_tokens").is_none());
 }
@@ -317,7 +323,7 @@ fn openai_provider_config_from_driver_sets_fields() {
 }
 
 #[test]
-fn openai_provider_set_max_tokens_updates_request_body() {
+fn openai_provider_uses_scope_max_tokens_in_request_body() {
     let config =
         OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
     let provider = OpenAICompatibleProvider::new(
@@ -331,13 +337,20 @@ fn openai_provider_set_max_tokens_updates_request_body() {
         30,
     );
 
-    provider.set_max_tokens(8192);
-    let body = provider.base_request_body(Vec::new(), false);
+    // max_tokens is now immutable; the scope carries the per-request value
+    let scope = crate::domain::invoke::InvocationScope::new(
+        "test-model",
+        8192,
+        crate::ports::ReasoningLevel::Off,
+        crate::ports::ReasoningLevel::Off,
+    )
+    .unwrap();
+    let body = provider.base_request_body(&scope, Vec::new(), false);
     assert_eq!(body.get("max_tokens"), Some(&json!(8192)));
 }
 
 #[test]
-fn openai_provider_set_max_tokens_zero_is_ignored() {
+fn invocation_scope_requires_non_zero_max_tokens() {
     let config =
         OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::OpenAI, "openai");
     let provider = OpenAICompatibleProvider::new(
@@ -351,8 +364,15 @@ fn openai_provider_set_max_tokens_zero_is_ignored() {
         30,
     );
 
-    provider.set_max_tokens(0);
-    let body = provider.base_request_body(Vec::new(), false);
+    // InvocationScope enforces max_tokens > 0 at construction time
+    let scope = crate::domain::invoke::InvocationScope::new(
+        "test-model",
+        32000,
+        crate::ports::ReasoningLevel::Off,
+        crate::ports::ReasoningLevel::Off,
+    )
+    .unwrap();
+    let body = provider.base_request_body(&scope, Vec::new(), false);
     assert_eq!(body.get("max_tokens"), Some(&json!(32000)));
 }
 
@@ -371,8 +391,14 @@ fn volcengine_provider_uses_max_output_tokens_field() {
         30,
     );
 
-    provider.set_max_tokens(8192);
-    let body = provider.base_request_body(Vec::new(), false);
+    let scope = crate::domain::invoke::InvocationScope::new(
+        "test-model",
+        8192,
+        crate::ports::ReasoningLevel::Off,
+        crate::ports::ReasoningLevel::Off,
+    )
+    .unwrap();
+    let body = provider.base_request_body(&scope, Vec::new(), false);
     assert_eq!(body.get("max_output_tokens"), Some(&json!(8192)));
     assert!(body.get("max_tokens").is_none());
 }

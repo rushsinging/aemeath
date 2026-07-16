@@ -329,7 +329,14 @@ async fn llm_generate(
         }));
 
         client
-            .stream_message(&[], &request, &[], &mut handler, cancel)
+            .stream_message(
+                client.default_scope(),
+                &[],
+                &request,
+                &[],
+                &mut handler,
+                cancel,
+            )
             .await
             .map_err(|e| format!("LLM call failed: {e}"))?;
     }

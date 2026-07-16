@@ -19,11 +19,15 @@ impl OpenAICompatibleProvider {
         })
     }
 
-    /// 将消息从 Anthropic 格式转换为 OpenAI 格式
+    /// 将消息从 Anthropic 格式转换为 OpenAI 格式。
+    ///
+    /// `reasoning_enabled` controls whether empty `reasoning_content` is
+    /// emitted on assistant messages that lack thinking blocks—needed for
+    /// DeepSeek compatibility when thinking mode is active.
     pub(crate) fn convert_messages(
-        &self,
         system: &[SystemBlock],
         messages: &[Message],
+        reasoning_enabled: bool,
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {
         let mut openai_messages = Vec::new();
 
@@ -147,10 +151,7 @@ impl OpenAICompatibleProvider {
             // DeepSeek 拒绝省略该字段的历史记录（"thinking 模式下的
             // `reasoning_content` 必须回传给 API"），即使模型未输出推理内容的轮次也是如此。
             // 空字符串可以接受。其他 OpenAI 兼容 provider 会静默忽略未知字段。
-            if msg.role == Role::Assistant
-                && (reasoning_content.is_some()
-                    || self.reasoning.load(std::sync::atomic::Ordering::Relaxed))
-            {
+            if msg.role == Role::Assistant && (reasoning_content.is_some() || reasoning_enabled) {
                 let rc = reasoning_content.unwrap_or_default();
                 message["reasoning_content"] = serde_json::Value::String(rc);
             }

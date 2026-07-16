@@ -23,27 +23,18 @@ impl AgentRunner for CliAgentRunner {
         let role = self.resolve_role(model_spec);
         let resolved_spec = self.resolve_model_spec(model_spec);
 
-        // Model-specific sub Runs get an isolated client. The shared default client is guarded
-        // for the full Run because max_tokens/reasoning_level are mutable provider settings.
-        let (client, shared_client_guard) = match (&self.pool, &resolved_spec) {
+        // Clients only own immutable transport/defaults. Every sub Run receives an independent scope.
+        let client = match (&self.pool, &resolved_spec) {
             (Some(pool), Some(spec)) => match pool.get_isolated_client(spec) {
-                Ok(client) => (std::sync::Arc::new(client), None),
+                Ok(client) => std::sync::Arc::new(client),
                 Err(error) => {
                     return tools::api::AgentRunTerminal::Failed { error };
                 }
             },
-            _ => {
-                let guard = self.shared_client_lock.clone().lock_owned().await;
-                (self.client.clone(), Some(guard))
-            }
+            _ => self.client.clone(),
         };
 
         let max_tokens_override = Self::role_max_tokens_override(role);
-        let previous_max_tokens = client.max_tokens();
-        let previous_reasoning_level = client.current_reasoning_level();
-        if let Some(max_tokens) = max_tokens_override {
-            client.set_max_tokens(max_tokens);
-        }
 
         // Determine reasoning for this sub-agent: role config > model config > default
         let role_reasoning = role.and_then(|r| r.reasoning);
@@ -81,7 +72,18 @@ impl AgentRunner for CliAgentRunner {
                 }
             }
         };
-        client.set_reasoning_level(level);
+        let invocation_scope = match client.invocation_scope(
+            client.default_scope().model(),
+            max_tokens_override,
+            level,
+        ) {
+            Ok(scope) => scope,
+            Err(error) => {
+                return tools::api::AgentRunTerminal::Failed {
+                    error: error.to_string(),
+                };
+            }
+        };
         log::info!(target: LOG_TARGET,
             "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
             reasoning,
@@ -92,8 +94,6 @@ impl AgentRunner for CliAgentRunner {
             model_effort,
             self.reasoning
         );
-
-        let restore_max_tokens = max_tokens_override.is_some();
 
         // Extract hook_runner to avoid borrow conflicts with closure
         let hook_runner = self.hook_runner.clone();
@@ -258,7 +258,7 @@ impl AgentRunner for CliAgentRunner {
             system,
             progress_tx,
             client,
-            _shared_client_guard: shared_client_guard,
+            invocation_scope,
             hook_runner,
             sub_schemas,
             messages,
@@ -279,9 +279,6 @@ impl AgentRunner for CliAgentRunner {
             role_name_for_log,
             model_name_for_log,
             resolved_spec,
-            previous_max_tokens,
-            previous_reasoning_level,
-            restore_max_tokens,
             progress: Box::new(progress),
             ctx_context_size: context_size,
         }
@@ -296,7 +293,14 @@ impl AgentRunner for CliAgentRunner {
 
         match self
             .client
-            .stream_message(&system_blocks, &messages, &[], &mut handler, &ctx.cancel)
+            .stream_message(
+                self.client.default_scope(),
+                &system_blocks,
+                &messages,
+                &[],
+                &mut handler,
+                &ctx.cancel,
+            )
             .await
         {
             Ok(resp) => resp.assistant_message.text_content(),

@@ -3,7 +3,7 @@
 use super::conversion::OllamaProviderConversion;
 use super::OllamaProvider;
 use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
-use crate::domain::invoke::{StreamResponse, SystemBlock};
+use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::StreamHandler;
 use crate::LOG_TARGET;
 use share::message::{ContentBlock, Message, Role};
@@ -11,6 +11,7 @@ use share::message::{ContentBlock, Message, Role};
 pub(crate) trait OllamaProviderNonStream {
     async fn send_message_non_stream(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -21,20 +22,21 @@ pub(crate) trait OllamaProviderNonStream {
 impl OllamaProviderNonStream for OllamaProvider {
     async fn send_message_non_stream(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let request_body = self.build_request_body(system, messages, tool_schemas, false)?;
+        let request_body = self.build_request_body(scope, system, messages, tool_schemas, false)?;
         let headers = self.build_headers()?;
         let url = format!("{}/api/chat", self.base_url);
 
         log::debug!(target: LOG_TARGET,
             "[ollama non-stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
-            self.model,
-            self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
+            scope.model(),
+            !matches!(scope.effective_reasoning(), crate::ReasoningLevel::Off),
             messages.len(),
             tool_schemas.len(),
             serde_json::to_string(&request_body)
@@ -59,7 +61,7 @@ impl OllamaProviderNonStream for OllamaProvider {
                         driver: "ollama",
                         api: "chat_non_stream",
                         provider: "ollama",
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &url,
                         attempt: 1,
                         max_attempts: 1,

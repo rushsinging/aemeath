@@ -153,7 +153,14 @@ async fn call_llm_for_reflection(
     let cancel = tokio_util::sync::CancellationToken::new();
 
     match client
-        .stream_message(&system_blocks, &messages, &[], &mut handler, &cancel)
+        .stream_message(
+            client.default_scope(),
+            &system_blocks,
+            &messages,
+            &[],
+            &mut handler,
+            &cancel,
+        )
         .await
     {
         Ok(resp) => {

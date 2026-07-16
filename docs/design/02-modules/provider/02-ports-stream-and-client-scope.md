@@ -165,6 +165,8 @@ Transport pool 的 key 至少能唯一标识 provider endpoint、认证域和 dr
 
 ## 7. Invocation Scope
 
+> **当前落地（#902）**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::stream_message`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已删除。下方 `transport / capability_fingerprint / OutputTokenLimit` 仍是后续完整 ProviderPort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
+
 ```rust
 struct InvocationScope {
     transport: Arc<ProviderTransport>,

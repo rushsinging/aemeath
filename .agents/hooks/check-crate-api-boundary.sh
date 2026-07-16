@@ -41,6 +41,7 @@ ROOT_ACCESS_ALLOW = {
         "InvocationDelta",
         "InvocationOptions",
         "InvocationRequest",
+        "InvocationScope",
         "LlmClient",
         "LlmConfigOptions",
         "LlmError",

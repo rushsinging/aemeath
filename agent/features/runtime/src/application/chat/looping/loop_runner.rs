@@ -77,6 +77,7 @@ where
         list_sessions,
     } = ctx;
     let mut client = client;
+    let mut session_reasoning = client.default_scope().requested_reasoning();
     let hook_ui = HookUi::new(sink.clone());
     let mut cwd = project::api::WorkspaceRead::current_workspace_root(workspace.as_ref());
     let memory_cwd = project::api::WorkspaceRead::initial_cwd(workspace.as_ref());
@@ -133,6 +134,8 @@ where
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
                         Ok((new_client, result)) => {
+                            session_reasoning =
+                                new_client.default_scope().requested_reasoning();
                             client = Arc::new(new_client);
                             context_size = result.context_window;
                             let _ = sink
@@ -151,7 +154,8 @@ where
                     continue;
                 }
                 PendingCommand::SetThinking { desired } => {
-                    execute_set_thinking(&client, &sink, desired).await;
+                    session_reasoning =
+                        execute_set_thinking(session_reasoning, &sink, desired).await;
                     continue;
                 }
                 PendingCommand::InitProject { force } => {
@@ -492,6 +496,7 @@ where
             active_summary: &mut active_summary,
             active_summary_arc: &active_summary_arc,
             reasoning_graph: &mut reasoning_graph,
+            session_reasoning,
             save_chain: &save_chain,
             pending_input: &mut pending_input,
             deferred_user_inputs: &mut deferred_user_inputs,

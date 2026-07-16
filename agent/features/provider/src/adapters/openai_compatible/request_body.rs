@@ -2,14 +2,13 @@ use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use share::message::Message;
 use std::error::Error as StdError;
-use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::error_log::{
     sanitize_preview, source_chain, ErrorLogContext, LlmApiErrorRecord,
 };
-use crate::domain::invoke::SystemBlock;
-use crate::ports::{LlmProvider, StreamHandler};
+use crate::domain::invoke::{InvocationScope, SystemBlock};
+use crate::ports::{LlmProvider, ReasoningLevel, StreamHandler};
 use crate::LOG_TARGET;
 
 use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
@@ -17,14 +16,15 @@ use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
 impl OpenAICompatibleProvider {
     pub(crate) fn base_request_body(
         &self,
+        scope: &InvocationScope,
         messages: Vec<serde_json::Value>,
         stream: bool,
     ) -> serde_json::Value {
         let max_tokens_field = self.driver.max_tokens_field();
         let mut request_body = serde_json::json!({
-            "model": self.model,
+            "model": scope.model(),
             "messages": messages,
-            max_tokens_field: self.current_max_tokens(),
+            max_tokens_field: scope.max_tokens(),
             "stream": stream,
         });
 
@@ -53,14 +53,21 @@ impl OpenAICompatibleProvider {
         Ok(headers)
     }
 
-    pub(crate) fn apply_reasoning_fields(&self, request_body: &mut serde_json::Value) {
-        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
-        if let Ok(guard) = self.reasoning_config.lock() {
-            // driver 自适应：clamp effort 到 provider 支持的档位
-            let clamped = guard.as_ref().map(|c| c.clamped(self.driver.as_ref()));
-            self.driver
-                .apply_reasoning_fields(request_body, clamped.as_ref(), reasoning_enabled);
-        }
+    pub(crate) fn apply_reasoning_fields(
+        &self,
+        request_body: &mut serde_json::Value,
+        scope: &InvocationScope,
+    ) {
+        let reasoning_enabled = !matches!(scope.effective_reasoning(), ReasoningLevel::Off);
+        let scoped_config = self
+            .reasoning_config
+            .as_ref()
+            .map(|config| config.for_scope(scope.effective_reasoning(), self.driver.as_ref()))
+            .unwrap_or_else(|| {
+                ReasoningConfig::from_scope(scope.effective_reasoning(), self.driver.as_ref())
+            });
+        self.driver
+            .apply_reasoning_fields(request_body, Some(&scoped_config), reasoning_enabled);
     }
 }
 
@@ -68,6 +75,7 @@ impl OpenAICompatibleProvider {
 impl LlmProvider for OpenAICompatibleProvider {
     async fn stream_message(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -77,16 +85,20 @@ impl LlmProvider for OpenAICompatibleProvider {
         // Responses API 分发（gpt-5.6-sol 等模型只支持 /v1/responses）
         if self.config.use_responses_api {
             return self
-                .stream_message_responses(system, messages, tool_schemas, handler, cancel)
+                .stream_message_responses(scope, system, messages, tool_schemas, handler, cancel)
                 .await;
         }
 
-        let openai_messages = self.convert_messages(system, messages)?;
+        let openai_messages = Self::convert_messages(
+            system,
+            messages,
+            !matches!(scope.effective_reasoning(), ReasoningLevel::Off),
+        )?;
         let tools = Self::convert_tools(tool_schemas);
 
-        let mut request_body = self.base_request_body(openai_messages, true);
+        let mut request_body = self.base_request_body(scope, openai_messages, true);
 
-        self.apply_reasoning_fields(&mut request_body);
+        self.apply_reasoning_fields(&mut request_body, scope);
 
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
@@ -214,7 +226,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 driver: "openai_compatible",
                                 api: "chat_completions_stream",
                                 provider: &self.config.source_key,
-                                model: &self.model,
+                                model: scope.model(),
                                 endpoint: &url,
                                 attempt: attempt + 1,
                                 max_attempts: self.max_retries,
@@ -234,7 +246,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                             log::debug!(target: LOG_TARGET,
                                 "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
                                 self.config.source_key,
-                                self.model,
+                                scope.model(),
                                 attempt + 1,
                                 self.max_retries,
                                 remaining,
@@ -260,7 +272,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             log::debug!(target: LOG_TARGET,
                 "[openai-compat stream] response received provider={} model={} status={} attempt={}/{} body_bytes={} messages={} tools={}",
                 self.config.source_key,
-                self.model,
+                scope.model(),
                 status,
                 attempt + 1,
                 self.max_retries,
@@ -288,7 +300,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                     driver: "openai_compatible",
                     api: "chat_completions_stream",
                     provider: &self.config.source_key,
-                    model: &self.model,
+                    model: scope.model(),
                     endpoint: &self.chat_url(),
                     attempt: attempt + 1,
                     max_attempts: self.max_retries,
@@ -333,7 +345,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                     driver: "openai_compatible",
                     api: "chat_completions_stream",
                     provider: &self.config.source_key,
-                    model: &self.model,
+                    model: scope.model(),
                     endpoint: &self.chat_url(),
                     attempt: attempt + 1,
                     max_attempts: self.max_retries,
@@ -378,7 +390,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                         driver: "openai_compatible",
                         api: "chat_completions_stream",
                         provider: &self.config.source_key,
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &self.chat_url(),
                         attempt: attempt + 1,
                         max_attempts: self.max_retries,
@@ -401,7 +413,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                     log::debug!(target: LOG_TARGET,
                         "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
                         self.config.source_key,
-                        self.model,
+                        scope.model(),
                         attempt + 1,
                         self.max_retries,
                         self.max_retries.saturating_sub(attempt + 1),
@@ -433,7 +445,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             if matches!(err, crate::LlmError::Stream(_)) {
                 handler.on_error("All streaming retries failed, attempting non-streaming fallback");
                 return self
-                    .send_message_non_stream(system, messages, tool_schemas, handler)
+                    .send_message_non_stream(scope, system, messages, tool_schemas, handler)
                     .await;
             }
         }
@@ -446,64 +458,6 @@ impl LlmProvider for OpenAICompatibleProvider {
 
     fn provider_name(&self) -> &str {
         &self.config.source_key
-    }
-
-    fn set_max_tokens(&self, max_tokens: u32) {
-        if max_tokens > 0 {
-            self.max_tokens.store(max_tokens, Ordering::Relaxed);
-        }
-    }
-
-    fn max_tokens(&self) -> u32 {
-        self.current_max_tokens()
-    }
-
-    fn set_reasoning_level(&self, level: crate::ports::ReasoningLevel) {
-        use crate::ports::ReasoningLevel;
-
-        // 同步布尔标志：Off → false，其他 → true
-        let enabled = !matches!(level, ReasoningLevel::Off);
-        self.reasoning
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-
-        // 更新 reasoning_config
-        if let Ok(mut guard) = self.reasoning_config.lock() {
-            match level {
-                ReasoningLevel::Off => {
-                    *guard = Some(ReasoningConfig::Bool(false));
-                }
-                ReasoningLevel::Low => {
-                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
-                        "effort": "low"
-                    })));
-                }
-                ReasoningLevel::Medium => {
-                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
-                        "effort": "medium"
-                    })));
-                }
-                ReasoningLevel::High => {
-                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
-                        "effort": "high"
-                    })));
-                }
-                ReasoningLevel::Xhigh => {
-                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
-                        "effort": "xhigh"
-                    })));
-                }
-                ReasoningLevel::Max => {
-                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
-                        "effort": "max"
-                    })));
-                }
-            }
-        }
-        self.store_reasoning_level(level);
-    }
-
-    fn current_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        self.load_reasoning_level()
     }
 
     fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {

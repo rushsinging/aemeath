@@ -19,14 +19,6 @@ impl ProviderInfoPort for LlmClientAdapter<provider::LlmClient> {
     fn model_name(&self) -> &str {
         self.0.model_name()
     }
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        self.0.current_reasoning_level()
-    }
-
-    fn set_reasoning_level(&self, level: provider::ReasoningLevel) {
-        self.0.set_reasoning_level(level)
-    }
 }
 
 #[async_trait::async_trait]
