@@ -272,6 +272,12 @@ where
                 self.active_summary_arc,
             )
             .await;
+            // compact 后重置 token 计数，避免下一轮 needs_compaction 用旧的大值误判。
+            // 这些字段会在下一次 invoke_model 成功后从 API 响应重新更新。
+            *self.last_api_input_tokens = 0;
+            *self.last_api_output_tokens = 0;
+            *self.cached_tokens = None;
+            *self.reasoning_tokens = None;
         }
     }
 
