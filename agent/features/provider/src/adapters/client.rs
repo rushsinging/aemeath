@@ -11,6 +11,40 @@ use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
+fn reasoning_level_from_options(
+    reasoning: bool,
+    config: Option<&ReasoningConfig>,
+) -> crate::ReasoningLevel {
+    match config {
+        Some(ReasoningConfig::Object(value)) => value
+            .get("effort")
+            .or_else(|| value.get("reasoning_effort"))
+            .and_then(|value| value.as_str())
+            .and_then(crate::ReasoningLevel::parse)
+            .unwrap_or(if reasoning {
+                crate::ReasoningLevel::High
+            } else {
+                crate::ReasoningLevel::Off
+            }),
+        Some(ReasoningConfig::ThinkingBudget(tokens)) => match *tokens {
+            0 => crate::ReasoningLevel::Off,
+            1..=1024 => crate::ReasoningLevel::Low,
+            1025..=8192 => crate::ReasoningLevel::Medium,
+            8193..=32768 => crate::ReasoningLevel::High,
+            _ => crate::ReasoningLevel::Xhigh,
+        },
+        Some(ReasoningConfig::Bool(enabled)) => {
+            if *enabled {
+                crate::ReasoningLevel::High
+            } else {
+                crate::ReasoningLevel::Off
+            }
+        }
+        None if reasoning => crate::ReasoningLevel::High,
+        None => crate::ReasoningLevel::Off,
+    }
+}
+
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
 fn truncate_preview(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
@@ -138,11 +172,22 @@ pub struct LlmConfigOptions {
 
 pub struct LlmClient {
     provider: Arc<dyn LlmProvider>,
+    default_scope: crate::InvocationScope,
 }
 
 impl LlmClient {
     pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
-        Self { provider }
+        let default_scope = crate::InvocationScope::new(
+            provider.model_name(),
+            share::config::models::DEFAULT_MAX_TOKENS,
+            crate::ReasoningLevel::Off,
+            crate::ReasoningLevel::Off,
+        )
+        .expect("provider defaults must form a valid invocation scope");
+        Self {
+            provider,
+            default_scope,
+        }
     }
 }
 
@@ -161,6 +206,9 @@ impl LlmClient {
     }
 
     pub fn with_provider(options: LlmProviderOptions) -> Self {
+        let model = options.model.clone();
+        let requested_reasoning =
+            reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
         let provider_impl: Arc<dyn LlmProvider> = match options.driver {
             ProviderDriverKind::Anthropic => Arc::new(crate::adapters::AnthropicProvider::new(
                 options.api_key,
@@ -200,8 +248,22 @@ impl LlmClient {
                 ))
             }
         };
+        let effective_reasoning =
+            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
+        let default_scope = crate::InvocationScope::new(
+            model.unwrap_or_else(|| provider_impl.model_name().to_string()),
+            if options.max_tokens == 0 {
+                share::config::models::DEFAULT_MAX_TOKENS
+            } else {
+                options.max_tokens
+            },
+            requested_reasoning,
+            effective_reasoning,
+        )
+        .expect("provider options must form a valid invocation scope");
         Self {
             provider: provider_impl,
+            default_scope,
         }
     }
 
@@ -216,6 +278,9 @@ impl LlmClient {
         reasoning_config: Option<ReasoningConfig>,
         timeout_secs: u64,
     ) -> Self {
+        let requested_reasoning =
+            reasoning_level_from_options(reasoning, reasoning_config.as_ref());
+        let model_for_scope = model.clone();
         let provider_impl: Arc<dyn LlmProvider> =
             Arc::new(crate::adapters::OpenAICompatibleProvider::new(
                 config,
@@ -227,8 +292,22 @@ impl LlmClient {
                 reasoning_config,
                 timeout_secs,
             ));
+        let effective_reasoning =
+            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
+        let default_scope = crate::InvocationScope::new(
+            model_for_scope.unwrap_or_else(|| provider_impl.model_name().to_string()),
+            if max_tokens == 0 {
+                share::config::models::DEFAULT_MAX_TOKENS
+            } else {
+                max_tokens
+            },
+            requested_reasoning,
+            effective_reasoning,
+        )
+        .expect("provider options must form a valid invocation scope");
         Self {
             provider: provider_impl,
+            default_scope,
         }
     }
 
@@ -260,6 +339,7 @@ impl LlmClient {
 
     pub async fn stream_message(
         &self,
+        scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -269,7 +349,7 @@ impl LlmClient {
         self.log_request(system, messages, tool_schemas);
         let result = self
             .provider
-            .stream_message(system, messages, tool_schemas, handler, cancel)
+            .stream_message(scope, system, messages, tool_schemas, handler, cancel)
             .await;
         if let Err(error) = &result {
             self.log_stream_error("stream_message", system, messages, tool_schemas, error);
@@ -280,6 +360,7 @@ impl LlmClient {
 
     pub async fn stream_message_raw(
         &self,
+        scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -290,7 +371,7 @@ impl LlmClient {
         let mut handler = CallbackHandler::new(callback);
         let result = self
             .provider
-            .stream_message(system, messages, tool_schemas, &mut handler, cancel)
+            .stream_message(scope, system, messages, tool_schemas, &mut handler, cancel)
             .await;
         if let Err(error) = &result {
             self.log_stream_error("stream_message_raw", system, messages, tool_schemas, error);
@@ -449,28 +530,44 @@ impl LlmClient {
         );
     }
 
+    pub fn with_default_reasoning(
+        mut self,
+        requested_reasoning: crate::ReasoningLevel,
+    ) -> Result<Self, crate::LlmError> {
+        self.default_scope = crate::InvocationScope::new(
+            self.default_scope.model(),
+            self.default_scope.max_tokens(),
+            requested_reasoning,
+            requested_reasoning.clamped_to(self.provider.max_reasoning_level()),
+        )?;
+        Ok(self)
+    }
+
+    pub fn default_scope(&self) -> &crate::InvocationScope {
+        &self.default_scope
+    }
+
+    pub fn invocation_scope(
+        &self,
+        model: impl Into<String>,
+        max_tokens: Option<u32>,
+        requested_reasoning: crate::ReasoningLevel,
+    ) -> Result<crate::InvocationScope, crate::LlmError> {
+        crate::InvocationScope::new(
+            model,
+            max_tokens.unwrap_or_else(|| self.default_scope.max_tokens()),
+            requested_reasoning,
+            requested_reasoning.clamped_to(self.provider.max_reasoning_level()),
+        )
+    }
+
     pub fn model_name(&self) -> &str {
         self.provider.model_name()
     }
     pub fn provider_name(&self) -> &str {
         self.provider.provider_name()
     }
-    pub fn set_reasoning_level(&self, level: crate::ports::ReasoningLevel) {
-        self.provider.set_reasoning_level(level);
-    }
-    pub fn current_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        self.provider.current_reasoning_level()
-    }
     pub fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
         self.provider.max_reasoning_level()
-    }
-    pub fn is_reasoning(&self) -> bool {
-        self.provider.is_reasoning()
-    }
-    pub fn set_max_tokens(&self, max_tokens: u32) {
-        self.provider.set_max_tokens(max_tokens);
-    }
-    pub fn max_tokens(&self) -> u32 {
-        self.provider.max_tokens()
     }
 }

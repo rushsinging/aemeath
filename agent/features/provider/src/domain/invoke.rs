@@ -1,5 +1,103 @@
 use serde::{Deserialize, Serialize};
 
+use super::capability::ReasoningLevel;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvocationScope {
+    model: String,
+    max_tokens: u32,
+    requested_reasoning: ReasoningLevel,
+    effective_reasoning: ReasoningLevel,
+}
+
+impl InvocationScope {
+    pub fn new(
+        model: impl Into<String>,
+        max_tokens: u32,
+        requested_reasoning: ReasoningLevel,
+        effective_reasoning: ReasoningLevel,
+    ) -> Result<Self, crate::LlmError> {
+        let model = model.into();
+        if model.trim().is_empty() {
+            return Err(crate::LlmError::Config(
+                "invocation model must not be empty".to_string(),
+            ));
+        }
+        if max_tokens == 0 {
+            return Err(crate::LlmError::Config(
+                "invocation max_tokens must be greater than zero".to_string(),
+            ));
+        }
+        if effective_reasoning > requested_reasoning {
+            return Err(crate::LlmError::Config(
+                "effective reasoning must not exceed requested reasoning".to_string(),
+            ));
+        }
+        Ok(Self {
+            model,
+            max_tokens,
+            requested_reasoning,
+            effective_reasoning,
+        })
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn max_tokens(&self) -> u32 {
+        self.max_tokens
+    }
+
+    pub fn requested_reasoning(&self) -> ReasoningLevel {
+        self.requested_reasoning
+    }
+
+    pub fn effective_reasoning(&self) -> ReasoningLevel {
+        self.effective_reasoning
+    }
+}
+
+#[cfg(test)]
+mod invocation_scope_tests {
+    use super::*;
+
+    #[test]
+    fn invocation_scope_freezes_resolved_values() {
+        let scope = InvocationScope::new(
+            "claude-sonnet",
+            4096,
+            ReasoningLevel::High,
+            ReasoningLevel::Medium,
+        )
+        .expect("valid scope");
+
+        assert_eq!(scope.model(), "claude-sonnet");
+        assert_eq!(scope.max_tokens(), 4096);
+        assert_eq!(scope.requested_reasoning(), ReasoningLevel::High);
+        assert_eq!(scope.effective_reasoning(), ReasoningLevel::Medium);
+    }
+
+    #[test]
+    fn invocation_scope_rejects_zero_max_tokens() {
+        assert!(
+            InvocationScope::new("claude-sonnet", 0, ReasoningLevel::Off, ReasoningLevel::Off,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invocation_scope_rejects_effective_reasoning_above_requested() {
+        assert!(InvocationScope::new(
+            "claude-sonnet",
+            4096,
+            ReasoningLevel::Low,
+            ReasoningLevel::High,
+        )
+        .is_err());
+    }
+}
+
 /// A block within the system prompt, supporting prompt caching via cache_control.
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemBlock {

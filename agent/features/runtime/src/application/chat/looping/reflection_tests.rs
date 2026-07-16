@@ -16,6 +16,7 @@ struct StaticReflectionProvider {
 impl LlmProvider for StaticReflectionProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[share::message::Message],
         _tool_schemas: &[serde_json::Value],
@@ -38,12 +39,6 @@ impl LlmProvider for StaticReflectionProvider {
 
     fn provider_name(&self) -> &str {
         "test-reflection-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 

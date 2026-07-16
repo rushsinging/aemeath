@@ -9,8 +9,8 @@
 use super::parse_responses_stream;
 use super::OpenAICompatibleProvider;
 use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
-use crate::domain::invoke::{StreamResponse, SystemBlock};
-use crate::ports::StreamHandler;
+use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
+use crate::ports::{ReasoningLevel, StreamHandler};
 use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
@@ -19,13 +19,15 @@ impl OpenAICompatibleProvider {
     /// Responses API streaming 入口
     pub(crate) async fn stream_message_responses(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let request_body = self.build_responses_request_body(system, messages, tool_schemas, true);
+        let request_body =
+            self.build_responses_request_body(scope, system, messages, tool_schemas, true);
         let headers = self.build_headers()?;
 
         let request_body_bytes = serde_json::to_string(&request_body)
@@ -74,7 +76,7 @@ impl OpenAICompatibleProvider {
                                 driver: "openai_compatible",
                                 api: "responses_stream",
                                 provider: &self.config.source_key,
-                                model: &self.model,
+                                model: scope.model(),
                                 endpoint: &url,
                                 attempt: attempt + 1,
                                 max_attempts: self.max_retries,
@@ -125,7 +127,7 @@ impl OpenAICompatibleProvider {
                         driver: "openai_compatible",
                         api: "responses_stream",
                         provider: &self.config.source_key,
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &url,
                         attempt: attempt + 1,
                         max_attempts: self.max_retries,
@@ -153,6 +155,7 @@ impl OpenAICompatibleProvider {
     /// 构造 Responses API 请求 body
     pub(crate) fn build_responses_request_body(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -172,10 +175,10 @@ impl OpenAICompatibleProvider {
         // 将 messages 转换为 input 格式
         let input = messages_to_responses_input(messages);
 
-        let max_tokens = self.current_max_tokens().max(16);
+        let max_tokens = scope.max_tokens().max(16);
 
         let mut body = serde_json::json!({
-            "model": self.model,
+            "model": scope.model(),
             "input": input,
             "max_output_tokens": max_tokens,
             "stream": stream,
@@ -185,16 +188,11 @@ impl OpenAICompatibleProvider {
             body["instructions"] = serde_json::Value::String(instructions);
         }
 
-        // reasoning
-        if self.reasoning.load(std::sync::atomic::Ordering::Relaxed) {
-            if let Ok(guard) = self.reasoning_config.lock() {
-                let clamped = guard.as_ref().map(|c| c.clamped(self.driver.as_ref()));
-                let effort = clamped
-                    .as_ref()
-                    .and_then(|c| c.as_effort())
-                    .unwrap_or_else(|| "medium".to_string());
-                body["reasoning"] = serde_json::json!({ "effort": effort });
-            }
+        // reasoning effort is resolved per invocation scope.
+        if !matches!(scope.effective_reasoning(), ReasoningLevel::Off) {
+            body["reasoning"] = serde_json::json!({
+                "effort": self.driver.clamp_effort(scope.effective_reasoning().as_str())
+            });
         }
 
         // tools（Responses API 扁平格式）

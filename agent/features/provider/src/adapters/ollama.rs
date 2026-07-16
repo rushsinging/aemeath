@@ -4,12 +4,10 @@
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use share::message::Message;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
-use crate::domain::invoke::{StreamResponse, SystemBlock};
+use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{LlmProvider, StreamHandler};
 use crate::LOG_TARGET;
 
@@ -25,11 +23,6 @@ pub struct OllamaProvider {
     pub(crate) api_key: String,
     pub(crate) base_url: String,
     pub(crate) model: String,
-    pub(crate) max_tokens: Arc<AtomicU32>,
-    /// If false, send `think: false` to disable reasoning mode for models
-    /// that support it (qwen3, deepseek-r1, gpt-oss, etc.)
-    pub(crate) reasoning: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub(crate) reasoning_level: std::sync::Arc<std::sync::atomic::AtomicU8>,
     pub(crate) user_agent: String,
     pub(crate) http: reqwest::Client,
     pub(crate) max_retries: u32,
@@ -41,12 +34,16 @@ pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(crate::OLLAMA_STREAM_IDLE_TIMEOUT_SECS);
 
 impl OllamaProvider {
+    /// `max_tokens` / `reasoning` 不再作为可变运行时状态保留：每次调用的实际
+    /// max_tokens / 推理档位由调用方传入的 `InvocationScope` 决定（不可变、
+    /// 一次调用一份快照）。这两个构造参数仅为保持调用方签名兼容而保留，
+    /// 当前未参与任何 immutable default 的派生，故有意不使用。
     pub fn new(
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
-        max_tokens: u32,
-        reasoning: bool,
+        _max_tokens: u32,
+        _reasoning: bool,
         timeout_secs: u64,
     ) -> Self {
         Self {
@@ -58,11 +55,6 @@ impl OllamaProvider {
             },
             model: model.unwrap_or_else(|| "llama3.2".to_string()),
             api_key,
-            max_tokens: Arc::new(AtomicU32::new(max_tokens)),
-            reasoning: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
-            reasoning_level: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
-                if reasoning { 3 } else { 0 }, // High or Off
-            )),
             user_agent: format!("aemeath/{}", share::version()),
             http: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
@@ -109,23 +101,20 @@ impl OllamaProvider {
         );
         Ok(headers)
     }
-
-    pub(crate) fn current_max_tokens(&self) -> u32 {
-        self.max_tokens.load(Ordering::Relaxed)
-    }
 }
 
 #[async_trait]
 impl LlmProvider for OllamaProvider {
     async fn stream_message(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let request_body = self.build_request_body(system, messages, tool_schemas, true)?;
+        let request_body = self.build_request_body(scope, system, messages, tool_schemas, true)?;
         let headers = self.build_headers()?;
         let url = format!("{}/api/chat", self.base_url);
 
@@ -135,8 +124,8 @@ impl LlmProvider for OllamaProvider {
         log::debug!(target: LOG_TARGET,
             "[ollama stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
-            self.model,
-            self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
+            scope.model(),
+            scope.effective_reasoning() != crate::ports::ReasoningLevel::Off,
             messages.len(),
             tool_schemas.len(),
             body_bytes,
@@ -191,7 +180,7 @@ impl LlmProvider for OllamaProvider {
                                         driver: "ollama",
                                         api: "chat_stream",
                                         provider: "ollama",
-                                        model: &self.model,
+                                        model: scope.model(),
                                         endpoint: &url,
                                         attempt: attempt + 1,
                                         max_attempts: self.max_retries,
@@ -222,7 +211,7 @@ impl LlmProvider for OllamaProvider {
                                     driver: "ollama",
                                     api: "chat_stream",
                                     provider: "ollama",
-                                    model: &self.model,
+                                    model: scope.model(),
                                     endpoint: &url,
                                     attempt: attempt + 1,
                                     max_attempts: self.max_retries,
@@ -264,7 +253,7 @@ impl LlmProvider for OllamaProvider {
                         driver: "ollama",
                         api: "chat_stream",
                         provider: "ollama",
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &url,
                         attempt: attempt + 1,
                         max_attempts: self.max_retries,
@@ -291,7 +280,7 @@ impl LlmProvider for OllamaProvider {
                         driver: "ollama",
                         api: "chat_stream",
                         provider: "ollama",
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &url,
                         attempt: attempt + 1,
                         max_attempts: self.max_retries,
@@ -319,7 +308,7 @@ impl LlmProvider for OllamaProvider {
                             "Ollama stream returned no content, falling back to non-streaming",
                         );
                         return self
-                            .send_message_non_stream(system, messages, tool_schemas, handler)
+                            .send_message_non_stream(scope, system, messages, tool_schemas, handler)
                             .await;
                     }
                     return Ok(resp);
@@ -333,7 +322,7 @@ impl LlmProvider for OllamaProvider {
                         e
                     ));
                     return self
-                        .send_message_non_stream(system, messages, tool_schemas, handler)
+                        .send_message_non_stream(scope, system, messages, tool_schemas, handler)
                         .await;
                 }
                 Err(e) => return Err(e),
@@ -351,32 +340,6 @@ impl LlmProvider for OllamaProvider {
 
     fn provider_name(&self) -> &str {
         "ollama"
-    }
-
-    fn set_max_tokens(&self, max_tokens: u32) {
-        if max_tokens > 0 {
-            self.max_tokens.store(max_tokens, Ordering::Relaxed);
-        }
-    }
-
-    fn max_tokens(&self) -> u32 {
-        self.current_max_tokens()
-    }
-
-    fn set_reasoning_level(&self, level: crate::ports::ReasoningLevel) {
-        // Ollama 仅支持 thinking 开关，无档位概念
-        let enabled = !matches!(level, crate::ports::ReasoningLevel::Off);
-        self.reasoning
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-        self.reasoning_level
-            .store(level.as_u8(), std::sync::atomic::Ordering::Relaxed);
-    }
-
-    fn current_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        crate::ports::ReasoningLevel::from_u8(
-            self.reasoning_level
-                .load(std::sync::atomic::Ordering::Relaxed),
-        )
     }
 
     fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {

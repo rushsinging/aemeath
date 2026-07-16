@@ -2,24 +2,29 @@
 
 use super::OpenAICompatibleProvider;
 use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
-use crate::domain::invoke::{StreamResponse, SystemBlock};
-use crate::ports::StreamHandler;
+use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
+use crate::ports::{ReasoningLevel, StreamHandler};
 use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {
     pub(crate) async fn send_message_non_stream(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         handler: &mut dyn StreamHandler,
     ) -> Result<StreamResponse, crate::LlmError> {
-        let openai_messages = self.convert_messages(system, messages)?;
+        let openai_messages = Self::convert_messages(
+            system,
+            messages,
+            !matches!(scope.effective_reasoning(), ReasoningLevel::Off),
+        )?;
         let tools = Self::convert_tools(tool_schemas);
 
-        let mut request_body = self.base_request_body(openai_messages, false);
+        let mut request_body = self.base_request_body(scope, openai_messages, false);
 
-        self.apply_reasoning_fields(&mut request_body);
+        self.apply_reasoning_fields(&mut request_body, scope);
         if !tools.is_empty() {
             request_body["tools"] = serde_json::Value::Array(tools);
             request_body["parallel_tool_calls"] = serde_json::Value::Bool(true);
@@ -47,7 +52,7 @@ impl OpenAICompatibleProvider {
                         driver: "openai_compatible",
                         api: "chat_completions_non_stream",
                         provider: &self.config.source_key,
-                        model: &self.model,
+                        model: scope.model(),
                         endpoint: &endpoint,
                         attempt: 1,
                         max_attempts: 1,
@@ -71,7 +76,7 @@ impl OpenAICompatibleProvider {
                     driver: "openai_compatible",
                     api: "chat_completions_non_stream",
                     provider: &self.config.source_key,
-                    model: &self.model,
+                    model: scope.model(),
                     endpoint: &endpoint,
                     attempt: 1,
                     max_attempts: 1,
