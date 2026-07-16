@@ -50,6 +50,8 @@ Provider 不发布 `on_text/on_thinking/on_tool_use/on_error` 一组回调，原
 
 目标流保持 pull-based 自然背压。若适配器内部使用 channel，必须有界并在消费方取消/丢弃时停止生产，channel 类型仍保持私有。
 
+> **现状缺口（P4 未关闭，由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接）**：本节与 §1 的 `InvocationStream` / `InvocationEvent` / pull-based `next()` 是 Target 设计；生产代码目前仍是 `agent/features/provider/src/ports.rs::StreamHandler` 的多方法回调（`on_text`/`on_thinking`/`on_tool_use_start`/`on_error`/...）。#1033 引入的 `HttpAttemptExecutor` 只收敛了单 attempt 的发送/失败判定/日志机械，**不触碰**流协议本身，不应被误读为 P4 已关闭。把生产实现迁移到本节 pull-based 契约由 #903（Pull-based Invocation Stream）承接。
+
 ## 3. 流生命周期
 
 ```text
@@ -74,6 +76,8 @@ Created
 - consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲。
 
 ### 3.2 可见内容与重复调用
+
+> **当前落地（#1033）**：Provider 已用 crate-private `HttpAttemptExecutor`（`adapters/http_attempt.rs`）统一单 attempt 的机械发送、cancellation、status/error body 判定与单一 diagnostic 记录，driver 之间不再各自复制这段逻辑。但本节下方“重试/fallback 必须由 Runtime 显式开始新 attempt”仍是 Target：driver 内部的 stream→non-stream fallback 尚未迁出到 Runtime 编排（P7 未关闭），**不应**把 #1033 误读为 Runtime 已完整拥有跨调用 retry/fallback。跨调用 retry/backoff（P6）与 stream→non-stream fallback（P7）的所有权迁移由 [#905](https://github.com/rushsinging/aemeath/issues/905)（统一错误分类并迁移 Retry/Fallback 所有权）承接。
 
 ProviderPort 的一次 invoke 只允许一次上游语义请求。Provider 不实现“stream 失败后自动 non-stream 重发”，因为第二次请求可能产生不同文本、工具调用或副作用意图，也会让 Runtime 无法准确记录 attempt 和 usage。
 
@@ -116,6 +120,8 @@ Provider 负责：
 - 提供 `retryable` 与安全 provider code；
 - 尊重 `Retry-After` 等协议 hint，并作为错误元数据返回；
 - 保证失败 attempt 的 delta、usage 和终结语义可归因。
+
+> **当前落地（#1033）**：以上机械已收敛进 crate-private `HttpAttemptExecutor`——单 attempt 的 cancellation-aware send/status 判定、安全 response headers 提取、16KiB 有界 error body 读取、typed network/HTTP transport failure 分类，以及唯一一条 `llm-api-error` diagnostic；Anthropic、OpenAI-compatible 与 Ollama 已全部迁入。下面“Provider 不负责”列表仍是 Target 边界，未被本次改动突破。错误分类当前仍分散在各 driver（P9 未关闭）；`ProviderErrorKind + retryable + safe provider code` 的统一收口，连同上方跨调用 retry/backoff（P6）与 stream→non-stream fallback（P7），均由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接。
 
 Provider 不负责：
 
@@ -280,6 +286,8 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 
 守卫应优先检查 AST/path 与公开 re-export，不依赖简单文件名黑名单。新增白名单必须记录 owner、理由和退出条件。
 
+> **已提前落地（#1033）**：`check-provider-http-attempt.sh` 已启用并计入守卫总数，锁定“driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用”三条不变量。这是 #1033 单 attempt 机械收敛的守卫，不等同于上方 #982 的 wire-types/construction/invocation-state 三条 Target 规则；详见 [Architecture Guards §6b](../../03-engineering/01-architecture-guards.md)。
+
 ## 13. 相关文档
 
 - 模块入口：[README.md](README.md)
@@ -292,6 +300,8 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-16 | #1033 交付 crate-private `HttpAttemptExecutor`：收敛单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic，并新增 `check-provider-http-attempt.sh` 守卫；跨调用 retry/fallback（P6/P7）仍是 Runtime 待迁移债，本次改动不冒充其已完成 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
+| 2026-07-16 | 文档审查：明确后续承接边界——pull-based `InvocationStream`（P4）由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接；跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-12 | 初稿：ProviderPort、流/取消、Runtime 重试边界、不可变 Transport 与 Invocation Scope | #788 |
 | 2026-07-14 | 增加 build 前 option resolution；Context prompt 与 InvocationScope 共享唯一 effective reasoning / limits 快照 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | `ProviderPort` 明确 Runtime-owned；移除本文重复的 trait 定义，改为引用 [Runtime 06 §2](../runtime/06-ports-and-adapters.md#2-runtime-消费的能力契约) 的唯一签名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

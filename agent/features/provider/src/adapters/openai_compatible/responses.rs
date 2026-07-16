@@ -8,7 +8,10 @@
 
 use super::parse_responses_stream;
 use super::OpenAICompatibleProvider;
-use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
+use crate::adapters::http_attempt::{
+    AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
+    HttpFailureKind, NetworkFailureKind,
+};
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{ReasoningLevel, StreamHandler};
 use crate::LOG_TARGET;
@@ -40,7 +43,6 @@ impl OpenAICompatibleProvider {
             self.config.source_key, url, request_body_bytes,
         );
 
-        let invocation_started = std::time::Instant::now();
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
@@ -57,94 +59,131 @@ impl OpenAICompatibleProvider {
                 }
             }
 
-            let send_fut = self
-                .http
-                .post(&url)
-                .headers(headers.clone())
-                .json(&request_body)
-                .send();
+            let context = HttpAttemptContext {
+                driver: "openai_compatible",
+                api: "responses_stream",
+                provider: &self.config.source_key,
+                model: scope.model(),
+                method: "POST",
+                endpoint: &url,
+                attempt: attempt + 1,
+                max_attempts: self.max_retries,
+                message_count: messages.len(),
+                tool_count: tool_schemas.len(),
+                request_bytes: request_body_bytes,
+            };
 
-            let response = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => return Err(crate::LlmError::Cancelled),
-                result = send_fut => match result {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        let remaining = self.max_retries.saturating_sub(attempt + 1);
-                        log_network_error(
-                            ErrorLogContext {
-                                driver: "openai_compatible",
-                                api: "responses_stream",
-                                provider: &self.config.source_key,
-                                model: scope.model(),
-                                endpoint: &url,
-                                attempt: attempt + 1,
-                                max_attempts: self.max_retries,
-                                elapsed_ms: invocation_started.elapsed().as_millis(),
-                                message_count: messages.len(),
-                                tool_count: tool_schemas.len(),
-                                request_bytes: request_body_bytes,
-                            },
-                            &e,
-                            remaining > 0,
-                        );
-                        log::debug!(target: LOG_TARGET,
-                            "[responses-stream] HTTP send failed attempt={}/{}: {}",
-                            attempt + 1, self.max_retries, e,
-                        );
-                        if attempt + 1 < self.max_retries {
-                            handler.on_error(&format!("network error, retrying ({}/{})...", attempt + 2, self.max_retries));
+            let response = match HttpAttemptExecutor::execute(
+                self.http
+                    .post(&url)
+                    .headers(headers.clone())
+                    .json(&request_body),
+                &context,
+                cancel,
+            )
+            .await
+            {
+                Ok(success) => success.response,
+                Err(failure) => {
+                    let remaining = self.max_retries.saturating_sub(attempt + 1);
+                    // Disposition mirrors the actual control-flow decision
+                    // below, decided after typed classification — not a
+                    // pre-guess. Client/ContextTooLong are unconditionally
+                    // terminal regardless of remaining retry budget.
+                    let disposition = match &failure {
+                        HttpAttemptFailure::Cancelled => AttemptDisposition::FinalFailure,
+                        HttpAttemptFailure::Network { .. } => {
+                            AttemptDisposition::from_remaining(remaining)
                         }
-                        last_error = Some(crate::LlmError::Network(e.to_string()));
-                        continue;
+                        HttpAttemptFailure::Http { kind, .. } => match kind {
+                            HttpFailureKind::RateLimited | HttpFailureKind::Server => {
+                                AttemptDisposition::from_remaining(remaining)
+                            }
+                            HttpFailureKind::ContextTooLong | HttpFailureKind::Client => {
+                                AttemptDisposition::FinalFailure
+                            }
+                        },
+                    };
+                    // 单次记录：typed 分类决定 disposition 后，消费式
+                    // failure.log(disposition) 只记一次，反映真实终态。
+                    failure.log(disposition);
+                    match failure {
+                        HttpAttemptFailure::Cancelled => {
+                            return Err(crate::LlmError::Cancelled);
+                        }
+                        HttpAttemptFailure::Network { source, kind, .. } => {
+                            let detail = match kind {
+                                NetworkFailureKind::Connect => "connection failed",
+                                NetworkFailureKind::Timeout => "request timed out",
+                                NetworkFailureKind::Redirect => "too many redirects",
+                                NetworkFailureKind::Request => "request build error",
+                                NetworkFailureKind::Body => "request body error",
+                                NetworkFailureKind::Decode => "response decode error",
+                                NetworkFailureKind::Unknown => "unknown",
+                            };
+                            log::debug!(target: LOG_TARGET,
+                                "[responses-stream] HTTP send failed attempt={}/{} kind={}: {}",
+                                attempt + 1, self.max_retries, detail, source,
+                            );
+                            if remaining > 0 {
+                                handler.on_error(&format!(
+                                    "network error ({}), retrying ({}/{})...",
+                                    detail,
+                                    attempt + 2,
+                                    self.max_retries
+                                ));
+                            }
+                            last_error = Some(crate::LlmError::Network(source.to_string()));
+                            continue;
+                        }
+                        HttpAttemptFailure::Http {
+                            status, kind, body, ..
+                        } => match kind {
+                            HttpFailureKind::RateLimited => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "rate limited ({}), retrying ({}/{})...",
+                                        status,
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
+                                last_error = Some(crate::LlmError::RateLimited);
+                                continue;
+                            }
+                            HttpFailureKind::ContextTooLong => {
+                                return Err(crate::LlmError::ContextTooLong);
+                            }
+                            HttpFailureKind::Server => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "server error ({}), retrying ({}/{})...",
+                                        status,
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
+                                last_error = Some(crate::LlmError::Api {
+                                    error_type: status.to_string(),
+                                    message: body.text().to_string(),
+                                });
+                                continue;
+                            }
+                            HttpFailureKind::Client => {
+                                return Err(crate::LlmError::Api {
+                                    error_type: status.to_string(),
+                                    message: body.text().to_string(),
+                                });
+                            }
+                        },
                     }
                 }
             };
 
-            let status = response.status();
             log::debug!(target: LOG_TARGET,
-                "[responses-stream] response status={} attempt={}/{}",
-                status, attempt + 1, self.max_retries,
+                "[responses-stream] response received attempt={}/{}",
+                attempt + 1, self.max_retries,
             );
-
-            if status == 429 {
-                let remaining = self.max_retries.saturating_sub(attempt + 1);
-                if remaining > 0 {
-                    handler.on_error(&format!(
-                        "rate limited, retrying ({}/{})...",
-                        attempt + 2,
-                        self.max_retries
-                    ));
-                    last_error = Some(crate::LlmError::RateLimited);
-                    continue;
-                }
-            }
-
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                log_http_error(
-                    ErrorLogContext {
-                        driver: "openai_compatible",
-                        api: "responses_stream",
-                        provider: &self.config.source_key,
-                        model: scope.model(),
-                        endpoint: &url,
-                        attempt: attempt + 1,
-                        max_attempts: self.max_retries,
-                        elapsed_ms: invocation_started.elapsed().as_millis(),
-                        message_count: messages.len(),
-                        tool_count: tool_schemas.len(),
-                        request_bytes: request_body_bytes,
-                    },
-                    status,
-                    &body,
-                    false,
-                );
-                return Err(crate::LlmError::Api {
-                    error_type: status.to_string(),
-                    message: body,
-                });
-            }
 
             return parse_responses_stream(response, handler, cancel).await;
         }
