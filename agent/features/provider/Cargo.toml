@@ -16,3 +16,4 @@ tracing = "0.1"
 log = "0.4"
 futures-util = { workspace = true }
 tokio-util = { workspace = true }
+httpdate = "1"

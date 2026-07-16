@@ -4,8 +4,10 @@ use share::message::Message;
 use std::error::Error as StdError;
 use tokio_util::sync::CancellationToken;
 
-use crate::adapters::error_log::{
-    sanitize_preview, source_chain, ErrorLogContext, LlmApiErrorRecord,
+use crate::adapters::error_log;
+use crate::adapters::http_attempt::{
+    AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
+    HttpFailureKind, NetworkFailureKind,
 };
 use crate::domain::invoke::{InvocationScope, SystemBlock};
 use crate::ports::{LlmProvider, ReasoningLevel, StreamHandler};
@@ -163,7 +165,6 @@ impl LlmProvider for OpenAICompatibleProvider {
             .unwrap_or(0);
 
         let mut last_error = None;
-        let invocation_started = std::time::Instant::now();
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
                 return Err(crate::LlmError::Cancelled);
@@ -181,68 +182,77 @@ impl LlmProvider for OpenAICompatibleProvider {
                 }
             }
 
-            let send_fut = self
-                .http
-                .post(self.chat_url())
-                .headers(headers.clone())
-                .json(&request_body)
-                .send();
+            let context = HttpAttemptContext {
+                driver: "openai_compatible",
+                api: "chat_completions_stream",
+                provider: &self.config.source_key,
+                model: scope.model(),
+                method: "POST",
+                endpoint: &self.chat_url(),
+                attempt: attempt + 1,
+                max_attempts: self.max_retries,
+                message_count: request_message_count,
+                tool_count: request_tool_count,
+                request_bytes: request_body_bytes,
+            };
 
-            let response = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => {
-                    return Err(crate::LlmError::Cancelled);
-                }
-                result = send_fut => {
-                    match result {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            let url = self.chat_url();
-                            let detail = if e.is_connect() {
-                                "connection failed"
-                            } else if e.is_timeout() {
-                                "request timed out"
-                            } else if e.is_redirect() {
-                                "too many redirects"
-                            } else if e.is_request() {
-                                "request build error"
-                            } else if e.is_body() {
-                                "request body error"
-                            } else if e.is_decode() {
-                                "response decode error"
-                            } else {
-                                "unknown"
+            let response = match HttpAttemptExecutor::execute(
+                self.http
+                    .post(self.chat_url())
+                    .headers(headers.clone())
+                    .json(&request_body),
+                &context,
+                cancel,
+            )
+            .await
+            {
+                Ok(success) => success.response,
+                Err(failure) => {
+                    let remaining = self.max_retries.saturating_sub(attempt + 1);
+                    // Disposition mirrors the actual control-flow decision
+                    // below, decided after typed classification — not a
+                    // pre-guess. Client/ContextTooLong are unconditionally
+                    // terminal regardless of remaining retry budget.
+                    let disposition = match &failure {
+                        HttpAttemptFailure::Cancelled => AttemptDisposition::FinalFailure,
+                        HttpAttemptFailure::Network { .. } => {
+                            AttemptDisposition::from_remaining(remaining)
+                        }
+                        HttpAttemptFailure::Http { kind, .. } => match kind {
+                            HttpFailureKind::RateLimited | HttpFailureKind::Server => {
+                                AttemptDisposition::from_remaining(remaining)
+                            }
+                            HttpFailureKind::ContextTooLong | HttpFailureKind::Client => {
+                                AttemptDisposition::FinalFailure
+                            }
+                        },
+                    };
+                    // 单次记录：typed 分类决定 disposition 后，消费式
+                    // failure.log(disposition) 只记一次，反映真实终态。
+                    failure.log(disposition);
+                    match failure {
+                        HttpAttemptFailure::Cancelled => {
+                            return Err(crate::LlmError::Cancelled);
+                        }
+                        HttpAttemptFailure::Network { source, kind, .. } => {
+                            let detail = match kind {
+                                NetworkFailureKind::Connect => "connection failed",
+                                NetworkFailureKind::Timeout => "request timed out",
+                                NetworkFailureKind::Redirect => "too many redirects",
+                                NetworkFailureKind::Request => "request build error",
+                                NetworkFailureKind::Body => "request body error",
+                                NetworkFailureKind::Decode => "response decode error",
+                                NetworkFailureKind::Unknown => "unknown",
                             };
-                            let mut msg = format!("{} ({})\n  URL: {}", e, detail, url);
-                            let mut source: Option<&dyn StdError> = StdError::source(&e);
+                            let mut msg =
+                                format!("{} ({})\n  URL: {}", source, detail, self.chat_url());
+                            let mut cause: Option<&dyn StdError> = StdError::source(&source);
                             let mut depth = 1;
-                            while let Some(cause) = source {
-                                msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
-                                source = cause.source();
+                            while let Some(c) = cause {
+                                msg.push_str(&format!("\n  Cause #{}: {}", depth, c));
+                                cause = c.source();
                                 depth += 1;
                             }
-                            let remaining = self.max_retries.saturating_sub(attempt + 1);
-                            let context = ErrorLogContext {
-                                driver: "openai_compatible",
-                                api: "chat_completions_stream",
-                                provider: &self.config.source_key,
-                                model: scope.model(),
-                                endpoint: &url,
-                                attempt: attempt + 1,
-                                max_attempts: self.max_retries,
-                                elapsed_ms: invocation_started.elapsed().as_millis(),
-                                message_count: request_message_count,
-                                tool_count: request_tool_count,
-                                request_bytes: request_body_bytes,
-                            };
-                            let mut record = LlmApiErrorRecord::new(&context, detail);
-                            record.retryable = remaining > 0;
-                            record.elapsed_ms = invocation_started.elapsed().as_millis();
-                            record.message_count = request_message_count;
-                            record.tool_count = request_tool_count;
-                            record.request_bytes = request_body_bytes;
-                            record.source_chain = source_chain(&e);
-                            record.log(remaining == 0);
                             log::debug!(target: LOG_TARGET,
                                 "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
                                 self.config.source_key,
@@ -256,119 +266,70 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 request_tool_count,
                                 msg,
                             );
-                            if remaining > 0 {                                handler.on_error(&format!(
+                            if remaining > 0 {
+                                handler.on_error(&format!(
                                     "network error ({detail}), retrying ({}/{})...",
-                                    attempt + 2, self.max_retries
+                                    attempt + 2,
+                                    self.max_retries
                                 ));
                             }
                             last_error = Some(crate::LlmError::Network(msg));
                             continue;
                         }
+                        HttpAttemptFailure::Http {
+                            status, kind, body, ..
+                        } => match kind {
+                            HttpFailureKind::RateLimited => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "rate limited ({}), retrying ({}/{})...",
+                                        status,
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
+                                last_error = Some(crate::LlmError::RateLimited);
+                                continue;
+                            }
+                            HttpFailureKind::ContextTooLong => {
+                                return Err(crate::LlmError::ContextTooLong);
+                            }
+                            HttpFailureKind::Server => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "server error ({}), retrying ({}/{})...",
+                                        status,
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
+                                last_error = Some(crate::LlmError::Api {
+                                    error_type: status.to_string(),
+                                    message: body.text().to_string(),
+                                });
+                                continue;
+                            }
+                            HttpFailureKind::Client => {
+                                return Err(crate::LlmError::Api {
+                                    error_type: status.to_string(),
+                                    message: body.text().to_string(),
+                                });
+                            }
+                        },
                     }
                 }
             };
 
-            let status = response.status();
             log::debug!(target: LOG_TARGET,
-                "[openai-compat stream] response received provider={} model={} status={} attempt={}/{} body_bytes={} messages={} tools={}",
+                "[openai-compat stream] response received provider={} model={} attempt={}/{} body_bytes={} messages={} tools={}",
                 self.config.source_key,
                 scope.model(),
-                status,
                 attempt + 1,
                 self.max_retries,
                 request_body_bytes,
                 request_message_count,
                 request_tool_count,
             );
-            if status == 429 {
-                let remaining = self.max_retries.saturating_sub(attempt + 1);
-                if remaining > 0 {
-                    handler.on_error(&format!(
-                        "rate limited (429), retrying ({}/{})...",
-                        attempt + 2,
-                        self.max_retries
-                    ));
-                }
-                last_error = Some(crate::LlmError::RateLimited);
-                continue;
-            }
-
-            if status.as_u16() >= 500 && status.as_u16() < 600 {
-                let error_body = response.text().await.unwrap_or_default();
-                let remaining = self.max_retries.saturating_sub(attempt + 1);
-                let context = ErrorLogContext {
-                    driver: "openai_compatible",
-                    api: "chat_completions_stream",
-                    provider: &self.config.source_key,
-                    model: scope.model(),
-                    endpoint: &self.chat_url(),
-                    attempt: attempt + 1,
-                    max_attempts: self.max_retries,
-                    elapsed_ms: invocation_started.elapsed().as_millis(),
-                    message_count: request_message_count,
-                    tool_count: request_tool_count,
-                    request_bytes: request_body_bytes,
-                };
-                let mut record = LlmApiErrorRecord::new(&context, "http_server_error");
-                record.http_status = Some(status.as_u16());
-                record.error_code = Some("http_5xx");
-                record.retryable = remaining > 0;
-                record.elapsed_ms = invocation_started.elapsed().as_millis();
-                record.message_count = request_message_count;
-                record.tool_count = request_tool_count;
-                record.request_bytes = request_body_bytes;
-                record.response_bytes = error_body.len();
-                record.body_preview = Some(sanitize_preview(&error_body));
-                record.log(remaining == 0);
-                if remaining > 0 {
-                    handler.on_error(&format!(
-                        "server error ({}), retrying ({}/{})...",
-                        status,
-                        attempt + 2,
-                        self.max_retries
-                    ));
-                }
-                last_error = Some(crate::LlmError::Api {
-                    error_type: status.to_string(),
-                    message: error_body,
-                });
-                continue;
-            }
-
-            if status == 413 {
-                return Err(crate::LlmError::ContextTooLong);
-            }
-
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                let context = ErrorLogContext {
-                    driver: "openai_compatible",
-                    api: "chat_completions_stream",
-                    provider: &self.config.source_key,
-                    model: scope.model(),
-                    endpoint: &self.chat_url(),
-                    attempt: attempt + 1,
-                    max_attempts: self.max_retries,
-                    elapsed_ms: invocation_started.elapsed().as_millis(),
-                    message_count: request_message_count,
-                    tool_count: request_tool_count,
-                    request_bytes: request_body_bytes,
-                };
-                let mut record = LlmApiErrorRecord::new(&context, "http_client_error");
-                record.http_status = Some(status.as_u16());
-                record.error_code = Some("http_non_success");
-                record.elapsed_ms = invocation_started.elapsed().as_millis();
-                record.message_count = request_message_count;
-                record.tool_count = request_tool_count;
-                record.request_bytes = request_body_bytes;
-                record.response_bytes = body.len();
-                record.body_preview = Some(sanitize_preview(&body));
-                record.log(true);
-                return Err(crate::LlmError::Api {
-                    error_type: status.to_string(),
-                    message: body,
-                });
-            }
 
             match parse_openai_stream(response, handler, cancel).await {
                 Ok(resp) => return Ok(resp),
@@ -386,30 +347,23 @@ impl LlmProvider for OpenAICompatibleProvider {
                         depth += 1;
                     }
                     let fallback_planned = e.contains("upstream truncated");
-                    let context = ErrorLogContext {
-                        driver: "openai_compatible",
-                        api: "chat_completions_stream",
-                        provider: &self.config.source_key,
-                        model: scope.model(),
-                        endpoint: &self.chat_url(),
-                        attempt: attempt + 1,
-                        max_attempts: self.max_retries,
-                        elapsed_ms: invocation_started.elapsed().as_millis(),
-                        message_count: request_message_count,
-                        tool_count: request_tool_count,
-                        request_bytes: request_body_bytes,
+                    let remaining = self.max_retries.saturating_sub(attempt + 1);
+                    // stream-protocol 错误不是 HTTP 层面的失败，HttpAttemptExecutor
+                    // 不感知此阶段；使用 error_log 的窄 protocol 日志 API（而非手写
+                    // 内部诊断结构体），这样 schema/JSON 解析
+                    // 失败的诊断信息仍能落到 aemeath:llm-api-error。
+                    let protocol_disposition = if fallback_planned || remaining == 0 {
+                        AttemptDisposition::FallbackPlanned
+                    } else {
+                        AttemptDisposition::RetryPlanned
                     };
-                    let mut record = LlmApiErrorRecord::new(&context, "stream_protocol_error");
-                    record.retryable = !fallback_planned;
-                    record.elapsed_ms = invocation_started.elapsed().as_millis();
-                    record.message_count = request_message_count;
-                    record.tool_count = request_tool_count;
-                    record.request_bytes = request_body_bytes;
-                    record.partial_output = true;
-                    record.fallback_planned = fallback_planned;
-                    record.body_preview = Some(sanitize_preview(&e));
-                    record.source_chain = source_chain(&stream_error);
-                    record.log(false);
+                    error_log::log_stream_protocol_error(
+                        context.error_log_context(0),
+                        &e,
+                        protocol_disposition.retryable(),
+                        fallback_planned,
+                        protocol_disposition.log_level(),
+                    );
                     log::debug!(target: LOG_TARGET,
                         "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
                         self.config.source_key,
@@ -445,7 +399,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             if matches!(err, crate::LlmError::Stream(_)) {
                 handler.on_error("All streaming retries failed, attempting non-streaming fallback");
                 return self
-                    .send_message_non_stream(scope, system, messages, tool_schemas, handler)
+                    .send_message_non_stream(scope, system, messages, tool_schemas, handler, cancel)
                     .await;
             }
         }

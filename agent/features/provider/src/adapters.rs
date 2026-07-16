@@ -3,6 +3,7 @@
 mod anthropic;
 pub(crate) mod client;
 pub(crate) mod error_log;
+pub(crate) mod http_attempt;
 pub(crate) mod json_recovery;
 mod ollama;
 pub(crate) mod openai_compatible;

@@ -6,7 +6,10 @@ use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
+use crate::adapters::http_attempt::{
+    AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
+    HttpFailureKind, NetworkFailureKind,
+};
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{LlmProvider, StreamHandler};
 use crate::LOG_TARGET;
@@ -131,7 +134,6 @@ impl LlmProvider for OllamaProvider {
             body_bytes,
         );
 
-        let invocation_started = std::time::Instant::now();
         let mut last_error = None;
         for attempt in 0..self.max_retries {
             if cancel.is_cancelled() {
@@ -156,148 +158,134 @@ impl LlmProvider for OllamaProvider {
                 }
             }
 
-            let send_fut = self
-                .http
-                .post(&url)
-                .headers(headers.clone())
-                .json(&request_body)
-                .send();
+            let context = HttpAttemptContext {
+                driver: "ollama",
+                api: "chat_stream",
+                provider: "ollama",
+                model: scope.model(),
+                method: "POST",
+                endpoint: &url,
+                attempt: attempt + 1,
+                max_attempts: self.max_retries,
+                message_count: messages.len(),
+                tool_count: tool_schemas.len(),
+                request_bytes: body_bytes,
+            };
 
-            let response = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => {
-                    return Err(crate::LlmError::Cancelled);
-                }
-                result = send_fut => {
-                    match result {
-                        Ok(r) => r,
-                        Err(e) => {
-                            let msg = e.to_string();
-                            if msg.contains("timed out") || msg.contains("timeout") {
-                                let remaining = self.max_retries.saturating_sub(attempt + 1);
-                                log_network_error(
-                                    ErrorLogContext {
-                                        driver: "ollama",
-                                        api: "chat_stream",
-                                        provider: "ollama",
-                                        model: scope.model(),
-                                        endpoint: &url,
-                                        attempt: attempt + 1,
-                                        max_attempts: self.max_retries,
-                                        elapsed_ms: invocation_started.elapsed().as_millis(),
-                                        message_count: messages.len(),
-                                        tool_count: tool_schemas.len(),
-                                        request_bytes: body_bytes,
-                                    },
-                                    &e,
-                                    remaining > 0,
-                                );
-                                // Ollama request timed out — will retry
+            let response = match HttpAttemptExecutor::execute(
+                self.http
+                    .post(&url)
+                    .headers(headers.clone())
+                    .json(&request_body),
+                &context,
+                cancel,
+            )
+            .await
+            {
+                Ok(success) => success.response,
+                Err(failure) => {
+                    let remaining = self.max_retries.saturating_sub(attempt + 1);
+                    // Disposition mirrors the actual control-flow decision
+                    // below, decided *after* typed classification — only
+                    // `NetworkFailureKind::Timeout` and the retryable HTTP
+                    // kinds ever loop back for another attempt; every other
+                    // network kind and Client/ContextTooLong are terminal
+                    // regardless of remaining budget.
+                    let disposition = match &failure {
+                        HttpAttemptFailure::Cancelled => AttemptDisposition::FinalFailure,
+                        HttpAttemptFailure::Network { kind, .. } => match kind {
+                            NetworkFailureKind::Timeout => {
+                                AttemptDisposition::from_remaining(remaining)
+                            }
+                            _ => AttemptDisposition::FinalFailure,
+                        },
+                        HttpAttemptFailure::Http { kind, .. } => match kind {
+                            HttpFailureKind::RateLimited | HttpFailureKind::Server => {
+                                AttemptDisposition::from_remaining(remaining)
+                            }
+                            HttpFailureKind::ContextTooLong | HttpFailureKind::Client => {
+                                AttemptDisposition::FinalFailure
+                            }
+                        },
+                    };
+                    // 单次记录：typed 分类决定 disposition 后，消费式
+                    // failure.log(disposition) 只记一次，反映真实终态。
+                    failure.log(disposition);
+                    match failure {
+                        HttpAttemptFailure::Cancelled => {
+                            return Err(crate::LlmError::Cancelled);
+                        }
+                        HttpAttemptFailure::Network { source, kind, .. } => match kind {
+                            NetworkFailureKind::Timeout => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "Ollama request timed out, retrying ({}/{})...",
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
                                 last_error = Some(crate::LlmError::Network(format!(
-                                    "Ollama request timed out after {}s — is the model loaded?", self.timeout_secs
+                                    "Ollama request timed out after {}s — is the model loaded?",
+                                    self.timeout_secs
                                 )));
                                 continue;
                             }
-                            let mut detailed = format!("{}\n  URL: {}", e, url);
-                            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
-                            let mut depth = 1;
-                            while let Some(cause) = source {
-                                detailed.push_str(&format!("\n  Cause #{}: {}", depth, cause));
-                                source = cause.source();
-                                depth += 1;
+                            _ => {
+                                let mut msg = format!("{}\n  URL: {}", source, url);
+                                let mut cause: Option<&dyn std::error::Error> =
+                                    std::error::Error::source(&source);
+                                let mut depth = 1;
+                                while let Some(c) = cause {
+                                    msg.push_str(&format!("\n  Cause #{}: {}", depth, c));
+                                    cause = c.source();
+                                    depth += 1;
+                                }
+                                return Err(crate::LlmError::Network(msg));
                             }
-                            log_network_error(
-                                ErrorLogContext {
-                                    driver: "ollama",
-                                    api: "chat_stream",
-                                    provider: "ollama",
-                                    model: scope.model(),
-                                    endpoint: &url,
-                                    attempt: attempt + 1,
-                                    max_attempts: self.max_retries,
-                                    elapsed_ms: invocation_started.elapsed().as_millis(),
-                                    message_count: messages.len(),
-                                    tool_count: tool_schemas.len(),
-                                    request_bytes: body_bytes,
-                                },
-                                &e,
-                                false,
-                            );
-                            return Err(crate::LlmError::Network(detailed));
-                        }
+                        },
+                        HttpAttemptFailure::Http {
+                            status, kind, body, ..
+                        } => match kind {
+                            HttpFailureKind::RateLimited => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "rate limited ({}), retrying ({}/{})...",
+                                        status,
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
+                                last_error = Some(crate::LlmError::RateLimited);
+                                continue;
+                            }
+                            HttpFailureKind::ContextTooLong => {
+                                return Err(crate::LlmError::ContextTooLong);
+                            }
+                            HttpFailureKind::Server => {
+                                if remaining > 0 {
+                                    handler.on_error(&format!(
+                                        "server error ({}), retrying ({}/{})...",
+                                        status,
+                                        attempt + 2,
+                                        self.max_retries
+                                    ));
+                                }
+                                last_error = Some(crate::LlmError::Api {
+                                    error_type: status.to_string(),
+                                    message: body.text().to_string(),
+                                });
+                                continue;
+                            }
+                            HttpFailureKind::Client => {
+                                return Err(crate::LlmError::Api {
+                                    error_type: status.to_string(),
+                                    message: body.text().to_string(),
+                                });
+                            }
+                        },
                     }
                 }
             };
-
-            let status = response.status();
-            log::debug!(target: LOG_TARGET,
-                "[ollama stream] attempt={} HTTP {} content-type={:?}",
-                attempt,
-                status,
-                response
-                    .headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-            );
-
-            if status == 429 {
-                last_error = Some(crate::LlmError::RateLimited);
-                continue;
-            }
-
-            if status.as_u16() >= 500 && status.as_u16() < 600 {
-                let error_body = response.text().await.unwrap_or_default();
-                let remaining = self.max_retries.saturating_sub(attempt + 1);
-                log_http_error(
-                    ErrorLogContext {
-                        driver: "ollama",
-                        api: "chat_stream",
-                        provider: "ollama",
-                        model: scope.model(),
-                        endpoint: &url,
-                        attempt: attempt + 1,
-                        max_attempts: self.max_retries,
-                        elapsed_ms: invocation_started.elapsed().as_millis(),
-                        message_count: messages.len(),
-                        tool_count: tool_schemas.len(),
-                        request_bytes: body_bytes,
-                    },
-                    status,
-                    &error_body,
-                    remaining > 0,
-                );
-                last_error = Some(crate::LlmError::Api {
-                    error_type: status.to_string(),
-                    message: error_body,
-                });
-                continue;
-            }
-
-            if !status.is_success() {
-                let body = response.text().await.unwrap_or_default();
-                log_http_error(
-                    ErrorLogContext {
-                        driver: "ollama",
-                        api: "chat_stream",
-                        provider: "ollama",
-                        model: scope.model(),
-                        endpoint: &url,
-                        attempt: attempt + 1,
-                        max_attempts: self.max_retries,
-                        elapsed_ms: invocation_started.elapsed().as_millis(),
-                        message_count: messages.len(),
-                        tool_count: tool_schemas.len(),
-                        request_bytes: body_bytes,
-                    },
-                    status,
-                    &body,
-                    false,
-                );
-                return Err(crate::LlmError::Api {
-                    error_type: status.to_string(),
-                    message: body,
-                });
-            }
 
             match parse_ollama_stream(response, handler, cancel).await {
                 Ok(resp) => {
@@ -308,7 +296,14 @@ impl LlmProvider for OllamaProvider {
                             "Ollama stream returned no content, falling back to non-streaming",
                         );
                         return self
-                            .send_message_non_stream(scope, system, messages, tool_schemas, handler)
+                            .send_message_non_stream(
+                                scope,
+                                system,
+                                messages,
+                                tool_schemas,
+                                handler,
+                                cancel,
+                            )
                             .await;
                     }
                     return Ok(resp);
@@ -322,7 +317,14 @@ impl LlmProvider for OllamaProvider {
                         e
                     ));
                     return self
-                        .send_message_non_stream(scope, system, messages, tool_schemas, handler)
+                        .send_message_non_stream(
+                            scope,
+                            system,
+                            messages,
+                            tool_schemas,
+                            handler,
+                            cancel,
+                        )
                         .await;
                 }
                 Err(e) => return Err(e),

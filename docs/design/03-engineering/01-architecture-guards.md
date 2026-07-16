@@ -18,12 +18,12 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 24 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 27 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 24 个守卫）。下表才是真正的守卫集合，按调用顺序排列。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 27 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
@@ -36,6 +36,7 @@
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`stream_message` 必须显式接收不可变 Invocation Scope |
+| 6b | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -52,10 +53,11 @@
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
-| 23 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
-| 24 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
+| 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
+| 24 | `check-config-reader-injection.sh` | 配置架构 | runtime 消费方不得直接 `ConfigAppService::new`（例外：from_args / trait_model / composition） |
+| 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
-另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §19。
+另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
 
 ## 1. check-cargo-dependency-graph.sh
 
@@ -207,6 +209,22 @@
 - **守护**：Provider 生产代码禁止 `AtomicU32/AtomicU8/AtomicBool`、`set_max_tokens`、`set_reasoning_level`、`current_reasoning_level` 与 `reasoning_config.lock()`；Runtime 禁止 `shared_client_lock` 与 setter/restore 路径。
 - **正向约束**：`LlmProvider::stream_message` 必须显式接收 `&InvocationScope`。
 - **故意违规验证**：临时向 Provider source 加入 `set_max_tokens` 标记时脚本退出 2；移除后通过。
+
+### 6b. check-provider-http-attempt.sh
+
+- **功能**：锁定 #1033 的单 attempt 机械收敛边界，防止各 driver 重新手写请求发送、错误响应体读取与 HTTP/network 诊断日志拼装。
+- **守护**：`agent/features/provider/src/adapters/http_attempt.rs` 的 `HttpAttemptExecutor` 是唯一允许发起请求发送与读取失败/成功响应体的入口（成功路径经其 `read_success_json` helper）；`error_log.rs` 的 `log_network_error` / `log_http_error` / `ErrorLogContext` / `LlmApiErrorRecord` 只能被 `http_attempt.rs` 与 `error_log.rs` 自身引用，其余 driver 只能调用窄的 `error_log::log_stream_protocol_error`。
+- **扫描范围**：整个 `agent/features/provider/src`（不仅 `adapters/`，覆盖 `domain/`、`ports.rs`、`published_language.rs`、`lib.rs` 等所有生产文件），精确排除 `adapters/http_attempt.rs` 本身（唯一 executor）与本 crate 测试约定文件（`*_tests.rs` / `tests.rs` / `tests/` 目录）；`error_log.rs` 仍在扫描范围内，仅对"禁止自引用诊断 API"这一项单独豁免。
+- **测试尾部剥离**：按本 crate 惯例——每个生产文件底部若有整段 `#[cfg(test)] mod tests { ... }`（列级、后跟 `mod NAME {` 而非 `mod NAME;`），扫描时剥离该标记起到文件末尾的内容；**NEVER** 盲目从文件中出现的第一个 `#[cfg(test)]` 处截断——中段声明式 `#[cfg(test)] mod x;`（引用外部测试子模块文件，如 `mod message_conversion_tests;` 或 `#[path = "..."] mod foo;`）不会触发截断，其后的生产代码继续参与扫描；若同一文件同时存在中段声明式标记与末尾内联测试块，只以最后一个"以 `mod NAME {` 开块"的标记为截断点。
+- **禁用模式**：
+  - `\.send\(\)` / `\.execute\(` —— driver 必须经 `HttpAttemptExecutor::execute` 发送请求，禁止直接调用 `RequestBuilder::send()` / `Client::execute()`；
+  - `\.(text|json|bytes|chunk)(::<T>)?\(\)` 紧跟 `\.await`（**跨行**检测，允许两者分处相邻两行，中间可穿插空行/被剥离的整行注释）—— driver 不得直接 `await` `reqwest::Response` 的 `text()`/`json()`/`bytes()`/`chunk()`（含带 turbofish 的 `.json::<T>()`）；`RequestBuilder::json(&body)` 因参数非空、`BoundedErrorBody::text()` 因无 `.await` 而天然豁免；整行 `//`/`///` 注释在匹配前被剔除，避免"注释里提到 `response.json().await`"误报。
+  - `log_network_error` / `log_http_error` / `ErrorLogContext` / `LlmApiErrorRecord` —— 仅 `http_attempt.rs`（消费方）与 `error_log.rs`（原生定义处）可引用，其余 driver 一律改走 `error_log::log_stream_protocol_error`。
+- **白名单**：无。
+- **刻意的简化**：注释豁免只剔除"整行以 `//` 开头"的注释（含 `///` doc comment），不做完整词法级字符串/注释区分；当前代码库内所有已知的 `.json().await` 提及都落在这类整行注释里，足够覆盖真实场景，换取实现简单。
+- **故意违规验证**（#1033 doc audit，验证后已还原）：临时在 driver 文件末尾追加 `client.get(url).send().await`、跨行 `.json::<T>().await` 与 `crate::adapters::error_log::log_network_error(..)` 三类探针，单 Guard 分别以 exit 2 命中三条对应说明；另在 `openai_compatible.rs` 中段声明式 `#[cfg(test)] mod message_conversion_tests;` 之后插入 `.send().await` 探针，验证不会被误剥离，同样以 exit 2 命中；移除探针后单 Guard 与总编排均 clean pass。
+- **范围边界**：本守卫只锁定“单次 attempt 怎么发、怎么判失败、怎么记一条日志”的机械收敛；不覆盖、也不代表 Runtime 已接管跨调用 retry/backoff 或 stream→non-stream fallback（P6/P7，由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接收口），也不覆盖 pull-based `InvocationStream`（P4，由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接）；详见 [Migration Governance §4](03-migration-governance.md#4-provider-现状缺口s2-代码盘点)。
+- **失败模式**：命中任一模式即输出对应 `[architecture]` 说明并以 exit code 2 退出。
 
 ## 7. check-context-architecture.sh
 
@@ -465,7 +483,18 @@
 - **检查方式**：扫描 `agent/shared/src/` 中是否存在 `run_loop` / `drive_loop` 等平行 loop 实现。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
-## 23. check-config-reader-injection.sh
+## 23. check-run-control-boundary.sh
+
+- **位置**：`.agents/hooks/check-run-control-boundary.sh`。
+- **功能**：锁定 SDK run control Published Language 与 `AgentClient` 的迁移期扩容边界，防止 #878 atomic cutover 完成前提前引入并发原语或新 RPC。
+- **守护**：
+  - `packages/sdk/src/run.rs`（SDK run control Published Language）只能是纯值 DTO，禁止 `CancellationToken` / `Sender<` / `Receiver<` / `Mutex<` / `RwLock<` / `Arc<`；
+  - `packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前出现 `cancel_run_step` / `terminate_run` 新 API。
+- **检查方式**：`grep -nE` 分别扫描上述两个文件，命中即输出对应说明并 `exit 1`。
+- **白名单**：无。
+- **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `New run control APIs must not reach production AgentClient before #878 atomic cutover.`
+
+## 24. check-config-reader-injection.sh
 
 - **位置**：`.agents/hooks/check-config-reader-injection.sh`。
 - **功能**：runtime 消费方（`agent/features/runtime/src/`）不得直接调用 `ConfigAppService::new()`。配置应通过注入的 `Arc<dyn ConfigReader>` port 获取 `ConfigSnapshot`。
@@ -482,7 +511,7 @@
 - **注**：`agent/composition/src/`（装配根）不在扫描范围内（守卫只扫 `runtime/src/`），天然放行。
 - **失败模式**：`❌ Config reader injection guard FAILED: runtime consumer directly new-ing ConfigAppService`
 
-## 24. check-production-reachability.sh
+## 25. check-production-reachability.sh
 
 - **位置**：`.agents/hooks/check-production-reachability.sh`，调用 `cargo run --quiet -p xtask -- source-guard`。
 - **功能**：扫描 `agent/`、`apps/`、`packages/` 的 Rust 源码，拦截非 `cfg(test)` 的公开 `*_for_test` / `test_only` 入口、未保护的 `testing` / `fixture(s)` / `fake(s)` 模块，以及超过集中 baseline 的生产 `allow(dead_code)`。
@@ -544,4 +573,6 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6b）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
+| 2026-07-16 | 文档审查修正：补登记此前文档从未登记、但脚本编排一直包含的 `check-run-control-boundary.sh`（新增 §23，原 §23/§24 顺延为 §24/§25）；同时收紧 `check-provider-http-attempt.sh` 扫描范围至整个 `agent/features/provider/src`（非仅 `adapters/`）、修复 `strip_test_tail` 首个 `#[cfg(test)]` 盲截尾问题、新增 `.text()/.json()/.bytes()/.chunk()` 跨行 body 读取绕过检测；串行守卫总数由 26 更正为 27，与 `check-architecture-guards.sh` 实际调用数一致 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |

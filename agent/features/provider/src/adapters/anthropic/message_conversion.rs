@@ -2,7 +2,12 @@
 
 use reqwest::header::HeaderMap;
 use share::message::{ContentBlock, Message, Role};
+use tokio_util::sync::CancellationToken;
 
+use crate::adapters::http_attempt::{
+    AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
+    HttpFailureKind, SuccessBodyReadError,
+};
 use crate::domain::invoke::{CreateMessageRequest, StopReason, StreamResponse, SystemBlock, Usage};
 use crate::ports::StreamHandler;
 
@@ -245,16 +250,23 @@ pub(crate) struct RequestParams<'a> {
 }
 
 /// Send a single non-streaming request and feed the result into `handler`.
+///
+/// `cancel` is required by `HttpAttemptExecutor` so that long body reads during
+/// a fallback can be aborted cooperatively — the streaming path's `cancel` is
+/// forwarded here to keep fallback cancellation latency aligned with the
+/// streaming path.
 pub(crate) async fn send_message_non_stream(
     params: RequestParams<'_>,
     system: &[SystemBlock],
     messages: &[Message],
     tool_schemas: &[serde_json::Value],
     handler: &mut dyn StreamHandler,
+    cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut api_messages = convert_messages(messages);
     apply_message_cache_breakpoint(&mut api_messages);
 
+    let model_label = params.model.clone();
     let request = CreateMessageRequest::new(
         params.model,
         params.max_tokens,
@@ -266,38 +278,74 @@ pub(crate) async fn send_message_non_stream(
     );
 
     let url = format!("{}/v1/messages", params.base_url);
-    let response = params
-        .http
-        .post(&url)
-        .headers(params.headers)
-        .json(&request.clone().into_json())
-        .send()
-        .await
-        .map_err(|e| {
-            let mut msg = format!("{}\n  URL: {}", e, url);
-            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
-            let mut depth = 1;
-            while let Some(cause) = source {
-                msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
-                source = cause.source();
-                depth += 1;
-            }
-            crate::LlmError::Network(msg)
-        })?;
+    let request_json = request.clone().into_json();
+    let request_bytes = serde_json::to_string(&request_json)
+        .map(|value| value.len())
+        .unwrap_or(0);
 
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(crate::LlmError::Api {
-            error_type: status.to_string(),
-            message: body,
-        });
-    }
+    let response = match HttpAttemptExecutor::execute(
+        params
+            .http
+            .post(&url)
+            .headers(params.headers)
+            .json(&request_json),
+        &HttpAttemptContext {
+            driver: "anthropic",
+            api: "messages_non_stream",
+            provider: "anthropic",
+            model: &model_label,
+            method: "POST",
+            endpoint: &url,
+            attempt: 1,
+            max_attempts: 1,
+            message_count: messages.len(),
+            tool_count: tool_schemas.len(),
+            request_bytes,
+        },
+        cancel,
+    )
+    .await
+    {
+        Ok(success) => success.response,
+        Err(failure) => {
+            // 单次记录：非流式路径只有一次尝试，失败即终态，
+            // 消费式 log(FinalFailure) 保证 error! 级别输出且只记一次。
+            failure.log(AttemptDisposition::FinalFailure);
+            return Err(match failure {
+                HttpAttemptFailure::Cancelled => crate::LlmError::Cancelled,
+                HttpAttemptFailure::Network { source, .. } => {
+                    let mut msg = format!("{}\n  URL: {}", source, url);
+                    let mut cause: Option<&dyn std::error::Error> =
+                        std::error::Error::source(&source);
+                    let mut depth = 1;
+                    while let Some(c) = cause {
+                        msg.push_str(&format!("\n  Cause #{}: {}", depth, c));
+                        cause = c.source();
+                        depth += 1;
+                    }
+                    crate::LlmError::Network(msg)
+                }
+                HttpAttemptFailure::Http {
+                    status, kind, body, ..
+                } => match kind {
+                    HttpFailureKind::RateLimited => crate::LlmError::RateLimited,
+                    HttpFailureKind::ContextTooLong => crate::LlmError::ContextTooLong,
+                    HttpFailureKind::Server | HttpFailureKind::Client => crate::LlmError::Api {
+                        error_type: status.to_string(),
+                        message: body.text().to_string(),
+                    },
+                },
+            });
+        }
+    };
 
-    let body: serde_json::Value = response
-        .json()
+    let body: serde_json::Value = match HttpAttemptExecutor::read_success_json(response, cancel)
         .await
-        .map_err(|e| crate::LlmError::Stream(e.to_string()))?;
+    {
+        Ok(body) => body,
+        Err(SuccessBodyReadError::Cancelled) => return Err(crate::LlmError::Cancelled),
+        Err(SuccessBodyReadError::Decode(e)) => return Err(crate::LlmError::Stream(e.to_string())),
+    };
 
     // Parse the non-streaming response into StreamResponse
     let mut content_blocks = Vec::new();
@@ -391,10 +439,388 @@ pub(crate) async fn send_message_non_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas};
+    use super::{
+        apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas,
+        send_message_non_stream, RequestParams,
+    };
+    use crate::ports::StreamHandler;
+    use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
     use share::message::{
         ContentBlock, ImageSource, Message, MessageMetadata, MessageSource, Role,
     };
+    use tokio::net::TcpListener;
+    use tokio_util::sync::CancellationToken;
+
+    /// Minimal StreamHandler for tests — records calls without asserting layout.
+    struct RecordingHandler;
+
+    impl StreamHandler for RecordingHandler {
+        fn on_text(&mut self, _text: &str) {}
+        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
+        fn on_error(&mut self, _error: &str) {}
+    }
+
+    /// Spawn a single-shot HTTP server that writes `raw_response` and closes.
+    async fn spawn_test_server(raw_response: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0_u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket.write_all(raw_response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn dummy_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers
+    }
+
+    #[tokio::test]
+    async fn send_message_non_stream_maps_http_error_to_llm_error_api() {
+        // 500 response with a small JSON body — the executor returns a bounded
+        // body which the driver forwards verbatim into LlmError::Api.message.
+        let url = spawn_test_server(
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 16\r\n\r\n{\"error\":\"boom\"}",
+        )
+        .await;
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url.trim_end_matches("/v1/messages").to_string(),
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        let messages = vec![Message::user("hi")];
+        let mut handler = RecordingHandler;
+
+        let err = send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel)
+            .await
+            .expect_err("expected a 500 → LlmError::Api");
+
+        match err {
+            crate::LlmError::Api {
+                error_type,
+                message,
+            } => {
+                assert_eq!(error_type, "500 Internal Server Error");
+                assert!(
+                    message.contains("boom"),
+                    "expected body to be forwarded, got {message}"
+                );
+            }
+            other => panic!("expected LlmError::Api, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_message_non_stream_maps_client_error_to_llm_error_api() {
+        // 400 — non-retryable, non-413 client error → LlmError::Api.
+        let url = spawn_test_server(
+            "HTTP/1.1 400 Bad Request\r\ncontent-length: 10\r\n\r\n{\"e\":\"bad\"}",
+        )
+        .await;
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url.trim_end_matches("/v1/messages").to_string(),
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        let messages = vec![Message::user("hi")];
+        let mut handler = RecordingHandler;
+
+        let err = send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel)
+            .await
+            .expect_err("expected a 400 → LlmError::Api");
+
+        assert!(
+            matches!(err, crate::LlmError::Api { ref error_type, .. } if error_type == "400 Bad Request"),
+            "expected Api(400), got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_message_non_stream_maps_success_response() {
+        // Minimal valid Anthropic non-stream response shape.
+        let body = r#"{"content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let url = spawn_test_server_static(&response).await;
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url.trim_end_matches("/v1/messages").to_string(),
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        let messages = vec![Message::user("hi")];
+        let mut handler = RecordingHandler;
+
+        let response = send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel)
+            .await
+            .expect("expected 200 → Ok(StreamResponse)");
+
+        assert_eq!(
+            response.stop_reason,
+            crate::domain::invoke::StopReason::EndTurn
+        );
+        assert_eq!(response.usage.input_tokens, 3);
+        assert_eq!(response.usage.output_tokens, 2);
+    }
+
+    async fn spawn_test_server_static(raw_response: &str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let raw_response = raw_response.to_owned();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0_u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket.write_all(raw_response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn send_message_non_stream_maps_cancellation_to_llm_error_cancelled() {
+        // The TcpListener below never accepts; combined with a pre-cancelled
+        // token, the executor returns Cancelled before any send completes.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Drop the listener so connect() fails fast with ConnectionRefused;
+        // the cancelled token guarantees Cancelled, not Network.
+        drop(listener);
+        let url = format!("http://{addr}");
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url,
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let messages = vec![Message::user("hi")];
+        let mut handler = RecordingHandler;
+
+        let err = send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel)
+            .await
+            .expect_err("expected cancelled");
+
+        assert!(
+            matches!(err, crate::LlmError::Cancelled),
+            "expected Cancelled, got {err:?}"
+        );
+    }
+
+    /// Minimal StreamHandler that records whether *any* output method fired —
+    /// used to assert that a cancelled attempt produces no user-visible
+    /// output at all.
+    #[derive(Default)]
+    struct CallTrackingHandler {
+        called: bool,
+    }
+
+    impl StreamHandler for CallTrackingHandler {
+        fn on_text(&mut self, _text: &str) {
+            self.called = true;
+        }
+        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {
+            self.called = true;
+        }
+        fn on_error(&mut self, _error: &str) {
+            self.called = true;
+        }
+        fn on_raw_line(&mut self, _line: &str) {
+            self.called = true;
+        }
+        fn on_block_complete(&mut self, _full_text: &str) {
+            self.called = true;
+        }
+        fn on_thinking(&mut self, _text: &str) {
+            self.called = true;
+        }
+    }
+
+    /// Review finding #2: a *successful* (200) response whose body stream
+    /// stalls after headers arrive must still be cancellable. Cancellation
+    /// during the body read must return `LlmError::Cancelled` promptly and
+    /// must not emit any output through `handler`.
+    ///
+    /// `HttpAttemptExecutor::execute` only guards the pre-body network round
+    /// trip (`request.send()`); the `response.json().await` call below it
+    /// runs with no `cancel` awareness at all, so a stalled body currently
+    /// blocks forever instead of surfacing `LlmError::Cancelled`. This test
+    /// wraps the call in a bounded `tokio::time::timeout` so the failure
+    /// mode is a clear assertion/panic rather than a hung test process.
+    #[tokio::test]
+    async fn send_message_non_stream_cancellation_during_blocked_body_read_returns_cancelled_with_no_output(
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0_u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let head =
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 200\r\n\r\n";
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(b"{\"content\":[").await;
+                // Advertise more bytes than are ever sent and never close
+                // the socket, so the body read blocks indefinitely absent
+                // cooperative cancellation.
+                std::future::pending::<()>().await;
+            }
+        });
+        let url = format!("http://{addr}");
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url,
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        let cancel_trigger = cancel.clone();
+        tokio::spawn(async move {
+            // Give the header round-trip time to land before cancelling
+            // mid-body.
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            cancel_trigger.cancel();
+        });
+        let messages = vec![Message::user("hi")];
+        let mut handler = CallTrackingHandler::default();
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel),
+        )
+        .await;
+
+        let result = outcome.unwrap_or_else(|_| {
+            panic!(
+                "cancellation during a blocked non-stream body read must return promptly; \
+                 `response.json().await` does not observe `cancel` at all, so the call was \
+                 still hanging 500ms after the token was cancelled"
+            )
+        });
+
+        assert!(
+            matches!(result, Err(crate::LlmError::Cancelled)),
+            "expected Cancelled, got {result:?}"
+        );
+        assert!(
+            !handler.called,
+            "handler must receive no output when the attempt is cancelled mid-body"
+        );
+    }
+
+    /// Review finding #3: the non-stream fallback must classify HTTP
+    /// failures by `HttpFailureKind` just like the streaming retry loop
+    /// does (`stream_message_retries_429_then_returns_rate_limited` in
+    /// `anthropic.rs`), not flatten every non-2xx response into a generic
+    /// `LlmError::Api`. `send_message_non_stream` currently matches only on
+    /// `HttpAttemptFailure::Http { status, body, .. }` and ignores `kind`
+    /// entirely.
+    #[tokio::test]
+    async fn send_message_non_stream_maps_429_to_rate_limited() {
+        let body = "{\"error\":\"slow down\"}";
+        let response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let url = spawn_test_server_static(&response).await;
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url.trim_end_matches("/v1/messages").to_string(),
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        let messages = vec![Message::user("hi")];
+        let mut handler = RecordingHandler;
+
+        let err = send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel)
+            .await
+            .expect_err("expected a 429 → LlmError::RateLimited");
+
+        assert!(
+            matches!(err, crate::LlmError::RateLimited),
+            "expected RateLimited (per HttpFailureKind::RateLimited classification), got {err:?}"
+        );
+    }
+
+    /// See `send_message_non_stream_maps_429_to_rate_limited` — same finding,
+    /// for the 413/ContextTooLong classification.
+    #[tokio::test]
+    async fn send_message_non_stream_maps_413_to_context_too_long() {
+        let body = "{\"error\":\"too big\"}";
+        let response = format!(
+            "HTTP/1.1 413 Payload Too Large\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let url = spawn_test_server_static(&response).await;
+
+        let http = reqwest::Client::new();
+        let params = RequestParams {
+            model: "claude-test".to_string(),
+            max_tokens: 64,
+            effort: None,
+            base_url: url.trim_end_matches("/v1/messages").to_string(),
+            headers: dummy_headers(),
+            http: &http,
+        };
+        let cancel = CancellationToken::new();
+        let messages = vec![Message::user("hi")];
+        let mut handler = RecordingHandler;
+
+        let err = send_message_non_stream(params, &[], &messages, &[], &mut handler, &cancel)
+            .await
+            .expect_err("expected a 413 → LlmError::ContextTooLong");
+
+        assert!(
+            matches!(err, crate::LlmError::ContextTooLong),
+            "expected ContextTooLong (per HttpFailureKind::ContextTooLong classification), got {err:?}"
+        );
+    }
 
     #[test]
     fn strips_data_schema_and_keeps_allowed_fields() {
