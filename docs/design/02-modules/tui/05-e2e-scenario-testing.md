@@ -272,7 +272,7 @@ streaming 每个 chunk 不建快照。流式顺序由语义断言覆盖，屏幕
 4. 接受的 `.snap` 与对应代码变更在同一 PR 提交；
 5. 拒绝并删除无意变化。
 
-CI 使用 `CI=1` 与 `INSTA_UPDATE=no`，并检查不存在 `.snap.new` 和 `.pending-snap`。CI **NEVER** 自动接受或重写快照。
+CI 使用 `CI=1` 与 `INSTA_UPDATE=no`，并检查不存在 `.snap.new` 和 `.pending-snap`。CI **NEVER** 自动接受或重写快照。#1017 当前将该行为落为本地/离线 `scripts/check-tui-snapshots.sh`；是否进入在线 PR CI 由 #1018 按耗时决策。
 
 ## 7. 确定性约束
 
@@ -399,3 +399,4 @@ P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录
 | 2026-07-14 | 初稿：定义 TestBackend/crossterm/insta 场景测试架构、流程、矩阵与 CI 门禁 | [#1006](https://github.com/rushsinging/aemeath/issues/1006) |
 | 2026-07-14 | 链接全仓测试架构、覆盖率与生产可达性治理 | [#677](https://github.com/rushsinging/aemeath/issues/677) |
 | 2026-07-15 | 落地共享同步 Frame Driver、任意 Backend 基础 Harness 和 startup/input 证明场景；修正无 mod.rs 与耗时先行规则 | [#1016](https://github.com/rushsinging/aemeath/issues/1016) |
+| 2026-07-15 | 扩展 Scripted Effect/Runtime 注入/离散 tick，落地 P0 快照、本地草稿检查和 completion busy Enter 根因修复 | [#1017](https://github.com/rushsinging/aemeath/issues/1017)、[#1009](https://github.com/rushsinging/aemeath/issues/1009) |

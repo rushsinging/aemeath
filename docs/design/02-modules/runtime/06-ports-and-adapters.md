@@ -91,7 +91,7 @@ enum InteractionCommandOutcome {
 - `CancelRunStepOutcome::Accepted` 只确认 Step scope 已即时停止调度；完成由 `RunStepCancelled` / `RunDrainingInput` 异步确认。`TerminateRunOutcome::Accepted` 只确认 Run root scope 已触发；完成由 `RunTerminated` 确认。
 - 迁移期旧 `cancel_run` / `CancelRunOutcome` 只允许为当前 TUI 生产兼容保留；#878 原子切换后由 #879 删除，**NEVER** 作为目标 OHS 的第二套语义。
 - interaction reply / cancel 同样是同步、幂等、out-of-band command；它们只完成 Runtime-owned pending request，**NEVER** 经输入队列排队，也 **NEVER** 由 TUI 持有 channel sender。
-- SDK Published Language 的 `InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
+- SDK Published Language 的 `RunStepId`、`AgentId`、`InteractionRequestId`、`InteractionReply`、`InteractionCancelReason`、`InteractionCommandOutcome` 与 `ChatEvent::InteractionRequested` **MUST** 可序列化且不含 channel / lock / Runtime handle。#874 已建立这些强类型 identity、纯值 DTO/outcome 与纯 event projection；旧 `AskUserBatch.reply_tx` 只作为 #878 生产切换前的兼容路径存在，**NEVER** 进入新 Interaction PL。当前只要求 local adapter；远端帧、重连与 WSS 行为不在 v0.1.0 冻结。
 
 ## 2. Runtime 消费的能力契约
 

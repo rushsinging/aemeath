@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use sdk::{ChatRequest, ChatStream, SdkError};
 
 use super::accessors::AgentClientImpl;
-use super::event::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort, SdkChatEventSink};
+use crate::ports::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 
 pub(super) async fn chat_impl(
     me: &AgentClientImpl,
@@ -73,10 +73,7 @@ pub(super) async fn chat_impl(
         chain.clone();
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    let sink = SdkChatEventSink {
-        tx,
-        change_tx: me.inner.change_tx.clone(),
-    };
+    let sink = (me.inner.event_sink_factory)(tx);
     let inner = me.inner.clone();
     tokio::spawn(async move {
         let final_chain = crate::application::chat::process_chat_loop(

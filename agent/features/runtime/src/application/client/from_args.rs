@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use sdk::{ChangeSet, SdkError};
-use tokio::sync::watch;
+use sdk::SdkError;
 
 use crate::adapters::runtime::LlmClientAdapter;
 use crate::application::config_app_service::ConfigAppService;
@@ -207,7 +206,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     };
 
     // 19. 构建 handle
-    let (change_tx, _) = watch::channel(ChangeSet::empty());
     let current_client = context.resources.client.clone();
     let workspace = project::api::WorkspaceService::new(cwd.clone());
     let handle = RuntimeHandle {
@@ -224,7 +222,11 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
         frozen_chats: Arc::new(Mutex::new(Vec::new())),
         active_summary: Arc::new(Mutex::new(None)),
         workspace,
-        change_tx,
+        event_sink_factory: Arc::new(|tx| {
+            crate::application::chat::ChatEventSinkHandle::new(
+                crate::adapters::sdk_event_sink::SdkChatEventSink::new(tx),
+            )
+        }),
         session_reminders: Arc::new(std::sync::RwLock::new(
             share::memory::SessionReminders::new(),
         )),

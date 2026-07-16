@@ -1,0 +1,34 @@
+---
+source: apps/cli/src/tui/app/scenario_tests/interaction.rs
+expression: harness.screen()
+---
+
+  Aemeath - AI Agent
+
+
+  Type /help for available commands
+
+
+  ━━ 已 回 答  ━━
+
+      Q1. Pick A or B
+        ❯ B
+
+ · Brewing...  (Generating...  ⏱ 0s)
+
+
+
+
+
+
+
+
+
+
+
+
+┌ Input ───────────────────────────────────────────────────────────────────────────────────────────┐
+│ 输 入 消 息 ...                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ Ready │ scenario-model │ in 0 │ out 0
+ │ main │ AskMe │ session scenario-session

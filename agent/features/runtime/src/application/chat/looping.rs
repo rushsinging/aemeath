@@ -40,8 +40,9 @@ mod tool_identity;
 mod tools;
 
 pub use events::{
-    ChatEventSink, CompactStage, EventFuture, RuntimeHookEvent, RuntimeHookEventStatus,
-    RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
+    ChatEventSink, ChatEventSinkHandle, CompactStage, EventFuture, RuntimeHookEvent,
+    RuntimeHookEventStatus, RuntimeHookExecutionResult, RuntimeStreamEvent, RuntimeToolCallStatus,
+    RuntimeTurnContext,
 };
 pub use input_gate::{
     apply_gate, drain_sources, run_loop_gate, ControlCommand, ControlCommandKind,

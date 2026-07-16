@@ -1,15 +1,6 @@
-use uuid::Uuid;
+pub use sdk::RunStepId;
 
 use super::step::{ModelInvocation, RunToolCall, ToolCallStatus};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RunStepId(Uuid);
-
-impl RunStepId {
-    pub fn new_v7() -> Self {
-        Self(Uuid::now_v7())
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {

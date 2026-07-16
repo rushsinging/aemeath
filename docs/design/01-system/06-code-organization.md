@@ -300,7 +300,7 @@ src/
     └── event_projection.rs         #   DomainEvent → 投影
 ```
 
-此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的战术命名。Runtime 已有三个以上具备独立词汇、变化原因、状态或测试边界的能力，因此在 `domain` 和 `application` 层内按能力展开子模块；这不表示每个子能力都升级为 BC 或 crate。`agent_client` 是稳定入站能力（application 层），`agent_run` 拥有生命周期不变量（domain 层），`loop_engine` 驱动单个 Run（application 层）。它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。
+此投影沿用 [Runtime 模块边界](../02-modules/runtime/02-module-boundaries.md) 的战术命名。源码事实复核后，Runtime 当前只有一个拥有完整用例、状态所有权与独立生命周期的能力 `agent_execution`；`agent_client`、`agent_run`、`loop_engine`、`model_invocation`、`tool_coordination`、`context_coordination`、`interaction` 与 `event_projection` 是 `domain` / `application` 内部角色，不是平级 capability。Runtime 因此直接在 crate 根采用 `domain/application/ports/adapters` 轻量六边形，**NEVER** 为单一能力创建 `capabilities/agent_execution` 包装或空 `shared/`。`agent_client` 是稳定入站 façade，`agent_run` 拥有生命周期不变量，`loop_engine` 编排各 coordinator；它们 **NEVER** 互相装配或穿透内部类型，Loop Engine **MUST** 只经各自 façade 协调它们。`event_projection` 保持 Runtime-owned 的扁平纯转换 adapter；Runtime 当前没有独立读模型和 HTTP delivery 端点，因此 **NEVER** 引入 CQRS-lite 或 REPR。
 
 ## 5. 跨生态参照
 
@@ -474,6 +474,5 @@ components/foo/
 | 2026-07-15 | 修复评审 #14：§3.5 新增技术外部 seam 与 BC boundary seam 的判据区分说明，明确后者由供应方入站 OHS 承载，避免与出站 port 技术证据混用 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §2/§3.5 明确无 seam 时私有具体 detail 只能由 adapter/detail 内部使用、稳定策略 NEVER 依赖；§3.5 补 Storage driver（私有 backend SPI）与 AtomicBlob/Dataset OHS（供 integration adapter 调用的入站服务）对照示例；§2 补 factory 只限生产代码路径、测试可绕过直接构造 fake；§3.8 把 crate 升格收益拆为可机械验证的规则与需人工评审判定的收益两类 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 在决定层明确 Hexagonal 默认结构的工程依据：稳定层名与单向依赖易由 Guard 证明，可阻止 domain→adapter、I/O 下沉、PL 泄漏、循环依赖与 façade 膨胀；例外结构必须提供等价依赖矩阵和故意违规证据 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
-| 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 投影明确递归竖切且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) |
-| 2026-07-16 | 统一递归竖切的物理容器为私有 `capabilities/`；明确 Hexagonal 不等于目录模板，Runtime 保留经战术设计冻结的 `domain/application/ports/adapters` 例外 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
-| 2026-07-15 | **v2 修订**：Hexagonal 成为 crate 内部默认组织方式；`capabilities/` 降格为可选；COLA 层名退役映射；§4 投影全部改写为 Hexagonal 形状；§7 精确化"拒绝固定横向目录"措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 经事实复核确认为单一 `agent_execution` 能力，crate 根采用轻量六边形且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) / [#874](https://github.com/rushsinging/aemeath/issues/874) |
+| 2026-07-15 | **v2 修订**：Hexagonal 成为 crate 内部默认组织方式；`capabilities/` 降格为可选；COLA 层名退役映射；§4 投影全部改写为 Hexagonal 形状；§7 精确化“拒绝固定横向目录”措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
