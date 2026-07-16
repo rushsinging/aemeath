@@ -376,3 +376,46 @@ async fn test_load_agents_md_triggers_hook_once_for_each_readable_file_in_order(
         ]
     );
 }
+
+#[tokio::test]
+async fn test_load_agents_md_dedupes_symlinked_claude_md_pointing_to_agents_md() {
+    let base = tempfile::tempdir().unwrap();
+    let agents_path = base.path().join("AGENTS.md");
+    let claude_path = base.path().join("CLAUDE.md");
+    std::fs::write(&agents_path, "shared instructions").unwrap();
+    // CLAUDE.md 是 AGENTS.md 的软链（aemeath 仓库常见配置）
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&agents_path, &claude_path).unwrap();
+    #[cfg(not(unix))]
+    std::fs::write(&claude_path, "shared instructions").unwrap();
+
+    let hook_runner = HookRunner::empty();
+    let content = load_agents_md_from_paths(
+        &[],
+        &[agents_path.clone(), claude_path.clone()],
+        &hook_runner,
+        base.path(),
+    )
+    .await;
+
+    // 软链解析后指向同一文件，应只注入一次
+    assert_eq!(content.matches("<guidance source=").count(), 1);
+    assert!(content.contains("shared instructions"));
+}
+
+#[tokio::test]
+async fn test_load_agents_md_dedupes_identical_content_different_paths() {
+    let base = tempfile::tempdir().unwrap();
+    // 两个不同路径但内容完全相同（worktree 场景）
+    let path_a = base.path().join("a.md");
+    let path_b = base.path().join("b.md");
+    std::fs::write(&path_a, "identical content").unwrap();
+    std::fs::write(&path_b, "identical content").unwrap();
+
+    let hook_runner = HookRunner::empty();
+    let content = load_agents_md_from_paths(&[], &[path_a, path_b], &hook_runner, base.path())
+        .await;
+
+    // 内容去重：应只保留第一个
+    assert_eq!(content.matches("<guidance source=").count(), 1);
+}
