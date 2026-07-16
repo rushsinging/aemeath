@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-pub use crate::contract::*;
+pub use crate::domain::*;
 
 /// Context Management 对 Agent Runtime 开放的唯一端口。
 ///

@@ -1,4 +1,4 @@
-use crate::capabilities::compact::restore::sanitize_pairs::sanitize_tool_pairs;
+use crate::domain::compact::restore::sanitize_pairs::sanitize_tool_pairs;
 use share::message::{ContentBlock, Message, Role};
 
 // ── sanitize_tool_pairs ─────────────────────────────────────

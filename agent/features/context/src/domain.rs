@@ -1,4 +1,15 @@
-//! Context Management 对外发布的类型化语言。
+//! Context Management 领域策略、Published Language 与内部能力。
+
+pub mod compact;
+pub(crate) mod context_decision;
+pub mod session;
+pub(crate) mod token_budget;
+
+pub use compact::CompactStage;
+pub use token_budget::{
+    autocompact_threshold, effective_context_window, estimate_message_tokens,
+    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens,
+};
 
 use std::collections::HashMap;
 
@@ -320,8 +331,12 @@ pub enum ContextAppendError {
 pub enum ContextPortError {
     #[error("Session 不存在：{0}")]
     SessionNotFound(SessionId),
-    #[error("Context 构建失败：{0}")]
-    Build(String),
+    #[error("Session backing 读取失败：{0}")]
+    SessionRepository(String),
+    #[error("Prompt 物化失败：{0}")]
+    PromptMaterialization(String),
+    #[error("Memory 物化失败：{0}")]
+    MemoryMaterialization(String),
     #[error("Context 压缩失败：{0}")]
     Compact(String),
 }
