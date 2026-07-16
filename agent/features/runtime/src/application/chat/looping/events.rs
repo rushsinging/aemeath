@@ -282,4 +282,73 @@ pub trait ChatEventSink: Clone + Send + Sync + 'static {
     fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
 
     fn try_send_event(&self, event: RuntimeStreamEvent);
+
+    fn send_domain_event<'a>(
+        &'a self,
+        _event: crate::domain::agent_run::RunDomainEvent,
+    ) -> EventFuture<'a> {
+        Box::pin(async {})
+    }
+}
+
+trait DynChatEventSink: Send + Sync {
+    fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a>;
+    fn try_send_event(&self, event: RuntimeStreamEvent);
+    fn send_domain_event<'a>(
+        &'a self,
+        event: crate::domain::agent_run::RunDomainEvent,
+    ) -> EventFuture<'a>;
+}
+
+impl<S> DynChatEventSink for S
+where
+    S: ChatEventSink,
+{
+    fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+        ChatEventSink::send_event(self, event)
+    }
+
+    fn try_send_event(&self, event: RuntimeStreamEvent) {
+        ChatEventSink::try_send_event(self, event);
+    }
+
+    fn send_domain_event<'a>(
+        &'a self,
+        event: crate::domain::agent_run::RunDomainEvent,
+    ) -> EventFuture<'a> {
+        ChatEventSink::send_domain_event(self, event)
+    }
+}
+
+#[derive(Clone)]
+pub struct ChatEventSinkHandle {
+    inner: std::sync::Arc<dyn DynChatEventSink>,
+}
+
+impl ChatEventSinkHandle {
+    pub fn new<S>(sink: S) -> Self
+    where
+        S: ChatEventSink,
+    {
+        Self {
+            inner: std::sync::Arc::new(sink),
+        }
+    }
+}
+
+impl ChatEventSink for ChatEventSinkHandle {
+    fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+        self.inner.send_event(event)
+    }
+
+    fn try_send_event(&self, event: RuntimeStreamEvent) {
+        self.inner.try_send_event(event);
+    }
+
+    fn send_domain_event<'a>(
+        &'a self,
+        event: crate::domain::agent_run::RunDomainEvent,
+    ) -> EventFuture<'a> {
+        self.inner.send_domain_event(event)
+    }
 }

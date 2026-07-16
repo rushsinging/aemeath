@@ -2,10 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use sdk::ChangeSet;
-use tokio::sync::watch;
-
+use crate::application::chat::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
+use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
 use tools::api::McpConnectionManager;
 
@@ -50,7 +49,9 @@ pub struct RuntimeHandle {
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
     pub(crate) workspace: Arc<project::api::WorkspaceService>,
-    pub(crate) change_tx: watch::Sender<ChangeSet>,
+    pub(crate) event_sink_factory: Arc<
+        dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
+    >,
 
     // ─── SDK 业务对象 ───
     /// Session reminders（供 SDK 增删改查）

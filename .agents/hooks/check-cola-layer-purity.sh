@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
-# 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 只允许
-#       domain/application/ports/adapters/shared；Storage 使用 capability-first 模块。
+# 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
+#       domain/application/ports/adapters/shared；Storage 使用 domain/ports/adapters。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -20,6 +20,8 @@ FEATURE_LAYERS = {"contract", "gateway", "core", "business", "utils"}
 RUNTIME_HEX_LAYERS = {"domain", "application", "ports", "adapters", "shared"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
+STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
+STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
 STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
@@ -65,10 +67,14 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
     except ValueError:
         return None
     parts = rel.parts
-    if len(parts) >= 4 and parts[1] == "src":
+    if len(parts) >= 3 and parts[1] == "src":
         if parts[0] == "runtime" and parts[2] in RUNTIME_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "provider" and parts[2] in PROVIDER_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "storage" and parts[2] in STORAGE_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "context" and parts[2] in CONTEXT_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "storage":
             return None
@@ -113,9 +119,8 @@ for old_path in RUNTIME_PROVIDER_TOOLS_OLD_PATHS:
     if old_path.exists():
         violations.append(f"{old_path.relative_to(root)}: runtime/provider/tools must live under agent/features/*")
 
-# Context crate organises stable vertical slices under capabilities/, not by COLA
-# layer. Design doc: docs/design/02-modules/context-management/README.md
-CONTEXT_DOMAIN_DIRS = {"capabilities"}
+# Context 已迁移到 Hexagonal Target；只允许四个目标层。
+CONTEXT_HEX_LAYERS = {"domain", "application", "ports", "adapters"}
 
 features_root = root / "agent" / "features"
 for feature_src in sorted(features_root.glob("*/src")):
@@ -143,15 +148,19 @@ for feature_src in sorted(features_root.glob("*/src")):
         if crate_name == "storage":
             if child.stem in STORAGE_LEGACY_LAYERS:
                 violations.append(
-                    f"{child.relative_to(root)}: Storage legacy fixed layer is forbidden; use capability-first modules"
+                    f"{child.relative_to(root)}: Storage legacy fixed layer is forbidden; use {sorted(STORAGE_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in STORAGE_HEX_LAYERS | STORAGE_TRANSITIONAL_MODULES:
+                violations.append(
+                    f"{child.relative_to(root)}: Storage directory must be a hexagonal layer {sorted(STORAGE_HEX_LAYERS)} or registered transitional module {sorted(STORAGE_TRANSITIONAL_MODULES)}"
                 )
             continue
         if child.is_dir() and child.name not in FEATURE_LAYERS:
             # Runtime 已迁到单一 agent_execution 能力的六边形目标结构。
             if crate_name == "runtime" and child.name in RUNTIME_HEX_LAYERS:
                 continue
-            # Context crate uses domain sub-modules at top level (by design).
-            if crate_name == "context" and child.name in CONTEXT_DOMAIN_DIRS:
+            # Context 已迁到 Hexagonal 目标结构。
+            if crate_name == "context" and child.name in CONTEXT_HEX_LAYERS:
                 continue
             violations.append(
                 f"{child.relative_to(root)}: feature src directories must be COLA layers {sorted(FEATURE_LAYERS)}"
@@ -160,12 +169,18 @@ for feature_src in sorted(features_root.glob("*/src")):
 for path in sorted(features_root.rglob("*.rs")):
     if is_test_path(path):
         continue
+    rel = path.relative_to(root)
+    rel_s = rel.as_posix()
+    if rel_s.startswith("agent/features/storage/src/domain/") or rel_s == "agent/features/storage/src/domain.rs":
+        source = path.read_text()
+        if re.search(r"\b(?:std|tokio)::fs::|\bPathBuf\b|\bcrate::adapters\b", source):
+            violations.append(
+                f"{rel}: Storage domain must not perform physical I/O, own PathBuf, or depend on adapters"
+            )
     layer_info = feature_layer_for(path)
     if not layer_info:
         continue
     _feature, layer = layer_info
-    rel = path.relative_to(root)
-    rel_s = rel.as_posix()
     for lineno, line in enumerate(path.read_text().splitlines(), 1):
         for target_layer, violation in line_layer_violations(layer, line):
             exception = (rel_s, target_layer)

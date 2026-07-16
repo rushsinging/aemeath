@@ -120,8 +120,9 @@ agent/features/runtime/src/
 - **NEVER** 让 Tool adapter 直接等待 TUI channel，也不让 `InteractionPort` 自行发布 `RunResumed`
 
 ### event_projection（横切）
-- **职责**：领域事件 → SDK `ChatEvent`；**Main/Sub 路由与命名**（Main→TUI，Sub→父 Run）；补 `agent_id`（#612 缺口）
+- **职责**：领域事件 → SDK `ChatEvent` 的封闭纯转换；**Main/Sub 路由与命名**（Main→TUI，Sub→父 Run）使用 SDK 发布的 `AgentId` / `RunId` / `RunStepId`
 - 消费：`EventSink`
+- projection **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
 
 ### model_invocation 的 Usage 出口
 - Provider 返回 RawUsageSnapshot 后，model_invocation 构造带 SessionId / RunId / RunStepId / ModelInvocationId 的 UsageRecord

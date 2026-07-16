@@ -147,6 +147,10 @@ impl App {
                 return UpdateResult::one(Effect::CancelCurrentRun);
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {
+                if completion_visible {
+                    self.apply_current_suggestion();
+                    return UpdateResult::none();
+                }
                 let doc_empty = self.model.input.document.is_empty();
                 crate::tui::log_debug!(
                     "mid_turn.enter is_processing=true doc_empty={} tx_available={}",
