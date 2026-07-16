@@ -51,6 +51,17 @@ impl TuiScenarioHarness {
         self.messages.push_back(TuiMsg::AgentEvent(event));
         self.drain(32);
     }
+    pub fn resize(&mut self, width: u16, height: u16) {
+        self.terminal
+            .resize(ratatui::layout::Rect::new(0, 0, width, height))
+            .expect("resize test terminal");
+        self.messages.push_back(TuiMsg::Resize { width, height });
+        self.drain(32);
+    }
+    pub fn paste(&mut self, text: impl Into<String>) {
+        self.messages.push_back(TuiMsg::Paste(text.into()));
+        self.drain(32);
+    }
     pub fn tick(&mut self) {
         self.ticks += 1;
         self.messages.push_back(TuiMsg::SpinnerTick);
