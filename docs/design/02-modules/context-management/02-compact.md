@@ -510,6 +510,15 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
 - 每块独立 LLM 摘要 → 合并后再 LLM 摘要
 - LLM 摘要失败返回结构化 `CompactError`；若产品选择本地降级，结果 **MUST** 带显式 quality / fallback 标记，**NEVER** 静默伪装成 LLM 摘要成功。
 
+**Summary 保真度不变量**：
+
+- `early` **MUST** 覆盖所有将从 active messages 移除、且未进入 recent tail 的消息；**NEVER** 存在既不保留、也不进入 summary 的 head gap。
+- Summary **MUST** 按时间顺序汇总影响当前工作的全部用户输入；相邻输入 **MAY** 合并表达，但后续修正 **MUST** 覆盖更早的冲突要求。
+- Summary **MUST** 精确保留用户要求的动作层级，**NEVER** 把 inspect / diagnose / explain / review / design 升级为 implement / edit / commit / push / merge。
+- Summary **MUST** 分开记录 `User Requests`、`Work Completed`、`Problems / Findings`、`Current State` 与单一 `Next Action`，并区分已确认事实、推断与未知项。
+- Summary **MUST** 输出 `Continue | Waiting for User | Completed` 三态 continuation。`Continue` 表示下一轮模型直接执行 `Next Action`，不等待新用户输入；`Waiting for User` 只用于确实缺少批准、选择、输入或新权限；`Completed` 只用于用户请求已交付且没有剩余工作。
+- Recent tail 的切分位置与 summary 覆盖范围是两个独立概念：调整 summary 输入 **NEVER** 隐式改变 tail 的预算、Run/Step 边界或 `split_point`。
+
 ### 8.4 compact_window 切分
 
 ```rust
@@ -679,3 +688,4 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | 2026-07-15 | #868 实现回写：ContextPort 冻结四方法与 provider-neutral PL；append 使用 revision/fingerprint CAS 并返回 typed receipt，Runtime 只消费 Context-owned 契约 | [#868](https://github.com/rushsinging/aemeath/issues/868) |
 | 2026-07-16 | compact 战术修改：Run 级冷却（每 Run 最多 compact 一次，防死循环）；compact 后重置 token 计数；recent tail 10%（从 30% 调低）；recent tail ToolResult 全部占位符替换；summary_budget 动态计算（context_size * 2%） | #1110 |
 | 2026-07-17 | Snip/Microcompact 统一保护最近 3 个 Run；自动触发改为 Provider 标准化 last_total_tokens；recent tail 按完整 RunStep 且上限为 context window 30%；记录无 Step schema 时按完整 Run 降级的最小修复 | compact token reset design |
+| 2026-07-17 | 补充 L5 summary 保真度：所有被移除消息必须进入 summary；按序汇总用户输入且后续修正覆盖前述冲突要求；禁止动作层级升级；增加 continuation 三态 | [#671](https://github.com/rushsinging/aemeath/issues/671) |
