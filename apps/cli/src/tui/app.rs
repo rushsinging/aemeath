@@ -1,4 +1,5 @@
 pub mod event;
+pub(crate) mod frame_driver;
 mod resize;
 mod run_loop;
 mod runtime;
@@ -14,11 +15,10 @@ use crate::tui::render::output::document_renderer::OutputDocumentRenderer;
 use crate::tui::view_state::AppViewState;
 use crate::tui::{InputArea, OutputArea, StatusBar};
 use ratatui::{
-    backend::CrosstermBackend,
+    backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     Terminal,
 };
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -217,23 +217,11 @@ impl App {
     }
 
     /// Draw the TUI frame.
-    fn draw(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+    pub(crate) fn draw<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<(), B::Error> {
         let draw_start = Instant::now();
         let mut output_rect = Rect::default();
         let mut input_rect = Rect::default();
         let mut status_rect = Rect::default();
-        // #520 workaround（待 ratatui 0.30 升级解除）：输出发生结构性变化（首帧 / 块数
-        // 变化 / 行数减少）时，先强制全屏清屏 + 全量重绘，清除 ratatui 0.29 在宽字符尾随
-        // cell 上遗留的样式残影。流式追加（行数仅增长）与滚动均不触发，避免闪屏。详见
-        // `OutputArea::should_force_repaint`。
-        {
-            let doc = self.output_area.document();
-            let total = doc.total_lines();
-            let blocks = doc.blocks.len();
-            if self.output_area.should_force_repaint(total, blocks) {
-                let _ = terminal.clear();
-            }
-        }
         terminal.draw(|f| {
             let size = f.area();
             if size.height < 8 || size.width < 20 {
@@ -363,10 +351,14 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod scenario_tests;
 pub mod slash;
 #[cfg(test)]
 mod slash_effect_tests;
 #[cfg(test)]
 mod slash_tests;
+#[cfg(test)]
+mod testing;
 pub mod update;
 pub mod util;

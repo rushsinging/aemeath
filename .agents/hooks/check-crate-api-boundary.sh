@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 功能：检查跨 feature 访问只经 `<feature>::api`，且 feature 的 api.rs 只 re-export
-#       contract / gateway。
-# 作用：守住 feature 发布语言边界（§6.4.2）——禁止穿透对方 contract/gateway/core/
-#       business/utils 内部路径，禁止 api.rs 暴露内部层。
-# 例外：无。（旧 WorktreeContextExt 投影豁免已随 context 所有权重构删除。）
+# 功能：检查未迁移 feature 访问只经 `<feature>::api`，并锁定已迁移 feature 的
+#       crate-root 窄 façade。
+# 作用：禁止穿透对方 contract/gateway/core/business/utils 内部路径；Storage 与 Runtime
+#       只允许经显式登记的 crate-root Published Language / production 入口访问。
+# 例外：无路径级白名单。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
@@ -21,7 +21,7 @@ FEATURE_CRATES = {
     "runtime",
     "project",
     "policy",
-    "prompt",
+    "context",
     "provider",
     "tools",
     "storage",
@@ -33,6 +33,69 @@ INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
+}
+# 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
+ROOT_ACCESS_ALLOW = {
+    "provider": {
+        "CallbackHandler",
+        "InvocationDelta",
+        "InvocationOptions",
+        "InvocationRequest",
+        "LlmClient",
+        "LlmConfigOptions",
+        "LlmError",
+        "LlmProvider",
+        "LlmProviderGateway",
+        "LlmClientPool",
+        "ModelCapability",
+        "ModelId",
+        "ModelToolSchema",
+        "OpenAIProviderConfig",
+        "ProviderCompletion",
+        "ProviderContentBlock",
+        "ProviderDriverKind",
+        "ProviderError",
+        "ProviderErrorKind",
+        "ProviderStopReason",
+        "ProviderToolCall",
+        "ProviderToolCallId",
+        "RawUsageSnapshot",
+        "ReasoningCapability",
+        "ReasoningLevel",
+        "ReasoningMappingKind",
+        "StopReason",
+        "StreamHandler",
+        "StreamResponse",
+        "SystemBlock",
+        "Usage",
+        "DEFAULT_TIMEOUT_SECS",
+        "wire_provider",
+    },
+    "runtime": {"AgentClientImpl", "from_args"},
+    # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
+    "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
+    # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
+    "storage": {
+        "Batch",
+        "BatchStatus",
+        "MemoryStore",
+        "Task",
+        "TaskPriority",
+        "TaskSnapshot",
+        "TaskStatus",
+        "TaskStore",
+        "MAX_TOOL_RESULT_CHARS",
+        "memory_base_dir",
+        "persist_oversized_results",
+        "project_file_name",
+        "project_file_name_from_path",
+    },
+}
+
+CONTEXT_FORBIDDEN_PATHS = {
+    "agent/features/context/src/api.rs",
+    "agent/features/context/src/gateway.rs",
+    "agent/features/context/src/capabilities",
 }
 
 path_pattern = re.compile(
@@ -113,6 +176,13 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
             continue
+        if segment in ROOT_ACCESS_ALLOW.get(target, set()):
+            continue
+        if target == "provider" and segment not in ROOT_ACCESS_ALLOW["provider"]:
+            violations.append(
+                f"cross-feature access to provider::{segment} is forbidden; use the registered provider crate-root facade"
+            )
+            continue
         if segment != "api":
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use {target}::api"
@@ -137,6 +207,13 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_REEXPORT_ALLOW.get(target, set()) and stripped.startswith("pub use "):
                 continue
+            if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
+                continue
+            if target == "provider" and item_name not in ROOT_ACCESS_ALLOW["provider"]:
+                violations.append(
+                    f"cross-feature braced import from provider exposes {item_name}; use the registered provider crate-root facade"
+                )
+                continue
             if item_name != "api":
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use {target}::api::..."
@@ -159,16 +236,19 @@ def check_api_line(line: str) -> list[str]:
 
 def run_sanity() -> None:
     allowed = [
-        ("runtime", "use provider::api::LlmClient;"),
+        ("runtime", "use provider::LlmClient;"),
         ("tools", "let _ = ctx.workspace_read();"),
-        ("provider", "use crate::core::client::LlmClient;"),
+        ("provider", "use crate::adapters::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
         ("sdk", "pub use project::ProjectContext;"),
+        ("runtime", "use storage::{MemoryStore, TaskStore};"),
     ]
     blocked = [
+        ("runtime", "use provider::api::LlmClient;"),
         ("runtime", "use provider::core::client::LlmClient;"),
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
-        ("runtime", "use storage::{api::MemoryStore, MemoryStore as RootStore};"),
+        ("runtime", "use storage::memory_store::MemoryStore;"),
+        ("runtime", "use storage::HistoryManager;"),
     ]
     for current, line in allowed:
         if check_cross_crate_line(current, line):
@@ -184,6 +264,10 @@ def run_sanity() -> None:
 
 run_sanity()
 violations: list[str] = []
+for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
+    path = root / forbidden
+    if path.exists():
+        violations.append(f"{forbidden}: forbidden fixed-layer Context path exists")
 for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
     rel = api_path.relative_to(root)
     for lineno, line in enumerate(api_path.read_text().splitlines(), 1):
@@ -199,9 +283,31 @@ for base in [root / "agent", root / "apps", root / "packages"]:
         rel = path.relative_to(root)
         current = crate_for(rel)
         text = path.read_text()
+        # 将 rustfmt 产生的多行 use 语句折叠为一行，避免花括号导入绕过 façade 白名单。
+        scan_lines: list[tuple[int, str]] = []
+        pending_use: list[str] = []
+        pending_lineno = 0
+        brace_depth = 0
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if pending_use:
+                pending_use.append(stripped)
+                brace_depth += stripped.count("{") - stripped.count("}")
+                if brace_depth <= 0 and ";" in stripped:
+                    scan_lines.append((pending_lineno, " ".join(pending_use)))
+                    pending_use = []
+                continue
+            if re.match(r"^(?:pub\s+)?use\s+", stripped) and "{" in stripped and "}" not in stripped:
+                pending_use = [stripped]
+                pending_lineno = lineno
+                brace_depth = stripped.count("{") - stripped.count("}")
+                continue
+            scan_lines.append((lineno, line))
+        if pending_use:
+            scan_lines.append((pending_lineno, " ".join(pending_use)))
         # 解析文件中声明的本地模块，排除同名 crate 的误报
         local_modules = set(re.findall(r'\b(?:pub\s+)?mod\s+(\w+)\s*;', text))
-        for lineno, line in enumerate(text.splitlines(), 1):
+        for lineno, line in scan_lines:
             for violation in check_cross_crate_line(current, line, local_modules):
                 violations.append(f"{rel}:{lineno}: {violation}: {line.strip()}")
 if violations:

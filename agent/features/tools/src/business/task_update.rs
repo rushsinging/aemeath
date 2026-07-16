@@ -3,16 +3,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_update::{TaskUpdateInput, TaskUpdateResult};
 use std::sync::Arc;
-use storage::api::{TaskPriority, TaskStatus, TaskStore};
-
-fn current_timestamp_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or_default()
-}
+use storage::{TaskPriority, TaskStatus, TaskStore};
 
 pub struct TaskUpdateTool {
     pub store: Arc<TaskStore>,
@@ -25,7 +16,10 @@ impl TypedTool for TaskUpdateTool {
         "TaskUpdate"
     }
     fn description(&self) -> &str {
-        "Update a task's status, subject, description, or dependencies.\n\n\
+        "Update a single field on a task.\n\n\
+         Pass `key` to select which field to change and `value` for the new value. \
+         Each call updates exactly one field. Value is always a string.\n\n\
+         Valid keys: status, subject, description, owner, priority, blocked_by_id.\n\n\
          Status workflow: pending → in_progress → completed. Use 'deleted' to remove.\n\n\
          When you mark a task as completed, the system will show which downstream tasks \
          are now unblocked and ready to execute. Use this to decide what to work on next.\n\n\
@@ -55,7 +49,6 @@ impl TypedTool for TaskUpdateTool {
         input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskUpdateResult> {
-        let now = current_timestamp_millis();
         let args: TaskUpdateInput = match serde_json::from_value(input) {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
@@ -68,24 +61,46 @@ impl TypedTool for TaskUpdateTool {
             None => return TypedToolResult::error(format!("task not found: {input_id}")),
         };
 
-        // Pre-resolve dependency display numbers to global ids (must be async)
-        let resolved_blocked_by = if let Some(display_ids) = args.add_blocked_by.as_deref() {
-            self.store.resolve_display_ids(display_ids).await
-        } else {
-            Vec::new()
+        let key = args.key.as_str();
+        let val = &args.value;
+
+        // Validate: value must be a string for all keys
+        let val_str = match val.as_str() {
+            Some(s) => s,
+            None => {
+                return TypedToolResult::error(format!("value must be a string for key '{key}'"))
+            }
         };
-        let resolved_blocks = if let Some(display_ids) = args.add_blocks.as_deref() {
-            self.store.resolve_display_ids(display_ids).await
-        } else {
-            Vec::new()
+
+        // Pre-resolve blocked_by_id display number to global id
+        let resolved_dep: Option<String> = match key {
+            "blocked_by_id" => {
+                let gid = self.store.resolve_display_id(val_str).await;
+                if gid.is_none() {
+                    return TypedToolResult::error(format!(
+                        "blocked_by_id task not found: {val_str}"
+                    ));
+                }
+                gid
+            }
+            _ => None,
         };
+
+        // Validate key
+        match key {
+            "status" | "subject" | "description" | "owner" | "priority" | "blocked_by_id" => {}
+            _ => {
+                return TypedToolResult::error(format!(
+                    "unknown field '{key}'. Valid keys: status, subject, description, owner, priority, blocked_by_id"
+                ));
+            }
+        }
 
         let result = self
             .store
-            .update(&task_id, |task| {
-                // Status update
-                if let Some(status) = args.status.as_deref() {
-                    task.status = match status {
+            .update(&task_id, |task| match key {
+                "status" => {
+                    task.status = match val_str {
                         "pending" => TaskStatus::Pending,
                         "in_progress" => TaskStatus::InProgress,
                         "completed" => TaskStatus::Completed,
@@ -93,59 +108,29 @@ impl TypedTool for TaskUpdateTool {
                         _ => task.status.clone(),
                     };
                 }
-
-                // Basic field updates
-                if let Some(subject) = args.subject {
-                    task.subject = subject;
+                "subject" => {
+                    task.subject = val_str.to_string();
                 }
-                if let Some(desc) = args.description {
-                    task.description = desc;
+                "description" => {
+                    task.description = val_str.to_string();
                 }
-                if let Some(af) = args.active_form {
-                    task.active_form = Some(af);
+                "owner" => {
+                    task.owner = Some(val_str.to_string());
                 }
-                if let Some(owner) = args.owner {
-                    task.owner = Some(owner);
-                }
-
-                // Priority update
-                if let Some(priority) = args.priority.as_deref() {
-                    if let Some(p) = TaskPriority::parse(priority) {
+                "priority" => {
+                    if let Some(p) = TaskPriority::parse(val_str) {
                         task.priority = p;
                     }
                 }
-
-                // Progress update
-                if let Some(progress) = args.progress {
-                    task.progress = progress.min(100);
-                }
-                if let Some(msg) = args.progress_message {
-                    task.progress_message = Some(msg);
-                }
-
-                // Dependency updates — use pre-resolved global ids
-                for gid in &resolved_blocked_by {
-                    if !task.blocked_by.contains(gid) {
-                        task.blocked_by.push(gid.clone());
+                "blocked_by_id" => {
+                    if let Some(gid) = &resolved_dep {
+                        if !task.blocked_by.contains(gid) {
+                            task.blocked_by.push(gid.clone());
+                        }
                     }
                 }
-                for gid in &resolved_blocks {
-                    if !task.blocks.contains(gid) {
-                        task.blocks.push(gid.clone());
-                    }
-                }
-
-                // Tag updates
-                if let Some(add_tags) = args.add_tags {
-                    for tag in add_tags {
-                        task.add_tag(tag, now);
-                    }
-                }
-                if let Some(remove_tags) = args.remove_tags {
-                    for tag in remove_tags {
-                        task.remove_tag(&tag, now);
-                    }
-                }
+                // Unreachable — validated above
+                _ => {}
             })
             .await;
 
@@ -153,14 +138,24 @@ impl TypedTool for TaskUpdateTool {
             Some(task) => {
                 let display_id = self.store.format_display_id(&task.id).await;
                 let status = format!("{:?}", task.status);
+                let priority = task.priority.as_str().to_string();
+                let blocked_by = self
+                    .store
+                    .to_display_ids(&task.blocked_by)
+                    .await
+                    .into_iter()
+                    .map(|id| format!("#{id}"))
+                    .collect::<Vec<_>>();
 
-                let message = format!("Task #{} updated", display_id);
+                let message = format!("Task #{} updated. Status: {}", display_id, status);
                 TypedToolResult::success(
                     message,
                     TaskUpdateResult {
                         task_id: display_id,
                         status,
                         subject: task.subject.clone(),
+                        priority,
+                        blocked_by,
                     },
                 )
             }

@@ -8,7 +8,7 @@ use crate::business::{
 use share::skill_ops::Skill;
 use std::collections::HashMap;
 use std::sync::Arc;
-use storage::api::TaskStore;
+use storage::TaskStore;
 use tokio::sync::Mutex;
 
 use super::tool_registry::ToolRegistry;
@@ -89,12 +89,7 @@ pub fn register_tools(
     reg!("WebSearch", web_search::WebSearchTool);
 
     // Agent dispatch
-    reg!(
-        "Agent",
-        agent_tool::AgentTool {
-            store: task_store.clone(),
-        }
-    );
+    reg!("Agent", agent_tool::AgentTool);
 
     // Task management tools
     reg!(

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "max_production_allow_dead_code": 10,
+  "owner": "#677",
+  "reason": "历史迁移期 dead_code 例外；新增数量必须更新本文件并说明 owner/退出条件",
+  "exit_condition": "#649/#947 完成退役，#1018 决定最终阻断策略"
+}

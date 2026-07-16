@@ -14,7 +14,7 @@
 ## MCP 工具
 
 - MCP 主体在 `agent/features/tools/src/business/`：`mcp_manager.rs`、`mcp_tool.rs`、`mcp.rs`、`read_mcp_resource.rs`、`list_mcp_resources.rs`。
-- MCP 加载器：`agent/features/runtime/src/utils/bootstrap/mcp_loader.rs`（`load_mcp_manager`、`parse_mcp_servers_config`、`spawn_mcp_connect`）。
+- MCP 加载器：`agent/features/runtime/src/application/startup/mcp_loader.rs`（`load_mcp_manager`、`parse_mcp_servers_config`、`spawn_mcp_connect`）。
 - MCP 外部协议 adapter：`agent/shared/src/adapter/mcp.rs`。
 - MCP server 配置来源：`~/.agents/mcp.json`（动态加载，当前通过 `serde_json::Value` 配置——属开放决策）。
 - MCP tool 的 description 来自 MCP server 透传，不在内置工具英文化范围内。

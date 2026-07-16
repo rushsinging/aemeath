@@ -15,6 +15,7 @@ fn resolver_config() -> ModelsConfig {
                 max_tokens: 32_000,
                 reasoning: Some(true),
                 reasoning_effort: None,
+                api_style: None,
                 ..Default::default()
             }],
         },
@@ -32,6 +33,7 @@ fn resolver_config() -> ModelsConfig {
                 max_tokens: 16_000,
                 reasoning: None,
                 reasoning_effort: None,
+                api_style: None,
                 ..Default::default()
             }],
         },

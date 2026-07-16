@@ -75,6 +75,22 @@ impl HookRunner {
         input: &HookInput,
         workspace_root: &Path,
     ) -> HookResult {
+        self.execute_hook_with_cancel(
+            hook,
+            input,
+            workspace_root,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub async fn execute_hook_with_cancel(
+        &self,
+        hook: &HookEntry,
+        input: &HookInput,
+        workspace_root: &Path,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> HookResult {
         let input_json = match serde_json::to_string(input) {
             Ok(json) => json,
             Err(e) => {
@@ -94,7 +110,9 @@ impl HookRunner {
             workspace_root_str
         );
 
-        let mut child = match tokio::process::Command::new("sh")
+        let mut command_builder = tokio::process::Command::new("sh");
+        command_builder.kill_on_drop(true);
+        let mut child = match command_builder
             .arg("-c")
             .arg(&command)
             .current_dir(workspace_root)
@@ -146,7 +164,12 @@ impl HookRunner {
             // stdin 在此处被关闭，进程看到 EOF
         }
 
-        let result = tokio::time::timeout(timeout, child.wait_with_output()).await;
+        let result = tokio::select! {
+            _ = cancel.cancelled() => {
+                return HookResult::with_error(format!("hook '{}' 已取消", command));
+            }
+            result = tokio::time::timeout(timeout, child.wait_with_output()) => result,
+        };
 
         match result {
             Ok(Ok(output)) => {
@@ -357,5 +380,41 @@ fn non_empty_text(text: &str) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_execute_hook_with_cancel_interrupts_running_process() {
+        let runner = HookRunner::empty();
+        let hook = HookEntry {
+            matcher: String::new(),
+            command: "sleep 30".to_string(),
+            timeout: 60,
+        };
+        let input = HookInput {
+            event: HookEvent::Stop,
+            data: HookData::Stop(crate::business::hook::data::StopHookData { turns: 1 }),
+        };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_task = cancel.clone();
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel_task.cancel();
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            runner.execute_hook_with_cancel(&hook, &input, Path::new("."), &cancel),
+        )
+        .await
+        .expect("取消必须中断在途 Hook 进程");
+
+        canceller.await.unwrap();
+        assert!(result.error.is_some_and(|error| error.contains("已取消")));
+        assert_eq!(result.exit_code, None);
     }
 }

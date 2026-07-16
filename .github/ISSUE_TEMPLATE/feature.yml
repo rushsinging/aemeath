@@ -62,6 +62,39 @@ body:
       label: Open design questions
       description: If substantial, the maintainer SHOULD relabel to `kind:rfc`.
   - type: textarea
+    id: doc-code-verification
+    attributes:
+      label: 文档与代码双向校验门禁
+      description: >-
+        涉及 `docs/design/**` 目标文档的改动 MUST 逐项执行；纯工具/脚本增强可标 N/A。
+        完整流程参见 AGENTS.md「Bug/Feature 执行流程」。
+      value: |
+        <!-- doc-code-verification-gate:v1 -->
+
+        - [ ] **开发前**：列出对应 Target 文档章节、当前代码路径、不符合点；文档矛盾/过期/不可行先修正文档
+        - [ ] **开发中**：范围/类型/端口/状态机/错误语义变化时同步校对文档；代码与文档使用同一术语
+        - [ ] **完成前**：差异清单逐项更新为 已对齐/已修正文档/经确认延期；PR Test plan 列出已核对文档与守卫命令
+    validations:
+      required: false
+  - type: textarea
+    id: test-strategy
+    attributes:
+      label: 测试策略
+      description: >-
+        单元/场景测试应遵守 `docs/design/03-engineering/04-testing-and-coverage.md`
+        六层测试模型（L0–L5）。Feature 实现 MUST 先写表达期望行为的测试（TDD），再写实现。
+      value: |
+        参见 `docs/design/03-engineering/04-testing-and-coverage.md`。
+
+        适用层级：
+        - [ ] L1 单元测试
+        - [ ] L2 模块协作测试
+        - [ ] L3 契约测试
+        - [ ] L4 场景测试
+        - [ ] L5 系统 smoke
+    validations:
+      required: false
+  - type: textarea
     id: additional-context
     attributes:
       label: Additional context

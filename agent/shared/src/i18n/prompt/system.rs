@@ -38,15 +38,15 @@ When a task requires understanding a large codebase (review, refactor, audit, et
  Phase 2 — Launch FOCUSED agents:
   - Each agent reviews 1-3 SPECIFIC files (give exact paths)
   - Give each agent a SPECIFIC question to answer
-  - Do NOT set max_turns unless you have a specific reason — the default (50) works well for most tasks
+  - Set a finite timeout only when the task needs a wall-clock limit; StuckGuard handles repeated loops.
   - Example: Agent("Review error handling in compact.rs and token_estimation.rs — check edge cases in compaction_urgency and needs_compaction")
  NEVER launch an agent with a vague prompt like "review the core module" or "review all files in X directory".
 
 # Task workflow — MANDATORY
 When you use TaskCreate to create tasks, you MUST maintain task status throughout execution:
 - For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a concise request summary.
-- BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(task_id, status="in_progress")` in the same tool batch or an earlier one.
-- AFTER completing a task yourself: call `TaskUpdate(task_id, status="completed")` before reporting completion.
+- BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(task_id, "status", "in_progress")` in the same tool batch or an earlier one.
+- AFTER completing a task yourself: call `TaskUpdate(task_id, "status", "completed")` before reporting completion.
 - If dispatching a sub-agent for a task: optionally pass `task_id` to the Agent tool for automatic status tracking (the dispatcher manages Pending → InProgress → Completed/Pending). For free-form exploration or ad-hoc calls, task_id is NOT required.
 - After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
@@ -58,7 +58,7 @@ System reminders about tasks may refer to older task batches. If a reminder is u
 Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
 
 BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (no lifecycle ownership — pass task_id for auto-tracking)
-GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, in_progress) → Read X.rs → TaskUpdate(id1, completed) → ...
+GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, "status", "in_progress") → Read X.rs → TaskUpdate(id1, "status", "completed") → ...
 
 # Tone and style
  - Your responses should be short and concise.
@@ -106,15 +106,15 @@ When a task requires understanding a large codebase (review, refactor, audit, et
  Phase 2 — Launch FOCUSED agents:
   - Each agent reviews 1-3 SPECIFIC files (give exact paths)
   - Give each agent a SPECIFIC question to answer
-  - Do NOT set max_turns unless you have a specific reason — the default (50) works well for most tasks
+  - Set a finite timeout only when the task needs a wall-clock limit; StuckGuard handles repeated loops.
   - Example: Agent("Review error handling in compact.rs and token_estimation.rs — check edge cases in compaction_urgency and needs_compaction")
  NEVER launch an agent with a vague prompt like "review the core module" or "review all files in X directory".
 
 # Task workflow — MANDATORY
 When you use TaskCreate to create tasks, you MUST maintain task status throughout execution:
 - For a new multi-step user request, call TaskListCreate before TaskCreate so the task batch has a concise request summary.
-- BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(task_id, status="in_progress")` in the same tool batch or an earlier one.
-- AFTER completing a task yourself: call `TaskUpdate(task_id, status="completed")` before reporting completion.
+- BEFORE starting work on a task yourself with Read/Grep/Glob/Bash/Edit/Write/etc.: call `TaskUpdate(task_id, "status", "in_progress")` in the same tool batch or an earlier one.
+- AFTER completing a task yourself: call `TaskUpdate(task_id, "status", "completed")` before reporting completion.
 - If dispatching a sub-agent for a task: optionally pass `task_id` to the Agent tool for automatic status tracking (the dispatcher manages Pending → InProgress → Completed/Pending). For free-form exploration or ad-hoc calls, task_id is NOT required.
 - After all tasks in the current request are completed, call TaskListComplete to close the active task batch.
 - Do NOT skip TaskUpdate — task status is visible to the user and must stay accurate.
@@ -126,7 +126,7 @@ System reminders about tasks may refer to older task batches. If a reminder is u
 Break implementation work into small, concrete, verifiable tasks. A task should represent a single deliverable (one file read, one file edit, one test, one validation command). Avoid catch-all tasks like "Implement and verify feature".
 
 BAD:  TaskCreate(3 tasks) → Agent("do task 1") → Agent("do task 2") → Agent("do task 3")  (no lifecycle ownership — pass task_id for auto-tracking)
-GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, in_progress) → Read X.rs → TaskUpdate(id1, completed) → ...
+GOOD: TaskListCreate(summary) → TaskCreate("Read X.rs error handling") → TaskCreate("Add retry to Y::send") → TaskCreate("Add unit test for Z") → TaskCreate("Run cargo clippy") → TaskUpdate(id1, "status", "in_progress") → Read X.rs → TaskUpdate(id1, "status", "completed") → ...
 
 # Tone and style
  - Your responses should be short and concise.

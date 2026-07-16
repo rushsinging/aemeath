@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # no_mod_rs.sh — 架构 guard：检测项目中新增的 mod.rs 文件
 # 用法：
-#   ./infra/scripts/no_mod_rs.sh          # 检查所有 .rs 源文件
-#   ./infra/scripts/no_mod_rs.sh --diff   # 仅检查 git 暂存区新增的文件
+#   ./no_mod_rs.sh          # 检查所有 .rs 源文件
+#   ./no_mod_rs.sh --diff   # 仅检查 git 暂存区新增的文件
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "$0")" && pwd)"
-project_root="$(cd "$script_dir/../.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$script_dir/../.." && pwd)}"
+# 守卫：如果 AEMEATH_PROJECT_DIR 不含 .agents/hooks，回退到 BASH_SOURCE 推导。
+if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/hooks" ]; then
+  ROOT="$(cd "$script_dir/../.." && pwd)"
+fi
 
 mode="${1:-all}"
 
@@ -20,13 +24,17 @@ if [ "$mode" = "--diff" ]; then
       echo "ERROR: 新增 mod.rs 文件: $f" >&2
       found=1
     fi
-  done < <(git -C "$project_root" diff --cached --name-only --diff-filter=A -- '*.rs')
+  done < <(git -C "$ROOT" diff --cached --name-only --diff-filter=A -- '*.rs')
 else
-  # 检查所有 mod.rs
+  # 检查所有 mod.rs；目录级 prune 避免递归进入 worktree、工具缓存和构建产物。
   while IFS= read -r f; do
     echo "ERROR: 发现 mod.rs 文件: $f" >&2
     found=1
-  done < <(find "$project_root" -path '*/src/*' -name 'mod.rs' -not -path '*/.worktrees/*' -not -path '*/.claude/*' -not -path '*/target/*')
+  done < <(
+    find "$ROOT" \
+      \( -type d \( -name .worktrees -o -name .claude -o -name target \) -prune \) -o \
+      \( -type f -path '*/src/*' -name 'mod.rs' -print \)
+  )
 fi
 
 if [ "$found" -ne 0 ]; then
@@ -38,4 +46,3 @@ if [ "$found" -ne 0 ]; then
 fi
 
 echo "OK: 未发现 mod.rs 文件"
-exit 0

@@ -79,22 +79,12 @@ pub struct Task {
     pub description: String,
     pub status: TaskStatus,
     #[serde(default)]
-    pub active_form: Option<String>,
-    #[serde(default)]
     pub owner: Option<String>,
     #[serde(default)]
     pub blocked_by: Vec<String>,
-    #[serde(default)]
-    pub blocks: Vec<String>,
     /// Task priority
     #[serde(default)]
     pub priority: TaskPriority,
-    /// Progress percentage (0-100)
-    #[serde(default)]
-    pub progress: u8,
-    /// Progress message
-    #[serde(default)]
-    pub progress_message: Option<String>,
     /// Creation timestamp (milliseconds since epoch)
     #[serde(default)]
     pub created_at: u64,
@@ -104,9 +94,6 @@ pub struct Task {
     /// Session ID this task belongs to
     #[serde(default)]
     pub session_id: Option<String>,
-    /// Tags for categorization
-    #[serde(default)]
-    pub tags: Vec<String>,
     /// Batch ID: tasks created in the same turn share the same batch.
     /// A new batch starts when all previous tasks are completed.
     #[serde(default)]
@@ -114,30 +101,9 @@ pub struct Task {
 }
 
 impl Task {
-    /// Update progress
-    pub fn set_progress(&mut self, progress: u8, message: Option<String>, updated_at: u64) {
-        self.progress = progress.min(100);
-        self.progress_message = message;
-        self.updated_at = updated_at;
-    }
-
     /// Set priority
     pub fn set_priority(&mut self, priority: TaskPriority, updated_at: u64) {
         self.priority = priority;
-        self.updated_at = updated_at;
-    }
-
-    /// Add a tag
-    pub fn add_tag(&mut self, tag: String, updated_at: u64) {
-        if !self.tags.contains(&tag) {
-            self.tags.push(tag);
-            self.updated_at = updated_at;
-        }
-    }
-
-    /// Remove a tag
-    pub fn remove_tag(&mut self, tag: &str, updated_at: u64) {
-        self.tags.retain(|t| t != tag);
         self.updated_at = updated_at;
     }
 }

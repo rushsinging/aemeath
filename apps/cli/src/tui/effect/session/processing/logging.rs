@@ -154,6 +154,40 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             context.turn_id,
             duration_ms
         ),
+        sdk::ChatEvent::RunStarted {
+            run_id,
+            parent_run_id,
+        } => crate::tui::log_trace!(
+            "{} run_started run_id={} parent_run_id={:?}",
+            stage,
+            run_id,
+            parent_run_id
+        ),
+        sdk::ChatEvent::RunStepStarted { run_id, step_id, .. } => {
+            crate::tui::log_trace!("{} run_step_started run_id={} step_id={}", stage, run_id, step_id)
+        }
+        sdk::ChatEvent::RunStepCompleted { run_id, step_id, .. } => {
+            crate::tui::log_trace!("{} run_step_completed run_id={} step_id={}", stage, run_id, step_id)
+        }
+        sdk::ChatEvent::RunStepCancellationRequested { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_cancellation_requested run_id={} step_id={}", stage, run_id, step_id),
+        sdk::ChatEvent::RunStepFinalizationStarted { run_id, step_id, .. } => crate::tui::log_trace!("{} run_step_finalization_started run_id={} step_id={}", stage, run_id, step_id),
+        sdk::ChatEvent::RunStepCancelled { run_id, step_id, confirmed, .. } => crate::tui::log_trace!("{} run_step_cancelled run_id={} step_id={} confirmed={}", stage, run_id, step_id, confirmed),
+        sdk::ChatEvent::RunDrainingInput { run_id, .. } => crate::tui::log_trace!("{} run_draining_input run_id={}", stage, run_id),
+        sdk::ChatEvent::RunTerminationRequested { run_id, .. } => crate::tui::log_trace!("{} run_termination_requested run_id={}", stage, run_id),
+        sdk::ChatEvent::RunTerminated { run_id, .. } => crate::tui::log_trace!("{} run_terminated run_id={}", stage, run_id),
+        sdk::ChatEvent::RunCompleted { run_id, .. } => crate::tui::log_trace!("{} run_completed run_id={}", stage, run_id),
+        sdk::ChatEvent::RunFailed { run_id, .. } => crate::tui::log_trace!("{} run_failed run_id={}", stage, run_id),
+        sdk::ChatEvent::RunStuckDetected { run_id, .. } => crate::tui::log_trace!("{} run_stuck_detected run_id={}", stage, run_id),
+        sdk::ChatEvent::RunTransitioned { run_id, status, .. } => crate::tui::log_trace!("{} run_transitioned run_id={} status={}", stage, run_id, status),
+        sdk::ChatEvent::RunAwaitingUser { run_id, .. } => crate::tui::log_trace!("{} run_awaiting_user run_id={}", stage, run_id),
+        sdk::ChatEvent::RunResumed { run_id, .. } => crate::tui::log_trace!("{} run_resumed run_id={}", stage, run_id),
+        sdk::ChatEvent::InteractionRequested { request } => crate::tui::log_trace!("{} interaction_requested request_id={} run_id={}", stage, request.id, request.run_id),
+        sdk::ChatEvent::RunCancelling { run_id } => {
+            crate::tui::log_trace!("{} run_cancelling run_id={}", stage, run_id)
+        }
+        sdk::ChatEvent::RunCancelled { run_id } => {
+            crate::tui::log_trace!("{} run_cancelled run_id={}", stage, run_id)
+        }
         sdk::ChatEvent::Cancelled { context } => crate::tui::log_trace!(
             "{} cancelled chat_id={} turn_id={}",
             stage,

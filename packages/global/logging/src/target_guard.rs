@@ -12,6 +12,7 @@ const ALLOWED_TARGETS: &[&str] = &[
     "aemeath:tui",
     "aemeath:composition",
     "aemeath:shared",
+    "aemeath:llm-api-error",
     "aemeath:agent:policy",
     "aemeath:agent:project",
     "aemeath:agent:hook",
@@ -230,8 +231,8 @@ mod tests {
     }
 
     #[test]
-    fn prompt_layer_must_not_use_bare_log_macros() {
-        check_layer("agent/features/prompt/src", "prompt::");
+    fn context_layer_must_not_use_bare_log_macros() {
+        check_layer("agent/features/context/src", "context::");
     }
 
     #[test]

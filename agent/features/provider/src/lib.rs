@@ -1,25 +1,40 @@
-//! LLM client library for aemeath
-//!
-//! Supports multiple LLM providers through a unified interface.
+//! LLM client library for aemeath.
 
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub const LOG_TARGET: &str = "aemeath:agent:provider";
 
-pub mod api;
-mod business;
-pub mod contract;
-mod core;
-pub mod gateway;
+mod adapters;
+mod domain;
+mod ports;
+pub mod published_language;
 
-pub use contract::ProviderDriverKind;
-
-/// Provider HTTP 超时常量（单一真相源，见 `business` 模块）。
-pub use business::{
-    ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS, CONNECT_TIMEOUT_SECS, DEFAULT_TIMEOUT_SECS,
-    OLLAMA_STREAM_IDLE_TIMEOUT_SECS, OPENAI_STREAM_IDLE_TIMEOUT_SECS, STALL_THRESHOLD_SECS,
+pub use adapters::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+pub use adapters::openai_compatible::ReasoningConfig;
+pub use adapters::pool::LlmClientPool;
+pub use adapters::transport::{wire_provider, DefaultLlmProviderGateway, LlmProviderGateway};
+pub use domain::capability::ProviderDriverKind;
+pub use domain::invoke::{
+    ApiError, CacheControl, ContentBlockPayload, CreateMessageRequest, DeltaPayload, DeltaUsage,
+    MessageDeltaPayload, MessageStartPayload, StopReason, StreamEvent, StreamResponse, SystemBlock,
+    Usage,
 };
+pub use ports::{CallbackHandler, LlmProvider, ReasoningLevel, StreamHandler};
+pub use published_language::{
+    InvocationDelta, InvocationOptions, InvocationRequest, ModelCapability, ModelId,
+    ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,
+    ProviderStopReason, ProviderToolCall, ProviderToolCallId, RawUsageSnapshot,
+    ReasoningCapability, ReasoningMappingKind,
+};
+
+/// Provider HTTP 超时常量。
+pub const DEFAULT_TIMEOUT_SECS: u64 = 1800;
+pub const CONNECT_TIMEOUT_SECS: u64 = 30;
+pub const ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS: u64 = 90;
+pub const OPENAI_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
+pub const OLLAMA_STREAM_IDLE_TIMEOUT_SECS: u64 = 180;
+pub const STALL_THRESHOLD_SECS: u64 = 30;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -37,11 +52,8 @@ pub enum LlmError {
     Stream(String),
     #[error("config error: {0}")]
     Config(String),
-    /// 上游 SSE 流在某个 tool_call 的 JSON arguments 字符串中间被截断。
-    /// 用结构化字段替代"通过字符串嗅探判断"的做法，方便 caller 精确路由。
     #[error(
-        "stream truncated mid-tool_call '{tool_call_name}' (id={tool_call_id}): \
-         {accumulated_bytes} bytes across {delta_count} deltas — provider closed SSE early"
+        "stream truncated mid-tool_call '{tool_call_name}' (id={tool_call_id}): {accumulated_bytes} bytes across {delta_count} deltas — provider closed SSE early"
     )]
     StreamTruncated {
         tool_call_id: String,
@@ -58,8 +70,6 @@ impl LlmError {
         matches!(self, LlmError::Cancelled)
     }
 
-    /// 是否属于"上游 SSE 流在 tool_call 中间被截断"的稳定失败模式。
-    /// 替代先前 `e.contains("upstream truncated")` 的字符串嗅探。
     pub fn is_stream_truncated(&self) -> bool {
         matches!(self, LlmError::StreamTruncated { .. })
     }
@@ -71,8 +81,7 @@ mod tests {
 
     #[test]
     fn llm_cancelled_error_is_classified_as_cancelled() {
-        let error = LlmError::Cancelled;
-        assert!(error.is_cancelled());
+        assert!(LlmError::Cancelled.is_cancelled());
     }
 
     #[test]
@@ -85,9 +94,7 @@ mod tests {
             head_preview: "{\"file_path\":\"/x\"".to_string(),
             tail_preview: "...truncated...".to_string(),
         };
-
         assert!(error.is_stream_truncated());
-        // Display 包含关键诊断字段，方便日志追溯
         let rendered = format!("{error}");
         assert!(rendered.contains("Write"));
         assert!(rendered.contains("call_x"));

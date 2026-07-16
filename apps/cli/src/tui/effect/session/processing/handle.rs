@@ -15,23 +15,55 @@ pub(crate) struct SpawnContext {
     pub fallback_context: UiTurnContext,
 }
 
-#[derive(Debug)]
+pub(crate) enum RunCancelState {
+    Idle,
+    AwaitingStart { cancel_requested: bool },
+    Active(sdk::RunId),
+}
+
 pub(crate) struct ProcessingHandle {
     pub(super) join: tokio::task::JoinHandle<()>,
-    /// #639：runtime chat 的 cancel 句柄。因 `chat()` 在 spawn task **内部** await，
-    /// 句柄要等 chat() 返回后才拿得到，故用共享 slot 由 task 回填、TUI 侧读取触发。
-    pub(super) cancel: Arc<std::sync::Mutex<Option<sdk::CancelHandle>>>,
+    pub(super) agent_client: Arc<dyn sdk::AgentClient>,
+    pub(super) run_cancel_state: Arc<std::sync::Mutex<RunCancelState>>,
+}
+
+impl std::fmt::Debug for ProcessingHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProcessingHandle")
+            .finish_non_exhaustive()
+    }
 }
 
 impl ProcessingHandle {
-    /// #639：即时取消当前 chat（触发 runtime 的 CancellationToken，进程内 out-of-band，
-    /// 不走事件流）。abort 只中断 TUI 消费流不停 runtime loop，故 cancel NEVER 用 abort。
-    pub(crate) fn cancel(&self) {
-        if let Ok(guard) = self.cancel.lock() {
-            if let Some(handle) = guard.as_ref() {
-                handle.cancel();
+    pub(crate) fn expect_run_start(&self) {
+        *self
+            .run_cancel_state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = RunCancelState::AwaitingStart {
+            cancel_requested: false,
+        };
+    }
+
+    pub(crate) fn cancel_current_run(&self) -> sdk::CancelRunOutcome {
+        let run_id = {
+            let mut state = self
+                .run_cancel_state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            match &mut *state {
+                RunCancelState::Active(run_id) => Some(run_id.clone()),
+                RunCancelState::AwaitingStart { cancel_requested } => {
+                    *cancel_requested = true;
+                    None
+                }
+                RunCancelState::Idle => return sdk::CancelRunOutcome::NotFound,
             }
-        }
+        };
+        run_id
+            .as_ref()
+            .map(|run_id| self.agent_client.cancel_run(run_id))
+            .unwrap_or(sdk::CancelRunOutcome::Accepted)
     }
 
     pub(crate) fn abort(&self) {

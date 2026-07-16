@@ -24,6 +24,7 @@ pub struct EditResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct EditInput {
     /// Absolute path to the file
     pub file_path: String,

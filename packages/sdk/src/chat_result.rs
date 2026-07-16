@@ -35,73 +35,14 @@ pub struct ChatResult {
     pub tokens_used: Option<u64>,
 }
 
-/// 取消句柄：TUI 持有，触发即向 runtime 的 CancellationToken 发**即时**取消信号
-/// （进程内 out-of-band，NEVER 走事件流——避免工具/hook/compact 期间的排队延迟）。
-///
-/// 用闭包封装，让 SDK 契约层不依赖 `tokio_util::CancellationToken`：runtime 侧
-/// （`trait_chat::chat_impl`）构造时注入「锁共享 cancel 槽 + cancel 当前 token」的
-/// 闭包，TUI 侧只认这个句柄。#639。
-#[derive(Clone)]
-pub struct CancelHandle {
-    trigger: std::sync::Arc<dyn Fn() + Send + Sync>,
-}
-
-impl CancelHandle {
-    /// 用触发闭包构造（runtime 侧调用）。
-    pub fn new(trigger: impl Fn() + Send + Sync + 'static) -> Self {
-        Self {
-            trigger: std::sync::Arc::new(trigger),
-        }
-    }
-
-    /// 无操作句柄——测试 / 无 runtime 的 mock ChatStream 用。
-    pub fn noop() -> Self {
-        Self {
-            trigger: std::sync::Arc::new(|| {}),
-        }
-    }
-
-    /// 触发取消（即时）。幂等：重复调用无害（CancellationToken 已取消再 cancel 无副作用）。
-    pub fn cancel(&self) {
-        (self.trigger)();
-    }
-}
-
-impl std::fmt::Debug for CancelHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("CancelHandle")
-    }
-}
-
 /// Chat 事件流。
-///
-/// TUI 使用 `recv().await` 阻塞等待——终端事件循环是轮询模型。
-/// 附带 [`CancelHandle`]：TUI 在 Ctrl+C/Esc 时调 `cancel_handle().cancel()` 即时中断本次 chat。
 pub struct ChatStream {
     rx: tokio::sync::mpsc::UnboundedReceiver<ChatEvent>,
-    cancel: CancelHandle,
 }
 
 impl ChatStream {
-    /// 无 cancel 能力的流（测试 / mock 用）。
     pub fn new(rx: tokio::sync::mpsc::UnboundedReceiver<ChatEvent>) -> Self {
-        Self {
-            rx,
-            cancel: CancelHandle::noop(),
-        }
-    }
-
-    /// 带 cancel 句柄的流（runtime 生产路径用）。
-    pub fn with_cancel(
-        rx: tokio::sync::mpsc::UnboundedReceiver<ChatEvent>,
-        cancel: CancelHandle,
-    ) -> Self {
-        Self { rx, cancel }
-    }
-
-    /// 取出可 clone 的取消句柄（TUI 存入 ProcessingHandle，Ctrl+C 时触发）。
-    pub fn cancel_handle(&self) -> CancelHandle {
-        self.cancel.clone()
+        Self { rx }
     }
 
     /// 接收下一个事件，流结束时返回 None。
@@ -158,55 +99,6 @@ mod tests {
 
         assert_eq!(image.base64, "abc");
         assert_eq!(image.media_type, "image/png");
-    }
-
-    #[test]
-    fn test_cancel_handle_invokes_trigger_closure() {
-        // #639：cancel() 必须调用注入的闭包（runtime 侧靠它触发 CancellationToken）。
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        let count = Arc::new(AtomicUsize::new(0));
-        let c = count.clone();
-        let handle = CancelHandle::new(move || {
-            c.fetch_add(1, Ordering::SeqCst);
-        });
-        assert_eq!(count.load(Ordering::SeqCst), 0);
-        handle.cancel();
-        assert_eq!(count.load(Ordering::SeqCst), 1);
-        // 幂等：重复 cancel 不 panic（token 已取消再取消无副作用）。
-        handle.cancel();
-        assert_eq!(count.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn test_cancel_handle_clone_shares_trigger() {
-        // cancel_handle() 返回 clone，两个 clone 触发同一闭包。
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        let count = Arc::new(AtomicUsize::new(0));
-        let c = count.clone();
-        let handle = CancelHandle::new(move || {
-            c.fetch_add(1, Ordering::SeqCst);
-        });
-        let cloned = handle.clone();
-        handle.cancel();
-        cloned.cancel();
-        assert_eq!(count.load(Ordering::SeqCst), 2);
-    }
-
-    #[tokio::test]
-    async fn test_chat_stream_with_cancel_exposes_handle() {
-        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<ChatEvent>();
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-        let fired = Arc::new(AtomicBool::new(false));
-        let f = fired.clone();
-        let stream = ChatStream::with_cancel(
-            rx,
-            CancelHandle::new(move || f.store(true, Ordering::SeqCst)),
-        );
-        stream.cancel_handle().cancel();
-        assert!(fired.load(Ordering::SeqCst));
     }
 
     #[test]

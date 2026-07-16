@@ -6,8 +6,8 @@ members = [
     "agent/features/audit",
     "agent/features/hook",
     "agent/features/policy",
+    "agent/features/context",
     "agent/features/project",
-    "agent/features/prompt",
     "agent/features/provider",
     "agent/features/runtime",
     "agent/features/storage",
@@ -17,6 +17,7 @@ members = [
     "packages/sdk",
     "packages/global/logging",
     "packages/global/utils",
+    "tools/xtask",
 ]
 
 [workspace.dependencies]

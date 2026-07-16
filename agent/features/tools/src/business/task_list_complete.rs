@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_list_complete::TaskListCompleteResult;
 use std::sync::Arc;
-use storage::api::TaskStore;
+use storage::TaskStore;
 
 pub struct TaskListCompleteTool {
     pub store: Arc<TaskStore>,
@@ -60,11 +60,12 @@ impl TypedTool for TaskListCompleteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use storage::api::BatchStatus;
+    use storage::BatchStatus;
 
     fn test_ctx() -> ToolExecutionContext {
         ToolExecutionContext {
             workspace: project::api::WorkspaceService::new(std::path::PathBuf::from(".")),
+            run_id: "test-run".to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -119,9 +120,7 @@ mod tests {
         let list = store
             .create_list("当前".to_string(), "当前请求".to_string())
             .await;
-        let task = store
-            .create("任务".to_string(), "描述".to_string(), None)
-            .await;
+        let task = store.create("任务".to_string(), "描述".to_string()).await;
         let tool = TaskListCompleteTool {
             store: store.clone(),
         };

@@ -17,6 +17,7 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -57,6 +58,7 @@ async fn test_bash_display_field_contains_stdout_not_message() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -111,6 +113,7 @@ async fn test_bash_result_cwd_reflects_cd() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -151,6 +154,7 @@ async fn test_bash_result_cwd_on_failed_command() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -186,6 +190,7 @@ async fn test_bash_result_cwd_on_empty_output() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -228,6 +233,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
     let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -316,6 +322,7 @@ async fn test_bash_no_progress_tx_still_works() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {
@@ -461,6 +468,7 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     let ws = project::api::WorkspaceService::new(workspace.path().to_path_buf());
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
+        run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
         resources: ToolResources {

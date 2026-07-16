@@ -1,0 +1,1953 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>架构三重奏 · DDD × 六边形 × 整洁架构</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,900;1,9..144,500&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@300;400;500;700&family=Noto+Serif+SC:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   架构三重奏 — Architectural Blueprint aesthetic
+   ============================================================ */
+:root{
+  --ink:        #070b12;
+  --ink-2:      #0b111c;
+  --ink-3:      #0f1826;
+  --panel:      rgba(17,26,42,.55);
+  --line:       rgba(120,170,215,.10);
+  --line-2:     rgba(120,170,215,.18);
+  --text:       #cdd9e8;
+  --text-dim:   #798aa1;
+  --white:      #eef4fb;
+
+  --cyan:       #57cfe6;   /* 六边形 Hexagonal */
+  --cyan-glow:  #8ee9f9;
+  --amber:      #f0b45a;   /* DDD */
+  --amber-glow: #ffd792;
+  --coral:      #f0705f;   /* 整洁架构 Clean */
+  --coral-glow: #ff9a8c;
+  --sage:       #7ed3a4;
+
+  --grid:       28px;
+  --maxw:       1180px;
+  --ff-disp:    'Fraunces', 'Noto Serif SC', Georgia, serif;
+  --ff-serif:   'Noto Serif SC', 'Fraunces', serif;
+  --ff-sans:    'Noto Sans SC', system-ui, sans-serif;
+  --ff-mono:    'JetBrains Mono', ui-monospace, monospace;
+}
+
+*{ margin:0; padding:0; box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  font-family:var(--ff-sans);
+  background:var(--ink);
+  color:var(--text);
+  line-height:1.75;
+  font-weight:300;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---- blueprint grid + atmosphere ---- */
+body::before{
+  content:""; position:fixed; inset:0; z-index:-2; pointer-events:none;
+  background:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px),
+    linear-gradient(var(--line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-2) 1px, transparent 1px);
+  background-size:
+    var(--grid) var(--grid), var(--grid) var(--grid),
+    calc(var(--grid)*5) calc(var(--grid)*5), calc(var(--grid)*5) calc(var(--grid)*5);
+  mask-image:radial-gradient(ellipse 120% 90% at 50% 0%, #000 55%, transparent 100%);
+}
+body::after{
+  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(60% 45% at 12% 8%, rgba(87,207,230,.10), transparent 60%),
+    radial-gradient(55% 40% at 88% 22%, rgba(240,112,95,.09), transparent 60%),
+    radial-gradient(60% 50% at 50% 100%, rgba(240,180,90,.07), transparent 60%);
+}
+
+/* grain overlay */
+.grain{
+  position:fixed; inset:-50%; z-index:1000; pointer-events:none; opacity:.045;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  mix-blend-mode:overlay;
+}
+
+/* ============================================================
+   NAV
+   ============================================================ */
+nav{
+  position:fixed; top:0; left:0; right:0; z-index:100;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px clamp(20px,4vw,52px);
+  backdrop-filter:blur(10px);
+  background:linear-gradient(180deg, rgba(7,11,18,.85), rgba(7,11,18,0));
+  border-bottom:1px solid transparent;
+  transition:border-color .4s, background .4s;
+}
+nav.scrolled{ border-bottom:1px solid var(--line-2); background:rgba(7,11,18,.82); }
+.brand{ display:flex; align-items:center; gap:12px; font-family:var(--ff-mono); font-size:12.5px; letter-spacing:.18em; color:var(--white); }
+.brand .mk{
+  width:22px; height:22px; flex:none;
+  border:1.5px solid var(--cyan); transform:rotate(45deg);
+  position:relative;
+}
+.brand .mk::after{ content:""; position:absolute; inset:4px; border:1.5px solid var(--amber); }
+.brand b{ font-weight:700; }
+.brand span{ color:var(--text-dim); }
+.navlinks{ display:flex; gap:21px; font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.13em; }
+.navlinks a{ color:var(--text-dim); text-decoration:none; transition:color .25s; position:relative; padding:4px 0; }
+.navlinks a::before{ content:""; position:absolute; left:0; bottom:0; width:0; height:1px; background:currentColor; transition:width .3s; }
+.navlinks a:hover{ color:var(--white); }
+.navlinks a:hover::before{ width:100%; }
+.navlinks a .dot{ display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+@media(max-width:900px){ .navlinks{ display:none; } }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{
+  position:relative; min-height:100vh;
+  display:flex; flex-direction:column; justify-content:center;
+  padding:120px clamp(20px,5vw,64px) 80px;
+  max-width:var(--maxw); margin:0 auto;
+  overflow:hidden;
+}
+.hero-schema{
+  position:absolute; right:-4%; top:50%; transform:translateY(-50%);
+  width:min(620px,52vw); aspect-ratio:1; z-index:0; opacity:.9;
+  pointer-events:none;
+}
+.hero-schema svg{ width:100%; height:100%; overflow:visible; }
+.spin-slow{ transform-box:fill-box; transform-origin:center; animation:spin 90s linear infinite; }
+.spin-rev{ transform-box:fill-box; transform-origin:center; animation:spin 120s linear infinite reverse; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+
+.hero-inner{ position:relative; z-index:2; max-width:760px; }
+.eyebrow{
+  font-family:var(--ff-mono); font-size:12px; letter-spacing:.34em; text-transform:uppercase;
+  color:var(--cyan); display:flex; align-items:center; gap:14px; margin-bottom:30px;
+}
+.eyebrow::before{ content:""; width:46px; height:1px; background:linear-gradient(90deg,var(--cyan),transparent); }
+
+.hero h1{
+  font-family:var(--ff-serif); font-weight:900;
+  font-size:clamp(44px,8.2vw,104px); line-height:.98; color:var(--white);
+  letter-spacing:-.01em; margin-bottom:8px;
+}
+.hero h1 .ln{ display:block; overflow:hidden; }
+.hero h1 em{
+  font-family:var(--ff-disp); font-style:italic; font-weight:500;
+  background:linear-gradient(100deg,var(--amber),var(--coral) 55%,var(--cyan));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.hero .sub{
+  font-family:var(--ff-mono); font-size:clamp(12px,1.4vw,14px);
+  letter-spacing:.22em; color:var(--text-dim); margin:26px 0 30px;
+  text-transform:uppercase;
+}
+.hero .lead{
+  font-size:clamp(15px,1.7vw,18.5px); max-width:560px; color:var(--text);
+  font-weight:300; line-height:1.9;
+}
+.hero .lead b{ color:var(--white); font-weight:500; }
+
+.hero-tags{ display:flex; gap:12px; flex-wrap:wrap; margin-top:40px; }
+.tag{
+  font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.1em;
+  padding:9px 16px; border:1px solid var(--line-2); border-radius:2px;
+  display:flex; align-items:center; gap:9px; color:var(--text); background:var(--panel);
+  transition:transform .3s, border-color .3s;
+}
+.tag:hover{ transform:translateY(-3px); }
+.tag .d{ width:8px; height:8px; border-radius:50%; }
+.tag.t-ddd .d{ background:var(--amber); box-shadow:0 0 10px var(--amber); }
+.tag.t-hex .d{ background:var(--cyan); box-shadow:0 0 10px var(--cyan); }
+.tag.t-cln .d{ background:var(--coral); box-shadow:0 0 10px var(--coral); }
+.tag.t-ddd:hover{ border-color:var(--amber); }
+.tag.t-hex:hover{ border-color:var(--cyan); }
+.tag.t-cln:hover{ border-color:var(--coral); }
+
+.scroll-cue{
+  position:absolute; bottom:34px; left:clamp(20px,5vw,64px); z-index:2;
+  font-family:var(--ff-mono); font-size:10.5px; letter-spacing:.28em; color:var(--text-dim);
+  display:flex; align-items:center; gap:12px;
+}
+.scroll-cue .bar{ width:1px; height:40px; background:linear-gradient(var(--cyan),transparent); position:relative; overflow:hidden; }
+.scroll-cue .bar::after{ content:""; position:absolute; top:-40px; left:0; width:1px; height:40px; background:var(--white); animation:drop 2.4s ease-in-out infinite; }
+@keyframes drop{ 0%{top:-40px;} 60%,100%{top:40px;} }
+
+/* ============================================================
+   SECTION SHELL
+   ============================================================ */
+section.blk{ position:relative; padding:clamp(70px,10vw,130px) clamp(20px,5vw,64px); max-width:var(--maxw); margin:0 auto; }
+.sec-head{ display:flex; align-items:baseline; gap:20px; margin-bottom:14px; flex-wrap:wrap; }
+.sec-idx{ font-family:var(--ff-mono); font-size:13px; letter-spacing:.2em; }
+.sec-kick{ font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.28em; text-transform:uppercase; color:var(--text-dim); }
+.sec-title{ font-family:var(--ff-serif); font-weight:700; font-size:clamp(30px,5vw,58px); color:var(--white); line-height:1.05; margin:8px 0 22px; letter-spacing:-.01em; }
+.sec-title small{ display:block; font-family:var(--ff-mono); font-weight:400; font-size:.26em; letter-spacing:.24em; color:var(--text-dim); margin-top:14px; text-transform:uppercase; }
+.sec-intro{ max-width:620px; font-size:16px; color:var(--text); line-height:1.9; margin-bottom:52px; }
+.sec-intro b{ color:var(--white); font-weight:500; }
+.rule{ height:1px; background:linear-gradient(90deg,var(--line-2),transparent); margin:0 auto; max-width:var(--maxw); }
+
+/* section accent theming */
+.blk.acc-ddd{ --acc:var(--amber); --acc-glow:var(--amber-glow); }
+.blk.acc-hex{ --acc:var(--cyan); --acc-glow:var(--cyan-glow); }
+.blk.acc-cln{ --acc:var(--coral); --acc-glow:var(--coral-glow); }
+.blk .sec-idx, .blk .sec-title small b{ color:var(--acc,#fff); }
+
+/* ============================================================
+   INTRO / DEPENDENCY RULE
+   ============================================================ */
+.creed{ display:grid; grid-template-columns:1.1fr .9fr; gap:56px; align-items:center; }
+@media(max-width:860px){ .creed{ grid-template-columns:1fr; gap:40px; } }
+.creed p{ font-size:16.5px; margin-bottom:18px; }
+.creed .big{
+  font-family:var(--ff-serif); font-weight:700; font-size:clamp(22px,3vw,30px);
+  line-height:1.5; color:var(--white); margin-bottom:26px;
+}
+.creed .big u{ text-decoration:none; background:linear-gradient(transparent 62%, rgba(87,207,230,.22) 0); }
+.dep-diagram{
+  aspect-ratio:1/.86; background:var(--panel); border:1px solid var(--line-2); border-radius:4px;
+  position:relative; padding:26px; display:flex; align-items:center; justify-content:center;
+}
+.dep-diagram svg{ width:100%; height:100%; overflow:visible; }
+.corner{ position:absolute; width:12px; height:12px; border:1px solid var(--cyan); }
+.corner.tl{ top:8px; left:8px; border-right:0; border-bottom:0; }
+.corner.tr{ top:8px; right:8px; border-left:0; border-bottom:0; }
+.corner.bl{ bottom:8px; left:8px; border-right:0; border-top:0; }
+.corner.br{ bottom:8px; right:8px; border-left:0; border-top:0; }
+
+/* ============================================================
+   DDD BUILDING BLOCKS
+   ============================================================ */
+.ddd-split{ display:grid; grid-template-columns:1fr 1fr; gap:56px; margin-bottom:64px; }
+@media(max-width:860px){ .ddd-split{ grid-template-columns:1fr; gap:38px; } }
+.subhead{ font-family:var(--ff-mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--acc); margin-bottom:20px; display:flex; align-items:center; gap:12px; }
+.subhead::before{ content:""; width:26px; height:1px; background:var(--acc); }
+.subhead .cn{ color:var(--white); font-family:var(--ff-serif); font-size:19px; letter-spacing:0; text-transform:none; }
+
+.blocks{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+@media(max-width:980px){ .blocks{ grid-template-columns:repeat(2,1fr); } }
+.block{
+  position:relative; padding:20px 18px 22px; border:1px solid var(--line-2); border-radius:3px;
+  background:linear-gradient(160deg, rgba(240,180,90,.05), var(--panel));
+  overflow:hidden; transition:transform .35s cubic-bezier(.2,.7,.2,1), border-color .35s, box-shadow .35s;
+  cursor:default;
+}
+.block::before{ content:attr(data-en); position:absolute; top:12px; right:14px; font-family:var(--ff-mono); font-size:9.5px; letter-spacing:.12em; color:var(--text-dim); opacity:.6; }
+.block .ic{ width:34px; height:34px; margin-bottom:16px; color:var(--amber); }
+.block .ic svg{ width:100%; height:100%; }
+.block h4{ font-family:var(--ff-serif); font-weight:700; font-size:17px; color:var(--white); margin-bottom:6px; }
+.block p{ font-size:13px; color:var(--text-dim); line-height:1.7; font-weight:300; }
+.block:hover{ transform:translateY(-6px); border-color:var(--amber); box-shadow:0 18px 40px -20px rgba(240,180,90,.4); }
+.block::after{ content:""; position:absolute; left:0; top:0; height:2px; width:0; background:var(--amber); transition:width .4s; }
+.block:hover::after{ width:100%; }
+
+.strategic{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+@media(max-width:640px){ .strategic{ grid-template-columns:1fr; } }
+.scard{
+  border-left:2px solid var(--amber); padding:16px 20px; background:var(--panel);
+  border-radius:0 3px 3px 0; transition:transform .3s, background .3s;
+}
+.scard:hover{ transform:translateX(6px); background:rgba(240,180,90,.07); }
+.scard h5{ font-family:var(--ff-mono); font-size:13px; letter-spacing:.06em; color:var(--white); margin-bottom:5px; }
+.scard h5 span{ color:var(--amber); }
+.scard p{ font-size:13px; color:var(--text-dim); font-weight:300; }
+
+/* ============================================================
+   HEXAGONAL DIAGRAM
+   ============================================================ */
+.hex-wrap{ display:grid; grid-template-columns:1.3fr .7fr; gap:48px; align-items:center; }
+@media(max-width:920px){ .hex-wrap{ grid-template-columns:1fr; } }
+.hex-stage{
+  position:relative; background:
+    radial-gradient(circle at 50% 50%, rgba(87,207,230,.08), transparent 62%), var(--panel);
+  border:1px solid var(--line-2); border-radius:5px; padding:10px;
+}
+.hex-stage svg{ width:100%; height:auto; display:block; overflow:visible; font-family:var(--ff-mono); }
+.channel{ cursor:pointer; }
+.channel .cbox{ fill:var(--ink-3); stroke:var(--line-2); stroke-width:1.2; transition:all .3s; }
+.channel .clabel{ fill:var(--text-dim); font-size:10.5px; letter-spacing:.04em; transition:fill .3s; }
+.channel .csub{ fill:#5f7189; font-size:7.6px; letter-spacing:.1em; }
+.channel .conn{ stroke:var(--line-2); stroke-width:1.4; fill:none; transition:all .35s; stroke-dasharray:3 4; }
+.channel .port{ fill:var(--ink); stroke:var(--cyan); stroke-width:1.6; transition:all .3s; }
+.channel:hover .cbox{ stroke:var(--cyan); fill:rgba(87,207,230,.10); }
+.channel:hover .clabel{ fill:var(--white); }
+.channel:hover .conn{ stroke:var(--cyan); stroke-dasharray:none; filter:drop-shadow(0 0 5px var(--cyan)); }
+.channel:hover .port{ fill:var(--cyan); r:6.4; filter:drop-shadow(0 0 6px var(--cyan)); }
+.hexcore{ fill:rgba(87,207,230,.05); stroke:var(--cyan); stroke-width:1.8; filter:drop-shadow(0 0 14px rgba(87,207,230,.25)); }
+.hexcore-inner{ fill:none; stroke:rgba(87,207,230,.4); stroke-width:1; stroke-dasharray:2 5; }
+.core-t1{ fill:var(--white); font-family:var(--ff-serif); font-weight:700; font-size:16px; }
+.core-t2{ fill:var(--cyan); font-size:8.5px; letter-spacing:.22em; }
+.side-note{ font-family:var(--ff-mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; }
+.legend-pair{ display:flex; flex-direction:column; gap:22px; }
+.legend-pair .lp{ padding-left:18px; border-left:2px solid var(--cyan); }
+.legend-pair .lp.driven{ border-color:var(--sage); }
+.legend-pair .lp h5{ font-family:var(--ff-mono); font-size:12px; letter-spacing:.08em; color:var(--white); margin-bottom:8px; }
+.legend-pair .lp h5 em{ font-style:normal; color:var(--cyan); }
+.legend-pair .lp.driven h5 em{ color:var(--sage); }
+.legend-pair .lp p{ font-size:13.5px; color:var(--text-dim); font-weight:300; line-height:1.8; }
+.hex-hint{ font-family:var(--ff-mono); font-size:11px; letter-spacing:.1em; color:var(--text-dim); margin-top:20px; text-align:center; opacity:.8; }
+.hex-hint b{ color:var(--cyan); }
+
+/* ============================================================
+   CLEAN RINGS
+   ============================================================ */
+.clean-wrap{ display:grid; grid-template-columns:1fr 1fr; gap:52px; align-items:center; }
+@media(max-width:920px){ .clean-wrap{ grid-template-columns:1fr; } }
+.rings-stage{ position:relative; }
+.rings-stage svg{ width:100%; height:auto; overflow:visible; cursor:pointer; }
+.ring{ transition:all .35s; }
+.ring circle{ transition:all .35s; }
+.ring text{ font-family:var(--ff-mono); pointer-events:none; transition:fill .3s; }
+.ring:hover circle, .ring.active circle{ filter:drop-shadow(0 0 12px var(--coral)); }
+.ring-label-cn{ font-family:var(--ff-serif); font-weight:700; }
+.arrow-dep{ stroke:var(--coral); stroke-width:1.6; fill:none; marker-end:url(#ah); filter:drop-shadow(0 0 5px rgba(240,112,95,.5)); }
+
+.ring-panel{ min-height:280px; }
+.ring-panel .rp-idx{ font-family:var(--ff-mono); font-size:12px; letter-spacing:.2em; color:var(--coral); margin-bottom:12px; }
+.ring-panel h4{ font-family:var(--ff-serif); font-weight:700; font-size:clamp(24px,3.4vw,34px); color:var(--white); margin-bottom:4px; line-height:1.1; }
+.ring-panel .rp-en{ font-family:var(--ff-mono); font-size:12.5px; letter-spacing:.14em; color:var(--text-dim); margin-bottom:20px; }
+.ring-panel .rp-body{ font-size:15.5px; line-height:1.9; color:var(--text); margin-bottom:22px; }
+.ring-panel ul{ list-style:none; display:flex; flex-direction:column; gap:9px; }
+.ring-panel li{ font-size:13.5px; color:var(--text-dim); padding-left:20px; position:relative; font-family:var(--ff-mono); letter-spacing:.02em; }
+.ring-panel li::before{ content:"›"; position:absolute; left:2px; color:var(--coral); }
+.ring-tabs{ display:flex; gap:8px; margin-top:26px; flex-wrap:wrap; }
+.ring-tab{ font-family:var(--ff-mono); font-size:11px; letter-spacing:.08em; padding:7px 13px; border:1px solid var(--line-2); background:transparent; color:var(--text-dim); cursor:pointer; border-radius:2px; transition:all .25s; }
+.ring-tab:hover{ color:var(--white); }
+.ring-tab.on{ border-color:var(--coral); color:var(--white); background:rgba(240,112,95,.1); }
+
+/* ============================================================
+   UNIFIED MAPPING
+   ============================================================ */
+.map-note{ max-width:640px; margin:0 auto 46px; text-align:center; font-size:16px; color:var(--text); }
+.map-note b{ color:var(--white); font-weight:500; }
+.map-table{ width:100%; border-collapse:collapse; font-size:14px; }
+.map-scroll{ overflow-x:auto; border:1px solid var(--line-2); border-radius:5px; background:var(--panel); }
+.map-table th, .map-table td{ padding:18px 20px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+.map-table thead th{ font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-dim); font-weight:400; white-space:nowrap; border-bottom:1px solid var(--line-2); }
+.map-table thead th .d{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:middle; }
+.map-table thead .h-ddd .d{ background:var(--amber); }
+.map-table thead .h-hex .d{ background:var(--cyan); }
+.map-table thead .h-cln .d{ background:var(--coral); }
+.map-table tbody tr{ transition:background .25s; }
+.map-table tbody tr:hover{ background:rgba(120,170,215,.04); }
+.map-table tbody tr:last-child td{ border-bottom:0; }
+.map-table .layer{ font-family:var(--ff-serif); font-weight:700; color:var(--white); font-size:15px; white-space:nowrap; }
+.map-table .layer small{ display:block; font-family:var(--ff-mono); font-weight:400; font-size:10.5px; letter-spacing:.1em; color:var(--text-dim); margin-top:4px; }
+.map-table td b{ color:var(--text); font-weight:500; font-family:var(--ff-mono); font-size:13px; }
+.map-table td span{ display:block; font-size:12px; color:var(--text-dim); font-weight:300; margin-top:3px; }
+.map-table .col-ddd b{ color:var(--amber-glow); }
+.map-table .col-hex b{ color:var(--cyan-glow); }
+.map-table .col-cln b{ color:var(--coral-glow); }
+
+.principle-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:52px; }
+@media(max-width:760px){ .principle-row{ grid-template-columns:1fr; } }
+.prin{ padding:26px 24px; border:1px solid var(--line-2); border-radius:4px; background:var(--panel); position:relative; }
+.prin .n{ font-family:var(--ff-mono); font-size:11px; letter-spacing:.2em; color:var(--text-dim); }
+.prin h5{ font-family:var(--ff-serif); font-weight:700; font-size:19px; color:var(--white); margin:12px 0 10px; }
+.prin p{ font-size:13.5px; color:var(--text-dim); font-weight:300; line-height:1.8; }
+.prin .glyph{ position:absolute; top:22px; right:22px; font-family:var(--ff-disp); font-style:italic; font-size:30px; color:var(--line-2); }
+
+/* ============================================================
+   06 · PIPELINE TIMELINE
+   ============================================================ */
+.timeline{ position:relative; margin-top:14px; }
+.tl-item{ position:relative; display:grid; grid-template-columns:56px 1fr; gap:24px; padding-bottom:42px; }
+.tl-item:last-child{ padding-bottom:0; }
+.tl-rail{ position:relative; display:flex; justify-content:center; }
+.tl-rail::before{ content:""; position:absolute; top:6px; bottom:-42px; width:1px; background:linear-gradient(var(--line-2),var(--line)); }
+.tl-item:last-child .tl-rail::before{ display:none; }
+.tl-node{ width:46px; height:46px; flex:none; border-radius:50%; border:1px solid var(--line-2); background:var(--ink-2);
+  display:flex; align-items:center; justify-content:center; font-family:var(--ff-disp); font-style:italic; font-size:21px; color:var(--white); position:relative; z-index:2; }
+.tl-item.p-ddd .tl-node{ border-color:var(--amber); color:var(--amber-glow); box-shadow:0 0 22px -7px var(--amber); }
+.tl-item.p-hex .tl-node{ border-color:var(--cyan);  color:var(--cyan-glow);  box-shadow:0 0 22px -7px var(--cyan); }
+.tl-item.p-mix .tl-node{ border-color:var(--coral); color:var(--coral-glow); box-shadow:0 0 22px -7px var(--coral); }
+.tl-card{ border:1px solid var(--line-2); border-radius:4px; background:var(--panel); padding:24px 26px; }
+.tl-top{ display:flex; align-items:center; gap:11px; flex-wrap:wrap; margin-bottom:4px; }
+.tl-card h3{ font-family:var(--ff-serif); font-weight:700; font-size:21px; color:var(--white); }
+.tl-badge{ font-family:var(--ff-mono); font-size:9.5px; letter-spacing:.1em; padding:4px 9px; border-radius:2px; border:1px solid; text-transform:uppercase; }
+.badge-ddd{ color:var(--amber); border-color:rgba(240,180,90,.4); }
+.badge-hex{ color:var(--cyan);  border-color:rgba(87,207,230,.4); }
+.badge-cln{ color:var(--coral); border-color:rgba(240,112,95,.4); }
+.tl-desc{ font-size:14px; color:var(--text-dim); margin:2px 0 16px; }
+.tl-list{ list-style:none; display:flex; flex-direction:column; gap:8px; }
+.tl-list li{ font-size:14px; padding-left:22px; position:relative; color:var(--text); line-height:1.7; }
+.tl-list li::before{ content:"→"; position:absolute; left:0; font-family:var(--ff-mono); }
+.p-ddd .tl-list li::before{ color:var(--amber); }
+.p-hex .tl-list li::before{ color:var(--cyan); }
+.p-mix .tl-list li::before{ color:var(--coral); }
+.tl-list li b{ font-family:var(--ff-mono); font-size:12.5px; color:var(--white); font-weight:500; }
+.tl-out{ margin-top:16px; padding-top:14px; border-top:1px dashed var(--line-2); font-family:var(--ff-mono); font-size:11.5px; letter-spacing:.03em; color:var(--text-dim); }
+.tl-out b{ color:var(--white); font-weight:500; }
+
+.bp-code{ margin-top:14px; background:var(--ink); border:1px solid var(--line-2); border-radius:4px; padding:20px 22px 18px; overflow-x:auto;
+  font-family:var(--ff-mono); font-size:12.5px; line-height:1.9; color:#9db4cc; position:relative; white-space:pre; }
+.bp-code .tag{ position:absolute; top:0; right:0; font-size:9px; letter-spacing:.14em; color:var(--text-dim);
+  padding:4px 11px; border-left:1px solid var(--line-2); border-bottom:1px solid var(--line-2); background:var(--ink-2); }
+.bp-code .k{ color:var(--cyan); }
+.bp-code .d{ color:var(--amber-glow); }
+.bp-code .m{ color:#5f7189; }
+.bp-code .r{ color:var(--coral-glow); }
+
+/* ============================================================
+   07 · DISAMBIGUATION
+   ============================================================ */
+.dz-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-bottom:30px; }
+@media(max-width:820px){ .dz-grid{ grid-template-columns:1fr; } }
+.dz-card{ border:1px solid var(--line-2); border-radius:4px; background:var(--panel); padding:20px 22px; position:relative; overflow:hidden;
+  transition:transform .3s, border-color .3s; }
+.dz-card:hover{ transform:translateY(-4px); }
+.dz-card::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--dzc,#57cfe6); }
+.dz-card.c-a{ --dzc:var(--coral); } .dz-card.c-b{ --dzc:var(--cyan); } .dz-card.c-c{ --dzc:var(--amber); } .dz-card.c-d{ --dzc:var(--sage); }
+.dz-head{ display:flex; align-items:center; gap:10px; margin-bottom:15px; flex-wrap:wrap; }
+.dz-t{ font-family:var(--ff-serif); font-weight:700; font-size:15.5px; color:var(--white); }
+.dz-t i{ font-family:var(--ff-mono); font-style:normal; font-size:9px; letter-spacing:.06em; color:var(--dzc); vertical-align:middle; margin-left:5px;
+  border:1px solid; padding:1px 5px; border-radius:2px; opacity:.85; }
+.dz-x{ font-family:var(--ff-mono); color:var(--text-dim); font-size:13px; }
+.dz-body{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px; }
+.dz-body.tri{ grid-template-columns:repeat(3,1fr); }
+@media(max-width:560px){ .dz-body,.dz-body.tri{ grid-template-columns:1fr; } }
+.dz-col{ font-size:12.8px; color:var(--text-dim); line-height:1.65; }
+.dz-col b{ display:block; font-family:var(--ff-mono); font-size:11px; letter-spacing:.03em; color:var(--white); margin-bottom:5px; }
+.dz-mem{ font-family:var(--ff-mono); font-size:12px; letter-spacing:.01em; color:var(--text); padding-top:12px; border-top:1px dashed var(--line-2); line-height:1.7; }
+.dz-mem::before{ content:"⌾ 记忆 · "; color:var(--dzc); }
+.dz-mem b{ color:#fff; font-weight:500; }
+.dz-rule{ font-size:16px; color:var(--text); max-width:660px; margin:6px auto 0; text-align:center; }
+.dz-rule b{ color:var(--white); font-weight:500; }
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+footer{ border-top:1px solid var(--line-2); margin-top:60px; padding:56px clamp(20px,5vw,64px); }
+.foot-inner{ max-width:var(--maxw); margin:0 auto; display:flex; justify-content:space-between; align-items:flex-end; gap:30px; flex-wrap:wrap; }
+.foot-inner .fq{ font-family:var(--ff-disp); font-style:italic; font-weight:500; font-size:clamp(20px,3vw,30px); color:var(--white); max-width:560px; line-height:1.4; }
+.foot-inner .fq span{ color:var(--cyan); }
+.foot-meta{ font-family:var(--ff-mono); font-size:11px; letter-spacing:.14em; color:var(--text-dim); text-align:right; line-height:2; }
+
+/* ============================================================
+   REVEAL
+   ============================================================ */
+.rev{ opacity:0; transform:translateY(26px); transition:opacity .9s cubic-bezier(.2,.7,.2,1), transform .9s cubic-bezier(.2,.7,.2,1); }
+.rev.in{ opacity:1; transform:none; }
+.rev.d1{ transition-delay:.08s; } .rev.d2{ transition-delay:.16s; } .rev.d3{ transition-delay:.24s; } .rev.d4{ transition-delay:.32s; }
+@media(prefers-reduced-motion:reduce){
+  .rev{ opacity:1; transform:none; transition:none; }
+  .spin-slow,.spin-rev,.scroll-cue .bar::after{ animation:none; }
+  html{ scroll-behavior:auto; }
+}
+
+/* hero entrance */
+.hero .anim{ opacity:0; transform:translateY(30px); animation:heroUp .95s cubic-bezier(.2,.7,.2,1) forwards; }
+.hero .anim.a1{ animation-delay:.15s; } .hero .anim.a2{ animation-delay:.32s; }
+.hero .anim.a3{ animation-delay:.5s; } .hero .anim.a4{ animation-delay:.68s; } .hero .anim.a5{ animation-delay:.86s; }
+@keyframes heroUp{ to{ opacity:1; transform:none; } }
+.draw{ stroke-dasharray:1; stroke-dashoffset:1; animation:draw 2.6s ease forwards .4s; }
+@keyframes draw{ to{ stroke-dashoffset:0; } }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<!-- ================= NAV ================= -->
+<nav id="nav">
+  <div class="brand"><span class="mk"></span><b>ARCH·TRIAD</b><span>/ 架构三重奏</span></div>
+  <div class="navlinks">
+    <a href="#creed"><span class="dot" style="background:#fff"></span>依赖法则</a>
+    <a href="#ddd"><span class="dot" style="background:var(--amber)"></span>DDD</a>
+    <a href="#hex"><span class="dot" style="background:var(--cyan)"></span>六边形</a>
+    <a href="#clean"><span class="dot" style="background:var(--coral)"></span>整洁架构</a>
+    <a href="#map"><span class="dot" style="background:linear-gradient(90deg,var(--amber),var(--coral))"></span>三位一体</a>
+    <a href="#example"><span class="dot" style="background:linear-gradient(90deg,var(--sage),var(--cyan))"></span>aemeath 实战</a>
+    <a href="#disambig"><span class="dot" style="background:var(--sage)"></span>辨析</a>
+  </div>
+</nav>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="hero-schema" aria-hidden="true">
+    <svg viewBox="0 0 500 500">
+      <g class="spin-slow" stroke="rgba(87,207,230,.28)" fill="none" stroke-width="1">
+        <polygon class="draw" points="250,70 406,160 406,340 250,430 94,340 94,160" stroke-width="1.4"/>
+        <circle cx="250" cy="250" r="150" stroke-dasharray="2 7"/>
+      </g>
+      <g class="spin-rev" stroke="rgba(240,180,90,.32)" fill="none" stroke-width="1">
+        <circle cx="250" cy="250" r="110"/>
+        <circle cx="250" cy="250" r="70" stroke="rgba(240,112,95,.4)"/>
+      </g>
+      <circle cx="250" cy="250" r="30" fill="rgba(87,207,230,.08)" stroke="var(--cyan)" stroke-width="1.4"/>
+      <circle cx="250" cy="250" r="4" fill="var(--amber)"/>
+      <g fill="var(--cyan)">
+        <circle cx="94" cy="160" r="3.5"/><circle cx="406" cy="160" r="3.5"/>
+        <circle cx="94" cy="340" r="3.5"/><circle cx="406" cy="340" r="3.5"/>
+        <circle cx="250" cy="70" r="3.5"/><circle cx="250" cy="430" r="3.5"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="hero-inner">
+    <div class="eyebrow anim a1">Domain · Ports · Dependency Rule</div>
+    <h1>
+      <span class="ln anim a2">架构的</span>
+      <span class="ln anim a3"><em>三重奏</em></span>
+    </h1>
+    <div class="sub anim a4">DDD × Hexagonal × Clean Architecture</div>
+    <p class="lead anim a5">
+      领域驱动设计、六边形架构与整洁架构，常被并列谈论并非偶然——
+      它们指向<b>同一条信念</b>：把业务规则置于中心，让所有依赖朝内收敛，
+      把数据库、框架与界面统统推向可替换的<b>外围细节</b>。
+    </p>
+    <div class="hero-tags anim a5">
+      <span class="tag t-ddd"><span class="d"></span>领域驱动 · 建模语言</span>
+      <span class="tag t-hex"><span class="d"></span>端口 · 适配器</span>
+      <span class="tag t-cln"><span class="d"></span>同心圆 · 依赖规则</span>
+    </div>
+  </div>
+
+  <div class="scroll-cue"><span class="bar"></span>SCROLL / 向下探索</div>
+</header>
+
+<div class="rule"></div>
+
+<!-- ================= 01 · CREED ================= -->
+<section class="blk" id="creed">
+  <div class="sec-head rev">
+    <span class="sec-idx">01</span>
+    <span class="sec-kick">The Common Creed · 共同信条</span>
+  </div>
+  <h2 class="sec-title rev d1">一条法则，贯穿三种架构<small>THE DEPENDENCY RULE</small></h2>
+
+  <div class="creed">
+    <div class="rev d2">
+      <p class="big">
+        源代码的依赖只能<u>由外向内</u>。内层的领域，永远不该知道外层的存在——
+        它不认识数据库，不认识 HTTP，也不认识任何框架。
+      </p>
+      <p>三种架构用不同的词汇讲述同一个故事：整洁架构称之为<b>「依赖规则 The Dependency Rule」</b>，六边形架构靠<b>「端口 Ports」</b>把方向反转，DDD 则通过<b>「Repository 抽象」</b>让领域对基础设施一无所知。</p>
+      <p>它们共同的技术支点，是<b>依赖倒置原则（DIP）</b>：当高层策略需要低层细节时，不直接依赖它，而是依赖一个由高层定义、由低层实现的接口。方向，由此被扭转。</p>
+    </div>
+
+    <div class="dep-diagram rev d3">
+      <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      <svg viewBox="0 0 340 300">
+        <defs>
+          <marker id="arw" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6" fill="none" stroke="var(--cyan)" stroke-width="1.3"/>
+          </marker>
+        </defs>
+        <!-- concentric layers -->
+        <rect x="20"  y="20"  width="300" height="260" rx="4" fill="none" stroke="rgba(240,112,95,.35)" stroke-width="1.2" stroke-dasharray="2 5"/>
+        <rect x="60"  y="55"  width="220" height="190" rx="4" fill="none" stroke="rgba(126,211,164,.4)" stroke-width="1.2"/>
+        <rect x="102" y="92"  width="136" height="116" rx="4" fill="none" stroke="rgba(240,180,90,.5)" stroke-width="1.3"/>
+        <rect x="132" y="120" width="76"  height="60"  rx="4" fill="rgba(87,207,230,.08)" stroke="var(--cyan)" stroke-width="1.6"/>
+        <text x="170" y="146" text-anchor="middle" fill="#fff" font-family="var(--ff-serif)" font-weight="700" font-size="13">领域</text>
+        <text x="170" y="164" text-anchor="middle" fill="var(--cyan)" font-family="var(--ff-mono)" font-size="7" letter-spacing="1.5">DOMAIN</text>
+        <!-- inward arrows -->
+        <line x1="40"  y1="270" x2="118" y2="196" stroke="var(--cyan)" stroke-width="1.3" marker-end="url(#arw)"/>
+        <line x1="300" y1="30"  x2="222" y2="104" stroke="var(--cyan)" stroke-width="1.3" marker-end="url(#arw)"/>
+        <text x="26" y="14" fill="#5f7189" font-family="var(--ff-mono)" font-size="7.5" letter-spacing="1">FRAMEWORKS · DB · UI</text>
+        <text x="298" y="292" text-anchor="end" fill="var(--cyan)" font-family="var(--ff-mono)" font-size="8" letter-spacing="1.5">依赖 → 向内</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<div class="rule"></div>
+
+<!-- ================= 02 · DDD ================= -->
+<section class="blk acc-ddd" id="ddd">
+  <div class="sec-head rev">
+    <span class="sec-idx">02</span>
+    <span class="sec-kick">Domain-Driven Design · 领域驱动设计</span>
+  </div>
+  <h2 class="sec-title rev d1">用统一语言，为复杂领域建模<small>提出者 · <b>Eric Evans</b> · 2003</small></h2>
+  <p class="sec-intro rev d2">
+    DDD 关心的不是分层，而是<b>如何思考业务</b>。它主张让开发者与领域专家共用一套<b>统一语言（Ubiquitous Language）</b>，
+    并把这套语言直接编码进模型。它分为两条战线：管理宏观边界的<b>战略设计</b>，与打磨领域模型的<b>战术设计</b>。
+  </p>
+
+  <div class="ddd-split">
+    <!-- tactical -->
+    <div class="rev d2" style="grid-column:1/-1;">
+      <div class="subhead">Tactical Patterns <span class="cn">· 战术建模构件</span></div>
+      <div class="blocks">
+        <div class="block" data-en="ENTITY">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></svg></div>
+          <h4>实体</h4><p>拥有唯一标识、贯穿生命周期保持连续性的对象。相等由 ID 决定，而非属性。</p>
+        </div>
+        <div class="block" data-en="VALUE OBJ">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 2l8 5v10l-8 5-8-5V7z"/></svg></div>
+          <h4>值对象</h4><p>无标识、不可变，由属性整体定义相等性。如金额、坐标、日期区间。</p>
+        </div>
+        <div class="block" data-en="AGGREGATE">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="8" y="13" width="8" height="8" rx="1"/></svg></div>
+          <h4>聚合</h4><p>一组绑定的对象，作为数据修改的一致性单元。外部只能引用聚合根。</p>
+        </div>
+        <div class="block" data-en="AGG ROOT">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="5" r="3"/><path d="M12 8v5M6 20l6-7 6 7"/></svg></div>
+          <h4>聚合根</h4><p>聚合唯一的入口与守门人，负责维护整个聚合的业务不变量。</p>
+        </div>
+        <div class="block" data-en="REPOSITORY">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.6 3.6 3 8 3s8-1.4 8-3V5"/><path d="M4 12c0 1.6 3.6 3 8 3s8-1.4 8-3"/></svg></div>
+          <h4>仓储</h4><p>以集合的错觉封装持久化。领域只见接口，不见 SQL——依赖倒置的落点。</p>
+        </div>
+        <div class="block" data-en="DOMAIN SVC">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></div>
+          <h4>领域服务</h4><p>承载不属于任何单一实体的领域逻辑，用动词命名，保持无状态。</p>
+        </div>
+        <div class="block" data-en="DOMAIN EVT">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg></div>
+          <h4>领域事件</h4><p>记录「已经发生」的业务事实，用过去时命名，驱动跨聚合与跨上下文协作。</p>
+        </div>
+        <div class="block" data-en="FACTORY">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 21V9l5 3V9l5 3V9l5 3v9z"/><path d="M3 21h18"/></svg></div>
+          <h4>工厂</h4><p>封装复杂聚合的创建过程，确保对象一诞生便处于合法状态。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- strategic -->
+    <div class="rev d3" style="grid-column:1/-1;">
+      <div class="subhead">Strategic Design <span class="cn">· 战略设计</span></div>
+      <div class="strategic">
+        <div class="scard"><h5><span>#</span> 限界上下文 Bounded Context</h5><p>模型的意义边界。同一个「商品」在下单与仓储中含义不同——各自为政，互不污染。</p></div>
+        <div class="scard"><h5><span>#</span> 统一语言 Ubiquitous Language</h5><p>团队与代码共享的精确措辞，消除翻译损耗。语言变，模型即变。</p></div>
+        <div class="scard"><h5><span>#</span> 上下文映射 Context Map</h5><p>描绘上下文之间的关系与集成方式：防腐层、共享内核、客户-供应商。</p></div>
+        <div class="scard"><h5><span>#</span> 子域 Subdomain</h5><p>区分核心域、支撑域与通用域，把最强的建模火力投向真正创造价值之处。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="rule"></div>
+
+<!-- ================= 03 · HEXAGONAL ================= -->
+<section class="blk acc-hex" id="hex">
+  <div class="sec-head rev">
+    <span class="sec-idx">03</span>
+    <span class="sec-kick">Hexagonal · Ports & Adapters · 六边形架构</span>
+  </div>
+  <h2 class="sec-title rev d1">让应用与外部世界，通过端口对话<small>提出者 · <b>Alistair Cockburn</b> · 2005</small></h2>
+  <p class="sec-intro rev d2">
+    六边形架构把应用想象成一个被<b>端口（Port）</b>包裹的核心：端口是核心定义的接口，
+    <b>适配器（Adapter）</b>则在外侧把具体技术翻译成端口能听懂的语言。左侧驱动应用，右侧被应用驱动——
+    <b>把测试、UI、数据库放在完全对称的位置上</b>，任意一个都可插拔替换。
+  </p>
+
+  <div class="hex-wrap">
+    <div class="hex-stage rev d2">
+      <svg viewBox="0 0 640 440">
+        <!-- driving adapters (left) -->
+        <g class="channel">
+          <path class="conn" d="M188 128 H236"/>
+          <rect class="cbox" x="44" y="104" width="146" height="48" rx="3"/>
+          <text class="clabel" x="117" y="126" text-anchor="middle">REST Controller</text>
+          <text class="csub"   x="117" y="140" text-anchor="middle">HTTP · JSON</text>
+          <circle class="port" cx="236" cy="128" r="5"/>
+        </g>
+        <g class="channel">
+          <path class="conn" d="M188 312 H236"/>
+          <rect class="cbox" x="44" y="288" width="146" height="48" rx="3"/>
+          <text class="clabel" x="117" y="310" text-anchor="middle">CLI · Test</text>
+          <text class="csub"   x="117" y="324" text-anchor="middle">Test Harness</text>
+          <circle class="port" cx="236" cy="312" r="5"/>
+        </g>
+
+        <!-- driven adapters (right) -->
+        <g class="channel">
+          <path class="conn" d="M404 118 H452"/>
+          <rect class="cbox" x="452" y="94" width="146" height="48" rx="3"/>
+          <text class="clabel" x="525" y="116" text-anchor="middle">SQL Repository</text>
+          <text class="csub"   x="525" y="130" text-anchor="middle">PostgreSQL</text>
+          <circle class="port" cx="404" cy="118" r="5"/>
+        </g>
+        <g class="channel">
+          <path class="conn" d="M404 220 H452"/>
+          <rect class="cbox" x="452" y="196" width="146" height="48" rx="3"/>
+          <text class="clabel" x="525" y="218" text-anchor="middle">Message Bus</text>
+          <text class="csub"   x="525" y="232" text-anchor="middle">Kafka · MQ</text>
+          <circle class="port" cx="404" cy="220" r="5"/>
+        </g>
+        <g class="channel">
+          <path class="conn" d="M404 322 H452"/>
+          <rect class="cbox" x="452" y="298" width="146" height="48" rx="3"/>
+          <text class="clabel" x="525" y="320" text-anchor="middle">Email Gateway</text>
+          <text class="csub"   x="525" y="334" text-anchor="middle">SMTP · API</text>
+          <circle class="port" cx="404" cy="322" r="5"/>
+        </g>
+
+        <!-- hexagon core (pointy-top, vertical L/R edges) -->
+        <polygon class="hexcore" points="320,110 404,158 404,282 320,330 236,282 236,158"/>
+        <polygon class="hexcore-inner" points="320,140 378,173 378,267 320,300 262,267 262,173"/>
+        <text class="core-t1" x="320" y="216" text-anchor="middle">领域模型</text>
+        <text class="core-t2" x="320" y="236" text-anchor="middle">APPLICATION CORE</text>
+        <text x="320" y="256" text-anchor="middle" fill="#5f7189" font-family="var(--ff-mono)" font-size="8">纯业务逻辑 · 零依赖</text>
+
+        <!-- side captions -->
+        <text class="side-note" x="44"  y="72"  fill="var(--cyan)">▸ Driving / 主动侧</text>
+        <text class="side-note" x="596" y="72"  fill="var(--sage)" text-anchor="end">Driven / 被动侧 ◂</text>
+      </svg>
+    </div>
+
+    <div class="rev d3">
+      <div class="legend-pair">
+        <div class="lp">
+          <h5><em>◤</em> 驱动端口 · Driving Ports</h5>
+          <p>被外界调用、驱动应用行动的入口。用例接口、Application Service 便在此暴露。适配器：Controller、CLI、定时任务、测试。</p>
+        </div>
+        <div class="lp driven">
+          <h5><em>◢</em> 被驱动端口 · Driven Ports</h5>
+          <p>应用调用外界的出口，由核心定义接口、外层提供实现。Repository、消息发布、通知网关都在此接入——依赖被倒置。</p>
+        </div>
+      </div>
+      <p class="hex-hint">悬停任意<b>适配器</b>，看它如何穿过端口接入核心 →</p>
+    </div>
+  </div>
+</section>
+
+<div class="rule"></div>
+
+<!-- ================= 04 · CLEAN ================= -->
+<section class="blk acc-cln" id="clean">
+  <div class="sec-head rev">
+    <span class="sec-idx">04</span>
+    <span class="sec-kick">Clean Architecture · 整洁架构</span>
+  </div>
+  <h2 class="sec-title rev d1">四层同心圆，一个方向的依赖<small>提出者 · <b>Robert C. Martin</b> · 2012</small></h2>
+  <p class="sec-intro rev d2">
+    整洁架构把系统画成四层同心圆，用一条铁律统摄：<b>依赖只能指向圆心</b>。
+    越靠内越稳定、越抽象、越与技术无关；越靠外越易变。跨越边界时，靠接口把控制流与依赖流<b>反向解耦</b>。
+    <br><span style="color:var(--text-dim);font-size:14px;">点击任意环层，查看它的职责 →</span>
+  </p>
+
+  <div class="clean-wrap">
+    <div class="rings-stage rev d2">
+      <svg viewBox="0 0 420 420" id="ringSvg">
+        <defs>
+          <marker id="ah" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6" fill="none" stroke="var(--coral)" stroke-width="1.4"/>
+          </marker>
+        </defs>
+        <g class="ring" data-r="0">
+          <circle cx="210" cy="210" r="200" fill="rgba(240,112,95,.05)" stroke="rgba(240,112,95,.45)" stroke-width="1.4"/>
+          <text x="210" y="32" text-anchor="middle" fill="#9fb0c4" font-size="11" letter-spacing="1.5">FRAMEWORKS &amp; DRIVERS</text>
+        </g>
+        <g class="ring" data-r="1">
+          <circle cx="210" cy="210" r="152" fill="rgba(126,211,164,.05)" stroke="rgba(126,211,164,.5)" stroke-width="1.4"/>
+          <text x="210" y="78" text-anchor="middle" fill="#a9c4b6" font-size="11" letter-spacing="1.5">INTERFACE ADAPTERS</text>
+        </g>
+        <g class="ring" data-r="2">
+          <circle cx="210" cy="210" r="104" fill="rgba(240,180,90,.06)" stroke="rgba(240,180,90,.55)" stroke-width="1.5"/>
+          <text x="210" y="126" text-anchor="middle" fill="#e0c79b" font-size="11" letter-spacing="1.5">USE CASES</text>
+        </g>
+        <g class="ring" data-r="3">
+          <circle cx="210" cy="210" r="58" fill="rgba(87,207,230,.09)" stroke="var(--cyan)" stroke-width="1.7"/>
+          <text class="ring-label-cn" x="210" y="206" text-anchor="middle" fill="#fff" font-size="17">实体</text>
+          <text x="210" y="224" text-anchor="middle" fill="var(--cyan)" font-size="8" letter-spacing="2">ENTITIES</text>
+        </g>
+        <!-- dependency arrow -->
+        <path class="arrow-dep" d="M210 405 C 262 380, 268 300, 210 274"/>
+        <text x="288" y="360" fill="var(--coral)" font-family="var(--ff-mono)" font-size="9.5" letter-spacing="1">依赖向内</text>
+      </svg>
+    </div>
+
+    <div class="ring-panel rev d3" id="ringPanel">
+      <!-- filled by JS -->
+    </div>
+  </div>
+</section>
+
+<div class="rule"></div>
+
+<!-- ================= 05 · UNIFIED MAP ================= -->
+<section class="blk" id="map">
+  <div class="sec-head rev" style="justify-content:center;">
+    <span class="sec-idx" style="background:linear-gradient(90deg,var(--amber),var(--coral));-webkit-background-clip:text;background-clip:text;color:transparent;">05</span>
+    <span class="sec-kick">One Idea · Three Dialects · 三位一体</span>
+  </div>
+  <h2 class="sec-title rev d1" style="text-align:center;">同一张地图，三种语言的图例</h2>
+  <p class="map-note rev d2">
+    这才是把三者放在一起讲的理由：它们描述的是<b>同一套分层</b>。
+    整洁架构的每一环、六边形的每一侧、DDD 的每类构件，都能在下表中对号入座。
+  </p>
+
+  <div class="map-scroll rev d2">
+    <table class="map-table">
+      <thead>
+        <tr>
+          <th>抽象层次 / Layer</th>
+          <th class="h-cln"><span class="d"></span>Clean Architecture</th>
+          <th class="h-hex"><span class="d"></span>Hexagonal</th>
+          <th class="h-ddd"><span class="d"></span>DDD Building Blocks</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="layer">核心业务<small>ENTERPRISE RULES</small></td>
+          <td class="col-cln"><b>Entities</b><span>最稳定的企业级业务规则</span></td>
+          <td class="col-hex"><b>Domain Model</b><span>六边形正中心的核心</span></td>
+          <td class="col-ddd"><b>Entity · Value Object · Aggregate</b><span>战术构件与不变量</span></td>
+        </tr>
+        <tr>
+          <td class="layer">应用编排<small>APPLICATION RULES</small></td>
+          <td class="col-cln"><b>Use Cases</b><span>面向应用的业务流程</span></td>
+          <td class="col-hex"><b>Ports (Driving)</b><span>核心暴露的用例接口</span></td>
+          <td class="col-ddd"><b>Application / Domain Service</b><span>协调聚合、编排用例</span></td>
+        </tr>
+        <tr>
+          <td class="layer">边界转换<small>INTERFACE ADAPTERS</small></td>
+          <td class="col-cln"><b>Interface Adapters</b><span>Controller · Presenter · Gateway</span></td>
+          <td class="col-hex"><b>Adapters</b><span>翻译技术与端口的双方</span></td>
+          <td class="col-ddd"><b>Repository 实现 · 防腐层 ACL</b><span>隔离外部模型的入侵</span></td>
+        </tr>
+        <tr>
+          <td class="layer">外部细节<small>FRAMEWORKS &amp; DRIVERS</small></td>
+          <td class="col-cln"><b>Frameworks &amp; Drivers</b><span>DB · Web · Devices</span></td>
+          <td class="col-hex"><b>外部世界</b><span>被适配器包裹的具体技术</span></td>
+          <td class="col-ddd"><b>Infrastructure</b><span>可替换的技术实现细节</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="principle-row">
+    <div class="prin rev d1">
+      <span class="glyph">→</span>
+      <span class="n">P · 01</span>
+      <h5>依赖倒置</h5>
+      <p>高层不依赖低层，两者都依赖抽象。接口由内层定义、外层实现——这是三种架构共同的机械原理。</p>
+    </div>
+    <div class="prin rev d2">
+      <span class="glyph">◎</span>
+      <span class="n">P · 02</span>
+      <h5>可测试性</h5>
+      <p>领域不绑定框架，便能在没有数据库、没有 Web 服务器的情况下，用纯粹的单元测试验证业务规则。</p>
+    </div>
+    <div class="prin rev d3">
+      <span class="glyph">⇄</span>
+      <span class="n">P · 03</span>
+      <h5>延迟决策</h5>
+      <p>数据库、消息中间件、UI 框架都是「细节」。好架构让你把这些选择推迟到最后一刻，且随时可换。</p>
+    </div>
+  </div>
+</section>
+
+<div class="rule"></div>
+
+<!-- ================= 06 · WORKED EXAMPLE ================= -->
+<section class="blk" id="example">
+  <div class="sec-head rev">
+    <span class="sec-idx" style="color:var(--cyan)">06</span>
+    <span class="sec-kick">Worked Example · aemeath 实战</span>
+  </div>
+  <h2 class="sec-title rev d1">一个真实 Rust 项目的 DDD 重构<small>REAL REFACTOR · FROM CODE TO BOUNDED CONTEXTS</small></h2>
+  <p class="sec-intro rev d2">
+    电商案例是从零建模；这一节反过来——一个<b>已有 16 crate 的 AI 编程助手</b>，代码先行、边界模糊，如何用 DDD <b>倒推</b>出清晰的限界上下文。
+        <b>战略篇 I-VI</b> 倒推 BC 与 Context Map，<b>战术篇 VII-XI</b> 盘点代码落地聚合与端口，<b>Context Management 篇 XII-XV</b> 在同一 BC 内做 compact/token/prompt/memory 战术设计，<b>Memory 篇 XVI-XVIII</b> 做检索/反思/异步执行设计，<b>Workflow + Config 篇 XIX-XXI</b> 做 ACL 防腐与 clamp 统一，<b>Task + Project 篇 XXII</b> 做领域模型极简与命名直觉，<b>TUI 篇 XXIII-XXXII</b> 做 Context 内聚、SDK DTO 收口、reducer 纯化与死代码清理、投影层术语对齐与状态派生、端口适配器、ACL 彻底隔离与两层分离，<b>通用域篇 XXXIII-XXXV</b> 做机制/语义、全局资源/scope 状态与安全计划类型化，<b>Policy + Hook + Audit 篇 XXXVI</b> 做实现范围收缩、双层重试与独立事实流，<b>评审与落地篇 XXXVII-XL</b> 做位置即暗示、derived data 定位标注、门禁防线与共享 Run 内核——贯穿经验：<b>不按 crate 划 BC</b>、<b>复杂度 ≠ BC</b>、<b>用不变量所有权划责任</b>、<b>声明与装配分离</b>、<b>同构才统一（异构不硬统一）</b>、<b>只在需求成熟时设计兼容协议</b>、<b>读模型与持久层分离</b>、<b>cacheable 按变化频率分不按类型分</b>、<b>组合加载优于 fallback</b>、<b>正交关注点不混入</b>、<b>检索与注入分离</b>、<b>领域服务不依赖外部资源</b>、<b>异步执行不阻塞主循环</b>、<b>ACL 两层防腐（格式检测 + 语义翻译）</b>、<b>clamp 收口到唯一入口</b>、<b>暂缓项写明条件和远期规划</b>、<b>LLM 驱动的领域模型极简（无消费方的字段砍掉）</b>、<b>命名直觉化（Unix fork 替代自造术语）</b>、<b>不拆但内聚子模块（大但内聚 &gt; 小但耦合）</b>、<b>DTO 从 runtime auto-gen 不两边维护</b>、<b>reducer 纯化副作用隔离到 Effect</b>、<b>死代码不是无害的（allow 掩盖真相）</b>、<b>投影层不自创术语（对齐权威层统一语言）</b>、<b>投影状态从权威派生不自建状态机</b>、<b>投影按来源拆分不混 BC（杂物箱按 BC 拆开）</b>、<b>端口不绑死实现（trait + 多适配器注入）</b>、<b>ACL 彻底隔离不泄漏类型（消费层零 SDK 依赖）</b>、<b>两层 ACL 分离结构与语义（机械映射 vs 业务翻译）</b>、<b>机制不拥有业务语义</b>、<b>全局资源不携带 scope-local 可变状态</b>、<b>安全流程用已验证类型闭合</b>、<b>重试按不变量所有者分层计数</b>、<b>位置即暗示（目录名/函数名是架构契约）</b>、<b>derived data 要标注定位（不然身份不清）</b>、<b>门禁是防漂移的最后防线（没有 = 靠自觉 = 必然漂移）</b>、<b>聚合根必须机械守护不变量</b>、<b>取消也是终态竞争者</b>、<b>声明正确不等于接线正确</b>、<b>异步注册用 RAII 收口</b>、<b>并发状态用单一状态机表达</b>、<b>门禁必须正反向验证</b>。
+  </p>
+
+  <div class="timeline">
+    <!-- 阶段一 -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">I</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战略前置 · 盘点事实</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
+        <p class="tl-desc">画任何边界前，先把代码事实摸清，拒绝拍脑袋。</p>
+        <ul class="tl-list">
+          <li>盘 <b>16 crate</b> + SDK 契约 + <b>AgentClient</b> 入站端口 + 持久化现状</li>
+          <li>精读现有 8 份设计文档，逐份标 <b>Current vs Target</b></li>
+          <li>发现核心 <b>runtime</b> 里塞了 11 组能力（compact / reflection / cost / scheduler…）</li>
+        </ul>
+        <div class="tl-out">产出 · 一张<b>「能力原子」清单</b>，作为划界原料</div>
+      </div>
+    </div>
+
+    <!-- 阶段二 -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">II</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战略设计 · 按能力聚类划 BC</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
+        <p class="tl-desc">拒绝「一个 crate = 一个 BC」，从领域能力重新聚类。</p>
+        <ul class="tl-list">
+          <li>划子域：<b>核心 / 支撑 / 通用</b></li>
+          <li>主动挖遗漏：<b>Context Management · Reflection · Scheduler · Update</b> 一开始都没列</li>
+          <li>暴露问题：Scheduler 是<b>死代码</b>、Update 命名错位应为 Version Control</li>
+        </ul>
+        <div class="tl-out">产出 · 15 个 BC 候选 + <b>主动暴露的遗漏项</b></div>
+      </div>
+    </div>
+
+    <!-- 阶段三 -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">III</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战略设计 · 两把判据辨边界</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
+        <p class="tl-desc">用两把尺子切开「看似要独立」的能力。</p>
+        <ul class="tl-list">
+          <li>尺一 · <b>有无独立聚合+不变量+生命周期？</b> → Task 是 BC，Interaction 不是</li>
+          <li>尺二 · <b>定义契约 vs 履行契约？</b> → SDK 是核心域契约，clients 是履行者</li>
+          <li><b>Loop 很复杂但无独立聚合</b> → 是模块，不是 BC</li>
+        </ul>
+        <div class="tl-out">产出 · 边界收敛，<b>伪 BC 被拒之门外</b></div>
+      </div>
+    </div>
+
+    <!-- 阶段四 -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">IV</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战略设计 · 简化与收敛</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
+        <p class="tl-desc">每个「要不要状态机 / 要不要 durable」都用领域本质回答。</p>
+        <ul class="tl-list">
+          <li>Session 的「状态」全是<b>投影或 IO 动作</b> → 不建 Session 状态机，只保留 <b>Run（内存态）</b> 作为 Agent 执行生命周期状态机</li>
+          <li>Task、Workflow、MCP Connection 可以有<b>局部聚合状态机</b>，但不能复制、驱动或替代 Run</li>
+          <li>Session 主体是<b>对话历史</b> → 并入 Context Management，不独立</li>
+          <li>人在环 CLI <b>崩溃从头开始</b> → 去掉 durable invocation</li>
+        </ul>
+        <div class="tl-out">产出 · BC 候选经增删与归类修正后<b>定稿为 15 个</b>，执行生命周期收敛为唯一 Run</div>
+      </div>
+    </div>
+
+    <!-- 阶段五 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">V</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>架构落地 · 上下文地图 + 落文档</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+        <p class="tl-desc">把边界翻译成端口关系与目录结构。</p>
+        <ul class="tl-list">
+          <li>集成关系：<b>C/S · ACL · Pub/Sub · OHS · PL · SK</b></li>
+          <li>交付层（clients）+ Future 预留（<b>Server 传输透明</b>）；Workflow 降为支撑域</li>
+          <li>落 docs/design 三层：<b>01-system</b> 总体 → <b>02-modules</b> 模块 → <b>03-engineering</b> 横切</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">CONTEXT MAP · 出站端口（Runtime 是 Customer）</span><span class="d">Agent Runtime</span>（唯一 Agent 执行生命周期状态机 Run）
+ ├─ <span class="d">ContextPort</span>        → Context Management  <span class="m">// C/S</span>
+ ├─ <span class="d">ProviderPort</span>       → Provider（内部 ACL）   <span class="m">// C/S + ACL</span>
+ ├─ <span class="d">ToolCatalogPort</span>    → Tool &amp; Skill &amp; Command
+ ├─ <span class="d">ToolExecutionPort</span>  → Tool &amp; Skill &amp; Command
+ ├─ <span class="d">PolicyPort</span>         → Policy
+ └─ <span class="d">AuditSink</span>          → Audit               <span class="m">// Pub/Sub 单向</span></pre>
+        <div class="tl-out">产出 · 一张<b>上下文地图</b> + 五篇 01-system 设计文档</div>
+      </div>
+    </div>
+
+    <!-- 阶段六 -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">VI</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>迭代与修正 · 边界不是一次画对</h3><span class="tl-badge badge-ddd">DDD · 战略</span></div>
+        <p class="tl-desc">真实项目里，命名和边界都要反复用判据检验、推倒重来——初稿不是终稿。</p>
+        <ul class="tl-list">
+          <li>命名三次迭代：Chat → AgentRun → <b>Run</b>（对齐 OpenAI <b>Thread / Run / Run Step</b>）</li>
+          <li>BC 归类修正：Workflow 一度进核心域，再用判据降为<b>支撑域</b>（复杂度 / 概念 ≠ 核心）</li>
+          <li>只写目标态：Current 与 Migration 另处维护，避免代码演进污染长期边界</li>
+        </ul>
+        <div class="tl-out">产出 · <b>15 BC 定稿</b>（1 核心 + 8 支撑 + 6 通用），Run 是唯一 Agent 执行生命周期状态机</div>
+      </div>
+    </div>
+
+    <!-- 阶段七（战术前置：盘点驱动）-->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">VII</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战术前置 · 盘点驱动</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+        <p class="tl-desc">战略可推演，战术 <b>必须读代码</b>——否则聚合是空想。</p>
+        <ul class="tl-list">
+          <li>多个 agent 并行深读核心 crate（runtime <b>144 文件</b>）</li>
+          <li>摸清现状：<b>两套 loop</b>、三层 Context 重叠、<b>无 Run 聚合</b>、12 端口只 4 个有 trait</li>
+          <li>现状缺口集中到 <b>migration-governance</b>（设计文档只写目标态）</li>
+        </ul>
+        <div class="tl-out">产出 · 现状缺口矩阵 <b>R1-R10</b>，战术的事实地基</div>
+      </div>
+    </div>
+
+    <!-- 阶段八 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">VIII</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>责任章程 + 战术验证 · 从名词清单到可判断边界</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+        <p class="tl-desc">列出 BC 名称不等于边界成立；真正可复用的是每个 BC 的正负责任判断，以及跨界时谁拥有不变量。</p>
+        <ul class="tl-list">
+          <li>为 15 个 BC 逐一写<b>负责什么 / 不负责什么</b>：命中不负责时，必须通过 Port 找真正所有者</li>
+          <li>判断顺序：<b>状态所有权 → 策略/机制 → 编排/能力 → Snapshot PL/物理存储</b></li>
+          <li>实例：Provider 只提取 raw usage；Audit 拥有 Cost/Pricing 聚合；Logging sink 不等于审计 sink</li>
+          <li>一项能力找不到明确所有者时，<b>先停设计</b>，更新责任章程与 Context Map 后再写代码</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">RESPONSIBILITY CHARTER · 最小模板</span><span class="d">Bounded Context</span>
+ ├─ 负责：拥有模型、定义合法迁移、守护不变量
+ ├─ 不负责：只参与集成，不拥有策略与状态
+ └─ 跨界：Port + Published Language / Event
+
+<span class="m">// 观察状态 ≠ 拥有状态；持久化 Snapshot ≠ 拥有聚合</span></pre>
+        <div class="tl-out">产出 · 一张可供后续设计评审使用的<b> BC 责任矩阵</b></div>
+      </div>
+    </div>
+
+    <!-- 阶段九 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">IX</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>战术设计 · 同一 BC，不强造统一执行抽象（异构不硬统一）</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+        <p class="tl-desc">Tool、Skill、Slash Command 共享“可发现能力”的语言，但执行机制不同；统一名词不意味着统一 trait。</p>
+        <ul class="tl-list">
+          <li><b>Tool</b> 调函数：Catalog / Execution 双端口；不向 Runtime 暴露 Registry 或 Tool 实例</li>
+          <li><b>Skill</b> 物化 PromptFragment：Context Management 决定注入位置、预算与缓存</li>
+          <li><b>Slash Command</b> 按 PromptInjection / SnapshotQuery / ApplicationControl 三种机制路由</li>
+          <li><b>Registry Scope ∩ capability Profile</b>：Scope 决定装配了什么，Profile 只负责收缩权限</li>
+          <li>MCP 是 Tool adapter；尚未接线时<b>延迟 ToolId / version / revision</b>，不为假设中的兼容问题过度设计</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">ONE BC · THREE SEMANTICS</span><span class="d">Tool</span>    → ToolCatalogPort + ToolExecutionPort
+<span class="d">Skill</span>   → SkillCatalogPort + SkillMaterializationPort
+<span class="d">Command</span> → parse + route（不共享 execute / result 基类）
+
+<span class="m">// BC 统一语言；端口尊重真实业务语义</span></pre>
+        <div class="tl-out">产出 · 一个避免<b>伪统一抽象</b>与<b>内部细节泄漏</b>的战术案例</div>
+      </div>
+    </div>
+
+    <!-- 阶段十（对照 IX：同构才统一）-->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">X</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>声明 vs 装配 · 同构才零分支统一</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+        <p class="tl-desc">与 IX 对照：Tools 异构不硬统一，Runtime 的 Main/Sub <b>同构</b>——反而应该零分支统一。判据是同构 vs 异构。</p>
+        <ul class="tl-list">
+          <li><b>RunSpec</b>（声明式规格）→ 装配 → <b>RuntimeContext</b>（活资源）→ Run</li>
+          <li>消解伪概念：ExecutionPolicy 拆开——静态归 RunSpec、动态归运行时绑定，<b>概念消失</b></li>
+          <li>Loop Engine <b>零分支</b>：Main/Sub 差异 100% 在 RunSpec + RuntimeContext + event adapter</li>
+        </ul>
+        <pre class="bp-code"><span class="tag">同构 vs 异构 · 何时统一</span><span class="d">Runtime</span> Main/Sub 同构   → 零分支统一（差异在装配）
+<span class="d">Tools</span>   Tool/Skill/Cmd 异构 → 不硬统一（端口尊重语义）</pre>
+        <div class="tl-out">产出 · <b>一套引擎跑 Main/Sub</b>；与 IX 合成"同构才统一"的判据</div>
+      </div>
+    </div>
+
+    <!-- 阶段十一 -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XI</div></div>
+      <div class="tl-card">
+        <div class="tl-top"><h3>统一的红利 · review 收敛</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+        <p class="tl-desc">统一内核不只优雅，还自动补齐能力；设计在 review 中反复收敛。</p>
+        <ul class="tl-list">
+          <li>统一 loop 的红利：Sub <b>自动获得</b> 防 stuck(4 层) + 重试（现状 Sub 裸奔）</li>
+          <li>review 反复收敛：InputSource→<b>InputBuffer</b>、梯度重试 <b>T0-T4→T0-T1</b>、output 统一经 EventSink</li>
+          <li>判据一以贯之：<b>Memory 独立 BC</b>（跨会话）vs <b>Session 归 Context</b>（会话本体）</li>
+        </ul>
+        <div class="tl-out">产出 · runtime 战术设计定稿，<b>健壮性完整</b></div>
+      </div>
+    </div>
+
+  <!-- ===== 阶段十二：Context Management 实战经验 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>读模型 vs 持久层 · 同一 BC 内的两种作用层</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Context Management 的 compact 家族五级管线（L1-L5），初稿把 L3 microcompact 设计为修改 ChatChain 的独立端口方法——review 后推翻：<b>只有 L5 auto-compact 修改 ChatChain</b>，L1-L4 全是读模型变换。</p>
+      <ul class="tl-list">
+        <li>L1 budget reduction 在 tool 出站时截断（入 ChatChain 前），不入 build_window</li>
+        <li>L2 snip / L3 microcompact / L4 context collapse 都是 <b>build_window 内部读模型变换</b>——只影响 ContextWindow.messages，ChatChain 原始数据不变</li>
+        <li>L5 auto-compact 是<b>唯一修改 ChatChain</b>的策略（创建 Compact segment，冻结旧链）</li>
+        <li>端口签名从 4 方法收敛为 3 方法：<b>microcompact 内聚到 build_window</b>，Runtime 不感知内部策略分层</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">读模型 vs 持久层 · compact 管线</span><span class="d">build_window</span>  L2 snip → L3 microcompact → L4 collapse    <span class="m">// 读模型，不改 ChatChain</span>
+<span class="d">compact</span>       L5 auto-compact                              <span class="m">// 持久层，创建 Compact segment</span>
+
+<span class="m">// 五级管线是 ContextPort 实现细节，Runtime 只调 3 个方法</span></pre>
+      <div class="tl-out">产出 · ContextPort 3 方法签名定稿，<b>读模型与持久层职责分离</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十三：cacheable 判据 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>cacheable 不是按类型分 · 是按变化频率分</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">初稿把系统提示分为 static_part（cacheable）/ dynamic_part（non-cacheable）——user_guidance、skills、memory 被归入 dynamic 不 cache。review 后推翻：<b>它们变化频率低，不变时应 cache</b>，变化时 miss 重算一次后恢复。</p>
+      <ul class="tl-list">
+        <li><b>错误分法</b>：按"静态/动态"类型分组 → user_guidance / skills / memory 被错误排除出 cache</li>
+        <li><b>正确分法</b>：按<b>内容是否变化</b>判定——每部分独立检测（mtime / fingerprint / hash 比对）</li>
+        <li>cacheable_prefix 纳入 user_guidance / skills / memory / active_summary；uncached_suffix 只留 current_date / git_context / task_reminder</li>
+        <li>memory 通过 <b>entry fingerprint</b> 检测变化——reflection 写入时 miss 一次，下一轮恢复命中</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">cacheable_prefix · 低频变化内容</span><span class="d">discipline + guidance + skills + roles</span>
+<span class="d">user_guidance + memory + active_summary</span>     <span class="m">// mtime / fingerprint 检测变化</span>
+↓ cache_control 断点
+<span class="tag">uncached_suffix · 每轮可能变</span><span class="d">current_date + git_context + task_reminder</span></pre>
+      <div class="tl-out">产出 · cache 命中率从"每轮 miss"提升到<b>"不变即命中"</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十四：组合加载 vs fallback ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>组合加载 vs fallback · 别用 break 杀掉信息</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">guidance 文件和 user_guidance（AGENTS.md / CLAUDE.md）初稿都设计为"取第一个存在的就 break"——review 后改为<b>组合加载</b>：所有匹配的文件都追加，从通用到具体逐层叠加。</p>
+      <ul class="tl-list">
+        <li><b>model guidance</b>：_default.md 总是加载 + 所有前缀匹配的 {prefix}.md 都追加（短前缀→长前缀）+ _reasoning.md（is_reasoning 时）</li>
+        <li><b>user guidance</b>：全局 ~/.agents/AGENTS.md + ~/.claude/CLAUDE.md + 项目从远到近每层 AGENTS.md / CLAUDE.md 都加载</li>
+        <li>每段带<b>路径信息</b>：<code>&lt;guidance source="~/.agents/guidance/Zhipu.md"&gt;...&lt;/guidance&gt;</code></li>
+        <li>命名收敛：CLAUDE.md / AGENTS.md 统称 <b>user_guidance</b>；cwd → <b>project_root</b></li>
+      </ul>
+      <pre class="bp-code"><span class="tag">组合加载 · 从通用到具体</span><span class="d">_default.md</span>          <span class="m">// 系统通用</span>
+<span class="d">Zhipu.md</span>             <span class="m">// 厂商通用</span>
+<span class="d">Zhipu/glm.md</span>        <span class="m">// 模型系列</span>
+<span class="d">Zhipu/glm-5.md</span>      <span class="m">// 版本特定</span>
+<span class="d">_reasoning.md</span>       <span class="m">// reasoning 模式</span>
+
+<span class="m">// fallback 会丢掉更具体的 guidance；组合加载才完整</span></pre>
+      <div class="tl-out">产出 · guidance 和 user_guidance <b>同策略组合加载</b>，每段带路径溯源</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十五：正交关注点不混入 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>正交关注点不混入 · reasoning 与常量收口</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">两个看似无关的问题，本质同一：关注点越界——一个混入了不该属于该层的参数，一个散落在三个文件里没有单一真相。</p>
+      <ul class="tl-list">
+        <li><b>reasoning 正交性</b>：<code>is_reasoning</code> 是 guidance 层开关（加载 _reasoning.md），与 provider API 参数（<code>reasoning_effort</code> / <code>thinking.budget_tokens</code>）正交——LLM 不需要"知道"自己开了 reasoning</li>
+        <li><b>常量收口</b>：8192 / 13000 / 20000 三个魔法常量散落在 <code>token_estimation.rs</code> 三处，<b>max_output_tokens 硬编码 8192 忽略模型真实 max_tokens</b> → 统一到 <b>TokenBudgetConfig</b>，max_output 从 ProviderPort 获取</li>
+        <li><b>幂等决策（#550）</b>：<code>needs_compaction</code> 是纯函数，但 PreCompact hook 每轮无条件触发破坏幂等 → <b>CompactionFingerprint</b> 不变时跳过 hook</li>
+        <li><b>circuit breaker 死代码</b>：<code>AutoCompactState</code> 完整实现但从未接入主循环 → 设计中明确接入点</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">正交关注点 · 不混入</span><span class="d">PromptPort</span>  is_reasoning → 加载 _reasoning.md guidance  <span class="m">// guidance 层</span>
+<span class="d">ProviderPort</span> reasoning_effort → API 参数              <span class="m">// provider 层</span>
+<span class="m">// 两者正交，不互相注入</span>
+
+<span class="tag">常量收口 · 单一真相</span><span class="d">TokenBudgetConfig</span>  max_summary_output / buffer / safety_factor
+<span class="d">ProviderPort</span>        max_output_tokens(model)  <span class="m">// 替代硬编码 8192</span></pre>
+      <div class="tl-out">产出 · 四个关注点各归其位：<b>guidance / API 参数 / 预算常量 / 幂等指纹</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十六：检索与注入分离 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>检索与注入分离 · 谁输出数据 vs 谁决定放哪</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Memory BC 初稿把"注入位置"也归自己管——review 后推翻：Memory 只输出检索结果和格式化文本，<b>注入位置、token 预算、与 guidance/skill 的排序全归 Context Management</b>。这是 XII"读模型 vs 持久层"的跨 BC 版本。</p>
+      <ul class="tl-list">
+        <li>Memory BC 职责：<code>top_for_inject(limit)</code> 返回排序后的 MemoryEntry + <code>format_injection_block</code> 格式化</li>
+        <li>Context Management 职责：决定注入位置（system block 顺序）、token 预算分配、跨轮去重</li>
+        <li>判据：<b>谁拥有 Context Window 结构，谁决定注入策略</b>——Memory 是数据提供者不是窗口管理者</li>
+        <li>附产物：<code>top_for_inject</code> 不 touch（只读），避免注入行为导致排序漂移</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">跨 BC 职责分离 · 检索 vs 注入</span><span class="d">Memory BC</span>      top_for_inject() → Vec&lt;MemoryEntry&gt;     <span class="m">// 读模型，只排序</span>
+<span class="d">Memory BC</span>      format_injection_block() → String        <span class="m">// 格式化</span>
+<span class="d">Context Mgmt</span>   决定注入位置 / 预算 / 去重 / 排序        <span class="m">// 拥有 Context Window</span>
+
+<span class="m">// Memory 不知道自己被放在哪；CM 不知道记忆怎么排序</span></pre>
+      <div class="tl-out">产出 · MemoryPort 只管检索与格式化，<b>注入策略归 Context Management</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十七：领域服务不依赖外部资源 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域服务不依赖外部资源 · Reflection 不依赖 ProviderPort</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Reflection 需要调 LLM，但 Memory BC 不应依赖 ProviderPort——否则 Context Map 多出一条 Memory→Provider 边，破坏依赖方向。解法：<b>把 Reflection 拆为领域逻辑（prompt/output/apply）和编排逻辑（LLM 调用）</b>，前者归 Memory BC，后者归 Runtime。</p>
+      <ul class="tl-list">
+        <li>Memory BC 暴露 <b>ReflectionPromptPort</b>：build_prompt（纯函数）、parse_output、apply_output——不调 LLM</li>
+        <li>Runtime 经 ProviderPort 发起 LLM 调用，把原始响应交回 Memory BC parse + apply</li>
+        <li>双端口分离：<b>MemoryPort</b>（CRUD + 检索）给 context_coordination 和 slash 命令用；<b>ReflectionPromptPort</b>给 Runtime reflection 编排用——消费方不同、演进方向不同</li>
+        <li>与 IX 对照：Tool/Skill/Command 异构不硬统一；MemoryPort/ReflectionPromptPort <b>同属 Memory BC 但职责正交</b>，分端口而非合并</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">领域服务 · 不依赖外部资源</span><span class="d">Memory BC</span>    ReflectionPromptPort::build_prompt()    <span class="m">// 纯函数</span>
+<span class="d">Memory BC</span>    ReflectionPromptPort::parse_output()    <span class="m">// 纯函数</span>
+<span class="d">Memory BC</span>    ReflectionPromptPort::apply_output()     <span class="m">// 经 MemoryPort 写入</span>
+<span class="d">Runtime</span>      call_llm() → ProviderPort               <span class="m">// 编排，Memory 不参与</span>
+
+<span class="m">// Memory BC 无 Memory→Provider 边；依赖方向保持一致</span></pre>
+      <div class="tl-out">产出 · Memory BC 无 ProviderPort 依赖，<b>双端口按消费方分离</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十八：异步执行不阻塞主循环 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>异步执行不阻塞主循环 · Reflection 从同步改异步</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">初稿中 Reflection 的三种触发（interval / pre-compact / forced）全部同步 await——主循环在等 LLM 返回时完全阻塞。review 后推翻：<b>interval 和 pre-compact 改为 tokio::spawn 后台执行</b>，只有 forced（用户主动 <code>/reflection</code>）保持同步。</p>
+      <ul class="tl-list">
+        <li><b>Interval</b>：Run 完成后 spawn 后台反思，主循环立即处理 outcome / 下一轮——结果通过 mpsc channel 在后续轮次回传</li>
+        <li><b>Pre-compact</b>：compact 前抓 messages 快照交给后台任务，<b>compact 立即继续不等待</b>——反思用快照跑，用户可能在 compact 后才看到结果，可接受</li>
+        <li><b>Forced</b>：<code>/reflection</code> 是用户主动请求，保持同步 await</li>
+        <li>并发控制：<b>单一后台 slot</b>（interval + pre-compact 共享），前一个未完成时跳过本次；Run 结束时 drain，避免孤儿任务</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">异步执行 · 不阻塞主循环</span><span class="d">Interval</span>     spawn → 后台跑 → channel 回传          <span class="m">// 不阻塞</span>
+<span class="d">Pre-compact</span>  抓快照 → spawn → compact 立即继续       <span class="m">// 不阻塞</span>
+<span class="d">Forced</span>       await → 用户等结果                      <span class="m">// 同步</span>
+
+<span class="m">// 判据：用户是否在等结果？否 → 异步；是 → 同步</span></pre>
+      <div class="tl-out">产出 · 主循环零阻塞，<b>Reflection 在后台跑</b>，结果延迟到下一轮 emit</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段十九：ACL 两层防腐 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>ACL 两层防腐 · 格式检测 + 语义翻译</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">兼容 Claude Code 的 settings.json 时，初稿只做格式检测——review 后指出 config 内容翻译也要防腐。外部 CLI 的字段语义和内部模型不对等，<b>不是字段名 1:1 直通</b>。</p>
+      <ul class="tl-list">
+        <li><b>第一层·格式检测防腐</b>：运行时检测文件格式（文件名 + 内容特征），未识别格式跳过 + 日志，不报错中断</li>
+        <li><b>第二层·内容语义翻译防腐</b>：外部字段经语义映射后产出 <code>ConfigPatch</code>——外部结构<b>不泄漏</b>到 Config domain</li>
+        <li>Claude <code>permissions.allow/deny</code> 规则列表 → <code>PermissionMode</code> 枚举（<b>聚合判断</b>，不是直通）</li>
+        <li>Claude <code>apiKeyHelper</code> 脚本 → 无法执行，<b>降级跳过 + warn</b>（不是塞原始结构进去）</li>
+        <li>新增外部 CLI 格式只加 translator（<code>ConfigTranslator</code> trait），不改 adapter / AppService / 分层</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">ACL 两层防腐</span><span class="d">CompatibilityAdapter</span>
+├─ <span class="m">// 第一层：格式检测</span>
+│   detect_format(path, content) → ConfigFormat
+│   未识别 → skip + log（不中断）
+│
+└─ <span class="m">// 第二层：语义翻译</span>
+    ClaudeTranslator::translate(content) → ConfigPatch
+      permissions  → PermissionMode（聚合判断）
+      env          → env 映射（过滤专有变量）
+      apiKeyHelper → skip + warn（降级）
+<span class="m">// 外部结构不泄漏到 Config domain</span></pre>
+      <div class="tl-out">产出 · <b>CompatibilityAdapter + ConfigTranslator trait</b>，两层防腐，外部格式可扩展</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十：clamp 统一 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>clamp 统一 · 3 处分散 → 1 个入口</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">ReasoningLevel 的 clamp 发生在 3 个时机（bootstrap / per-API-call / sub-agent setup），各自独立 clamp，导致 <code>max_reasoning</code> 配置已解析但从未生效，<code>current_reasoning_level()</code> 报告的值和实际发送给 provider 的值不一致（declared vs effective drift）。</p>
+      <ul class="tl-list">
+        <li><b>问题</b>：3 处 clamp 各拿各的上限——bootstrap 拿 user_cap，per-call 只拿 provider_max，<code>max_reasoning</code> 被跳过</li>
+        <li><b>目标</b>：<code>ReasoningPort.set_level()</code> 是<b>唯一 clamp 点</b>——内部 clamp <code>min(user_max, provider_max)</code></li>
+        <li>bootstrap / per-call / sub-agent 只调 <code>set_level</code>，不自行 clamp</li>
+        <li><code>current_level()</code> 返回<b>已 clamp 的有效值</b>——消除 declared vs effective drift</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">clamp 统一 · 唯一入口</span><span class="d">ReasoningPort::set_level</span>(desired)
+│  clamped = desired
+│      .min(user_max_reasoning)        <span class="m">// 用户配置上限</span>
+│      .min(provider.max_level())      <span class="m">// provider 模型上限</span>
+└─ inner.set_reasoning_level(clamped)
+
+<span class="m">// bootstrap / per-call / sub-agent 只调 set_level，不自行 clamp</span></pre>
+      <div class="tl-out">产出 · <b>ReasoningPort</b> 统一 clamp，<code>max_reasoning</code> 接入，drift 消除</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十一：暂缓条件明确 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>暂缓不是不做了 · 写明条件和远期规划</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">Workflow Engine（Phase 3 控制流编排）标记为暂缓——但"暂缓"不是"不做了"，设计文档中必须写明<b>暂缓原因</b>和<b>启动条件</b>，让后续开发者知道何时该重新评估。</p>
+      <ul class="tl-list">
+        <li><b>暂缓原因</b>：ReasoningGraph 已满足当前需求；Loop Engine 已是事实上的控制流；缺乏真实场景驱动</li>
+        <li><b>启动条件</b>（全部满足）：ReasoningGraph 稳定 + 出现 Loop Engine 无法表达的控制流需求 + 至少 2 个真实场景验证</li>
+        <li><b>远期方向</b>：与 ReasoningGraph 并存不替代——一个调 effort，一个调控制流；不修改 ChatChain（读模型层）</li>
+        <li>同理：<code>/think</code> 完整 6 级、L4 Context Collapse 等暂缓项都写明原因和条件</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">暂缓 ≠ 不做 · 写明条件</span><span class="d">Workflow Engine</span>  暂缓
+├─ 原因：ReasoningGraph 够用 + Loop Engine 事实控制流 + 无场景驱动
+└─ 启动条件（全部满足）：
+     1. ReasoningGraph 稳定
+     2. Loop Engine 无法表达的需求出现
+     3. ≥ 2 个真实场景验证
+
+<span class="m">// 暂缓项都有明确的重启条件，不是遗忘</span></pre>
+      <div class="tl-out">产出 · 暂缓项<b>条件化追踪</b>，不遗忘不盲启</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十二：领域模型极简 + 命名直觉 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>领域模型极简 · LLM 驱动系统的每个字段都是 token 成本</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Task BC 战术设计中发现：<code>progress</code> / <code>progress_message</code> 字段要求 LLM 每步更新，纯费 token 无消费方——直接砍掉。同轮中 <code>seed_isolated</code> 重命名为 <code>fork</code>：自造术语不如 Unix 语义直觉。</p>
+      <ul class="tl-list">
+        <li><b>字段存活判据</b>：每个字段必须回答"谁消费它"——TUI 不渲染、Runtime 不读取、快照不依赖的字段直接移除。LLM 驱动的领域模型尤其要极简，多余字段 = 每轮浪费 token</li>
+        <li><b>Batch 是领域服务非聚合根</b>：Batch 管理 Task 集合的分组与生命周期（Active / Paused / Archived），但无独立状态机——lifecycle 检测是纯函数，归档动作由调用方执行。不是每个"管理一组东西"的概念都需要是聚合根</li>
+        <li><b>Published Language 所有权</b>：Task 类型定义所有权属 Task BC，其他 BC 引用其发布类型经端口翻译——<b>NEVER</b> 自行定义副本。当前类型在 shared/tool/types 下（build.rs 生成 Schema 需要），目标迁移到 Task BC 所有权下</li>
+        <li><b>命名直觉化</b>：<code>seed_isolated</code> → <code>fork</code>——Unix fork 语义（继承父状态 + 独立可变）比自造术语更直觉，跨团队沟通成本更低</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">字段存活判据 · 谁消费它？</span><span class="d">Task.subject</span>        → TUI 渲染、用户可读          <span class="m">// 留</span>
+<span class="d">Task.status</span>         → Runtime 决策、TUI 渲染        <span class="m">// 留</span>
+<span class="d">Task.blocked_by</span>     → is_blocked 判定              <span class="m">// 留</span>
+<span class="d">Task.progress</span>       → ??? 无消费方                  <span class="m">// 砍</span>
+<span class="d">Task.progress_message</span> → ??? 无消费方                <span class="m">// 砍</span>
+
+<span class="tag">Batch · 领域服务非聚合根</span><span class="d">detect_batch_all_completed</span>(tasks) → Option&lt;batch_id&gt;  <span class="m">// 纯函数</span>
+<span class="d">detect_interrupted_batch</span>(tasks) → Option&lt;Info&gt;      <span class="m">// 纯函数</span>
+<span class="m">// 检测无副作用；归档动作由调用方执行</span>
+
+<span class="tag">fork · Unix 语义替代自造术语</span><span class="d">fn fork(&amp;self) -> Arc&lt;Self&gt;</span>
+  <span class="m">// 继承 root + path_base + initial_cwd</span>
+  <span class="m">// 空栈 + 独立锁 + 共享 git 端口</span></pre>
+      <div class="tl-out">产出 · Task 聚合砍掉 2 字段 / 1 不变量 / 1 事件；Batch 定位为领域服务；<code>fork</code> 替代 <code>seed_isolated</code></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十三：3+1 Context · 不拆但内聚子模块 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>3+1 Context · 不拆但内聚子模块</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">设计文档定 4 Context（Conversation / Input / Runtime / Diagnostic），代码把 RuntimeState 合并进 Conversation——review 时面临矛盾：不拆则 Conversation 臃肿，拆则跨 Context 通信开销大。<b>最终决策：不拆，通过内聚子模块 + 字段私有化控制臃肿。</b></p>
+      <ul class="tl-list">
+        <li>RuntimeState 与 chat 生命周期紧密耦合——chat 启动 → spinner 开始，chat 完成 → spinner 停止</li>
+        <li>拆成独立 Context 会增加跨 Context Intent/Change 通信开销，收益不明确</li>
+        <li><b>内聚子模块</b>：RuntimeState 作为 Conversation 的私有子模块，字段全私有，只经业务方法操作</li>
+        <li><b>臃肿通过封装控制</b>，不通过拆 Context 控制——"大但内聚"优于"小但耦合"</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">3+1 Context · 不拆但内聚</span><span class="d">ConversationModel</span>
+├─ chats: Vec&lt;Chat&gt;            <span class="m">// 对话结构</span>
+├─ timeline: OutputTimelineModel
+├─ <span class="d">runtime: RuntimeState</span>        <span class="m">// 内聚子模块，字段私有</span>
+│    ├─ spinner / usage / workspace
+│    └─ task_status / compact_progress
+└─ ask_user: AskUserState
+
+<span class="m">// "大但内聚" &gt; "小但耦合"</span></pre>
+      <div class="tl-out">产出 · <b>3+1 Context 定型</b>——不强行拆分，用封装控制复杂度</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十四：SDK DTO 从 runtime auto-gen ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>SDK DTO 从 runtime auto-gen · 别两边维护</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">SDK ↔ Runtime 类型同步存在三种方式：tool result 用 re-export（✅）、ChatEvent 用 444 行手工 match（⚠️ 已 5 处漂移）、ContentBlock 用 JSON round-trip（⚠️ 加变体静默降级）。<b>原则：Runtime 是类型定义唯一来源，SDK 不应两边维护。</b></p>
+      <ul class="tl-list">
+        <li><b>ChatEvent 漂移</b>：<code>DoneWithDuration { Duration }</code> → <code>DoneWithDurationMs { u64 }</code>（重命名+改类型）；<code>GraphPhaseChanged { ReasoningNode }</code> → <code>{ String }</code>（类型擦除）</li>
+        <li><b>ContentBlock 脆弱</b>：JSON round-trip 无编译期保证——加变体静默降级为空 Vec</li>
+        <li><b>目标</b>：ChatEvent 删除 444 行手工 match，ContentBlock 删 JSON round-trip，统一为 re-export</li>
+        <li>tool result 的 <code>pub use</code> re-export 模式是正确范例——其他两类应跟进</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">SDK DTO · 单一来源</span><span class="d">tool_result</span>    pub use → ✅ 单一来源，零漂移
+<span class="d">ChatEvent</span>       444 行手工 match → ⚠️ 5 处漂移 → 删 convert.rs
+<span class="d">ContentBlock</span>    JSON round-trip → ⚠️ 静默降级 → pub use share
+
+<span class="m">// Runtime 是唯一来源，SDK re-export，不两边维护</span></pre>
+      <div class="tl-out">产出 · <b>SDK DTO 收口目标态</b>——三类全走 re-export，加 CI shape 守卫</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十五：reducer 纯化 · 副作用隔离 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>reducer 纯化 · 副作用隔离到 Effect</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TEA 架构要求 Model update 是纯函数——但 <code>root_reducer</code> 直接调 <code>runtime.start_chat()</code> 等副作用方法。设计文档说"Model 不执行 IO"，代码违反。<b>目标态：reducer 只产出 Change，Coordinator 消费 Change 生成 Effect，Effect 执行副作用。</b></p>
+      <ul class="tl-list">
+        <li><b>当前</b>：<code>root_reducer → apply_change → runtime.start_chat()</code>（reducer 直接调副作用）</li>
+        <li><b>目标</b>：<code>root_reducer → apply_change → 产出 Change → Coordinator 消费 → 生成 Effect → EffectExecutor 执行</code></li>
+        <li>RuntimeState 字段私有化（当前全 <code>pub</code>，TODO 已标注）——副作用经业务方法，不经直接字段写</li>
+        <li>v0.1.0 只设计目标态，实现由后续 issue 承接</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">reducer 纯化 · 副作用隔离</span><span class="d">当前</span>  reducer → apply_change → runtime.start_chat()  <span class="m">// 副作用！</span>
+<span class="d">目标</span>  reducer → apply_change → Change
+      Coordinator → consume(Change) → Effect
+      EffectExecutor → execute(Effect)         <span class="m">// 副作用隔离在此</span>
+
+<span class="m">// reducer 只管状态转换，副作用归 Effect</span></pre>
+      <div class="tl-out">产出 · <b>reducer 纯化目标态</b>——Change → Effect 两段式，副作用隔离</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十六：死代码不是无害的 ===== -->
+  <div class="tl-item p-cln rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>死代码不是无害的 · allow 掩盖真相</h3><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI 代码走查发现：7 个 Msg 变体从未产生、4 个 Effect 变体 no-op、<code>coordinator.rs</code> 整个模块无调用方、4 个模块根级 <code>#![allow(dead_code)]</code> 掩盖一切。<b>死代码不是无害的——它误导后续开发者以为这些路径存在。</b></p>
+      <ul class="tl-list">
+        <li><b>7 个 Msg 变体</b>：<code>TimerTick</code> / <code>RenderTick</code> / <code>EffectCompleted</code> / <code>TerminalKey</code> / <code>TerminalMouse</code> / <code>TerminalResize</code> / <code>AgentEvent</code>——定义但从未产生</li>
+        <li><b>4 个 Effect 变体</b>：<code>StartTimer</code> / <code>StopTimer</code> / <code>RunHook</code> / <code>SetCurrentTurn</code>——no-op</li>
+        <li><b>4 个 <code>#![allow(dead_code)]</code></b>：model / update / effect / view_state 模块根级——掩盖真实死代码</li>
+        <li><b>分类处理</b>：删除（确认无用）/ 设计预留（标注 "reserved"）/ 待移除 allow（先暴露再清理）</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">死代码 · 分类处理</span><span class="d">删除</span>        7 Msg + 4 Effect + coordinator.rs + EffectResult
+<span class="d">设计预留</span>     标注 reserved（如有明确未来用途）
+<span class="d">待移除 allow</span>  移除 #![allow(dead_code)] → 暴露 → 逐个清理
+
+<span class="m">// allow(dead_code) 不是宽容，是掩盖</span></pre>
+      <div class="tl-out">产出 · <b>死代码清单 + 分类处理策略</b>——不让 allow 掩盖真相</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十七：投影层不自创术语 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影层不自创术语 · 对齐权威层统一语言</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI Model 是 Runtime 的投影层，但代码自创了一套术语——<code>Chat</code> / <code>ChatTurn</code> / <code>ChatStatus</code>，与 Runtime 的 <code>Run</code> / <code>RunStep</code> / <code>RunStatus</code> 不一致。<b>投影层不能自造词汇，MUST 对齐权威层统一语言。</b></p>
+      <ul class="tl-list">
+        <li><b>术语映射</b>：Chat→Run、ChatTurn→RunStep、ChatStatus→RunProjectionStatus、ChatTurnStatus→RunStepProjectionStatus</li>
+        <li><b>投影类型加 <code>*Projection</code> 后缀</b>：明确这是投影而非权威——<code>RunProjection</code> / <code>RunStepProjection</code></li>
+        <li><b>投影简化规则</b>：Runtime RunStatus 有 11 态，TUI 投影合并为 7 态——细粒度展示交给 SpinnerPhase 派生函数</li>
+        <li><b>恢复历史会话的 bug</b>：<code>ensure_runtime_turn()</code> 把 status 设为 Running，但恢复的会话已结束——正确应为 Completed。术语不一致让这个 bug 更难发现</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">投影层术语 · 对齐权威</span><span class="d">权威 (Runtime)</span>    Run / RunStep / RunStatus
+<span class="d">投影 (TUI)</span>       RunProjection / RunStepProjection / RunProjectionStatus
+<span class="d">现状代码</span>         Chat / ChatTurn / ChatStatus  → ← 目标态统一
+
+<span class="m">// 投影层不能自造词汇，加 *Projection 后缀明示身份</span></pre>
+      <div class="tl-out">产出 · <b>投影层术语对齐</b>——TUI Model 不自创术语，对齐 Runtime 统一语言</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十八：投影状态从权威派生 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影状态从权威派生 · 不自建状态机</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">SpinnerPhase 有 <code>start_chat()</code> / <code>generate()</code> / <code>think()</code> 等自驱动转换方法——<b>投影层自建状态机是设计缺陷</b>。两套状态机需要手动同步，spinner 状态三处同步的根因就在于此。</p>
+      <ul class="tl-list">
+        <li><b>根因</b>：SpinnerPhase 是独立状态机，与 RunStatus 脱耦——需要手动同步，三处副本（model + view_state + animation）</li>
+        <li><b>目标态</b>：<code>derive_spinner_phase(run_status, step_status, spinner)</code> 纯函数——从 RunProjectionStatus + RunStepProjectionStatus 派生</li>
+        <li><b>chat_active 也可派生</b>：<code>run_status ∈ {Running, AwaitingUser}</code>——NEVER 独立维护 bool</li>
+        <li><b>Reflecting 移除</b>：无对应 Runtime 状态，是自己造的——需要区分 reasoning 模式应从 RunSpec.reasoning_level 派生</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">SpinnerPhase · 从派生函数替代状态机</span><span class="d">现状</span>  SpinnerPhase 独立状态机  →  start_chat() / generate() / think()
+                         ↓ 手动同步 ↓
+                model + view_state + animation  <span class="m">// 三处副本</span>
+
+<span class="d">目标</span>  derive_spinner_phase(run_status, step_status, ctx)
+       → Option&lt;SpinnerPhase&gt;  <span class="m">// 纯函数，零同步</span>
+
+<span class="m">// 投影状态从权威派生，不自建状态机</span></pre>
+      <div class="tl-out">产出 · <b>SpinnerPhase 改为派生函数</b>——根因消除，三处同步问题自动消失</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段二十九：投影按来源拆分不混 BC ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>投影按来源拆分不混 BC · 杂物箱按 BC 拆开</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">RuntimeState 13 字段混了 4 个不同 BC 的投影——provider/model_id（Config）、workspace（Project）、task_status（Task）、其余才是 Run 耦合。<b>不同更新路径的投影混在一起 = 杂物箱</b>，改一个 BC 的投影会误触其他 BC 的 revision。</p>
+      <ul class="tl-list">
+        <li><b>拆分判据</b>：字段的更新路径是否与 Run 生命周期耦合？不耦合就拆出去</li>
+        <li><b>RunRuntimeState（9 字段）</b>：spinner / thinking / graph_phase / compact_progress / processing_jobs / usage / live_tps / status_notice / transient_notice_expiry——与 Run 耦合</li>
+        <li><b>ConfigProjection（2 字段）</b>：provider / model_id——用户切 model 时不触发 Conversation revision</li>
+        <li><b>WorkspaceProjection（6 字段）</b>：cwd / worktree / path_base——进出 worktree 不影响 Conversation</li>
+        <li><b>task_status 移到 SessionModel</b>——投影自 Task BC，与 Session 关联</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RuntimeState 拆分 · 按投影来源</span><span class="d">原</span> RuntimeState (13 字段杂物箱)
+  ├─ provider / model_id     <span class="m">// → ConfigProjection</span>
+  ├─ workspace (6 字段)       <span class="m">// → WorkspaceProjection</span>
+  ├─ task_status              <span class="m">// → SessionModel</span>
+  └─ spinner / usage / ...   <span class="m">// → RunRuntimeState (9 字段)</span>
+
+<span class="d">拆后</span> TuiModel  3+1 → 3+3 Context
+  ├─ conversation.run_runtime    <span class="m">// Run 耦合</span>
+  ├─ config                      <span class="m">// Config BC</span>
+  ├─ workspace                   <span class="m">// Project BC</span>
+  └─ session.task_status         <span class="m">// Task BC</span>
+
+<span class="m">// 不同更新路径的投影不混在一起</span></pre>
+      <div class="tl-out">产出 · <b>3+1→3+3 Context</b>——每个投影来源独立 Context，更新路径互不干扰</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十：端口不绑死实现 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>端口不绑死实现 · trait + 多适配器注入</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI→Runtime 通信绑死在 <code>AgentClientImpl</code> 上——Controller 直接依赖具体实现而非 trait 接口。<b>端口接口（trait）必须支持多个适配器实现</b>：本地直连和 WSS 远程连接。</p>
+      <ul class="tl-list">
+        <li><b>LocalAgentClient</b>：TUI 与 Runtime 同进程，直接函数调用 + channel（现状已实现）</li>
+        <li><b>WssAgentClient</b>：TUI 远程连接 Server，WebSocket Secure 帧传输（#794 启动后实现）</li>
+        <li><b>Controller 依赖 trait</b>，NEVER 直接依赖具体适配器——适配器选择在组合根通过依赖注入完成</li>
+        <li><b>Model 层端口透明</b>：NEVER 知道当前使用哪个适配器——远程断连映射为 ChatEvent::Error，NEVER panic</li>
+        <li><b>协议契约统一</b>：无论本地还是远程，请求/响应流/事件类型 MUST 遵循同一套 SDK Published Language</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">端口适配器 · 不绑死实现</span><span class="d">trait</span>  AgentClient                    <span class="m">// 端口接口</span>
+ ├─ <span class="d">LocalAgentClient</span>   直连 + channel  <span class="m">// 现状</span>
+ └─ <span class="d">WssAgentClient</span>     WSS 远程帧      <span class="m">// #794</span>
+
+<span class="d">Controller</span>  depends on trait    <span class="m">// 不依赖具体类型</span>
+<span class="d">组合根</span>      inject adapter       <span class="m">// 依赖注入选择</span>
+<span class="d">Model</span>       port-transparent    <span class="m">// 不知道用哪个</span>
+
+<span class="m">// trait 是端口接口，不是绑死的实现</span></pre>
+      <div class="tl-out">产出 · <b>出站端口适配器设计</b>——Local + WSS 双适配器，组合根注入，端口透明</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十一：ACL 彻底隔离不泄漏类型 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>ACL 彻底隔离 · 不泄漏类型到消费层</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TUI 的 <code>UiEvent</code> 直接持有 14+ 个 <code>sdk::*</code> 类型——SDK 类型泄漏到 model/update/view_model 层。<b>防腐层 MUST 彻底消除外部类型，消费层 NEVER 看到来源类型</b>（R7 铁律）。</p>
+      <ul class="tl-list">
+        <li><b>现状违规</b>：UiEvent 持有 <code>sdk::ToolCallStatusView</code> / <code>sdk::AgentProgressEventView</code> / <code>sdk::HookEventView</code> 等，SDK crate 成为 TUI 全层的硬依赖</li>
+        <li><b>目标态</b>：TUI 定义自有 DTO（<code>ToolCallStatus</code> / <code>AgentProgressEvent</code> / <code>HookEvent</code>），<code>sdk_event_to_ui_event</code> 是唯一转换点</li>
+        <li><b>不 re-export 而是自定义</b>：<code>type ToolCallId = String</code> 而非 <code>pub use sdk::ToolCallId</code>——切断 SDK crate 依赖，TUI 可脱离 SDK 独立编译</li>
+        <li><b>端口 trait 是唯一例外</b>：<code>AgentClient</code> trait 是 R4 允许的端口依赖，但 trait 返回的 ChatEvent 中的类型 MUST 在 ACL 层转换后才能进入 UiEvent</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">ACL 彻底隔离 · 不泄漏类型</span><span class="d">现状</span>  UiEvent { tool: sdk::ToolCallStatusView, ... }
+       model/update/view_model 全层可见 sdk::*
+
+<span class="d">目标</span>  UiEvent { status: ToolCallStatus, ... }   <span class="m">// TUI 自有</span>
+       sdk_event_to_ui_event() 是唯一转换点
+       model/update/view_model NEVER 见 sdk::*
+
+<span class="d">关键</span>  type ToolCallId = String  <span class="m">// 不 re-export</span>
+       切断 SDK crate 依赖
+
+<span class="m">// 防腐层彻底消除外部类型，消费层只看 TUI 类型</span></pre>
+      <div class="tl-out">产出 · <b>UiEvent 零 SDK 类型</b>——ACL 是唯一转换点，TUI 可脱离 SDK 独立编译</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十二：两层 ACL 分离结构与语义 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>两层 ACL · 结构转换与语义翻译分离</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">TUI 事件流有两层转换：第一层 <code>sdk_event_to_ui_event</code> 做结构转换（SDK→TUI 类型），第二层 <code>map_agent_event</code> 做语义翻译（事件→Intent 拆分）。<b>结构转换和语义翻译是不同关注点，MUST 分离</b>。</p>
+      <ul class="tl-list">
+        <li><b>第一层（结构转换）</b>：机械式 1:1 类型映射，<code>sdk::ChatEvent</code> → <code>UiEvent</code>，NEVER 产生 Intent/Effect</li>
+        <li><b>第二层（语义翻译）</b>：业务逻辑——Intent 拆分（跨 Context）、sanitize 截断、progress 格式化、hook notice 派生</li>
+        <li><b>分离理由</b>：结构转换是机械的（加字段只需改映射），语义翻译是业务的（涉及多 Context 拆分逻辑）——混在一起会变成 444 行手工 match 巨石</li>
+        <li><b>convert.rs 漂移教训</b>：Runtime → SDK 的 444 行手工 match 已有 5 处结构漂移（类型擦除、字段丢失），根因是两边各自定义类型</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">两层 ACL · 结构与语义分离</span><span class="d">第一层</span>  event_mapping.rs
+ sdk::ChatEvent → UiEvent         <span class="m">// 机械 1:1 映射</span>
+ · 消除 SDK 类型                  <span class="m">// NEVER 产生 Intent</span>
+
+<span class="d">第二层</span>  agent_event.rs
+ &UiEvent → AgentEventMapping      <span class="m">// 语义翻译</span>
+ · Intent 拆分（跨 Context）
+ · sanitize / format / derive     <span class="m">// NEVER 接触 SDK 类型</span>
+
+<span class="m">// 结构转换是机械的，语义翻译是业务的——分离</span></pre>
+      <div class="tl-out">产出 · <b>两层 ACL 职责边界</b>——结构转换与语义翻译分离，各层可独立测试</div>
+    </div>
+  </div>
+  <!-- ===== 阶段三十三：机制不等于语义 ===== -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>机制不等于语义 · Storage 只保证 bytes，不判断领域合法</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Storage 初稿想直接返回 <code>RecoveredFromBackup</code>，却又坚持不依赖 Session / Memory schema——review 后发现契约无法实现：<b>只搬运 opaque bytes 的通用域，不可能知道数据在领域上是否可解析</b>。</p>
+      <ul class="tl-list">
+        <li><b>Storage 拥有机械 OHS</b>：<code>AtomicBlobPort</code> 只处理 StorageKey、Primary / Previous 代际、原子提交、commit marker、promote 与 quarantine</li>
+        <li><b>数据 BC 拥有窄端口</b>：SessionSnapshotStore / MemorySnapshotStore 定义 schema、decoder、migration、retention 与恢复决策</li>
+        <li><b>恢复流程反转</b>：机械读取 Primary → 数据 BC 验证 → 必要时读 Previous → 数据 BC 显式请求 promote / quarantine</li>
+        <li><b>策略不下沉</b>：Tool Result 阈值、preview、级联删除、archive / eviction 不属于 Storage；持久化 Snapshot 也不等于拥有聚合</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">机制域 vs 数据域 · 谁能判断合法？</span><span class="d">Storage</span>  read(Primary)  → opaque bytes           <span class="m">// 物理机制</span>
+<span class="d">Data BC</span>  decode(bytes)  → valid / invalid        <span class="m">// 领域语义</span>
+<span class="d">Storage</span>  read(Previous) → opaque bytes
+<span class="d">Data BC</span>  decode + decide → promote / quarantine  <span class="m">// 恢复决策</span>
+
+<span class="m">// 判据：谁能判断数据是否合法，谁就拥有恢复决策</span></pre>
+      <div class="tl-out">产出 · Storage 收敛为<b>机械持久化通用域</b>，schema / migration / retention 回归数据 BC</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十四：全局资源不等于全局状态 ===== -->
+    <div class="tl-item p-mix rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXIV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>全局资源不等于全局状态 · Logger 单例，调用上下文 scope-local</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">Logging 的 facade / sink 可以进程级共享，但 <code>CURRENT_REQUEST_ID</code> / model / provider / role 不能是进程级可变值。Main 与多个 Sub 并发时，<b>共享基础设施资源和共享请求状态是两回事</b>。</p>
+      <ul class="tl-list">
+        <li><b>可全局共享</b>：boot_ts / pid / version、TargetCatalog、文件 sink、rotation policy——构造后只读或内部同步</li>
+        <li><b>必须 scope-local</b>：session / chat / turn / request_id / model / provider / role——随异步任务传播并自动恢复</li>
+        <li><b>Patch 三态</b>：<code>Inherit / Set / Clear</code> 区分继承父值、覆盖新值和显式清空；普通 <code>Option</code> 表达不了这个语义</li>
+        <li><b>诊断 ≠ 审计</b>：Logging best-effort、失败降级 stderr；Audit Event 不得通过 target 文件路由伪装成审计交付</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">共享资源 vs scope-local 状态</span><span class="d">Global Logger</span>   TargetCatalog + Sink + Rotation      <span class="m">// 可共享</span>
+<span class="d">LogContextPatch</span> Inherit | Set(value) | Clear         <span class="m">// 每个执行 scope</span>
+<span class="d">spawn child</span>     capture(parent) → instrument(task)   <span class="m">// 显式传播</span>
+
+<span class="m">// 单例是资源生命周期；scope 是业务关联生命周期</span></pre>
+      <div class="tl-out">产出 · Main/Sub 日志上下文从进程全局改为<b>capture + instrument 的 scope-local 传播</b></div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十五：安全承诺类型化 ===== -->
+    <div class="tl-item p-ddd rev d2">
+      <div class="tl-rail"><div class="tl-node">XXXV</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>安全承诺类型化 · 让 installer 只接受 VerifiedUpdatePlan</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">自更新若只约定“先校验、再下载、再替换”，任何调用方都可能绕过顺序。review 后把已验证事实固化为不透明值对象：<b>后一步只能接收前一步验证完成后才能构造的类型</b>。</p>
+      <ul class="tl-list">
+        <li><b>typed channel</b>：Stable / Prerelease 是领域值对象；Config 经 ACL 映射，不让自由字符串污染渠道、cache key 和 release 筛选</li>
+        <li><b>VerifiedUpdatePlan 私有构造</b>：绑定签名 manifest、artifact digest、可信 host、target executable canonical path + 当前 digest、redirect 与安装策略</li>
+        <li><b>防旧计划覆盖新版本</b>：持跨进程锁后、commit 前重新校验 executable identity；不匹配返回 PlanStale，必须重新 plan</li>
+        <li><b>承诺只到可证明边界</b>：pre-commit 失败旧版本不变；平台无单步 atomic replace 就用 helper 或拒绝——不虚构“永远可恢复”</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">安全流程 · 用类型闭合</span><span class="d">Release DTO</span>  → ACL + signature verify
+    ↓
+<span class="d">VerifiedUpdatePlan</span>  <span class="m">// private constructor</span>
+    ├─ target_path + target_digest
+    ├─ artifact_digest + trust_key
+    └─ host / redirect / install_strategy
+    ↓
+<span class="d">Installer::apply(plan)</span> → lock → recheck target → atomic commit
+
+<span class="m">// 安全事实进入类型；installer 不接受 raw URL / version</span></pre>
+      <div class="tl-out">产出 · Application Version Control 以<b>VerifiedUpdatePlan</b>封住信任链、TOCTOU 与安装提交边界</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十六：Policy/Hook/Audit 最小范围 + 双层重试 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXVI</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>控制范围 + 双层重试 · 让扩展点不反客为主</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">接口可以为未来留形状，但实现必须诚实；跨 BC 重试必须按各自不变量分层计数。</p>
+      <ul class="tl-list">
+        <li><b>Policy</b>：PL 保留 Allow / Deny / RequireApproval，本期生产实现只有 AllowAll；不为尚不存在的审批流过度设计</li>
+        <li><b>Hook</b>：先用一个类型化 HookPort；只有不同沙箱、一致性或失败策略真实出现时再拆端口</li>
+        <li><b>双层重试</b>：Hook 命令执行故障最多 3 次（Hook BC）；Stop 阻断同一 Run 最多 15 次（Runtime）</li>
+        <li>第 16 次 Stop Block → <b>Failed + RunFailed 事件</b>，不能为了防死循环伪造 Completed</li>
+        <li><b>Audit MVP</b>：只存 Usage metadata；非阻塞 enqueue，按 SessionId 分区到独立 Audit JSONL，不并入 Session</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RETRY OWNERSHIP · 两个计数器</span><span class="d">Hook BC</span>   max_attempts = 3
+└─ 处理单条命令 spawn / timeout / protocol failure
+
+<span class="d">Runtime</span>   max_stop_hook_blocks = 15
+└─ 处理同一 Run 的 Stop 协议不收敛 → 第 16 次 Failed
+
+<span class="tag">AUDIT MVP</span>Runtime --try_record--▶ UsageSink --AppendLogPort--▶ ~/.agents/audit/usage/{session}.jsonl
+<span class="m">// SessionId 是分区键，不是聚合所有权</span></pre>
+      <div class="tl-out">产出 · <b>最小但可实施</b>的 Policy / Hook / Audit 边界与失败语义</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十七：位置即暗示 ===== -->
+  <div class="tl-item p-hex rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXVII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>位置即暗示 · 目录名是架构契约</h3><span class="tl-badge badge-hex">六边形</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">TUI 评审发现：第一层 ACL（SDK → UiEvent 结构转换）放在 <code>effect/session/processing/</code> 目录——"effect" 暗示可加副作用。<b>已发生污染</b>：<code>WorkingDirectoryChanged</code> 在 ACL 里同步调 git 子进程。目录名是架构契约，放错了会引导后续开发者犯错。</p>
+      <ul class="tl-list">
+        <li><b>目录名 = 架构承诺</b>：<code>effect/</code> 暗示副作用、<code>adapter/</code> 暗示纯翻译、<code>model/</code> 暗示纯状态——放错位置会劣化</li>
+        <li><b>纯函数放在 effect/ 目录 → 被当作可加副作用的地方</b>——位置即暗示</li>
+        <li>同理：<code>update_ui</code> 混合 5 种职责——函数名暗示"统一更新 UI"，实际成了杂物箱</li>
+        <li><b>AgentEventMapping hybrid</b>：ACL 同时返回 Intent + Effect——一个返回值混合"输入"和"输出"，mapper 从纯函数变有副作用</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">位置即暗示 · 目录名是契约</span><span class="d">adapter/</span>  ACL 纯翻译 ← 结构转换应放这
+<span class="d">effect/</span>   副作用执行 ← 放纯翻译会导致污染
+<span class="d">update_ui()</span> 统一更新 ← 混合 5 职责成杂物箱
+
+<span class="m">// 放对位置，后续开发者自然做对；放错位置，污染只是时间问题</span></pre>
+      <div class="tl-out">产出 · <b>位置即暗示</b>——目录名/函数名是架构契约，不是随便起的</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十八：derived data 要标注定 位 ===== -->
+  <div class="tl-item p-ddd rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXVIII</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>derived data 要标注定 · 不然身份不清</h3><span class="tl-badge badge-ddd">DDD · 战术</span></div>
+      <p class="tl-desc">TUI 的 <code>chats: Vec&lt;Chat&gt;</code>（source of truth）和 <code>OutputTimelineModel</code>（渲染用扁平时间线）并行维护——评审发现 <b>timeline 身份不清</b>：它是 Model 的一部分还是 ViewAssembler 的缓存？答案：它是 derived data（投影缓存），但缺少定位注释导致后人困惑。</p>
+      <ul class="tl-list">
+        <li><b>source of truth</b>：<code>chats</code>——每次 <code>apply()</code> 更新，不变量保护的权威数据</li>
+        <li><b>derived data</b>：<code>timeline</code>——从 chats 派生，维护时机在 <code>apply()</code> 中增量更新</li>
+        <li><b>不标注的后果</b>：新人以为 timeline 是独立数据源 → 直接写 timeline 不写 chats → 数据不一致</li>
+        <li>同理：<code>force_repaint</code> 的 <code>last_total_lines</code> 是 derived data——从 RenderedDocument 派生，不是独立状态</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">derived data · 要标注定位</span><span class="d">source of truth</span>  chats: Vec&lt;Chat&gt;          <span class="m">// 权威</span>
+<span class="d">derived data</span>      timeline: OutputTimelineModel <span class="m">// 从 chats 派生</span>
+                 ↑ 不标注 = 身份不清 = 后人写错
+
+<span class="m">// derived data 必须标注"从哪里派生""何时更新"</span></pre>
+      <div class="tl-out">产出 · <b>derived data 定位标注</b>——不是所有字段都是 source of truth</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段三十九：门禁是防漂移的最后防线 ===== -->
+  <div class="tl-item p-cln rev d2">
+    <div class="tl-rail"><div class="tl-node">XXXIX</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>门禁是防漂移的最后防线 · 没有 = 靠自觉</h3><span class="tl-badge badge-cln">整洁架构</span><span class="tl-badge badge-hex">六边形</span></div>
+      <p class="tl-desc">TUI 评审：设计文档描述 7 条架构门禁，代码只落地 1 条。15 个评审发现（5 易漂移 + 5 劣化 + 5 职责不清）<b>全部无法在 CI 中捕获</b>——因为没有门禁。<code>#![allow(dead_code)]</code> 更是主动关掉了编译器的漂移检测。</p>
+      <ul class="tl-list">
+        <li><b>Model purity 门禁</b>：model/ 禁止 import ratatui/tokio/process/AgentClient——防止 reducer 不纯（W1）</li>
+        <li><b>TEA purity 门禁</b>：update/ 禁止 spawn/await/Command——防止 ACL 污染（W4）</li>
+        <li><b>Agent event adapter 门禁</b>：SDK 类型只在 adapter/ 出现——防止 DTO 泄漏（D1）</li>
+        <li><b>没有门禁 = 靠自觉 = 必然漂移</b>——15 个发现就是实证</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">门禁 · 防漂移最后防线</span><span class="d">设计描述</span>  7 条门禁
+<span class="d">代码落地</span>  1 条（adapter → render）
+<span class="d">缺口</span>      6 条 → 15 个漂移点全部无法 CI 捕获
+
+<span class="m">// 门禁不是可选的——是防漂移的唯一机械保障</span></pre>
+      <div class="tl-out">产出 · <b>门禁优先级 P0</b>——先补门禁再修问题，否则修了也会再漂</div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段四十：共享 Run 内核落地 ===== -->
+  <div class="tl-item p-mix rev d2">
+    <div class="tl-rail"><div class="tl-node">XL</div></div>
+    <div class="tl-card">
+      <div class="tl-top"><h3>共享 Run 内核落地 · 类型、接线与生命周期缺一不可</h3><span class="tl-badge badge-ddd">DDD · 战术</span><span class="tl-badge badge-cln">整洁架构</span></div>
+      <p class="tl-desc">Main 与 Sub 共用 Loop Engine 后，独立评审仍发现五个高风险缺口：聚合对象存在却没守住不变量、取消绕过终态仲裁、child token 创建正确却接错持有者、注册清理依赖正常返回、并发状态被拆成互不原子的字段。结论是：<b>抽象统一只是起点，正确性最终落在聚合根、真实接线和生命周期边界上</b>。</p>
+      <ul class="tl-list">
+        <li><b>聚合根机械守规则</b>：Run 阻止多个活跃 Step、无 Invocation 的推进、未终结 Tool Call 的 Step 收口，以及活跃 Step 下 Run 进入终态</li>
+        <li><b>取消也是终态竞争者</b>：Completed / Failed / Cancelled 经过同一个互斥仲裁；取消不能绕过 claim 再发布第二终态</li>
+        <li><b>声明正确 ≠ 接线正确</b>：创建 <code>child_token()</code> 不代表 Sub 真正在使用它；验收要追踪实际持有者、registry 注册值和异步调用参数</li>
+        <li><b>异步注册用 RAII</b>：<code>activate → await → clear</code> 覆盖不了 future drop / abort / panic；Drop guard 才能关闭 stale entry 路径</li>
+        <li><b>并发状态用一个状态机表达</b>：<code>Idle / AwaitingStart / Active</code> 比独立 ID + pending flag 更能表达语义并消除 TOCTOU</li>
+        <li><b>门禁要做反向验证</b>：正常通过只说明当前合规；故意恢复旧 FSM 并确认 exit 2 阻断，才证明守卫真的有效</li>
+      </ul>
+      <pre class="bp-code"><span class="tag">RUN AGGREGATE · 唯一一致性边界</span><span class="d">Run</span>
+├─ active Step ≤ 1
+├─ ModelInvocation ≤ 1 / Step
+├─ ToolCall 必须归属 Step 且单向终结
+└─ Completed / Failed / Cancelled 互斥 claim
+
+<span class="tag">CANCELLATION TREE</span>Parent scope ──child_token──▶ Sub scope
+<span class="m">// 创建、持有、注册、传参必须指向同一个 child scope</span>
+
+<span class="tag">LIFECYCLE</span>ActiveRunRegistration::new() → await → Drop::clear()
+<span class="m">// future 被 drop 也必须清理；门禁再用故意违规证明边界可执行</span></pre>
+      <div class="tl-out">产出 · 共享执行内核从<b>结构统一</b>推进到<b>不变量、取消树与异步生命周期统一</b></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<div class="rule"></div>
+
+<!-- ================= 07 · DISAMBIGUATION ================= -->
+<section class="blk" id="disambig">
+  <div class="sec-head rev">
+    <span class="sec-idx" style="color:var(--sage)">07</span>
+    <span class="sec-kick">Disambiguation · 概念辨析</span>
+  </div>
+  <h2 class="sec-title rev d1">长得像，却各司其职<small>TWO RULERS CUT THE FOG</small></h2>
+  <p class="sec-intro rev d2">
+    这些混淆几乎都能归到<b>两把尺子</b>：「它有没有身份？」与「它是<b>定义契约</b>还是<b>履行契约</b>？」
+    抓住这两把尺，大部分歧义自解。
+  </p>
+
+  <!-- A · 同名陷阱 -->
+  <div class="subhead rev d2" style="--acc:var(--coral)">A · 同名陷阱 <span class="cn">· 一词两义，最坑</span></div>
+  <div class="dz-grid rev d2">
+    <div class="dz-card c-a">
+      <div class="dz-head"><span class="dz-t">Entity<i>DDD</i></span><span class="dz-x">✕</span><span class="dz-t">Entity<i>Clean</i></span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>DDD · 一个对象</b>有唯一标识的领域对象，如 Order、Customer。对立面是值对象。</div>
+        <div class="dz-col"><b>Clean · 一整环</b>最内层的企业级业务规则圈，内部可容纳 DDD 的 Entity/VO/Aggregate。</div>
+      </div>
+      <div class="dz-mem">DDD 的 Entity 是<b>名词</b>（一个对象），Clean 的 Entity 是<b>地名</b>（最里那一环）。</div>
+    </div>
+    <div class="dz-card c-a">
+      <div class="dz-head"><span class="dz-t">领域服务</span><span class="dz-x">✕</span><span class="dz-t">应用服务</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Domain Service</b>装不属于单个聚合的业务规则，如 PricingService。含逻辑。</div>
+        <div class="dz-col"><b>Application Service</b>只做编排：调聚合、仓储、管事务。不含业务规则。</div>
+      </div>
+      <div class="dz-mem">应用服务是<b>导演</b>（只调度），领域服务是<b>专家</b>（只贡献判断）。</div>
+    </div>
+    <div class="dz-card c-a">
+      <div class="dz-head"><span class="dz-t">Repository</span><span class="dz-x">✕</span><span class="dz-t">DAO</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Repository</b>内存集合的错觉，面向聚合根，接口在 domain。</div>
+        <div class="dz-col"><b>DAO</b>一张表的 CRUD 映射，面向数据，纯技术层。</div>
+      </div>
+      <div class="dz-mem">Repo 让领域<b>以为数据在内存里</b>；save(order) 会连同 OrderItem 一起落盘。</div>
+    </div>
+  </div>
+
+  <!-- B · 结构对 -->
+  <div class="subhead rev d2" style="--acc:var(--cyan)">B · 结构对 <span class="cn">· 谁是谁</span></div>
+  <div class="dz-grid rev d2">
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">聚合</span><span class="dz-x">✕</span><span class="dz-t">聚合根</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Aggregate</b>共享一致性边界的一组对象：Order + 全部 OrderItem。</div>
+        <div class="dz-col"><b>Aggregate Root</b>聚合唯一入口与守门人：Order。外部只能经它操作。</div>
+      </div>
+      <div class="dz-mem">聚合是<b>范围</b>，聚合根是<b>门</b>。</div>
+    </div>
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">实体</span><span class="dz-x">✕</span><span class="dz-t">值对象</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Entity</b>在乎「是不是同一个」，靠 ID 区分。两个同额 Order 仍不同。</div>
+        <div class="dz-col"><b>Value Object</b>不在乎身份，不可变，按属性相等。Money(100,CNY) 可互换。</div>
+      </div>
+      <div class="dz-mem">唯一判据——<b>你在乎它的身份吗？</b>Address 常被误建成 Entity。</div>
+    </div>
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">端口</span><span class="dz-x">✕</span><span class="dz-t">适配器</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Port · 契约</b>由核心定义的接口：「我要能扣款的东西」→ PaymentGateway。</div>
+        <div class="dz-col"><b>Adapter · 翻译官</b>具体实现：StripeAdapter 把 Stripe API 翻成 PaymentGateway。</div>
+      </div>
+      <div class="dz-mem">一个端口可挂多个适配器（Stripe/支付宝/Fake）。<b>端口不变，适配器随便换。</b></div>
+    </div>
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">驱动端口</span><span class="dz-x">✕</span><span class="dz-t">被驱动端口</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Driving · 主动侧</b>别人调你：Controller → UseCase。接口<b style="display:inline;color:var(--cyan)">你实现</b>。</div>
+        <div class="dz-col"><b>Driven · 被动侧</b>你调别人：Service → Repository。接口你声明、适配器实现。</div>
+      </div>
+      <div class="dz-mem">看<b>控制流从谁发起</b>：发起方在左，被调方在右。</div>
+    </div>
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">子域</span><span class="dz-x">✕</span><span class="dz-t">限界上下文</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Subdomain · 问题空间</b>业务客观分成订单/库存/支付，与技术无关。</div>
+        <div class="dz-col"><b>Bounded Context · 解空间</b>你在软件里划出的模型边界。</div>
+      </div>
+      <div class="dz-mem">子域是<b>天生的</b>，上下文是<b>设计出来的</b>；理想一对一，现实常错位。</div>
+    </div>
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">上下文</span><span class="dz-x">✕</span><span class="dz-t">限界上下文</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Context · 语境</b>通用词：词与模型赖以成立的语境，隐含、无边界、会蔓延。</div>
+        <div class="dz-col"><b>Bounded Context · 限界</b>划明边界的语境，内部统一语言严格一致，跨界含义可不同。</div>
+      </div>
+      <div class="dz-mem">差别全在<b>限界 Bounded</b>——有没有那条边界。日常说的「上下文」多半就是它的简称（如 Context Map）。</div>
+    </div>
+  </div>
+
+  <!-- C · 三种方言 -->
+  <div class="subhead rev d2" style="--acc:var(--amber)">C · 同一件事的三种叫法</div>
+  <div class="dz-grid rev d2" style="grid-template-columns:1fr">
+    <div class="dz-card c-c">
+      <div class="dz-head"><span class="dz-t">用例 = 应用服务 = 驱动端口 · 同一段编排代码</span></div>
+      <div class="dz-body tri">
+        <div class="dz-col"><b>Clean</b>Use Case / Interactor</div>
+        <div class="dz-col"><b>Hexagonal</b>Driving Port + 其实现</div>
+        <div class="dz-col"><b>DDD</b>Application Service</div>
+      </div>
+      <div class="dz-mem">看到这三个词并列，先默认<b>它们在说同一层东西</b>。</div>
+    </div>
+  </div>
+
+  <!-- D · 三种同心架构 -->
+  <div class="subhead rev d2" style="--acc:var(--cyan)">D · 三种「同心圆」架构的区别</div>
+  <div class="dz-grid rev d2" style="grid-template-columns:1fr">
+    <div class="dz-card c-b">
+      <div class="dz-head"><span class="dz-t">六边形 ✕ 洋葱 ✕ 整洁 · 同一座山的三张地图</span></div>
+      <div class="dz-body tri">
+        <div class="dz-col"><b>Hexagonal · 2005</b>强调对称插拔（端口 / 适配器）。</div>
+        <div class="dz-col"><b>Onion · 2008</b>强调多层同心、领域居中。</div>
+        <div class="dz-col"><b>Clean · 2012</b>一句「依赖规则」统摄 + 控制流反转。</div>
+      </div>
+      <div class="dz-mem">别纠结用哪个。工程上常混用：<b>整洁的分层 + 六边形的端口 + DDD 的内涵</b>。</div>
+    </div>
+  </div>
+
+  <!-- E · 建模质量 -->
+  <div class="subhead rev d2" style="--acc:var(--sage)">E · 建模质量 <span class="cn">· 一字之差，天壤之别</span></div>
+  <div class="dz-grid rev d2">
+    <div class="dz-card c-d">
+      <div class="dz-head"><span class="dz-t">充血模型</span><span class="dz-x">✕</span><span class="dz-t">贫血模型</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Rich · 充血</b>order.pay() / cancel() 自守不变量，行为与数据在一起。</div>
+        <div class="dz-col"><b>Anemic · 贫血</b>实体只有 getter/setter，逻辑全在 Service——DDD 反模式。</div>
+      </div>
+      <div class="dz-mem">实体是一袋数据、规则全在 Service，你写的就是<b>贫血模型</b>。</div>
+    </div>
+    <div class="dz-card c-d">
+      <div class="dz-head"><span class="dz-t">值对象</span><span class="dz-x">✕</span><span class="dz-t">DTO</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>Value Object</b>领域内、不可变、<b style="display:inline;color:var(--sage)">有行为</b>（Money.add）、守规则。</div>
+        <div class="dz-col"><b>DTO</b>跨边界搬数据、可变、无行为、纯字段袋（PlaceOrderRequest）。</div>
+      </div>
+      <div class="dz-mem">都无标识，但一个<b>守规则</b>、一个<b>只搬运</b>；别让 DTO 泄进领域层。</div>
+    </div>
+    <div class="dz-card c-d">
+      <div class="dz-head"><span class="dz-t">防腐层</span><span class="dz-x">✕</span><span class="dz-t">适配器</span></div>
+      <div class="dz-body">
+        <div class="dz-col"><b>ACL · 防腐层</b>翻译<b style="display:inline;color:var(--sage)">模型 / 概念</b>，防外部世界观污染领域。</div>
+        <div class="dz-col"><b>Adapter · 适配器</b>翻译<b style="display:inline;color:var(--sage)">技术格式</b>（HTTP ↔ 对象）。</div>
+      </div>
+      <div class="dz-mem">防腐层是适配器的「加强用途」：由适配器 + 转换器实现，多一层<b>概念翻译</b>。</div>
+    </div>
+  </div>
+
+  <p class="dz-rule rev d2" style="margin-top:12px">
+    <b>两把尺收束全部</b>：<b>有没有身份</b>（Entity/VO、子域/上下文）· <b>定义契约还是履行契约</b>（端口/适配器、领域服务/应用服务）。
+  </p>
+</section>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="foot-inner">
+    <p class="fq">「架构，是那些<span>关于重要决策</span>的东西——<br>而重要与否，由更改它的成本来衡量。」</p>
+    <div class="foot-meta">
+      ARCH·TRIAD / 架构三重奏<br>
+      DDD · HEXAGONAL · CLEAN<br>
+      A KNOWLEDGE CANVAS · 2026
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ---------- nav scroll state ---------- */
+const nav = document.getElementById('nav');
+addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 40), {passive:true});
+
+/* ---------- reveal on scroll ---------- */
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+}, {threshold:.14, rootMargin:'0px 0px -8% 0px'});
+document.querySelectorAll('.rev').forEach(el => io.observe(el));
+
+/* ---------- Clean Architecture ring panel ---------- */
+const RINGS = [
+  {
+    idx:'LAYER · 04 (外层)', cn:'框架与驱动', en:'FRAMEWORKS & DRIVERS',
+    body:'最外圈是所有琐碎的技术细节——数据库、Web 框架、设备驱动。这里几乎不写业务代码，只是把一切「粘合」到系统上，随时可以被替换掉。',
+    items:['Database / ORM','Web Framework','外部 API / SDK','UI · Devices']
+  },
+  {
+    idx:'LAYER · 03', cn:'接口适配器', en:'INTERFACE ADAPTERS',
+    body:'一层翻译官。把用例与实体的数据格式，转换成数据库或 Web 需要的形态，反之亦然。Controller、Presenter、Gateway 都住在这里。',
+    items:['Controllers','Presenters / View Models','Gateways · Repository 实现','数据格式转换']
+  },
+  {
+    idx:'LAYER · 02', cn:'用例', en:'USE CASES',
+    body:'应用特有的业务规则。它编排实体去完成一个个具体用例（下单、退款、转账），只关心「应用要做什么」，不关心界面与存储的技术形态。',
+    items:['Application Business Rules','编排 Entities','Input / Output Ports','对应 DDD 的 Application Service']
+  },
+  {
+    idx:'LAYER · 01 (圆心)', cn:'实体', en:'ENTITIES',
+    body:'最内、最稳定的一环，承载企业级的核心业务规则与数据。它对外部一无所知——换掉数据库、换掉框架，都不该惊动这里分毫。',
+    items:['Enterprise Business Rules','核心不变量','对应 DDD 的 Entity / Aggregate','零外部依赖']
+  }
+];
+const panel = document.getElementById('ringPanel');
+const ringGroups = [...document.querySelectorAll('#ringSvg .ring')];
+
+function renderRing(r){
+  const d = RINGS[r];
+  panel.innerHTML = `
+    <div class="rp-idx">${d.idx}</div>
+    <h4>${d.cn}</h4>
+    <div class="rp-en">${d.en}</div>
+    <p class="rp-body">${d.body}</p>
+    <ul>${d.items.map(i=>`<li>${i}</li>`).join('')}</ul>
+    <div class="ring-tabs">
+      ${RINGS.map((x,i)=>`<button class="ring-tab ${i===r?'on':''}" data-t="${i}">${x.cn}</button>`).join('')}
+    </div>`;
+  ringGroups.forEach((g,i)=>g.classList.toggle('active', i===r));
+  panel.querySelectorAll('.ring-tab').forEach(b=>b.onclick=()=>renderRing(+b.dataset.t));
+}
+ringGroups.forEach((g,i)=> g.addEventListener('click', ()=>renderRing(i)) );
+renderRing(3); // start at the center · Entities
+</script>
+</body>
+</html>

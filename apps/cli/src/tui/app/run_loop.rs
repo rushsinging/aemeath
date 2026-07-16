@@ -109,16 +109,7 @@ impl App {
                 self.output_area.document().total_lines()
             );
 
-            // Ctrl+C 超时复原 status line
-            self.check_ctrlc_timeout();
-
-            // 每帧先批量派生 dirty ViewModel，避免 streaming chunk 每次同步重渲染输出区。
-            self.flush_dirty_view_models();
-            // 每帧维护 live-status 动画 view_state；render 直接消费 LiveStatusViewModel。
-            self.refresh_live_status_from_model();
-            // 每帧据 layout/live-status 与 document 指标同步 view_state 滚动真相。
-            self.refresh_output_scroll_from_view_state();
-            // Draw UI
+            self.prepare_frame();
             self.draw(terminal)?;
 
             let spawn_refs = processing::SpawnContextRefs {
@@ -170,7 +161,7 @@ impl App {
 
             // --- TEA update: state transition ---
             let update_start = Instant::now();
-            let result = self.update(msg, &ui_tx, &spawn_refs);
+            let result = self.drive_frame(msg, &ui_tx, &spawn_refs);
             crate::tui::log_trace!(
                 "tui.loop.update_complete elapsed_ms={} effects={} has_spawn_effect={} has_pending_slash={} dirty_output={} dirty_status={} dirty_input={} dirty_dialog={} spinner_active={} spinner_phase={:?} spinner_frame={}",
                 update_start.elapsed().as_millis(),
@@ -198,6 +189,7 @@ impl App {
                     interrupted.store(false, Ordering::Relaxed);
                     self.chat.clear_tool_activity();
                     self.spinner_phase(SpinnerPhase::Thinking);
+                    self.chat.expect_run_start();
                     self.chat.start_processing();
                     self.chat
                         .push_input_event(sdk::ChatInputEvent::UserMessage {

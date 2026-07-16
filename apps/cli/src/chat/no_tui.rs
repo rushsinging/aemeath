@@ -115,6 +115,24 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CompactFinished { .. }
         | sdk::ChatEvent::UserMessagesAdopted { .. }
         | sdk::ChatEvent::UserMessagesQueued { .. }
+        | sdk::ChatEvent::RunStarted { .. }
+        | sdk::ChatEvent::RunStepStarted { .. }
+        | sdk::ChatEvent::RunStepCompleted { .. }
+        | sdk::ChatEvent::RunStepCancellationRequested { .. }
+        | sdk::ChatEvent::RunStepFinalizationStarted { .. }
+        | sdk::ChatEvent::RunStepCancelled { .. }
+        | sdk::ChatEvent::RunDrainingInput { .. }
+        | sdk::ChatEvent::RunTerminationRequested { .. }
+        | sdk::ChatEvent::RunTerminated { .. }
+        | sdk::ChatEvent::RunCompleted { .. }
+        | sdk::ChatEvent::RunFailed { .. }
+        | sdk::ChatEvent::RunStuckDetected { .. }
+        | sdk::ChatEvent::RunTransitioned { .. }
+        | sdk::ChatEvent::RunAwaitingUser { .. }
+        | sdk::ChatEvent::RunResumed { .. }
+        | sdk::ChatEvent::InteractionRequested { .. }
+        | sdk::ChatEvent::RunCancelling { .. }
+        | sdk::ChatEvent::RunCancelled { .. }
         | sdk::ChatEvent::Usage { .. }
         | sdk::ChatEvent::LiveTps(_)
         | sdk::ChatEvent::TurnChanged(_)
