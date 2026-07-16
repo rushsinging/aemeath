@@ -241,10 +241,9 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
 // threshold = effective_window - buffer
 
 /// Reserved tokens for compaction summary output (p99.99 ≈ 17.4K, use 20K).
-/// Summary 输出预算：context window 的 2%（至少 4096）。
-/// summary 会作为后续每轮固定前缀，按比例缩放比写死常量更合理。
+/// Summary 输出预算：context window 的 2%。
 pub fn summary_budget(context_size: usize) -> usize {
-    (context_size / 50).max(4096)
+    context_size / 50
 }
 
 /// Safety buffer below the effective window before triggering compaction.
