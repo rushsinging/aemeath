@@ -1,35 +1,78 @@
-use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Mutex;
 
 use async_trait::async_trait;
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, OpenOptions};
+use fs2::FileExt;
 use uuid::Uuid;
 
+use super::blob_protocol::{
+    digest, digest_file, journal_name, read_journal, write_journal, BlobJournal, JournalPhase,
+};
 use crate::{
-    AtomicBlobPort, BlobRead, DeleteOptions, DeleteOutcome, Durability, Generation, PreviousPolicy,
-    PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
-    SafePathSegment, StorageError, StorageErrorKind, StorageKey, TransactionScope, WriteOptions,
-    WriteReceipt,
+    AtomicBlobPort, BlobRead, CorruptTransactionError, CorruptionReason, DeleteOptions,
+    DeleteOutcome, Durability, Generation, PreviousPolicy, PromoteOutcome, QuarantineDisposition,
+    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, SafePathSegment,
+    StorageError, StorageErrorKind, StorageKey, TransactionScope, WriteOptions, WriteReceipt,
 };
 
 #[derive(Debug)]
+enum FaultPoint {
+    StageWrite,
+    FileSync,
+    UnsupportedDurability,
+    PreviousNext,
+    PreparedJournal,
+    DirectorySync,
+    AfterReplace,
+    CommittedJournal,
+    PreviousPromotion,
+    Cleanup,
+}
+
+fn inject_fault(point: FaultPoint) -> Result<(), StorageError> {
+    let requested = std::env::var_os("AEMEATH_STORAGE_FAULT_POINT");
+    let name = match point {
+        FaultPoint::StageWrite => "stage_write",
+        FaultPoint::FileSync => "file_sync",
+        FaultPoint::UnsupportedDurability => "unsupported_durability",
+        FaultPoint::PreviousNext => "previous_next",
+        FaultPoint::PreparedJournal => "prepared_journal",
+        FaultPoint::DirectorySync => "directory_sync",
+        FaultPoint::AfterReplace => "after_replace",
+        FaultPoint::CommittedJournal => "committed_journal",
+        FaultPoint::PreviousPromotion => "previous_promotion",
+        FaultPoint::Cleanup => "cleanup",
+    };
+    if requested.as_deref() != Some(std::ffi::OsStr::new(name)) {
+        return Ok(());
+    }
+    if matches!(point, FaultPoint::UnsupportedDurability) {
+        return Err(StorageError::new(
+            StorageErrorKind::UnsupportedDurability,
+            "injected unsupported durability capability",
+        ));
+    }
+    if std::env::var_os("AEMEATH_STORAGE_FAULT_ABORT").is_some() {
+        std::process::abort();
+    }
+    Err(StorageError::new(
+        StorageErrorKind::Io,
+        format!("injected storage fault: {name}"),
+    ))
+}
+
 pub struct FileSystemBlobAdapter {
     root: Dir,
-    promoted_keys: Mutex<HashSet<StorageKey>>,
 }
 
 impl FileSystemBlobAdapter {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, StorageError> {
         std::fs::create_dir_all(root.as_ref()).map_err(map_io)?;
         let root = Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(map_io)?;
-        Ok(Self {
-            root,
-            promoted_keys: Mutex::new(HashSet::new()),
-        })
+        Ok(Self { root })
     }
 
     fn relative_primary(key: &StorageKey) -> PathBuf {
@@ -38,14 +81,6 @@ impl FileSystemBlobAdapter {
             .fold(PathBuf::from(key.namespace().as_str()), |path, segment| {
                 path.join(segment.as_str())
             })
-    }
-
-    fn relative_generation(key: &StorageKey, generation: Generation) -> PathBuf {
-        let primary = Self::relative_primary(key);
-        match generation {
-            Generation::Primary => primary,
-            Generation::Previous => primary.with_extension("previous"),
-        }
     }
 
     fn prepare_parent(&self, key: &StorageKey) -> Result<(Dir, PathBuf), StorageError> {
@@ -61,6 +96,165 @@ impl FileSystemBlobAdapter {
         Ok((parent_dir, PathBuf::from(file_name)))
     }
 
+    fn lock_key(&self, parent: &Dir, primary_name: &Path) -> Result<std::fs::File, StorageError> {
+        let lock_name = primary_name.with_extension("lock");
+        if let Ok(metadata) = parent.symlink_metadata(&lock_name) {
+            if metadata.file_type().is_symlink() {
+                return Err(StorageError::new(
+                    StorageErrorKind::InvalidKey,
+                    "事务锁文件是符号链接",
+                ));
+            }
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        let lock = parent
+            .open_with(&lock_name, &options)
+            .map_err(map_io)?
+            .into_std();
+        lock.lock_exclusive().map_err(map_lock_io)?;
+        Ok(lock)
+    }
+
+    fn prepare_locked(
+        &self,
+        key: &StorageKey,
+    ) -> Result<(Dir, PathBuf, std::fs::File), StorageError> {
+        let (parent, primary_name) = self.prepare_parent(key)?;
+        let lock = self.lock_key(&parent, &primary_name)?;
+        self.recover_sync(&parent, &primary_name)?;
+        Ok((parent, primary_name, lock))
+    }
+
+    fn recover_sync(&self, parent: &Dir, primary_name: &Path) -> Result<(), StorageError> {
+        let Some(journal) = read_journal(parent, primary_name)? else {
+            return self.recover_orphan_previous(parent, primary_name);
+        };
+        let observed = digest_file(parent, primary_name)?;
+        match journal.phase {
+            JournalPhase::Prepared if observed.as_deref() == Some(journal.new_digest.as_str()) => {
+                let committed = BlobJournal {
+                    phase: JournalPhase::Committed,
+                    ..journal.clone()
+                };
+                write_journal(parent, primary_name, &committed, true)?;
+            }
+            JournalPhase::Prepared
+                if observed == journal.old_digest
+                    || (observed.is_none() && journal.old_digest.is_none()) =>
+            {
+                let _ = parent.remove_file(format!(".stage-{}", journal.nonce));
+                let _ = parent.remove_file(primary_name.with_extension("previous.next"));
+                parent
+                    .remove_file(journal_name(primary_name))
+                    .map_err(map_io)?;
+                return Ok(());
+            }
+            JournalPhase::Committed if observed.as_deref() == Some(journal.new_digest.as_str()) => {
+            }
+            _ => {
+                return Err(self.quarantine_corrupt_transaction(
+                    parent,
+                    primary_name,
+                    &journal,
+                    if journal.phase == JournalPhase::Committed {
+                        CorruptionReason::CommittedDigestMismatch
+                    } else {
+                        CorruptionReason::PrimaryDigestMatchesNeitherGeneration
+                    },
+                ));
+            }
+        }
+        let previous_next = primary_name.with_extension("previous.next");
+        if parent.symlink_metadata(&previous_next).is_ok() {
+            let previous = primary_name.with_extension("previous");
+            let _ = parent.remove_file(&previous);
+            parent
+                .rename(&previous_next, parent, &previous)
+                .map_err(map_io)?;
+        }
+        let _ = parent.remove_file(format!(".stage-{}", journal.nonce));
+        parent
+            .remove_file(journal_name(primary_name))
+            .map_err(map_io)?;
+        sync_directory(parent, Durability::ProcessCrashSafe)
+    }
+
+    fn recover_orphan_previous(
+        &self,
+        parent: &Dir,
+        primary_name: &Path,
+    ) -> Result<(), StorageError> {
+        let previous_next = primary_name.with_extension("previous.next");
+        let Some(orphan_digest) = digest_file(parent, &previous_next)? else {
+            return Ok(());
+        };
+        if digest_file(parent, primary_name)?.as_deref() == Some(orphan_digest.as_str()) {
+            parent.remove_file(&previous_next).map_err(map_io)?;
+            return sync_directory(parent, Durability::ProcessCrashSafe);
+        }
+        let journal = BlobJournal {
+            nonce: "orphan".to_string(),
+            old_digest: None,
+            new_digest: orphan_digest,
+            phase: JournalPhase::Prepared,
+        };
+        Err(self.quarantine_corrupt_transaction(
+            parent,
+            primary_name,
+            &journal,
+            CorruptionReason::OrphanPreviousDigestMismatch,
+        ))
+    }
+
+    fn quarantine_corrupt_transaction(
+        &self,
+        parent: &Dir,
+        primary_name: &Path,
+        journal: &BlobJournal,
+        reason: CorruptionReason,
+    ) -> StorageError {
+        let id = Uuid::new_v4().simple().to_string();
+        let candidates = [
+            primary_name.to_path_buf(),
+            primary_name.with_extension("previous.next"),
+            journal_name(primary_name),
+            PathBuf::from(format!(".stage-{}", journal.nonce)),
+        ];
+        let mut disposition = QuarantineDisposition::EvidenceQuarantined;
+        for source in candidates {
+            match parent.symlink_metadata(&source) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => {
+                    disposition = QuarantineDisposition::QuarantineFailed;
+                    continue;
+                }
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    disposition = QuarantineDisposition::QuarantineFailed;
+                    continue;
+                }
+                Ok(_) => {}
+            }
+            let label = source
+                .file_name()
+                .expect("protocol evidence always has a file name")
+                .to_string_lossy();
+            let target = PathBuf::from(format!("{label}.corrupt.{id}"));
+            if parent.rename(&source, parent, target).is_err() {
+                disposition = QuarantineDisposition::QuarantineFailed;
+            }
+        }
+        let _ = sync_directory(parent, Durability::ProcessCrashSafe);
+        StorageError::new(
+            StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
+                TransactionScope::Blob,
+                reason,
+                disposition,
+            )),
+            "Storage 事务证据矛盾，已 fail-closed",
+        )
+    }
+
     fn write_sync(
         &self,
         key: &StorageKey,
@@ -68,7 +262,7 @@ impl FileSystemBlobAdapter {
         options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError> {
         let durability = key.namespace().effective_durability(options.durability());
-        let (parent, primary_name) = self.prepare_parent(key)?;
+        let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         if let Ok(metadata) = parent.symlink_metadata(&primary_name) {
             if metadata.file_type().is_symlink() {
                 return Err(StorageError::new(
@@ -78,20 +272,67 @@ impl FileSystemBlobAdapter {
             }
         }
 
-        let stage_name = format!(".stage-{}", Uuid::new_v4());
+        let nonce = Uuid::new_v4().simple().to_string();
+        let stage_name = format!(".stage-{nonce}");
+        let mut crossed_commit = false;
         let result = (|| {
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
             let mut stage = parent.open_with(&stage_name, &options).map_err(map_io)?;
             stage.write_all(bytes).map_err(map_io)?;
+            inject_fault(FaultPoint::StageWrite)?;
             if durability == Durability::ProcessCrashSafe {
+                inject_fault(FaultPoint::UnsupportedDurability)?;
                 stage.sync_all().map_err(map_durability)?;
+                inject_fault(FaultPoint::FileSync)?;
             }
             drop(stage);
-            if key.namespace().previous_policy() == PreviousPolicy::Retain
-                && parent.symlink_metadata(&primary_name).is_ok()
-            {
+            let primary_exists = parent.symlink_metadata(&primary_name).is_ok();
+            let old_digest = if primary_exists {
+                Some(read_and_digest(&parent, &primary_name)?)
+            } else {
+                None
+            };
+            let journal = BlobJournal {
+                nonce: nonce.clone(),
+                old_digest,
+                new_digest: digest(bytes),
+                phase: JournalPhase::Prepared,
+            };
+            if key.namespace().previous_policy() == PreviousPolicy::Retain && primary_exists {
                 let previous_name = primary_name.with_extension("previous");
+                let previous_next_name = primary_name.with_extension("previous.next");
+                if let Ok(metadata) = parent.symlink_metadata(&previous_next_name) {
+                    if metadata.file_type().is_symlink() {
+                        return Err(StorageError::new(
+                            StorageErrorKind::InvalidKey,
+                            "上一代事务目标是符号链接",
+                        ));
+                    }
+                    parent.remove_file(&previous_next_name).map_err(map_io)?;
+                }
+                parent
+                    .hard_link(&primary_name, &parent, &previous_next_name)
+                    .map_err(map_io)?;
+                inject_fault(FaultPoint::PreviousNext)?;
+                if durability == Durability::ProcessCrashSafe {
+                    let previous_next = parent.open(&previous_next_name).map_err(map_io)?;
+                    previous_next.sync_all().map_err(map_durability)?;
+                }
+                write_journal(
+                    &parent,
+                    &primary_name,
+                    &journal,
+                    durability == Durability::ProcessCrashSafe,
+                )?;
+                inject_fault(FaultPoint::PreparedJournal)?;
+                sync_directory(&parent, durability)?;
+                inject_fault(FaultPoint::DirectorySync)?;
+                parent
+                    .rename(&stage_name, &parent, &primary_name)
+                    .map_err(map_io)?;
+                crossed_commit = true;
+                inject_fault(FaultPoint::AfterReplace)?;
                 if let Ok(metadata) = parent.symlink_metadata(&previous_name) {
                     if metadata.file_type().is_symlink() {
                         return Err(StorageError::new(
@@ -102,27 +343,71 @@ impl FileSystemBlobAdapter {
                     parent.remove_file(&previous_name).map_err(map_io)?;
                 }
                 parent
-                    .rename(&primary_name, &parent, &previous_name)
+                    .rename(&previous_next_name, &parent, &previous_name)
                     .map_err(map_io)?;
-            }
-            parent
-                .rename(&stage_name, &parent, &primary_name)
-                .map_err(map_io)?;
-            self.promoted_keys.lock().map_err(map_lock)?.remove(key);
-            if durability == Durability::ProcessCrashSafe {
-                let mut directory_options = OpenOptions::new();
-                directory_options.read(true);
+                inject_fault(FaultPoint::PreviousPromotion)?;
+            } else {
+                write_journal(
+                    &parent,
+                    &primary_name,
+                    &journal,
+                    durability == Durability::ProcessCrashSafe,
+                )?;
+                inject_fault(FaultPoint::PreparedJournal)?;
+                sync_directory(&parent, durability)?;
+                inject_fault(FaultPoint::DirectorySync)?;
                 parent
-                    .open_with(".", &directory_options)
-                    .and_then(|directory| directory.sync_all())
-                    .map_err(map_durability)?;
+                    .rename(&stage_name, &parent, &primary_name)
+                    .map_err(map_io)?;
+                crossed_commit = true;
+                inject_fault(FaultPoint::AfterReplace)?;
             }
+            inject_fault(FaultPoint::CommittedJournal)?;
+            let committed = BlobJournal {
+                phase: JournalPhase::Committed,
+                ..journal
+            };
+            write_journal(
+                &parent,
+                &primary_name,
+                &committed,
+                durability == Durability::ProcessCrashSafe,
+            )?;
+            inject_fault(FaultPoint::CommittedJournal)?;
+            let _ = parent.remove_file(promoted_marker_name(&primary_name));
+            sync_directory(&parent, durability)?;
+            parent
+                .remove_file(journal_name(&primary_name))
+                .map_err(map_io)?;
+            inject_fault(FaultPoint::Cleanup)?;
+            sync_directory(&parent, durability)?;
             Ok(WriteReceipt::committed(None))
         })();
-        if result.is_err() {
-            let _ = parent.remove_file(stage_name);
+        match result {
+            Ok(receipt) => Ok(receipt),
+            Err(error) => {
+                let _ = parent.remove_file(&stage_name);
+                let committed = crossed_commit
+                    || read_journal(&parent, &primary_name)
+                        .ok()
+                        .flatten()
+                        .and_then(|journal| {
+                            digest_file(&parent, &primary_name)
+                                .ok()
+                                .flatten()
+                                .map(|observed| observed == journal.new_digest)
+                        })
+                        .unwrap_or(false);
+                if committed {
+                    let _ = self.recover_sync(&parent, &primary_name);
+                    Ok(WriteReceipt::committed(Some(
+                        crate::CommitWarning::JournalCleanupPending,
+                    )))
+                } else {
+                    Err(error)
+                }
+            }
         }
-        result
     }
 }
 
@@ -133,8 +418,12 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         key: &StorageKey,
         generation: Generation,
     ) -> Result<ReadOutcome, StorageError> {
-        let relative = Self::relative_generation(key, generation);
-        let metadata = match self.root.symlink_metadata(&relative) {
+        let (parent, primary_name, _lock) = self.prepare_locked(key)?;
+        let relative = match generation {
+            Generation::Primary => primary_name,
+            Generation::Previous => primary_name.with_extension("previous"),
+        };
+        let metadata = match parent.symlink_metadata(&relative) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(ReadOutcome::NotFound);
@@ -147,7 +436,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
                 "存储目标是符号链接",
             ));
         }
-        let mut file = self.root.open(&relative).map_err(map_io)?;
+        let mut file = parent.open(&relative).map_err(map_io)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).map_err(map_io)?;
         Ok(ReadOutcome::Found(BlobRead::new(generation, bytes)))
@@ -163,12 +452,15 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
     }
 
     async fn promote_previous(&self, key: &StorageKey) -> Result<PromoteOutcome, StorageError> {
-        let (parent, primary_name) = self.prepare_parent(key)?;
+        let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let previous_name = primary_name.with_extension("previous");
         match parent.symlink_metadata(&previous_name) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let promoted = self.promoted_keys.lock().map_err(map_lock)?.contains(key);
-                if promoted && parent.symlink_metadata(&primary_name).is_ok() {
+                if parent
+                    .symlink_metadata(promoted_marker_name(&primary_name))
+                    .is_ok()
+                    && parent.symlink_metadata(&primary_name).is_ok()
+                {
                     return Ok(PromoteOutcome::AlreadyPromoted);
                 }
                 return Ok(PromoteOutcome::NotFound);
@@ -198,10 +490,8 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         parent
             .rename(&previous_name, &parent, &primary_name)
             .map_err(map_io)?;
-        self.promoted_keys
-            .lock()
-            .map_err(map_lock)?
-            .insert(key.clone());
+        write_promoted_marker(&parent, &primary_name)?;
+        sync_directory(&parent, Durability::ProcessCrashSafe)?;
         Ok(PromoteOutcome::Promoted(WriteReceipt::committed(None)))
     }
 
@@ -212,7 +502,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         scope: TransactionScope,
         reason: QuarantineReason,
     ) -> Result<QuarantineOutcome, StorageError> {
-        let (parent, primary_name) = self.prepare_parent(key)?;
+        let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let source = match generation {
             Generation::Primary => primary_name.clone(),
             Generation::Previous => primary_name.with_extension("previous"),
@@ -244,7 +534,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         key: &StorageKey,
         options: DeleteOptions,
     ) -> Result<DeleteOutcome, StorageError> {
-        let (parent, primary_name) = self.prepare_parent(key)?;
+        let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let deleted_primary = remove_if_exists(&parent, &primary_name)?;
         let deleted_previous = remove_if_exists(&parent, &primary_name.with_extension("previous"))?;
         let mut deleted_quarantine = false;
@@ -259,13 +549,54 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
                 }
             }
         }
-        self.promoted_keys.lock().map_err(map_lock)?.remove(key);
+        let _ = parent.remove_file(promoted_marker_name(&primary_name));
         Ok(DeleteOutcome::new(
             deleted_primary,
             deleted_previous,
             deleted_quarantine,
         ))
     }
+}
+
+fn promoted_marker_name(primary: &Path) -> PathBuf {
+    primary.with_extension("promoted")
+}
+
+fn write_promoted_marker(parent: &Dir, primary: &Path) -> Result<(), StorageError> {
+    let marker = promoted_marker_name(primary);
+    if let Ok(metadata) = parent.symlink_metadata(&marker) {
+        if metadata.file_type().is_symlink() {
+            return Err(StorageError::new(
+                StorageErrorKind::InvalidKey,
+                "promote marker 是符号链接",
+            ));
+        }
+        parent.remove_file(&marker).map_err(map_io)?;
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = parent.open_with(&marker, &options).map_err(map_io)?;
+    file.write_all(b"promoted-v1").map_err(map_io)?;
+    file.sync_all().map_err(map_durability)
+}
+
+fn read_and_digest(parent: &Dir, path: &Path) -> Result<String, StorageError> {
+    let mut file = parent.open(path).map_err(map_io)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(map_io)?;
+    Ok(digest(&bytes))
+}
+
+fn sync_directory(parent: &Dir, durability: Durability) -> Result<(), StorageError> {
+    if durability == Durability::ProcessCrashSafe {
+        let mut directory_options = OpenOptions::new();
+        directory_options.read(true);
+        parent
+            .open_with(".", &directory_options)
+            .and_then(|directory| directory.sync_all())
+            .map_err(map_durability)?;
+    }
+    Ok(())
 }
 
 fn quarantine_name(primary: &Path, id: &str) -> PathBuf {
@@ -291,10 +622,10 @@ fn remove_if_exists(parent: &Dir, path: &Path) -> Result<bool, StorageError> {
     }
 }
 
-fn map_lock<T>(error: std::sync::PoisonError<T>) -> StorageError {
+fn map_lock_io(error: std::io::Error) -> StorageError {
     StorageError::new(
-        StorageErrorKind::Io,
-        format!("Storage 内部状态锁损坏：{error}"),
+        StorageErrorKind::ConcurrentWrite,
+        format!("Storage key 锁获取失败：{error}"),
     )
 }
 

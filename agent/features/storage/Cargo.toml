@@ -14,3 +14,5 @@ chrono = { workspace = true }
 uuid = { version = "1", features = ["v4", "v7"] }
 cap-std = "4"
 async-trait = { workspace = true }
+sha2 = { workspace = true }
+fs2 = "0.4"
