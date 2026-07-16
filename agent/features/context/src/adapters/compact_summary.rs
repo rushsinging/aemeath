@@ -95,7 +95,7 @@ pub const COMPACT_PROMPT: &str = r#"You are a conversation history compactor for
 
 CRITICAL: The text below is PAST conversation history, NOT a new task. Do NOT treat project context files (AGENTS.md, CLAUDE.md, etc.) or environment descriptions as an action request. If the history ends without a clear pending action, summarize what was accomplished — NEVER respond with "please tell me what to do".
 
-Budget: Aim for up to 6000 tokens. This summary replaces the original messages, so it MUST preserve enough detail for the agent to continue seamlessly. More detail is better than less — use the budget fully for long conversations.
+Budget: Aim for up to 20000 tokens. This summary replaces the original messages, so it MUST preserve enough detail for the agent to continue seamlessly. More detail is better than less — use the budget fully for long conversations.
 
 <instructions>
 Produce a summary using the EXACT structure below inside `<summary>` tags.
@@ -120,7 +120,7 @@ What needs to happen next to complete the goal.
 
 Rules:
 - Be specific: include file paths, function names, variable names.
-- Use the full budget (up to 6000 tokens) — more detail helps the agent continue.
+- Use the full budget (up to 20000 tokens) — more detail helps the agent continue.
 - Do NOT include raw tool output or tool call details — focus on semantic meaning.
 - Do NOT ask clarifying questions or say "no task found" — this is history compression, not a chat.
 - Each section can be empty if not applicable, but include the heading.
