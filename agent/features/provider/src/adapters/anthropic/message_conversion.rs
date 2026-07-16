@@ -348,7 +348,7 @@ pub(crate) async fn send_message_non_stream(
         }
     }
 
-    let usage = Usage {
+    let mut usage = Usage {
         input_tokens: body
             .get("usage")
             .and_then(|u| u.get("input_tokens"))
@@ -370,8 +370,13 @@ pub(crate) async fn send_message_non_stream(
             .and_then(|v| v.as_u64())
             .map(|v| v as u32),
         reasoning_tokens: None, // Anthropic 不返回 reasoning_tokens
-        total_tokens: None,     // Anthropic 不返回 total_tokens，由消费侧回退 input+output
+        total_tokens: None,
     };
+    let additional_input_tokens = usage
+        .cached_tokens
+        .unwrap_or(0)
+        .saturating_add(usage.cache_creation_tokens.unwrap_or(0));
+    usage.finalize_total_tokens(additional_input_tokens);
 
     let stop_reason_str = body
         .get("stop_reason")

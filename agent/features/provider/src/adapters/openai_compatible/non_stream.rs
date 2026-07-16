@@ -217,20 +217,23 @@ impl OpenAICompatibleProvider {
             }
         }
 
+        let mut usage = crate::domain::invoke::Usage {
+            input_tokens,
+            output_tokens,
+            cached_tokens: None,
+            cache_creation_tokens: None,
+            reasoning_tokens: None,
+            total_tokens,
+        };
+        usage.finalize_total_tokens(0);
+
         Ok(StreamResponse {
             assistant_message: Message {
                 role: Role::Assistant,
                 content: content_blocks,
                 metadata: None,
             },
-            usage: crate::domain::invoke::Usage {
-                input_tokens,
-                output_tokens,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens,
-            },
+            usage,
             stop_reason,
         })
     }

@@ -231,6 +231,63 @@ pub struct Usage {
     pub total_tokens: Option<u32>,
 }
 
+impl Usage {
+    pub fn normalized_total_tokens(&self, additional_input_tokens: u32) -> u32 {
+        self.total_tokens.unwrap_or_else(|| {
+            self.input_tokens
+                .saturating_add(additional_input_tokens)
+                .saturating_add(self.output_tokens)
+        })
+    }
+
+    pub fn finalize_total_tokens(&mut self, additional_input_tokens: u32) {
+        self.total_tokens = Some(self.normalized_total_tokens(additional_input_tokens));
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::Usage;
+
+    #[test]
+    fn openai_total_prefers_reported_total_and_does_not_add_cached_tokens() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: Some(80),
+            total_tokens: Some(150),
+            ..Usage::default()
+        };
+
+        assert_eq!(usage.normalized_total_tokens(0), 150);
+    }
+
+    #[test]
+    fn openai_total_falls_back_to_input_plus_output() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: Some(80),
+            ..Usage::default()
+        };
+
+        assert_eq!(usage.normalized_total_tokens(0), 120);
+    }
+
+    #[test]
+    fn anthropic_total_includes_cache_read_and_creation_tokens() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: Some(80),
+            cache_creation_tokens: Some(30),
+            ..Usage::default()
+        };
+
+        assert_eq!(usage.normalized_total_tokens(110), 230);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StopReason {
     EndTurn,

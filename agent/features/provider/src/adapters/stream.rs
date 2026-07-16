@@ -251,6 +251,12 @@ pub async fn parse_stream(
         }
     }
 
+    let additional_input_tokens = usage
+        .cached_tokens
+        .unwrap_or(0)
+        .saturating_add(usage.cache_creation_tokens.unwrap_or(0));
+    usage.finalize_total_tokens(additional_input_tokens);
+
     Ok(StreamResponse {
         assistant_message: Message {
             role: Role::Assistant,

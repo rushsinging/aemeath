@@ -235,6 +235,8 @@ pub(crate) async fn parse_responses_stream(
         metadata: None,
     };
 
+    usage.finalize_total_tokens(0);
+
     Ok(StreamResponse {
         assistant_message,
         usage,

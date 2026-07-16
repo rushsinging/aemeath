@@ -440,6 +440,8 @@ pub(crate) async fn parse_openai_stream(
         });
     }
 
+    usage.finalize_total_tokens(0);
+
     Ok(StreamResponse {
         assistant_message: Message {
             role: Role::Assistant,
