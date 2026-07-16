@@ -8,13 +8,14 @@ use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
-/// ToolResult 文本超过此字符数时截断（≈2000 token）。
+/// ToolResult 文本超过此字符数时替换为占位符（≈2000 token）。
 /// recent tail 保留的是原始消息，大 ToolResult（读大文件/grep 大量结果）
 /// 会让 compact 后 token 仍超阈值，导致死循环或 context 爆满。
 const TOOL_RESULT_MAX_CHARS: usize = 8000;
 
-/// 截断 recent_messages 中超阈值的 ToolResult 文本。
-/// 只截断 `text` 字段（发给 LLM 的 text-first 文本），保留 `content` 结构化原值不动。
+/// 替换 recent_messages 中超阈值的 ToolResult 文本为占位符。
+/// 保留 tool_use_id 和消息结构（保证 LLM 能继续工具调用链路），
+/// 但 text 内容替换为简短占位符，大幅降低 token 占用。
 fn truncate_large_tool_results(messages: &mut [Message]) {
     for msg in messages.iter_mut() {
         for block in msg.content.iter_mut() {
@@ -24,16 +25,14 @@ fn truncate_large_tool_results(messages: &mut [Message]) {
                 ..
             } = block
             {
-                if text.chars().count() > TOOL_RESULT_MAX_CHARS {
-                    let truncated: String = text.chars().take(TOOL_RESULT_MAX_CHARS).collect();
-                    let original_chars = text.chars().count();
+                let original_chars = text.chars().count();
+                if original_chars > TOOL_RESULT_MAX_CHARS {
                     *text = format!(
-                        "{truncated}\n\n[... truncated: {original_chars} chars total, {remaining} chars omitted ...]",
-                        remaining = original_chars - TOOL_RESULT_MAX_CHARS
+                        "[tool result omitted during compaction: {original_chars} chars]",
                     );
                     log::debug!(
                         target: "aemeath:agent:storage",
-                        "compact truncate ToolResult {tool_use_id}: {original_chars} → {} chars",
+                        "compact placeholder ToolResult {tool_use_id}: {original_chars} → {} chars",
                         text.chars().count()
                     );
                 }
@@ -179,8 +178,8 @@ pub fn compact_window(total: usize) -> Option<CompactWindow> {
         return None;
     }
     let head_protect = 2usize.min(total);
-    // recent tail 保留尾部 5%（至少 4 条保证工具调用连续性）。
-    let tail_budget = total * 5 / 100;
+    // recent tail 保留尾部 10%（至少 4 条保证工具调用连续性）。
+    let tail_budget = total * 10 / 100;
     let keep_recent = tail_budget.max(4).min(total - head_protect);
     let split_point = (total - keep_recent).max(head_protect);
     if split_point <= head_protect {
