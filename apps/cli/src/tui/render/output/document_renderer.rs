@@ -97,7 +97,14 @@ impl OutputDocumentRenderer {
     ) {
         // #329 契约：block 内部 wrap 宽度 = outer_width - gutter_width(depth)，
         // 保证 wrap 后 line 加回 gutter 总可见宽 ≤ outer_width（content_area.width）。
-        let text_width = gutter::effective_block_width(outer_width, depth);
+        // 窄屏模式：极窄屏完全移除 gutter；窄屏消除缩进（depth=0）。
+        let effective_depth =
+            if gutter::is_gutter_suppressed(outer_width) || outer_width < 50 {
+                0
+            } else {
+                depth
+            };
+        let text_width = gutter::effective_block_width(outer_width, effective_depth);
 
         // 计算 gutted 缓存 key：运行中 ToolCall 的 marker_frame 随动画帧推进而变化，
         // 导致每次闪烁周期自动失效；其他 block 的 marker_frame 为 None，跨帧稳定命中。
@@ -175,12 +182,18 @@ impl OutputDocumentRenderer {
         // gutter（depth 缩进 + marker）在缓存外注入：缓存只存无 gutter 内容，
         // gutter 随 depth/status 变化，故组合期叠加（rendered 已 owned，无借用冲突）。
         // 注：(*rendered.lines).clone() 解 Rc 为 Vec，仅在未命中路径付此开销。
-        let mut gutted = crate::tui::render::output::gutter::apply_gutter_with_frame(
-            &node.kind,
-            depth,
-            (*rendered.lines).clone(),
-            animation_frame,
-        );
+        let gutted = if gutter::is_gutter_suppressed(outer_width) {
+            // 极窄屏：完全跳过 gutter
+            (*rendered.lines).clone()
+        } else {
+            crate::tui::render::output::gutter::apply_gutter_with_frame(
+                &node.kind,
+                effective_depth,
+                (*rendered.lines).clone(),
+                animation_frame,
+            )
+        };
+        let mut gutted = gutted;
         if matches!(
             node.kind,
             crate::tui::view_model::output::OutputBlockKind::UserMessage(_)

@@ -112,7 +112,8 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
             continue;
         }
 
-        if is_table_row(line)
+        if width >= crate::tui::render::output::gutter::NARROW_DISABLE_TABLE_THRESHOLD
+            && is_table_row(line)
             && src
                 .get(idx + 1)
                 .map(|next| is_table_separator(next))
