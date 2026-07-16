@@ -434,23 +434,27 @@ fn generate_collapse_summary(messages: &[Message]) -> CollapseSummary {
 
 按优先级检查，任一失败即跳过：
 
-1. **Resume 保护**：`turn_count == 1 && last_api_input_tokens == 0` → 跳过（resume 第一轮）
-2. **PreCompact hook**：`result.blocked || decision == "block"` → 跳过
-3. **Token 阈值**：
+1. **Run 级冷却**：同一 Run 已 compact 过 → 跳过（防止 recent tail 仍超阈值时 engine loop 死循环抖动；每 Run 最多 compact 一次）
+2. **Resume 保护**：`turn_count == 1 && last_api_input_tokens == 0` → 跳过（resume 第一轮）
+3. **PreCompact hook**：`result.blocked || decision == "block"` → 跳过
+4. **Token 阈值**：
    - **Actual API**（`last_api_input_tokens > 0`）：`input_tokens > threshold`
    - **Heuristic fallback**（`last_api_input_tokens == 0`）：`estimated_tokens > threshold`
-4. **消息数**：`messages.len() > 4`
+5. **消息数**：`messages.len() > 4`
+
+**compact 后 token 重置**：compact 成功后 `last_api_input_tokens` / `last_api_output_tokens` / `cached_tokens` / `reasoning_tokens` 重置为 0/None，下一轮 `needs_compaction` 因 `last_api_input_tokens == 0` 回退到 heuristic 路径，基于 compact 后的实际消息重新估算。
 
 ### 8.2 阈值计算
 
 见 [03-token-budget.md](03-token-budget.md)。核心公式：
 
 ```
-effective = context_size - min(max_output_tokens, max_summary_output_tokens)
-threshold = effective - autocompact_buffer_tokens
+summary_budget = context_size * 2%
+effective = context_size - min(max_output_tokens, summary_budget)
+threshold = (effective - autocompact_buffer_tokens) * 0.8
 ```
 
-`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
+`summary_budget` 按 context window 比例动态缩放（如 100K context → 2000 token budget；272K → 5440 token），**NEVER** 写死常量。`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
 
 ### 8.3 Summary 生成
 
@@ -513,14 +517,17 @@ fn compact_window(messages: &[Message]) -> Option<CompactWindow> {
     if messages.len() <= 4 { return None; }
 
     let head: Vec<_> = messages[..2].to_vec();
-    let tail_len = (messages.len() as f64 * 0.3) as usize;
-    let tail_len = tail_len.min(4);
+    // recent tail 保留尾部 10%（至少 4 条保证工具调用连续性）
+    let tail_budget = messages.len() * 10 / 100;
+    let tail_len = tail_budget.max(4).min(messages.len() - 2);
     let early = messages[2..messages.len() - tail_len].to_vec();
     let tail = messages[messages.len() - tail_len..].to_vec();
 
     Some(CompactWindow { head, early, tail })
 }
 ```
+
+**recent tail ToolResult 占位**：compact 返回前，recent tail 中所有非空 `ToolResult.text` 替换为 `[tool result omitted during compaction]` 占位符。保留 `tool_use_id` 和消息结构（LLM 仍能继续工具调用链路），但内容大幅缩减——避免大 ToolResult 导致 compact 后 token 仍超阈值。
 
 ### 8.5 Pre/PostCompact Hook
 
@@ -597,7 +604,7 @@ chain.compact(result.summary, result.recent_messages, source.revision);
 | 常量 | 默认值 / 来源 | 唯一所有者 |
 |---|---|---|
 | `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Invocation / ContextRequest |
-| `max_summary_output_tokens` | 20,000 | `TokenBudgetConfig.max_summary_output_tokens` |
+| `summary_budget` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
 | `autocompact_buffer_tokens` | 13,000 | `TokenBudgetConfig.autocompact_buffer_tokens` |
 | `estimation_safety_factor` | 1.33 | `TokenBudgetConfig.estimation_safety_factor` |
 
@@ -631,3 +638,4 @@ chain.compact(result.summary, result.recent_messages, source.revision);
 |---|---|---|
 | 2026-07-12 | 初稿：五级管线、ContextPort 签名、L1-L5 策略设计、幂等性、circuit breaker、常量统一 | #786 |
 | 2026-07-15 | #868 实现回写：ContextPort 冻结四方法与 provider-neutral PL；append 使用 revision/fingerprint CAS 并返回 typed receipt，Runtime 只消费 Context-owned 契约 | [#868](https://github.com/rushsinging/aemeath/issues/868) |
+| 2026-07-16 | compact 战术修改：Run 级冷却（每 Run 最多 compact 一次，防死循环）；compact 后重置 token 计数；recent tail 10%（从 30% 调低）；recent tail ToolResult 全部占位符替换；summary_budget 动态计算（context_size * 2%） | #1110 |
