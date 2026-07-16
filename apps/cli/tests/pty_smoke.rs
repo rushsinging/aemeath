@@ -7,6 +7,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, ExitStatus, PtySize
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[test]
+#[ignore = "L5 slow test: run via scripts/check-slow-test-matrix.sh"]
 fn tui_process_enters_and_restores_terminal_on_interrupt() {
     let binary = locate_aemeath_binary().expect(
         "PTY smoke requires a built binary; run `cargo build -p cli --bin aemeath` or set AEMEATH_PTY_BIN",
