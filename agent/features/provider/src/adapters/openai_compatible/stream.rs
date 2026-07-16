@@ -1,6 +1,7 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
+use super::usage::parse_chat_usage;
 use crate::domain::invoke::StreamResponse;
 use crate::ports::StreamHandler;
 use crate::LOG_TARGET;
@@ -165,41 +166,9 @@ pub(crate) async fn parse_openai_stream(
         // 提取 usage（某些 provider 在最后一个 chunk 中包含）
         if let Some(usage_obj) = chunk.get("usage") {
             if !usage_obj.is_null() {
-                let in_tok = usage_obj
-                    .get("prompt_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let out_tok = usage_obj
-                    .get("completion_tokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                // 提取 cached_tokens from prompt_tokens_details.cached_tokens
-                let cached_tok = usage_obj
-                    .get("prompt_tokens_details")
-                    .and_then(|d| d.get("cached_tokens"))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                // 提取 reasoning_tokens from completion_tokens_details.reasoning_tokens
-                let reasoning_tok = usage_obj
-                    .get("completion_tokens_details")
-                    .and_then(|d| d.get("reasoning_tokens"))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-
-                // 提取 total_tokens (prompt_tokens + completion_tokens)
-                let total_tok = usage_obj
-                    .get("total_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32);
-
-                if in_tok > 0 || out_tok > 0 {
-                    usage.input_tokens = in_tok;
-                    usage.output_tokens = out_tok;
-                    usage.cached_tokens = Some(cached_tok);
-                    usage.reasoning_tokens = Some(reasoning_tok);
-                    usage.total_tokens = total_tok;
+                let parsed = parse_chat_usage(usage_obj);
+                if parsed.input_tokens > 0 || parsed.output_tokens > 0 {
+                    usage = parsed;
                 }
             }
         }
@@ -439,6 +408,8 @@ pub(crate) async fn parse_openai_stream(
             tail_preview: tail,
         });
     }
+
+    usage.finalize_total_tokens(0);
 
     Ok(StreamResponse {
         assistant_message: Message {

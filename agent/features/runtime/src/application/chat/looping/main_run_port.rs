@@ -89,10 +89,7 @@ where
     pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
     pub(crate) memory_cwd: PathBuf,
-    pub(crate) last_api_input_tokens: &'a mut u64,
-    pub(crate) last_api_output_tokens: &'a mut u64,
-    pub(crate) cached_tokens: &'a mut Option<u64>,
-    pub(crate) reasoning_tokens: &'a mut Option<u64>,
+    pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
         &'a crate::application::chat::looping::tool_identity::ToolIdentityRegistry,
@@ -230,8 +227,6 @@ where
     }
 
     async fn compact_impl(&mut self) {
-        let tool_schemas = self.registry.schemas_for(self.language);
-        let tool_schema_tokens = context::compact::estimate_tool_schemas_tokens(&tool_schemas);
         let cleared = context::compact::microcompact_chain(self.chain);
         if cleared > 0 {
             self.sink
@@ -247,13 +242,9 @@ where
             self.hook_runner,
             self.turn_count,
             &self.chain.messages_flat(),
+            self.active_summary.as_deref(),
             self.system_prompt_text,
             self.context_size,
-            tool_schema_tokens,
-            *self.last_api_input_tokens,
-            *self.last_api_output_tokens,
-            *self.cached_tokens,
-            *self.reasoning_tokens,
             self.memory_config,
             &self.memory_cwd,
             self.client,
@@ -272,6 +263,8 @@ where
                 self.active_summary_arc,
             )
             .await;
+            // compact 后清空最近 usage；只有下一次 Provider 响应才能再次触发。
+            *self.last_total_tokens = None;
         }
     }
 
@@ -406,10 +399,9 @@ where
             }
         }
 
-        *self.last_api_input_tokens = resp.usage.input_tokens as u64;
-        *self.last_api_output_tokens = resp.usage.output_tokens as u64;
-        *self.cached_tokens = resp.usage.cached_tokens.map(u64::from);
-        *self.reasoning_tokens = resp.usage.reasoning_tokens.map(u64::from);
+        *self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
+            &resp.usage,
+        ));
 
         let token_usage = crate::application::loop_engine::StepTokenUsage {
             input_tokens: resp.usage.input_tokens as u64,
@@ -417,11 +409,7 @@ where
             cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
             cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: resp
-                .usage
-                .total_tokens
-                .map(u64::from)
-                .unwrap_or(resp.usage.input_tokens as u64 + resp.usage.output_tokens as u64),
+            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
             context_window: self.context_size as u64,
             est_system_tokens: effective_system_blocks
                 .iter()
@@ -567,8 +555,12 @@ where
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        // `auto_compact` is the existing source of truth (including resume protection and hooks).
-        Ok(true)
+        let needed = super::super::compact::should_compact_now(
+            *self.last_total_tokens,
+            self.context_size,
+            self.chain.message_count(),
+        );
+        Ok(needed)
     }
 
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {

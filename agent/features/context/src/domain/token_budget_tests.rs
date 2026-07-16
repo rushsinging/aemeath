@@ -46,6 +46,17 @@ fn test_needs_compaction_actual_no_cache_no_reasoning() {
 }
 
 #[test]
+fn normalized_total_above_threshold_needs_compaction() {
+    assert!(needs_compaction_total(900_000, 1_048_576));
+}
+
+#[test]
+fn normalized_total_at_or_below_threshold_does_not_need_compaction() {
+    let threshold = autocompact_threshold(1_048_576, 8192) as u64;
+    assert!(!needs_compaction_total(threshold, 1_048_576));
+}
+
+#[test]
 fn test_needs_compaction_actual_with_cached_tokens() {
     // 有 cached_tokens，但不扣除（cached tokens 仍占用 context window）
     // input=100000, cached=80000, total=110000 (100000 + 10000)

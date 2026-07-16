@@ -241,19 +241,22 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
 // threshold = effective_window - buffer
 
 /// Reserved tokens for compaction summary output (p99.99 ≈ 17.4K, use 20K).
-const MAX_OUTPUT_TOKENS_FOR_SUMMARY: usize = 20_000;
+/// Summary 输出预算：context window 的 2%。
+pub fn summary_budget(context_size: usize) -> usize {
+    context_size / 50
+}
 
 /// Safety buffer below the effective window before triggering compaction.
 const AUTOCOMPACT_BUFFER_TOKENS: usize = 13_000;
 
 /// Calculate the effective context window size (after reserving output tokens).
 pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
-    let reserved = max_output_tokens.min(MAX_OUTPUT_TOKENS_FOR_SUMMARY);
+    let reserved = max_output_tokens.min(summary_budget(context_size));
     context_size.saturating_sub(reserved)
 }
 
 /// Calculate the autocompact trigger threshold.
-/// Formula: (context_size - min(max_output, 20K) - 13K) * 0.8
+/// Formula: (context_size - summary_budget - 13K) * 0.8
 pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
     let raw = effective_context_window(context_size, max_output_tokens)
         .saturating_sub(AUTOCOMPACT_BUFFER_TOKENS);
@@ -327,8 +330,13 @@ pub fn needs_compaction_actual(
     // so they are already accounted for — adding them back would double-count.
     let total = last_input_tokens + last_output_tokens;
 
+    needs_compaction_total(total, context_size)
+}
+
+/// Check if compaction is needed using a provider-normalized total token count.
+pub fn needs_compaction_total(last_total_tokens: u64, context_size: usize) -> bool {
     let threshold = autocompact_threshold(context_size, 8192) as u64;
-    total > threshold
+    last_total_tokens > threshold
 }
 
 /// Determine the compaction urgency level based on actual token usage.

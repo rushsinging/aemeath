@@ -85,10 +85,7 @@ where
         .lock()
         .map(|value| value.clone())
         .unwrap_or_default();
-    let mut last_api_input_tokens = 0;
-    let mut last_api_output_tokens = 0;
-    let mut cached_tokens = None;
-    let mut reasoning_tokens = None;
+    let mut last_total_tokens = None;
     let mut turn_count = 0;
     let mut pending_input = PendingInputBuffer::default();
     let mut deferred_user_inputs = VecDeque::new();
@@ -109,6 +106,7 @@ where
                         &hook_runner,
                         turn_count,
                         &chain.messages_flat(),
+                        active_summary.as_deref(),
                         &system_prompt_text,
                         context_size,
                         &memory_config,
@@ -510,10 +508,7 @@ where
             rollback_frozen_chats,
             rollback_active_summary,
             memory_cwd: memory_cwd.clone(),
-            last_api_input_tokens: &mut last_api_input_tokens,
-            last_api_output_tokens: &mut last_api_output_tokens,
-            cached_tokens: &mut cached_tokens,
-            reasoning_tokens: &mut reasoning_tokens,
+            last_total_tokens: &mut last_total_tokens,
             task_reminder_state: &mut task_reminder_state,
             tool_identity: &tool_identity,
             started_at,

@@ -55,6 +55,7 @@ trait ContextPort: Send + Sync {
 struct ContextRequest {
     request_id: ContextRequestId,       // 一次 PreparingContext 冻结输入的 identity
     run_id: RunId,
+    step_id: RunStepId,                 // 当前待执行 RunStep identity
     pending_messages: Vec<Message>,     // 当前 RunStep 尚未提交的增量输入；历史仍由 Context backing 独占
     system_prompt: SystemPromptSpec,    // RunSpec.system_prompt 原值；不得在 Runtime 丢失
     model_id: String,                   // PromptPipeline 的 guidance 前缀选择
@@ -66,11 +67,9 @@ struct ContextRequest {
     config_snapshot: ConfigSnapshot,    // 本 Run shared lease 下的只读快照
     context_size: usize,                // 模型 context window
     max_output_tokens: usize,           // 与 InvocationRequest 相同的 resolved output limit
-    last_api_input_tokens: Option<u64>, // API 上报（None=首轮/估算）；上一轮精确值，非本轮
+    last_total_tokens: Option<u64>,     // 上一次 Provider 响应的标准化 total；None 时不自动 compact
     tool_schemas: Vec<ModelToolSchema>, // 本轮唯一 ToolCatalogSnapshot 的稳定投影
     tool_schema_tokens: usize,          // tool 定义占用
-    prev_system_tokens: Option<usize>,  // 上一轮 system_blocks token 数（用于 Actual API 增量计算）
-    prev_tool_schema_tokens: Option<usize>, // 上一轮 tool_schema_tokens（同上）
 }
 
 impl ContextRequest {
@@ -97,7 +96,7 @@ struct ContextAppend {
     finalize_cause: FinalizeCause,       // Completed | UserCancelledStep | RunTerminated
     messages: Vec<Message>,              // finalized projection：inputs → assistant → 原序 terminal results
     receipts: Vec<StepReceipt>,          // deterministic Tool/Agent receipt；可含 CancellationUnconfirmed
-    api_input_tokens: Option<u64>,
+    usage: Option<UsageSnapshot>,         // Provider ACL 标准化后的 usage；Context 不解释 provider 原始字段
     fingerprint: ContentFingerprint,     // 相同幂等键的内容一致性校验
 }
 
@@ -112,12 +111,12 @@ struct CompactionDecision {
     urgency: Urgency,                   // None / Monitor / Should / Must
     estimated_tokens: usize,
     threshold: usize,
-    reason: DecisionReason,             // ActualApiWithDelta / Heuristic / Manual
+    reason: DecisionReason,             // ActualProviderUsage / NoActualUsage / Manual
 }
 
 enum DecisionReason {
-    ActualApiWithDelta,                 // 基于上一轮 API 精确值 + 本轮增量估算
-    Heuristic,                          // 纯启发式估算（首轮 / API 未返回）
+    ActualProviderUsage,                // 基于上一次 Provider 标准化 total_tokens
+    NoActualUsage,                      // 首轮 / compact 后尚无新 Provider usage
     Manual,                             // 仅 manual compact 路径独立构造 Decision 时使用；
                                         // compaction_decision 计算永远不会产出此值
 }
@@ -131,7 +130,7 @@ enum Urgency {
 
 struct CompactResult {
     summary: String,
-    recent_messages: Vec<Message>,
+    recent_runs: Vec<CommittedRunSlice>, // recent tail 保留 Run/Step 结构
     source_revision: SessionRevision,  // compact 基于的 backing revision（幂等键 + CAS 校验值）
 }
 
@@ -252,7 +251,7 @@ ExecutingTools
 
 | 维度 | L3 Microcompact | L2 Snip |
 |---|---|---|
-| 扫描范围 | 最近 N 个 segment | 整个 ChatChain |
+| 扫描范围 | 最近 3 个完整 Run 之前 | 整个 ChatChain |
 | 触发时机 | `build_window` 时 | `build_window` 时 |
 | 处理对象 | 探索类 tool result（Read/Glob/Grep） | 已被后续操作覆盖的探索结果 |
 | 作用层 | 读模型层（不修改 ChatChain） | 读模型层（不修改 ChatChain） |
@@ -274,6 +273,7 @@ struct SnipRule {
 - **不修改 ChatChain**：L2 在 `build_window` 时计算哪些 message 应跳过，直接在输出的 `ContextWindow.messages` 中省略——ChatChain 原始数据不变
 - **保留 user/assistant 文本**：只跳过 tool result content，对应 assistant 的 tool_call 描述保留
 - **跨 segment 生效**：扫描全链（已 compact 段内不操作，因为已摘要化）
+- **Run 边界**：保护窗口按 `CommittedRunSlice.run_id` 计算，Main / Sub 统一保护最近 3 个完整 Run；同一 Run 内新增 RunStep **NEVER** 推动保护窗口
 
 ### 5.3 Snip 幂等性
 
@@ -287,7 +287,7 @@ struct SnipRule {
 ### 6.1 触发
 
 - **时机**：`build_window` 内部，在 L2 snip 之后执行
-- **条件**：`ContextWindow.messages` 对应的 segment 数 > 3（Main）/ > 2（Sub）
+- **条件**：结构化 history 中完整 Run 数 > 3；Main / Sub 统一
 
 ### 6.2 策略
 
@@ -298,21 +298,22 @@ const EXPLORATORY_TOOLS: &[&str] = &[
 ];
 ```
 
-- 从 `ContextWindow.messages` 中扫描，保护最近 N 个 segment（Main=3, Sub=2）
-- 在保护窗口外的 segment 中，移除 `EXPLORATORY_TOOLS` 对应的 tool result content
+- 从结构化 history 中扫描，保护最近 3 个完整 Run
+- 在保护窗口外的 Run 中，移除 `EXPLORATORY_TOOLS` 对应的 tool result content
 - 替换为 `[microcompacted: N tool results removed]` 标记
 - **ChatChain 中的原始 message 不受影响**——下一轮 `build_window` 重新计算
 
 ### 6.3 读模型约束
 
-- `microcompact_window(&mut messages, protect_last)` **MUST** 只操作本次 `ContextWindow.messages` candidate。
+- `microcompact_window(&mut structured_history, protect_last_runs=3)` **MUST** 只操作本次结构化 candidate。
 - L3 **NEVER** 接收 `&mut ChatChain`，也 **NEVER** 通过另一条 helper 回写 Session backing。
-- 保护窗口：Main=3 segments，Sub=2 user turns；该差异来自 RunSpec / ContextRequest，**NEVER** 读取进程级 role。
+- Main / Sub 的保护窗口统一为最近 3 个 Run。Run 内无论产生多少 Model Invocation、Tool batch 或 RunStep，均只算一个 Run。
+- Run / Step 边界 **MUST** 来自 Context backing 保存的 identity，**NEVER** 通过 `Role::User`、ToolResult 或 message 顺序反推。
 
 ### 6.4 幂等性
 
 - 对已移除 content 的消息二次执行无效果（EXPLORATORY_TOOLS 结果已不在 ContextWindow 中）
-- 保护窗口随 segment 增长滑动——之前在保护窗口内的 segment 可能滑出窗口被移除
+- 保护窗口随完整 Run 增长滑动——之前在保护窗口内的 Run 可能滑出窗口被修剪
 
 ## 7. L4 Context Collapse（#554）
 
@@ -434,23 +435,32 @@ fn generate_collapse_summary(messages: &[Message]) -> CollapseSummary {
 
 按优先级检查，任一失败即跳过：
 
-1. **Resume 保护**：`turn_count == 1 && last_api_input_tokens == 0` → 跳过（resume 第一轮）
-2. **PreCompact hook**：`result.blocked || decision == "block"` → 跳过
-3. **Token 阈值**：
-   - **Actual API**（`last_api_input_tokens > 0`）：`input_tokens > threshold`
-   - **Heuristic fallback**（`last_api_input_tokens == 0`）：`estimated_tokens > threshold`
-4. **消息数**：`messages.len() > 4`
+1. **Provider usage 存在**：`last_total_tokens` 为 `Some`；首轮、resume 首轮和 compact 后尚未产生新 Provider 响应时均跳过自动 compact
+2. **Token 阈值**：`last_total_tokens > threshold`
+3. **PreCompact hook**：`result.blocked || decision == "block"` → 跳过
+4. **可压缩历史存在**：至少一个 finalized RunStep 可进入 summary 或 recent tail
+
+`last_total_tokens` 是上一次 Provider 响应经 Provider ACL 标准化后的单次
+context usage，不是 Session 累计成本。Anthropic 必须包含 cache read / cache
+creation input；完整规则见 [03-token-budget.md](03-token-budget.md)。
+
+**compact 后 usage 重置**：compact 成功后把 `last_total_tokens` 清为 `None`。
+只有下一次 Provider 调用成功返回新的 usage 后，自动 compact 才可再次触发。
+因此一个长 Run 可以在不同 RunStep 后多次 compact，但 **NEVER** 在没有新
+Provider usage 的情况下围绕同一个旧值重复进入 `Compacting`。目标态不再使用
+“每 Run 最多 compact 一次”的粗粒度冷却。
 
 ### 8.2 阈值计算
 
 见 [03-token-budget.md](03-token-budget.md)。核心公式：
 
 ```
-effective = context_size - min(max_output_tokens, max_summary_output_tokens)
-threshold = effective - autocompact_buffer_tokens
+summary_budget = context_size * 2%
+effective = context_size - min(max_output_tokens, summary_budget)
+threshold = (effective - autocompact_buffer_tokens) * 0.8
 ```
 
-`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
+`summary_budget` 按 context window 比例动态缩放（如 100K context → 2000 token budget；272K → 5440 token），**NEVER** 写死常量。`max_output_tokens` **MUST** 使用本 Run 的 Config / Provider capability 已解析真实值，**NEVER** 使用固定 `8192`。
 
 ### 8.3 Summary 生成
 
@@ -458,8 +468,8 @@ threshold = effective - autocompact_buffer_tokens
 async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError> {
     // 1. 从自身稳定 Session backing 取得一致性快照并切分窗口
     let source = self.session.compaction_source()?;
-    let window = compact_window(&source.messages);
-    // head = 前两条（system + 首条 user），tail = 最近 30%（max 4 条）
+    let window = compact_window(&source.structured_history, req.source.context_size);
+    // early = 进入 summary 的完整 RunStep；tail = 不超过 window 30% 的近期完整 RunStep
 
     // 2. 选择策略
     let result = if early_tokens > 30_000 {
@@ -470,8 +480,8 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
         llm_compact(&window.early, req).await?
     };
 
-    // 3. 修复 tail 中的 orphan tool pairs
-    let recent = sanitize_tool_pairs(window.tail);
+    // 3. tail 已按完整 Step 切分，不需要按 message 猜测 / 修复边界
+    let recent = window.tail;
 
     // 4. CAS 校验：确认 backing revision 未变（compact 跨多个 LLM await，期间可能有并发写入）
     let current_revision = self.session.backing_revision();
@@ -482,14 +492,14 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
         });
     }
 
-    // 5. ChatChain::compact 一次性提交（三参数版：summary, recent_messages, source_revision）
+    // 5. ChatChain::compact 一次性提交（三参数版：summary, recent_runs, source_revision）
     //    内部完成 freeze_active → 创建 Compact segment → 记录 source_revision
     //    定义见 01-session.md §3.1
     self.session.compact(result.summary.clone(), recent.clone(), source.revision);
 
     Ok(CompactResult {
         summary: result.summary,
-        recent_messages: recent,
+        recent_runs: recent,
         source_revision: source.revision,
     })
 }
@@ -500,27 +510,57 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
 - 每块独立 LLM 摘要 → 合并后再 LLM 摘要
 - LLM 摘要失败返回结构化 `CompactError`；若产品选择本地降级，结果 **MUST** 带显式 quality / fallback 标记，**NEVER** 静默伪装成 LLM 摘要成功。
 
+**Summary 保真度不变量**：
+
+- `early` **MUST** 覆盖所有将从 active messages 移除、且未进入 recent tail 的消息；**NEVER** 存在既不保留、也不进入 summary 的 head gap。
+- Summary **MUST** 按时间顺序汇总影响当前工作的全部用户输入；相邻输入 **MAY** 合并表达，但后续修正 **MUST** 覆盖更早的冲突要求。
+- Summary **MUST** 精确保留用户要求的动作层级，**NEVER** 把 inspect / diagnose / explain / review / design 升级为 implement / edit / commit / push / merge。
+- Summary **MUST** 分开记录 `User Requests`、`Work Completed`、`Problems / Findings`、`Current State` 与单一 `Next Action`，并区分已确认事实、推断与未知项。
+- Summary **MUST** 输出 `Continue | Waiting for User | Completed` 三态 continuation。`Continue` 表示下一轮模型直接执行 `Next Action`，不等待新用户输入；`Waiting for User` 只用于确实缺少批准、选择、输入或新权限；`Completed` 只用于用户请求已交付且没有剩余工作。
+- 连续 compact 时，上一轮 active summary **MUST** 作为 authoritative previous summary 显式进入下一轮 compact 输入；Runtime **MAY** 替换 summary block，但 **NEVER** 在生成新 summary 前丢弃旧 summary。
+- 单次 LLM compact 请求 **MUST** 只有一份带真实 history 的 compact prompt；**NEVER** 在尾部追加一条没有 history 的重复指令。
+- 本地 fallback **MUST** 把 assistant 文本和 ToolUse 标为未验证报告 / 已观察调用，**NEVER** 直接据此声称工作完成；只有最新 unresolved user request 可输出 `Continue`，assistant 的等待、普通报告或完成报告都保守输出 `Waiting for User`。`Completed` 只允许语义摘要在确认交付事实后输出。
+- Recent tail 的切分位置与 summary 覆盖范围是两个独立概念：调整 summary 输入 **NEVER** 隐式改变 tail 的预算、Run/Step 边界或 `split_point`。
+
 ### 8.4 compact_window 切分
 
 ```rust
 struct CompactWindow {
-    head: Vec<Message>,     // 前两条（保留）
-    early: Vec<Message>,    // 待摘要部分
-    tail: Vec<Message>,     // 保留的近期消息
+    early: Vec<CommittedRunStep>,       // 待摘要部分
+    tail: Vec<CommittedRunSlice>,       // 保留 Run/Step 结构的近期后缀
+    tail_tokens: usize,
+    tail_budget: usize,
 }
 
-fn compact_window(messages: &[Message]) -> Option<CompactWindow> {
-    if messages.len() <= 4 { return None; }
+fn compact_window(
+    runs: &[CommittedRunSlice],
+    context_size: usize,
+) -> Option<CompactWindow> {
+    let tail_budget = context_size * 30 / 100;
+    let ordered_steps = runs.iter().flat_map(|run| run.steps.iter());
 
-    let head: Vec<_> = messages[..2].to_vec();
-    let tail_len = (messages.len() as f64 * 0.3) as usize;
-    let tail_len = tail_len.min(4);
-    let early = messages[2..messages.len() - tail_len].to_vec();
-    let tail = messages[messages.len() - tail_len..].to_vec();
+    // 从最新 Step 向前保留完整 Step；一旦加入更远 Step 会超预算，
+    // 该 Step 及其之前的历史全部进入 early summary。
+    let tail = take_newest_complete_steps_within_budget(ordered_steps, tail_budget);
+    let early = steps_before_tail(runs, &tail);
 
-    Some(CompactWindow { head, early, tail })
+    (!early.is_empty()).then(|| CompactWindow {
+        tail_tokens: estimate_step_tokens(&tail),
+        early,
+        tail,
+        tail_budget,
+    })
 }
 ```
+
+recent tail 预算只估算 tail 自身 messages，**排除** compact summary、system
+prompt、memory 和 tool schemas。选择单位是完整 finalized RunStep：
+
+- 超过 `context_size * 30%` 时，从最远的 Step 开始逐个移出 tail，直到预算内；
+- Step 内的 assistant ToolUse 与对应 ToolResult **NEVER** 被拆开；
+- 不保留独立“前两条 head”；更早的目标、决策和初始输入统一由 summary 保存；
+- 单个 Step 已超过预算时，该 Step 进入 early summary；L1 budget reduction 必须限制新 ToolResult，map-reduce 负责处理超大 early 输入；
+- compact 提交与 Provider 出站前，才把 tail 按 Run / Step 顺序扁平化为 messages。
 
 ### 8.5 Pre/PostCompact Hook
 
@@ -553,25 +593,55 @@ impl AutoCompactState {
 
 ### 8.7 Compact 提交协议（统一入口）
 
-Compact 提交由 `ChatChain::compact(summary, recent_messages, source_revision)` 一次性完成（三参数版，定义见 [01-session.md](01-session.md) §3.1）：
+Compact 提交由 `ChatChain::compact(summary, recent_runs, source_revision)` 一次性完成（三参数版，定义见 [01-session.md](01-session.md) §3.1）：
 
 ```rust
 // ChatChain 唯一提交入口——不再有 apply_compact_outcome 或 commit_compaction 独立函数
-chain.compact(result.summary, result.recent_messages, source.revision);
+chain.compact(result.summary, result.recent_runs, source.revision);
 // 内部等价于：freeze_active() → 创建 Compact segment → 记录 source_revision
 // 幂等保护：若 compact_source_revision + compact_committed marker 匹配则跳过（见 03-token-budget.md §5.5）
 ```
 
 - summary 作为 `CompactSegment.summary`（走 system 通道，不会被 future compact 二次损耗）
-- recent_messages 保留在新 segment 的 `messages` 中
+- recent_runs 保留在新 Compact segment 的结构化 `runs/steps` 中
 - 旧 segment 冻结保留供审计
 - `ChatChain::compact` 是唯一提交入口——`apply_compact_outcome`、`commit_compaction` 等独立函数皆已退役
 
 ### 8.8 Manual Compact
 
 用户 `/compact` 命令触发：
-- **绕过 token 阈值检查**（但保留 `messages.len() > 4` 检查）
+- **绕过 token 阈值检查**，但必须存在至少一个可进入 summary 的 finalized RunStep
 - manual compact 不经过 `compaction_decision` 判定，直接进入 compact use case；内部 **NEVER** 重复检查自动阈值
+
+### 8.9 Current 落地边界与 Deferred 迁移
+
+当前生产 `ChatChain` 只保留 Run/segment 边界，并在 compact 前调用
+`messages_flat()`；因此现状**无法正确按 RunStep 裁 recent tail**。在
+`CommittedRunStep` backing 落地前，Current 与 Target 必须明确区分：
+
+**Current（本次已实现）**：
+
+1. Provider ACL 先产出标准化 `last_total_tokens`，Runtime 仅以
+   `last_total_tokens > threshold` 进入 `Compacting`，成功后清空该值；
+2. 删除 auto compact 各层重复阈值判断，`Compacting` 内只执行一次管线；
+3. 连续 compact 把上一轮 active summary 显式并入下一轮 summary 输入；
+4. recent tail **保持现有实现不变**：按 message 数保留约 10%（至少 4 条），
+   并在 tail 内修复 ToolUse/ToolResult 配对、占位 ToolResult；这不是
+   Run/Step-aware 算法；
+5. 现有 Microcompact 仍在 compact 管线内执行；本次未把它迁移为
+   `PreparingContext` 常驻投影，也未新增 micro 实验。
+
+**Deferred / Target（本次不实现）**：
+
+1. Snip / Microcompact 在每次 `PreparingContext` 常驻执行，并统一按完整 Run
+   保护最近 3 个 Run；
+2. recent tail 按完整 finalized RunStep 选择，使用 `context_size * 30%`
+   token 预算并从最远 Step 开始移出；
+3. Session schema 保存 `RunId → RunStepId → messages`，compact 提交前保持
+   Run / Step 结构，只在 Provider 出站时扁平化。
+
+在这些 Deferred 项落地前，文档中的 Run/Step-aware 30% 算法均为 Target，
+**NEVER** 作为 Current 行为或“已完成的最小修复”验收。
 
 ## 9. 幂等性设计（#550）
 
@@ -597,7 +667,7 @@ chain.compact(result.summary, result.recent_messages, source.revision);
 | 常量 | 默认值 / 来源 | 唯一所有者 |
 |---|---|---|
 | `max_output_tokens` | 本 Run 的 model capability / ConfigSnapshot | Invocation / ContextRequest |
-| `max_summary_output_tokens` | 20,000 | `TokenBudgetConfig.max_summary_output_tokens` |
+| `summary_budget` | `context_size * 2%`（动态计算） | `token_budget::summary_budget(context_size)` |
 | `autocompact_buffer_tokens` | 13,000 | `TokenBudgetConfig.autocompact_buffer_tokens` |
 | `estimation_safety_factor` | 1.33 | `TokenBudgetConfig.estimation_safety_factor` |
 
@@ -631,3 +701,6 @@ chain.compact(result.summary, result.recent_messages, source.revision);
 |---|---|---|
 | 2026-07-12 | 初稿：五级管线、ContextPort 签名、L1-L5 策略设计、幂等性、circuit breaker、常量统一 | #786 |
 | 2026-07-15 | #868 实现回写：ContextPort 冻结四方法与 provider-neutral PL；append 使用 revision/fingerprint CAS 并返回 typed receipt，Runtime 只消费 Context-owned 契约 | [#868](https://github.com/rushsinging/aemeath/issues/868) |
+| 2026-07-16 | compact 战术修改：Run 级冷却（每 Run 最多 compact 一次，防死循环）；compact 后重置 token 计数；recent tail 10%（从 30% 调低）；recent tail ToolResult 全部占位符替换；summary_budget 动态计算（context_size * 2%） | #1110 |
+| 2026-07-17 | 自动触发落地 Provider 标准化 last_total_tokens；明确 Snip/Microcompact 常驻、Run/Step-aware 30% recent tail 为 Deferred Target，Current tail 仍保持 message 10% | compact token reset design |
+| 2026-07-17 | 补充 L5 summary 保真度：所有被移除消息必须进入 summary；按序汇总用户输入且后续修正覆盖前述冲突要求；禁止动作层级升级；增加 continuation 三态 | [#671](https://github.com/rushsinging/aemeath/issues/671) |
