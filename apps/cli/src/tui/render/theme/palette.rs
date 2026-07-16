@@ -84,8 +84,8 @@ pub const SELECTION_FG: Color = TEXT;
 pub const USER: Color = Color::Rgb(220, 232, 255);
 /// 用户消息背景色。
 pub const USER_BG: Color = Color::Rgb(63, 95, 143);
-/// 助手消息色。
-pub const ASSISTANT: Color = TEXT;
+/// 助手消息色。使用 SUBTEXT1 替代 TEXT（近白），降低大面积正文亮度以减少暗光环境下的眼部疲劳。
+pub const ASSISTANT: Color = SUBTEXT1;
 /// 工具运行中色。
 pub const TOOL_RUNNING: Color = PEACH;
 /// 成功色。

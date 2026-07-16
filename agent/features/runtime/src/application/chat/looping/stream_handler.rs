@@ -3,7 +3,7 @@ use crate::application::chat::looping::events::{
 };
 use crate::application::chat::looping::tool_identity::ToolIdentityRegistry;
 use crate::LOG_TARGET;
-use provider::api::StreamHandler;
+use provider::StreamHandler;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

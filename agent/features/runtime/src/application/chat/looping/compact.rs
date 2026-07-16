@@ -37,7 +37,7 @@ pub(crate) async fn auto_compact<S>(
     reasoning_tokens: Option<u64>,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
-    llm_client: &Arc<provider::api::LlmClient>,
+    llm_client: &Arc<provider::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
     cancel: &tokio_util::sync::CancellationToken,
@@ -225,7 +225,7 @@ pub(crate) async fn manual_compact<S>(
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
-    llm_client: &Arc<provider::api::LlmClient>,
+    llm_client: &Arc<provider::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
 ) -> Option<CompactOutcome>

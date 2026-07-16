@@ -1,7 +1,7 @@
 use hook::api::HookRunner;
-use provider::api::LlmClient;
-use provider::api::LlmClientPool;
-use provider::api::StreamHandler;
+use provider::LlmClient;
+use provider::LlmClientPool;
+use provider::StreamHandler;
 use share::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use std::sync::Arc;
 

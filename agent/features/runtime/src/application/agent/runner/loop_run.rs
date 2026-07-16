@@ -13,8 +13,8 @@ use crate::application::loop_engine::{
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
-use provider::api::LlmClient;
-use provider::api::{StopReason, SystemBlock};
+use provider::LlmClient;
+use provider::{StopReason, SystemBlock};
 use share::message::Message;
 use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
@@ -75,7 +75,7 @@ pub(super) struct SubAgentRun<'a> {
     pub model_name_for_log: String,
     pub resolved_spec: Option<String>,
     pub previous_max_tokens: u32,
-    pub previous_reasoning_level: provider::contract::ReasoningLevel,
+    pub previous_reasoning_level: provider::ReasoningLevel,
     pub restore_max_tokens: bool,
     pub progress: Box<dyn Fn(Option<usize>, &str) + Send + Sync + 'a>,
     pub ctx_context_size: usize,
@@ -190,7 +190,7 @@ impl<'a> SubAgentRun<'a> {
         logging::context::set_current_turn(turn_number);
     }
 
-    fn progress_api_ok(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
+    fn progress_api_ok(&self, turn_number: usize, resp: &provider::StreamResponse) {
         (self.progress)(
             Some(turn_number),
             &format!(
@@ -200,7 +200,7 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, turn_number: usize, resp: &provider::api::StreamResponse) {
+    fn log_output(&self, turn_number: usize, resp: &provider::StreamResponse) {
         let mut data = build_json_logger_output_data(
             resp,
             self.start_time.elapsed().as_secs_f64(),
@@ -220,7 +220,7 @@ impl<'a> SubAgentRun<'a> {
         logging::context::set_current_turn(turn_number);
     }
 
-    fn send_text_progress(&self, turn: usize, resp: &provider::api::StreamResponse) {
+    fn send_text_progress(&self, turn: usize, resp: &provider::StreamResponse) {
         if let Some(ref tx) = self.progress_tx {
             let text = resp.assistant_message.text_content();
             let trimmed = text.trim();

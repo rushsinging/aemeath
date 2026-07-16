@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use ::provider::api::LlmProviderGateway;
+use ::provider::LlmProviderGateway;
 
 pub fn wire_provider() -> Arc<dyn LlmProviderGateway> {
-    ::provider::api::wire_provider()
+    ::provider::wire_provider()
 }
 
 #[cfg(test)]

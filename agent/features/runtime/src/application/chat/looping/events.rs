@@ -1,6 +1,6 @@
 use crate::application::reasoning_graph::ReasoningNode;
 use context::session::PersistedWorkspaceContext;
-use provider::api::ReasoningLevel;
+use provider::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
 use share::tool::{AgentProgressEvent, ImageData};

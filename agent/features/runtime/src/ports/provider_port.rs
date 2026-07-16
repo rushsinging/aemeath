@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
 // 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReason 导出，此处还原为 StopReason。
-pub use provider::api::{
+pub use provider::{
     InvocationDelta, InvocationOptions, InvocationRequest, ModelCapability, ModelId,
     ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,
     ProviderStopReason as StopReason, ProviderToolCall, ProviderToolCallId, RawUsageSnapshot,
@@ -28,7 +28,7 @@ pub use provider::api::{
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
-pub use provider::api::ReasoningLevel;
+pub use provider::ReasoningLevel;
 
 // ─── InvocationEvent / InvocationStream ────────────────
 

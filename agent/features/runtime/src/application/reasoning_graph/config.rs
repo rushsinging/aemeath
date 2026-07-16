@@ -1,9 +1,9 @@
 //! ReasoningGraph 运行时配置。
 //!
 //! 从 `share::config::ReasoningGraphConfig`（字符串 effort 值）转换为
-//! 运行时使用的 `provider::api::ReasoningLevel` 枚举。
+//! 运行时使用的 `provider::ReasoningLevel` 枚举。
 
-use provider::api::ReasoningLevel;
+use provider::ReasoningLevel;
 use share::config::ReasoningGraphConfig as SharedConfig;
 
 use super::ReasoningNode;

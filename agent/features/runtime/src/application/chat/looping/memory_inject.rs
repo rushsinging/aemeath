@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use provider::api::SystemBlock;
+use provider::SystemBlock;
 
 /// 从项目 memory store 读取 top N 条目，构建 `<memory-context>` system block。
 ///
