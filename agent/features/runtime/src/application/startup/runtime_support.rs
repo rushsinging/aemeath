@@ -45,7 +45,6 @@ pub fn build_agent_runner(
     Arc::new(agent_runner::CliAgentRunner {
         client,
         pool,
-        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
         active_run,
         agents_config,
         hook_runner,

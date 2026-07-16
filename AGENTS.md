@@ -102,9 +102,9 @@ aemeath/                    # workspace root
 │   └── agent-audit.log      #   aemeath:agent:audit — 审计事件
 > **废弃文件**：`input.log` / `output.log` / `tool.log` / `audit.log` / `agent.log` 已废弃，NEVER 再使用。详见 `specs/logging.md`。
 >
-> **终端测试**：`echo '{prompt}' | AEMEATH_VERSION= RUST_LOG= cargo run -- -qv`（`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试；`AEMEATH_VERSION=` 覆盖版本号、`RUST_LOG=` 覆盖日志级别，方便测试）。可用 `--model Zhipu/glm-5.2` 等参数指定模型。
+> **终端测试**：`echo '{prompt}' | AEMEATH_VERSION= RUST_LOG= cargo run -p cli --bin aemeath -- -qv`（workspace 同时包含 `aemeath` 与 `xtask` binary，运行 CLI 时 **MUST** 显式指定 `-p cli --bin aemeath`；`-q` 静默模式 + `-v` 日志输出到 stderr，适合非交互式 CLI 测试；`AEMEATH_VERSION=` 覆盖版本号、`RUST_LOG=` 覆盖日志级别）。可在末尾追加 `--model Zhipu/glm-5.2` 等 CLI 参数。
 >
-> **日志级别**：全局配置 `logging.level` 默认 `info`，debug 级别日志仅在文件和 stderr 中可见（文件已路由到对应 target 文件）。调试时用 `AEMEATH_LOG_LEVEL=debug` 环境变量全局拉高到 debug：`AEMEATH_LOG_LEVEL=debug cargo run`；也可用 `RUST_LOG` 按 target 单独拉高：`RUST_LOG=aemeath:tui=debug,aemeath:agent:runtime=debug cargo run`。
+> **日志级别**：全局配置 `logging.level` 默认 `info`，debug 级别日志仅在文件和 stderr 中可见（文件已路由到对应 target 文件）。调试时用 `AEMEATH_LOG_LEVEL=debug cargo run -p cli --bin aemeath` 全局拉高到 debug；也可用 `RUST_LOG=aemeath:tui=debug,aemeath:agent:runtime=debug cargo run -p cli --bin aemeath` 按 target 单独拉高。
 >
 > **注意**：`log::set_max_level()` 设为 `Info` 时会全局过滤掉所有 debug 日志。若需在非交互模式下验证 debug 日志，需将全局配置 `logging.level` 改为 `debug`，或将日志临时改为 `info!` 级别。
 ├── memory/                  # 持久化记忆存储
@@ -215,13 +215,13 @@ Release Gate issue 模板：
 4. **标注依赖与并行性**：父 Issue **MUST** 对每个直接 sub-issue 标明可否并行、被谁 block / block 谁，并据此排执行顺序。依赖关系 **MUST** 使用 GitHub 原生 blocked-by / blocking 关系；正文可保留说明，但 **NEVER** 作为唯一依赖记录。
 5. **跟进进度**：父 Issue **MUST** 通过原生 sub-issue 状态和正文摘要维护进度（未开始 / 进行中 / 已合入）。sub-issue 状态变化时 **MUST** 同步父 Issue 的范围、阻断项和验收结论。
 6. **范围调整同步**：执行中若发现更根本的问题需重做或移动范围，**MUST** 调整相关原生 parent / sub-issue 与依赖关系，保持层级、依赖图和实际交付始终一致。
-7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 7 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
+7. **拆分规模**：每层直接 sub-issues **SHOULD** 不超过 10 个。超过时 **MUST** 按稳定模块或能力边界增加中间父 Issue，**NEVER** 通过扩大单个 sub-issue 规避分层。
 8. **必有收尾能力**：大型工作 **MUST** 在最合适的父层级覆盖以下三类交付；若多个模块共享同一全局收尾，**MUST** 复用同一 sub-issue，**NEVER** 在每个模块重复创建：
    - **Guard + Verify sub-issue**：落地架构守卫锁定新边界，故意制造违规验证拦截生效；端到端验收测试覆盖核心场景。
    - **收尾退役 sub-issue**：清理全项目的旧路径、散点读取和死代码（不限于本次改动引入）；去除 `cargo clippy --workspace --all-targets` 全部 warning；更新 `specs/` 分片和 `docs/design/`。
    - **大文件拆分 sub-issue**：对本次改动涉及的核心大文件进行模块边界整理，确保每个文件只承担单一职责。
 9. **依赖顺序**：其余 sub-issues **MUST** 按领域模型 → Port / Published Language → Adapter → 消费方 → Guard / 退役的方向拆分。依赖方向严格从内到外，**NEVER** 反向。
-10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 7 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
+10. **当前重构适用规则**：#743 是全模块架构重构根父 Issue，#547 是 Context Engineering 算法与质量根父 Issue；模块重构 Issue **MUST** 位于 #743 的原生 sub-issue 树中，算法与质量任务 **MUST** 位于 #547 的原生 sub-issue 树中。若根父 Issue 的直接 sub-issues 将超过 10 个，**MUST** 先按稳定能力边界建立中间父 Issue，再将模块 Issue 作为其原生 sub-issues；**NEVER** 建立平行的追踪父 Issue。
 
 ### Git 工作流
 

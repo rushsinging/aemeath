@@ -11,6 +11,15 @@ mod ports;
 mod task_store;
 mod tool_result;
 
+pub mod api {
+    pub use crate::{
+        AtomicBlobPort, BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Durability,
+        Generation, PreviousPolicy, PromoteOutcome, QuarantineOutcome, QuarantineReason,
+        QuarantineReceipt, ReadOutcome, SafePathSegment, StorageError, StorageErrorKind,
+        StorageKey, StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
+    };
+}
+
 pub use adapters::FileSystemBlobAdapter;
 pub use domain::{
     decide_blob_recovery, decide_orphan_previous, BlobRead, CommitWarning, CorruptTransactionError,

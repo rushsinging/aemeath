@@ -14,13 +14,13 @@ pub use adapters::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
 pub use adapters::openai_compatible::ReasoningConfig;
 pub use adapters::pool::LlmClientPool;
 pub use adapters::transport::{wire_provider, DefaultLlmProviderGateway, LlmProviderGateway};
-pub use domain::capability::ProviderDriverKind;
+pub use domain::capability::{ProviderDriverKind, ReasoningLevel};
 pub use domain::invoke::{
     ApiError, CacheControl, ContentBlockPayload, CreateMessageRequest, DeltaPayload, DeltaUsage,
-    MessageDeltaPayload, MessageStartPayload, StopReason, StreamEvent, StreamResponse, SystemBlock,
-    Usage,
+    InvocationScope, MessageDeltaPayload, MessageStartPayload, StopReason, StreamEvent,
+    StreamResponse, SystemBlock, Usage,
 };
-pub use ports::{CallbackHandler, LlmProvider, ReasoningLevel, StreamHandler};
+pub use ports::{CallbackHandler, LlmProvider, StreamHandler};
 pub use published_language::{
     InvocationDelta, InvocationOptions, InvocationRequest, ModelCapability, ModelId,
     ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,

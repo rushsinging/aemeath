@@ -1,6 +1,5 @@
 use crate::LOG_TARGET;
 use hook::api::HookRunner;
-use provider::LlmClient;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::path::Path;
 use std::time::Duration;
@@ -41,20 +40,16 @@ pub fn log_agent_outcome(outcome: &AgentRunOutcome, session_id: &str) {
 /// 子 agent 退出时统一收尾：
 ///   1. 结构化日志
 ///   2. SubagentStop hook（含 system_message 转发）
-///   3. 恢复 client 设置
+///   3. 不需要恢复 Provider 设置；调用期配置属于不可变 InvocationScope。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn finalize_sub_agent(
     outcome: &AgentRunOutcome,
-    client: &LlmClient,
     hook_runner: &HookRunner,
     session_id: &str,
     prompt: &str,
     system: &str,
     model_spec: Option<&str>,
     output: &str,
-    previous_max_tokens: u32,
-    previous_reasoning_level: provider::ReasoningLevel,
-    restore_max_tokens: bool,
     progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     workspace_root: &Path,
 ) {
@@ -93,9 +88,4 @@ pub(crate) async fn finalize_sub_agent(
             }
         }
     }
-
-    if restore_max_tokens && previous_max_tokens > 0 {
-        client.set_max_tokens(previous_max_tokens);
-    }
-    client.set_reasoning_level(previous_reasoning_level);
 }

@@ -526,7 +526,6 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
             ErrorProvider { error },
         ))),
         pool: None,
-        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         agents_config: Arc::new(share::config::AgentsConfig::default()),
         hook_runner: hook::api::HookRunner::empty(),
@@ -541,7 +540,6 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
             BlockingThenCancelledProvider { calls },
         ))),
         pool: None,
-        shared_client_lock: Arc::new(tokio::sync::Mutex::new(())),
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         agents_config: Arc::new(share::config::AgentsConfig::default()),
         hook_runner: hook::api::HookRunner::empty(),
@@ -560,6 +558,7 @@ struct BlockingThenCancelledProvider {
 impl LlmProvider for BlockingThenCancelledProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -580,12 +579,6 @@ impl LlmProvider for BlockingThenCancelledProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 
@@ -621,6 +614,7 @@ struct ErrorProvider {
 impl LlmProvider for ErrorProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -665,11 +659,5 @@ impl LlmProvider for ErrorProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }

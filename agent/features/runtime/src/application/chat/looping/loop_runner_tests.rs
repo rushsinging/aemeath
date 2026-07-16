@@ -281,6 +281,7 @@ struct TwoTurnProvider;
 impl LlmProvider for TwoTurnProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -323,12 +324,6 @@ impl LlmProvider for TwoTurnProvider {
     fn provider_name(&self) -> &str {
         "test-provider"
     }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
-    }
 }
 
 struct SequenceProvider {
@@ -349,6 +344,7 @@ impl SequenceProvider {
 impl LlmProvider for SequenceProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -386,12 +382,6 @@ impl LlmProvider for SequenceProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 
@@ -1327,6 +1317,7 @@ impl IdenticalReplyProvider {
 impl LlmProvider for IdenticalReplyProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -1361,12 +1352,6 @@ impl LlmProvider for IdenticalReplyProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 
@@ -1521,6 +1506,7 @@ impl RecordingProvider {
 impl LlmProvider for RecordingProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -1560,12 +1546,6 @@ impl LlmProvider for RecordingProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 
@@ -2016,6 +1996,7 @@ impl CancellableThenNormalProvider {
 impl LlmProvider for CancellableThenNormalProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -2063,12 +2044,6 @@ impl LlmProvider for CancellableThenNormalProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 
@@ -2252,6 +2227,7 @@ impl CompleteThenCancellableProvider {
 impl LlmProvider for CompleteThenCancellableProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -2299,12 +2275,6 @@ impl LlmProvider for CompleteThenCancellableProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 
@@ -2535,6 +2505,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
     impl LlmProvider for CountingProvider {
         async fn stream_message(
             &self,
+            _scope: &provider::InvocationScope,
             _system: &[SystemBlock],
             _messages: &[Message],
             _tool_schemas: &[serde_json::Value],
@@ -2570,12 +2541,6 @@ async fn test_chat_impl_idle_until_first_input_event() {
 
         fn provider_name(&self) -> &str {
             "test-provider"
-        }
-
-        fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-        fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-            provider::ReasoningLevel::Off
         }
     }
 
@@ -3002,6 +2967,7 @@ impl ApiErrorThenNormalProvider {
 impl LlmProvider for ApiErrorThenNormalProvider {
     async fn stream_message(
         &self,
+        _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
@@ -3048,12 +3014,6 @@ impl LlmProvider for ApiErrorThenNormalProvider {
 
     fn provider_name(&self) -> &str {
         "test-provider"
-    }
-
-    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
-
-    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
-        provider::ReasoningLevel::Off
     }
 }
 

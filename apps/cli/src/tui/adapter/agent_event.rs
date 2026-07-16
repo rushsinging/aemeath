@@ -2,6 +2,7 @@ use crate::tui::adapter::hook_notice::hook_event_notice;
 use crate::tui::app::event::{StatusContextUpdate, UiEvent};
 use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
@@ -269,9 +270,23 @@ where
         }
 
         // ── System messages ──
-        UiEvent::SystemMessage(text) => conversation(ConversationIntent::AppendSystemMessage(
-            AppendSystemMessage { text: text.clone() },
-        )),
+        // runtime 允许发空 SystemMessage——hook 的 additional_context / system_message
+        // 只判 `Option` 不判空串（`looping/tools.rs`、`post_batch.rs`、`compact.rs`）。
+        // ACL 层在此丢弃，否则空 block 会各吃掉 2 行（空内容 + depth0 前置空行，#1106）。
+        // 判空前先剥离信封：`<system-reminder></system-reminder>` 剥离后即为空。
+        // 启动横幅经 `seed_banner` 直接注入 model，不走本路径，其空行不受影响。
+        UiEvent::SystemMessage(text) => {
+            if strip_system_reminder_envelope(text).trim().is_empty() {
+                crate::tui::log_debug!(
+                    "drop empty system message from runtime raw_len={}",
+                    text.len()
+                );
+                return AgentEventMapping::default();
+            }
+            conversation(ConversationIntent::AppendSystemMessage(
+                AppendSystemMessage { text: text.clone() },
+            ))
+        }
         UiEvent::ModelStreamWaiting {
             context,
             elapsed_secs,

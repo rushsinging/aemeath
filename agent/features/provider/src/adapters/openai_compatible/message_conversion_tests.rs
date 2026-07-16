@@ -1,37 +1,8 @@
-use super::{OpenAICompatibleProvider, ReasoningConfig};
-use crate::adapters::client::OpenAIProviderConfig;
-use crate::ProviderDriverKind;
+use super::OpenAICompatibleProvider;
 use share::message::{ContentBlock, Message, Role};
-
-fn provider_with_reasoning() -> OpenAICompatibleProvider {
-    OpenAICompatibleProvider::new(
-        OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "DeepSeek"),
-        "test-key".to_string(),
-        None,
-        Some("deepseek-v4-pro".to_string()),
-        8192,
-        true,
-        Some(ReasoningConfig::Bool(true)),
-        30,
-    )
-}
-
-fn provider_without_reasoning() -> OpenAICompatibleProvider {
-    OpenAICompatibleProvider::new(
-        OpenAIProviderConfig::from_driver(ProviderDriverKind::OpenAI, "DeepSeek"),
-        "test-key".to_string(),
-        None,
-        Some("deepseek-v4-pro".to_string()),
-        8192,
-        false,
-        Some(ReasoningConfig::Bool(false)),
-        30,
-    )
-}
 
 #[test]
 fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
-    let provider = provider_with_reasoning();
     let messages = vec![Message {
         role: Role::Assistant,
         content: vec![
@@ -47,7 +18,7 @@ fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
         ],
         metadata: None,
     }];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
     let assistant = converted
         .iter()
         .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -62,7 +33,6 @@ fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
 
 #[test]
 fn test_convert_messages_preserves_real_reasoning_content_even_when_reasoning_disabled() {
-    let provider = provider_without_reasoning();
     let messages = vec![Message {
         role: Role::Assistant,
         content: vec![
@@ -76,7 +46,7 @@ fn test_convert_messages_preserves_real_reasoning_content_even_when_reasoning_di
         ],
         metadata: None,
     }];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
     let assistant = converted
         .iter()
         .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -91,7 +61,6 @@ fn test_convert_messages_preserves_real_reasoning_content_even_when_reasoning_di
 
 #[test]
 fn test_convert_messages_omits_reasoning_content_when_reasoning_disabled() {
-    let provider = provider_without_reasoning();
     let messages = vec![Message {
         role: Role::Assistant,
         content: vec![ContentBlock::ToolUse {
@@ -101,7 +70,7 @@ fn test_convert_messages_omits_reasoning_content_when_reasoning_disabled() {
         }],
         metadata: None,
     }];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, false).unwrap();
     let assistant = converted
         .iter()
         .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -113,7 +82,6 @@ fn test_convert_messages_omits_reasoning_content_when_reasoning_disabled() {
 
 #[test]
 fn test_convert_messages_drops_reasoning_only_assistant() {
-    let provider = provider_with_reasoning();
     let messages = vec![Message {
         role: Role::Assistant,
         content: vec![ContentBlock::Thinking {
@@ -122,7 +90,7 @@ fn test_convert_messages_drops_reasoning_only_assistant() {
         }],
         metadata: None,
     }];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
 
     assert!(converted.iter().all(|m| {
         m.get("role").and_then(|v| v.as_str()) != Some("assistant")
@@ -134,7 +102,6 @@ fn test_convert_messages_drops_reasoning_only_assistant() {
 
 #[test]
 fn test_convert_messages_preserves_all_historical_thinking() {
-    let provider = provider_with_reasoning();
     let messages = vec![
         Message {
             role: Role::User,
@@ -177,7 +144,7 @@ fn test_convert_messages_preserves_all_historical_thinking() {
             metadata: None,
         },
     ];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
     let assistants: Vec<_> = converted
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -200,7 +167,6 @@ fn test_convert_messages_preserves_all_historical_thinking() {
 
 #[test]
 fn test_convert_messages_preserves_historical_thinking_with_tool_calls() {
-    let provider = provider_with_reasoning();
     let messages = vec![
         Message {
             role: Role::User,
@@ -245,7 +211,7 @@ fn test_convert_messages_preserves_historical_thinking_with_tool_calls() {
             metadata: None,
         },
     ];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
     let assistants: Vec<_> = converted
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -269,7 +235,6 @@ fn test_convert_messages_preserves_historical_thinking_with_tool_calls() {
 
 #[test]
 fn test_convert_messages_current_turn_without_thinking_keeps_historical() {
-    let provider = provider_with_reasoning();
     let messages = vec![
         Message {
             role: Role::User,
@@ -306,7 +271,7 @@ fn test_convert_messages_current_turn_without_thinking_keeps_historical() {
             metadata: None,
         },
     ];
-    let converted = provider.convert_messages(&[], &messages).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
     let assistants: Vec<_> = converted
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))

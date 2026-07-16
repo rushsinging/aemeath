@@ -58,7 +58,10 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let gateways = FeatureGateways::wire_default();
     let runtime_client = crate::runtime::from_args_with_gateways(args, gateways).await?;
     let launch = runtime_client.tui_launch_context();
-    let thinking = launch.client.is_reasoning();
+    let thinking = !matches!(
+        launch.client.default_scope().effective_reasoning(),
+        provider::ReasoningLevel::Off
+    );
     let client = agent_client_from_runtime(runtime_client);
     let cwd = launch.workspace_root.clone();
 

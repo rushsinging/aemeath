@@ -1,3 +1,4 @@
+mod atomic_blob_session;
 pub(crate) mod compact_summary;
 mod in_memory_session;
 pub mod memory_injection;
@@ -5,5 +6,6 @@ pub mod prompt;
 pub(crate) mod session_search;
 pub(crate) mod session_storage;
 
+pub use atomic_blob_session::AtomicBlobSessionStore;
 pub use in_memory_session::InMemorySessionRepository;
 pub use memory_injection::NoOpContextMemorySource;

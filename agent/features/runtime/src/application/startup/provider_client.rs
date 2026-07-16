@@ -80,9 +80,10 @@ pub fn build_llm_client(
         Some(cap) => desired.min(cap).min(client.max_reasoning_level()),
         None => desired.min(client.max_reasoning_level()),
     };
-    client.set_reasoning_level(final_level);
 
     client
+        .with_default_reasoning(final_level)
+        .expect("resolved startup reasoning must form a valid invocation scope")
 }
 
 fn provider_driver_api_key_from_env(

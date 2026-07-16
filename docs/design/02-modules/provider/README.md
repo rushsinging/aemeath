@@ -128,4 +128,5 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：锁定 Provider ACL、调用尝试边界、reasoning/usage 所有权与无共享可变状态原则 | #788 |
+| 2026-07-17 | #902 完成不可变 Invocation Scope 生产切线：请求构造只读 scope，删除 provider 调用期 atomics/setter、Sub restore 与 shared-client lock；完整 Runtime-owned pull stream 仍按 Target 推进 | [#902](https://github.com/rushsinging/aemeath/issues/902) |
 | 2026-07-16 | 冻结 Provider Target 物理目录：扁平统一调用核心 + provider/protocol 技术目录，明确不建 `capabilities/` 或复制 Runtime-owned port | [#972](https://github.com/rushsinging/aemeath/issues/972) |

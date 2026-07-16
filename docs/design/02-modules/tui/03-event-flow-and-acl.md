@@ -90,6 +90,7 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
 3. **progress 格式化**：sub-agent progress 事件 → 可读字符串（`format_agent_progress`）
 4. **hook notice 派生**：Hook 事件 → HookNoticeContent（`hook_event_notice`）
 5. **placeholder 清理**：收到实际内容时清 ModelStreamWaiting 占位（`clear_placeholder_then`）
+6. **空 payload 守卫**：runtime **MAY** 发送空 payload 事件，ACL **MUST** 在此丢弃，**NEVER** 让空内容进入 Model（见 3.5）
 
 ### 3.2 AgentEventMapping 结构
 
@@ -118,7 +119,9 @@ enum AgentIntent {
 
 ### 3.3 六个 Context 的穷尽映射
 
-`agent_event.rs` **MUST** 对封闭 `UiEvent` 枚举做穷尽 match；禁止 wildcard、默认空 mapping、静默忽略或交给另一条更新路径二次处理。允许一个事件产生多个 Context Intent，但每个 Intent 必须显式出现在下表：
+`agent_event.rs` **MUST** 对封闭 `UiEvent` 枚举做穷尽 match；禁止 wildcard、默认空 mapping、静默忽略或交给另一条更新路径二次处理。允许一个事件产生多个 Context Intent，但每个 Intent 必须显式出现在下表。
+
+> **唯一例外**：3.5 的空 payload 守卫——空内容事件 **MAY** 返回空 mapping，但 **MUST** 记 `log_debug!` 留痕。事件变体本身仍 **MUST** 显式出现在下表，丢弃的是空 payload 而非事件变体。
 
 | Context | UiEvent 变体 | Intent / 关键规则 |
 |---|---|---|
@@ -149,6 +152,17 @@ enum AgentIntent {
 | `json_value_kind(content)` | `&Value` | `&str` | 诊断用——返回 JSON 值类型名 |
 
 > **设计原则**：sanitize 是 ACL 的核心职责——Runtime 的 tool 输出可能包含大段文本、二进制数据或敏感信息，TUI 展示前 **MUST** 经过 sanitize。sanitize 逻辑集中在 `adapter/agent_event/sanitize.rs`，**NEVER** 散落在 Model 或 Render 层。
+
+### 3.5 空 payload 守卫
+
+**契约：runtime 允许发空，TUI 负责不渲染。** runtime 侧多处按 `if let Some(x) = ... { send(x) }` 发送——只判 `Option` 是否 `Some`，**不判空字符串**（`looping/tools.rs` 的 `emit_json_hook_context`、`looping/post_batch.rs`、`looping/compact.rs`）。据此：
+
+1. **MUST** 空 payload 的判定发生在 **ACL 层**，**NEVER** 下沉到 Model 或 view_assembler——TUI 自身注入的内容（如 `seed_banner` 的 `BANNER_LINES` 故意用空 System block 产生横幅空行）不经 ACL，下沉会误伤（#1106）
+2. **MUST** 判空前先做等价归一化，例如 SystemMessage **MUST** 先剥离 `<system-reminder>` 信封再 `trim().is_empty()`——空信封剥离后才为空
+3. **MUST** 丢弃时记 `log_debug!`，保留可观测性（能查到 runtime 发了空事件、发了几条）；这是 3.3「禁止静默忽略」的**唯一例外**：丢弃是显式决策且留痕，不是遗漏
+4. **NEVER** 在 runtime 侧逐点补判空——反模式散落十余处，判空责任归展示层，单点收口
+
+> 违反后果（#1106）：空 SystemMessage → `timeline` 空 System item → `SystemNotice` block → `render_diagnostic` 产 1 空行，叠加 `document_renderer` 给 depth0 前插的 1 行 = **每条空事件吃掉 2 行**，在输出区堆出大片空白。
 
 ## 4. SDK DTO 边界
 

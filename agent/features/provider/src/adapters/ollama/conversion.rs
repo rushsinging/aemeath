@@ -1,7 +1,7 @@
 //! 消息格式转换：将 Anthropic 风格转换为 Ollama 原生 /api/chat 格式。
 
 use super::OllamaProvider;
-use crate::domain::invoke::SystemBlock;
+use crate::domain::invoke::{InvocationScope, SystemBlock};
 use share::message::{ContentBlock, Message, Role};
 
 /// 将转换方法封装为 trait，方便在 mod.rs 中通过 `self.convert_messages(...)` 调用。
@@ -14,6 +14,7 @@ pub(crate) trait OllamaProviderConversion {
     fn convert_tools(tool_schemas: &[serde_json::Value]) -> Vec<serde_json::Value>;
     fn build_request_body(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -186,6 +187,7 @@ impl OllamaProviderConversion for OllamaProvider {
     /// and non-streaming paths; toggle `stream` accordingly.
     fn build_request_body(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -195,15 +197,15 @@ impl OllamaProviderConversion for OllamaProvider {
         let tools = Self::convert_tools(tool_schemas);
 
         let mut request_body = serde_json::json!({
-            "model": self.model,
+            "model": scope.model(),
             "messages": ollama_messages,
             "stream": stream,
             // think toggles reasoning mode natively (qwen3, deepseek-r1, gpt-oss...)
-            "think": self.reasoning.load(std::sync::atomic::Ordering::Relaxed),
+            "think": scope.effective_reasoning() != crate::ports::ReasoningLevel::Off,
         });
 
         // ollama uses `options.num_predict` for max tokens
-        let max_tokens = self.current_max_tokens();
+        let max_tokens = scope.max_tokens();
         if max_tokens > 0 && max_tokens <= 128000 {
             request_body["options"] = serde_json::json!({
                 "num_predict": max_tokens

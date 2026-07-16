@@ -148,6 +148,7 @@ pub fn apply_gutter_with_frame(
             gutted.style = line.style;
             gutted.gutter_cols = gutter_cols;
             gutted.fill_style = line.fill_style;
+            gutted.links = line.links;
             gutted
         })
         .collect()

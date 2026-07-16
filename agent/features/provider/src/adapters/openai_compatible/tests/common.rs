@@ -4,7 +4,6 @@ use super::driver::{
 };
 use super::*;
 use crate::adapters::client::OpenAIProviderConfig;
-use crate::ports::LlmProvider;
 use serde_json::json;
 
 fn base_body() -> serde_json::Value {

@@ -53,7 +53,7 @@ pub(super) struct SubAgentRun<'a> {
     pub system: String,
     pub progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     pub client: Arc<LlmClient>,
-    pub _shared_client_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+    pub invocation_scope: provider::InvocationScope,
     pub hook_runner: hook::api::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
@@ -74,9 +74,6 @@ pub(super) struct SubAgentRun<'a> {
     pub role_name_for_log: String,
     pub model_name_for_log: String,
     pub resolved_spec: Option<String>,
-    pub previous_max_tokens: u32,
-    pub previous_reasoning_level: provider::ReasoningLevel,
-    pub restore_max_tokens: bool,
     pub progress: Box<dyn Fn(Option<usize>, &str) + Send + Sync + 'a>,
     pub ctx_context_size: usize,
 }
@@ -139,16 +136,12 @@ impl<'a> SubAgentRun<'a> {
         let output = terminal.output();
         finalize_sub_agent(
             &outcome,
-            self.client.as_ref(),
             &self.hook_runner,
             &self.session_id,
             self.prompt,
             &self.system,
             self.resolved_spec.as_deref(),
             &output,
-            self.previous_max_tokens,
-            self.previous_reasoning_level,
-            self.restore_max_tokens,
             self.progress_tx.as_ref(),
             &workspace_root,
         )
@@ -367,6 +360,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         let response = self
             .client
             .stream_message(
+                &self.invocation_scope,
                 &effective_blocks,
                 &messages_for_api,
                 &self.sub_schemas,

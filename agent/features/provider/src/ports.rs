@@ -4,90 +4,8 @@ use async_trait::async_trait;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::invoke::{StreamResponse, SystemBlock};
-
-/// 统一推理深度级别——所有 provider 的共同语言。
-///
-/// `Ord` derive 保证 clamp 语义：`desired.min(provider_max).min(user_max)`。
-/// 各 provider 的实际档位能力不同，由 `max_reasoning_level()` 声明上限，
-/// 超出时由调用方 clamp 到可用档位。
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningLevel {
-    /// 关闭 thinking
-    Off,
-    /// 浅度推理（省 token）
-    Low,
-    /// 中等
-    Medium,
-    /// 深度
-    High,
-    /// 超深度（GLM xhigh / DeepSeek max）
-    Xhigh,
-    /// 极限（GLM max）
-    Max,
-}
-
-impl ReasoningLevel {
-    /// 字符串表示，用于日志和调试。
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ReasoningLevel::Off => "off",
-            ReasoningLevel::Low => "low",
-            ReasoningLevel::Medium => "medium",
-            ReasoningLevel::High => "high",
-            ReasoningLevel::Xhigh => "xhigh",
-            ReasoningLevel::Max => "max",
-        }
-    }
-
-    /// 从字符串解析，大小写不敏感。
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "off" => Some(ReasoningLevel::Off),
-            "low" => Some(ReasoningLevel::Low),
-            "medium" => Some(ReasoningLevel::Medium),
-            "high" => Some(ReasoningLevel::High),
-            "xhigh" => Some(ReasoningLevel::Xhigh),
-            "max" => Some(ReasoningLevel::Max),
-            _ => None,
-        }
-    }
-
-    /// 将本级别 clamp 到 `max` 指定的上限。
-    pub fn clamped_to(self, max: ReasoningLevel) -> ReasoningLevel {
-        if self > max {
-            max
-        } else {
-            self
-        }
-    }
-
-    /// Discriminant as u8，用于 AtomicU8 存储。
-    pub fn as_u8(self) -> u8 {
-        self as u8
-    }
-
-    /// 从 u8 discriminant 还原。
-    pub fn from_u8(v: u8) -> ReasoningLevel {
-        match v {
-            0 => ReasoningLevel::Off,
-            1 => ReasoningLevel::Low,
-            2 => ReasoningLevel::Medium,
-            3 => ReasoningLevel::High,
-            4 => ReasoningLevel::Xhigh,
-            _ => ReasoningLevel::Max,
-        }
-    }
-}
-
-impl std::fmt::Display for ReasoningLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+pub use crate::domain::capability::ReasoningLevel;
+use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 
 /// Handler trait for streaming responses
 pub trait StreamHandler: Send {
@@ -139,6 +57,7 @@ pub trait LlmProvider: Send + Sync {
     /// Stream a message with tool support
     async fn stream_message(
         &self,
+        scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
@@ -152,32 +71,10 @@ pub trait LlmProvider: Send + Sync {
     /// Get the provider name
     fn provider_name(&self) -> &str;
 
-    /// 统一入口：设置推理深度。各 provider 覆盖此方法做自身映射。
-    fn set_reasoning_level(&self, _level: ReasoningLevel) {}
-
-    /// 当前推理深度（用于 save/restore）。
-    /// 默认 Off，各 provider 按内部状态覆盖。
-    fn current_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Off
-    }
-
     /// 声明此 provider 支持的最高档位（graph 用于 clamp 决策）。
     /// 默认 High，各 driver 按能力覆盖。
     fn max_reasoning_level(&self) -> ReasoningLevel {
         ReasoningLevel::High
-    }
-
-    /// 是否开启了推理（current_reasoning_level != Off 的便捷判断）。
-    fn is_reasoning(&self) -> bool {
-        !matches!(self.current_reasoning_level(), ReasoningLevel::Off)
-    }
-
-    /// Set max_tokens override at runtime. `0` means inherit/default and should be ignored.
-    fn set_max_tokens(&self, _max_tokens: u32) {}
-
-    /// Get current runtime max_tokens override. `0` means inherit/default.
-    fn max_tokens(&self) -> u32 {
-        0
     }
 }
 

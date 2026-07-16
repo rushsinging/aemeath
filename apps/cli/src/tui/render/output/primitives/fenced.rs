@@ -14,7 +14,9 @@
 
 use crate::tui::render::output::markdown::{is_table_row, is_table_separator};
 use crate::tui::render::output::primitives::{
-    markdown::markdown, table::table, unified_diff::render_unified_diff,
+    markdown::{markdown, should_skip_blank_outside_fence},
+    table::table,
+    unified_diff::render_unified_diff,
     wrap::wrap_spans_to_rendered_lines,
 };
 use crate::tui::render::output::rendered::RenderedLine;
@@ -33,6 +35,7 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
     let mut idx = 0;
     let mut in_fence = false;
     let mut fence_lang: Option<String> = None;
+    let mut prev_blank_outside = true; // 跳过开头空行
 
     while idx < src.len() {
         let Some(line) = src.get(idx) else {
@@ -40,6 +43,8 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
         };
         let trimmed = line.trim_start();
         if is_fence_marker(trimmed) {
+            // fence 标记行不参与空行合并
+            prev_blank_outside = false;
             if in_fence {
                 let should_show_marker = fence_lang.as_deref() != Some("text");
                 in_fence = false;
@@ -97,6 +102,12 @@ pub fn render_fenced_markdown(text: &str, base_style: Style, width: u16) -> Vec<
                     width as usize,
                 ));
             }
+            idx += 1;
+            continue;
+        }
+
+        // fence 外：跳过连续空行（紧凑模式）
+        if should_skip_blank_outside_fence(line, &mut prev_blank_outside) {
             idx += 1;
             continue;
         }
