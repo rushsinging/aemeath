@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use hook::api::HookRunner;
-use provider::api::LlmClient;
-use provider::api::SystemBlock;
+use provider::LlmClient;
+use provider::SystemBlock;
 use storage::TaskStore;
 use tools::api::{AgentRunner, ToolRegistry};
 

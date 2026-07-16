@@ -51,9 +51,9 @@ where
     pub(crate) sink: &'a S,
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
-    pub(crate) client: &'a Arc<provider::api::LlmClient>,
+    pub(crate) client: &'a Arc<provider::LlmClient>,
     pub(crate) registry: &'a Arc<tools::api::ToolRegistry>,
-    pub(crate) system_blocks: &'a [provider::api::SystemBlock],
+    pub(crate) system_blocks: &'a [provider::SystemBlock],
     pub(crate) system_prompt_text: &'a str,
     pub(crate) user_context: &'a str,
     pub(crate) chain: &'a mut ChatChain,
@@ -298,7 +298,7 @@ where
             }
         }
         if let Some(summary) = self.active_summary.clone() {
-            effective_system_blocks.push(provider::api::SystemBlock {
+            effective_system_blocks.push(provider::SystemBlock {
                 block_type: "text".to_string(),
                 text: format!("<compact-summary>\n{summary}\n</compact-summary>"),
                 cache_control: None,

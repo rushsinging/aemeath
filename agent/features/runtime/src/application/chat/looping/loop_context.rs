@@ -19,7 +19,7 @@ pub type SwitchClientFn = Arc<
             Box<
                 dyn std::future::Future<
                         Output = std::result::Result<
-                            (provider::api::LlmClient, sdk::ModelSwitchResult),
+                            (provider::LlmClient, sdk::ModelSwitchResult),
                             String,
                         >,
                     > + Send,
@@ -51,9 +51,9 @@ where
     pub sink: S,
     pub queue: Q,
     pub input_events: I,
-    pub client: Arc<provider::api::LlmClient>,
+    pub client: Arc<provider::LlmClient>,
     pub registry: Arc<ToolRegistry>,
-    pub system_blocks: Vec<provider::api::SystemBlock>,
+    pub system_blocks: Vec<provider::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
     pub chain: context::session::ChatChain,

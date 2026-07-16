@@ -18,6 +18,8 @@ import sys
 root = Path.cwd()
 FEATURE_LAYERS = {"contract", "gateway", "core", "business", "utils"}
 RUNTIME_HEX_LAYERS = {"domain", "application", "ports", "adapters", "shared"}
+PROVIDER_HEX_LAYERS = {"domain", "adapters"}
+PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
 STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
@@ -36,25 +38,11 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
     root / "agent" / "provider",
     root / "agent" / "tools",
 ]
-# Narrow migration exceptions for already-existing layer inversions.  These are
-# path + target-layer limited so new COLA violations still fail.  Provider still
-# keeps provider traits/config in core while provider protocol files live in
-# business; runtime bootstrap/adapter still owns temporary wiring; tools MCP
-# connection still reaches the registry until the registry port is split.
+# Narrow migration exceptions for already-existing layer inversions. These are
+# path + target-layer limited so new COLA violations still fail. Runtime
+# bootstrap/adapter still owns temporary wiring; tools MCP connection still
+# reaches the registry until the registry port is split.
 LAYER_MIGRATION_EXCEPTIONS = {
-    ("agent/features/provider/src/business/providers/anthropic/message_conversion.rs", "core"),
-    ("agent/features/provider/src/business/providers/anthropic.rs", "core"),
-    ("agent/features/provider/src/business/providers/ollama/non_stream.rs", "core"),
-    ("agent/features/provider/src/business/providers/ollama/stream.rs", "core"),
-    ("agent/features/provider/src/business/providers/ollama.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/driver.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/non_stream.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/provider.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/request_body.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/stream.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/responses.rs", "core"),
-    ("agent/features/provider/src/business/providers/openai_compatible/responses_stream.rs", "core"),
-    ("agent/features/provider/src/business/stream.rs", "core"),
     ("agent/features/tools/src/business/mcp_manager/connection.rs", "core"),
 }
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
@@ -79,6 +67,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
     parts = rel.parts
     if len(parts) >= 4 and parts[1] == "src":
         if parts[0] == "runtime" and parts[2] in RUNTIME_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "provider" and parts[2] in PROVIDER_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "storage":
             return None
@@ -137,6 +127,18 @@ for feature_src in sorted(features_root.glob("*/src")):
             violations.append(
                 f"{child.relative_to(root)}: Runtime legacy COLA directory is forbidden; use {sorted(RUNTIME_HEX_LAYERS)}"
             )
+            continue
+        if crate_name == "provider":
+            if child.stem in PROVIDER_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Provider legacy fixed layer is forbidden; use domain/ports/adapters"
+                )
+                continue
+            if child.is_dir() and child.name not in PROVIDER_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Provider source directories must be {sorted(PROVIDER_HEX_LAYERS)}"
+                )
+                continue
             continue
         if crate_name == "storage":
             if child.stem in STORAGE_LEGACY_LAYERS:

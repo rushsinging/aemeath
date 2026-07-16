@@ -263,7 +263,7 @@ pub async fn compact_messages_with_llm(
     messages: &[Message],
     system_prompt: &str,
     context_size: usize,
-    client: Option<&provider::api::LlmClient>,
+    client: Option<&provider::LlmClient>,
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
@@ -316,14 +316,14 @@ pub async fn compact_messages_with_llm(
 
 /// 底层 LLM 调用：发送 request 消息列表，流式收集文本并解析 `<summary>` 标签。
 async fn llm_generate(
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     request: Vec<Message>,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
     let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let collected_clone = collected.clone();
     {
-        let mut handler = provider::api::CallbackHandler::new(Box::new(move |text: &str| {
+        let mut handler = provider::CallbackHandler::new(Box::new(move |text: &str| {
             if let Ok(mut guard) = collected_clone.lock() {
                 guard.push_str(text);
             }
@@ -345,7 +345,7 @@ async fn llm_generate(
 
 /// 调用 LLM 对 early_messages 生成单次压缩摘要。
 async fn llm_compact(
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     early_messages: &[Message],
     cancel: &CancellationToken,
 ) -> Result<String, String> {
@@ -387,7 +387,7 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
 /// 1. map: 按 token 预算分 N 块，每块独立调用 `llm_compact`。
 /// 2. reduce: 把 N 个子摘要合并，再次调用 LLM 生成连贯的最终摘要。
 async fn compact_messages_map_reduce(
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     early_messages: &[Message],
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,

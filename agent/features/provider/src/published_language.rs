@@ -35,7 +35,7 @@ impl std::fmt::Display for ModelId {
 // ─── Reasoning ──────────────────────────────────────────
 
 /// Re-export ReasoningLevel from core::provider for PL consumers.
-pub use crate::core::provider::ReasoningLevel;
+pub use crate::ports::ReasoningLevel;
 
 /// Reasoning 映射方式——driver 如何把 ReasoningLevel 映射到 wire。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

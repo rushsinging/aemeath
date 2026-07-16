@@ -179,9 +179,7 @@ fn parse_memory_category(value: &str) -> Result<share::memory::MemoryCategory> {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use provider::api::{
-        LlmProvider, StopReason, StreamHandler, StreamResponse, SystemBlock, Usage,
-    };
+    use provider::{LlmProvider, StopReason, StreamHandler, StreamResponse, SystemBlock, Usage};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -242,10 +240,10 @@ mod tests {
             "test-reflection-provider"
         }
 
-        fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+        fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-        fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-            provider::contract::ReasoningLevel::Off
+        fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+            provider::ReasoningLevel::Off
         }
     }
 
@@ -257,7 +255,7 @@ mod tests {
         let cwd =
             std::env::temp_dir().join(format!("aemeath-sdk-reflection-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&cwd).unwrap();
-        let client = Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        let client = Arc::new(provider::LlmClient::from_provider(Arc::new(
             StaticReflectionProvider {
                 response: response.to_string(),
                 usage: Usage {

@@ -14,11 +14,11 @@ type Result<T> = std::result::Result<T, SdkError>;
 pub(crate) async fn build_llm_client_for_switch(
     selection: &str,
     cwd: &std::path::Path,
-) -> std::result::Result<(provider::api::LlmClient, sdk::ModelSwitchResult), String> {
+) -> std::result::Result<(provider::LlmClient, sdk::ModelSwitchResult), String> {
     use crate::application::startup::{
         build_llm_client, resolve_api_key, resolve_base_url, resolve_model_runtime_settings,
     };
-    use provider::api::ProviderDriverKind;
+    use provider::ProviderDriverKind;
 
     let svc = ConfigAppService::new(Some(cwd));
     svc.load().await?;

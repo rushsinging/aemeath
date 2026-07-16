@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use provider::api::{ModelToolSchema, ReasoningLevel};
+use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleConfig;

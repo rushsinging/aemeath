@@ -26,7 +26,7 @@ pub async fn run_complete_reflection(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
     cwd: &Path,
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
 ) -> ReflectionResult<Option<CompleteReflectionResult>> {
@@ -49,7 +49,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
     cwd: &Path,
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
     lang: &str,
@@ -126,12 +126,12 @@ fn should_run_reflection(mode: ReflectionRunMode, config: &share::config::Memory
 }
 
 async fn call_llm_for_reflection(
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     prompt: &str,
     system_prompt_text: &str,
 ) -> ReflectionResult<(String, u32, u32)> {
-    use provider::api::StreamHandler;
-    use provider::api::SystemBlock;
+    use provider::StreamHandler;
+    use provider::SystemBlock;
 
     let system_blocks = vec![SystemBlock::dynamic(system_prompt_text.to_string())];
     let messages = vec![share::message::Message::user(prompt)];

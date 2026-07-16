@@ -32,7 +32,7 @@ pub struct RuntimeHandle {
     pub _mcp_manager: Arc<McpConnectionManager>,
 
     // ─── 可切换的客户端（switch_model 更新此处） ───
-    pub(crate) current_client: std::sync::RwLock<Arc<provider::api::LlmClient>>,
+    pub(crate) current_client: std::sync::RwLock<Arc<provider::LlmClient>>,
 
     // ─── SDK 状态 ───
     /// 当前 active Run 的唯一注册表。同步 cancel_run(run_id) 在同一锁内校验 ID、

@@ -33,7 +33,7 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 锁定六边形目录，Context 锁定 `capabilities/`，Storage 只禁止旧固定层恢复 |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime 与 Provider 锁定六边形目录，Context 锁定 `capabilities/`，Storage 只禁止旧固定层恢复 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
@@ -164,39 +164,31 @@
 | `gateway` | `business`, `utils` |
 
 - **检查方式**：
-  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Context 使用精确能力目录；Runtime 使用六边形目录；Storage 在 #991 阶段不限制过渡模块名称。
+  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Context 使用精确能力目录；Runtime 使用六边形目录；Provider 只允许 `domain/`、`ports.rs`、`adapters/`；Storage 在 #991 阶段不限制过渡模块名称。
+  - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
   - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败。
   - 依赖方向扫描跳过测试路径，并对未迁移横向层与 Runtime 六边形层按 `FORBIDDEN_LAYER_DEPS` 检查；Storage 不参与横向层依赖扫描。
   - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
+- **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
 
 | 路径 | 目标层 | 上下文 |
 |---|---|---|
-| `agent/features/provider/src/business/providers/anthropic/message_conversion.rs` | `core` | Anthropic 消息转换 |
-| `agent/features/provider/src/business/providers/anthropic.rs` | `core` | Anthropic 入口 |
-| `agent/features/provider/src/business/providers/ollama/non_stream.rs` | `core` | Ollama 非流式 |
-| `agent/features/provider/src/business/providers/ollama/stream.rs` | `core` | Ollama 流式 |
-| `agent/features/provider/src/business/providers/ollama.rs` | `core` | Ollama 入口 |
-| `agent/features/provider/src/business/providers/openai_compatible/driver.rs` | `core` | OpenAI 兼容 driver |
-| `agent/features/provider/src/business/providers/openai_compatible/non_stream.rs` | `core` | OpenAI 兼容非流式 |
-| `agent/features/provider/src/business/providers/openai_compatible/provider.rs` | `core` | OpenAI 兼容入口 |
-| `agent/features/provider/src/business/providers/openai_compatible/request_body.rs` | `core` | OpenAI 兼容请求体 |
-| `agent/features/provider/src/business/providers/openai_compatible/stream.rs` | `core` | OpenAI 兼容流式 |
-| `agent/features/provider/src/business/stream.rs` | `core` | Provider 通用 stream |
 | `agent/features/tools/src/business/mcp_manager/connection.rs` | `core` | MCP 连接触达 registry |
 
 - **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：4 个精确 `path + target layer` 例外，均为 #995 只迁目录而不改变接线语义后仍存在的 Current 倒置：`application/client/accessors.rs → adapters`、`application/client/from_args.rs → adapters`、`ports/input_buffer.rs → application`、`ports/legacy.rs → application`。脚本对其做 stale 自检；由 #874–#879 删除，禁止扩张。
 
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Context 使用根级窄 façade `context::{context_port, compact, guidance, skill, session}`；Storage 使用 #991 过渡期 crate-root 窄 façade。脚本同时禁止恢复 Context 的纯转发 `api/gateway`、Prompt `business/gateway` 与 Storage 内部固定层穿透。
+- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context 与 Storage 使用登记的 crate-root 窄 façade。脚本同时禁止 `provider::api` 与 Provider 内部路径穿透、Context 的纯转发层恢复及 Storage 内部固定层穿透。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
+  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
   - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
   - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory/Tool Result façade 符号集合；最终随 #880/#983/#883/#884 收敛。

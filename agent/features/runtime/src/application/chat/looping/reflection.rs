@@ -3,7 +3,7 @@
 use crate::application::reflection::runner::run_complete_reflection_with_base_dir;
 use crate::application::reflection::ReflectionRunMode;
 use crate::LOG_TARGET;
-use provider::api::StopReason;
+use provider::StopReason;
 use std::path::{Path, PathBuf};
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
@@ -15,7 +15,7 @@ pub async fn run_reflection(
     turn_count: usize,
     messages: &[share::message::Message],
     cwd: &Path,
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
 ) -> Option<String> {
@@ -36,7 +36,7 @@ pub async fn run_precompact_reflection(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
     cwd: &Path,
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
 ) -> Option<String> {
@@ -80,7 +80,7 @@ async fn run_forced_reflection_with_base_dir(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
     cwd: &Path,
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
     lang: &str,
@@ -111,7 +111,7 @@ async fn run_reflection_with_base_dir(
     turn_count: usize,
     messages: &[share::message::Message],
     cwd: &Path,
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     system_prompt_text: &str,
     base_dir: PathBuf,
     lang: &str,
