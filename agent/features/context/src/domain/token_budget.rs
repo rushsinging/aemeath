@@ -330,8 +330,13 @@ pub fn needs_compaction_actual(
     // so they are already accounted for — adding them back would double-count.
     let total = last_input_tokens + last_output_tokens;
 
+    needs_compaction_total(total, context_size)
+}
+
+/// Check if compaction is needed using a provider-normalized total token count.
+pub fn needs_compaction_total(last_total_tokens: u64, context_size: usize) -> bool {
     let threshold = autocompact_threshold(context_size, 8192) as u64;
-    total > threshold
+    last_total_tokens > threshold
 }
 
 /// Determine the compaction urgency level based on actual token usage.
