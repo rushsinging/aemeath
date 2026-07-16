@@ -91,6 +91,32 @@ Block feedback 是 system-generated input，至少包含：
 
 Feedback 经 Context Management 进入下一步 Context Window；Hook BC 只返回结构化 reason，不直接修改消息历史。
 
+### 5.1 Hook 输出上下文的 message type
+
+> 状态：Target（目标设计，尚未实现）｜对应 Issue：[#1107](https://github.com/rushsinging/aemeath/issues/1107)｜发现来源：[#1106](https://github.com/rushsinging/aemeath/issues/1106)
+
+Hook JSON 输出的 `additional_context` / `system_message` 面向**展示层**（与上文 block feedback 面向**模型**不同），当前被复用为 `RuntimeStreamEvent::SystemMessage` 投递给 TUI：
+
+| 发送点 | 位置 |
+|---|---|
+| `emit_json_hook_context` | `agent/features/runtime/src/application/chat/looping/tools.rs` |
+| PostToolBatch | `agent/features/runtime/src/application/chat/looping/post_batch.rs` |
+| PreCompact / PostCompact | `agent/features/runtime/src/application/chat/looping/compact.rs` |
+
+**现状问题**：
+
+1. **语义混淆**：Hook 产生的上下文与 runtime 自身的系统消息（如 `[auto-compacted: N → M messages]`）共用一个事件类型，消费端无法区分来源，也就无法按来源施加不同的展示 / 过滤策略。
+2. **无法归因**：TUI 收到 SystemMessage 时不知道来自哪个 hook、哪个 HookEvent，日志与诊断缺少归因信息。
+3. **责任错位**：因类型不可区分，TUI 只能对所有 SystemMessage 一视同仁地做空值过滤（#1106 的 ACL 空 payload 守卫），无法表达「hook 上下文为空是异常，runtime 系统消息为空是 bug」这类差异。
+4. **已有先例**：`HookEvent` → `AppendHookNotice` 早已走独立通道（`adapter/hook_notice.rs`），说明 hook 通知本就该有自己的类型；`additional_context` / `system_message` 是漏网的一支。
+
+**目标设计**：
+
+1. **MUST** Hook 面向展示层的输出使用**独立事件类型**，携带来源归因（hook 名、触发的 HookEvent），**NEVER** 复用 `RuntimeStreamEvent::SystemMessage`
+2. **MUST** 归因字段结构化透传至 TUI，**NEVER** 中途压扁成字符串（对齐 `specs/tui-cli.md` 对 `AgentProgressEvent` 的同类约定）
+3. **MUST** 保持「runtime 允许发空、展示层负责不渲染」的既有契约（见 [tui/03-event-flow-and-acl.md §3.5](../tui/03-event-flow-and-acl.md#35-空-payload-守卫)）——独立 message type 不改变判空责任的归属，只让展示层能按来源区分处理
+4. Hook BC 仍**只返回结构化输出**，事件封装由 runtime 侧完成，**NEVER** 由 Hook BC 直接构造 TUI 事件
+
 ## 6. Main 与 Sub
 
 ### Main Run
