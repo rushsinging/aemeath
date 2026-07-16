@@ -200,7 +200,7 @@ pub fn messages_selected_for_precompact_memory(messages: &[Message]) -> Vec<Mess
 }
 
 /// 从早期对话历史构建 LLM 压缩请求消息。
-pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
+pub fn build_compact_request(early_messages: &[Message], context_size: usize) -> Vec<Message> {
     let mut conversation_text = String::new();
     for msg in early_messages {
         let role = match msg.role {
@@ -250,7 +250,10 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
     let prompt = format!(
         "{COMPACT_PROMPT}\n<conversation_history>\n{conversation_text}</conversation_history>\n\nCompress this history into a summary now. Write your summary inside <summary> tags.",
     )
-    .replace("{BUDGET}", &crate::domain::token_budget::MAX_OUTPUT_TOKENS_FOR_SUMMARY.to_string());
+    .replace(
+        "{BUDGET}",
+        &crate::domain::token_budget::summary_budget(context_size).to_string(),
+    );
 
     vec![Message::user(prompt)]
 }
@@ -331,13 +334,13 @@ pub async fn compact_messages_with_llm(
     let summary = match client {
         Some(client) => {
             if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
-                match compact_messages_map_reduce(client, early_messages, progress, cancel).await {
+                match compact_messages_map_reduce(client, early_messages, progress, context_size, cancel).await {
                     Ok(text) => text,
                     Err(_) => build_summary_text(early_messages),
                 }
             } else {
                 emit_progress(progress, CompactStage::Summarizing);
-                match llm_compact(client, early_messages, cancel).await {
+                match llm_compact(client, early_messages, context_size, cancel).await {
                     Ok(text) => text,
                     Err(_) => build_summary_text(early_messages),
                 }
@@ -400,9 +403,10 @@ async fn llm_generate(
 async fn llm_compact(
     client: &provider::LlmClient,
     early_messages: &[Message],
+    context_size: usize,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
-    let mut request = build_compact_request(early_messages);
+    let mut request = build_compact_request(early_messages, context_size);
     request.push(Message::user(format!(
         "{}\n\n这里是要总结的对话：",
         COMPACT_PROMPT
@@ -443,6 +447,7 @@ async fn compact_messages_map_reduce(
     client: &provider::LlmClient,
     early_messages: &[Message],
     progress: Option<&dyn CompactProgressFn>,
+    context_size: usize,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
     use crate::domain::token_budget::estimate_messages_tokens;
@@ -461,7 +466,7 @@ async fn compact_messages_map_reduce(
     let mut sub_summaries = Vec::with_capacity(chunks.len());
     for (i, chunk) in chunks.iter().enumerate() {
         emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
-        let summary = llm_compact(client, chunk, cancel).await?;
+        let summary = llm_compact(client, chunk, context_size, cancel).await?;
         sub_summaries.push(summary);
         log::info!(
             target: "aemeath:agent:runtime",
