@@ -480,7 +480,20 @@
 - **功能**：扫描 `agent/`、`apps/`、`packages/` 的 Rust 源码，拦截非 `cfg(test)` 的公开 `*_for_test` / `test_only` 入口、未保护的 `testing` / `fixture(s)` / `fake(s)` 模块，以及超过集中 baseline 的生产 `allow(dead_code)`。
 - **baseline**：`.agents/dead-code-baseline.json` 当前上限 10，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
 - **public surface**：`source-guard <root> <output>` 可输出按路径和声明排序的 deterministic public surface，仅供 diff review，不承诺 crates.io semver。
-- **执行策略**：当前注册为本地 Stop 守卫，不新增 PR workflow；#1018 根据实测耗时决定后续在线、离线/定时或手动执行。
+- **执行策略**：source guard 同时进入通用 Git pre-commit（仅 staged 路径命中时）与本地 Stop 守卫；#1018 实测热耗时约 3.1-6s，不新增在线 workflow。
+
+### Git pre-commit（本地钩子，非架构守卫）
+
+- **位置**：`.cargo/hooks/pre-commit`，通过 `core.hooksPath=.cargo/hooks` 启用。
+- **行为**：对 staged Rust 执行 `cargo fmt` 并重新暂存；相关源码/守卫变更执行 source guard；TUI scenario/snapshot 变更只检查 `.snap.new` / `.pending-snap`。
+- **边界**：不执行 production reachability、workspace/all-target、Coverage、完整 P0 或任何依赖 GitHub 网络的 Issue 治理检查。
+- **绕过**：仅使用 Git 原生 `--no-verify`；PR Test plan 必须披露并补跑。
+
+### #677 文档—代码双向校验（人工关键节点）
+
+- **时机**：sub-issue 创建/调整后、叶子 PR 创建前、叶子 PR 合入后、#677 关闭前。
+- **检查**：gate marker、开发前差异、无待对齐、实施结果与 PR/commit 证据、延期承接 Issue，以及原生 parent/sub-issue/blocked-by 状态。
+- **方式**：使用 `gh issue view` 与 GitHub 原生关系人工核验；该规则只服务 #677 有限生命周期，不沉淀为长期 xtask 或通用 pre-commit。
 
 ## 附：钩子体系（非架构守卫）
 
