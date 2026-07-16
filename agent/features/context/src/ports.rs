@@ -6,7 +6,9 @@ use crate::domain::{
 };
 
 pub mod context_port;
+pub mod session_snapshot_store;
 pub use context_port::ContextPort;
+pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
