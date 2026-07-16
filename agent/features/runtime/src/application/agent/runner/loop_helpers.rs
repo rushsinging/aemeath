@@ -5,7 +5,6 @@ use share::message::Message;
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
 use crate::LOG_TARGET;
-use context::compact::needs_compaction_actual;
 use provider::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
@@ -71,22 +70,17 @@ impl<'a> SubAgentRun<'a> {
         logging::context::set_current_turn(turn_number);
     }
 
+    /// 执行 compact（判断由 LoopEngine `needs_compaction()` 承担）。
+    ///
+    /// 先尝试 microcompact（规则清理探索类 tool result），
+    /// 清理后重新估算：若已降到安全线以下则跳过 LLM 摘要。
+    /// 否则执行 LLM compact。
     pub(super) async fn compact_if_needed(
         &mut self,
         api_input: u64,
-        last_output_tokens: u64,
+        _last_output_tokens: u64,
         turn_number: usize,
     ) {
-        if !needs_compaction_actual(
-            api_input,
-            last_output_tokens,
-            None,
-            None,
-            self.ctx_context_size,
-        ) {
-            return;
-        }
-
         // microcompact：规则驱动清理陈旧探索类 tool result（零 LLM 成本）。
         // 清理后重新判断是否还需要 LLM 摘要。
         let mc_cleared = context::compact::microcompact_messages(&mut self.messages);

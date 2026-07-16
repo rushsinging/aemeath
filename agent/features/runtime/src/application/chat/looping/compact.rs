@@ -17,7 +17,10 @@ pub(crate) struct CompactOutcome {
 /// Run auto-compaction if the context is approaching the limit.
 ///
 /// 返回 `Some(CompactOutcome)` 表示发生了压缩（summary + recent tail）。
-/// 返回 `None` 表示无需压缩。
+/// 返回 `None` 表示无需压缩或被 hook 阻断。
+///
+/// **判断职责由 LoopEngine `needs_compaction()` 承担**（基于 API 真实 token 数）。
+/// 本函数到达时，调用方已确认需要 compact，只管执行。
 ///
 /// resume 保护：首 turn 无 API 反馈时跳过（`turn_count == 1 && last_api_input_tokens == 0`），
 /// 确保 resume 会话不会在第一轮被误判 compact。
@@ -30,11 +33,7 @@ pub(crate) async fn auto_compact<S>(
     messages: &[Message],
     system_prompt_text: &str,
     context_size: usize,
-    tool_schema_tokens: usize,
     last_api_input_tokens: u64,
-    last_api_output_tokens: u64,
-    cached_tokens: Option<u64>,
-    reasoning_tokens: Option<u64>,
     memory_config: &share::config::MemoryConfig,
     cwd: &std::path::Path,
     llm_client: &Arc<provider::LlmClient>,
@@ -95,24 +94,7 @@ where
         return None;
     }
 
-    let should_compact = if last_api_input_tokens > 0 {
-        compact::needs_compaction_actual(
-            last_api_input_tokens,
-            last_api_output_tokens,
-            cached_tokens,
-            reasoning_tokens,
-            context_size,
-        )
-    } else {
-        compact::needs_compaction_full(
-            messages,
-            system_prompt_text,
-            context_size,
-            tool_schema_tokens,
-        )
-    };
-
-    if !should_compact || messages.len() <= 4 {
+    if messages.len() <= 4 {
         return None;
     }
 
@@ -305,9 +287,9 @@ where
             .await;
     }
 
-    // full compact：summary + recent tail（手动场景绕过 token 阈值不太合适，
-    // 但 compact_messages_with_llm 内部的 needs_compaction 会基于 system_prompt + context_size
-    // 判断；手动 compact 时用户明确要求，若消息太少会返回 None）。
+    // full compact：summary + recent tail。
+    // compact_messages_with_llm 已不再内部判断阈值，由调用方决定。
+    // 手动 compact 时用户明确要求，消息太少（<=4）会返回 None。
     let progress = make_progress_sink(sink);
     let manual_cancel = tokio_util::sync::CancellationToken::new();
 

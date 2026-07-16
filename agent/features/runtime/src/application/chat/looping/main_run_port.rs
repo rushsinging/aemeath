@@ -230,8 +230,6 @@ where
     }
 
     async fn compact_impl(&mut self) {
-        let tool_schemas = self.registry.schemas_for(self.language);
-        let tool_schema_tokens = context::compact::estimate_tool_schemas_tokens(&tool_schemas);
         let cleared = context::compact::microcompact_chain(self.chain);
         if cleared > 0 {
             self.sink
@@ -249,11 +247,7 @@ where
             &self.chain.messages_flat(),
             self.system_prompt_text,
             self.context_size,
-            tool_schema_tokens,
             *self.last_api_input_tokens,
-            *self.last_api_output_tokens,
-            *self.cached_tokens,
-            *self.reasoning_tokens,
             self.memory_config,
             &self.memory_cwd,
             self.client,
@@ -567,8 +561,16 @@ where
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        // `auto_compact` is the existing source of truth (including resume protection and hooks).
-        Ok(true)
+        if *self.last_api_input_tokens == 0 && *self.last_api_output_tokens == 0 {
+            return Ok(false);
+        }
+        Ok(context::compact::needs_compaction_actual(
+            *self.last_api_input_tokens,
+            *self.last_api_output_tokens,
+            *self.cached_tokens,
+            *self.reasoning_tokens,
+            self.context_size,
+        ))
     }
 
     async fn compact(&mut self, _cancel: &CancellationToken) -> Result<(), LoopEngineError> {

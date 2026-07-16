@@ -8,9 +8,6 @@ use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
-// 向后兼容的 re-export
-pub use crate::domain::compact::needs_compaction;
-
 /// Compact 进度回调 trait。
 ///
 /// `compact_messages_with_llm` 在各阶段（Preparing/Summarizing/Finalizing）
@@ -97,16 +94,14 @@ const COMPACT_CHUNK_TARGET_TOKENS: usize = 30_000;
 /// 使用本地文本提取压缩消息（LLM 不可用时的回退方案）。
 ///
 /// 返回 `Some(CompactResult)` 表示发生了压缩（summary + recent tail）；
-/// `None` 表示无需压缩。summary 不再注入 messages，走 system 通道。
+/// `None` 表示消息太少。summary 不再注入 messages，走 system 通道。
+///
+/// **调用方负责判断是否需要 compact**。本函数只管执行。
 pub fn compact_messages(
     messages: &[Message],
-    system_prompt: &str,
-    context_size: usize,
+    _system_prompt: &str,
+    _context_size: usize,
 ) -> Option<CompactResult> {
-    if !needs_compaction(messages, system_prompt, context_size) {
-        return None;
-    }
-
     let total = messages.len();
     let window = compact_window(total)?;
     if total <= 4 {
@@ -256,20 +251,19 @@ pub fn build_summary_text(messages: &[Message]) -> String {
 /// 使用 LLM 进行语义化压缩（对早期消息生成结构化摘要）。
 ///
 /// 如果 LLM 调用失败，回退到本地 `build_summary_text`。
-/// 返回 `Some(CompactResult)` 表示发生了压缩；`None` 表示无需压缩。
+/// 返回 `Some(CompactResult)` 表示发生了压缩；`None` 表示消息太少无法压缩。
+///
+/// **调用方负责判断是否需要 compact**（基于 API 真实 token 数）。
+/// 本函数只管执行，不重复判断——避免估算偏差导致静默跳过。
 /// summary 走 system 通道，不注入 messages。
 pub async fn compact_messages_with_llm(
     messages: &[Message],
-    system_prompt: &str,
-    context_size: usize,
+    _system_prompt: &str,
+    _context_size: usize,
     client: Option<&provider::LlmClient>,
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
-    if !needs_compaction(messages, system_prompt, context_size) {
-        return None;
-    }
-
     let total = messages.len();
     if total <= 4 {
         return None;
