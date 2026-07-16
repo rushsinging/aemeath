@@ -30,6 +30,7 @@ pub fn validate_session_id(id: &str) -> Result<(), String> {
 
 /// Session metadata for organizing and filtering sessions
 #[derive(Serialize, Deserialize, Default, Clone)]
+#[serde(default)]
 pub struct SessionMetadata {
     /// User-defined title for the session
     pub title: Option<String>,
