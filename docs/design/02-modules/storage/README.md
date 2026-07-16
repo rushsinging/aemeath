@@ -37,7 +37,9 @@ Storage 是数据 BC 与物理介质之间的机制边界：
 
 ## 3. Target 物理目录
 
-Storage 采用 Hexagonal + Clean 组织（`domain + adapters`）。三个拥有独立协议、独立故障测试边界与独立词汇的能力——`safe_path`（路径词法校验）、`atomic_blob`（整值 blob 原子替换协议）、`atomic_dataset`（多 member dataset 事务协议）——收在 `domain/` 各自展开；文件系统技术 detail 终止在 `adapters/`：
+Storage 采用 Hexagonal + Clean 组织（`domain + ports + adapters`）。三个拥有独立协议与故障测试边界的机制——`safe_path`（路径词法校验）、`atomic_blob`（整值 blob 原子替换协议）、`atomic_dataset`（多 member dataset 事务协议）——作为同一 Storage BC 的 domain 模块共置；Storage-owned OHS 集中在 `ports/`，文件系统技术 detail 终止在 `adapters/`。
+
+选择该结构不仅为了语义分层，也为了**易守卫、防漂移、防劣化**：固定的层名与 `domain ← ports ← adapters` 方向可由静态 Guard 直接证明；Guard **MUST** 阻止 `domain/` 使用 `std::fs`/物理 `PathBuf` 或 import `adapters`，阻止 `ports/` 依赖具体 adapter，阻止 adapter 类型进入 crate-root Published Language，并限制 `lib.rs` 只发布稳定 PL/OHS。Storage 不叠加 `capabilities/`，因为它会形成第二套物理边界并提高依赖矩阵守卫成本；三个机制通过 domain 子模块表达，仍共享同一 Hexagonal 约束：
 
 ```text
 src/
@@ -57,6 +59,7 @@ src/
 ```
 
 - `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型，**NEVER** 转发内部结构。
+- `ports/` 只定义 Storage-owned `AtomicBlobPort` / `AtomicDatasetPort` OHS，并依赖 `domain` Published Language；它 **NEVER** 成为所有 trait 的垃圾桶，也不容纳消费方的 Session/Memory/Audit 出站端口。
 - `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；这正是 §3.5 所述"Storage 私有 backend SPI"的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
 - `safe_path` 是被 `atomic_blob` / `atomic_dataset` 消费的独立 domain 子模块：它拥有自己的校验协议与测试夹具，**NEVER** 因"看似工具函数"被内联进另外两个模块。
 - Storage **NEVER** 建立按存储技术命名的模块级横向技术目录；sled 等未来 backend 若引入，仍 **MUST** 落在 `adapters/` 内，不形成横向替换层。
@@ -462,4 +465,4 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-14 | 为 AtomicDataset 增加 expected-revision CAS 与 typed committed receipt，并移除 Task / Project 直连 Storage 路径 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 typed CorruptTransaction + quarantine disposition，统一 blob / dataset digest 歧义的 fail-closed 恢复语义 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 移除 Storage 端 AtomicAppendLogPort（append-log 归 Audit-owned adapter 直接实现）；read() 取消跨代自动 fallback；补 dataset manifest + previous read/promote/quarantine；promote/quarantine 补齐 committed+warning receipt 与 generation/scope/reason | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-16 | 新增 §3 Target 物理目录：Storage 递归竖切为私有 `capabilities/{safe_path,atomic_blob,atomic_dataset}`，`filesystem.rs` 是各切片局部私有技术 detail、不形成横向 adapter 层；后续章节顺延编号至 §4-§11 | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
+| 2026-07-16 | 冻结 §3 Storage Hexagonal 物理结构为 `domain + ports + adapters`：三个机制由 domain 子模块表达，不叠加 `capabilities/`；以稳定层名、单向依赖和窄 façade 支持机械 Guard，防止 I/O 下沉、adapter 泄漏与公开面劣化 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
