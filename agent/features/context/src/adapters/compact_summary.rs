@@ -8,6 +8,40 @@ use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
+/// ToolResult 文本超过此字符数时截断（≈2000 token）。
+/// recent tail 保留的是原始消息，大 ToolResult（读大文件/grep 大量结果）
+/// 会让 compact 后 token 仍超阈值，导致死循环或 context 爆满。
+const TOOL_RESULT_MAX_CHARS: usize = 8000;
+
+/// 截断 recent_messages 中超阈值的 ToolResult 文本。
+/// 只截断 `text` 字段（发给 LLM 的 text-first 文本），保留 `content` 结构化原值不动。
+fn truncate_large_tool_results(messages: &mut [Message]) {
+    for msg in messages.iter_mut() {
+        for block in msg.content.iter_mut() {
+            if let ContentBlock::ToolResult {
+                text: Some(text),
+                tool_use_id,
+                ..
+            } = block
+            {
+                if text.chars().count() > TOOL_RESULT_MAX_CHARS {
+                    let truncated: String = text.chars().take(TOOL_RESULT_MAX_CHARS).collect();
+                    let original_chars = text.chars().count();
+                    *text = format!(
+                        "{truncated}\n\n[... truncated: {original_chars} chars total, {remaining} chars omitted ...]",
+                        remaining = original_chars - TOOL_RESULT_MAX_CHARS
+                    );
+                    log::debug!(
+                        target: "aemeath:agent:storage",
+                        "compact truncate ToolResult {tool_use_id}: {original_chars} → {} chars",
+                        text.chars().count()
+                    );
+                }
+            }
+        }
+    }
+}
+
 // 向后兼容的 re-export
 pub use crate::domain::compact::needs_compaction;
 
@@ -119,6 +153,8 @@ pub fn compact_messages(
     // recent tail：split_point 到末尾的原始消息
     let mut recent = messages[window.split_point..].to_vec();
     sanitize_tool_pairs(&mut recent);
+    // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
+    truncate_large_tool_results(&mut recent);
 
     Some(CompactResult {
         summary,
@@ -307,6 +343,8 @@ pub async fn compact_messages_with_llm(
     // recent tail：split_point 到末尾的原始消息
     let mut recent = messages[window.split_point..].to_vec();
     sanitize_tool_pairs(&mut recent);
+    // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
+    truncate_large_tool_results(&mut recent);
 
     Some(CompactResult {
         summary,
