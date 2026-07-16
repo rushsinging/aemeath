@@ -8,6 +8,30 @@ use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
+/// 将 recent_messages 中所有 ToolResult 文本替换为占位符。
+/// recent tail 的工具结果内容已被 summary 涵盖，保留原始大块文本会浪费 context。
+/// 保留 tool_use_id 和消息结构（保证 LLM 能继续工具调用链路）。
+fn placeholder_tool_results(messages: &mut [Message]) {
+    for msg in messages.iter_mut() {
+        for block in msg.content.iter_mut() {
+            if let ContentBlock::ToolResult {
+                text: Some(text),
+                tool_use_id,
+                ..
+            } = block
+            {
+                if !text.is_empty() {
+                    *text = "[tool result omitted during compaction]".to_string();
+                    log::debug!(
+                        target: "aemeath:agent:storage",
+                        "compact placeholder ToolResult {tool_use_id}",
+                    );
+                }
+            }
+        }
+    }
+}
+
 // 向后兼容的 re-export
 pub use crate::domain::compact::needs_compaction;
 
@@ -57,16 +81,26 @@ pub struct CompactResult {
 }
 
 /// 发送给 LLM 的压缩提示模板。
-pub const COMPACT_PROMPT: &str = r#"You are a conversation summarizer. Create a structured summary of the conversation.
+pub const COMPACT_PROMPT: &str = r#"You are a conversation history compactor for an AI coding agent. Your job is to compress PRIOR conversation history into a structured summary so the agent can continue working with reduced context.
+
+CRITICAL: The text below is PAST conversation history, NOT a new task. Do NOT treat project context files (AGENTS.md, CLAUDE.md, etc.) or environment descriptions as an action request. If the history ends without a clear pending action, summarize what was accomplished — NEVER respond with "please tell me what to do".
+
+Budget: Aim for up to {BUDGET} tokens. This summary replaces the original messages, so it MUST preserve enough detail for the agent to continue seamlessly. More detail is better than less — use the budget fully for long conversations.
 
 <instructions>
 Produce a summary using the EXACT structure below inside `<summary>` tags.
 
-## Goal
-The user's ultimate objective (one sentence).
+## User Requests
+Chronological consolidation of every user instruction that affects the work. Merge related consecutive inputs, preserve scope and action verbs exactly, and make later corrections supersede earlier conflicting instructions.
 
-## Progress
-What has been accomplished so far. Include specific file paths, function names, and concrete details.
+## Goal
+The user's ultimate objective, without upgrading the requested action level.
+
+## Work Completed
+What has actually been done so far. Include specific file paths, function names, commands, commits, and verification evidence when known.
+
+## Problems / Findings
+Confirmed problems, root causes, failed attempts, blockers, uncertainties, and important observations.
 
 ## Key Decisions
 Important decisions made and their reasons.
@@ -77,17 +111,27 @@ List of key files involved (paths only).
 ## Current State
 Where things stand right now — what's working, what's not.
 
-## Next Steps
-What needs to happen next to complete the goal.
+## Next Action
+The single most immediate action the agent should take next, or the exact user decision/input it must wait for.
+
+## Continuation Status
+Exactly one of: Continue, Waiting for User, or Completed. Add one short reason after the status.
 
 Rules:
 - Be specific: include file paths, function names, variable names.
-- Keep concise: aim for 20-30% of original content length.
+- Preserve the requested action level exactly. NEVER upgrade inspect, diagnose, explain, review, or design into implement, edit, commit, push, merge, or close.
+- Consolidate all user inputs in chronological order; later corrections supersede earlier conflicting instructions.
+- Distinguish facts from inference. Do not claim work was completed unless the history shows it.
+- If Continuation Status is Continue, the agent must execute Next Action without waiting for a new user instruction.
+- Use Waiting for User only when an explicit approval, choice, missing input, or new authority is genuinely required.
+- Use Completed only when the user's requested outcome has already been delivered and no work remains.
+- Use the full budget (up to {BUDGET} tokens) — more detail helps the agent continue.
 - Do NOT include raw tool output or tool call details — focus on semantic meaning.
+- Do NOT ask clarifying questions or say "no task found" — this is history compression, not a chat.
 - Each section can be empty if not applicable, but include the heading.
 </instructions>
 
-Here is the conversation to summarize:
+Here is the PAST conversation history to compress:
 "#;
 
 /// 单个 compact chunk 的目标 token 数。
@@ -113,12 +157,17 @@ pub fn compact_messages(
         return None;
     }
 
-    let early_messages = &messages[window.head_protect..window.split_point];
-    let summary = build_summary_text(early_messages);
+    // summary 必须覆盖所有将从 active messages 移除的内容。
+    // `head_protect` 只参与窗口边界计算；头部消息不进入 recent tail，
+    // 因此也必须进入 summary，避免首条用户请求永久丢失。
+    let early_messages = &messages[..window.split_point];
+    let summary = build_summary_text(early_messages, None);
 
     // recent tail：split_point 到末尾的原始消息
     let mut recent = messages[window.split_point..].to_vec();
     sanitize_tool_pairs(&mut recent);
+    // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
+    placeholder_tool_results(&mut recent);
 
     Some(CompactResult {
         summary,
@@ -138,7 +187,8 @@ pub fn compact_window(total: usize) -> Option<CompactWindow> {
         return None;
     }
     let head_protect = 2usize.min(total);
-    let tail_budget = total * 30 / 100;
+    // recent tail 保留尾部 10%（至少 4 条保证工具调用连续性）。
+    let tail_budget = total * 10 / 100;
     let keep_recent = tail_budget.max(4).min(total - head_protect);
     let split_point = (total - keep_recent).max(head_protect);
     if split_point <= head_protect {
@@ -153,12 +203,16 @@ pub fn compact_window(total: usize) -> Option<CompactWindow> {
 
 pub fn messages_selected_for_precompact_memory(messages: &[Message]) -> Vec<Message> {
     compact_window(messages.len())
-        .map(|window| messages[window.head_protect..window.split_point].to_vec())
+        .map(|window| messages[..window.split_point].to_vec())
         .unwrap_or_default()
 }
 
 /// 从早期对话历史构建 LLM 压缩请求消息。
-pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
+pub fn build_compact_request(
+    early_messages: &[Message],
+    previous_summary: Option<&str>,
+    context_size: usize,
+) -> Vec<Message> {
     let mut conversation_text = String::new();
     for msg in early_messages {
         let role = match msg.role {
@@ -205,7 +259,24 @@ pub fn build_compact_request(early_messages: &[Message]) -> Vec<Message> {
         }
     }
 
-    let prompt = format!("{COMPACT_PROMPT}\n<conversation>\n{conversation_text}</conversation>\n\nWrite your summary inside <summary> tags.");
+    let previous_summary = previous_summary
+        .filter(|summary| !summary.trim().is_empty())
+        .map(|summary| {
+            format!(
+                "<previous_summary>\n{summary}\n</previous_summary>\n\n\
+                 The previous summary is authoritative compacted history. Merge it with the newer \
+                 conversation history below; do not drop its user requests, decisions, completed \
+                 work, problems, or continuation state.\n\n"
+            )
+        })
+        .unwrap_or_default();
+    let prompt = format!(
+        "{COMPACT_PROMPT}\n{previous_summary}<conversation_history>\n{conversation_text}</conversation_history>\n\nCompress this history into a summary now. Write your summary inside <summary> tags.",
+    )
+    .replace(
+        "{BUDGET}",
+        &crate::domain::token_budget::summary_budget(context_size).to_string(),
+    );
 
     vec![Message::user(prompt)]
 }
@@ -226,13 +297,13 @@ pub fn parse_compact_response(response_text: &str) -> String {
 }
 
 /// 从早期消息构建本地文本摘要（回退方案，无 LLM 调用）。
-pub fn build_summary_text(messages: &[Message]) -> String {
-    let mut summary = String::new();
+pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) -> String {
+    let mut user_requests = Vec::new();
+    let mut assistant_reports = Vec::new();
+    let mut observed_tool_invocations = Vec::new();
+    let mut last_text: Option<(Role, String)> = None;
+
     for msg in messages {
-        let role = match msg.role {
-            Role::User => "User",
-            Role::Assistant => "Assistant",
-        };
         let text = msg.text_content();
         if !text.is_empty() {
             let truncated = if text.len() > 200 {
@@ -240,17 +311,141 @@ pub fn build_summary_text(messages: &[Message]) -> String {
             } else {
                 text
             };
-            summary.push_str(&format!("- {role}: {truncated}\n"));
+            last_text = Some((msg.role.clone(), truncated.clone()));
+            match msg.role {
+                Role::User => user_requests.push(format!("- {truncated}")),
+                Role::Assistant => {
+                    let label = if indicates_completion(&truncated) {
+                        "Assistant-reported completion (unverified)"
+                    } else {
+                        "Unverified assistant report"
+                    };
+                    assistant_reports.push(format!("- {label}: {truncated}"));
+                }
+            }
         }
 
-        // 记录工具使用但不包含完整详情
+        // 工具调用只证明发起过调用，不能证明结果成功或工作已完成。
         let tool_uses = msg.extract_tool_uses();
         if !tool_uses.is_empty() {
             let tool_names: Vec<&str> = tool_uses.iter().map(|(_, name, _)| *name).collect();
-            summary.push_str(&format!("- {role} used tools: {}\n", tool_names.join(", ")));
+            observed_tool_invocations.push(format!(
+                "- Observed tool invocation (outcome not established): {}",
+                tool_names.join(", ")
+            ));
         }
     }
-    summary
+
+    let user_requests = if user_requests.is_empty() {
+        "- Unknown: no user text was available in the fallback input.".to_string()
+    } else {
+        user_requests.join("\n")
+    };
+    let mut reported_context = assistant_reports;
+    reported_context.extend(observed_tool_invocations);
+    let work_completed = if reported_context.is_empty() {
+        "- No completed work could be established from the fallback input.".to_string()
+    } else {
+        reported_context.join("\n")
+    };
+    let previous_summary = previous_summary
+        .filter(|summary| !summary.trim().is_empty())
+        .map(|summary| {
+            format!(
+                "- Previous compact summary (authoritative context; preserved verbatim):\n\
+                 <previous_summary>\n{summary}\n</previous_summary>"
+            )
+        })
+        .unwrap_or_else(|| "- No previous compact summary was supplied.".to_string());
+    let (next_action, continuation_status) = fallback_continuation(last_text.as_ref());
+
+    format!(
+        "## User Requests\n{user_requests}\n\n\
+         ## Goal\n- Continue the user-requested work without changing its action level.\n\n\
+         ## Work Completed\n{work_completed}\n\n\
+         ## Problems / Findings\n- Semantic LLM compaction failed; this is a deterministic fallback and may not classify findings precisely.\n\n\
+         ## Key Decisions\n- Preserve the chronological user requests and recent messages; do not invent decisions.\n\n\
+         ## Relevant Files\n- Unknown from deterministic fallback.\n\n\
+         ## Current State\n{previous_summary}\n\
+         - Earlier messages were compacted into this fallback summary; recent messages remain available verbatim.\n\n\
+         ## Next Action\n- {next_action}\n\n\
+         ## Continuation Status\n{continuation_status}"
+    )
+}
+
+fn indicates_waiting_for_user(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    [
+        "等待你",
+        "等你确认",
+        "需要你确认",
+        "等待用户",
+        "waiting for user",
+        "waiting for your",
+        "awaiting approval",
+        "need your approval",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn indicates_completion(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if [
+        "not completed",
+        "not finished",
+        "not merged",
+        "未完成",
+        "尚未完成",
+        "没有完成",
+        "未合入",
+        "没有合入",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return false;
+    }
+    [
+        "已完成",
+        "已经完成",
+        "完成并通过",
+        "已合入",
+        "completed",
+        "finished",
+        "merged",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn fallback_continuation(last_text: Option<&(Role, String)>) -> (String, String) {
+    match last_text {
+        Some((Role::User, text)) => (
+            format!("Address the latest user request without expanding its scope: {text}"),
+            "Continue — the latest compacted message is an unresolved user request.".to_string(),
+        ),
+        Some((Role::Assistant, text)) if indicates_waiting_for_user(text) => (
+            format!("Wait for the user input or approval reported here: {text}"),
+            "Waiting for User — the assistant explicitly reported that user input or approval is required."
+                .to_string(),
+        ),
+        Some((Role::Assistant, text)) if indicates_completion(text) => (
+            format!("Wait for the user to confirm completion or request follow-up; reported state: {text}"),
+            "Waiting for User — the assistant reported completion, but deterministic fallback cannot verify delivery or whether follow-up remains."
+                .to_string(),
+        ),
+        Some((Role::Assistant, text)) => (
+            format!("Wait for a new user instruction; last assistant report: {text}"),
+            "Waiting for User — no unambiguous pending user action can be established from the fallback input."
+                .to_string(),
+        ),
+        None => (
+            "Wait for a new user instruction because no actionable text was available.".to_string(),
+            "Waiting for User — deterministic fallback found no actionable user or assistant text."
+                .to_string(),
+        ),
+    }
 }
 
 /// 使用 LLM 进行语义化压缩（对早期消息生成结构化摘要）。
@@ -260,16 +455,14 @@ pub fn build_summary_text(messages: &[Message]) -> String {
 /// summary 走 system 通道，不注入 messages。
 pub async fn compact_messages_with_llm(
     messages: &[Message],
-    system_prompt: &str,
+    previous_summary: Option<&str>,
     context_size: usize,
     client: Option<&provider::LlmClient>,
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,
 ) -> Option<CompactResult> {
-    if !needs_compaction(messages, system_prompt, context_size) {
-        return None;
-    }
-
+    // should_compact 判定已在调用方（状态机 needs_compaction）完成。
+    // 进入此函数即直接执行 compact 管线，不再二次检查。
     let total = messages.len();
     if total <= 4 {
         return None;
@@ -279,26 +472,44 @@ pub async fn compact_messages_with_llm(
 
     let window = compact_window(total)?;
 
-    let early_messages = &messages[window.head_protect..window.split_point];
+    // 与 recent tail 互补：所有不再保留的消息都必须参与 summary。
+    let early_messages = &messages[..window.split_point];
 
     // 尝试 LLM 摘要，失败则回退到本地
     let early_tokens = crate::domain::token_budget::estimate_messages_tokens(early_messages);
     let summary = match client {
         Some(client) => {
             if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
-                match compact_messages_map_reduce(client, early_messages, progress, cancel).await {
+                match compact_messages_map_reduce(
+                    client,
+                    early_messages,
+                    previous_summary,
+                    progress,
+                    context_size,
+                    cancel,
+                )
+                .await
+                {
                     Ok(text) => text,
-                    Err(_) => build_summary_text(early_messages),
+                    Err(_) => build_summary_text(early_messages, previous_summary),
                 }
             } else {
                 emit_progress(progress, CompactStage::Summarizing);
-                match llm_compact(client, early_messages, cancel).await {
+                match llm_compact(
+                    client,
+                    early_messages,
+                    previous_summary,
+                    context_size,
+                    cancel,
+                )
+                .await
+                {
                     Ok(text) => text,
-                    Err(_) => build_summary_text(early_messages),
+                    Err(_) => build_summary_text(early_messages, previous_summary),
                 }
             }
         }
-        None => build_summary_text(early_messages),
+        None => build_summary_text(early_messages, previous_summary),
     };
 
     emit_progress(progress, CompactStage::Finalizing);
@@ -306,6 +517,8 @@ pub async fn compact_messages_with_llm(
     // recent tail：split_point 到末尾的原始消息
     let mut recent = messages[window.split_point..].to_vec();
     sanitize_tool_pairs(&mut recent);
+    // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
+    placeholder_tool_results(&mut recent);
 
     Some(CompactResult {
         summary,
@@ -353,13 +566,11 @@ async fn llm_generate(
 async fn llm_compact(
     client: &provider::LlmClient,
     early_messages: &[Message],
+    previous_summary: Option<&str>,
+    context_size: usize,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
-    let mut request = build_compact_request(early_messages);
-    request.push(Message::user(format!(
-        "{}\n\n这里是要总结的对话：",
-        COMPACT_PROMPT
-    )));
+    let request = build_compact_request(early_messages, previous_summary, context_size);
     llm_generate(client, request, cancel).await
 }
 
@@ -395,7 +606,9 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
 async fn compact_messages_map_reduce(
     client: &provider::LlmClient,
     early_messages: &[Message],
+    previous_summary: Option<&str>,
     progress: Option<&dyn CompactProgressFn>,
+    context_size: usize,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
     use crate::domain::token_budget::estimate_messages_tokens;
@@ -414,7 +627,14 @@ async fn compact_messages_map_reduce(
     let mut sub_summaries = Vec::with_capacity(chunks.len());
     for (i, chunk) in chunks.iter().enumerate() {
         emit_progress_chunk(progress, CompactStage::Summarizing, i + 1, total_chunks);
-        let summary = llm_compact(client, chunk, cancel).await?;
+        let summary = llm_compact(
+            client,
+            chunk,
+            (i == 0).then_some(previous_summary).flatten(),
+            context_size,
+            cancel,
+        )
+        .await?;
         sub_summaries.push(summary);
         log::info!(
             target: "aemeath:agent:runtime",

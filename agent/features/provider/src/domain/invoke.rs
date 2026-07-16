@@ -224,11 +224,79 @@ pub struct Usage {
     /// or `usage.reasoning_tokens` (if provider supports it).
     #[serde(default)]
     pub reasoning_tokens: Option<u32>,
-    /// Total tokens for this request (`prompt_tokens + completion_tokens`).
-    /// Parsed from `usage.total_tokens` (OpenAI-compatible / Anthropic).
-    /// Falls back to `input_tokens + output_tokens` when the provider omits this field.
+    /// Provider-normalized total tokens for this request.
+    ///
+    /// OpenAI-compatible adapters prefer reported `total_tokens`, falling back to
+    /// `input_tokens + output_tokens` without re-adding cached tokens. Anthropic
+    /// adapters normalize `input_tokens + cache_read_input_tokens
+    /// + cache_creation_input_tokens + output_tokens`.
     #[serde(default)]
     pub total_tokens: Option<u32>,
+}
+
+impl Usage {
+    pub fn normalized_total_tokens(&self, additional_input_tokens: u32) -> u32 {
+        self.total_tokens.unwrap_or_else(|| {
+            self.input_tokens
+                .saturating_add(additional_input_tokens)
+                .saturating_add(self.output_tokens)
+        })
+    }
+
+    pub fn finalize_total_tokens(&mut self, additional_input_tokens: u32) {
+        self.total_tokens = Some(self.normalized_total_tokens(additional_input_tokens));
+    }
+
+    pub fn finalize_anthropic_total_tokens(&mut self) {
+        let cache_tokens = self
+            .cached_tokens
+            .unwrap_or(0)
+            .saturating_add(self.cache_creation_tokens.unwrap_or(0));
+        self.finalize_total_tokens(cache_tokens);
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::Usage;
+
+    #[test]
+    fn openai_total_prefers_reported_total_and_does_not_add_cached_tokens() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: Some(80),
+            total_tokens: Some(150),
+            ..Usage::default()
+        };
+
+        assert_eq!(usage.normalized_total_tokens(0), 150);
+    }
+
+    #[test]
+    fn openai_total_falls_back_to_input_plus_output() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: Some(80),
+            ..Usage::default()
+        };
+
+        assert_eq!(usage.normalized_total_tokens(0), 120);
+    }
+
+    #[test]
+    fn anthropic_total_includes_cache_read_and_creation_tokens() {
+        let usage = Usage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: Some(80),
+            cache_creation_tokens: Some(30),
+            ..Usage::default()
+        };
+
+        assert_eq!(usage.normalized_total_tokens(110), 230);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

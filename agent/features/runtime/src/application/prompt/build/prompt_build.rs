@@ -228,6 +228,18 @@ async fn load_agents_md_from_paths(
 ) -> String {
     let mut files = read_user_guidance_files(global_paths, hook_runner, workspace_root).await;
     files.extend(read_user_guidance_files(project_paths, hook_runner, workspace_root).await);
+
+    // 去重：CLAUDE.md 常是 AGENTS.md 的软链，worktree 路径也会导致同一文件被遍历多次。
+    // 先按 canonicalize 后的真实路径去重，再按内容去重（兜底不同路径但内容完全相同的情况）。
+    let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut seen_contents: std::collections::HashSet<String> = std::collections::HashSet::new();
+    files.retain(|file| {
+        let canonical = std::fs::canonicalize(&file.path).unwrap_or_else(|_| file.path.clone());
+        let path_ok = seen_paths.insert(canonical);
+        let content_ok = seen_contents.insert(file.content.clone());
+        path_ok && content_ok
+    });
+
     scan_user_guidance(render_user_guidance(&files))
 }
 

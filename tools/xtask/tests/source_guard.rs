@@ -32,6 +32,27 @@ fn test_only_api_guard_rejects_unguarded_testing_module() {
 }
 
 #[test]
+fn cfg_test_detection_is_exact() {
+    let source = "#[cfg(feature = \"contest\")]\n#[allow(dead_code)]\nfn legacy() {}";
+    assert_eq!(
+        xtask::source_guard::production_dead_code_allow_count(source),
+        1
+    );
+}
+
+#[test]
+fn dead_code_guard_skips_test_only_source_path() {
+    let source = "#[allow(dead_code)]\nfn fixture() {}";
+    assert_eq!(
+        xtask::source_guard::production_dead_code_allow_count_for_path(
+            Path::new("src/module/foo_tests.rs"),
+            source,
+        ),
+        0
+    );
+}
+
+#[test]
 fn dead_code_guard_counts_allow_attributes() {
     let source =
         "#[allow(dead_code)]\nfn legacy() {}\n#[cfg(test)]\n#[allow(dead_code)]\nfn fixture() {}";

@@ -105,6 +105,24 @@ impl StatusBar {
             return;
         }
 
+        // 窄屏提示：终端宽度 < 40 时，状态栏只显示提示
+        if area.width < crate::tui::render::output::gutter::NARROW_STATUS_HINT_THRESHOLD {
+            let base = Style::default().bg(theme::STATUS_BG).fg(theme::WARNING);
+            let hint = "[窄屏] 窗口过窄，建议调整终端大小";
+            let spans = vec![Span::styled(hint, base)];
+            for row in 0..area.height {
+                let row_area = Rect {
+                    y: area.y + row,
+                    height: 1,
+                    ..area
+                };
+                Paragraph::new(Line::from(spans.clone()))
+                    .style(base)
+                    .render(row_area, buf);
+            }
+            return;
+        }
+
         let base = Style::default().bg(theme::STATUS_BG);
         let runtime_area = Rect { height: 1, ..area };
         // Default status selection points at Runtime, but an empty view_state short-circuits in

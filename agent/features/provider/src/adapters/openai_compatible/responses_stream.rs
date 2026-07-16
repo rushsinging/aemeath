@@ -6,6 +6,7 @@
 //! - `response.output_item.added` — 新 item（function_call 或 message）
 //! - `response.completed` — 含 usage
 
+use super::usage::parse_responses_usage;
 use crate::domain::invoke::{StopReason, StreamResponse, Usage};
 use crate::ports::StreamHandler;
 use crate::LOG_TARGET;
@@ -161,29 +162,7 @@ pub(crate) async fn parse_responses_stream(
                 // 提取 usage
                 if let Some(resp_obj) = event.get("response") {
                     if let Some(u) = resp_obj.get("usage") {
-                        usage.input_tokens =
-                            u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                        usage.output_tokens =
-                            u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                        usage.total_tokens = u
-                            .get("total_tokens")
-                            .and_then(|v| v.as_u64())
-                            .map(|v| v as u32);
-
-                        // cached tokens
-                        if let Some(details) = u.get("input_tokens_details") {
-                            usage.cached_tokens = details
-                                .get("cached_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                        }
-                        // reasoning tokens
-                        if let Some(details) = u.get("output_tokens_details") {
-                            usage.reasoning_tokens = details
-                                .get("reasoning_tokens")
-                                .and_then(|v| v.as_u64())
-                                .map(|v| v as u32);
-                        }
+                        usage = parse_responses_usage(u);
                     }
 
                     // 检查 status 判断 stop_reason
@@ -234,6 +213,8 @@ pub(crate) async fn parse_responses_stream(
         content: content_blocks,
         metadata: None,
     };
+
+    usage.finalize_total_tokens(0);
 
     Ok(StreamResponse {
         assistant_message,

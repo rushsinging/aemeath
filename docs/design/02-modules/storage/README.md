@@ -351,16 +351,16 @@ trait AtomicDatasetPort: Send + Sync {
 1. 通过受约束根目录句柄解析 key；拒绝 symlink/no-follow 违规
 2. 获取同 key 的进程内 + 跨进程写锁；先恢复或隔离旧 journal
 3. create-new 随机 stage；write_all + file fsync，计算 new_digest
-4. 若 primary 存在：生成 previous.next、fsync，并记录 old_digest；首次写记录 old=Absent
+4. 若 primary 存在：在**不移动、不删除、不改写 primary** 的前提下，以受约束 copy / reflink / hard-link 后独立验证等平台可证明方式生成同内容 `previous.next`，校验 old digest 并 fsync；首次写记录 old=Absent。Prepared 前任一步失败只清理本事务文件，旧 primary 必须仍在原位
 5. 原子写并 fsync prepared journal { nonce, old_digest|Absent, new_digest, phase=Prepared }，再 fsync 父目录
-6. 原子 replace stage → primary；fsync 父目录（逻辑提交点）
+6. 使用平台/文件系统可证明的“替换既有目标”primitive 原子 replace stage → primary；fsync 父目录（逻辑提交点）。禁止以 remove primary + rename stage 模拟原子替换
 7. 原子把 journal 更新为 phase=Committed 并 fsync；随后 promote previous.next → previous，再 fsync 父目录
 8. 清理本事务临时文件 / journal，释放锁，返回 WriteReceipt
 ```
 
-提交点在第 6 步：此前 crash 保留旧 primary；此后 crash 保留新 primary。rename 与 journal phase 更新无法原子完成，因此恢复 **NEVER** 只看 marker：在同一 key lock 下读取 journal 并校验 primary digest。`phase=Prepared` 且 primary digest 等于 `new_digest` 表示 rename 已提交，**MUST** 补写 Committed 并完成 previous promotion；等于 `old_digest`（或首次写仍 Absent）表示尚未提交，可清理 stage / previous.next / journal；与两者都不符时 **MUST** 隔离 journal、stage、primary 与 previous.next 的可识别证据，并返回 `StorageErrorKind::CorruptTransaction(CorruptTransactionError { reason: PrimaryDigestMatchesNeitherGeneration, ... })`，**NEVER** 猜测或删除上一代。`phase=Committed` **MUST** 验证 primary 等于 `new_digest` 后完成 promotion；不相等时返回 `CommittedDigestMismatch`。没有 journal 时可以清理不被引用的随机 stage；残留 `previous.next` 只有在其 digest 等于当前 primary（证明 crash 发生在 journal 前）时才可清理，否则返回 `OrphanPreviousDigestMismatch` 并 quarantine，**NEVER** 当作普通垃圾删除。
+提交点在第 6 步：此前 crash 保留旧 primary；此后 crash 保留新 primary。这里的“原子 replace”是 adapter capability，不是 rename API 名称假设：adapter **MUST** 在目标平台与文件系统上证明替换既有目标不会出现 Primary 缺失窗口；无法兑现 `ProcessCrashSafe` 时必须在修改 Primary 前返回 `UnsupportedDurability`，**NEVER** 降级为 remove + rename。rename/replace 与 journal phase 更新无法原子完成，因此恢复 **NEVER** 只看 marker：在同一 key lock 下读取 journal并校验 primary digest。`phase=Prepared` 且 primary digest 等于 `new_digest` 表示 replace 已提交，**MUST** 补写 Committed 并完成 previous promotion；等于 `old_digest`（或首次写仍 Absent）表示尚未提交，可清理 stage / previous.next / journal；与两者都不符时 **MUST** 隔离 journal、stage、primary 与 previous.next 的可识别证据，并返回 `StorageErrorKind::CorruptTransaction(CorruptTransactionError { reason: PrimaryDigestMatchesNeitherGeneration, ... })`，**NEVER** 猜测或删除上一代。`phase=Committed` **MUST** 验证 primary 等于 `new_digest` 后完成 promotion；不相等时返回 `CommittedDigestMismatch`。没有 journal 时可以清理不被引用的随机 stage；残留 `previous.next` 只有在其 digest 等于当前 primary（证明 crash 发生在 journal 前）时才可清理，否则返回 `OrphanPreviousDigestMismatch` 并 quarantine，**NEVER** 当作普通垃圾删除。
 
-`write_atomic` 的任何 `Err` **MUST** 表示提交点尚未跨越；第 6 步之后若任一后续 I/O 报错，实现必须在锁内按同一 digest 判定恢复并返回带 `CommitWarning` 的 committed `WriteReceipt`，**NEVER** 返回普通 Err。调用方看到 receipt 必须发布新 live state，**NEVER** 把 warning 当作“仍是旧值”。首次写入没有 previous。所有 adapter 共享这张 crash-state 恢复表，不得自行选择清扫语义。
+`write_atomic` 的普通 `Err` **MUST** 表示提交点尚未跨越；第 6 步之后若任一普通收尾 I/O 报错，实现必须在锁内按同一 digest 判定恢复并返回带 `CommitWarning` 的 committed `WriteReceipt`，**NEVER** 返回普通 `Io`。但 journal/digest 证据互相矛盾时，Storage 已无法证明安全 generation，typed `CorruptTransaction` 的 fail-closed 语义优先于 committed warning：必须隔离可识别证据并返回 corruption，禁止伪装成 warning。调用方看到 receipt 必须发布新 live state，**NEVER** 把 warning 当作“仍是旧值”。首次写入没有 previous。所有 adapter 共享这张 crash-state 恢复表，不得自行选择清扫语义。
 
 `ProcessCrashSafe` 表示 stage 文件和提交目录项都完成所需同步；`BestEffort` 只保证进程内原子可见。namespace 规定最低 durability，逐次 WriteOptions 只能提高，不能降低；平台无法兑现时返回 `UnsupportedDurability`。
 
@@ -489,3 +489,4 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-15 | 移除 Storage 端 AtomicAppendLogPort（append-log 归 Audit-owned adapter 直接实现）；read() 取消跨代自动 fallback；补 dataset manifest + previous read/promote/quarantine；promote/quarantine 补齐 committed+warning receipt 与 generation/scope/reason | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 冻结 §3 Storage Hexagonal 物理结构为 `domain + ports + adapters`：三个机制由 domain 子模块表达，不叠加 `capabilities/`；以稳定层名、单向依赖和窄 façade 支持机械 Guard，防止 I/O 下沉、adapter 泄漏与公开面劣化 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
 | 2026-07-16 | 冻结 blob generation policy 与幂等结果：namespace 静态选择 Retain/Discard；promote 区分 Promoted/AlreadyPromoted/NotFound；quarantine 区分 Moved/AlreadyAbsent，且跨 reopen promote 证据归 #882 journal | [#881](https://github.com/rushsinging/aemeath/issues/881) |
+| 2026-07-16 | 冻结单 blob crash protocol：Prepared 前创建 previous.next 不得移动 Primary；atomic replace 是须证明的平台/文件系统 capability，禁止 remove+rename；提交后普通收尾失败返回 warning，证据矛盾优先返回 typed corruption | [#882](https://github.com/rushsinging/aemeath/issues/882) |

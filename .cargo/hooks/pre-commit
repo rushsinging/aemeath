@@ -4,22 +4,22 @@ set -euo pipefail
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$top"
-mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACMR)
-((${#staged[@]})) || exit 0
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[[ -n "$staged" ]] || exit 0
 
-if printf '%s\n' "${staged[@]}" | grep -qE '\.rs$'; then
+if printf '%s\n' "$staged" | grep -qE '\.rs$'; then
     cargo fmt
     git add -u -- '*.rs'
 fi
 
-if printf '%s\n' "${staged[@]}" | grep -qE '^(agent|apps|packages|tools/xtask|\.agents)/'; then
+if printf '%s\n' "$staged" | grep -qE '^(agent|apps|packages|tools/xtask|\.agents)/'; then
     cargo run --quiet -p xtask -- source-guard "$top"
 fi
 
-if printf '%s\n' "${staged[@]}" | grep -qE '(^|/)(scenario_tests|snapshots)(/|\.)|\.snap$'; then
-    mapfile -t drafts < <(find apps/cli -type f \( -name '*.snap.new' -o -name '.pending-snap' \) -print)
-    if ((${#drafts[@]})); then
-        printf 'error: pending insta snapshot files:\n%s\n' "${drafts[*]}" >&2
+if printf '%s\n' "$staged" | grep -qE '(^|/)(scenario_tests|snapshots)(/|\.)|\.snap$'; then
+    drafts=$(find apps/cli -type f \( -name '*.snap.new' -o -name '.pending-snap' \) -print)
+    if [[ -n "$drafts" ]]; then
+        printf 'error: pending insta snapshot files:\n%s\n' "$drafts" >&2
         exit 1
     fi
 fi

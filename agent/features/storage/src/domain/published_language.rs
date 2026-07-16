@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-use super::SafePathSegment;
+use super::{CorruptTransactionError, SafePathSegment};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Durability {
@@ -121,14 +121,14 @@ impl StorageKey {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StorageErrorKind {
     InvalidKey,
     Io,
     PermissionDenied,
     UnsupportedDurability,
     ConcurrentWrite,
-    CorruptTransaction,
+    CorruptTransaction(CorruptTransactionError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,8 +145,8 @@ impl StorageError {
         }
     }
 
-    pub fn kind(&self) -> StorageErrorKind {
-        self.kind
+    pub fn kind(&self) -> &StorageErrorKind {
+        &self.kind
     }
 }
 

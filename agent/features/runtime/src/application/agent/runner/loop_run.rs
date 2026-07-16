@@ -63,8 +63,7 @@ pub(super) struct SubAgentRun<'a> {
     pub agent: Agent<'a>,
     pub timeout: std::time::Duration,
     pub turn_count: usize,
-    pub last_api_input_tokens: u64,
-    pub last_api_output_tokens: u64,
+    pub last_total_tokens: Option<u64>,
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     pub terminal: Option<AgentRunTerminal>,
     pub start_time: std::time::Instant,
@@ -293,6 +292,11 @@ fn terminal_from_domain_event(event: &RunDomainEvent) -> Option<AgentRunTerminal
     }
 }
 
+fn sub_needs_compaction(last_total_tokens: Option<u64>, context_size: usize) -> bool {
+    last_total_tokens
+        .is_some_and(|total| context::compact::needs_compaction_total(total, context_size))
+}
+
 #[async_trait]
 impl RunLoopPort for SubAgentRun<'_> {
     async fn drain_input(
@@ -302,14 +306,8 @@ impl RunLoopPort for SubAgentRun<'_> {
     }
 
     async fn needs_compaction(&mut self) -> Result<bool, LoopEngineError> {
-        if self.last_api_input_tokens == 0 && self.last_api_output_tokens == 0 {
-            return Ok(false);
-        }
-        Ok(context::compact::needs_compaction_actual(
-            self.last_api_input_tokens,
-            self.last_api_output_tokens,
-            None,
-            None,
+        Ok(sub_needs_compaction(
+            self.last_total_tokens,
             self.ctx_context_size,
         ))
     }
@@ -318,12 +316,9 @@ impl RunLoopPort for SubAgentRun<'_> {
         &mut self,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError> {
-        let input = self.last_api_input_tokens;
-        let output = self.last_api_output_tokens;
-        self.compact_if_needed(input, output, self.turn_count).await;
+        self.compact_now(self.turn_count).await;
         if !self.agent.ctx.cancel.is_cancelled() {
-            self.last_api_input_tokens = 0;
-            self.last_api_output_tokens = 0;
+            self.last_total_tokens = None;
         }
         // The engine owns cancellation transitions. Returning success lets its
         // post-compaction cancellation check emit the authoritative event.
@@ -378,8 +373,9 @@ impl RunLoopPort for SubAgentRun<'_> {
             Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),
         };
 
-        self.last_api_input_tokens = resp.usage.input_tokens as u64;
-        self.last_api_output_tokens = resp.usage.output_tokens as u64;
+        self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
+            &resp.usage,
+        ));
         self.progress_api_ok(turn_number, &resp);
 
         let usage = StepTokenUsage {
@@ -388,7 +384,7 @@ impl RunLoopPort for SubAgentRun<'_> {
             cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
             cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
             reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: resp.usage.total_tokens.map(u64::from).unwrap_or(0),
+            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
             context_window: self.ctx_context_size as u64,
             est_system_tokens: effective_blocks
                 .iter()
@@ -421,8 +417,7 @@ impl RunLoopPort for SubAgentRun<'_> {
             if tool_calls.is_empty() {
                 // Preserve the old retry path: a text-only truncation did not
                 // trigger compaction before asking the model to continue.
-                self.last_api_input_tokens = 0;
-                self.last_api_output_tokens = 0;
+                self.last_total_tokens = None;
                 // An empty tool phase advances the shared state machine while
                 // retaining the old behavior of retrying a truncated response.
                 return Ok((
@@ -548,7 +543,9 @@ impl RunLoopPort for SubAgentRun<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{messages_for_llm, terminal_from_domain_event, ActiveRunRegistration};
+    use super::{
+        messages_for_llm, sub_needs_compaction, terminal_from_domain_event, ActiveRunRegistration,
+    };
     use crate::domain::agent_run::{ActiveRunPort, RunDomainEvent, RunId};
     use share::message::{ContentBlock, Message, Role};
 
@@ -573,6 +570,12 @@ mod tests {
         fn clear(&self, run_id: &RunId) {
             self.active.lock().unwrap().remove(run_id);
         }
+    }
+
+    #[test]
+    fn sub_compact_requires_latest_normalized_total() {
+        assert!(!sub_needs_compaction(None, 1_048_576));
+        assert!(sub_needs_compaction(Some(900_000), 1_048_576));
     }
 
     #[test]

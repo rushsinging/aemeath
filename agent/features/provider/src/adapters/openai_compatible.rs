@@ -14,6 +14,7 @@ mod request_body;
 mod responses;
 mod responses_stream;
 mod stream;
+mod usage;
 
 #[cfg(test)]
 mod tests;

@@ -371,7 +371,7 @@ apps/cli/src/tui/app/scenario_tests/
 5. CLI 全量测试与 clippy；
 6. 独立的少量 PTY smoke test。
 
-P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录冷/热耗时。除已存在的 Coverage workflow 外，是否进入普通 PR CI、release/定时或保持手动执行由 #1018 基于耗时与失败价值决定。
+P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录冷/热耗时。#1050 最终落地 `scripts/check-slow-test-matrix.sh`：host-native fmt/clippy/workspace/P0/P1/PTY 为必跑，跨 target build 仅在显式 `AEMEATH_MATRIX_CROSS=1` 且 toolchain/linker 可用时运行；不新增普通 PR workflow。
 
 ### 10.2 设计验收
 
@@ -400,3 +400,4 @@ P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录
 | 2026-07-14 | 链接全仓测试架构、覆盖率与生产可达性治理 | [#677](https://github.com/rushsinging/aemeath/issues/677) |
 | 2026-07-15 | 落地共享同步 Frame Driver、任意 Backend 基础 Harness 和 startup/input 证明场景；修正无 mod.rs 与耗时先行规则 | [#1016](https://github.com/rushsinging/aemeath/issues/1016) |
 | 2026-07-15 | 扩展 Scripted Effect/Runtime 注入/离散 tick，落地 P0 快照、本地草稿检查和 completion busy Enter 根因修复 | [#1017](https://github.com/rushsinging/aemeath/issues/1017)、[#1009](https://github.com/rushsinging/aemeath/issues/1009) |
+| 2026-07-16 | 落地代表性 P1 组合场景、真实 PTY 启动/恢复 smoke 与 host/cross 慢速矩阵入口 | [#1050](https://github.com/rushsinging/aemeath/issues/1050) |

@@ -1,6 +1,6 @@
 //! 非流式请求：发送消息并等待完整响应
 
-use super::OpenAICompatibleProvider;
+use super::{usage::parse_chat_usage, OpenAICompatibleProvider};
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
     HttpFailureKind, SuccessBodyReadError,
@@ -108,26 +108,10 @@ impl OpenAICompatibleProvider {
 
         // 解析响应
         let mut content_blocks = Vec::new();
-        let mut input_tokens = 0u32;
-        let mut output_tokens = 0u32;
-        let mut total_tokens: Option<u32> = None;
         let mut stop_reason = crate::domain::invoke::StopReason::EndTurn;
 
         // 提取 usage
-        if let Some(usage) = body.get("usage") {
-            input_tokens = usage
-                .get("prompt_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            output_tokens = usage
-                .get("completion_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32;
-            total_tokens = usage
-                .get("total_tokens")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as u32);
-        }
+        let usage = body.get("usage").map(parse_chat_usage).unwrap_or_default();
 
         // 从 choices 中提取内容
         if let Some(choices) = body.get("choices").and_then(|c| c.as_array()) {
@@ -229,14 +213,7 @@ impl OpenAICompatibleProvider {
                 content: content_blocks,
                 metadata: None,
             },
-            usage: crate::domain::invoke::Usage {
-                input_tokens,
-                output_tokens,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens,
-            },
+            usage,
             stop_reason,
         })
     }

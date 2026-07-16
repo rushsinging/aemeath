@@ -396,7 +396,26 @@ pub(crate) async fn send_message_non_stream(
         }
     }
 
-    let usage = Usage {
+    let usage = usage_from_anthropic_response(&body);
+
+    let stop_reason_str = body
+        .get("stop_reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("end_turn");
+
+    Ok(StreamResponse {
+        assistant_message: Message {
+            role: Role::Assistant,
+            content: content_blocks,
+            metadata: None,
+        },
+        usage,
+        stop_reason: StopReason::parse(stop_reason_str),
+    })
+}
+
+fn usage_from_anthropic_response(body: &serde_json::Value) -> Usage {
+    let mut usage = Usage {
         input_tokens: body
             .get("usage")
             .and_then(|u| u.get("input_tokens"))
@@ -418,30 +437,17 @@ pub(crate) async fn send_message_non_stream(
             .and_then(|v| v.as_u64())
             .map(|v| v as u32),
         reasoning_tokens: None, // Anthropic 不返回 reasoning_tokens
-        total_tokens: None,     // Anthropic 不返回 total_tokens，由消费侧回退 input+output
+        total_tokens: None,
     };
-
-    let stop_reason_str = body
-        .get("stop_reason")
-        .and_then(|v| v.as_str())
-        .unwrap_or("end_turn");
-
-    Ok(StreamResponse {
-        assistant_message: Message {
-            role: Role::Assistant,
-            content: content_blocks,
-            metadata: None,
-        },
-        usage,
-        stop_reason: StopReason::parse(stop_reason_str),
-    })
+    usage.finalize_anthropic_total_tokens();
+    usage
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas,
-        send_message_non_stream, RequestParams,
+        send_message_non_stream, usage_from_anthropic_response, RequestParams,
     };
     use crate::ports::StreamHandler;
     use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
@@ -861,6 +867,26 @@ mod tests {
         })];
         let result = sanitize_tool_schemas(&schemas);
         assert_eq!(result[0].get("input_schema").unwrap(), &input);
+    }
+
+    #[test]
+    fn non_stream_usage_includes_anthropic_cache_read_and_creation_fields() {
+        let body = serde_json::json!({
+            "usage": {
+                "input_tokens": 100,
+                "cache_read_input_tokens": 80,
+                "cache_creation_input_tokens": 30,
+                "output_tokens": 20
+            }
+        });
+
+        let usage = usage_from_anthropic_response(&body);
+
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.cached_tokens, Some(80));
+        assert_eq!(usage.cache_creation_tokens, Some(30));
+        assert_eq!(usage.output_tokens, 20);
+        assert_eq!(usage.total_tokens, Some(230));
     }
 
     #[test]
