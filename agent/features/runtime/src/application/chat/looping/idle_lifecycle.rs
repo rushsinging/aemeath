@@ -9,13 +9,13 @@ use crate::LOG_TARGET;
 use context::session::ChatChain;
 
 pub(crate) async fn execute_set_thinking<S>(
-    client: &provider::api::LlmClient,
+    client: &provider::LlmClient,
     sink: &S,
     desired: Option<bool>,
 ) where
     S: ChatEventSink,
 {
-    use provider::api::ReasoningLevel;
+    use provider::ReasoningLevel;
     let current = client.current_reasoning_level();
     let new_state = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
     let level = if new_state {

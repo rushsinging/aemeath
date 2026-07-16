@@ -84,8 +84,8 @@ fn test_list_sessions() -> Arc<
 use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
-use provider::api::{LlmProvider, StreamHandler};
-use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
+use provider::{LlmProvider, StreamHandler};
+use provider::{StopReason, StreamResponse, SystemBlock, Usage};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
@@ -100,17 +100,14 @@ fn test_build_switched_client(
 ) -> std::pin::Pin<
     Box<
         dyn std::future::Future<
-                Output = std::result::Result<
-                    (provider::api::LlmClient, sdk::ModelSwitchResult),
-                    String,
-                >,
+                Output = std::result::Result<(provider::LlmClient, sdk::ModelSwitchResult), String>,
             > + Send,
     >,
 > {
     let selection = selection.to_string();
     Box::pin(async move {
         let client =
-            provider::api::LlmClient::from_provider(Arc::new(SequenceProvider::new(vec!["dummy"])));
+            provider::LlmClient::from_provider(Arc::new(SequenceProvider::new(vec!["dummy"])));
         let result = sdk::ModelSwitchResult {
             display_name: selection,
             context_window: 0,
@@ -133,7 +130,7 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
 
 #[test]
 fn provider_cancelled_error_maps_to_cancelled_outcome() {
-    let error = provider::api::LlmError::Cancelled;
+    let error = provider::LlmError::Cancelled;
     assert!(is_user_cancelled_provider_error(&error));
 }
 
@@ -327,10 +324,10 @@ impl LlmProvider for TwoTurnProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -391,10 +388,10 @@ impl LlmProvider for SequenceProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -475,7 +472,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -589,7 +586,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -705,7 +702,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["final response"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -798,7 +795,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         sink: sink.clone(),
         queue,
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             TwoTurnProvider,
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -965,7 +962,7 @@ async fn test_continue_false_json_treated_as_block() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["first response", "second response"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -1080,7 +1077,7 @@ async fn test_stall_triggers_stop_hook_check() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec![
                 "same output",
                 "same output",
@@ -1244,7 +1241,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -1366,10 +1363,10 @@ impl LlmProvider for IdenticalReplyProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -1429,7 +1426,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -1565,10 +1562,10 @@ impl LlmProvider for RecordingProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -1646,7 +1643,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -1766,7 +1763,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -1866,7 +1863,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -1943,7 +1940,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -2034,11 +2031,11 @@ impl LlmProvider for CancellableThenNormalProvider {
         if call_index == 0 {
             // 回合 1：阻塞等待 cancel，被取消后返回 Cancelled（模拟 provider 侧取消）。
             cancel.cancelled().await;
-            return Err(provider::api::LlmError::Cancelled);
+            return Err(provider::LlmError::Cancelled);
         }
         // 回合 2+：正常完成（关键：此时若 token 未重置，会立刻 Cancelled）。
         if cancel.is_cancelled() {
-            return Err(provider::api::LlmError::Cancelled);
+            return Err(provider::LlmError::Cancelled);
         }
         let text = format!("turn {} final", call_index + 1);
         handler.on_text(&text);
@@ -2068,10 +2065,10 @@ impl LlmProvider for CancellableThenNormalProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -2148,7 +2145,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -2271,10 +2268,10 @@ impl LlmProvider for CompleteThenCancellableProvider {
         // 回合 1 / 回合 3：正常完成（token 已重置，不应被陈旧 cancel 污染）。
         if call_index == 1 {
             cancel.cancelled().await;
-            return Err(provider::api::LlmError::Cancelled);
+            return Err(provider::LlmError::Cancelled);
         }
         if cancel.is_cancelled() {
-            return Err(provider::api::LlmError::Cancelled);
+            return Err(provider::LlmError::Cancelled);
         }
         let text = format!("turn {} assistant", call_index + 1);
         handler.on_text(&text);
@@ -2304,10 +2301,10 @@ impl LlmProvider for CompleteThenCancellableProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -2402,7 +2399,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -2575,10 +2572,10 @@ async fn test_chat_impl_idle_until_first_input_event() {
             "test-provider"
         }
 
-        fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+        fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-        fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-            provider::contract::ReasoningLevel::Off
+        fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+            provider::ReasoningLevel::Off
         }
     }
 
@@ -2651,7 +2648,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2771,7 +2768,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
@@ -2866,7 +2863,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -2939,7 +2936,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![None]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
@@ -3019,7 +3016,7 @@ impl LlmProvider for ApiErrorThenNormalProvider {
         };
         if call_index == 0 {
             // 回合 1：模拟 provider 流中断（非取消类 API 错误）。
-            return Err(provider::api::LlmError::Stream(
+            return Err(provider::LlmError::Stream(
                 "stream interrupted after partial output: error decoding response body".to_string(),
             ));
         }
@@ -3053,10 +3050,10 @@ impl LlmProvider for ApiErrorThenNormalProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -3106,7 +3103,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         sink: sink.clone(),
         queue: SequenceQueueDrainPort::new(vec![]),
         input_events,
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(provider))),
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),

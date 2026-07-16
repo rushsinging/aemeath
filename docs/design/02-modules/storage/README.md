@@ -96,6 +96,13 @@ struct WriteOptions {
 enum Durability { ProcessCrashSafe, BestEffort }
 enum Generation { Primary, Previous }
 
+enum PreviousPolicy { Retain, Discard }
+
+impl StorageNamespace {
+    /// namespace-owned 静态策略；调用方不能逐次关闭。
+    fn previous_policy(self) -> PreviousPolicy;
+}
+
 struct DeleteOptions {
     include_quarantine: bool,
 }
@@ -178,6 +185,19 @@ enum CommitWarning {
     MemberPublishRecoveryPending,
 }
 
+/// promote_previous() 的幂等结果。
+enum PromoteOutcome {
+    Promoted(WriteReceipt),
+    AlreadyPromoted,
+    NotFound,
+}
+
+/// quarantine() 只移动显式指定的代；缺失时不创建虚假 artifact。
+enum QuarantineOutcome {
+    Moved(QuarantineReceipt),
+    AlreadyAbsent,
+}
+
 struct QuarantineId(SafePathSegment);
 
 struct QuarantinedArtifact {
@@ -236,7 +256,9 @@ enum StorageErrorKind {
 
 > **Audit UsageAppendStorePort 所有权**：`UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。`AtomicBlobPort`/`AtomicDatasetPort` 的原子性建立在“整值 stage → fsync → rename”协议上，天然拼不出增量 append + 逐行 flush 语义；因此 Audit adapter **MUST** 直接以 file append（open-append 等价物 + write + fsync）detail 实现 append-log，只复用 Storage 发布的路径安全 primitive（`SafePathSegment` 校验、受约束根目录句柄解析），**NEVER** 组合调用 `AtomicBlobPort`/`AtomicDatasetPort` 来模拟追加。端口 trait 的定义、调用和语义归属 **MUST** 属于 Audit；Storage 只提供原子读写、路径安全和损坏兜底**机制**，不发布 append-log OHS。这样保持 Storage 的 blob/dataset 级抽象不被 append 语义污染，也避免两个 BC 同时声称拥有同一端口。
 
-`StorageKey` 表达逻辑位置，不暴露用户主目录或绝对路径。物理路径由 adapter 根据 ConfigSnapshot 提供的根目录与 namespace policy 解析。namespace policy 固定是否保留上一代；调用方不能逐次关闭该安全属性。
+`StorageKey` 表达逻辑位置，不暴露用户主目录或绝对路径。物理路径由 adapter 根据 ConfigSnapshot 提供的根目录与 namespace policy 解析。namespace policy 固定是否保留上一代；调用方不能逐次关闭该安全属性。Session、Memory、Task、History、ToolResult、Config、Workspace 与 Cost 使用 `PreviousPolicy::Retain`；AuditUsage 的增量 append 不经 AtomicBlobPort，因此使用 `Discard`。未来新增 namespace **MUST** 显式选择策略，禁止依赖默认分支。
+
+`promote_previous` 的幂等语义由 typed outcome 冻结：Previous 存在时返回 `Promoted(receipt)`；Previous 已在同一 adapter 生命周期内被该 key 的上一次 promote 成功消费且 Primary 仍存在时返回 `AlreadyPromoted`；从未存在可 promote generation 或 Primary/Previous 均不存在时返回 `NotFound`。实现 **NEVER** 只凭“Previous 缺失 + Primary 存在”猜测 `AlreadyPromoted`，必须有 Storage-owned 提交证据；该跨 reopen 证据与 crash-safe 幂等由 #882 journal 承接，#881 仅保证同一进程实例内的机械幂等。`quarantine` 缺失指定 generation 时返回 `AlreadyAbsent`，不创建 artifact id、不移动另一代；移动成功 receipt 必须原样记录 generation、scope 与 reason。
 
 `CorruptTransaction` 只表示 **Storage 自己的 crash protocol 证据互相矛盾**；领域 decoder 拒绝一份机械完整的 JSON / bytes 仍由所属数据 BC 处理，并通过普通 `quarantine()` 命令隔离，**NEVER** 伪装成 Storage transaction corruption。错误不暴露绝对路径、nonce 或原始内容；quarantine 失败也 **MUST** 在 `QuarantineDisposition::Failed` 中保留原始 corruption reason。
 
@@ -255,7 +277,7 @@ trait AtomicBlobPort: Send + Sync {
         bytes: &[u8],
         options: WriteOptions,
     ) -> Result<WriteReceipt, StorageError>;
-    async fn promote_previous(&self, key: &StorageKey) -> Result<WriteReceipt, StorageError>;
+    async fn promote_previous(&self, key: &StorageKey) -> Result<PromoteOutcome, StorageError>;
     /// 显式隔离某一 generation / transaction scope；reason 由调用方选择稳定 typed 类别。
     async fn quarantine(
         &self,
@@ -263,7 +285,7 @@ trait AtomicBlobPort: Send + Sync {
         generation: Generation,
         scope: TransactionScope,
         reason: QuarantineReason,
-    ) -> Result<QuarantineReceipt, StorageError>;
+    ) -> Result<QuarantineOutcome, StorageError>;
     async fn delete_all_generations(
         &self,
         key: &StorageKey,
@@ -466,3 +488,4 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-14 | 增加 typed CorruptTransaction + quarantine disposition，统一 blob / dataset digest 歧义的 fail-closed 恢复语义 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 移除 Storage 端 AtomicAppendLogPort（append-log 归 Audit-owned adapter 直接实现）；read() 取消跨代自动 fallback；补 dataset manifest + previous read/promote/quarantine；promote/quarantine 补齐 committed+warning receipt 与 generation/scope/reason | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 冻结 §3 Storage Hexagonal 物理结构为 `domain + ports + adapters`：三个机制由 domain 子模块表达，不叠加 `capabilities/`；以稳定层名、单向依赖和窄 façade 支持机械 Guard，防止 I/O 下沉、adapter 泄漏与公开面劣化 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
+| 2026-07-16 | 冻结 blob generation policy 与幂等结果：namespace 静态选择 Retain/Discard；promote 区分 Promoted/AlreadyPromoted/NotFound；quarantine 区分 Moved/AlreadyAbsent，且跨 reopen promote 证据归 #882 journal | [#881](https://github.com/rushsinging/aemeath/issues/881) |

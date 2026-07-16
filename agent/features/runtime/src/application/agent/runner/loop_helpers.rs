@@ -6,7 +6,7 @@ use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
 use crate::LOG_TARGET;
 use context::compact::needs_compaction_actual;
-use provider::api::SystemBlock;
+use provider::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
     pub(super) fn progress_tools_done(&self, turn_number: usize, result_count: usize) {

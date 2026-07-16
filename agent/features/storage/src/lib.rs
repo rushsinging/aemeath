@@ -13,8 +13,10 @@ mod tool_result;
 
 pub use adapters::FileSystemBlobAdapter;
 pub use domain::{
-    BlobRead, CommitWarning, Durability, Generation, ReadOutcome, SafePathSegment, StorageError,
-    StorageErrorKind, StorageKey, StorageNamespace, WriteOptions, WriteReceipt,
+    BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Durability, Generation, PreviousPolicy,
+    PromoteOutcome, QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome,
+    SafePathSegment, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
+    TransactionScope, WriteOptions, WriteReceipt,
 };
 pub use memory_store::{
     memory_base_dir, project_file_name, project_file_name_from_path, MemoryStore,

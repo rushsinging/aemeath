@@ -1,7 +1,7 @@
 use super::stream_handler::{should_emit_model_stream_waiting, RuntimeStreamHandler};
 use super::tool_identity::ToolIdentityRegistry;
 use super::{ChatEventSink, EventFuture, RuntimeStreamEvent, RuntimeTurnContext};
-use provider::api::StreamHandler;
+use provider::StreamHandler;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]

@@ -3,7 +3,7 @@ use crate::application::agent::runner as agent_runner;
 use crate::application::startup::config_paths;
 use crate::LOG_TARGET;
 use hook::api::HookRunner;
-use provider::api::LlmClient;
+use provider::LlmClient;
 use share::config::hooks::HooksConfig;
 use share::config::{AgentsConfig, ModelsConfig};
 use std::path::Path;
@@ -59,12 +59,12 @@ fn build_llm_client_pool(
     client: Arc<LlmClient>,
     models_config: Arc<share::config::ModelsConfig>,
     timeout_secs: u64,
-) -> Option<Arc<provider::api::LlmClientPool>> {
+) -> Option<Arc<provider::LlmClientPool>> {
     if !has_multi_provider_or_agent_roles(agents, &models_config) {
         return None;
     }
 
-    Some(Arc::new(provider::api::LlmClientPool::new(
+    Some(Arc::new(provider::LlmClientPool::new(
         client,
         models_config,
         timeout_secs,

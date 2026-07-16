@@ -1,0 +1,232 @@
+//! 非流式请求：发送消息并等待完整响应
+
+use super::OpenAICompatibleProvider;
+use crate::adapters::error_log::{log_http_error, log_network_error, ErrorLogContext};
+use crate::domain::invoke::{StreamResponse, SystemBlock};
+use crate::ports::StreamHandler;
+use share::message::{ContentBlock, Message, Role};
+
+impl OpenAICompatibleProvider {
+    pub(crate) async fn send_message_non_stream(
+        &self,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+    ) -> Result<StreamResponse, crate::LlmError> {
+        let openai_messages = self.convert_messages(system, messages)?;
+        let tools = Self::convert_tools(tool_schemas);
+
+        let mut request_body = self.base_request_body(openai_messages, false);
+
+        self.apply_reasoning_fields(&mut request_body);
+        if !tools.is_empty() {
+            request_body["tools"] = serde_json::Value::Array(tools);
+            request_body["parallel_tool_calls"] = serde_json::Value::Bool(true);
+        }
+
+        let headers = self.build_headers()?;
+
+        let endpoint = self.chat_url();
+        let request_bytes = serde_json::to_string(&request_body)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let started = std::time::Instant::now();
+        let response = match self
+            .http
+            .post(&endpoint)
+            .headers(headers)
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log_network_error(
+                    ErrorLogContext {
+                        driver: "openai_compatible",
+                        api: "chat_completions_non_stream",
+                        provider: &self.config.source_key,
+                        model: &self.model,
+                        endpoint: &endpoint,
+                        attempt: 1,
+                        max_attempts: 1,
+                        elapsed_ms: started.elapsed().as_millis(),
+                        message_count: messages.len(),
+                        tool_count: tool_schemas.len(),
+                        request_bytes,
+                    },
+                    &error,
+                    false,
+                );
+                return Err(crate::LlmError::Network(error.to_string()));
+            }
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            log_http_error(
+                ErrorLogContext {
+                    driver: "openai_compatible",
+                    api: "chat_completions_non_stream",
+                    provider: &self.config.source_key,
+                    model: &self.model,
+                    endpoint: &endpoint,
+                    attempt: 1,
+                    max_attempts: 1,
+                    elapsed_ms: started.elapsed().as_millis(),
+                    message_count: messages.len(),
+                    tool_count: tool_schemas.len(),
+                    request_bytes,
+                },
+                status,
+                &body,
+                false,
+            );
+            return Err(crate::LlmError::Api {
+                error_type: status.to_string(),
+                message: body,
+            });
+        }
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| crate::LlmError::Stream(e.to_string()))?;
+
+        // 解析响应
+        let mut content_blocks = Vec::new();
+        let mut input_tokens = 0u32;
+        let mut output_tokens = 0u32;
+        let mut total_tokens: Option<u32> = None;
+        let mut stop_reason = crate::domain::invoke::StopReason::EndTurn;
+
+        // 提取 usage
+        if let Some(usage) = body.get("usage") {
+            input_tokens = usage
+                .get("prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            output_tokens = usage
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            total_tokens = usage
+                .get("total_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+        }
+
+        // 从 choices 中提取内容
+        if let Some(choices) = body.get("choices").and_then(|c| c.as_array()) {
+            if let Some(choice) = choices.first() {
+                // 检查 finish_reason
+                if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                    stop_reason = match finish {
+                        "stop" => crate::domain::invoke::StopReason::EndTurn,
+                        "tool_calls" => crate::domain::invoke::StopReason::ToolUse,
+                        "length" => crate::domain::invoke::StopReason::MaxTokens,
+                        _ => crate::domain::invoke::StopReason::EndTurn,
+                    };
+                }
+
+                if let Some(message) = choice.get("message") {
+                    // 提取 reasoning 内容（例如 glm-5.1, DeepSeek-R1）。
+                    // 作为 Thinking 块保留在 content_blocks 中，以便下一轮
+                    // convert_messages 可以将其作为 `reasoning_content` 字段重发——
+                    // DeepSeek 的 thinking 模式拒绝省略此字段的 assistant 消息。
+                    if let Some(reasoning) =
+                        message.get("reasoning_content").and_then(|c| c.as_str())
+                    {
+                        if !reasoning.is_empty() {
+                            handler.on_thinking(reasoning);
+                            content_blocks.push(ContentBlock::Thinking {
+                                thinking: reasoning.to_string(),
+                                signature: None,
+                            });
+                        }
+                    }
+
+                    // 提取文本内容
+                    if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
+                        if !content.is_empty() {
+                            handler.on_text(content);
+                            handler.on_block_complete(content);
+                            content_blocks.push(ContentBlock::Text {
+                                text: content.to_string(),
+                            });
+                        }
+                    }
+
+                    // 提取 tool calls
+                    if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
+                        for (idx, tool_call) in tool_calls.iter().enumerate() {
+                            if let Some(function) = tool_call.get("function") {
+                                let id = tool_call
+                                    .get("id")
+                                    .and_then(|i| i.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = function
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let arguments = function
+                                    .get("arguments")
+                                    .and_then(|a| a.as_str())
+                                    .unwrap_or("{}");
+                                let input: serde_json::Value = match serde_json::from_str(arguments)
+                                {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        // 非流式 HTTP body 已完整接收，arguments 解析失败属 provider 协议异常。
+                                        // 仍尝试启发式恢复（防 arguments 被切在 string 字面量中间），
+                                        // 恢复失败则记 warn 用空对象兜底（避免整个响应失败）。
+                                        log::warn!(
+                                            target: "aemeath:agent:provider",
+                                            "OpenAI 非流式 tool_call arguments 解析失败（id={}, name={}, err={}, raw_len={}），尝试恢复",
+                                            id, name, e, arguments.len(),
+                                        );
+                                        crate::adapters::json_recovery::try_complete_truncated_json(arguments)
+                                            .unwrap_or_else(|| {
+                                                log::warn!(
+                                                    target: "aemeath:agent:provider",
+                                                    "启发式恢复未成功（id={}, name={}），使用空对象兜底",
+                                                    id, name,
+                                                );
+                                                serde_json::Value::Object(serde_json::Map::new())
+                                            })
+                                    }
+                                };
+
+                                handler.on_tool_use_start(&name, Some(&id), idx);
+                                if !name.is_empty() {
+                                    content_blocks.push(ContentBlock::ToolUse { id, name, input });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(StreamResponse {
+            assistant_message: Message {
+                role: Role::Assistant,
+                content: content_blocks,
+                metadata: None,
+            },
+            usage: crate::domain::invoke::Usage {
+                input_tokens,
+                output_tokens,
+                cached_tokens: None,
+                cache_creation_tokens: None,
+                reasoning_tokens: None,
+                total_tokens,
+            },
+            stop_reason,
+        })
+    }
+}

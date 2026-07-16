@@ -5,7 +5,7 @@ use super::logging::{
 use super::progress::build_tool_calls_progress_event;
 use super::*;
 use async_trait::async_trait;
-use provider::api::{LlmError, LlmProvider, StreamResponse, SystemBlock};
+use provider::{LlmError, LlmProvider, StreamResponse, SystemBlock};
 use share::config::AgentRoleConfig;
 use share::message::Message;
 use share::tool::AgentProgressKind;
@@ -522,7 +522,7 @@ fn test_tool_call_with_id(
 
 fn test_runner(error: LlmError) -> CliAgentRunner {
     CliAgentRunner {
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             ErrorProvider { error },
         ))),
         pool: None,
@@ -537,7 +537,7 @@ fn test_runner(error: LlmError) -> CliAgentRunner {
 
 fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> CliAgentRunner {
     CliAgentRunner {
-        client: Arc::new(provider::api::LlmClient::from_provider(Arc::new(
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             BlockingThenCancelledProvider { calls },
         ))),
         pool: None,
@@ -563,7 +563,7 @@ impl LlmProvider for BlockingThenCancelledProvider {
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        _handler: &mut dyn provider::api::StreamHandler,
+        _handler: &mut dyn provider::StreamHandler,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StreamResponse, LlmError> {
         {
@@ -582,10 +582,10 @@ impl LlmProvider for BlockingThenCancelledProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
@@ -624,7 +624,7 @@ impl LlmProvider for ErrorProvider {
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        _handler: &mut dyn provider::api::StreamHandler,
+        _handler: &mut dyn provider::StreamHandler,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StreamResponse, LlmError> {
         Err(match &self.error {
@@ -667,9 +667,9 @@ impl LlmProvider for ErrorProvider {
         "test-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }

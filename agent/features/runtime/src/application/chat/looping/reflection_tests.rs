@@ -1,7 +1,7 @@
 use super::*;
 use async_trait::async_trait;
-use provider::api::{LlmProvider, StreamHandler};
-use provider::api::{StopReason, StreamResponse, SystemBlock, Usage};
+use provider::{LlmProvider, StreamHandler};
+use provider::{StopReason, StreamResponse, SystemBlock, Usage};
 use share::memory::{MemoryCategory, MemoryLayer, MemorySource};
 use std::sync::Arc;
 use storage::MemoryStore;
@@ -40,14 +40,14 @@ impl LlmProvider for StaticReflectionProvider {
         "test-reflection-provider"
     }
 
-    fn set_reasoning_level(&self, _level: provider::contract::ReasoningLevel) {}
+    fn set_reasoning_level(&self, _level: provider::ReasoningLevel) {}
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
-        provider::contract::ReasoningLevel::Off
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
+        provider::ReasoningLevel::Off
     }
 }
 
-fn build_client(response: &str) -> provider::api::LlmClient {
+fn build_client(response: &str) -> provider::LlmClient {
     build_client_with_usage(response, 0, 0)
 }
 
@@ -55,8 +55,8 @@ fn build_client_with_usage(
     response: &str,
     input_tokens: u32,
     output_tokens: u32,
-) -> provider::api::LlmClient {
-    provider::api::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
+) -> provider::LlmClient {
+    provider::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
         response: response.to_string(),
         usage: Usage {
             input_tokens,

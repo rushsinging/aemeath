@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use context::skill::Skill;
 use hook::api::HookRunner;
-use provider::api::{LlmClient, SystemBlock};
+use provider::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
 use storage::TaskStore;
 use tools::api::{AgentRunner, ToolRegistry};

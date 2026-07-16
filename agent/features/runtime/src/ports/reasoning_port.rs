@@ -4,7 +4,7 @@
 //! 细化由 #919 负责。
 
 use crate::domain::agent_run::Run;
-use provider::api::ReasoningLevel;
+use provider::ReasoningLevel;
 
 /// Workflow BC 的出站端口——决定本轮 reasoning effort。
 ///

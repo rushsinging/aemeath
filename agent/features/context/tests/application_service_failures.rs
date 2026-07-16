@@ -11,7 +11,7 @@ use context::ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     SessionRepository, SessionSnapshot,
 };
-use provider::api::ReasoningLevel;
+use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
