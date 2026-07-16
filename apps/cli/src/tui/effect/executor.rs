@@ -39,6 +39,7 @@ impl App {
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
             Effect::ResetRuntimeState => self.reset_runtime_state().await,
+            Effect::OpenUrl { url } => self.open_url_effect(&url),
         }
     }
 
@@ -250,6 +251,61 @@ impl App {
         // 暂时发 ListReminders 事件，recap 在 UiEvent 处理中生成。
         self.chat
             .push_input_event(sdk::ChatInputEvent::ListReminders);
+    }
+
+    /// 用系统默认程序打开 URL 或本地文件路径（Ctrl+Click markdown link / 行内代码路径）。
+    fn open_url_effect(&mut self, url: &str) {
+        // 安全校验：允许 http/https URL 和本地文件路径
+        let is_url = url.starts_with("http://") || url.starts_with("https://");
+        let is_path = url.contains('/')
+            || url.contains('\\')
+            || url.ends_with(".rs")
+            || url.ends_with(".toml")
+            || url.ends_with(".md")
+            || url.ends_with(".json");
+        if !is_url && !is_path {
+            self.set_transient_notice(StatusNotice::warning(format!("无法识别的链接目标: {url}")));
+            return;
+        }
+
+        // 本地相对路径：尝试基于 cwd 解析
+        let resolved = if !is_url && !std::path::Path::new(url).is_absolute() {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            Some(cwd.join(url).to_string_lossy().into_owned())
+        } else {
+            None
+        };
+        let target = resolved.as_deref().unwrap_or(url);
+
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(target_os = "linux")]
+        let cmd = "xdg-open";
+        #[cfg(target_os = "windows")]
+        let cmd = "cmd";
+
+        let result = {
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new(cmd)
+                    .args(["/C", "start", target])
+                    .spawn()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                std::process::Command::new(cmd).arg(target).spawn()
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                self.set_transient_notice(StatusNotice::success(format!("已打开: {url}")));
+            }
+            Err(e) => {
+                crate::tui::log_warn!("打开失败: {e}");
+                self.set_transient_notice(StatusNotice::warning(format!("打开失败: {e}")));
+            }
+        }
     }
 }
 

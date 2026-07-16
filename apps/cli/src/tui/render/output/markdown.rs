@@ -2,6 +2,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
+use crate::tui::render::output::rendered::LinkSpan;
 use crate::tui::render::theme;
 
 mod table;
@@ -126,8 +127,18 @@ fn wrap_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Line<'static>>
 /// - `[text](url)` → 链接（青色+下划线样式）
 /// - 格式不完整时原样显示原始文本
 pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>> {
+    inline_markdown_spans_with_links(text, base_style).0
+}
+
+/// 与 `inline_markdown_spans` 相同，但同时返回 link 元数据（位置 + URL）。
+/// `col_start` / `col_end` 是在产出 spans 拼接后的 **plain 文本** 中的字符偏移。
+pub fn inline_markdown_spans_with_links(
+    text: &str,
+    base_style: Style,
+) -> (Vec<Span<'static>>, Vec<LinkSpan>) {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut buf = String::new();
+    let mut links: Vec<LinkSpan> = Vec::new();
     let mut chars = text.chars().peekable();
 
     while let Some(ch) = chars.next() {
@@ -175,15 +186,7 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 "_",
             ),
             '_' => buf.push('_'),
-            '`' => push_delimited(
-                &mut spans,
-                &mut buf,
-                &mut chars,
-                "`",
-                base_style.fg(theme::CODE),
-                base_style,
-                "`",
-            ),
+            '`' => push_code_with_link(&mut spans, &mut buf, &mut chars, base_style, &mut links),
             '~' if chars.peek() == Some(&'~') => {
                 chars.next();
                 push_delimited(
@@ -197,8 +200,33 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
                 );
             }
             '[' => {
-                if !push_link(&mut spans, &mut buf, &mut chars, base_style) {
+                if !push_link(&mut spans, &mut buf, &mut chars, base_style, &mut links) {
                     buf.push('[');
+                }
+            }
+            'h' if buf.is_empty() || buf.ends_with(' ') || buf.ends_with('\t') => {
+                // 裸 URL 自动检测：http:// 或 https://
+                let rest: String = chars.clone().collect();
+                let candidate = format!("h{rest}");
+                if let Some((url, url_len)) = extract_bare_url(&candidate) {
+                    flush_plain(&mut spans, &mut buf, base_style);
+                    let col_start: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+                    let col_end = col_start + url.chars().count();
+                    spans.push(Span::styled(
+                        url.clone(),
+                        base_style
+                            .fg(theme::LINK)
+                            .add_modifier(Modifier::UNDERLINED),
+                    ));
+                    links.push(LinkSpan {
+                        col_start,
+                        col_end,
+                        url,
+                    });
+                    // 消费 url 长度 - 1（开头的 'h' 已经被 next() 消费）
+                    advance_chars(&mut chars, url_len - 1);
+                } else {
+                    buf.push('h');
                 }
             }
             other => buf.push(other),
@@ -206,7 +234,7 @@ pub fn inline_markdown_spans(text: &str, base_style: Style) -> Vec<Span<'static>
     }
 
     flush_plain(&mut spans, &mut buf, base_style);
-    spans
+    (spans, links)
 }
 
 fn push_delimited(
@@ -233,6 +261,7 @@ fn push_link(
     buf: &mut String,
     chars: &mut std::iter::Peekable<std::str::Chars>,
     base_style: Style,
+    links: &mut Vec<LinkSpan>,
 ) -> bool {
     let rest: String = chars.clone().collect();
     let Some(close_bracket) = rest.find(']') else {
@@ -254,17 +283,108 @@ fn push_link(
     }
 
     flush_plain(spans, buf, base_style);
+    // 记录 link 在 plain 文本中的位置：当前 buf 已 flush，起始偏移 = 已产出 spans 的文本总宽。
+    let col_start: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    let col_end = col_start + inner.chars().count();
     spans.push(Span::styled(
         inner.to_string(),
         base_style
             .fg(theme::LINK)
             .add_modifier(Modifier::UNDERLINED),
     ));
+    links.push(LinkSpan {
+        col_start,
+        col_end,
+        url: url.to_string(),
+    });
     advance_chars(
         chars,
         inner.chars().count() + 1 + 1 + url.chars().count() + 1,
     );
     true
+}
+
+/// 行内代码 `` `code` ``：如果内容看起来是文件路径，同时生成 link 元数据。
+fn push_code_with_link(
+    spans: &mut Vec<Span<'static>>,
+    buf: &mut String,
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    base_style: Style,
+    links: &mut Vec<LinkSpan>,
+) {
+    match find_closing(chars, "`") {
+        Some(inner) => {
+            flush_plain(spans, buf, base_style);
+            let col_start: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+            let col_end = col_start + inner.chars().count();
+            spans.push(Span::styled(inner.clone(), base_style.fg(theme::CODE)));
+            // 如果内容看起来是文件路径，记录 link
+            if looks_like_file_path(&inner) {
+                links.push(LinkSpan {
+                    col_start,
+                    col_end,
+                    url: inner.clone(),
+                });
+            }
+            advance_chars(chars, inner.chars().count() + 1);
+        }
+        None => buf.push('`'),
+    }
+}
+
+/// 判断行内代码内容是否看起来是文件路径。
+fn looks_like_file_path(s: &str) -> bool {
+    if s.is_empty() || s.contains(' ') || s.contains('\n') {
+        return false;
+    }
+    // 包含路径分隔符
+    if s.contains('/') || s.contains('\\') {
+        return true;
+    }
+    // 或以常见代码文件扩展名结尾
+    const EXTENSIONS: &[&str] = &[
+        ".rs", ".toml", ".md", ".json", ".yaml", ".yml", ".txt", ".sh", ".py", ".ts", ".js",
+        ".tsx", ".jsx", ".go", ".c", ".h", ".cpp", ".hpp",
+    ];
+    EXTENSIONS.iter().any(|ext| s.ends_with(ext))
+}
+
+/// 从文本开头提取裸 URL（http/https）。返回 (url, 消费字符数)。
+/// URL 在遇到空白、中文括号、反引号等非 URL 字符时终止。
+fn extract_bare_url(text: &str) -> Option<(String, usize)> {
+    let prefixes = ["https://", "http://"];
+    for prefix in &prefixes {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            let url_end = rest
+                .find(|c: char| {
+                    c.is_whitespace()
+                        || c == '`'
+                        || c == '('
+                        || c == ')'
+                        || c == '<'
+                        || c == '>'
+                        || c == '"'
+                        || c == '\''
+                        || c == '「'
+                        || c == '」'
+                        || c == '《'
+                        || c == '》'
+                        || c == '，'
+                        || c == '。'
+                })
+                .map(|pos| prefix.len() + pos)
+                .unwrap_or(text.len());
+            // 使用 get() 避免 unsafe text slice；prefix 是 ASCII 所以 prefix.len() 是安全 byte offset，
+            // find 返回的也是 char 对应的 byte offset，都在 char boundary 上。
+            if let Some(url) = text.get(..url_end) {
+                // URL 至少要有 prefix + 3 字符（如 http://x）
+                if url.len() > prefix.len() + 2 {
+                    return Some((url.to_string(), url.chars().count()));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// 在迭代器的剩余字符串中查找 closing 标记。如果找到，返回标记前的文本。

@@ -27,11 +27,22 @@ pub struct RenderCtx {
     pub text_width: u16,
 }
 
+/// 行内 link 的位置与 URL，用于 Ctrl+Click 打开。
+/// `col_start` / `col_end` 是 **plain 文本**中的字符偏移（与 `RenderedLine::plain` 对齐）。
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LinkSpan {
+    pub col_start: usize,
+    pub col_end: usize,
+    pub url: String,
+}
+
 /// 一行渲染产物。`spans` 用于显示（含 markdown/语法/theme 色），
 /// `plain` 是逻辑纯文本（选中/复制用）。
 ///
 /// `gutter_cols` 记录前导 gutter 占用的显示列 / span 字符数（gutter 不进 plain）。
 /// 选区高亮与点击列→plain 字符映射据此补偿（gutter 是 chrome，不参与选中/复制）。
+///
+/// `links` 记录行内 link 的位置与 URL，用于 Ctrl+Click 打开。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RenderedLine {
     pub spans: Vec<Span<'static>>,
@@ -42,6 +53,8 @@ pub struct RenderedLine {
     pub gutter_cols: usize,
     /// 整条可见行的填充样式。由最终 buffer render 负责填满行宽，不进入 plain。
     pub fill_style: Option<Style>,
+    /// 行内 link 的 (col_start, col_end, url) 列表（偏移与 plain 对齐）。
+    pub links: Vec<LinkSpan>,
 }
 
 impl RenderedLine {
@@ -57,6 +70,7 @@ impl RenderedLine {
             style: Style::default(),
             gutter_cols: 0,
             fill_style: None,
+            links: Vec::new(),
         }
     }
 
@@ -74,6 +88,7 @@ impl RenderedLine {
             style: Style::default(),
             gutter_cols: 0,
             fill_style: None,
+            links: Vec::new(),
         }
     }
 
@@ -85,6 +100,23 @@ impl RenderedLine {
             style: Style::default(),
             gutter_cols: 0,
             fill_style: None,
+            links: Vec::new(),
+        }
+    }
+
+    /// 显式提供 plain 和 links（用于 markdown link Ctrl+Click）。
+    pub fn with_plain_and_links(
+        spans: Vec<Span<'static>>,
+        plain: String,
+        links: Vec<LinkSpan>,
+    ) -> Self {
+        Self {
+            spans,
+            plain,
+            style: Style::default(),
+            gutter_cols: 0,
+            fill_style: None,
+            links,
         }
     }
 
