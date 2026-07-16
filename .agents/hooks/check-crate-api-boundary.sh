@@ -38,7 +38,7 @@ ROOT_REEXPORT_ALLOW = {
 ROOT_ACCESS_ALLOW = {
     "runtime": {"AgentClientImpl", "from_args"},
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
-    "context": {"compact", "context_port", "guidance", "session", "skill"},
+    "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
     "storage": {
         "Batch",
@@ -60,9 +60,7 @@ ROOT_ACCESS_ALLOW = {
 CONTEXT_FORBIDDEN_PATHS = {
     "agent/features/context/src/api.rs",
     "agent/features/context/src/gateway.rs",
-    "agent/features/context/src/capabilities/prompt/business.rs",
-    "agent/features/context/src/capabilities/prompt/business",
-    "agent/features/context/src/capabilities/prompt/gateway.rs",
+    "agent/features/context/src/capabilities",
 }
 
 path_pattern = re.compile(

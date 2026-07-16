@@ -3,14 +3,13 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use super::CompactStage;
-use crate::capabilities::compact::restore::sanitize_tool_pairs;
+use crate::domain::compact::{sanitize_tool_pairs, CompactStage};
 use share::message::{ContentBlock, Message, Role};
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
 
 // 向后兼容的 re-export
-pub use crate::capabilities::compact::needs_compaction;
+pub use crate::domain::compact::needs_compaction;
 
 /// Compact 进度回调 trait。
 ///
@@ -283,7 +282,7 @@ pub async fn compact_messages_with_llm(
     let early_messages = &messages[window.head_protect..window.split_point];
 
     // 尝试 LLM 摘要，失败则回退到本地
-    let early_tokens = crate::capabilities::token_budget::estimate_messages_tokens(early_messages);
+    let early_tokens = crate::domain::token_budget::estimate_messages_tokens(early_messages);
     let summary = match client {
         Some(client) => {
             if early_tokens > COMPACT_CHUNK_TARGET_TOKENS {
@@ -359,7 +358,7 @@ async fn llm_compact(
 
 /// 将消息列表按 token 预算分块（不拆分单条消息）。
 fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec<Vec<Message>> {
-    use crate::capabilities::token_budget::estimate_message_tokens;
+    use crate::domain::token_budget::estimate_message_tokens;
 
     let mut chunks = Vec::new();
     let mut current = Vec::new();
@@ -392,7 +391,7 @@ async fn compact_messages_map_reduce(
     progress: Option<&dyn CompactProgressFn>,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
-    use crate::capabilities::token_budget::estimate_messages_tokens;
+    use crate::domain::token_budget::estimate_messages_tokens;
 
     let chunks = split_messages_into_chunks(early_messages, COMPACT_CHUNK_TARGET_TOKENS);
     let total_chunks = chunks.len();
@@ -439,5 +438,5 @@ async fn compact_messages_map_reduce(
 }
 
 #[cfg(test)]
-#[path = "summary_tests.rs"]
-mod summary_tests;
+#[path = "compact_summary_tests.rs"]
+mod compact_summary_tests;

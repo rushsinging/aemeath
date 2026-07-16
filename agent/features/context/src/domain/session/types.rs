@@ -2,7 +2,6 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use share::config::paths;
 use share::message::{Message, Role};
 use std::path::PathBuf;
 use storage::TaskSnapshot;
@@ -181,11 +180,6 @@ pub fn extract_project_name(cwd: &str) -> Option<String> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|s| s.to_string())
-}
-
-/// Get the sessions directory (`~/.agents/sessions/`)
-pub fn sessions_dir() -> PathBuf {
-    paths::global_sessions_dir()
 }
 
 /// Generate a new session ID (UUIDv7, time-ordered, filename-safe).

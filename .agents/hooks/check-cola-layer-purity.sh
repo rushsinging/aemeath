@@ -77,8 +77,10 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
     except ValueError:
         return None
     parts = rel.parts
-    if len(parts) >= 4 and parts[1] == "src":
+    if len(parts) >= 3 and parts[1] == "src":
         if parts[0] == "runtime" and parts[2] in RUNTIME_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "context" and parts[2] in CONTEXT_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "storage":
             return None
@@ -123,9 +125,8 @@ for old_path in RUNTIME_PROVIDER_TOOLS_OLD_PATHS:
     if old_path.exists():
         violations.append(f"{old_path.relative_to(root)}: runtime/provider/tools must live under agent/features/*")
 
-# Context crate organises stable vertical slices under capabilities/, not by COLA
-# layer. Design doc: docs/design/02-modules/context-management/README.md
-CONTEXT_DOMAIN_DIRS = {"capabilities"}
+# Context 已迁移到 Hexagonal Target；只允许四个目标层。
+CONTEXT_HEX_LAYERS = {"domain", "application", "ports", "adapters"}
 
 features_root = root / "agent" / "features"
 for feature_src in sorted(features_root.glob("*/src")):
@@ -148,8 +149,8 @@ for feature_src in sorted(features_root.glob("*/src")):
             # Runtime 已迁到单一 agent_execution 能力的六边形目标结构。
             if crate_name == "runtime" and child.name in RUNTIME_HEX_LAYERS:
                 continue
-            # Context crate uses domain sub-modules at top level (by design).
-            if crate_name == "context" and child.name in CONTEXT_DOMAIN_DIRS:
+            # Context 已迁到 Hexagonal 目标结构。
+            if crate_name == "context" and child.name in CONTEXT_HEX_LAYERS:
                 continue
             violations.append(
                 f"{child.relative_to(root)}: feature src directories must be COLA layers {sorted(FEATURE_LAYERS)}"
