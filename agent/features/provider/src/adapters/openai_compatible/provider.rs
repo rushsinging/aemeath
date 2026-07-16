@@ -1,0 +1,128 @@
+use crate::adapters::client::OpenAIProviderConfig;
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
+
+use super::driver::{driver_for_provider_driver, ChatApiDriver};
+use super::ReasoningConfig;
+
+pub struct OpenAICompatibleProvider {
+    pub(super) config: OpenAIProviderConfig,
+    pub(super) api_key: String,
+    pub(super) base_url: String,
+    pub(super) model: String,
+    pub(super) max_tokens: Arc<AtomicU32>,
+    pub(super) user_agent: String,
+    pub(super) http: reqwest::Client,
+    pub(super) max_retries: u32,
+    pub(super) reasoning: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) reasoning_config: Arc<Mutex<Option<ReasoningConfig>>>,
+    pub(super) reasoning_level: Arc<AtomicU8>,
+    pub(super) driver: Box<dyn ChatApiDriver + Send + Sync>,
+}
+
+pub(crate) fn build_streaming_http_client_builder(_timeout_secs: u64) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(crate::CONNECT_TIMEOUT_SECS))
+}
+
+impl OpenAICompatibleProvider {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        config: OpenAIProviderConfig,
+        api_key: String,
+        base_url: Option<String>,
+        model: Option<String>,
+        max_tokens: u32,
+        reasoning: bool,
+        reasoning_config: Option<ReasoningConfig>,
+        timeout_secs: u64,
+    ) -> Self {
+        let driver = driver_for_provider_driver(config.driver);
+        let raw_base_url = base_url.unwrap_or_else(|| "https://api.openai.com".to_string());
+        let base_url = if matches!(
+            config.driver,
+            crate::ProviderDriverKind::Minimax
+                | crate::ProviderDriverKind::Mimo
+                | crate::ProviderDriverKind::Agnes
+        ) {
+            raw_base_url.trim_end_matches('/').to_string()
+        } else {
+            raw_base_url
+                .trim_end_matches('/')
+                .trim_end_matches("/v1")
+                .to_string()
+        };
+        let reasoning_level = initial_level(reasoning, reasoning_config.as_ref());
+        Self {
+            base_url,
+            model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+            config,
+            api_key,
+            max_tokens: Arc::new(AtomicU32::new(max_tokens)),
+            user_agent: format!("aemeath/{}", share::version()),
+            http: build_streaming_http_client_builder(timeout_secs)
+                .build()
+                .expect("failed to create HTTP client"),
+            max_retries: 10,
+            reasoning: Arc::new(std::sync::atomic::AtomicBool::new(reasoning)),
+            reasoning_config: Arc::new(Mutex::new(reasoning_config)),
+            reasoning_level: Arc::new(AtomicU8::new(reasoning_level)),
+            driver,
+        }
+    }
+
+    pub(crate) fn chat_url(&self) -> String {
+        format!("{}{}", self.base_url, self.config.chat_api_suffix)
+    }
+
+    pub(crate) fn current_max_tokens(&self) -> u32 {
+        self.max_tokens.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn store_reasoning_level(&self, level: crate::ports::ReasoningLevel) {
+        self.reasoning_level.store(level.as_u8(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn load_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        crate::ports::ReasoningLevel::from_u8(self.reasoning_level.load(Ordering::Relaxed))
+    }
+}
+
+/// 从初始 reasoning 布尔值和 reasoning_config 推断 ReasoningLevel。
+fn initial_level(reasoning: bool, reasoning_config: Option<&ReasoningConfig>) -> u8 {
+    use crate::ports::ReasoningLevel;
+    let level = match reasoning_config {
+        Some(ReasoningConfig::Object(obj)) => obj
+            .get("effort")
+            .or_else(|| obj.get("reasoning_effort"))
+            .and_then(|v| v.as_str())
+            .and_then(ReasoningLevel::parse)
+            .unwrap_or(if reasoning {
+                ReasoningLevel::High
+            } else {
+                ReasoningLevel::Off
+            }),
+        Some(ReasoningConfig::ThinkingBudget(tokens)) => match *tokens {
+            0 => ReasoningLevel::Off,
+            1..=1024 => ReasoningLevel::Low,
+            1025..=8192 => ReasoningLevel::Medium,
+            8193..=32768 => ReasoningLevel::High,
+            _ => ReasoningLevel::Xhigh,
+        },
+        Some(ReasoningConfig::Bool(b)) => {
+            if *b {
+                ReasoningLevel::High
+            } else {
+                ReasoningLevel::Off
+            }
+        }
+        None => {
+            if reasoning {
+                ReasoningLevel::High
+            } else {
+                ReasoningLevel::Off
+            }
+        }
+    };
+    level.as_u8()
+}

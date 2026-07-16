@@ -1,6 +1,6 @@
 use crate::LOG_TARGET;
 use hook::api::HookRunner;
-use provider::api::LlmClient;
+use provider::LlmClient;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::path::Path;
 use std::time::Duration;
@@ -53,7 +53,7 @@ pub(crate) async fn finalize_sub_agent(
     model_spec: Option<&str>,
     output: &str,
     previous_max_tokens: u32,
-    previous_reasoning_level: provider::contract::ReasoningLevel,
+    previous_reasoning_level: provider::ReasoningLevel,
     restore_max_tokens: bool,
     progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
     workspace_root: &Path,

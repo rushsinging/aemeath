@@ -1,0 +1,512 @@
+use async_trait::async_trait;
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
+use share::message::Message;
+use std::error::Error as StdError;
+use std::sync::atomic::Ordering;
+use tokio_util::sync::CancellationToken;
+
+use crate::adapters::error_log::{
+    sanitize_preview, source_chain, ErrorLogContext, LlmApiErrorRecord,
+};
+use crate::domain::invoke::SystemBlock;
+use crate::ports::{LlmProvider, StreamHandler};
+use crate::LOG_TARGET;
+
+use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
+
+impl OpenAICompatibleProvider {
+    pub(crate) fn base_request_body(
+        &self,
+        messages: Vec<serde_json::Value>,
+        stream: bool,
+    ) -> serde_json::Value {
+        let max_tokens_field = self.driver.max_tokens_field();
+        let mut request_body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            max_tokens_field: self.current_max_tokens(),
+            "stream": stream,
+        });
+
+        if stream {
+            request_body["stream_options"] = serde_json::json!({ "include_usage": true });
+        }
+
+        request_body
+    }
+
+    pub(crate) fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}", self.api_key))
+                .map_err(|e| crate::LlmError::Config(e.to_string()))?,
+        );
+
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&self.user_agent)
+                .map_err(|e| crate::LlmError::Config(e.to_string()))?,
+        );
+        Ok(headers)
+    }
+
+    pub(crate) fn apply_reasoning_fields(&self, request_body: &mut serde_json::Value) {
+        let reasoning_enabled = self.reasoning.load(std::sync::atomic::Ordering::Relaxed);
+        if let Ok(guard) = self.reasoning_config.lock() {
+            // driver 自适应：clamp effort 到 provider 支持的档位
+            let clamped = guard.as_ref().map(|c| c.clamped(self.driver.as_ref()));
+            self.driver
+                .apply_reasoning_fields(request_body, clamped.as_ref(), reasoning_enabled);
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for OpenAICompatibleProvider {
+    async fn stream_message(
+        &self,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<crate::domain::invoke::StreamResponse, crate::LlmError> {
+        // Responses API 分发（gpt-5.6-sol 等模型只支持 /v1/responses）
+        if self.config.use_responses_api {
+            return self
+                .stream_message_responses(system, messages, tool_schemas, handler, cancel)
+                .await;
+        }
+
+        let openai_messages = self.convert_messages(system, messages)?;
+        let tools = Self::convert_tools(tool_schemas);
+
+        let mut request_body = self.base_request_body(openai_messages, true);
+
+        self.apply_reasoning_fields(&mut request_body);
+
+        if !tools.is_empty() {
+            request_body["tools"] = serde_json::Value::Array(tools);
+            // Enable parallel tool calls so the model can return multiple
+            // tool_use blocks in a single response, enabling true concurrent
+            // execution of independent tasks (e.g. launching 6 reviewers at once).
+            request_body["parallel_tool_calls"] = serde_json::Value::Bool(true);
+        }
+
+        if let Some(msgs) = request_body.get("messages").and_then(|m| m.as_array()) {
+            let mut summary = String::with_capacity(256);
+            for (i, m) in msgs.iter().enumerate() {
+                let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+                match role {
+                    "assistant" => {
+                        let has_tc = m.get("tool_calls").is_some();
+                        let rc_len = m
+                            .get("reasoning_content")
+                            .and_then(|r| r.as_str())
+                            .map(|s| s.len() as i32)
+                            .unwrap_or(-1);
+                        let content_null = m.get("content").map(|c| c.is_null()).unwrap_or(false);
+                        summary.push_str(&format!(
+                            "\n  [{i}] assistant rc_len={rc_len} tc={has_tc} content_null={content_null}"
+                        ));
+                    }
+                    "tool" => {
+                        let tcid = m.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
+                        let tcid_short: String = tcid.chars().take(24).collect();
+                        summary.push_str(&format!("\n  [{i}] tool id={tcid_short}"));
+                    }
+                    _ => {
+                        summary.push_str(&format!("\n  [{i}] {role}"));
+                    }
+                }
+            }
+            let body_bytes = serde_json::to_string(&request_body)
+                .map(|s| s.len())
+                .unwrap_or(0);
+            log::debug!(target: LOG_TARGET,
+                "[openai-compat stream] POST provider={} body_bytes={} messages={}:{}",
+                self.config.source_key,
+                body_bytes,
+                msgs.len(),
+                summary,
+            );
+        }
+
+        let headers = self.build_headers()?;
+        let request_body_bytes = serde_json::to_string(&request_body)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let request_message_count = request_body
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
+        let request_tool_count = request_body
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
+
+        let mut last_error = None;
+        let invocation_started = std::time::Instant::now();
+        for attempt in 0..self.max_retries {
+            if cancel.is_cancelled() {
+                return Err(crate::LlmError::Cancelled);
+            }
+
+            if attempt > 0 {
+                let delay =
+                    std::time::Duration::from_millis((1000 * 2u64.pow(attempt)).min(30_000));
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {
+                        return Err(crate::LlmError::Cancelled);
+                    }
+                    _ = tokio::time::sleep(delay) => {}
+                }
+            }
+
+            let send_fut = self
+                .http
+                .post(self.chat_url())
+                .headers(headers.clone())
+                .json(&request_body)
+                .send();
+
+            let response = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    return Err(crate::LlmError::Cancelled);
+                }
+                result = send_fut => {
+                    match result {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            let url = self.chat_url();
+                            let detail = if e.is_connect() {
+                                "connection failed"
+                            } else if e.is_timeout() {
+                                "request timed out"
+                            } else if e.is_redirect() {
+                                "too many redirects"
+                            } else if e.is_request() {
+                                "request build error"
+                            } else if e.is_body() {
+                                "request body error"
+                            } else if e.is_decode() {
+                                "response decode error"
+                            } else {
+                                "unknown"
+                            };
+                            let mut msg = format!("{} ({})\n  URL: {}", e, detail, url);
+                            let mut source: Option<&dyn StdError> = StdError::source(&e);
+                            let mut depth = 1;
+                            while let Some(cause) = source {
+                                msg.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                                source = cause.source();
+                                depth += 1;
+                            }
+                            let remaining = self.max_retries.saturating_sub(attempt + 1);
+                            let context = ErrorLogContext {
+                                driver: "openai_compatible",
+                                api: "chat_completions_stream",
+                                provider: &self.config.source_key,
+                                model: &self.model,
+                                endpoint: &url,
+                                attempt: attempt + 1,
+                                max_attempts: self.max_retries,
+                                elapsed_ms: invocation_started.elapsed().as_millis(),
+                                message_count: request_message_count,
+                                tool_count: request_tool_count,
+                                request_bytes: request_body_bytes,
+                            };
+                            let mut record = LlmApiErrorRecord::new(&context, detail);
+                            record.retryable = remaining > 0;
+                            record.elapsed_ms = invocation_started.elapsed().as_millis();
+                            record.message_count = request_message_count;
+                            record.tool_count = request_tool_count;
+                            record.request_bytes = request_body_bytes;
+                            record.source_chain = source_chain(&e);
+                            record.log(remaining == 0);
+                            log::debug!(target: LOG_TARGET,
+                                "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
+                                self.config.source_key,
+                                self.model,
+                                attempt + 1,
+                                self.max_retries,
+                                remaining,
+                                detail,
+                                request_body_bytes,
+                                request_message_count,
+                                request_tool_count,
+                                msg,
+                            );
+                            if remaining > 0 {                                handler.on_error(&format!(
+                                    "network error ({detail}), retrying ({}/{})...",
+                                    attempt + 2, self.max_retries
+                                ));
+                            }
+                            last_error = Some(crate::LlmError::Network(msg));
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            let status = response.status();
+            log::debug!(target: LOG_TARGET,
+                "[openai-compat stream] response received provider={} model={} status={} attempt={}/{} body_bytes={} messages={} tools={}",
+                self.config.source_key,
+                self.model,
+                status,
+                attempt + 1,
+                self.max_retries,
+                request_body_bytes,
+                request_message_count,
+                request_tool_count,
+            );
+            if status == 429 {
+                let remaining = self.max_retries.saturating_sub(attempt + 1);
+                if remaining > 0 {
+                    handler.on_error(&format!(
+                        "rate limited (429), retrying ({}/{})...",
+                        attempt + 2,
+                        self.max_retries
+                    ));
+                }
+                last_error = Some(crate::LlmError::RateLimited);
+                continue;
+            }
+
+            if status.as_u16() >= 500 && status.as_u16() < 600 {
+                let error_body = response.text().await.unwrap_or_default();
+                let remaining = self.max_retries.saturating_sub(attempt + 1);
+                let context = ErrorLogContext {
+                    driver: "openai_compatible",
+                    api: "chat_completions_stream",
+                    provider: &self.config.source_key,
+                    model: &self.model,
+                    endpoint: &self.chat_url(),
+                    attempt: attempt + 1,
+                    max_attempts: self.max_retries,
+                    elapsed_ms: invocation_started.elapsed().as_millis(),
+                    message_count: request_message_count,
+                    tool_count: request_tool_count,
+                    request_bytes: request_body_bytes,
+                };
+                let mut record = LlmApiErrorRecord::new(&context, "http_server_error");
+                record.http_status = Some(status.as_u16());
+                record.error_code = Some("http_5xx");
+                record.retryable = remaining > 0;
+                record.elapsed_ms = invocation_started.elapsed().as_millis();
+                record.message_count = request_message_count;
+                record.tool_count = request_tool_count;
+                record.request_bytes = request_body_bytes;
+                record.response_bytes = error_body.len();
+                record.body_preview = Some(sanitize_preview(&error_body));
+                record.log(remaining == 0);
+                if remaining > 0 {
+                    handler.on_error(&format!(
+                        "server error ({}), retrying ({}/{})...",
+                        status,
+                        attempt + 2,
+                        self.max_retries
+                    ));
+                }
+                last_error = Some(crate::LlmError::Api {
+                    error_type: status.to_string(),
+                    message: error_body,
+                });
+                continue;
+            }
+
+            if status == 413 {
+                return Err(crate::LlmError::ContextTooLong);
+            }
+
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                let context = ErrorLogContext {
+                    driver: "openai_compatible",
+                    api: "chat_completions_stream",
+                    provider: &self.config.source_key,
+                    model: &self.model,
+                    endpoint: &self.chat_url(),
+                    attempt: attempt + 1,
+                    max_attempts: self.max_retries,
+                    elapsed_ms: invocation_started.elapsed().as_millis(),
+                    message_count: request_message_count,
+                    tool_count: request_tool_count,
+                    request_bytes: request_body_bytes,
+                };
+                let mut record = LlmApiErrorRecord::new(&context, "http_client_error");
+                record.http_status = Some(status.as_u16());
+                record.error_code = Some("http_non_success");
+                record.elapsed_ms = invocation_started.elapsed().as_millis();
+                record.message_count = request_message_count;
+                record.tool_count = request_tool_count;
+                record.request_bytes = request_body_bytes;
+                record.response_bytes = body.len();
+                record.body_preview = Some(sanitize_preview(&body));
+                record.log(true);
+                return Err(crate::LlmError::Api {
+                    error_type: status.to_string(),
+                    message: body,
+                });
+            }
+
+            match parse_openai_stream(response, handler, cancel).await {
+                Ok(resp) => return Ok(resp),
+                Err(crate::LlmError::Stream(ref msg)) if msg.contains("interrupted") => {
+                    return Err(crate::LlmError::Stream(msg.clone()));
+                }
+                Err(crate::LlmError::Stream(e)) => {
+                    let mut source_chain_text = String::new();
+                    let stream_error = crate::LlmError::Stream(e.clone());
+                    let mut source: Option<&dyn StdError> = StdError::source(&stream_error);
+                    let mut depth = 1;
+                    while let Some(cause) = source {
+                        source_chain_text.push_str(&format!("\n  Cause #{}: {}", depth, cause));
+                        source = cause.source();
+                        depth += 1;
+                    }
+                    let fallback_planned = e.contains("upstream truncated");
+                    let context = ErrorLogContext {
+                        driver: "openai_compatible",
+                        api: "chat_completions_stream",
+                        provider: &self.config.source_key,
+                        model: &self.model,
+                        endpoint: &self.chat_url(),
+                        attempt: attempt + 1,
+                        max_attempts: self.max_retries,
+                        elapsed_ms: invocation_started.elapsed().as_millis(),
+                        message_count: request_message_count,
+                        tool_count: request_tool_count,
+                        request_bytes: request_body_bytes,
+                    };
+                    let mut record = LlmApiErrorRecord::new(&context, "stream_protocol_error");
+                    record.retryable = !fallback_planned;
+                    record.elapsed_ms = invocation_started.elapsed().as_millis();
+                    record.message_count = request_message_count;
+                    record.tool_count = request_tool_count;
+                    record.request_bytes = request_body_bytes;
+                    record.partial_output = true;
+                    record.fallback_planned = fallback_planned;
+                    record.body_preview = Some(sanitize_preview(&e));
+                    record.source_chain = source_chain(&stream_error);
+                    record.log(false);
+                    log::debug!(target: LOG_TARGET,
+                        "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
+                        self.config.source_key,
+                        self.model,
+                        attempt + 1,
+                        self.max_retries,
+                        self.max_retries.saturating_sub(attempt + 1),
+                        request_body_bytes,
+                        request_message_count,
+                        request_tool_count,
+                        e,
+                        source_chain_text,
+                    );
+                    // SSE 流被上游截断是稳定性失败（不是瞬时网络抖动），
+                    // 重试流式请求无法解决——直接跳出重试循环走 non-stream fallback。
+                    if e.contains("upstream truncated") {
+                        handler.on_error(&format!(
+                            "Streaming error: {}, switching to non-streaming...",
+                            e
+                        ));
+                        last_error = Some(crate::LlmError::Stream(e));
+                        break;
+                    }
+                    handler.on_error(&format!("Streaming error: {}, retrying...", e));
+                    last_error = Some(crate::LlmError::Stream(e));
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        if let Some(ref err) = last_error {
+            if matches!(err, crate::LlmError::Stream(_)) {
+                handler.on_error("All streaming retries failed, attempting non-streaming fallback");
+                return self
+                    .send_message_non_stream(system, messages, tool_schemas, handler)
+                    .await;
+            }
+        }
+        Err(last_error.unwrap_or(crate::LlmError::Network("max retries exceeded".to_string())))
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    fn provider_name(&self) -> &str {
+        &self.config.source_key
+    }
+
+    fn set_max_tokens(&self, max_tokens: u32) {
+        if max_tokens > 0 {
+            self.max_tokens.store(max_tokens, Ordering::Relaxed);
+        }
+    }
+
+    fn max_tokens(&self) -> u32 {
+        self.current_max_tokens()
+    }
+
+    fn set_reasoning_level(&self, level: crate::ports::ReasoningLevel) {
+        use crate::ports::ReasoningLevel;
+
+        // 同步布尔标志：Off → false，其他 → true
+        let enabled = !matches!(level, ReasoningLevel::Off);
+        self.reasoning
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+
+        // 更新 reasoning_config
+        if let Ok(mut guard) = self.reasoning_config.lock() {
+            match level {
+                ReasoningLevel::Off => {
+                    *guard = Some(ReasoningConfig::Bool(false));
+                }
+                ReasoningLevel::Low => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "low"
+                    })));
+                }
+                ReasoningLevel::Medium => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "medium"
+                    })));
+                }
+                ReasoningLevel::High => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "high"
+                    })));
+                }
+                ReasoningLevel::Xhigh => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "xhigh"
+                    })));
+                }
+                ReasoningLevel::Max => {
+                    *guard = Some(ReasoningConfig::Object(serde_json::json!({
+                        "effort": "max"
+                    })));
+                }
+            }
+        }
+        self.store_reasoning_level(level);
+    }
+
+    fn current_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.load_reasoning_level()
+    }
+
+    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.driver.max_reasoning_level()
+    }
+}

@@ -3,7 +3,7 @@ use super::{CliAgentRunner, SilentHandler};
 use crate::application::agent::Agent;
 use crate::LOG_TARGET;
 use async_trait::async_trait;
-use provider::api::SystemBlock;
+use provider::SystemBlock;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use storage::TaskStore;
@@ -68,16 +68,16 @@ impl AgentRunner for CliAgentRunner {
         let model_effort = model_entry
             .as_ref()
             .and_then(|(_, _, entry)| entry.reasoning_effort.as_deref())
-            .and_then(provider::api::ReasoningLevel::parse);
+            .and_then(provider::ReasoningLevel::parse);
         let reasoning = role_reasoning.or(model_reasoning).unwrap_or(self.reasoning);
         // effort 存在时取显式档位（clamp 到 provider 上限），否则沿用 bool→Medium/Off。
         let level = match model_effort {
             Some(effort) => effort.clamped_to(client.max_reasoning_level()),
             None => {
                 if reasoning {
-                    provider::api::ReasoningLevel::Medium
+                    provider::ReasoningLevel::Medium
                 } else {
-                    provider::api::ReasoningLevel::Off
+                    provider::ReasoningLevel::Off
                 }
             }
         };

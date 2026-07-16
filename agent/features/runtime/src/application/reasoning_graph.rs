@@ -35,7 +35,7 @@ pub mod config;
 
 pub use config::GraphRuntimeConfig;
 
-use provider::api::ReasoningLevel;
+use provider::ReasoningLevel;
 
 /// 推理阶段节点。
 ///

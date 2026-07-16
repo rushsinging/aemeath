@@ -46,7 +46,7 @@ mod tests {
     use crate::application::chat::request::ChatLaunchOptions;
     use async_trait::async_trait;
     use hook::api::HookRunner;
-    use provider::api::LlmClient;
+    use provider::LlmClient;
     use share::config::MemoryConfig;
     use std::collections::HashMap;
     use std::path::PathBuf;

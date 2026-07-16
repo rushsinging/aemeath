@@ -11,7 +11,7 @@ use crate::ports::legacy::{HookNotificationPort, ProviderInfoPort, TaskStorePort
 use std::collections::HashMap;
 use storage::{Task, TaskSnapshot, TaskStore};
 
-impl ProviderInfoPort for LlmClientAdapter<provider::api::LlmClient> {
+impl ProviderInfoPort for LlmClientAdapter<provider::LlmClient> {
     fn provider_name(&self) -> &str {
         self.0.provider_name()
     }
@@ -20,11 +20,11 @@ impl ProviderInfoPort for LlmClientAdapter<provider::api::LlmClient> {
         self.0.model_name()
     }
 
-    fn current_reasoning_level(&self) -> provider::contract::ReasoningLevel {
+    fn current_reasoning_level(&self) -> provider::ReasoningLevel {
         self.0.current_reasoning_level()
     }
 
-    fn set_reasoning_level(&self, level: provider::contract::ReasoningLevel) {
+    fn set_reasoning_level(&self, level: provider::ReasoningLevel) {
         self.0.set_reasoning_level(level)
     }
 }

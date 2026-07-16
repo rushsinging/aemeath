@@ -8,7 +8,7 @@ use context::context_port::{
     FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec,
     TaskReminderSnapshot, TokenBudget, ToolOutcomeKind, Urgency,
 };
-use provider::api::ReasoningLevel;
+use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use provider::api::LlmProviderGateway;
+use provider::LlmProviderGateway;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
 use tools::api::ToolCatalogGateway;
 

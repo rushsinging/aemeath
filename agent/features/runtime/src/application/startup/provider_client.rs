@@ -1,7 +1,7 @@
 use super::model_runtime::ModelRuntimeSettings;
-use provider::api::ProviderDriverKind;
-use provider::api::ReasoningLevel;
-use provider::api::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+use provider::ProviderDriverKind;
+use provider::ReasoningLevel;
+use provider::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
 use share::config::models::ResolvedModel;
 use std::env;
 
