@@ -148,16 +148,22 @@ impl NetworkFailureKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HttpFailureKind {
+    Authentication,
+    PermissionDenied,
     RateLimited,
     ContextTooLong,
+    ModelUnavailable,
     Server,
     Client,
 }
 
 pub(crate) fn classify_http_status(status: reqwest::StatusCode) -> HttpFailureKind {
     match status {
+        reqwest::StatusCode::UNAUTHORIZED => HttpFailureKind::Authentication,
+        reqwest::StatusCode::FORBIDDEN => HttpFailureKind::PermissionDenied,
         reqwest::StatusCode::TOO_MANY_REQUESTS => HttpFailureKind::RateLimited,
         reqwest::StatusCode::PAYLOAD_TOO_LARGE => HttpFailureKind::ContextTooLong,
+        reqwest::StatusCode::NOT_FOUND => HttpFailureKind::ModelUnavailable,
         status if status.is_server_error() => HttpFailureKind::Server,
         _ => HttpFailureKind::Client,
     }
@@ -289,6 +295,80 @@ pub(crate) enum HttpAttemptFailure {
 }
 
 impl HttpAttemptFailure {
+    pub(crate) fn into_provider_error(self) -> crate::ProviderError {
+        use crate::ProviderErrorKind;
+
+        match self {
+            Self::Cancelled => crate::ProviderError::cancelled(),
+            Self::Network { kind, .. } => {
+                let (error_kind, message) = match kind {
+                    NetworkFailureKind::Timeout => {
+                        (ProviderErrorKind::Timeout, "provider request timed out")
+                    }
+                    _ => (
+                        ProviderErrorKind::Network,
+                        "provider network request failed",
+                    ),
+                };
+                crate::ProviderError::retryable(error_kind, message)
+            }
+            Self::Http {
+                status,
+                kind,
+                headers,
+                ..
+            } => {
+                let (error_kind, retryable, message) = match kind {
+                    HttpFailureKind::Authentication => (
+                        ProviderErrorKind::Authentication,
+                        false,
+                        "provider authentication failed",
+                    ),
+                    HttpFailureKind::PermissionDenied => (
+                        ProviderErrorKind::PermissionDenied,
+                        false,
+                        "provider permission denied",
+                    ),
+                    HttpFailureKind::RateLimited => (
+                        ProviderErrorKind::RateLimited,
+                        true,
+                        "provider rate limit exceeded",
+                    ),
+                    HttpFailureKind::ContextTooLong => (
+                        ProviderErrorKind::ContextTooLong,
+                        false,
+                        "provider context limit exceeded",
+                    ),
+                    HttpFailureKind::ModelUnavailable => (
+                        ProviderErrorKind::ModelUnavailable,
+                        false,
+                        "provider model unavailable",
+                    ),
+                    HttpFailureKind::Server => (
+                        ProviderErrorKind::UpstreamUnavailable,
+                        true,
+                        "provider upstream unavailable",
+                    ),
+                    HttpFailureKind::Client => (
+                        ProviderErrorKind::InvalidRequest,
+                        false,
+                        "provider rejected the request",
+                    ),
+                };
+                let mut error = if retryable {
+                    crate::ProviderError::retryable(error_kind, message)
+                } else {
+                    crate::ProviderError::fatal(error_kind, message)
+                };
+                error.provider_code = Some(status.as_u16().to_string());
+                error.retry_after = headers
+                    .retry_after_ms()
+                    .map(std::time::Duration::from_millis);
+                error
+            }
+        }
+    }
+
     /// Emits the unified `llm_api_error` diagnostic record for this failure
     /// at the given `disposition`.
     ///
@@ -580,23 +660,105 @@ mod tests {
     }
 
     #[test]
-    fn http_status_classifies_retry_and_terminal_failures() {
-        assert_eq!(
-            classify_http_status(reqwest::StatusCode::TOO_MANY_REQUESTS),
-            HttpFailureKind::RateLimited
-        );
-        assert_eq!(
-            classify_http_status(reqwest::StatusCode::BAD_GATEWAY),
-            HttpFailureKind::Server
-        );
-        assert_eq!(
-            classify_http_status(reqwest::StatusCode::PAYLOAD_TOO_LARGE),
-            HttpFailureKind::ContextTooLong
-        );
-        assert_eq!(
-            classify_http_status(reqwest::StatusCode::BAD_REQUEST),
-            HttpFailureKind::Client
-        );
+    fn http_status_classifies_stable_provider_error_categories() {
+        let cases = [
+            (
+                reqwest::StatusCode::UNAUTHORIZED,
+                HttpFailureKind::Authentication,
+            ),
+            (
+                reqwest::StatusCode::FORBIDDEN,
+                HttpFailureKind::PermissionDenied,
+            ),
+            (
+                reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+                HttpFailureKind::ContextTooLong,
+            ),
+            (
+                reqwest::StatusCode::TOO_MANY_REQUESTS,
+                HttpFailureKind::RateLimited,
+            ),
+            (
+                reqwest::StatusCode::NOT_FOUND,
+                HttpFailureKind::ModelUnavailable,
+            ),
+            (reqwest::StatusCode::BAD_GATEWAY, HttpFailureKind::Server),
+            (reqwest::StatusCode::BAD_REQUEST, HttpFailureKind::Client),
+        ];
+
+        for (status, expected) in cases {
+            assert_eq!(classify_http_status(status), expected, "status={status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn attempt_failure_maps_to_safe_provider_error_contract() {
+        let cases = [
+            (401, crate::ProviderErrorKind::Authentication, false, None),
+            (403, crate::ProviderErrorKind::PermissionDenied, false, None),
+            (413, crate::ProviderErrorKind::ContextTooLong, false, None),
+            (
+                429,
+                crate::ProviderErrorKind::RateLimited,
+                true,
+                Some(3_000),
+            ),
+            (404, crate::ProviderErrorKind::ModelUnavailable, false, None),
+            (
+                502,
+                crate::ProviderErrorKind::UpstreamUnavailable,
+                true,
+                None,
+            ),
+            (400, crate::ProviderErrorKind::InvalidRequest, false, None),
+        ];
+
+        for (status, expected_kind, expected_retryable, expected_retry_after_ms) in cases {
+            let reason = reqwest::StatusCode::from_u16(status)
+                .unwrap()
+                .canonical_reason()
+                .unwrap();
+            let retry_after = if status == 429 {
+                "retry-after: 3\r\n"
+            } else {
+                ""
+            };
+            let response = format!(
+                "HTTP/1.1 {status} {reason}\r\n{retry_after}content-length: 21\r\n\r\nsecret-token-in-body"
+            );
+            let server = TestServer::start(&response).await;
+            let url = server.url();
+            let failure = HttpAttemptExecutor::execute(
+                reqwest::Client::new().get(&url),
+                &test_context(&url),
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+            let error = failure.into_provider_error();
+            assert_eq!(error.kind, expected_kind, "status={status}");
+            assert_eq!(error.retryable, expected_retryable, "status={status}");
+            assert_eq!(
+                error.provider_code.as_deref(),
+                Some(status.to_string().as_str())
+            );
+            assert_eq!(
+                error
+                    .retry_after
+                    .map(|duration| duration.as_millis() as u64),
+                expected_retry_after_ms,
+                "status={status}"
+            );
+            assert!(!error.safe_message.contains("secret-token-in-body"));
+        }
+    }
+
+    #[test]
+    fn cancellation_maps_to_non_retryable_provider_error() {
+        let error = HttpAttemptFailure::Cancelled.into_provider_error();
+        assert_eq!(error.kind, crate::ProviderErrorKind::Cancelled);
+        assert!(!error.retryable);
     }
 
     #[test]

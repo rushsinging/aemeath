@@ -98,7 +98,11 @@ impl OllamaProviderNonStream for OllamaProvider {
                     } => match kind {
                         HttpFailureKind::RateLimited => crate::LlmError::RateLimited,
                         HttpFailureKind::ContextTooLong => crate::LlmError::ContextTooLong,
-                        HttpFailureKind::Server | HttpFailureKind::Client => crate::LlmError::Api {
+                        HttpFailureKind::Server
+                        | HttpFailureKind::Client
+                        | HttpFailureKind::Authentication
+                        | HttpFailureKind::PermissionDenied
+                        | HttpFailureKind::ModelUnavailable => crate::LlmError::Api {
                             error_type: status.to_string(),
                             message: body.text().to_string(),
                         },

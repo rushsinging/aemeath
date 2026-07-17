@@ -99,6 +99,18 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             elapsed_secs,
             phase
         ),
+        sdk::ChatEvent::ModelInvocationRetrying {
+            context,
+            attempt,
+            delay,
+        } => crate::tui::log_trace!(
+            "{} model_invocation_retrying chat_id={} turn_id={} attempt={} delay_ms={}",
+            stage,
+            context.chat_id,
+            context.turn_id,
+            attempt,
+            delay.as_millis()
+        ),
         sdk::ChatEvent::Usage {
             input,
             output,

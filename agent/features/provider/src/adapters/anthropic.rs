@@ -186,30 +186,14 @@ fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
     crate::ProviderError::fatal(kind, error.to_string())
 }
 
+/// Pull-stream failures share the single typed classification maintained by
+/// [`HttpAttemptFailure::into_provider_error`], so every driver maps the same
+/// `HttpFailureKind` (including the newer `Authentication` / `PermissionDenied`
+/// / `ModelUnavailable`) to the same `ProviderErrorKind` and retryability.
+/// The caller logs `FinalFailure` before handing the failure here, so this
+/// consumes the (already-logged) failure into the port error.
 fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
-    match failure {
-        HttpAttemptFailure::Cancelled => crate::ProviderError::cancelled(),
-        HttpAttemptFailure::Network { source, kind, .. } => crate::ProviderError::fatal(
-            match kind {
-                NetworkFailureKind::Timeout => crate::ProviderErrorKind::Timeout,
-                _ => crate::ProviderErrorKind::Network,
-            },
-            source.to_string(),
-        ),
-        HttpAttemptFailure::Http {
-            status, kind, body, ..
-        } => {
-            let error_kind = match kind {
-                HttpFailureKind::RateLimited => crate::ProviderErrorKind::RateLimited,
-                HttpFailureKind::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
-                HttpFailureKind::Server => crate::ProviderErrorKind::UpstreamUnavailable,
-                HttpFailureKind::Client => crate::ProviderErrorKind::InvalidRequest,
-            };
-            let mut error = crate::ProviderError::fatal(error_kind, body.text());
-            error.provider_code = Some(status.to_string());
-            error
-        }
-    }
+    failure.into_provider_error()
 }
 
 #[async_trait]
@@ -347,9 +331,11 @@ impl LlmProvider for AnthropicProvider {
                             HttpFailureKind::RateLimited | HttpFailureKind::Server => {
                                 AttemptDisposition::from_remaining(remaining)
                             }
-                            HttpFailureKind::ContextTooLong | HttpFailureKind::Client => {
-                                AttemptDisposition::FinalFailure
-                            }
+                            HttpFailureKind::ContextTooLong
+                            | HttpFailureKind::Client
+                            | HttpFailureKind::Authentication
+                            | HttpFailureKind::PermissionDenied
+                            | HttpFailureKind::ModelUnavailable => AttemptDisposition::FinalFailure,
                         },
                     };
                     // 单次记录：typed 分类决定 disposition 后，消费式
@@ -421,7 +407,15 @@ impl LlmProvider for AnthropicProvider {
                                 });
                                 continue;
                             }
-                            HttpFailureKind::Client => {
+                            // Authentication / permission / model-unavailable
+                            // are unconditionally terminal alongside a generic
+                            // client error: surface a non-retryable Api error
+                            // immediately (legacy behavior preserved, match
+                            // made exhaustive over the widened HttpFailureKind).
+                            HttpFailureKind::Client
+                            | HttpFailureKind::Authentication
+                            | HttpFailureKind::PermissionDenied
+                            | HttpFailureKind::ModelUnavailable => {
                                 return Err(crate::LlmError::Api {
                                     error_type: status.to_string(),
                                     message: body.text().to_string(),
@@ -520,6 +514,45 @@ mod tests {
             }
         });
         (format!("http://{addr}"), counter)
+    }
+
+    #[tokio::test]
+    async fn anthropic_invocation_stream_returns_retryable_error_after_one_request() {
+        let response =
+            "HTTP/1.1 429 Too Many Requests\r\nretry-after: 2\r\ncontent-length: 8\r\n\r\nsensitive";
+        let (base_url, request_count) = spawn_counting_server(response).await;
+        let provider = AnthropicProvider::new(
+            "test-key".to_string(),
+            Some(base_url),
+            Some("test-model".to_string()),
+            8192,
+            ReasoningLevel::Off,
+            60,
+        )
+        .with_max_retries(10);
+        let scope =
+            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+                .expect("valid scope");
+
+        let error = match provider
+            .invocation_stream(
+                &scope,
+                &[],
+                &[Message::user("hi")],
+                &[],
+                &CancellationToken::new(),
+            )
+            .await
+        {
+            Ok(_) => panic!("429 should be returned to Runtime"),
+            Err(error) => error,
+        };
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert_eq!(error.kind, crate::ProviderErrorKind::RateLimited);
+        assert!(error.retryable);
+        assert_eq!(error.retry_after, Some(std::time::Duration::from_secs(2)));
+        assert!(!error.safe_message.contains("sensitive"));
     }
 
     #[tokio::test]
