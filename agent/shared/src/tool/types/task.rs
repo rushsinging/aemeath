@@ -1,8 +1,8 @@
-//! Task-related types used by `task_get` and `task_list` tools.
+//! Legacy Task DTOs used by Tool schema and the pre-#889 Storage façade.
 //!
-//! The canonical `Task` type lives here (in `tool/types`) so that
-//! `build.rs` can generate precise JSON Schema for it.
-//! The `task` module re-exports it for backward compatibility.
+//! Task BC owns the canonical Published Language in `agent/features/task`.
+//! These public-field DTOs remain temporarily because existing consumers mutate
+//! them directly; #889 migrates those consumers and #891 removes this façade.
 
 use serde::{Deserialize, Serialize};
 
