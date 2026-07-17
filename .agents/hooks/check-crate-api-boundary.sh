@@ -86,12 +86,7 @@ ROOT_ACCESS_ALLOW = {
         "wire_provider",
     },
     "runtime": {"AgentClientImpl", "from_args"},
-    "workflow": {
-        "GraphRuntimeConfig",
-        "GraphSignal",
-        "ReasoningGraph",
-        "ReasoningNode",
-    },
+    "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
@@ -400,6 +395,11 @@ for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():
         violations.append(f"{forbidden}: forbidden fixed-layer Context path exists")
+runtime_reasoning_port = root / "agent/features/runtime/src/ports/reasoning_port.rs"
+if runtime_reasoning_port.exists():
+    violations.append(
+        "agent/features/runtime/src/ports/reasoning_port.rs: Runtime must consume workflow::api::ReasoningPort instead of defining a duplicate trait"
+    )
 project_lib = root / "agent/features/project/src/lib.rs"
 if project_lib.exists():
     for violation in project_public_facade_violations(project_lib.read_text()):

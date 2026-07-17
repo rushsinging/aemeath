@@ -180,9 +180,7 @@ pub async fn from_args_with_workspace(
 
     // 18. 组装 context
     let memory_config = snapshot.memory().clone();
-    let reasoning_graph_config = Some(workflow::GraphRuntimeConfig::from_shared(
-        snapshot.reasoning_graph(),
-    ));
+    let reasoning_graph_config = snapshot.reasoning_graph().clone();
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
             client,

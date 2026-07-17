@@ -9,9 +9,19 @@ pub const LOG_TARGET: &str = "aemeath:agent:workflow";
 
 mod domain;
 
-pub use domain::reasoning_graph::{GraphRuntimeConfig, ReasoningGraph, ReasoningNode};
-
 /// 跨 BC 公开 API。
 pub mod api {
-    pub use crate::domain::reasoning_graph::ReasoningSignal;
+    pub use crate::domain::reasoning_graph::{ReasoningNode, ReasoningSignal};
+    pub use crate::domain::reasoning_port::{ReasoningObservation, ReasoningPort};
+}
+
+/// Composition-only wiring。
+pub fn adaptive_reasoning(
+    config: share::config::ReasoningGraphConfig,
+    initial: share::reasoning::ReasoningLevel,
+) -> std::sync::Arc<dyn api::ReasoningPort> {
+    std::sync::Arc::new(domain::reasoning_port::AdaptiveReasoningPort::new(
+        domain::reasoning_graph::GraphRuntimeConfig::from_shared(&config),
+        initial,
+    ))
 }
