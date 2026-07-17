@@ -244,7 +244,7 @@ async fn load_agents_md_from_paths(
 }
 
 fn scan_user_guidance(mut user_guidance: String) -> String {
-    let warnings = policy::api::scan_content("AGENTS.md", &user_guidance);
+    let warnings = policy::scan_content("AGENTS.md", &user_guidance);
     if !warnings.is_empty() {
         for w in &warnings {
             log::warn!(target: LOG_TARGET,
@@ -255,7 +255,7 @@ fn scan_user_guidance(mut user_guidance: String) -> String {
                 w.matched_text
             );
         }
-        if let Some(prefix) = policy::api::format_warnings(&warnings) {
+        if let Some(prefix) = policy::format_warnings(&warnings) {
             user_guidance = format!("{}\n\n{}", prefix, user_guidance);
         }
     }

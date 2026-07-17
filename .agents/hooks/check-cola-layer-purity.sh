@@ -23,6 +23,9 @@ WORKFLOW_HEX_LAYERS = {"domain"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
 MEMORY_HEX_LAYERS = {"domain", "ports", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
+POLICY_HEX_LAYERS = {"domain", "adapters"}
+POLICY_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
+POLICY_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
 STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
 STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
@@ -94,6 +97,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
         if parts[0] == "storage" and normalized_layer in STORAGE_HEX_LAYERS:
             return parts[0], normalized_layer
         if parts[0] == "context" and normalized_layer in CONTEXT_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "policy" and normalized_layer in POLICY_HEX_LAYERS:
             return parts[0], normalized_layer
         if parts[0] == "project" and normalized_layer in PROJECT_HEX_LAYERS:
             return parts[0], normalized_layer
@@ -189,6 +194,20 @@ for feature_src in sorted(features_root.glob("*/src")):
                     f"{child.relative_to(root)}: Provider source directories must be {sorted(PROVIDER_HEX_LAYERS)}"
                 )
                 continue
+            continue
+        if crate_name == "policy":
+            if child.stem in POLICY_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Policy legacy fixed layer is forbidden; use {sorted(POLICY_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in POLICY_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Policy source directories must be {sorted(POLICY_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in POLICY_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Policy top-level source files must be {sorted(POLICY_ALLOWED_TOP_LEVEL_FILES)}"
+                )
             continue
         if crate_name == "project":
             if child.stem in PROJECT_LEGACY_LAYERS:
