@@ -15,6 +15,7 @@ use std::collections::HashMap;
 
 use provider::{ModelToolSchema, ReasoningLevel};
 use sdk::RunId;
+pub use sdk::{RunStepId, SessionId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleConfig;
 pub use share::message::Message as ContextMessage;
@@ -42,9 +43,7 @@ macro_rules! string_value_object {
     };
 }
 
-string_value_object!(SessionId);
 string_value_object!(ContextRequestId);
-string_value_object!(RunStepId);
 string_value_object!(CalendarDate);
 string_value_object!(Language);
 string_value_object!(SystemPromptSpec);

@@ -97,7 +97,7 @@ agent/features/runtime/src/
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
-- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `UsageSnapshot`；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（≤10 次，退避封顶 5 分钟），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
+- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `RawUsageSnapshot`（provider-neutral、单 attempt 累计快照）；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（≤10 次，退避封顶 5 分钟），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
 - 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`ReasoningPort`（取 effort）
 
@@ -125,7 +125,7 @@ agent/features/runtime/src/
 - projection **NEVER** 执行 channel send、watch 更新、I/O 或状态 mutation；这些副作用只属于 sink adapter。#874 已收口纯转换与 SDK identity 契约，`AgentId` 的生产接线和旧 AskUser sender 退役由 #878/#943/#944 完成
 
 ### model_invocation 的 Usage 出口
-- Provider ACL 返回标准化 `UsageSnapshot` 后，model_invocation 构造带 SessionId / RunId / RunStepId / ModelInvocationId 的 UsageRecord
+- Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；Runtime **NEVER** 解释 vendor wire 字段或重复定义 Usage DTO
 - 经 `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态
 
 ### agent_client（入站 façade）

@@ -58,5 +58,5 @@ pub use tool_port::{
     ToolOutcome, ToolProfileName,
 };
 pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
-pub use usage_sink::{UsageEmitOutcome, UsageRecord, UsageSink};
+pub use usage_sink::{UsageDropReason, UsageEmitOutcome, UsageRecord, UsageSink};
 pub use workspace_port::{WorkspaceFrame, WorkspacePort};
