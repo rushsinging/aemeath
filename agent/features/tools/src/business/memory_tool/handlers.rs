@@ -1,6 +1,6 @@
 use crate::api::{ToolExecutionContext, TypedToolResult};
 use serde_json::Value;
-use share::memory_ops::{AddResult, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+use share::memory::{AddResult, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use share::tool::types::memory::MemoryResult;
 use std::time::{SystemTime, UNIX_EPOCH};
 
