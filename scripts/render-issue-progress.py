@@ -138,7 +138,7 @@ def render_tree(root: int, issues: dict[int, Issue]) -> str:
         child_prefix = prefix if is_root else prefix + ("   " if is_last else "│  ")
         if issue.blocked_by:
             dependencies = ", ".join(
-                f"#{dependency}{status_icon(issues[dependency].state)}"
+                f"#{dependency}(#{issues[dependency].parent or '—'}){status_icon(issues[dependency].state)}"
                 for dependency in issue.blocked_by
             )
             lines.append(f"{child_prefix}   ← {dependencies}")
