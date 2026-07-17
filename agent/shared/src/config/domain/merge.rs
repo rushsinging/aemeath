@@ -15,7 +15,7 @@ use crate::config::{
     permissions::{PermissionConfig, PermissionModeConfig},
     skills::SkillsConfig,
     storage::StorageConfig,
-    tools::{AgentRoleConfig, AgentsConfig, ToolsConfig},
+    tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig},
     ui::{TaskLifecycleConfig, TaskListConfig, UiConfig},
     Config, GuidanceConfig, GuidanceReloadPolicy,
 };
@@ -138,6 +138,18 @@ pub struct ToolsConfigPatch {
     pub settings: Option<HashMap<String, Value>>,
     #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
+    #[serde(default)]
+    pub tool_result: Option<ToolResultConfigPatch>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ToolResultConfigPatch {
+    #[serde(default)]
+    pub threshold_chars: Option<usize>,
+    #[serde(default)]
+    pub preview_head_chars: Option<usize>,
+    #[serde(default)]
+    pub preview_tail_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -416,6 +428,25 @@ pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) 
     }
     if let Some(v) = patch.max_concurrency {
         base.max_concurrency = v;
+    }
+    if let Some(v) = patch.tool_result {
+        base.tool_result = apply_tool_result_patch(base.tool_result, v);
+    }
+    base
+}
+
+fn apply_tool_result_patch(
+    mut base: ToolResultConfig,
+    patch: ToolResultConfigPatch,
+) -> ToolResultConfig {
+    if let Some(v) = patch.threshold_chars {
+        base.threshold_chars = v;
+    }
+    if let Some(v) = patch.preview_head_chars {
+        base.preview_head_chars = v;
+    }
+    if let Some(v) = patch.preview_tail_chars {
+        base.preview_tail_chars = v;
     }
     base
 }
@@ -729,5 +760,24 @@ mod tests {
         assert_eq!(snapshot.max_tool_concurrency(), 8);
         assert_eq!(snapshot.max_agent_concurrency(), 5);
         assert_eq!(snapshot.agents().default_model, "legacy/model");
+    }
+
+    #[test]
+    fn tool_result_partial_patch_preserves_unspecified_policy_fields() {
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+                "tools": {
+                    "tool_result": { "threshold_chars": 9000 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
+        let policy = snapshot.tool_result_policy();
+
+        assert_eq!(policy.threshold_chars(), 9_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
     }
 }

@@ -29,6 +29,8 @@ pub struct CliAgentRunner {
     pub reasoning: bool,
     /// Model entries config for reasoning lookup.
     pub models_config: Arc<ModelsConfig>,
+    pub tool_result_materializer:
+        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
 }
 
 impl CliAgentRunner {

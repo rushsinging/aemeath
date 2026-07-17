@@ -278,6 +278,7 @@ impl AgentRunner for CliAgentRunner {
             resolved_spec,
             progress: Box::new(progress),
             ctx_context_size: context_size,
+            tool_result_materializer: self.tool_result_materializer.clone(),
         }
         .run_loop()
         .await

@@ -9,7 +9,6 @@ mod domain_tests;
 mod memory_store;
 mod ports;
 mod task_store;
-mod tool_result;
 
 pub mod api {
     pub use crate::{
@@ -39,4 +38,3 @@ pub use ports::{AtomicBlobPort, AtomicDatasetPort};
 pub use task_store::{
     Batch, BatchStatus, Task, TaskPriority, TaskSnapshot, TaskStatus, TaskStore, TaskStoreStats,
 };
-pub use tool_result::{persist_oversized_results, MAX_TOOL_RESULT_CHARS};

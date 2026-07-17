@@ -309,7 +309,8 @@ pub(crate) async fn send_tool_result<S>(
         .await;
 }
 
-pub(crate) fn tool_results_for_api(
+pub(crate) async fn tool_results_for_api(
+    materializer: &crate::application::tool_result_materialization::ToolResultMaterializer,
     results: Vec<ToolExecution>,
     session_id: &str,
 ) -> share::message::Message {
@@ -320,7 +321,7 @@ pub(crate) fn tool_results_for_api(
         results.len(),
         error_count
     );
-    let mut provider_results: Vec<_> = results
+    let provider_results: Vec<_> = results
         .into_iter()
         .map(|ex| {
             (
@@ -332,8 +333,9 @@ pub(crate) fn tool_results_for_api(
             )
         })
         .collect();
-    storage::persist_oversized_results(session_id, &mut provider_results);
-    share::message::Message::tool_results_rich(provider_results)
+    materializer
+        .materialize_provider_results(session_id, provider_results)
+        .await
 }
 
 pub(crate) fn log_tool_result(id: &ToolCallId, tool_name: &str, is_error: bool, output: &str) {
@@ -366,7 +368,6 @@ mod tests {
     use share::tool::ToolOutcome;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
-    use storage::MAX_TOOL_RESULT_CHARS;
     use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
     #[derive(Clone, Default)]
@@ -527,15 +528,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
+    #[tokio::test]
+    async fn test_tool_results_for_api_uses_provider_id_not_runtime_id() {
         let results = vec![ToolExecution::from_parts(
             ToolCallId::new_v7(),
             "provider-id".to_string(),
             "Bash".to_string(),
             ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
         )];
-        let message = tool_results_for_api(results, "test-provider-id");
+        let materializer = crate::application::testing::test_tool_result_materializer();
+        let message =
+            tool_results_for_api(materializer.as_ref(), results, "test-provider-id").await;
 
         let [ContentBlock::ToolResult { tool_use_id, .. }] = message.content.as_slice() else {
             panic!("expected one tool result");
@@ -543,10 +546,11 @@ mod tests {
         assert_eq!(tool_use_id, "provider-id");
     }
 
-    #[test]
-    fn test_tool_results_for_api_persists_oversized_tui_result() {
+    #[tokio::test]
+    async fn test_tool_results_for_api_persists_oversized_tui_result() {
+        const THRESHOLD: usize = 50_000;
         let session_id = format!("test-tui-{}", std::process::id());
-        let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
+        let oversized = "x".repeat(THRESHOLD + 1);
         let results = vec![ToolExecution::from_parts(
             ToolCallId::new_v7(),
             "provider-oversized".to_string(),
@@ -557,7 +561,8 @@ mod tests {
                 Vec::new(),
             ),
         )];
-        let message = tool_results_for_api(results, &session_id);
+        let materializer = crate::application::testing::test_tool_result_materializer();
+        let message = tool_results_for_api(materializer.as_ref(), results, &session_id).await;
 
         let [ContentBlock::ToolResult { content, .. }] = message.content.as_slice() else {
             panic!("expected one tool result");
@@ -571,7 +576,7 @@ mod tests {
             .and_then(|value| value.as_str())
             .expect("persisted reference should be in text field");
         assert!(text.contains("<persisted-output>"));
-        assert!(text.len() < MAX_TOOL_RESULT_CHARS);
+        assert!(text.len() < THRESHOLD);
         assert!(text.contains(&session_id));
     }
 }

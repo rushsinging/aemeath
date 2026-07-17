@@ -146,12 +146,13 @@ pub(super) fn inject_summary_into_system_blocks(
     }
 }
 
-pub(super) fn append_tool_results(
+pub(super) async fn append_tool_results(
+    materializer: &crate::application::tool_result_materialization::ToolResultMaterializer,
     messages: &mut Vec<Message>,
     results: Vec<crate::application::agent::ToolExecution>,
     session_id: &str,
 ) {
-    let mut provider_results: Vec<_> = results
+    let provider_results: Vec<_> = results
         .into_iter()
         .map(|ex| {
             (
@@ -163,18 +164,20 @@ pub(super) fn append_tool_results(
             )
         })
         .collect();
-    storage::persist_oversized_results(session_id, &mut provider_results);
-    messages.push(Message::tool_results_rich(provider_results));
+    messages.push(
+        materializer
+            .materialize_provider_results(session_id, provider_results)
+            .await,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use share::message::ContentBlock;
-    use storage::MAX_TOOL_RESULT_CHARS;
 
-    #[test]
-    fn test_append_tool_results_uses_provider_id_not_runtime_id() {
+    #[tokio::test]
+    async fn test_append_tool_results_uses_provider_id_not_runtime_id() {
         let mut messages = Vec::new();
         let results = vec![crate::application::agent::ToolExecution::from_parts(
             sdk::ids::ToolCallId::from_legacy_or_new("runtime-id"),
@@ -183,7 +186,14 @@ mod tests {
             share::tool::ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
         )];
 
-        append_tool_results(&mut messages, results, "test-sub-agent-provider-id");
+        let materializer = crate::application::testing::test_tool_result_materializer();
+        append_tool_results(
+            materializer.as_ref(),
+            &mut messages,
+            results,
+            "test-sub-agent-provider-id",
+        )
+        .await;
 
         let [ContentBlock::ToolResult { tool_use_id, .. }] = messages[0].content.as_slice() else {
             panic!("expected one tool result");
@@ -191,10 +201,11 @@ mod tests {
         assert_eq!(tool_use_id, "provider-id");
     }
 
-    #[test]
-    fn test_append_tool_results_persists_oversized_sub_agent_result() {
+    #[tokio::test]
+    async fn test_append_tool_results_persists_oversized_sub_agent_result() {
+        const THRESHOLD: usize = 50_000;
         let session_id = format!("test-sub-agent-{}", std::process::id());
-        let oversized = "x".repeat(MAX_TOOL_RESULT_CHARS + 1);
+        let oversized = "x".repeat(THRESHOLD + 1);
         let mut messages = Vec::new();
         let results = vec![crate::application::agent::ToolExecution::from_parts(
             sdk::ids::ToolCallId::from_legacy_or_new("tool-oversized"),
@@ -207,7 +218,8 @@ mod tests {
             ),
         )];
 
-        append_tool_results(&mut messages, results, &session_id);
+        let materializer = crate::application::testing::test_tool_result_materializer();
+        append_tool_results(materializer.as_ref(), &mut messages, results, &session_id).await;
 
         let [ContentBlock::ToolResult { content, .. }] = messages[0].content.as_slice() else {
             panic!("expected one tool result");
@@ -221,7 +233,7 @@ mod tests {
             .and_then(|value| value.as_str())
             .expect("persisted reference should be in text field");
         assert!(text.contains("<persisted-output>"));
-        assert!(text.len() < MAX_TOOL_RESULT_CHARS);
+        assert!(text.len() < THRESHOLD);
         assert!(text.contains(&session_id));
     }
 

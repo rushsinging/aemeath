@@ -548,6 +548,7 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: Arc::new(share::config::ModelsConfig::default()),
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
     }
 }
 
@@ -562,6 +563,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: Arc::new(share::config::ModelsConfig::default()),
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
     }
 }
 
