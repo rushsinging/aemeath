@@ -8,9 +8,12 @@ import json
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+DEFAULT_WORKERS = 10
 
 
 @dataclass(frozen=True)
@@ -50,52 +53,70 @@ def decode_paginated_json(raw: str) -> list[dict[str, Any]]:
     return values
 
 
-def collect_issues(repo: str, root: int) -> dict[int, Issue]:
+def collect_issues(
+    repo: str, root: int, *, workers: int = DEFAULT_WORKERS
+) -> dict[int, Issue]:
     issues: dict[int, Issue] = {}
+    parents: dict[int, int | None] = {root: None}
+    pending = [root]
 
-    def collect(number: int, parent: int | None) -> None:
-        if number in issues:
-            return
+    def fetch_issue(number: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         data = gh_api(f"repos/{repo}/issues/{number}")
-        children_data = gh_api(
+        children = gh_api(
             f"repos/{repo}/issues/{number}/sub_issues", paginate=True
         )
-        children = [item["number"] for item in children_data]
-        issues[number] = Issue(
-            number=number,
-            title=data["title"],
-            state=data["state"].lower(),
-            parent=parent,
-            children=children,
-            blocked_by=[],
-        )
-        for child in children:
-            collect(child, number)
+        return data, children
 
-    collect(root, None)
-    for number, issue in list(issues.items()):
-        dependencies = gh_api(
-            f"repos/{repo}/issues/{number}/dependencies/blocked_by", paginate=True
-        )
-        for dependency in dependencies:
-            dependency_number = dependency["number"]
-            if dependency_number not in issues:
-                issues[dependency_number] = Issue(
-                    number=dependency_number,
-                    title=dependency["title"],
-                    state=dependency["state"].lower(),
-                    parent=None,
-                    children=[],
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        while pending:
+            batch = pending
+            pending = []
+            results = executor.map(fetch_issue, batch)
+            for number, (data, children_data) in zip(batch, results):
+                children = [item["number"] for item in children_data]
+                issues[number] = Issue(
+                    number=number,
+                    title=data["title"],
+                    state=data["state"].lower(),
+                    parent=parents[number],
+                    children=children,
                     blocked_by=[],
                 )
-        issues[number] = Issue(
-            number=issue.number,
-            title=issue.title,
-            state=issue.state,
-            parent=issue.parent,
-            children=issue.children,
-            blocked_by=[dependency["number"] for dependency in dependencies],
-        )
+                for child in children:
+                    if child not in parents:
+                        parents[child] = number
+                        pending.append(child)
+
+        hierarchy_numbers = list(issues)
+
+        def fetch_dependencies(number: int) -> list[dict[str, Any]]:
+            return gh_api(
+                f"repos/{repo}/issues/{number}/dependencies/blocked_by",
+                paginate=True,
+            )
+
+        dependency_results = executor.map(fetch_dependencies, hierarchy_numbers)
+        for number, dependencies in zip(hierarchy_numbers, dependency_results):
+            issue = issues[number]
+            for dependency in dependencies:
+                dependency_number = dependency["number"]
+                if dependency_number not in issues:
+                    issues[dependency_number] = Issue(
+                        number=dependency_number,
+                        title=dependency["title"],
+                        state=dependency["state"].lower(),
+                        parent=None,
+                        children=[],
+                        blocked_by=[],
+                    )
+            issues[number] = Issue(
+                number=issue.number,
+                title=issue.title,
+                state=issue.state,
+                parent=issue.parent,
+                children=issue.children,
+                blocked_by=[dependency["number"] for dependency in dependencies],
+            )
     return issues
 
 
@@ -171,6 +192,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("issue", type=int, nargs="?", default=743, help="根 Issue 编号")
     parser.add_argument("--repo", default="rushsinging/aemeath", help="owner/repo")
+    parser.add_argument(
+        "--workers", type=int, default=DEFAULT_WORKERS, help="并发请求数（默认 10）"
+    )
     parser.add_argument("--output", type=Path, help="输出 Markdown 文件；默认 stdout")
     return parser.parse_args()
 
@@ -178,7 +202,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        report = render_report(args.issue, collect_issues(args.repo, args.issue), args.repo)
+        if args.workers < 1:
+            raise RuntimeError("--workers 必须大于 0")
+        issues = collect_issues(args.repo, args.issue, workers=args.workers)
+        report = render_report(args.issue, issues, args.repo)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(report, encoding="utf-8")

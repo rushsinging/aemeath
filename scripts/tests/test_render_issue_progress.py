@@ -3,8 +3,11 @@
 
 import importlib.util
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "render-issue-progress.py"
 SPEC = importlib.util.spec_from_file_location("render_issue_progress", SCRIPT)
@@ -28,6 +31,39 @@ class RenderIssueProgressTests(unittest.TestCase):
 
         self.assertIn("⬜ #875(#649) 模型调用", rendered)
         self.assertIn("← #873✅, #903⬜", rendered)
+
+    def test_collect_issues_uses_ten_concurrent_workers(self):
+        active = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def fake_api(path, *, paginate=False, retries=5):
+            nonlocal active, peak
+            if path.endswith("/issues/743"):
+                return {"title": "根", "state": "open"}
+            if path.endswith("/issues/743/sub_issues"):
+                return [
+                    {"number": number} for number in range(800, 812)
+                ]
+            if "/dependencies/blocked_by" in path:
+                return []
+            if path.endswith("/sub_issues"):
+                return []
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            number = int(path.rsplit("/", 1)[1])
+            return {"title": f"Issue {number}", "state": "open"}
+
+        with patch.object(MODULE, "gh_api", side_effect=fake_api):
+            issues = MODULE.collect_issues("owner/repo", 743)
+
+        self.assertEqual(MODULE.DEFAULT_WORKERS, 10)
+        self.assertEqual(len(issues), 13)
+        self.assertEqual(peak, 10)
 
     def test_render_report_summarizes_progress(self):
         issues = {
