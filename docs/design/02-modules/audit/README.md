@@ -96,8 +96,9 @@ Usage worker 顺序消费 queue：
 
 ```text
 receive one UsageRecord
-  → UsageAppendStorePort.append(partition, record)
-  → UsageAppendStorePort.flush(partition)
+  → encode UsageEnvelopeV1 as one newline-terminated bytes payload
+  → UsageAppendStorePort.append(stream, bytes)
+  → UsageAppendStorePort.flush(stream)
   → receive next
 ```
 
@@ -148,14 +149,20 @@ Audit 是尽力事实记录，不是 durable execution 或 Run checkpoint。
 struct AppendLogNamespace(String);      // Audit 使用 "usage"
 struct AppendLogStream(String);         // 不透明 stream key；Audit adapter 从 SessionId 派生
 
+struct AppendLogLine {
+    bytes: Vec<u8>,
+    terminated: bool,                // false = 文件尾未换行残片
+}
+
 struct AppendLogReader {
-    lines: AsyncLineStream,
+    lines: Vec<AppendLogLine>,       // 机械 bytes 行；不解析 Usage JSON
 }
 
 enum AppendLogError {
     Io,
     InvalidNamespace,
     InvalidStream,
+    InvalidPayload,
     Closed,
 }
 
@@ -170,12 +177,13 @@ trait UsageAppendStorePort: Send + Sync {
 }
 ```
 
-Audit domain/application/worker 不直接访问 filesystem；Audit-owned File AppendLog **adapter MAY** 使用受约束的文件 API 执行 append/flush，并 **MUST** 依赖 Storage 发布的路径安全 primitive 做 segment/root 解析，**NEVER** 消费 Storage 整值替换 OHS。`append` 只保证整行 bytes 按 stream 追加且不覆盖已有内容；`flush` 必须把此前 append 的 bytes 提交到该 adapter 定义的 OS durability boundary，默认文件实现执行 file data sync。#928 以调用顺序与 reopen 可见性/耐久性契约测试冻结该语义。
+Audit domain/application/worker 不直接访问 filesystem；Audit-owned File AppendLog **adapter MAY** 使用 Storage 发布的 `SafeStorageRoot` / `SafeStorageDir` 仅做 capability-root 下 no-follow 目录与普通文件句柄打开，并 **MUST** 以 `SafePathSegment` 解析 namespace 与 stream；`write_all` / `sync_data` / framing / read/list policy 均由 Audit adapter 执行，Storage primitive **NEVER** 定义 append 语义或消费整值替换 OHS。`append` 要求非空 bytes、内部不含 `\n` 且恰好以一个 `\n` 结束，违约返回 `InvalidPayload`；#929 worker 负责把序列化 envelope 封成该单行 payload。adapter 在 per-stream 进程内锁下单次 `write_all` 到 no-follow open-existing-or-create append 文件，绝不覆盖已有内容；`flush` 在同一锁下重新打开该 stream 并执行 `sync_data`。这建立“调用返回后已请求 OS file-data sync”的明确边界，但不承诺断电、目录项或跨进程 exactly-once。`read` 在同一锁下打开只读句柄并返回机械 bytes 行：已终结行剥离尾 `\n`，文件尾存在未终结残片时也作为最后一个元素原样返回，使 #930 可报告截断 warning；`list_streams` 只返回合法 `.jsonl` 普通文件、按 stream key 排序。`UsageAppendStorePort` 的方法保持 async 以服务 #929 worker；默认文件 adapter 当前执行同步文件 syscall，#929 **MUST** 在专用 blocking 边界调用（如 `spawn_blocking` 或专用线程），NEVER 在 Runtime hot path 或通用 async executor worker 上直接执行 `sync_data`。#928 以 contract harness、flush 后 reopen、symlink fail-closed 与 append/read/flush 互斥测试冻结该语义。
 
 Audit adapter（detail 执行机制）负责：
 
-- 路径映射与目录创建（基于 Storage 路径安全 primitive，而非 Storage OHS）；
-- append 与 flush 的物理执行；
+- `SafeStorageRoot` 下的路径映射与目录创建；该 primitive 只提供 capability-root/no-symlink 机制，不拥有 append 语义；
+- append + `sync_data` flush 的物理执行；
+- per-stream 进程内锁与 handle 生命周期；跨进程顺序不在 MVP 承诺；
 - 顺序读取与 namespace 下的 stream 枚举；
 - 轮转/分段的物理文件切分、rename 等执行机制；
 - 文件/IO 层错误隔离。

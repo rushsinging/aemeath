@@ -138,6 +138,9 @@ dependencies = [
  "serde",
  "serde_json",
  "share",
+ "storage",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -3315,6 +3318,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "share",
+ "tempfile",
  "tokio",
  "uuid",
 ]

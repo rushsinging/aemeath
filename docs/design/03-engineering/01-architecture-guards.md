@@ -84,7 +84,7 @@
 | `storage` | `share` |
 | `task` | ∅ |
 | `hook` | `share` |
-| `audit` | `share`, `sdk` |
+| `audit` | `share`, `sdk`, `storage` |
 | `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
 | `sdk` | `share`, `utils` |
@@ -160,10 +160,10 @@
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 限制为 `POLICY_HEX_LAYERS = {domain, adapters}` 与精确顶层文件 `lib.rs/domain.rs/adapters.rs`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}`，并暂时允许 #991 过渡目录 `memory_store/task_store`；Audit 在 #927 后允许有真实契约的 `domain + ports`，继续禁止空 COLA 占位。
-- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context、Policy、Storage 与 Audit 使用各自目标规则。Policy 由 `POLICY_HEX_LAYERS = {domain, adapters}`、`POLICY_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, adapters.rs}` 和 legacy 层禁单锁定 #986 后基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, ports}`、`AUDIT_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, ports.rs}` 和 `AUDIT_LEGACY_LAYERS = {api, business, contract, core, gateway, capabilities}` 锁定 #927 后基线；Storage domain 额外禁止 `std::fs`/`tokio::fs`、`PathBuf` 与 `crate::adapters`，其过渡模块由 #883/#884 退出。其余规则按路径识别当前层，并对例外做 stale 自检。
+- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 限制为 `POLICY_HEX_LAYERS = {domain, adapters}` 与精确顶层文件；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}` 并暂时允许过渡目录；Audit 在 #928 后允许真实 `domain + ports + adapters`，继续禁止空 COLA 占位。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context、Policy、Storage 与 Audit 使用各自目标规则。Policy 由精确层/文件/legacy 禁单锁定 #986 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, ports, adapters}`、`AUDIT_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, ports.rs, adapters.rs}` 和 legacy 禁单锁定 #928 基线；Storage domain 额外禁止物理 fs API、`PathBuf` 与 `crate::adapters`。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
-- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS = {contract, gateway, core, business, utils}`；Runtime 使用 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 使用 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 使用 `POLICY_HEX_LAYERS = {domain, adapters}`，顶层只允许 `lib.rs/domain.rs/adapters.rs`，并禁止 `api/business/contract/core/gateway/capabilities` 恢复；Storage 使用 `STORAGE_HEX_LAYERS = {domain, ports, adapters}`、`STORAGE_TRANSITIONAL_MODULES = {memory_store, task_store}`，并以 `STORAGE_LEGACY_LAYERS = {api, business, contract, gateway}` 防旧层恢复；Audit 使用 `AUDIT_HEX_LAYERS = {domain, ports}` 与精确顶层文件集合，后续 #928/#929/#930 只能随真实实现同步增量扩展。Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
+- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS`；Runtime/Context/Policy/Storage 使用各自登记目标层；Audit 使用 `domain/ports/adapters` 与精确顶层文件集合，后续 #929/#930 只能随真实实现同步增量扩展；Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -203,8 +203,9 @@
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-  - `ROOT_ACCESS_ALLOW.policy = {format_warnings, scan_content, validate_and_normalize_path, validate_and_normalize_path_from_base, validate_search_path, validate_search_path_from_base}`：#986 行为等价迁移期间的精确 crate-root façade；`policy::{domain,adapters}` 与 `policy::api` 均禁止跨 crate 消费，#915/#916 迁出相邻 guard 后删除对应符号。
-  - `ROOT_ACCESS_ALLOW.audit`：#927 发布的 `UsageRecord` / `UsageEnvelopeV1` / emit outcome、query DTO / `UsageQueryPort` 与 schema version；后续公开面必须由真实消费者证明。
+  - `ROOT_ACCESS_ALLOW.policy = {format_warnings, scan_content, validate_and_normalize_path, validate_and_normalize_path_from_base, validate_search_path, validate_search_path_from_base}`：#986 行为等价迁移期间的精确 crate-root façade；#915/#916 迁出后删除。
+  - `ROOT_ACCESS_ALLOW.audit`：#927 Usage PL/query contract 加 #928 AppendLog PL、File adapter type/factory；后续公开面必须由真实消费者证明。
+  - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade 加 #928 `SafeStorageRoot` / `SafeStorageDir` / typed entry/open options 路径安全 PL；不包含任何 AppendLog/Usage 类型。
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。

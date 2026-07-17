@@ -37,7 +37,7 @@ business_allow = {
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),
     "hook": {"share"},
-    "audit": {"share", "sdk"},
+    "audit": {"share", "sdk", "storage"},
     "workflow": {"share"},
     # SDK publishes delivery contracts and typed tool result DTOs. During #993 the
     # DTO owner moved from share::tool into the tools crate-root façade, so SDK

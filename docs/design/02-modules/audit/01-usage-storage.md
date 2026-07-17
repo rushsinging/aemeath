@@ -44,17 +44,18 @@ Runtime
   → UsageSink.try_record(record)
   → bounded queue
   → Usage worker
-  → serialize envelope as one JSON line
+  → serialize envelope + append exactly one trailing newline (#929 framing owner)
   → UsageAppendStorePort.append
   → UsageAppendStorePort.flush
 ```
 
-每条 flush 的语义：worker 收到下一条记录前，上一条已请求 Audit adapter flush。它不等同于 fsync 或绝对持久性；具体 flush/fsync 语义由 Audit 的 File AppendLog Adapter 以 file append detail（而非 Storage 整值替换协议）自行定义并执行，只复用 Storage 发布的路径安全 primitive。
+每条 flush 的语义：worker 收到下一条记录前，上一条已调用 Audit adapter flush。默认 File AppendLog adapter 在 per-stream 进程内锁下执行 append `write_all`，flush 调用同一打开文件的 `sync_data`；因此 flush 成功表示已向 OS 请求同步该文件数据，且随后 reopen 可见完整行。它不承诺断电绝对持久、目录项 durability、跨进程全局顺序或 exactly-once。路径解析与 no-symlink 约束复用 Storage `SafeStorageRoot` / `SafePathSegment`，不经过 Storage 整值替换端口。
 
 ## 4. 顺序与重复
 
 - 单个 worker 保持 dequeue 顺序；
-- 同一 Session 分区内按 worker 接收顺序追加；
+- 默认 adapter 以 per-stream 进程内锁保证同进程 append/read/flush 互斥，完整行不交错；
+- 同一 Session 分区内按 adapter 接受锁的顺序追加；
 - 不承诺跨进程全局顺序；
 - v0.1.0 不做去重和 exactly-once；
 - `model_invocation_id` 为 Future 去重和诊断提供稳定关联；
@@ -87,10 +88,10 @@ Audit reader：
 
 ## 7. 查询
 
-按 SessionId 查询只读取对应分区。跨 Session 查询：
+按 SessionId 查询只读取对应分区。v0.1.0 的 `AppendLogReader` 对单分区采用 eager `Vec<Vec<u8>>`，因此“流式”只表示逐分区处理、**NEVER** 同时加载全部 Session 文件；单个超大分区的真正 streaming reader 留作后续演进。跨 Session 查询：
 
 - 由 Audit Query adapter 调用 `UsageAppendStorePort::list_streams("usage")` 枚举可用分区；
-- 流式读取，不一次性加载全部文件；
+- 逐分区读取，不一次性加载全部 Session 文件；单分区 eager reader 是 v0.1.0 明确取舍；
 - pagination 在 Audit BC 内实施；
 - token summary 在解析后聚合；
 - 不计算 Cost。
