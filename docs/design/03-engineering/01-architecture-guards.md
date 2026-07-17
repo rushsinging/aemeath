@@ -33,6 +33,7 @@
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
+| 4a | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
@@ -156,6 +157,15 @@
 | `agent/shared/src/task/store.rs` | task store 行为属于 Storage 当前 façade |
 
 - **依赖白名单（`allowed_dependencies`）**：`serde`, `serde_json`, `serde_yml`, `thiserror`, `tokio`, `tokio-util`, `uuid`, `log`, `logging`, `unicode-width`, `utils`。
+
+### 4a. check-composition-layout.sh
+
+- **功能**：锁定 `agent/composition/src` 的 capability-first wiring modules 结构；Composition 按被装配职责分片，不机械复制 feature crate 的 Hexagonal 四层。
+- **允许的顶层源码**：`lib.rs`, `app.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/provider/runtime/tools/update` 五个 wiring module。
+- **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
+- **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
+- **范围边界**：本守卫只证明 Composition 物理结构与 façade 模块声明；`FeatureGateways` 真实注入由 #948 承接，全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
+- **#1002 故意违规证据**：临时创建 `agent/composition/src/domain.rs` 时，单 Guard 与总编排均以 exit 2 命中 `forbidden Hexagonal/COLA layer`；删除探针后两者 clean pass。
 
 ## 5. check-cola-layer-purity.sh
 
