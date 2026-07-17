@@ -194,7 +194,7 @@ impl<'a> SubAgentRun<'a> {
             );
         }
         log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
-        logging::context::set_current_turn(turn_number);
+        logging::set_current_turn(turn_number);
     }
 
     fn progress_api_ok(&self, turn_number: usize, resp: &provider::StreamResponse) {
@@ -224,7 +224,7 @@ impl<'a> SubAgentRun<'a> {
             );
         }
         log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
-        logging::context::set_current_turn(turn_number);
+        logging::set_current_turn(turn_number);
     }
 
     fn send_text_progress(&self, turn: usize, resp: &provider::StreamResponse) {
@@ -258,7 +258,7 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::to_string(&data).unwrap_or_default()
             );
         }
-        logging::context::set_current_turn(turn_number);
+        logging::set_current_turn(turn_number);
     }
 
     fn build_call_info(

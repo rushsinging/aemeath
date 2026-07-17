@@ -3,10 +3,10 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_list_complete::TaskListCompleteResult;
 use std::sync::Arc;
-use storage::TaskStore;
+use task::TaskAccess;
 
 pub struct TaskListCompleteTool {
-    pub store: Arc<TaskStore>,
+    pub access: Arc<dyn TaskAccess>,
 }
 
 #[async_trait]
@@ -45,14 +45,18 @@ impl TypedTool for TaskListCompleteTool {
         _input: serde_json::Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskListCompleteResult> {
-        match self.store.complete_list().await {
-            Some(batch) => TypedToolResult::success(
-                format!("Task list #{} completed", batch.id),
-                TaskListCompleteResult {
-                    batch_id: batch.id.to_string(),
-                },
-            ),
-            None => TypedToolResult::error("no active task list"),
+        let Some(batch_id) = self.access.lifecycle_snapshot(0).current_batch else {
+            return TypedToolResult::error("no active task list");
+        };
+        match self.access.archive_batch(batch_id) {
+            Ok(result) => {
+                let batch_id = result.value.id().to_string();
+                TypedToolResult::success(
+                    format!("Task list #{} completed", batch_id),
+                    TaskListCompleteResult { batch_id },
+                )
+            }
+            Err(error) => TypedToolResult::error(error.to_string()),
         }
     }
 }
@@ -60,7 +64,6 @@ impl TypedTool for TaskListCompleteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use storage::BatchStatus;
 
     fn test_ctx() -> ToolExecutionContext {
         ToolExecutionContext {
@@ -89,26 +92,39 @@ mod tests {
         }
     }
 
+    fn create_batch(access: &dyn task::TaskAccess) -> task::Batch {
+        access
+            .create_batch(
+                task::BatchCreateSpec::try_new("当前请求".to_string()).unwrap(),
+                1,
+            )
+            .unwrap()
+            .value
+    }
+
     #[tokio::test]
     async fn test_task_list_complete_success_archives_current_batch() {
-        let store = Arc::new(TaskStore::new());
-        store
-            .create_list("当前".to_string(), "当前请求".to_string())
-            .await;
+        let access = Arc::new(task::TaskStore::new());
+        let access: Arc<dyn task::TaskAccess> = access.clone();
+        let batch = create_batch(access.as_ref());
         let tool = TaskListCompleteTool {
-            store: store.clone(),
+            access: access.clone(),
         };
 
         let result = tool.call(serde_json::json!({}), &test_ctx()).await;
 
-        assert!(!result.is_error);
-        assert_eq!(store.list_batches().await[0].status, BatchStatus::Archived);
+        assert!(!result.is_error, "{}", result.text);
+        assert_eq!(result.data.unwrap().batch_id, batch.id().to_string());
+        assert_eq!(
+            task::TaskAccess::list_batches(access.as_ref())[0].status(),
+            task::BatchStatus::Archived
+        );
     }
 
     #[tokio::test]
     async fn test_task_list_complete_without_active_list_errors() {
-        let store = Arc::new(TaskStore::new());
-        let tool = TaskListCompleteTool { store };
+        let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
+        let tool = TaskListCompleteTool { access };
 
         let result = tool.call(serde_json::json!({}), &test_ctx()).await;
 
@@ -118,18 +134,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_list_complete_keeps_task_batch() {
-        let store = Arc::new(TaskStore::new());
-        let list = store
-            .create_list("当前".to_string(), "当前请求".to_string())
-            .await;
-        let task = store.create("任务".to_string(), "描述".to_string()).await;
+        let access = Arc::new(task::TaskStore::new());
+        let access: Arc<dyn task::TaskAccess> = access.clone();
+        let batch = create_batch(access.as_ref());
+        let created = access
+            .create_task(
+                task::TaskCreateSpec::try_new(
+                    "任务".to_string(),
+                    "描述".to_string(),
+                    None,
+                    task::TaskPriority::Normal,
+                )
+                .unwrap(),
+                2,
+            )
+            .unwrap()
+            .value;
         let tool = TaskListCompleteTool {
-            store: store.clone(),
+            access: access.clone(),
         };
 
         let result = tool.call(serde_json::json!({}), &test_ctx()).await;
 
-        assert!(!result.is_error);
-        assert_eq!(store.get(&task.id).await.unwrap().batch, list.id);
+        assert!(!result.is_error, "{}", result.text);
+        assert_eq!(access.get(created.id()).unwrap().batch(), batch.id());
     }
 }

@@ -5,14 +5,14 @@
 //!
 //! 写入格式为 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
 
-use crate::context;
-use crate::rotation::timestamp_rfc3339;
+use super::context;
+use super::lifecycle::timestamp_rfc3339;
 use log::Record;
 use serde_json::{json, Value};
 
 /// 本地时间 RFC3339 格式（含时区偏移），毫秒精度。
 ///
-/// 委托 `rotation::timestamp_rfc3339`（已使用 `chrono::Local`）。
+/// 委托 `lifecycle::timestamp_rfc3339`（已使用 `chrono::Local`）。
 pub fn timestamp_local_rfc3339() -> String {
     timestamp_rfc3339()
 }

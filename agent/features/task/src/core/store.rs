@@ -78,6 +78,10 @@ impl TaskAccess for TaskStore {
         self.lock().revision()
     }
 
+    fn clear(&self) -> Result<TaskCommandResult<()>, TaskCommandError> {
+        self.lock().clear()
+    }
+
     fn create_batch(
         &self,
         spec: BatchCreateSpec,
@@ -122,6 +126,24 @@ impl TaskAccess for TaskStore {
         updated_at: u64,
     ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
         self.lock().transition(id, to, updated_at)
+    }
+
+    fn set_subject(
+        &self,
+        id: TaskId,
+        subject: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+        self.lock().set_subject(id, subject, updated_at)
+    }
+
+    fn set_description(
+        &self,
+        id: TaskId,
+        description: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+        self.lock().set_description(id, description, updated_at)
     }
 
     fn set_priority(
@@ -189,6 +211,10 @@ impl TaskAccess for TaskStore {
 
     fn list_batches(&self) -> Vec<Batch> {
         self.lock().list_batches()
+    }
+
+    fn current_batch(&self) -> Option<BatchId> {
+        self.lock().current_batch()
     }
 
     fn stats(&self) -> TaskStoreStats {

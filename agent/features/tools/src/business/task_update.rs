@@ -3,10 +3,45 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_update::{TaskUpdateInput, TaskUpdateResult};
 use std::sync::Arc;
-use storage::{TaskPriority, TaskStatus, TaskStore};
+use task::{TaskAccess, TaskId, TaskPriority, TaskStatus};
 
 pub struct TaskUpdateTool {
-    pub store: Arc<TaskStore>,
+    pub access: Arc<dyn TaskAccess>,
+}
+
+fn parse_id(value: &str, field: &str) -> Result<TaskId, String> {
+    value
+        .parse::<u64>()
+        .map(TaskId::new)
+        .map_err(|_| format!("{field} must be a decimal task ID: {value}"))
+}
+
+fn parse_priority(value: &str) -> Result<TaskPriority, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "low" => Ok(TaskPriority::Low),
+        "normal" | "medium" => Ok(TaskPriority::Normal),
+        "high" => Ok(TaskPriority::High),
+        "urgent" | "critical" => Ok(TaskPriority::Urgent),
+        _ => Err(format!("invalid priority: {value}")),
+    }
+}
+
+fn status_label(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Pending => "Pending",
+        TaskStatus::InProgress => "InProgress",
+        TaskStatus::Completed => "Completed",
+        TaskStatus::Deleted => "Deleted",
+    }
+}
+
+fn priority_label(priority: TaskPriority) -> &'static str {
+    match priority {
+        TaskPriority::Low => "low",
+        TaskPriority::Normal => "normal",
+        TaskPriority::High => "high",
+        TaskPriority::Urgent => "urgent",
+    }
 }
 
 #[async_trait]
@@ -16,14 +51,7 @@ impl TypedTool for TaskUpdateTool {
         "TaskUpdate"
     }
     fn description(&self) -> &str {
-        "Update a single field on a task.\n\n\
-         Pass `key` to select which field to change and `value` for the new value. \
-         Each call updates exactly one field. Value is always a string.\n\n\
-         Valid keys: status, subject, description, owner, priority, blocked_by_id.\n\n\
-         Status workflow: pending → in_progress → completed. Use 'deleted' to remove.\n\n\
-         When you mark a task as completed, the system will show which downstream tasks \
-         are now unblocked and ready to execute. Use this to decide what to work on next.\n\n\
-         After completing a task, check the unblocked list or call TaskList to find the next available task."
+        "Update a single field on a task. Valid keys: status, subject, description, priority, blocked_by_id."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_update(lang))
@@ -40,7 +68,6 @@ impl TypedTool for TaskUpdateTool {
         false
     }
     fn is_concurrency_safe(&self) -> bool {
-        // Mutates persistent task state; keep ordered with related task operations.
         false
     }
 
@@ -50,116 +77,76 @@ impl TypedTool for TaskUpdateTool {
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskUpdateResult> {
         let args: TaskUpdateInput = match serde_json::from_value(input) {
-            Ok(a) => a,
-            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+            Ok(args) => args,
+            Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
-        let input_id = args.task_id.clone();
-
-        // Resolve display number (batch-local id) to global task id
-        let task_id = match self.store.resolve_display_id(&input_id).await {
-            Some(global_id) => global_id,
-            None => return TypedToolResult::error(format!("task not found: {input_id}")),
+        let id = match parse_id(&args.task_id, "task_id") {
+            Ok(id) => id,
+            Err(error) => return TypedToolResult::error(error),
         };
-
-        let key = args.key.as_str();
-        let val = &args.value;
-
-        // Validate: value must be a string for all keys
-        let val_str = match val.as_str() {
-            Some(s) => s,
+        let value = match args.value.as_str() {
+            Some(value) => value,
             None => {
-                return TypedToolResult::error(format!("value must be a string for key '{key}'"))
-            }
-        };
-
-        // Pre-resolve blocked_by_id display number to global id
-        let resolved_dep: Option<String> = match key {
-            "blocked_by_id" => {
-                let gid = self.store.resolve_display_id(val_str).await;
-                if gid.is_none() {
-                    return TypedToolResult::error(format!(
-                        "blocked_by_id task not found: {val_str}"
-                    ));
-                }
-                gid
-            }
-            _ => None,
-        };
-
-        // Validate key
-        match key {
-            "status" | "subject" | "description" | "owner" | "priority" | "blocked_by_id" => {}
-            _ => {
                 return TypedToolResult::error(format!(
-                    "unknown field '{key}'. Valid keys: status, subject, description, owner, priority, blocked_by_id"
-                ));
+                    "value must be a string for key '{}'",
+                    args.key
+                ))
             }
-        }
-
-        let result = self
-            .store
-            .update(&task_id, |task| match key {
-                "status" => {
-                    task.status = match val_str {
-                        "pending" => TaskStatus::Pending,
-                        "in_progress" => TaskStatus::InProgress,
-                        "completed" => TaskStatus::Completed,
-                        "deleted" => TaskStatus::Deleted,
-                        _ => task.status.clone(),
-                    };
-                }
-                "subject" => {
-                    task.subject = val_str.to_string();
-                }
-                "description" => {
-                    task.description = val_str.to_string();
-                }
-                "owner" => {
-                    task.owner = Some(val_str.to_string());
-                }
-                "priority" => {
-                    if let Some(p) = TaskPriority::parse(val_str) {
-                        task.priority = p;
-                    }
-                }
-                "blocked_by_id" => {
-                    if let Some(gid) = &resolved_dep {
-                        if !task.blocked_by.contains(gid) {
-                            task.blocked_by.push(gid.clone());
-                        }
-                    }
-                }
-                // Unreachable — validated above
-                _ => {}
-            })
-            .await;
-
-        match result {
-            Some(task) => {
-                let display_id = self.store.format_display_id(&task.id).await;
-                let status = format!("{:?}", task.status);
-                let priority = task.priority.as_str().to_string();
-                let blocked_by = self
-                    .store
-                    .to_display_ids(&task.blocked_by)
-                    .await
-                    .into_iter()
+        };
+        let timestamp = chrono::Utc::now().timestamp_millis() as u64;
+        let result = match args.key.as_str() {
+            "status" => match value {
+                "pending" => self.access.transition(id, TaskStatus::Pending, timestamp),
+                "in_progress" => self.access.transition(id, TaskStatus::InProgress, timestamp),
+                // Task BC supports Pending -> Completed as one atomic transition/commit.
+                "completed" => self.access.transition(id, TaskStatus::Completed, timestamp),
+                "deleted" => self.access.delete(id, timestamp),
+                _ => return TypedToolResult::error(format!("invalid status: {value}")),
+            },
+            "subject" => self.access.set_subject(id, value.to_owned(), timestamp),
+            "description" => self.access.set_description(id, value.to_owned(), timestamp),
+            "priority" => {
+                let priority = match parse_priority(value) {
+                    Ok(priority) => priority,
+                    Err(error) => return TypedToolResult::error(error),
+                };
+                self.access.set_priority(id, priority, timestamp)
+            }
+            "blocked_by_id" => {
+                let dependency = match parse_id(value, "blocked_by_id") {
+                    Ok(id) => id,
+                    Err(error) => return TypedToolResult::error(error),
+                };
+                self.access.add_dependency(id, dependency, timestamp)
+            }
+            // `owner` is intentionally rejected: it is not in Task's Published Language.
+            key => return TypedToolResult::error(format!(
+                "unknown field '{key}'. Valid keys: status, subject, description, priority, blocked_by_id"
+            )),
+        };
+        let updated = match result {
+            Ok(result) => result.value,
+            Err(error) => return TypedToolResult::error(error.to_string()),
+        };
+        let task_id = updated.id().to_string();
+        let status = status_label(updated.status()).to_owned();
+        TypedToolResult::success(
+            format!("Task #{} updated. Status: {}", task_id, status),
+            TaskUpdateResult {
+                task_id,
+                status,
+                subject: updated.subject().to_owned(),
+                priority: priority_label(updated.priority()).to_owned(),
+                blocked_by: updated
+                    .blocked_by()
+                    .iter()
                     .map(|id| format!("#{id}"))
-                    .collect::<Vec<_>>();
-
-                let message = format!("Task #{} updated. Status: {}", display_id, status);
-                TypedToolResult::success(
-                    message,
-                    TaskUpdateResult {
-                        task_id: display_id,
-                        status,
-                        subject: task.subject.clone(),
-                        priority,
-                        blocked_by,
-                    },
-                )
-            }
-            None => TypedToolResult::error(format!("task not found: {input_id}")),
-        }
+                    .collect(),
+            },
+        )
     }
 }
+
+#[cfg(test)]
+#[path = "task_update_tests.rs"]
+mod tests;

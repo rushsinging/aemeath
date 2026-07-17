@@ -147,6 +147,12 @@ pub enum TaskEvent {
         from: TaskPriority,
         to: TaskPriority,
     },
+    TaskSubjectChanged {
+        task_id: TaskId,
+    },
+    TaskDescriptionChanged {
+        task_id: TaskId,
+    },
     TaskTagAdded {
         task_id: TaskId,
         tag: String,
@@ -157,6 +163,15 @@ pub enum TaskEvent {
     },
     TaskDeleted {
         task_id: TaskId,
+    },
+    /// The complete Task aggregate was reset atomically.
+    ///
+    /// A non-empty reset emits exactly one event and advances the aggregate
+    /// revision exactly once. Resetting an already-empty aggregate is an
+    /// idempotent no-op (no event and no revision).
+    TaskStoreCleared {
+        task_count: usize,
+        batch_count: usize,
     },
 }
 
@@ -353,8 +368,41 @@ impl Task {
     pub fn subject(&self) -> &str {
         &self.subject
     }
+    pub(crate) fn set_subject(
+        &mut self,
+        subject: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Self>, TaskCommandError> {
+        if subject.trim().is_empty() {
+            return Err(TaskCommandError::InvalidTaskSubject);
+        }
+        if self.subject == subject {
+            return Ok(TaskCommandResult::uncommitted(self.clone(), Vec::new()));
+        }
+        self.subject = subject;
+        self.updated_at = updated_at;
+        Ok(TaskCommandResult::uncommitted(
+            self.clone(),
+            vec![TaskEvent::TaskSubjectChanged { task_id: self.id }],
+        ))
+    }
     pub fn description(&self) -> &str {
         &self.description
+    }
+    pub(crate) fn set_description(
+        &mut self,
+        description: String,
+        updated_at: u64,
+    ) -> TaskCommandResult<Self> {
+        if self.description == description {
+            return TaskCommandResult::uncommitted(self.clone(), Vec::new());
+        }
+        self.description = description;
+        self.updated_at = updated_at;
+        TaskCommandResult::uncommitted(
+            self.clone(),
+            vec![TaskEvent::TaskDescriptionChanged { task_id: self.id }],
+        )
     }
     pub fn active_form(&self) -> Option<&str> {
         self.active_form.as_deref()

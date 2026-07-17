@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use crate::domain::{
     AppendReceipt, CompactOutcome, CompactRequest, CompactSkipReason, ContentFingerprint,
-    ContextAppend, ContextAppendError, ContextMessage, ContextPortError, RunStepId, SessionId,
+    ContextAppend, ContextAppendError, ContextMessage, ContextPortError, SessionId,
     SessionRevision,
 };
 use crate::ports::{SessionRepository, SessionSnapshot};
@@ -95,7 +95,7 @@ impl SessionRepository for InMemorySessionRepository {
             }
             return Err(ContextAppendError::ContentConflict {
                 run_id: append.run_id.clone(),
-                step_id: RunStepId::new(append.step_id.as_str()),
+                step_id: append.step_id.clone(),
             });
         }
         let actual = SessionRevision::new(state.revision);

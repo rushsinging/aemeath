@@ -294,7 +294,15 @@ impl RunId {
 
 impl_id_type!(RunId);
 
+define_id_type!(
+    SessionId,
+    "Context-owned Session identity published for cross-BC correlation (UUIDv7)."
+);
 define_id_type!(RunStepId, "Published Run Step identity (UUIDv7).");
+define_id_type!(
+    ModelInvocationId,
+    "Runtime-owned identity for one model invocation (UUIDv7)."
+);
 define_id_type!(
     AgentId,
     "Published Agent identity used for Main/Sub routing (UUIDv7)."
@@ -417,6 +425,26 @@ impl_id_type!(InputId);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_and_model_invocation_ids_are_uuidv7_string_contracts() {
+        let session = SessionId::new("session-927");
+        let invocation = ModelInvocationId::new("invocation-927");
+
+        assert_eq!(session.as_uuid().get_version_num(), 7);
+        assert_eq!(invocation.as_uuid().get_version_num(), 7);
+        assert!(serde_json::to_value(&session).unwrap().is_string());
+        assert!(serde_json::to_value(&invocation).unwrap().is_string());
+        assert_eq!(
+            serde_json::from_value::<SessionId>(serde_json::to_value(&session).unwrap()).unwrap(),
+            session
+        );
+        assert_eq!(
+            serde_json::from_value::<ModelInvocationId>(serde_json::to_value(&invocation).unwrap())
+                .unwrap(),
+            invocation
+        );
+    }
 
     #[test]
     fn test_run_id_new_v7_is_version_7() {

@@ -69,6 +69,56 @@ fn task_create_and_local_fields_preserve_private_state() {
 }
 
 #[test]
+fn task_subject_and_description_updates_are_typed_and_idempotent() {
+    let mut task = Task::create(
+        TaskId::new(1),
+        BatchId::new(1),
+        TaskCreateSpec::try_new(
+            "原始标题".into(),
+            "原始描述".into(),
+            None,
+            TaskPriority::Normal,
+        )
+        .unwrap(),
+        10,
+    )
+    .value;
+
+    let subject = task
+        .set_subject("新标题".to_owned(), 11)
+        .expect("非空标题应更新");
+    assert_eq!(subject.value.subject(), "新标题");
+    assert_eq!(
+        subject.events,
+        vec![TaskEvent::TaskSubjectChanged {
+            task_id: TaskId::new(1),
+        }]
+    );
+
+    let duplicate = task
+        .set_subject("新标题".to_owned(), 12)
+        .expect("重复标题应幂等成功");
+    assert!(duplicate.events.is_empty());
+    assert_eq!(duplicate.value.updated_at(), 11);
+
+    let description = task.set_description("新描述".to_owned(), 13);
+    assert_eq!(description.value.description(), "新描述");
+    assert_eq!(
+        description.events,
+        vec![TaskEvent::TaskDescriptionChanged {
+            task_id: TaskId::new(1),
+        }]
+    );
+
+    assert_eq!(
+        task.set_subject("   ".to_owned(), 14),
+        Err(TaskCommandError::InvalidTaskSubject)
+    );
+    assert_eq!(task.subject(), "新标题");
+    assert_eq!(task.updated_at(), 13);
+}
+
+#[test]
 fn task_allows_only_documented_live_transitions() {
     for (from, to) in [
         (TaskStatus::Pending, TaskStatus::InProgress),

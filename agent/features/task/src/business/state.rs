@@ -128,6 +128,35 @@ impl TaskStoreState {
         result
     }
 
+    /// Atomically clears all Tasks and Batches and resets allocation counters.
+    ///
+    /// A non-empty aggregate is one state-changing command: it emits one
+    /// `TaskStoreCleared` event and advances revision exactly once. An already
+    /// empty aggregate is an idempotent no-op. The monotonic revision is never
+    /// reset to zero.
+    pub fn clear(&mut self) -> Result<TaskCommandResult<()>, TaskCommandError> {
+        if self.tasks.is_empty()
+            && self.batches.is_empty()
+            && self.current_batch.is_none()
+            && self.next_task_id == TaskId::new(1)
+            && self.next_batch_id == BatchId::new(1)
+        {
+            return Ok(TaskCommandResult::uncommitted((), Vec::new()));
+        }
+
+        let revision = self.reserve_revision()?;
+        let events = vec![TaskEvent::TaskStoreCleared {
+            task_count: self.tasks.len(),
+            batch_count: self.batches.len(),
+        }];
+        self.tasks.clear();
+        self.batches.clear();
+        self.next_task_id = TaskId::new(1);
+        self.next_batch_id = BatchId::new(1);
+        self.current_batch = None;
+        Ok(self.commit(TaskCommandResult::uncommitted((), events), revision))
+    }
+
     pub fn create_batch(
         &mut self,
         spec: BatchCreateSpec,
@@ -169,6 +198,49 @@ impl TaskStoreState {
         let result = Task::create(id, batch, spec, timestamp);
         self.tasks.insert(id, result.value.clone());
         self.next_task_id = next_task_id;
+        Ok(self.commit(result, revision))
+    }
+
+    pub fn set_subject(
+        &mut self,
+        id: TaskId,
+        subject: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+        let task = self
+            .tasks
+            .get(&id)
+            .filter(|task| task.status() != TaskStatus::Deleted)
+            .ok_or(TaskCommandError::TaskNotFound { id })?;
+        if subject.trim().is_empty() {
+            return Err(TaskCommandError::InvalidTaskSubject);
+        }
+        if task.subject() == subject {
+            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+        }
+        let revision = self.reserve_revision()?;
+        let task = self.tasks.get_mut(&id).expect("validated task must exist");
+        let result = task.set_subject(subject, updated_at)?;
+        Ok(self.commit(result, revision))
+    }
+
+    pub fn set_description(
+        &mut self,
+        id: TaskId,
+        description: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError> {
+        let task = self
+            .tasks
+            .get(&id)
+            .filter(|task| task.status() != TaskStatus::Deleted)
+            .ok_or(TaskCommandError::TaskNotFound { id })?;
+        if task.description() == description {
+            return Ok(TaskCommandResult::uncommitted(task.clone(), Vec::new()));
+        }
+        let revision = self.reserve_revision()?;
+        let task = self.tasks.get_mut(&id).expect("validated task must exist");
+        let result = task.set_description(description, updated_at);
         Ok(self.commit(result, revision))
     }
 

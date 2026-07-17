@@ -8,7 +8,7 @@ use crate::business::{
 use share::skill_ops::Skill;
 use std::collections::HashMap;
 use std::sync::Arc;
-use storage::TaskStore;
+use task::TaskAccess;
 use tokio::sync::Mutex;
 
 use super::tool_registry::ToolRegistry;
@@ -63,7 +63,7 @@ impl ToolProfile {
 /// MCP 工具由 connector 动态注册，不在此列。
 pub fn register_tools(
     registry: &ToolRegistry,
-    task_store: Arc<TaskStore>,
+    task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
     profile: ToolProfile,
 ) {
@@ -95,43 +95,43 @@ pub fn register_tools(
     reg!(
         "TaskCreate",
         task_create::TaskCreateTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
     reg!(
         "TaskUpdate",
         task_update::TaskUpdateTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
     reg!(
         "TaskList",
         task_list::TaskListTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
     reg!(
         "TaskListCreate",
         task_list_create::TaskListCreateTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
     reg!(
         "TaskListComplete",
         task_list_complete::TaskListCompleteTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
     reg!(
         "TaskGet",
         task_get::TaskGetTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
     reg!(
         "TaskStop",
         task_stop::TaskStopTool {
-            store: task_store.clone(),
+            access: task_access.clone(),
         }
     );
 
@@ -163,41 +163,43 @@ pub fn register_tools(
 /// 主 agent 全量工具（[`register_tools`] 的 `Full` profile 便捷封装）。
 pub fn register_all_tools(
     registry: &ToolRegistry,
-    task_store: Arc<TaskStore>,
+    task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    register_tools(registry, task_store, skills, ToolProfile::Full);
+    register_tools(registry, task_access, skills, ToolProfile::Full);
 }
 
 /// 子 agent 工具集（排除协调类工具；[`ToolProfile::SubAgent`] 封装）。
 pub fn register_subagent_tools(
     registry: &mut ToolRegistry,
-    task_store: Arc<TaskStore>,
+    task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    register_tools(registry, task_store, skills, ToolProfile::SubAgent);
+    register_tools(registry, task_access, skills, ToolProfile::SubAgent);
 }
 
 /// 排除 Agent 的工具集（[`ToolProfile::NoAgent`] 封装）。
 pub fn register_all_tools_except_agent(
     registry: &ToolRegistry,
-    task_store: Arc<TaskStore>,
+    task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    register_tools(registry, task_store, skills, ToolProfile::NoAgent);
+    register_tools(registry, task_access, skills, ToolProfile::NoAgent);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use task::TaskStore;
 
     #[test]
     fn test_register_subagent_tools_excludes_coordination_tools() {
         let mut registry = ToolRegistry::new();
         let task_store = Arc::new(TaskStore::new());
+        let task_access: Arc<dyn TaskAccess> = task_store.clone();
         let skills = Arc::new(Mutex::new(HashMap::new()));
 
-        register_subagent_tools(&mut registry, task_store, skills);
+        register_subagent_tools(&mut registry, task_access, skills);
 
         for forbidden in [
             "Agent",
@@ -226,9 +228,11 @@ mod tests {
     #[test]
     fn test_full_profile_registers_all_27_tools() {
         let registry = ToolRegistry::new();
+        let task_store = Arc::new(TaskStore::new());
+        let task_access: Arc<dyn TaskAccess> = task_store.clone();
         register_tools(
             &registry,
-            Arc::new(TaskStore::new()),
+            task_access,
             Arc::new(Mutex::new(HashMap::new())),
             ToolProfile::Full,
         );
@@ -252,9 +256,11 @@ mod tests {
     fn test_no_agent_profile_excludes_agent_toolsearch_planmode_only() {
         // NoAgent 的 quirk：排除 Agent / ToolSearch / PlanMode，但保留 Task / AskUser / Worktree。
         let registry = ToolRegistry::new();
+        let task_store = Arc::new(TaskStore::new());
+        let task_access: Arc<dyn TaskAccess> = task_store.clone();
         register_tools(
             &registry,
-            Arc::new(TaskStore::new()),
+            task_access,
             Arc::new(Mutex::new(HashMap::new())),
             ToolProfile::NoAgent,
         );

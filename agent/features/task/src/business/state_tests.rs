@@ -600,3 +600,41 @@ fn record_batch_turn_is_noop_when_no_effective_change() {
         u64::MAX
     );
 }
+
+#[test]
+fn clear_is_one_atomic_revision_and_empty_clear_is_noop() {
+    let (mut state, _) = state_with_tasks(2);
+    let before = state.revision();
+    let cleared = state.clear().expect("clear succeeds");
+    assert_eq!(
+        cleared.revision(),
+        Some(TaskRevision::new(before.get() + 1))
+    );
+    assert_eq!(
+        cleared.events,
+        vec![TaskEvent::TaskStoreCleared {
+            task_count: 2,
+            batch_count: 1,
+        }]
+    );
+    assert!(state.list().is_empty());
+    assert!(state.list_batches().is_empty());
+    assert_eq!(state.current_batch(), None);
+    assert_eq!(state.next_task_id(), TaskId::new(1));
+    assert_eq!(state.next_batch_id(), BatchId::new(1));
+
+    let revision = state.revision();
+    let noop = state.clear().expect("empty clear succeeds");
+    assert_eq!(noop.revision(), None);
+    assert!(noop.events.is_empty());
+    assert_eq!(state.revision(), revision);
+}
+
+#[test]
+fn clear_at_revision_exhaustion_is_atomic() {
+    let (state, _) = state_with_tasks(1);
+    let mut state = state.with_revision(TaskRevision::new(u64::MAX));
+    let before = state.clone();
+    assert_eq!(state.clear(), Err(TaskCommandError::RevisionExhausted));
+    assert_eq!(state, before);
+}

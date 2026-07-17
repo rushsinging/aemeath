@@ -237,10 +237,10 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 待设计点 | 决策 | 理由 |
 |---|---|---|
 | 按模块定义 target 命名规范 | **沿用现状**——`aemeath:<domain>` | 现有规范已满足，见上方 target 命名章节 |
-| 统一要求生产代码日志带 `target:` | **MUST**（已落地，守卫强制） | `rust-coding.md` + `target_guard.rs` 已实现 |
+| 统一要求生产代码日志带 `target:` | **MUST**（已落地，守卫强制） | `rust-coding.md` + `domain/routing_guard.rs` 已实现 |
 | 从 `log` 迁移到结构化 `tracing` | **推迟**，单开 issue 追踪（#346） | 当前无 trace 可视化后端消费 span 因果链，迁移成本高且与 level 规范正交 |
 | 统一 logging helper / macro | **沿用现状**——`LOG_TARGET` 常量 + TUI `log_xxx!` 宏 | 已满足，无需新增 |
-| 建立 lint/test 防止错误 level 扩散 | **文档 + code review 为主**；`target_guard.rs` 仅强制 target 合规 | level 选择存在语义判断，机器化检测收益有限；新增日志的 level 由 PR review 把关 |
+| 建立 lint/test 防止错误 level 扩散 | **文档 + code review 为主**；`domain/routing_guard.rs` 仅强制 target 合规 | level 选择存在语义判断，机器化检测收益有限；新增日志的 level 由 PR review 把关 |
 | provider/tool/runtime/TUI 补充细则 | **已在本节 Per-Layer 细则落地** | 见上 |
 
 ## preview / 脱敏策略
