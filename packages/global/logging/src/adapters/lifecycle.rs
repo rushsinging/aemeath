@@ -5,22 +5,10 @@ use chrono::{DateTime, Local};
 use std::fs::{self};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
-
-use super::{LOG_MAX_BACKUPS, LOG_MAX_BYTES, LOG_RETENTION_DAYS};
 
 pub fn timestamp_rfc3339() -> String {
     let now: DateTime<Local> = Local::now();
     now.to_rfc3339()
-}
-
-#[allow(dead_code)]
-pub(crate) fn prepare_log_path(path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-        cleanup_old_rotated_logs(parent)?;
-    }
-    rotate_if_needed(path, LOG_MAX_BYTES, LOG_MAX_BACKUPS)
 }
 
 pub(crate) fn rotate_if_needed(path: &Path, max_bytes: u64, max_backups: usize) -> io::Result<()> {
@@ -52,26 +40,6 @@ pub(crate) fn rotate_if_needed(path: &Path, max_bytes: u64, max_backups: usize) 
     }
 
     fs::rename(path, rotated_path(path, 1))
-}
-
-#[allow(dead_code)]
-pub(crate) fn cleanup_old_rotated_logs(dir: &Path) -> io::Result<()> {
-    let cutoff = SystemTime::now()
-        .checked_sub(Duration::from_secs(LOG_RETENTION_DAYS * 24 * 60 * 60))
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_rotated_log_path(&path) {
-            continue;
-        }
-        let modified = entry.metadata()?.modified()?;
-        if modified < cutoff {
-            fs::remove_file(path)?;
-        }
-    }
-    Ok(())
 }
 
 pub fn rotated_path(path: &Path, index: usize) -> PathBuf {

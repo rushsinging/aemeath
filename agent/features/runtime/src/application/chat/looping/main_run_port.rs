@@ -317,10 +317,10 @@ where
             )
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
 
-        logging::context::set_current_model(self.client.model_name().to_string());
-        logging::context::set_current_provider(self.client.provider_name().to_string());
-        logging::context::set_current_role("default".to_string());
-        logging::context::set_current_request_id(uuid::Uuid::now_v7().to_string());
+        logging::set_current_model(self.client.model_name().to_string());
+        logging::set_current_provider(self.client.provider_name().to_string());
+        logging::set_current_role("default".to_string());
+        logging::set_current_request_id(uuid::Uuid::now_v7().to_string());
 
         let api_start = Instant::now();
         let mut coordinator =

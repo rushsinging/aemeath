@@ -35,8 +35,8 @@
 //! 统一走 **compact JSON Lines**（一行一个 JSON 对象，无 pretty-print 缩进）。
 //! 消费者可用 `grep -E '^\{' *.log | jq` 统一处理。
 
-use crate::format::format_diag_json_line;
-use crate::rotation::rotate_if_needed;
+use super::formatter::format_diag_json_line;
+use super::lifecycle::rotate_if_needed;
 use log::{LevelFilter, Log, Metadata, Record};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, stderr, BufWriter, Stderr, Write};
@@ -445,5 +445,5 @@ fn open_buf(path: &Path) -> io::Result<BufWriter<File>> {
 }
 
 #[cfg(test)]
-#[path = "unified_logger_tests.rs"]
-mod unified_logger_tests;
+#[path = "file_sink_tests.rs"]
+mod file_sink_tests;

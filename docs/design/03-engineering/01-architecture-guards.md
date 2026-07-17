@@ -439,9 +439,9 @@
   - 匹配 `target:\s*"[^"]*"` 模式，筛选出不包含 `aemeath:` 的行；
   - 引用常量（如 `target: LOG_TARGET`）不带引号，不会被匹配，自然放行。
 - **白名单**：无文件级白名单。
-- **例外**：`packages/global/logging/src/`（该目录的守卫由 Rust 测试 `target_guard.rs` 覆盖）。
+- **例外**：`packages/global/logging/src/`（该目录的精确白名单校验由 Rust 测试 `domain/routing_guard.rs` 覆盖；#936 将其切换为消费唯一 TargetCatalog）。
 - **错误信息**：`log target must start with 'aemeath:' (or use LOG_TARGET constant)`。
-- **关联 Rust 守卫**：`packages/global/logging/src/target_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
+- **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
 
 ## 18. no_mod_rs.sh
 

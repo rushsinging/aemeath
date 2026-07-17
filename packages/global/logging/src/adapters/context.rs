@@ -12,7 +12,7 @@
 //! | `CURRENT_MODEL` | `setup.rs` model 解析后 | 可变，模型可能切换 |
 //! | `BOOT_TS` | `init_logging` 时调用一次 | 一次写入，`OnceLock` |
 //! | `APP_VERSION` | `init_logging` 时调用一次 | 一次写入，`OnceLock` |
-//! | `PID` | `init_logging` 时调用一次 | 一次写入，`OnceLock`，进程 pid |
+//! | `PID` | 首次格式化日志时惰性读取 | 一次写入，`OnceLock`，进程 pid |
 //! | `CURRENT_PROVIDER` | 每次 LLM 调用前 | 可变，`RwLock` |
 //! | `CURRENT_REQUEST_ID` | 每次 LLM 调用前 | 可变，`RwLock` |
 //! | `CURRENT_ROLE` | 主 agent 为 `"default"`，sub-agent 为其 role 名 | 可变，`RwLock` |
@@ -81,11 +81,6 @@ pub fn set_boot_ts(ts: String) {
 /// 设置 app 版本号。`init_logging` 时调用一次。
 pub fn set_app_version(ver: String) {
     let _ = APP_VERSION.set(ver);
-}
-
-/// 设置进程 pid。`init_logging` 时调用一次，未显式设置时惰性取 `std::process::id()`。
-pub fn ensure_pid() {
-    let _ = PID.get_or_init(std::process::id);
 }
 
 /// 设置当前 provider。
