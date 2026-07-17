@@ -3,6 +3,8 @@
 > 层级：02-modules / audit（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#790（S2）
 > Audit MVP 只记录 Model Usage metadata；不保存原文，不计算 Cost，不阻塞 Runtime。
+>
+> 迁移基线：#988 已先行删除无行为的 `api/contract/gateway` COLA 占位。后续实现 **MUST** 依据真实 Usage 能力和 seam 增量建立 Hexagonal 层，**NEVER** 为目录对称恢复空层或 marker。
 
 ## 1. 本期范围
 
@@ -331,6 +333,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-17 | #988 删除无行为的 `api/contract/gateway` COLA 占位；Usage 实现前仅保留真实 crate 入口，后续按已冻结的 Usage Target 增量建层 | [#988](https://github.com/rushsinging/aemeath/issues/988) |
 | 2026-07-12 | 初稿：Usage-only Audit MVP、非阻塞 Sink、查询与独立 JSONL 分区 | #790 |
 | 2026-07-15 | UsageSink 改为只引用 Runtime-owned trait，不重复定义签名；UsageAppendStorePort 明确由 Audit adapter 直接以 file append detail 实现（不复用 Storage 整值替换端口）；轮转拆分为 Audit 决策 + adapter 执行 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 冻结 Audit Target 物理目录：扁平 Usage 能力 + `ingest`（queue/worker/drain）、`append`（File AppendLog adapter）、`query`（扫描/聚合/续页）技术实现；明确不建 `capabilities/`（v0.1.0 只拥有 Usage，无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
