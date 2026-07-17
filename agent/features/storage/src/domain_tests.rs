@@ -2,9 +2,10 @@ use std::str::FromStr;
 
 use crate::domain::{
     decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
-    DeleteOptions, DigestObservation, Durability, Generation, JournalPhase, PreviousPolicy,
-    QuarantineDisposition, QuarantineOutcome, QuarantineReason, RecoveryDecision, SafePathSegment,
-    StorageErrorKind, StorageKey, StorageNamespace, TransactionDigest, TransactionScope,
+    DatasetKey, DatasetManifest, DatasetMember, DeleteOptions, DigestObservation, Durability,
+    Generation, JournalPhase, PreviousPolicy, QuarantineDisposition, QuarantineOutcome,
+    QuarantineReason, RecoveryDecision, SafePathSegment, StorageErrorKind, StorageKey,
+    StorageNamespace, TransactionDigest, TransactionScope,
 };
 
 #[test]
@@ -170,4 +171,117 @@ fn quarantine_already_absent_preserves_requested_facts() {
     assert_eq!(outcome.scope(), TransactionScope::Blob);
     assert_eq!(outcome.reason(), QuarantineReason::DecoderRejected);
     assert!(!outcome.moved());
+}
+
+// --- #983 AtomicDataset published-language (L1) ---------------------------------
+
+fn dataset_member(name: &str, bytes: &[u8]) -> DatasetMember {
+    DatasetMember::new(
+        SafePathSegment::from_str(name).expect("member name should be a safe path segment"),
+        bytes.to_vec(),
+    )
+}
+
+#[test]
+fn dataset_key_with_empty_segments_is_rejected() {
+    let error = DatasetKey::new(StorageNamespace::Memory, Vec::new())
+        .expect_err("dataset keys with no segments must be rejected");
+
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+}
+
+#[test]
+fn dataset_manifest_orders_members_canonically_by_name() {
+    let manifest = DatasetManifest::new(vec![
+        dataset_member("payload", b"p"),
+        dataset_member("active", b"a"),
+        dataset_member("index", b"i"),
+    ])
+    .expect("distinct member names should be accepted");
+
+    let names: Vec<&str> = manifest
+        .members()
+        .iter()
+        .map(|member| member.name().as_str())
+        .collect();
+
+    assert_eq!(names, ["active", "index", "payload"]);
+}
+
+#[test]
+fn dataset_manifest_with_duplicate_member_names_is_rejected() {
+    let error = DatasetManifest::new(vec![
+        dataset_member("index", b"first"),
+        dataset_member("index", b"second"),
+    ])
+    .expect_err("duplicate member names must be rejected");
+
+    assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
+}
+
+#[test]
+fn empty_dataset_manifest_has_stable_revision() {
+    let first = DatasetManifest::new(Vec::new()).expect("empty manifest is valid");
+    let second = DatasetManifest::new(Vec::new()).expect("empty manifest is valid");
+
+    assert_eq!(first.revision(), second.revision());
+}
+
+#[test]
+fn dataset_revision_is_independent_of_member_input_order() {
+    let ordered = DatasetManifest::new(vec![
+        dataset_member("active", b"a"),
+        dataset_member("archive", b"z"),
+    ])
+    .expect("distinct member names should be accepted");
+    let shuffled = DatasetManifest::new(vec![
+        dataset_member("archive", b"z"),
+        dataset_member("active", b"a"),
+    ])
+    .expect("distinct member names should be accepted");
+
+    assert_eq!(ordered.revision(), shuffled.revision());
+}
+
+#[test]
+fn dataset_revision_changes_when_member_name_changes() {
+    let base = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("distinct member names should be accepted");
+    let renamed = DatasetManifest::new(vec![dataset_member("archive", b"a")])
+        .expect("distinct member names should be accepted");
+
+    assert_ne!(base.revision(), renamed.revision());
+}
+
+#[test]
+fn dataset_revision_changes_when_member_bytes_change() {
+    let base = DatasetManifest::new(vec![dataset_member("active", b"a")])
+        .expect("distinct member names should be accepted");
+    let mutated = DatasetManifest::new(vec![dataset_member("active", b"b")])
+        .expect("distinct member names should be accepted");
+
+    assert_ne!(base.revision(), mutated.revision());
+}
+
+#[test]
+fn omitted_members_are_old_names_absent_from_replacement() {
+    let current = DatasetManifest::new(vec![
+        dataset_member("active", b"a"),
+        dataset_member("archive", b"z"),
+        dataset_member("index", b"i"),
+    ])
+    .expect("distinct member names should be accepted");
+    let replacement = DatasetManifest::new(vec![
+        dataset_member("active", b"a2"),
+        dataset_member("index", b"i2"),
+    ])
+    .expect("distinct member names should be accepted");
+
+    let omitted: Vec<&str> = current
+        .omitted_members(&replacement)
+        .iter()
+        .map(|name| name.as_str())
+        .collect();
+
+    assert_eq!(omitted, ["archive"]);
 }
