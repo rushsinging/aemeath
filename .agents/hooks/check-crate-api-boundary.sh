@@ -22,6 +22,7 @@ FEATURE_CRATES = {
     "project",
     "policy",
     "context",
+    "memory",
     "provider",
     "tools",
     "storage",

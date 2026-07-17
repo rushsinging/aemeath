@@ -5,6 +5,7 @@ members = [
     "agent/composition",
     "agent/features/audit",
     "agent/features/hook",
+    "agent/features/memory",
     "agent/features/policy",
     "agent/features/context",
     "agent/features/project",
