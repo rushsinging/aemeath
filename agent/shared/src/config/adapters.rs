@@ -10,3 +10,4 @@ pub mod claude;
 pub mod cli_args;
 pub mod env;
 pub mod file;
+pub mod paths;
