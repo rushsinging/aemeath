@@ -49,6 +49,9 @@ pub struct RuntimeHandle {
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
     pub(crate) workspace: project::WorkspaceViews,
+    pub(crate) config_reader: Arc<dyn config::ConfigReader>,
+    pub(crate) config_query: Arc<dyn config::ConfigQuery>,
+    pub(crate) config_writer: Arc<dyn config::ConfigWriter>,
     pub(crate) event_sink_factory: Arc<
         dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
     >,

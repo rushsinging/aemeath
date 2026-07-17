@@ -405,6 +405,7 @@ name = "composition"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "config",
  "project",
  "provider",
  "runtime",
@@ -412,6 +413,18 @@ dependencies = [
  "share",
  "tools",
  "update",
+]
+
+[[package]]
+name = "config"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "share",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -2840,6 +2853,7 @@ dependencies = [
  "audit",
  "base64",
  "chrono",
+ "config",
  "context",
  "dirs",
  "env_logger",

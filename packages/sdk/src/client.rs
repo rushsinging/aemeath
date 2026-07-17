@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 
-use crate::{CancelRunOutcome, ChatRequest, ChatStream, RunId};
+use crate::{
+    CancelRunOutcome, ChatRequest, ChatStream, ConfigUpdate, ConfigUpdateResult, ConfigView, RunId,
+};
 
 /// Agent Runtime 的统一客户端 trait。
 ///
@@ -13,6 +15,23 @@ use crate::{CancelRunOutcome, ChatRequest, ChatStream, RunId};
 pub trait AgentClient: Send + Sync + 'static {
     /// 同步、幂等地打断指定 Run。返回前 Runtime 已进入 Cancelling 并触发 cancellation scope。
     fn cancel_run(&self, run_id: &RunId) -> CancelRunOutcome;
+
+    /// 查询当前已提交配置的 SDK 投影。
+    async fn config_view(&self) -> Result<ConfigView, super::SdkError> {
+        Err(super::SdkError::Internal(
+            "config query is unavailable for this client".to_string(),
+        ))
+    }
+
+    /// 提交类型化配置更新；返回完整已提交投影。
+    async fn update_config(
+        &self,
+        _update: ConfigUpdate,
+    ) -> Result<ConfigUpdateResult, super::SdkError> {
+        Err(super::SdkError::Internal(
+            "config update is unavailable for this client".to_string(),
+        ))
+    }
 
     /// 发起一次 Chat，返回事件流。
     ///

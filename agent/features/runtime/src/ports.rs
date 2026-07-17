@@ -18,7 +18,6 @@
 //! - UsageSink -> audit BC (#927)
 //! - EventSink / InputBuffer -> runtime 内部
 
-pub mod config;
 pub mod context_port;
 pub mod event_sink;
 pub mod hook_port;
