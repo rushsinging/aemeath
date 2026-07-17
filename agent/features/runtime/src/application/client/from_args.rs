@@ -15,7 +15,6 @@ use crate::ports::config::ConfigReader;
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
-use provider::ProviderDriverKind;
 use provider::SystemBlock;
 use storage::TaskStore;
 use tools::api as tools_crate;
@@ -57,8 +56,7 @@ pub async fn from_args_with_workspace(
         .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
         .map_err(|e| SdkError::Init(e.to_string()))?;
     let resolved_model = runtime_model.resolved_model().clone();
-    let driver =
-        ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
+    let driver = resolved_model.driver.as_str();
     // 7. API key
     let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
         SdkError::Init(
@@ -78,23 +76,26 @@ pub async fn from_args_with_workspace(
     log::info!(target: LOG_TARGET,
         "[main] source={} api={} model={} reasoning={} args.no_think={}",
         resolved_model.source_key,
-        driver.as_str(),
+        driver,
         model,
         runtime_settings.reasoning,
         args.no_think
     );
 
     // 9. LLM client
-    let client = Arc::new(bootstrap::build_llm_client(
-        driver,
-        api_key,
-        base_url,
-        model.clone(),
-        &resolved_model,
-        &runtime_settings,
-        args.max_reasoning.as_deref(),
-        snapshot.api_timeout_secs(),
-    ));
+    let client = Arc::new(
+        bootstrap::build_llm_client(
+            driver,
+            api_key,
+            base_url,
+            model.clone(),
+            &resolved_model,
+            &runtime_settings,
+            args.max_reasoning.as_deref(),
+            snapshot.api_timeout_secs(),
+        )
+        .map_err(|error| SdkError::Init(error.to_string()))?,
+    );
 
     // 10. Tooling
     let task_store = Arc::new(TaskStore::new());
@@ -165,8 +166,7 @@ pub async fn from_args_with_workspace(
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
-        snapshot.max_tool_concurrency(),
-        snapshot.max_agent_concurrency(),
+        &snapshot,
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,
@@ -181,9 +181,7 @@ pub async fn from_args_with_workspace(
 
     // 18. 组装 context
     let memory_config = snapshot.memory().clone();
-    let reasoning_graph_config = Some(workflow::GraphRuntimeConfig::from_shared(
-        snapshot.reasoning_graph(),
-    ));
+    let reasoning_graph_config = snapshot.reasoning_graph().clone();
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
             client,

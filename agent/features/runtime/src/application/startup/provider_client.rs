@@ -1,7 +1,6 @@
 use super::model_runtime::ModelRuntimeSettings;
-use provider::ProviderDriverKind;
 use provider::ReasoningLevel;
-use provider::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+use provider::{LlmClient, LlmConfigOptions};
 use share::config::models::ResolvedModel;
 use std::env;
 
@@ -12,8 +11,7 @@ pub fn resolve_api_key(
     resolved_model: &ResolvedModel,
     env_value: EnvReader<'_>,
 ) -> Option<String> {
-    let driver =
-        ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
+    let driver = resolved_model.driver.as_str();
     cli_api_key
         .or_else(|| env_or_runtime("AEMEATH_API_KEY", env_value))
         .or_else(|| provider_driver_api_key_from_env(driver, env_value))
@@ -30,7 +28,7 @@ pub fn resolve_base_url(
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_llm_client(
-    driver: ProviderDriverKind,
+    driver: &str,
     api_key: String,
     base_url: Option<String>,
     model: String,
@@ -38,18 +36,19 @@ pub fn build_llm_client(
     runtime_settings: &ModelRuntimeSettings,
     max_reasoning: Option<&str>,
     timeout_secs: u64,
-) -> LlmClient {
+) -> Result<LlmClient, provider::LlmError> {
     let client = LlmClient::from_config(LlmConfigOptions {
-        driver,
+        driver: driver.to_string(),
+        source_key: resolved_model.source_key.clone(),
+        api_style: resolved_model.model.api_style.clone(),
         api_key,
         base_url,
         model,
         max_tokens: runtime_settings.max_tokens,
         reasoning: runtime_settings.reasoning,
         reasoning_config: None,
-        openai_config: openai_config(driver, &resolved_model.source_key),
         timeout_secs,
-    });
+    })?;
 
     // CLI / env 指定的上限（优先级 CLI > env），clamp 到 provider 能力上限。
     let max_level = max_reasoning.and_then(ReasoningLevel::parse).or_else(|| {
@@ -81,16 +80,11 @@ pub fn build_llm_client(
         None => desired.min(client.max_reasoning_level()),
     };
 
-    client
-        .with_default_reasoning(final_level)
-        .expect("resolved startup reasoning must form a valid invocation scope")
+    client.with_default_reasoning(final_level)
 }
 
-fn provider_driver_api_key_from_env(
-    driver: ProviderDriverKind,
-    env_value: EnvReader<'_>,
-) -> Option<String> {
-    share::config::domain::driver_env::driver_api_key_env_name(driver.as_str())
+fn provider_driver_api_key_from_env(driver: &str, env_value: EnvReader<'_>) -> Option<String> {
+    share::config::domain::driver_env::driver_api_key_env_name(driver)
         .and_then(|name| env_or_runtime(name, env_value))
 }
 
@@ -107,18 +101,6 @@ fn non_empty_string(value: &str) -> Option<String> {
         None
     } else {
         Some(value.to_string())
-    }
-}
-
-fn openai_config(driver: ProviderDriverKind, source_key: &str) -> Option<OpenAIProviderConfig> {
-    // Anthropic 与 Ollama 各有专用 provider，不走 OpenAI 兼容工厂分支。
-    if matches!(
-        driver,
-        ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama
-    ) {
-        None
-    } else {
-        Some(OpenAIProviderConfig::from_driver(driver, source_key))
     }
 }
 

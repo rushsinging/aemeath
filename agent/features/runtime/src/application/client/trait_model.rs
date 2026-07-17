@@ -18,8 +18,6 @@ pub(crate) async fn build_llm_client_for_switch(
     use crate::application::startup::{
         build_llm_client, resolve_api_key, resolve_base_url, resolve_model_runtime_settings,
     };
-    use provider::ProviderDriverKind;
-
     let svc = ConfigAppService::new(Some(cwd));
     svc.load().await?;
     let snapshot = svc.snapshot().await;
@@ -29,8 +27,7 @@ pub(crate) async fn build_llm_client_for_switch(
         .map_err(|e| e.to_string())?;
     let resolved_model = runtime_model.resolved_model().clone();
 
-    let driver =
-        ProviderDriverKind::parse(&resolved_model.driver).unwrap_or(ProviderDriverKind::OpenAI);
+    let driver = resolved_model.driver.as_str();
 
     let api_key = resolve_api_key(None, &resolved_model, None).ok_or_else(|| {
         format!(
@@ -54,7 +51,8 @@ pub(crate) async fn build_llm_client_for_switch(
         &runtime_settings,
         None,
         provider::DEFAULT_TIMEOUT_SECS,
-    );
+    )
+    .map_err(|error| error.to_string())?;
 
     let display_name = if resolved_model.model.name.is_empty() {
         &resolved_model.model.id

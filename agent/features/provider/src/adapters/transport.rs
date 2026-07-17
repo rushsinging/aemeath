@@ -23,7 +23,7 @@ use crate::published_language::{InvocationStream, ProviderError};
 pub trait LlmProviderGateway: Send + Sync {
     fn client_from_provider(&self, provider: Arc<dyn LlmProvider>) -> LlmClient;
 
-    fn client_from_config(&self, options: LlmConfigOptions) -> LlmClient;
+    fn client_from_config(&self, options: LlmConfigOptions) -> Result<LlmClient, crate::LlmError>;
 
     fn client_pool(
         &self,
@@ -57,7 +57,7 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
         LlmClient::from_provider(provider)
     }
 
-    fn client_from_config(&self, options: LlmConfigOptions) -> LlmClient {
+    fn client_from_config(&self, options: LlmConfigOptions) -> Result<LlmClient, crate::LlmError> {
         LlmClient::from_config(options)
     }
 

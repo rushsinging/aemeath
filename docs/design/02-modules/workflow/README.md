@@ -29,12 +29,11 @@ agent/features/workflow/
     ├── lib.rs                       # 窄 façade：ReasoningPort 与稳定 PL + composition-only wiring
     └── domain.rs                    # 领域策略入口
         domain/
-        ├── reasoning_graph.rs       #   node 状态与 transition
-        ├── effort.rs                #   effort 推断与 user-maximum clamp
-        └── error.rs                 #   仅在多个文件共同消费时存在
+        ├── reasoning_graph.rs       #   node 状态与 transition（私有）
+        └── reasoning_port.rs        #   adaptive Port、observation 与 user-max clamp
 ```
 
-Workflow 当前没有易变技术外部 detail，故 **NEVER** 预建 `adapters/` 或出站 port。#998 完成独立 crate 的物理抽离后，Runtime 临时经 crate-root façade 直接消费 graph；#855/#920/#921 将其收窄为本节 Target 的 `ReasoningPort` façade，并补齐按需出现的 `effort.rs`。Future 若出现多个拥有独立词汇、状态与测试夹具的 workflow 能力，才重新按代码组织规范评估 `capabilities/` 或 `application/` / `adapters/` 升格。
+Workflow 当前没有易变技术外部 detail，故 **NEVER** 预建 `adapters/` 或出站 port。#998 完成独立 crate 抽离，#919 冻结 graph 语义，#920 将 Main 收口为 Workflow-owned adaptive `ReasoningPort`。Sub Fixed/Inherit/NoOp 随 #875/#878 的统一 RuntimeContext 生产接线落地，避免为即将退役的 legacy Sub 创建一次性适配；Future 若出现多个拥有独立词汇、状态与测试夹具的 workflow 能力，才重新评估升格。
 
 ## 相关文档
 
@@ -46,5 +45,6 @@ Workflow 当前没有易变技术外部 detail，故 **NEVER** 预建 `adapters/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-17 | Main 通过 adaptive ReasoningPort 消费 graph；Sub Fixed/Inherit/NoOp 延至统一 RuntimeContext 接线 | [#920](https://github.com/rushsinging/aemeath/issues/920) |
 | 2026-07-17 | 明确 Workflow 为独立 BC crate；v0.1.0 仅交付 Reasoning Graph，完整能力延至 v0.2.0 | [#998](https://github.com/rushsinging/aemeath/issues/998) |
 | 2026-07-16 | 冻结 Workflow Target 物理目录：Reasoning Graph 单能力扁平，明确不建 `capabilities/` 或无证据 adapter | [#972](https://github.com/rushsinging/aemeath/issues/972) |
