@@ -36,13 +36,21 @@ ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
 PROJECT_ROOT_ACCESS_ALLOW = {
+    "GitOperationError",
+    "GitProbeError",
+    "PreparedWorkspaceRestore",
+    "ProjectIdentity",
     "WorkspaceControl",
     "WorkspaceError",
     "WorkspaceFrame",
+    "WorkspaceId",
+    "WorkspaceInitError",
     "WorkspacePersist",
     "WorkspaceRead",
+    "WorkspaceRestoreError",
     "WorkspaceViews",
     "WorkspaceWiring",
+    "WorktreeKind",
     "wire_production_workspace",
 }
 PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
@@ -65,7 +73,6 @@ ROOT_ACCESS_ALLOW = {
         "ModelCapability",
         "ModelId",
         "ModelToolSchema",
-        "OpenAIProviderConfig",
         "ProviderCompletion",
         "ProviderContentBlock",
         "ProviderDriverKind",
@@ -86,12 +93,7 @@ ROOT_ACCESS_ALLOW = {
         "wire_provider",
     },
     "runtime": {"AgentClientImpl", "from_args"},
-    "workflow": {
-        "GraphRuntimeConfig",
-        "GraphSignal",
-        "ReasoningGraph",
-        "ReasoningNode",
-    },
+    "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
@@ -378,7 +380,9 @@ def run_sanity() -> None:
     valid_facade = '''
 pub const LOG_TARGET: &str = "aemeath:agent:project";
 pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
-pub use domain::types::{WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead};
+pub use domain::state::PreparedWorkspaceRestore;
+pub use domain::types::{GitOperationError, GitProbeError, WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspaceInitError, WorkspacePersist, WorkspaceRead, WorkspaceRestoreError};
+pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 '''
     if project_public_facade_violations(valid_facade):
         raise AssertionError("sanity allow failed: registered Project façade")
@@ -400,6 +404,11 @@ for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():
         violations.append(f"{forbidden}: forbidden fixed-layer Context path exists")
+runtime_reasoning_port = root / "agent/features/runtime/src/ports/reasoning_port.rs"
+if runtime_reasoning_port.exists():
+    violations.append(
+        "agent/features/runtime/src/ports/reasoning_port.rs: Runtime must consume workflow::api::ReasoningPort instead of defining a duplicate trait"
+    )
 project_lib = root / "agent/features/project/src/lib.rs"
 if project_lib.exists():
     for violation in project_public_facade_violations(project_lib.read_text()):

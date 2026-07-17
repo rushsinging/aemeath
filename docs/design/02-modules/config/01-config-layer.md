@@ -255,7 +255,6 @@ struct ConfigPatch {
     max_tokens: Option<usize>,
     permission_mode: Option<PermissionMode>,
     memory: Option<MemoryConfig>,
-    reasoning_graph: Option<ReasoningGraphConfig>,
     env: Option<HashMap<String, String>>,  // env 注入规则（过滤专有变量后）
     // ... 14 个 section
     hooks: Option<HooksConfig>,            // 事件 key 级合并（见 merge_hooks，非整块覆盖）
@@ -263,9 +262,9 @@ struct ConfigPatch {
 ```
 
 - 14 个 section 走 `apply_patch`（字段级合并）
-- `hooks` 和 `reasoning_graph` 都不走 14-section 的字段级 `apply_patch`，但合并算法刻意不同：
+- `hooks` 不走 14-section 的字段级 `apply_patch`，但合并算法刻意不同：
   - **hooks**：语义是合并事件表——按事件 `key` 级合并；同 key 以 patch 覆盖 base，不同 key 累加保留，算法见 `merge_hooks`（§3.3）
-  - **reasoning_graph**：v0.1.0 固定整块覆盖（存在即整体替换）；未来若要字段级合并，**MUST** 先版本化其 merge 语义
+- `reasoning_graph` 已退役（#921 收缩范围）：Config 不再承载 `ReasoningGraphConfig`；Workflow 五节点采用固定默认 effort，无 config 驱动 override。是否保留/接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
 
 ### 3.3 合并算法
 
@@ -276,7 +275,6 @@ fn merge_config(base: Config, patches: Vec<ConfigPatch>) -> Config {
         if let Some(v) = patch.context_size { config.context_size = v; }
         // ... 每个 section
         if let Some(hooks) = patch.hooks { config.hooks = merge_hooks(config.hooks, hooks); }
-        if let Some(rg) = patch.reasoning_graph { config.reasoning_graph = rg; }
         config
     })
 }
@@ -310,7 +308,6 @@ impl ConfigSnapshot {
     pub fn context_size(&self) -> usize { self.inner.context_size }
     pub fn permission_mode(&self) -> PermissionMode { self.inner.permission_mode }
     pub fn memory_config(&self) -> &MemoryConfig { &self.inner.memory }
-    pub fn reasoning_graph_config(&self) -> Option<&ReasoningGraphConfig> { self.inner.reasoning_graph.as_ref() }
     // ... 30+ accessor
 }
 ```
@@ -319,6 +316,7 @@ impl ConfigSnapshot {
 - **复用 Config 字段定义**——避免重复维护
 - **不采用裸 `Arc<Config>`**（暴露 pub 字段）
 - **不采用独立 struct**（字段重复维护）
+- **accessor 返回最终有效值**——`max_tool_concurrency()` / `max_agent_concurrency()` 将底层 `0` 归一为 Config domain 的唯一默认值；Runtime 只叠加非零 CLI override，**NEVER** 复制 `10` / `4` 等业务默认值
 
 ### 4.2 active state 与 watch channel
 
@@ -658,39 +656,17 @@ impl ConfigTranslator for ClaudeTranslator {
 3. 所有 project 路径只从 `ProjectConfigLocation` 的 canonical search root 派生；adapter **NEVER** import Project PL 或自行读取 process cwd。
 4. 所有会影响 active state 的读取与校验在 `prepare_for_project` 完成；`commit_project` **NEVER** 触发 adapter。
 
-## 7. reasoning 静态阈值
+## 7. reasoning 静态阈值（已退役）
 
-### 7.1 ReasoningGraphConfig
+### 7.1 退役说明（#921 收缩范围）
 
-```rust
-struct ReasoningGraphConfig {
-    enabled: bool,
-    nodes: HashMap<ReasoningNode, NodeOverrideConfig>,
-    max_reasoning: Option<ReasoningLevel>,   // 用户配置上限
-}
+`ReasoningGraphConfig`（含 `enabled`、`nodes` override 与 `max_reasoning`）已从 Config 全部退役。Config 不再承载 reasoning graph 相关配置。
 
-struct NodeOverrideConfig {
-    override_effort: ReasoningLevel,
-}
-```
-
-### 7.2 静态阈值的含义
-
-- 节点默认 effort 映射由 Workflow 唯一拥有，Config **NEVER** 复制默认值
-- `nodes` 只保存非 Idle 节点的显式 override；缺失条目使用 Workflow 默认值，Idle 固定为 Off
-- 有效节点集合由 Workflow Published Language 限定为 `Idle / Explore / Plan / Execute / Verify`；目标态中未知节点或无效 effort 返回结构化校验错误。当前实现仍会忽略未知节点并对无效 effort 静默回退，校验收口由 #934 承接
-- `max_reasoning` 是用户配置的 reasoning level 上限
-- `max_reasoning` **MUST** 接入 ReasoningPort 的 clamp 链（见 [../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md) §5）
-
-### 7.3 Config 中的 reasoning 相关字段
-
-| 字段 | 位置 | 用途 |
-|---|---|---|
-| `model.reasoning` | `ModelEntryConfig` | 模型是否支持 reasoning |
-| `model.reasoning_effort` | `ModelEntryConfig` | 默认 reasoning effort |
-| `reasoning_graph.enabled` | `ReasoningGraphConfig` | 是否启用 ReasoningGraph |
-| `reasoning_graph.nodes` | `ReasoningGraphConfig` | 节点 effort 映射 |
-| `reasoning_graph.max_reasoning` | `ReasoningGraphConfig` | 用户配置上限（参与 clamp） |
+- Workflow 五节点（Idle/Explore/Plan/Execute/Verify）采用固定默认 effort 映射，无 config 驱动 override
+- Config **NEVER** 复制节点默认 effort——该映射由 Workflow 唯一拥有
+- `max_reasoning`（用户配置上限）不再存在于 Config；如需 reasoning level 上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策其归属与形式
+- 是否保留 Workflow ReasoningGraph 能力本身、以及是否接线到生产链路，同样由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
+- `ConfigPatch` / `ConfigSnapshot` 均不再包含 `reasoning_graph` 字段
 
 ## 8. driver_env — 环境变量后处理
 
@@ -716,7 +692,7 @@ fn resolve_provider_api_keys(config: &mut Config) -> Result<(), ProjectConfigErr
 
 ## 9. 相关文档
 
-- Workflow 战术设计（ReasoningPort + clamp 链）：[../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md)
+- Workflow 战术设计（ReasoningPort + clamp 链，五节点固定默认 effort）：[../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md)
 - Runtime 装配（每 Run 捕获 ConfigSnapshot）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Provider 端口（模型 reasoning 配置）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - 上下文地图（Config = 通用域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
@@ -731,3 +707,4 @@ fn resolve_provider_api_keys(config: &mut Config) -> Result<(), ProjectConfigErr
 | 2026-07-14 | 明确 Config-owned active state、project-aware prepare / commit participant，并与 Session gate、Memory candidate 装配闭环 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 将非 Run query / subscribe 收口到 async gate-aware façade，明确 #933 delivery seam 与 #871 coordinator 的所有权 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 修复 review #5/#6/#18/#19：`ConfigUpdate` 删除 `SessionSwitchGate`（gate/coordinator 明确归属 #871 composition）；hooks 字段注释与 key 级 `merge_hooks` 算法对齐；新增最高优先级 `RuntimeOverrideAdapter` layer 并定义其 project-scoped 持久化范围；无失败提交段（Memory install 与 Config install 之间）只允许 panic/crash injection，失败/取消注入收口到 handoff 前与 `persist_update` await 点 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-17 | #921 收缩范围：`ReasoningGraphConfig`（含 `enabled`/`nodes`/`max_reasoning`）从 Config 全部退役；`ConfigPatch`/`ConfigSnapshot` 移除 `reasoning_graph` 字段与 accessor；§7 改为退役说明；Workflow 五节点采用固定默认 effort，是否保留/接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |

@@ -43,6 +43,29 @@
 //! let _state = task::TaskStoreState::empty();
 //! ```
 //!
+//! Snapshot validation is public, but capture, candidate preparation, and
+//! installation remain crate-private until #890 publishes a persistence port:
+//! ```compile_fail
+//! let store = task::TaskStore::new();
+//! let _ = store.capture_snapshot();
+//! ```
+//! ```compile_fail
+//! let snapshot = task::TaskSnapshot::empty();
+//! let _ = snapshot.prepare();
+//! ```
+//! ```compile_fail
+//! let _ = task::PreparedTaskRestore;
+//! ```
+//! ```compile_fail
+//! let store = task::TaskStore::new();
+//! store.install_snapshot(());
+//! ```
+//! `TaskStore` has no external stateful restore owner in #888:
+//! ```compile_fail
+//! let store = task::TaskStore::new();
+//! store.restore_bytes(b"{}").unwrap();
+//! ```
+//!
 //! 实体工厂构造器不对外发布（构造经 [`TaskAccess`] 意图命令）：
 //! ```compile_fail
 //! let _factory = task::Task::create;
@@ -73,6 +96,6 @@ pub use business::{
     BatchCreateSpec, BatchId, BatchStatus, InterruptedBatchInfo, StaleBatchInfo, Task,
     TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId, TaskLifecycleSnapshot,
     TaskPriority, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot, TaskRevision,
-    TaskStatus, TaskStoreStats,
+    TaskSnapshot, TaskSnapshotCodecError, TaskSnapshotValidationError, TaskStatus, TaskStoreStats,
 };
 pub use core::{TaskAccess, TaskStore};

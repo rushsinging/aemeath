@@ -429,6 +429,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-stop-hook-blocked".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -444,7 +445,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -544,6 +545,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-stop-hook-metadata".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -559,7 +561,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -593,23 +595,92 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
 #[tokio::test]
 async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env() {
     let sink = RecordingSink::default();
-    let path_base = tempfile::tempdir().unwrap();
-    let workspace_root = tempfile::tempdir().unwrap();
-    let marker = path_base.path().join("stop-hook-env.txt");
-    let marker_path = marker.display().to_string();
-    let workspace_dto = context::session::PersistedWorkspaceContext {
-        path_base: path_base.path().display().to_string(),
-        workspace_root: workspace_root.path().display().to_string(),
-        context_stack: vec![context::session::PersistedWorkspaceFrame {
-            path_base: path_base.path().display().to_string(),
-            workspace_root: path_base.path().display().to_string(),
-        }],
+    // #894: stop hook 的 cwd / `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` 必须取自
+    // restore 后的 `workspace_root`。要让 `workspace_root` 合法地不同于 wire 时的路径，
+    // 必须满足 Project 不变量：一个 linked worktree 与主仓共享同一 git common dir。
+    // 因此创建真实 git 仓库 + linked worktree 作为合法 fixture（而非两个互不相关的临时目录，
+    // 那样无法通过 prepare_restore 的同 repo 校验）。
+    let tmp = tempfile::tempdir().unwrap();
+    let main_repo = tmp.path().join("main");
+    let linked_wt = tmp.path().join("linked");
+    std::fs::create_dir_all(&main_repo).unwrap();
+    let run_git = |args: &[&str], cwd: &std::path::Path| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success()
     };
-    let workspace = project::wire_production_workspace(path_base.path().to_path_buf()).into_views();
-    workspace
+    assert!(run_git(&["init"], &main_repo), "git init 失败");
+    run_git(&["config", "user.name", "test"], &main_repo);
+    run_git(&["config", "user.email", "test@example.com"], &main_repo);
+    run_git(&["config", "commit.gpgsign", "false"], &main_repo);
+    std::fs::write(main_repo.join("README.md"), "init").unwrap();
+    assert!(run_git(&["add", "-A"], &main_repo), "git add 失败");
+    assert!(
+        run_git(&["commit", "-m", "init"], &main_repo),
+        "git commit 失败"
+    );
+    assert!(
+        run_git(
+            &["worktree", "add", linked_wt.to_str().unwrap(), "-b", "wt"],
+            &main_repo
+        ),
+        "git worktree add 失败"
+    );
+
+    // 取 canonical 路径，构造自洽且满足不变量的完整 DTO。
+    let main_repo = main_repo.canonicalize().unwrap();
+    let workspace_root = linked_wt.canonicalize().unwrap();
+    // `--git-common-dir` 可能输出相对路径（相对 main_repo），需按 base 解析后再 canonicalize，
+    // 与 GitCli::resolve_git_path 语义一致。
+    let raw_common = String::from_utf8(
+        std::process::Command::new("git")
+            .args(["rev-parse", "--git-common-dir"])
+            .current_dir(&main_repo)
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_owned();
+    let common_path = std::path::PathBuf::from(raw_common);
+    let common_dir = if common_path.is_absolute() {
+        common_path
+    } else {
+        main_repo.join(common_path)
+    }
+    .canonicalize()
+    .unwrap();
+
+    let identity = share::session_types::ProjectIdentity {
+        initial_cwd: main_repo.display().to_string(),
+        git_common_dir: Some(common_dir.display().to_string()),
+    };
+    let workspace_root_str = workspace_root.display().to_string();
+    let workspace_dto = context::session::PersistedWorkspaceContext {
+        workspace_id: share::session_types::WorkspaceId::derive(&identity, &workspace_root_str),
+        project_identity: identity,
+        path_base: workspace_root_str.clone(),
+        workspace_root: workspace_root_str,
+        worktree_kind: share::session_types::WorktreeKind::Linked,
+        context_stack: vec![],
+    };
+    // 从主仓 wire；prepare_restore + commit_restore 后 workspace_root 切换为 linked worktree
+    // （与主仓路径不同），这正是本测试要验证的 stop hook env 来源。
+    let workspace = project::wire_production_workspace(main_repo.clone())
+        .expect("workspace 初始化成功")
+        .into_views();
+    let prepared = workspace
         .persist()
-        .restore(&workspace_dto)
-        .expect("restore workspace dto");
+        .prepare_restore(&workspace_dto)
+        .expect("prepare_restore 合法 DTO 应通过同 repo 校验");
+    workspace.persist().commit_restore(prepared);
+
+    let marker = tmp.path().join("stop-hook-env.txt");
+    let marker_path = marker.display().to_string();
     let mut events = HashMap::new();
     events.insert(
         HookEvent::Stop,
@@ -677,7 +748,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -699,7 +770,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
     let output = std::fs::read_to_string(marker).unwrap();
     let parts: Vec<&str> = output.split('|').collect();
     assert_eq!(parts.len(), 3);
-    let expected = workspace_root.path().canonicalize().unwrap();
+    let expected = workspace_root.clone();
     for part in parts {
         assert_eq!(std::fs::canonicalize(part).unwrap(), expected);
     }
@@ -756,6 +827,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-session".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -771,7 +843,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -924,6 +996,7 @@ async fn test_continue_false_json_treated_as_block() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-continue-false".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -939,7 +1012,7 @@ async fn test_continue_false_json_treated_as_block() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1045,6 +1118,7 @@ async fn test_stall_triggers_stop_hook_check() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-stall-hook".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1060,7 +1134,7 @@ async fn test_stall_triggers_stop_hook_check() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1205,6 +1279,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-persistent-loop".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1220,7 +1295,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1367,6 +1442,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-stall-reset-across-turns".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1382,7 +1458,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1563,6 +1639,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-idle-control-command".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1578,7 +1655,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1684,6 +1761,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-idle-pending-save".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1699,7 +1777,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1785,6 +1863,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-idle-pending-list-reminders".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1800,7 +1879,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -1863,6 +1942,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-block-limit".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1878,7 +1958,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -2047,6 +2127,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-cancel-then-idle".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2062,7 +2143,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -2280,6 +2361,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-cancel-preserves-prior-turns".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2295,7 +2377,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -2503,6 +2585,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-idle-until-first-input".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2518,7 +2601,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -2626,6 +2709,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-no-turn-signal-before-first-input".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2641,7 +2725,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -2720,6 +2804,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         chain: messages, // 末条为 User，模拟 resume
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-resume-skip-pending".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2735,7 +2820,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(), // 正常场景
         language: "en".to_string(),
@@ -2794,6 +2879,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         chain: messages,
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-user-tail-idle".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2809,7 +2895,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),
@@ -2938,6 +3024,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
+            .expect("workspace 初始化成功")
             .into_views(),
         session_id: "test-api-error-finalize".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -2953,7 +3040,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         memory_config: share::config::MemoryConfig::default(),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning_graph: None,
+        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
         build_switched_client: Arc::new(test_build_switched_client),
         save_chain: test_save_chain(),
         language: "en".to_string(),

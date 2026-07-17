@@ -1,13 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use share::session_types::PersistedWorkspaceContext;
+use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 
 use crate::domain::git::GitWorktreeOps;
 use crate::domain::state::{self as rules, WorkspaceState};
 use crate::domain::types::{
     WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
+    WorkspaceRestoreError,
 };
+use crate::PreparedWorkspaceRestore;
 
 /// project 拥有的唯一可变 workspace 状态源（单锁）。
 pub(crate) struct WorkspaceService {
@@ -17,21 +19,47 @@ pub(crate) struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    pub(crate) fn with_git(cwd: PathBuf, git: Arc<dyn GitWorktreeOps>) -> Arc<Self> {
+    pub(crate) fn with_verified_git(
+        project_identity: ProjectIdentity,
+        workspace_root: PathBuf,
+        path_base: PathBuf,
+        worktree_kind: WorktreeKind,
+        git: Arc<dyn GitWorktreeOps>,
+    ) -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(WorkspaceState::new(cwd)),
+            state: Mutex::new(WorkspaceState::from_verified(
+                project_identity,
+                workspace_root,
+                path_base,
+                worktree_kind,
+            )),
             control_operation: Mutex::new(()),
             git,
         })
     }
+    #[cfg(test)]
+    pub(crate) fn with_git(cwd: PathBuf, git: Arc<dyn GitWorktreeOps>) -> Arc<Self> {
+        Self::with_verified_git(
+            ProjectIdentity {
+                initial_cwd: cwd.display().to_string(),
+                git_common_dir: Some(cwd.join(".git").display().to_string()),
+            },
+            cwd.clone(),
+            cwd,
+            WorktreeKind::Primary,
+            git,
+        )
+    }
+
     /// 从当前快照派生独立实例（继承 root/base、空栈、新锁），供子 agent。
     pub fn seed_isolated(&self) -> Arc<Self> {
         let s = self.lock();
         Arc::new(Self {
             state: Mutex::new(WorkspaceState {
-                initial_cwd: s.initial_cwd.clone(),
+                project_identity: s.project_identity.clone(),
                 workspace_root: s.workspace_root.clone(),
                 path_base: s.path_base.clone(),
+                worktree_kind: s.worktree_kind,
                 stack: Vec::new(),
             }),
             control_operation: Mutex::new(()),
@@ -58,6 +86,12 @@ impl WorkspaceService {
 }
 
 impl WorkspaceRead for WorkspaceService {
+    fn workspace_id(&self) -> WorkspaceId {
+        self.lock().workspace_id()
+    }
+    fn project_identity(&self) -> ProjectIdentity {
+        self.lock().project_identity.clone()
+    }
     fn current_workspace_root(&self) -> PathBuf {
         self.lock().workspace_root.clone()
     }
@@ -68,32 +102,29 @@ impl WorkspaceRead for WorkspaceService {
         self.lock().resolve(rel)
     }
     fn in_worktree(&self) -> bool {
-        // 先克隆 workspace_root 释放状态锁，避免持锁期间 spawn git 子进程。
-        let root = self.lock().workspace_root.clone();
-        self.git.in_worktree(&root).unwrap_or(false)
+        self.lock().worktree_kind == WorktreeKind::Linked
     }
     fn current_branch(&self) -> Result<Option<String>, WorkspaceError> {
-        let root = self.lock().workspace_root.clone();
-        self.git.current_branch(&root).map_err(WorkspaceError::Git)
+        let state = self.lock();
+        if state.worktree_kind == WorktreeKind::NonGit {
+            return Ok(None);
+        }
+        let root = state.workspace_root.clone();
+        drop(state);
+        self.git
+            .current_branch(&root)
+            .map_err(WorkspaceError::GitOperationFailed)
     }
     fn initial_cwd(&self) -> PathBuf {
-        self.lock().initial_cwd.clone()
+        PathBuf::from(&self.lock().project_identity.initial_cwd)
     }
 }
 
 impl WorkspaceControl for WorkspaceService {
-    fn set_path_base(&self, path: PathBuf) -> Result<(), WorkspaceError> {
+    fn change_directory(&self, path: PathBuf) -> Result<(), WorkspaceError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
-        rules::set_path_base(&mut candidate, path)?;
-        self.commit(candidate);
-        Ok(())
-    }
-
-    fn set_workspace_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError> {
-        let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        rules::set_workspace_root(&mut candidate, root, path)?;
+        rules::change_directory(&mut candidate, path)?;
         self.commit(candidate);
         Ok(())
     }
@@ -118,7 +149,7 @@ impl WorkspaceControl for WorkspaceService {
     fn exit(&self) -> Result<WorkspaceFrame, WorkspaceError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
-        let frame = rules::exit(&mut candidate)?;
+        let frame = rules::exit(&mut candidate, self.git.as_ref())?;
         self.commit(candidate);
         Ok(frame)
     }
@@ -128,12 +159,18 @@ impl WorkspacePersist for WorkspaceService {
     fn snapshot(&self) -> PersistedWorkspaceContext {
         rules::snapshot(&self.lock())
     }
-    fn restore(&self, dto: &PersistedWorkspaceContext) -> Result<(), WorkspaceError> {
+
+    fn prepare_restore(
+        &self,
+        dto: &PersistedWorkspaceContext,
+    ) -> Result<PreparedWorkspaceRestore, WorkspaceRestoreError> {
+        let live = self.candidate();
+        rules::prepare_restore(&live, dto, self.git.as_ref())
+    }
+
+    fn commit_restore(&self, prepared: PreparedWorkspaceRestore) {
         let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        rules::restore(&mut candidate, dto)?;
-        self.commit(candidate);
-        Ok(())
+        rules::commit_restore(&mut self.lock(), prepared);
     }
 }
 
@@ -154,18 +191,25 @@ mod tests {
     }
 
     impl GitWorktreeOps for BlockingGit {
-        fn git_common_dir(&self, _path: &Path) -> Result<PathBuf, String> {
-            Ok(self.common_dir.clone())
+        fn probe_repository(
+            &self,
+            path: &Path,
+        ) -> Result<crate::domain::git::RepositoryProbe, crate::GitProbeError> {
+            Ok(crate::domain::git::RepositoryProbe::Git {
+                canonical_top_level: path.to_path_buf(),
+                canonical_common_dir: self.common_dir.clone(),
+                worktree_kind: WorktreeKind::Primary,
+            })
         }
 
-        fn show_toplevel(&self, path: &Path) -> Result<PathBuf, String> {
+        fn show_toplevel(&self, path: &Path) -> Result<PathBuf, crate::GitOperationError> {
             assert_eq!(path, self.target);
             self.io_started.send(()).unwrap();
             self.io_release.lock().unwrap().recv().unwrap();
             Ok(self.worktree_root.clone())
         }
 
-        fn in_worktree(&self, _path: &Path) -> Result<bool, String> {
+        fn is_linked_worktree(&self, _path: &Path) -> Result<bool, crate::GitOperationError> {
             Ok(false)
         }
 
@@ -175,11 +219,11 @@ mod tests {
             _path: &Path,
             _branch: &str,
             _base: &str,
-        ) -> Result<(), String> {
+        ) -> Result<(), crate::GitOperationError> {
             Ok(())
         }
 
-        fn current_branch(&self, _path: &Path) -> Result<Option<String>, String> {
+        fn current_branch(&self, _path: &Path) -> Result<Option<String>, crate::GitOperationError> {
             Ok(None)
         }
     }
@@ -256,9 +300,9 @@ mod tests {
         let (second_done_tx, second_done_rx) = mpsc::channel();
         let second = {
             let workspace = workspace.clone();
-            let root = root.clone();
+            let target = target.clone();
             thread::spawn(move || {
-                let result = workspace.set_path_base(root);
+                let result = workspace.change_directory(target);
                 second_done_tx.send(()).unwrap();
                 result
             })
@@ -274,7 +318,7 @@ mod tests {
         assert_eq!(first.join().unwrap(), Ok(()));
         second_done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(second.join().unwrap(), Ok(()));
-        assert_eq!(workspace.current_path_base(), root);
+        assert_eq!(workspace.current_path_base(), target);
     }
 
     #[test]
@@ -289,6 +333,7 @@ mod tests {
             s.stack.push(WorkspaceFrame {
                 path_base: "/repo".into(),
                 workspace_root: "/repo".into(),
+                worktree_kind: WorktreeKind::Primary,
             });
         }
         let child = parent.seed_isolated();
@@ -300,5 +345,103 @@ mod tests {
         );
         // 父仍有一帧（不受子影响）
         assert_eq!(parent.lock().stack.len(), 1);
+    }
+
+    // ---- #894: WorkspacePersist prepare_restore / commit_restore 令牌协议 ----
+
+    /// 构造一个位于真实 temp root 的 git service，并配置 FakeGit 使 probe 自洽。
+    fn git_service_at(root: &Path, common: &str) -> Arc<WorkspaceService> {
+        let identity = ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.to_string()),
+        };
+        let mut git = FakeGit::default();
+        git.common_dir
+            .insert(root.to_path_buf(), PathBuf::from(common));
+        git.toplevel.insert(root.to_path_buf(), root.to_path_buf());
+        WorkspaceService::with_verified_git(
+            identity,
+            root.to_path_buf(),
+            root.to_path_buf(),
+            WorktreeKind::Primary,
+            Arc::new(git),
+        )
+    }
+
+    /// 组装一份自洽、真实存在、可通过 prepare 校验的 DTO（path_base 位于 root 内子目录）。
+    fn valid_dto_with_subdir(root: &Path, common: &str) -> (PersistedWorkspaceContext, PathBuf) {
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        let sub = sub.canonicalize().unwrap();
+        let identity = ProjectIdentity {
+            initial_cwd: root.display().to_string(),
+            git_common_dir: Some(common.to_string()),
+        };
+        let dto = PersistedWorkspaceContext {
+            workspace_id: WorkspaceId::derive(&identity, &root.display().to_string()),
+            project_identity: identity,
+            path_base: sub.display().to_string(),
+            workspace_root: root.display().to_string(),
+            worktree_kind: WorktreeKind::Primary,
+            context_stack: vec![],
+        };
+        (dto, sub)
+    }
+
+    #[test]
+    fn prepare_restore_via_port_exposes_identity_and_leaves_live_state() {
+        let root = unique_temp_dir("port_prepare_root");
+        let common = "/repo/.git";
+        let service = git_service_at(&root, common);
+        let (dto, _sub) = valid_dto_with_subdir(&root, common);
+
+        let observed_before = service.current_path_base();
+        let prepared = service.prepare_restore(&dto).expect("合法 DTO 应构造令牌");
+
+        // opaque token 唯一只读 accessor 暴露 Project 已校验 identity。
+        assert_eq!(prepared.project_identity(), &dto.project_identity);
+        // prepare NEVER 修改 live state：commit 前 observable 位置不变。
+        assert_eq!(service.current_path_base(), observed_before);
+        assert_eq!(service.current_path_base(), root);
+    }
+
+    #[test]
+    fn commit_restore_via_port_returns_unit_and_replaces_state() {
+        let root = unique_temp_dir("port_commit_root");
+        let common = "/repo/.git";
+        let service = git_service_at(&root, common);
+        let (dto, sub) = valid_dto_with_subdir(&root, common);
+
+        let prepared = service.prepare_restore(&dto).expect("合法 DTO 应构造令牌");
+
+        // 签名 MUST 无 Result：一次性按值消费令牌、返回 unit。
+        let unit: () = service.commit_restore(prepared);
+        assert_eq!(unit, ());
+
+        // 全量替换后可观测新 path_base。
+        assert_eq!(service.current_path_base(), sub);
+        assert_eq!(service.current_workspace_root(), root);
+        assert_eq!(service.project_identity(), dto.project_identity);
+    }
+
+    #[test]
+    fn prepare_restore_via_port_rejects_missing_path_and_keeps_live_state() {
+        let root = unique_temp_dir("port_missing_root");
+        let common = "/repo/.git";
+        let service = git_service_at(&root, common);
+        let mut dto = valid_dto_with_subdir(&root, common).0;
+        dto.path_base = root.join("nope_missing").display().to_string();
+
+        let before = service.current_path_base();
+        let result = service.prepare_restore(&dto);
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::WorkspaceRestoreError::PathNotFound { .. })
+            ),
+            "expected PathNotFound, got {result:?}"
+        );
+        assert_eq!(service.current_path_base(), before);
     }
 }

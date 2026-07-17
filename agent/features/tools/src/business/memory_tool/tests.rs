@@ -8,8 +8,11 @@ use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
 fn test_ctx(cwd: PathBuf) -> ToolExecutionContext {
+    std::fs::create_dir_all(&cwd).expect("create test workspace");
     ToolExecutionContext {
-        workspace: project::wire_production_workspace(cwd.clone()).into_views(),
+        workspace: project::wire_production_workspace(cwd.clone())
+            .expect("workspace 初始化成功")
+            .into_views(),
         run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),

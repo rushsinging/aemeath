@@ -13,7 +13,6 @@ use crate::config::{
     memory::{MemoryConfig, ReflectionConfig},
     models::{ModelsConfig, ProviderModelsConfig},
     permissions::{PermissionConfig, PermissionModeConfig},
-    reasoning_graph::ReasoningGraphConfig,
     skills::SkillsConfig,
     storage::StorageConfig,
     tools::{AgentRoleConfig, AgentsConfig, ToolsConfig},
@@ -54,8 +53,6 @@ pub struct ConfigPatch {
     pub logging: Option<LoggingConfigPatch>,
     #[serde(default)]
     pub guidance: Option<GuidanceConfigPatch>,
-    #[serde(default)]
-    pub reasoning_graph: Option<ReasoningGraphConfig>,
 }
 
 impl ConfigPatch {
@@ -80,7 +77,6 @@ impl ConfigPatch {
             && self.storage.is_none()
             && self.memory.is_none()
             && self.logging.is_none()
-            && self.reasoning_graph.is_none()
             && self.guidance.is_none()
             && self.hooks.is_none()
     }
@@ -331,9 +327,6 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(guidance) = patch.guidance {
         base.guidance = apply_guidance_patch(base.guidance, guidance);
-    }
-    if let Some(rg) = patch.reasoning_graph {
-        base.reasoning_graph = rg;
     }
     base
 }

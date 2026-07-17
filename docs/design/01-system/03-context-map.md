@@ -3,6 +3,7 @@
 > 层级：01-system（系统级总体设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：[#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 15 个 Bounded Context 之间的集成关系、方向、端口与防腐边界。以核心域 **Agent Runtime** 为中心组织（hub-and-spoke）。**只描述目标态集成关系，不记录当前代码位置。**
+> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域迁移已完成但未接生产链路；Config `reasoning_graph` 已退役，Workflow 五节点采用固定默认 effort；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线。上述集成关系是 Target 设计，v0.1.0 中 Runtime/Context/TUI 尚未端到端消费 Provider resolver。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 ## 1. 集成模式图例
 
@@ -62,8 +63,8 @@
 | 供应方 | 模式 | 契约与所有权 | 说明 |
 |---|---|---|---|
 | Context Management | C/S | Context-owned `ContextPort` OHS | Runtime 请求"构建本轮 Context Window"（取历史 + compact + 注入 + prompt） |
-| Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器 |
-| Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流 |
+| Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。**v0.1.0 scope（#921 收缩）**：五节点固定默认 effort（Config `reasoning_graph` 已退役）；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；是否接线由 v0.2.0 #1142 决策 |
+| Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
 | Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Skill 物化 PromptFragment；Command 按 PromptInjection / SnapshotQuery / ApplicationControl 路由；MCP 是 Tool adapter |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
 | Memory | C/S | Memory-owned `MemoryPort` OHS | 检索注入 + 反思写入（Reflection 产出 Memory Suggestion） |
@@ -109,7 +110,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 共享内核 | 参与 BC | 风险控制 |
 |---|---|---|
 | `Message`（对话消息类型） | Agent Runtime / Context Management / Provider | 最小化，只放稳定核心类型 |
-| `ReasoningLevel`（`Off / Low / Medium / High / Xhigh / Max`） | Workflow / Config / Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；graph、user max、model capability 与 wire 映射仍归各 BC 所有 |
+| `ReasoningLevel`（`Off / Low / Medium / High / Xhigh / Max`） | Workflow / Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；graph（固定默认 effort）、model capability 与 wire 映射仍归各 BC 所有。Config `reasoning_graph` 含 user max 已退役（#921） |
 | `Task` 类型 | 实为 **Task BC 的 Published Language**（非 SK），其他 BC 引用其发布类型 | 不变量由 Task BC 独占 |
 
 领域标识 **NEVER** 使用“全域 ID”共享内核：RunId / ToolCallId 等 UUIDv7 newtype 由各自所有者发布，TaskId / BatchId 使用 Task-owned 单 Session 数字格式，WorkspaceId 使用 Project-owned deterministic opaque 格式。跨 BC 只消费所有者发布的精确类型，**NEVER** 退化为无所有权的通用 `Id`。
@@ -162,3 +163,4 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-15 | 修复评审 #11-#13：入站 C/S 表改为 CLI/TUI 是 Customer、Runtime 是 Supplier；Server 移出 v0.1.0 present 表、只保留于 §9 Future；新增 §4 表后说明，消费方 outbound SPI（如 `ProviderPort`）签名真相源统一指向 Runtime 端口与适配器，供应方模块设计不再称签名真相 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §3 入站 C/S 表补齐 REPL 为 `AgentClient` 的 v0.1.0 Customer（与 CLI / TUI 并列，Server 仍只在 §9 Future），统一 Agent Runtime 是 AgentClient Supplier 的措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | 持久化边对齐 AtomicDataset 现状：独立 OHS/adapter、Prepared commit point、roll-forward 与 typed corruption；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
+| 2026-07-17 | #921 收缩范围：Provider resolver 领域迁移完成但未接生产链路；Config `reasoning_graph` 退役，Workflow 五节点固定默认 effort；Main ReasoningPort 已接线；Runtime/Context/TUI 尚未端到端消费 Provider resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |

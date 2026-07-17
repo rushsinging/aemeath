@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
 use crate::domain::session::{CanonicalSession, SessionCodec, SessionCodecError};
-use crate::ports::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+use crate::ports::{SessionDecoder, SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
 pub struct SessionPersistenceService {
     store: Arc<dyn SessionSnapshotStore>,
+    decoder: Arc<dyn SessionDecoder>,
 }
 
 impl SessionPersistenceService {
-    pub fn new(store: Arc<dyn SessionSnapshotStore>) -> Self {
-        Self { store }
+    pub fn new(store: Arc<dyn SessionSnapshotStore>, decoder: Arc<dyn SessionDecoder>) -> Self {
+        Self { store, decoder }
     }
 
     pub async fn load(&self) -> Result<CanonicalSession, SessionLoadError> {
@@ -17,7 +18,7 @@ impl SessionPersistenceService {
         let Some(primary) = primary else {
             return Err(SessionLoadError::NotFound);
         };
-        match SessionCodec::decode(&primary) {
+        match self.decoder.decode(&primary) {
             Ok(decoded) => Ok(decoded.session),
             Err(SessionCodecError::UnsupportedFutureVersion {
                 version,
@@ -42,7 +43,7 @@ impl SessionPersistenceService {
             self.store.quarantine(SessionGeneration::Primary).await?;
             return Err(SessionLoadError::NoDecodableGeneration);
         };
-        match SessionCodec::decode(&previous) {
+        match self.decoder.decode(&previous) {
             Ok(decoded) => {
                 self.store.quarantine(SessionGeneration::Primary).await?;
                 self.store.promote_previous().await?;

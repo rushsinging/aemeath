@@ -27,7 +27,6 @@ pub mod legacy;
 pub mod memory_port;
 pub mod policy_port;
 pub mod provider_port;
-pub mod reasoning_port;
 pub mod task_port;
 pub mod tool_port;
 pub mod usage_sink;
@@ -52,7 +51,6 @@ pub use provider_port::{
     ProviderError, ProviderErrorKind, ProviderPort, ProviderToolCall, ProviderToolCallId,
     RawUsageSnapshot, ReasoningCapability, ReasoningLevel, ReasoningMappingKind, StopReason,
 };
-pub use reasoning_port::ReasoningPort;
 pub use task_port::TaskPort;
 pub use tool_port::{
     RegistryScopeName, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort, ToolInvocation,

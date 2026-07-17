@@ -10,7 +10,7 @@ mod domain;
 mod ports;
 pub mod published_language;
 
-pub use adapters::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+pub use adapters::client::{LlmClient, LlmConfigOptions};
 pub use adapters::openai_compatible::ReasoningConfig;
 pub use adapters::pool::LlmClientPool;
 pub use adapters::transport::{wire_provider, DefaultLlmProviderGateway, LlmProviderGateway};
@@ -22,10 +22,11 @@ pub use domain::invoke::{
 };
 pub use ports::{LegacyStreamSink, LlmProvider};
 pub use published_language::{
-    CancellationSignal, InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest,
-    InvocationStream, ModelCapability, ModelId, ModelToolSchema, ProviderCompletion,
-    ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall,
-    ProviderToolCallId, RawUsageSnapshot, ReasoningCapability, ReasoningMappingKind,
+    CancellationSignal, CapabilityFingerprint, InvocationDelta, InvocationEvent, InvocationOptions,
+    InvocationRequest, InvocationStream, ModelCapability, ModelId, ModelToolSchema,
+    ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason,
+    ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningCapability,
+    ReasoningMappingKind, RequestedInvocationOptions, ResolvedInvocationOptions,
 };
 
 /// Provider HTTP 超时常量。

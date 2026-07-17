@@ -10,6 +10,13 @@ pub mod session_snapshot_store;
 pub use context_port::ContextPort;
 pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
+pub trait SessionDecoder: Send + Sync {
+    fn decode(
+        &self,
+        bytes: &[u8],
+    ) -> Result<crate::domain::session::DecodedSession, crate::domain::session::SessionCodecError>;
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub revision: SessionRevision,

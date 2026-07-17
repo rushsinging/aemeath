@@ -12,7 +12,6 @@ pub mod memory;
 pub mod merge;
 pub mod models;
 pub mod permissions;
-pub mod reasoning_graph;
 pub mod skills;
 pub mod snapshot;
 pub mod storage;

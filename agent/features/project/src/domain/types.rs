@@ -3,7 +3,7 @@
 //! 这些类型由 `WorkspaceService` / `WorkspaceState` 实现与消费，并由 crate root
 //! 精确 re-export 为 Project 的稳定 façade。
 
-use share::session_types::PersistedWorkspaceContext;
+use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
 use std::path::{Path, PathBuf};
 
 /// Runtime worktree stack frame（替代 share::tool::WorkingContext）。
@@ -11,12 +11,59 @@ use std::path::{Path, PathBuf};
 pub struct WorkspaceFrame {
     pub path_base: PathBuf,
     pub workspace_root: PathBuf,
+    pub worktree_kind: WorktreeKind,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitProbeError {
+    GitUnavailable,
+    PermissionDenied,
+    CommandFailed { exit_code: Option<i32> },
+    InvalidOutput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitOperationError {
+    GitUnavailable,
+    PermissionDenied,
+    CommandFailed { exit_code: Option<i32> },
+    InvalidOutput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceInitError {
+    PathNotFound { path: PathBuf },
+    NotDirectory { path: PathBuf },
+    PermissionDenied { path: PathBuf },
+    CanonicalizeFailed { path: PathBuf },
+    GitProbeFailed(GitProbeError),
+}
+
+impl std::fmt::Display for WorkspaceInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PathNotFound { path } => write!(f, "路径不存在：{}", path.display()),
+            Self::NotDirectory { path } => write!(f, "路径不是目录：{}", path.display()),
+            Self::PermissionDenied { path } => write!(f, "无权访问路径：{}", path.display()),
+            Self::CanonicalizeFailed { path } => {
+                write!(f, "无法规范化路径：{}", path.display())
+            }
+            Self::GitProbeFailed(error) => write!(f, "Git 仓库探测失败：{error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for WorkspaceInitError {}
 
 /// Workspace 层集中错误（用户可见消息为中文）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceError {
     PathNotFound(PathBuf),
+    NotDirectory(PathBuf),
+    PathOutsideWorkspaceRoot {
+        path: PathBuf,
+        root: PathBuf,
+    },
     MissingPathAndBranch,
     InvalidBranch,
     NestedWorktree {
@@ -28,14 +75,22 @@ pub enum WorkspaceError {
         repo_root: PathBuf,
     },
     EmptyStack,
-    RestoreInvalidPath(PathBuf),
-    Git(String),
+    UnsupportedForNonGit,
+    GitProbeFailed(GitProbeError),
+    GitOperationFailed(GitOperationError),
 }
 
 impl std::fmt::Display for WorkspaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WorkspaceError::PathNotFound(p) => write!(f, "路径不存在或无法访问 {}", p.display()),
+            WorkspaceError::NotDirectory(p) => write!(f, "路径不是目录 {}", p.display()),
+            WorkspaceError::PathOutsideWorkspaceRoot { path, root } => write!(
+                f,
+                "路径 {} 位于当前工作区根 {} 之外",
+                path.display(),
+                root.display()
+            ),
             WorkspaceError::MissingPathAndBranch => {
                 write!(f, "进入或创建 worktree 时必须提供 path 或 branch")
             }
@@ -61,17 +116,47 @@ impl std::fmt::Display for WorkspaceError {
                 f,
                 "上下文栈为空，没有可恢复的 worktree。可能已经在主工作区。"
             ),
-            WorkspaceError::RestoreInvalidPath(p) => {
-                write!(f, "恢复工作区失败：路径不存在 {}", p.display())
-            }
-            WorkspaceError::Git(m) => write!(f, "{}", m),
+            WorkspaceError::UnsupportedForNonGit => write!(f, "非 Git 项目不支持 worktree 操作"),
+            WorkspaceError::GitProbeFailed(error) => write!(f, "Git 仓库探测失败：{error:?}"),
+            WorkspaceError::GitOperationFailed(error) => write!(f, "Git 操作失败：{error:?}"),
         }
     }
 }
 impl std::error::Error for WorkspaceError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceRestoreError {
+    InvalidProjectIdentity,
+    PathNotFound { path: String },
+    PathOutsideWorkspaceRoot { path: String, root: String },
+    InvalidStackShape,
+    RepositoryMismatch,
+    WorkspaceIdMismatch,
+    GitProbeFailed(GitProbeError),
+}
+
+impl std::fmt::Display for WorkspaceRestoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidProjectIdentity => write!(f, "恢复工作区失败：项目身份无效"),
+            Self::PathNotFound { path } => write!(f, "恢复工作区失败：路径不存在 {path}"),
+            Self::PathOutsideWorkspaceRoot { path, root } => {
+                write!(f, "恢复工作区失败：路径 {path} 位于工作区根 {root} 之外")
+            }
+            Self::InvalidStackShape => write!(f, "恢复工作区失败：上下文栈形状无效"),
+            Self::RepositoryMismatch => write!(f, "恢复工作区失败：仓库身份或类型不匹配"),
+            Self::WorkspaceIdMismatch => write!(f, "恢复工作区失败：workspace ID 不匹配"),
+            Self::GitProbeFailed(error) => write!(f, "恢复工作区失败：Git 仓库探测失败：{error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for WorkspaceRestoreError {}
+
 /// 读当前 workspace 位置（所有 tool 可用）。
 pub trait WorkspaceRead: Send + Sync {
+    fn workspace_id(&self) -> WorkspaceId;
+    fn project_identity(&self) -> ProjectIdentity;
     fn current_workspace_root(&self) -> PathBuf;
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
@@ -87,8 +172,7 @@ pub trait WorkspaceRead: Send + Sync {
 
 /// 运行期 workspace 变更（bash cd + worktree enter/exit）。
 pub trait WorkspaceControl: Send + Sync {
-    fn set_path_base(&self, path: PathBuf) -> Result<(), WorkspaceError>;
-    fn set_workspace_root(&self, root: PathBuf, path: PathBuf) -> Result<(), WorkspaceError>;
+    fn change_directory(&self, path: PathBuf) -> Result<(), WorkspaceError>;
     /// 切换到 `path`（存在性 + 同源校验），不压栈帧。供 ExitWorktree{path} 使用。
     fn switch_to(&self, path: PathBuf) -> Result<(), WorkspaceError>;
     fn enter(
@@ -102,5 +186,9 @@ pub trait WorkspaceControl: Send + Sync {
 /// session 边界持久化。
 pub trait WorkspacePersist: Send + Sync {
     fn snapshot(&self) -> PersistedWorkspaceContext;
-    fn restore(&self, dto: &PersistedWorkspaceContext) -> Result<(), WorkspaceError>;
+    fn prepare_restore(
+        &self,
+        dto: &PersistedWorkspaceContext,
+    ) -> Result<crate::PreparedWorkspaceRestore, WorkspaceRestoreError>;
+    fn commit_restore(&self, prepared: crate::PreparedWorkspaceRestore);
 }

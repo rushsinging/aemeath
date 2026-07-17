@@ -104,13 +104,14 @@ pub(super) async fn chat_impl(
                 language: inner.context.resources.language.clone(),
                 frozen_chats: inner.frozen_chats.clone(),
                 active_summary: inner.active_summary.clone(),
-                reasoning_graph: inner
-                    .context
-                    .resources
-                    .reasoning_graph_config
-                    .as_ref()
-                    .filter(|c| c.enabled)
-                    .map(|c| workflow::ReasoningGraph::new(c.clone())),
+                reasoning: workflow::adaptive_reasoning(
+                    inner
+                        .context
+                        .resources
+                        .client
+                        .default_scope()
+                        .requested_reasoning(),
+                ),
                 build_switched_client: {
                     let cwd = inner.cwd.clone();
                     std::sync::Arc::new(move |selection: &str| {

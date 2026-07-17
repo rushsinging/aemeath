@@ -12,8 +12,8 @@ pub mod domain;
 
 pub use adapters::paths;
 pub use domain::{
-    file_snapshot, hooks, legacy, logging, memory, models, permissions, reasoning_graph, skills,
-    storage, tools, ui, update,
+    file_snapshot, hooks, legacy, logging, memory, models, permissions, skills, storage, tools, ui,
+    update,
 };
 
 // Re-exports for backward compatibility
@@ -25,7 +25,6 @@ pub use logging::LoggingConfig;
 pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
-pub use reasoning_graph::{NodeEffortConfig, ReasoningGraphConfig, ReasoningGraphNodesConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
 pub use tools::{AgentRoleConfig, AgentsConfig, ToolsConfig};

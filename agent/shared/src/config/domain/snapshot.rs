@@ -11,10 +11,7 @@ use crate::config::models::{
     RuntimeModelRequest, RuntimeModelResolutionError, RuntimeModelResolver,
 };
 use crate::config::permissions::PermissionModeConfig;
-use crate::config::{
-    AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, ReasoningGraphConfig,
-    SkillsConfig,
-};
+use crate::config::{AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, SkillsConfig};
 
 /// Immutable snapshot of effective configuration.
 ///
@@ -84,11 +81,19 @@ impl ConfigSnapshot {
     // ── Tools / Agents ───────────────────────────────────────
 
     pub fn max_tool_concurrency(&self) -> usize {
-        self.0.tools.max_concurrency
+        if self.0.tools.max_concurrency > 0 {
+            self.0.tools.max_concurrency
+        } else {
+            super::tools::default_max_tool_concurrency()
+        }
     }
 
     pub fn max_agent_concurrency(&self) -> usize {
-        self.0.agents.max_concurrency
+        if self.0.agents.max_concurrency > 0 {
+            self.0.agents.max_concurrency
+        } else {
+            super::tools::default_max_agent_concurrency()
+        }
     }
 
     // ── Logging ──────────────────────────────────────────────
@@ -191,11 +196,6 @@ impl ConfigSnapshot {
         &self.0.skills
     }
 
-    /// 返回完整 `ReasoningGraphConfig`，供 `GraphRuntimeConfig::from_shared` 消费。
-    pub fn reasoning_graph(&self) -> &ReasoningGraphConfig {
-        &self.0.reasoning_graph
-    }
-
     /// 返回完整 `LoggingConfig`，供 `init_logging` 消费。
     pub fn logging(&self) -> &LoggingConfig {
         &self.0.logging
@@ -291,10 +291,6 @@ mod tests {
         );
         assert_eq!(snap.memory().enabled, Config::default().memory.enabled);
         assert_eq!(snap.skills().dirs, Config::default().skills.dirs);
-        assert_eq!(
-            snap.reasoning_graph().enabled,
-            Config::default().reasoning_graph.enabled
-        );
         assert_eq!(snap.logging().level, Config::default().logging.level);
     }
 
@@ -500,6 +496,25 @@ mod tests {
         assert_eq!(snap.max_agent_concurrency(), 4);
     }
 
+    #[test]
+    fn snapshot_concurrency_limits_use_domain_defaults_for_default_config() {
+        let snap = ConfigSnapshot::new(Config::default());
+
+        assert_eq!(snap.max_tool_concurrency(), 10);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    #[test]
+    fn snapshot_concurrency_limits_normalize_zero_to_domain_defaults() {
+        let mut config = Config::default();
+        config.tools.max_concurrency = 0;
+        config.agents.max_concurrency = 0;
+        let snap = ConfigSnapshot::new(config);
+
+        assert_eq!(snap.max_tool_concurrency(), 10);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
     /// resolve_context_size 在 CLI 传 0 时应忽略 CLI（用 snapshot 值），
     /// CLI 传 128000 时应直接使用 CLI 值。
     #[test]
@@ -516,22 +531,28 @@ mod tests {
         assert_eq!(snap.resolve_context_size(Some(128000), 96000), 128000);
     }
 
-    /// Config 含 memory.enabled=true / reasoning_graph.enabled=true 时，
-    /// 子结构 accessor 返回正确值。
+    /// Config 只暴露仍受支持的 memory 子结构。
     #[test]
-    fn test_snapshot_memory_and_reasoning_graph() {
-        // Arrange
+    fn test_snapshot_memory_accessor() {
         let mut config = Config::default();
         config.memory.enabled = true;
-        config.reasoning_graph.enabled = true;
         let snap = ConfigSnapshot::new(config);
 
-        // Act & Assert
         assert!(snap.memory().enabled, "memory().enabled 应为 true");
-        assert!(
-            snap.reasoning_graph().enabled,
-            "reasoning_graph().enabled 应为 true"
-        );
+    }
+
+    #[test]
+    fn retired_reasoning_graph_section_is_ignored_by_config() {
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "reasoning_graph": {
+                "enabled": true,
+                "max_reasoning": "high",
+                "nodes": { "plan": { "effort": "low" } }
+            }
+        }))
+        .expect("unknown retired section should remain backward-readable");
+        let serialized = serde_json::to_value(config).expect("config serializes");
+        assert!(serialized.get("reasoning_graph").is_none());
     }
 
     /// Config.language="zh" 时，snapshot.language() 应返回 "zh"。

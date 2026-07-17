@@ -67,7 +67,7 @@ where
         language,
         frozen_chats,
         active_summary: active_summary_arc,
-        mut reasoning_graph,
+        reasoning,
         build_switched_client,
         save_chain,
         run_reflection_on_demand,
@@ -77,7 +77,6 @@ where
         list_sessions,
     } = ctx;
     let mut client = client;
-    let mut session_reasoning = client.default_scope().requested_reasoning();
     let hook_ui = HookUi::new(sink.clone());
     let mut cwd = workspace.read().current_workspace_root();
     let memory_cwd = workspace.read().initial_cwd();
@@ -132,8 +131,9 @@ where
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
                         Ok((new_client, result)) => {
-                            session_reasoning =
-                                new_client.default_scope().requested_reasoning();
+                            reasoning.reset_default_level(
+                                new_client.default_scope().requested_reasoning(),
+                            );
                             client = Arc::new(new_client);
                             context_size = result.context_window;
                             let _ = sink
@@ -152,8 +152,7 @@ where
                     continue;
                 }
                 PendingCommand::SetThinking { desired } => {
-                    session_reasoning =
-                        execute_set_thinking(session_reasoning, &sink, desired).await;
+                    execute_set_thinking(reasoning.as_ref(), &sink, desired).await;
                     continue;
                 }
                 PendingCommand::InitProject { force } => {
@@ -436,20 +435,18 @@ where
         let started_at = Instant::now();
         cwd = workspace.read().current_workspace_root();
 
-        if let Some(graph) = reasoning_graph.as_mut() {
-            let text = chain
-                .last_message()
-                .map(|message| message.text_content())
-                .unwrap_or_default();
-            let previous = graph.current_node();
-            if graph.transition(ReasoningSignal::UserMessage { text, turn_count }) {
-                sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                    node: graph.current_node(),
-                    effort: graph.current_effort(),
-                    prev: previous,
-                })
-                .await;
-            }
+        let text = chain
+            .last_message()
+            .map(|message| message.text_content())
+            .unwrap_or_default();
+        let observation = reasoning.observe(ReasoningSignal::UserMessage { text, turn_count });
+        if observation.changed() {
+            sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                node: observation.current,
+                effort: observation.requested,
+                prev: observation.previous,
+            })
+            .await;
         }
 
         handle_turn_boundary_config(
@@ -493,8 +490,7 @@ where
             frozen_chats: &frozen_chats,
             active_summary: &mut active_summary,
             active_summary_arc: &active_summary_arc,
-            reasoning_graph: &mut reasoning_graph,
-            session_reasoning,
+            reasoning: reasoning.as_ref(),
             save_chain: &save_chain,
             pending_input: &mut pending_input,
             deferred_user_inputs: &mut deferred_user_inputs,
