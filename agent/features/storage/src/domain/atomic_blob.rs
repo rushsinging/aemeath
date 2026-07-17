@@ -200,6 +200,9 @@ impl WriteOptions {
 pub enum CommitWarning {
     PreviousPromotionPending,
     JournalCleanupPending,
+    /// The dataset is committed, but one or more members still require
+    /// mechanical roll-forward before the generation becomes visible.
+    MemberPublishRecoveryPending,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
