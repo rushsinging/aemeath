@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
-use crate::domain::invoke::{StreamResponse, SystemBlock};
+use crate::domain::invoke::SystemBlock;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
 use crate::LOG_TARGET;
@@ -297,21 +297,6 @@ impl LlmClient {
         self.log_request(system, messages, tool_schemas);
         self.provider
             .invocation_stream(scope, system, messages, tool_schemas, cancel)
-            .await
-    }
-
-    #[doc(hidden)]
-    pub async fn legacy_stream_message(
-        &self,
-        scope: &crate::InvocationScope,
-        system: &[SystemBlock],
-        messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        sink: &mut dyn crate::ports::LegacyStreamSink,
-        cancel: &CancellationToken,
-    ) -> Result<StreamResponse, crate::LlmError> {
-        self.provider
-            .legacy_stream_message(scope, system, messages, tool_schemas, sink, cancel)
             .await
     }
 

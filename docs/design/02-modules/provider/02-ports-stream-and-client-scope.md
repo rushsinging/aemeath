@@ -27,7 +27,7 @@ enum InvocationEvent {
 - `resolve_invocation_options` 是 model capability clamp 的唯一入口；返回值供同一次 Context build 与 invoke 共同使用；
 - `invoke` 建立一次上游调用并返回有序流；
 - `Delta` 只表达非终结增量；
-- `Completed`、`Failed` 与 `Cancelled` 是互斥终结事件，恰好出现一个；取消以独立 `Cancelled` 终结；
+- `Completed` 与 `Failed` 是互斥终结事件，恰好出现一个；取消统一表示为 `Failed(ProviderErrorKind::Cancelled)`，不发布第二条取消终结通道；
 - 终结事件后下一次 `next` 必须返回 `None`，不再提供独立 `finish()` 造成二次终结；
 - consumer 可在本地根据全部 Delta + Completed 组装 attempt 结果；
 - 具体 Rust 实现可使用关联 Stream 类型，但 Published Language 不暴露 Tokio channel、reqwest bytes、SSE frame 或 callback handler。
@@ -44,7 +44,7 @@ Provider 不发布 `on_text/on_thinking/on_tool_use/on_error` 一组回调，原
 
 目标流保持 pull-based 自然背压。若适配器内部使用 channel，必须有界并在消费方取消/丢弃时停止生产，channel 类型仍保持私有。
 
-> **现状缺口（P4 未关闭，由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接）**：本节与 §1 的 `InvocationStream` / `InvocationEvent` / pull-based `next()` 是 Target 设计；生产代码目前仍是 `agent/features/provider/src/ports.rs::StreamHandler` 的多方法回调（`on_text`/`on_thinking`/`on_tool_use_start`/`on_error`/...）。#1033 引入的 `HttpAttemptExecutor` 只收敛了单 attempt 的发送/失败判定/日志机械，**不触碰**流协议本身，不应被误读为 P4 已关闭。把生产实现迁移到本节 pull-based 契约由 #903（Pull-based Invocation Stream）承接。
+> **当前落地（#903）**：Provider 生产入口 `LlmProvider::invocation_stream` 返回 pull-based `InvocationStream`，Runtime Main/Sub/Reflection 主动 poll `InvocationEvent` 并经 reducer 组装结果；`invocation_stream` 是 Provider 实现与测试替身的必实现项。Runtime 与 Context 的生产代码和测试替身均被架构守卫禁止引用 `LegacyStreamSink` / `legacy_stream_message`。Provider driver 内部 decoder 暂留隐藏 legacy sink 作为 crate 内迁移桥，不属于跨 BC Published Language；其物理退役继续登记在 Migration Governance 的退役清单，**NEVER** 重新暴露给 Runtime/Context。
 
 ## 3. 流生命周期
 
@@ -54,7 +54,7 @@ Created
                   ├─ delta* ─▶ Streaming
                   ├─ completed event ─▶ Completed(response)
                   ├─ failed event ────▶ Failed(error)
-                  └─ cancelled error ─▶ Cancelled
+                  └─ cancelled error ─▶ Failed(ProviderErrorKind::Cancelled)
 ```
 
 这是单次协议流的局部生命周期，不是 Agent 执行状态机。它不得驱动、复制或持久化 Run 状态。
@@ -167,7 +167,7 @@ Transport pool 的 key 至少能唯一标识 provider endpoint、认证域和 dr
 
 ## 7. Invocation Scope
 
-> **当前落地（#902）**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::stream_message`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已删除。下方 `transport / capability_fingerprint / OutputTokenLimit` 仍是后续完整 ProviderPort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
+> **当前落地（#902/#903）**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::invocation_stream`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已删除。下方 `transport / capability_fingerprint / OutputTokenLimit` 仍是后续完整 ProviderPort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
 
 ```rust
 struct InvocationScope {
@@ -282,7 +282,7 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 
 守卫应优先检查 AST/path 与公开 re-export，不依赖简单文件名黑名单。新增白名单必须记录 owner、理由和退出条件。
 
-> **已提前落地（#1033）**：`check-provider-http-attempt.sh` 已启用并计入守卫总数，锁定“driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用”三条不变量。这是 #1033 单 attempt 机械收敛的守卫，不等同于上方 #982 的 wire-types/construction/invocation-state 三条 Target 规则；详见 [Architecture Guards §6b](../../03-engineering/01-architecture-guards.md)。
+> **已提前落地（#1033）**：`check-provider-http-attempt.sh` 已启用并计入守卫总数，锁定“driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用”三条不变量。这是 #1033 单 attempt 机械收敛的守卫，不等同于上方 #982 的 wire-types/construction/invocation-state 三条 Target 规则；详见 [Architecture Guards §6c](../../03-engineering/01-architecture-guards.md)。
 
 ## 13. 相关文档
 
@@ -296,6 +296,7 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-17 | #903 将 Provider→Runtime 生产链切换为 pull-based `InvocationStream`：`Completed/Failed` 单终结、取消统一为 `Failed(Cancelled)`、Runtime/Context 主动 poll 且禁止跨 crate legacy sink；Provider decoder 内部迁移桥作为明确残余登记 | [#903](https://github.com/rushsinging/aemeath/issues/903) |
 | 2026-07-16 | #1033 交付 crate-private `HttpAttemptExecutor`：收敛单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic，并新增 `check-provider-http-attempt.sh` 守卫；跨调用 retry/fallback（P6/P7）仍是 Runtime 待迁移债，本次改动不冒充其已完成 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-16 | 文档审查：明确后续承接边界——pull-based `InvocationStream`（P4）由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接；跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-12 | 初稿：ProviderPort、流/取消、Runtime 重试边界、不可变 Transport 与 Invocation Scope | #788 |

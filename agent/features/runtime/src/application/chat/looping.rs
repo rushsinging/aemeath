@@ -17,8 +17,6 @@ mod input_gate_tests;
 mod input_log;
 mod llm_log;
 mod loop_context;
-#[cfg(test)]
-mod loop_helpers;
 mod loop_phases;
 mod loop_runner;
 #[cfg(test)]

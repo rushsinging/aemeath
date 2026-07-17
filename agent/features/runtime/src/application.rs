@@ -17,5 +17,7 @@ pub mod runtime_context;
 pub mod scheduler;
 pub mod service;
 pub mod startup;
+#[cfg(test)]
+pub(crate) mod testing;
 pub(crate) mod token_usage;
 pub mod tool_coordination;

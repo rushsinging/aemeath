@@ -2,7 +2,6 @@
 //! runner file focused on the production code path.
 #![allow(clippy::type_complexity)]
 
-use super::loop_helpers::is_user_cancelled_provider_error;
 use super::*;
 
 use context::session::ChatChain;
@@ -81,11 +80,11 @@ fn test_list_sessions() -> Arc<
     Arc::new(|| Box::pin(async { Ok(Vec::new()) }))
 }
 
+use crate::application::testing::text_completion_stream;
 use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
-use provider::{LegacyStreamSink, LlmProvider};
-use provider::{StopReason, StreamResponse, SystemBlock, Usage};
+use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
@@ -126,12 +125,6 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
     assert!(!source.contains("ChatLoopFsm"));
     assert!(!source.contains("StallDetector"));
     assert!(!source.contains("ChatLoopTransition"));
-}
-
-#[test]
-fn provider_cancelled_error_maps_to_cancelled_outcome() {
-    let error = provider::LlmError::Cancelled;
-    assert!(is_user_cancelled_provider_error(&error));
 }
 
 #[derive(Clone)]
@@ -279,15 +272,14 @@ struct TwoTurnProvider;
 
 #[async_trait]
 impl LlmProvider for TwoTurnProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         let text = if messages
             .iter()
             .any(|message| message.text_content() == "stop-hook input")
@@ -296,25 +288,7 @@ impl LlmProvider for TwoTurnProvider {
         } else {
             "initial final response"
         };
-        handler.on_text(text);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: share::message::Role::Assistant,
-                content: vec![share::message::ContentBlock::Text {
-                    text: text.to_string(),
-                }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream(text, 1, 1))
     }
 
     fn model_name(&self) -> &str {
@@ -342,38 +316,21 @@ impl SequenceProvider {
 
 #[async_trait]
 impl LlmProvider for SequenceProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         let text = self
             .responses
             .lock()
             .unwrap()
             .pop_front()
             .unwrap_or_else(|| "fallback final response".to_string());
-        handler.on_text(&text);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: share::message::Role::Assistant,
-                content: vec![share::message::ContentBlock::Text { text }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream(text, 1, 1))
     }
 
     fn model_name(&self) -> &str {
@@ -1315,35 +1272,16 @@ impl IdenticalReplyProvider {
 
 #[async_trait]
 impl LlmProvider for IdenticalReplyProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         tokio::time::sleep(self.per_turn_delay).await;
-        handler.on_text(&self.reply);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: share::message::Role::Assistant,
-                content: vec![share::message::ContentBlock::Text {
-                    text: self.reply.clone(),
-                }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream(self.reply.clone(), 1, 1))
     }
 
     fn model_name(&self) -> &str {
@@ -1504,15 +1442,14 @@ impl RecordingProvider {
 
 #[async_trait]
 impl LlmProvider for RecordingProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         let last_user = messages
             .iter()
             .rev()
@@ -1521,23 +1458,7 @@ impl LlmProvider for RecordingProvider {
             .unwrap_or_default();
         self.calls.lock().unwrap().push(last_user.clone());
         let text = format!("response to {last_user}");
-        handler.on_text(&text);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: Role::Assistant,
-                content: vec![share::message::ContentBlock::Text { text }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream(text, 1, 1))
     }
 
     fn model_name(&self) -> &str {
@@ -1976,7 +1897,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
     );
 }
 
-/// 第 1 次调用阻塞直到 cancel 被触发后返回 `LlmError::Cancelled`，
+/// 第 1 次调用阻塞直到 cancel 被触发后返回取消错误，
 /// 第 2 次及以后调用立即返回正常响应。用于模拟「回合进行中被取消、
 /// 随后新回合正常完成」的场景。
 #[derive(Clone)]
@@ -1994,15 +1915,14 @@ impl CancellableThenNormalProvider {
 
 #[async_trait]
 impl LlmProvider for CancellableThenNormalProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -2012,30 +1932,14 @@ impl LlmProvider for CancellableThenNormalProvider {
         if call_index == 0 {
             // 回合 1：阻塞等待 cancel，被取消后返回 Cancelled（模拟 provider 侧取消）。
             cancel.cancelled().await;
-            return Err(provider::LlmError::Cancelled);
+            return Err(ProviderError::cancelled());
         }
         // 回合 2+：正常完成（关键：此时若 token 未重置，会立刻 Cancelled）。
         if cancel.is_cancelled() {
-            return Err(provider::LlmError::Cancelled);
+            return Err(ProviderError::cancelled());
         }
         let text = format!("turn {} final", call_index + 1);
-        handler.on_text(&text);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: Role::Assistant,
-                content: vec![share::message::ContentBlock::Text { text }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream(text, 1, 1))
     }
 
     fn model_name(&self) -> &str {
@@ -2225,15 +2129,14 @@ impl CompleteThenCancellableProvider {
 
 #[async_trait]
 impl LlmProvider for CompleteThenCancellableProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -2244,29 +2147,13 @@ impl LlmProvider for CompleteThenCancellableProvider {
         // 回合 1 / 回合 3：正常完成（token 已重置，不应被陈旧 cancel 污染）。
         if call_index == 1 {
             cancel.cancelled().await;
-            return Err(provider::LlmError::Cancelled);
+            return Err(ProviderError::cancelled());
         }
         if cancel.is_cancelled() {
-            return Err(provider::LlmError::Cancelled);
+            return Err(ProviderError::cancelled());
         }
         let text = format!("turn {} assistant", call_index + 1);
-        handler.on_text(&text);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: Role::Assistant,
-                content: vec![share::message::ContentBlock::Text { text }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream(text, 1, 1))
     }
 
     fn model_name(&self) -> &str {
@@ -2503,36 +2390,16 @@ async fn test_chat_impl_idle_until_first_input_event() {
     }
     #[async_trait]
     impl LlmProvider for CountingProvider {
-        async fn legacy_stream_message(
+        async fn invocation_stream(
             &self,
             _scope: &provider::InvocationScope,
             _system: &[SystemBlock],
             _messages: &[Message],
             _tool_schemas: &[serde_json::Value],
-            handler: &mut dyn LegacyStreamSink,
             _cancel: &CancellationToken,
-        ) -> Result<StreamResponse, provider::LlmError> {
+        ) -> Result<InvocationStream, ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            let text = "hi response";
-            handler.on_text(text);
-            Ok(StreamResponse {
-                assistant_message: Message {
-                    role: Role::Assistant,
-                    content: vec![share::message::ContentBlock::Text {
-                        text: text.to_string(),
-                    }],
-                    metadata: None,
-                },
-                usage: Usage {
-                    input_tokens: 1,
-                    output_tokens: 1,
-                    cached_tokens: None,
-                    cache_creation_tokens: None,
-                    reasoning_tokens: None,
-                    total_tokens: None,
-                },
-                stop_reason: StopReason::EndTurn,
-            })
+            Ok(text_completion_stream("hi response", 1, 1))
         }
 
         fn model_name(&self) -> &str {
@@ -2947,7 +2814,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
     );
 }
 
-/// 首次 LLM 调用返回普通 API 错误（`LlmError::Stream`，模拟
+/// 首次 LLM 调用返回普通协议错误，模拟
 /// "stream error: stream interrupted..."），后续调用正常完成。
 /// 用于验证 API 错误 turn 终止收口（#749）。
 #[derive(Clone)]
@@ -2965,15 +2832,14 @@ impl ApiErrorThenNormalProvider {
 
 #[async_trait]
 impl LlmProvider for ApiErrorThenNormalProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -2982,30 +2848,12 @@ impl LlmProvider for ApiErrorThenNormalProvider {
         };
         if call_index == 0 {
             // 回合 1：模拟 provider 流中断（非取消类 API 错误）。
-            return Err(provider::LlmError::Stream(
+            return Err(ProviderError::retryable(
+                ProviderErrorKind::Protocol,
                 "stream interrupted after partial output: error decoding response body".to_string(),
             ));
         }
-        let text = "recovered final response";
-        handler.on_text(text);
-        Ok(StreamResponse {
-            assistant_message: Message {
-                role: Role::Assistant,
-                content: vec![share::message::ContentBlock::Text {
-                    text: text.to_string(),
-                }],
-                metadata: None,
-            },
-            usage: Usage {
-                input_tokens: 1,
-                output_tokens: 1,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: StopReason::EndTurn,
-        })
+        Ok(text_completion_stream("recovered final response", 1, 1))
     }
 
     fn model_name(&self) -> &str {

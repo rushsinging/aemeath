@@ -1,7 +1,7 @@
 use super::*;
+use crate::application::testing::text_completion_stream;
 use async_trait::async_trait;
-use provider::{LegacyStreamSink, LlmProvider};
-use provider::{StopReason, StreamResponse, SystemBlock, Usage};
+use provider::{InvocationStream, LlmProvider, ProviderError, SystemBlock};
 use share::memory::{MemoryCategory, MemoryLayer, MemorySource};
 use std::sync::Arc;
 use storage::MemoryStore;
@@ -9,28 +9,25 @@ use tokio_util::sync::CancellationToken;
 
 struct StaticReflectionProvider {
     response: String,
-    usage: Usage,
+    input_tokens: u32,
+    output_tokens: u32,
 }
 
 #[async_trait]
 impl LlmProvider for StaticReflectionProvider {
-    async fn legacy_stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[share::message::Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
-    ) -> Result<StreamResponse, provider::LlmError> {
-        handler.on_text(&self.response);
-        Ok(StreamResponse {
-            assistant_message: share::message::Message::placeholder(
-                share::message::Role::Assistant,
-            ),
-            usage: self.usage.clone(),
-            stop_reason: StopReason::EndTurn,
-        })
+    ) -> Result<InvocationStream, ProviderError> {
+        Ok(text_completion_stream(
+            self.response.clone(),
+            self.input_tokens,
+            self.output_tokens,
+        ))
     }
 
     fn model_name(&self) -> &str {
@@ -53,14 +50,8 @@ fn build_client_with_usage(
 ) -> provider::LlmClient {
     provider::LlmClient::from_provider(Arc::new(StaticReflectionProvider {
         response: response.to_string(),
-        usage: Usage {
-            input_tokens,
-            output_tokens,
-            cached_tokens: None,
-            cache_creation_tokens: None,
-            reasoning_tokens: None,
-            total_tokens: None,
-        },
+        input_tokens,
+        output_tokens,
     }))
 }
 

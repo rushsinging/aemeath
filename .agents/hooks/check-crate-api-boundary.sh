@@ -44,7 +44,6 @@ ROOT_ACCESS_ALLOW = {
         "InvocationRequest",
         "InvocationStream",
         "InvocationScope",
-        "LegacyStreamSink",
         "LlmClient",
         "LlmConfigOptions",
         "LlmError",

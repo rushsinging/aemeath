@@ -7,7 +7,10 @@ use tokio_util::sync::CancellationToken;
 pub use crate::domain::capability::ReasoningLevel;
 use crate::domain::invoke::{InvocationScope, SystemBlock};
 
-/// Provider 内部旧 decoder 使用的事件接收器；不从 crate root 导出。
+/// Provider 内部旧 decoder 使用的事件接收器。
+///
+/// 因仍出现在迁移期 legacy 方法签名中而保留隐藏导出；Provider crate 外的
+/// 生产代码与测试替身都不得依赖它。
 #[doc(hidden)]
 pub trait LegacyStreamSink: Send {
     fn on_text(&mut self, text: &str);
@@ -37,16 +40,7 @@ pub trait LlmProvider: Send + Sync {
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStream, crate::ProviderError> {
-        let _ = (scope, system, messages, tool_schemas);
-        if cancel.is_cancelled() {
-            return Err(crate::ProviderError::cancelled());
-        }
-        Err(crate::ProviderError::fatal(
-            crate::ProviderErrorKind::Configuration,
-            "provider test double does not implement invocation_stream",
-        ))
-    }
+    ) -> Result<crate::InvocationStream, crate::ProviderError>;
 
     /// 仅供迁移期 decoder 与测试替身使用；生产入口必须使用 `invocation_stream`。
     #[doc(hidden)]
@@ -58,7 +52,15 @@ pub trait LlmProvider: Send + Sync {
         tool_schemas: &[serde_json::Value],
         sink: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
-    ) -> Result<crate::StreamResponse, crate::LlmError>;
+    ) -> Result<crate::StreamResponse, crate::LlmError> {
+        let _ = (scope, system, messages, tool_schemas, sink);
+        if cancel.is_cancelled() {
+            return Err(crate::LlmError::Cancelled);
+        }
+        Err(crate::LlmError::Config(
+            "legacy stream entry is unavailable for pull-stream providers".to_string(),
+        ))
+    }
 
     /// Get the model name
     fn model_name(&self) -> &str;
