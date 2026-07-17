@@ -92,7 +92,23 @@ ROOT_ACCESS_ALLOW = {
         "DEFAULT_TIMEOUT_SECS",
         "wire_provider",
     },
-    "runtime": {"AgentClientImpl", "from_args"},
+    "audit": {
+        "Pagination",
+        "TimeRange",
+        "UsageCursor",
+        "UsageDropReason",
+        "UsageEmitOutcome",
+        "UsageEnvelopeV1",
+        "UsagePage",
+        "UsageQuery",
+        "UsageQueryError",
+        "UsageQueryPort",
+        "UsageQueryWarning",
+        "UsageRecord",
+        "UsageSummary",
+        "CURRENT_USAGE_SCHEMA_VERSION",
+    },
+    "runtime": {"AgentClientImpl", "UsageSink", "from_args"},
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
@@ -146,6 +162,7 @@ braced_pattern = re.compile(
 )
 crate_reexport_pattern = re.compile(r"crate::([A-Za-z_][A-Za-z0-9_]*)")
 project_wildcard_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*\*")
+audit_wildcard_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?audit\s*::\s*\*")
 project_braced_full_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*\{(.*?)\}", re.DOTALL)
 project_path_full_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*([A-Za-z_][A-Za-z0-9_]*)", re.DOTALL)
 project_pub_mod_pattern = re.compile(r"^\s*pub\s+mod\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.MULTILINE)
@@ -208,6 +225,10 @@ def check_cross_crate_line(
     line = re.sub(r'"[^"]*"', '""', line)
 
     violations: list[str] = []
+    if audit_wildcard_pattern.search(line) and current_crate not in {"audit", "share"}:
+        violations.append(
+            "cross-feature wildcard import from audit is forbidden; import registered crate-root symbols explicitly"
+        )
     for match in path_pattern.finditer(line):
         prefix = line[: match.start()].rstrip()
         if "::" in prefix or "{" in prefix or (
@@ -225,7 +246,7 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_ACCESS_ALLOW.get(target, set()):
             continue
-        if target in {"provider", "project"}:
+        if target in {"audit", "provider", "project", "runtime"}:
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use the registered {target} crate-root facade"
             )
@@ -256,7 +277,7 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
-            if target in {"provider", "project"}:
+            if target in {"audit", "provider", "project", "runtime"}:
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use the registered {target} crate-root facade"
                 )

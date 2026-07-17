@@ -7,6 +7,7 @@ pub mod domain;
 pub mod ports;
 
 pub use application::client::{from_args, from_args_with_workspace, AgentClientImpl};
+pub use ports::UsageSink;
 pub use sdk::{
     AgentClient, ChangeSet, ChatEvent, ChatRequest, ChatStream, CostInfo, ProjectContext,
     SessionSnapshot, TaskSummary,

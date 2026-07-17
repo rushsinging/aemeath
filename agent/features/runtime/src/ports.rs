@@ -56,5 +56,5 @@ pub use tool_port::{
     RegistryScopeName, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort, ToolInvocation,
     ToolOutcome, ToolProfileName,
 };
-pub use usage_sink::{UsageEmitOutcome, UsageRecord, UsageSink};
+pub use usage_sink::{UsageDropReason, UsageEmitOutcome, UsageRecord, UsageSink};
 pub use workspace_port::{WorkspaceFrame, WorkspacePort};

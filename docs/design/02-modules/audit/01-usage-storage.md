@@ -18,10 +18,10 @@
 每行是一个带 schema version 的 envelope：
 
 ```json
-{"schema_version":1,"recorded_at":"...","session_id":"...","run_id":"...","run_step_id":"...","model_invocation_id":"...","provider":"...","model":"...","input_tokens":123,"output_tokens":45}
+{"schema_version":1,"record":{"recorded_at_unix_ms":1720000000000,"session_id":"...","run_id":"...","run_step_id":"...","model_invocation_id":"...","provider":"...","model":"...","input_tokens":123,"output_tokens":45}}
 ```
 
-Envelope 版本属于 Audit schema；Audit 的 File AppendLog Adapter 只读写 bytes 本身，不解释字段语义（字段级解析在 §5 reader 层进行）。
+Envelope 版本属于 Audit schema；#927 定义 `UsageEnvelopeV1 { schema_version: 1, record: UsageRecord }` 的稳定 serde 契约。Audit 的 File AppendLog Adapter 只读写 bytes 本身，不解释字段语义；#928 负责 append/read bytes，版本化 decoder 与字段级解析由 #930 reader 层实现。
 
 ## 2. 分区键
 
@@ -133,5 +133,6 @@ Future retention 必须由 Audit Config 定义，并通过 Audit 的 File Append
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-17 | #927 冻结嵌套 `UsageEnvelopeV1` serde 契约与责任边界：#928 只处理 bytes append/read，#930 实现版本化 decoder 与坏行处理 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-12 | 初稿：按 SessionId 分区的独立 Audit JSONL、逐条 flush 与损坏隔离 | #790 |
 | 2026-07-15 | 修正职责归属：append/flush/IO 隔离/retention 执行改为 Audit-owned File AppendLog Adapter 直接实现，不再归 Storage | [#972](https://github.com/rushsinging/aemeath/issues/972) |
