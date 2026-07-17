@@ -9,7 +9,7 @@ use crate::ports::ToolResultBlobPort;
 #[cfg(test)]
 use crate::ports::{ToolResultBlobError, ToolResultBlobRef};
 use share::message::Message;
-use share::tool::ImageData;
+use tools::ImageData;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ToolResultMaterializationPolicy {

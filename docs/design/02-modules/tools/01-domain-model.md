@@ -3,6 +3,7 @@
 > 层级：02-modules / tools（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文只描述目标态；实现差距统一记录在 `03-engineering/03-migration-governance.md`。
+> **当前落地（[#993](https://github.com/rushsinging/aemeath/issues/993)）**：Tool crate 已迁至过渡 Hexagonal `domain + adapters`，本文领域模型类型现居 `domain/`（Published Language DTO 在 `domain/types`）。本文 Target 语义不变；`ToolCatalogPort` / `ToolExecutionPort` 等端口与 T1-T12 语义收口仍为 Target，尚未落地。
 
 ## 1. Tool 语言
 
@@ -406,3 +407,4 @@ enum McpConnectionState {
 |---|---|---|
 | 2026-07-12 | 初稿：Tool PL、Scope/Profile、Outcome、Skill/Command 机制与 MCP 聚合 | #787 |
 | 2026-07-14 | 移除通用 Workspace resource 包装，改为 Tool 按需直接消费 WorkspaceRead / WorkspaceControl，并将 Control 限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-17 | #993 落地状态：领域模型类型迁入过渡 Hexagonal `domain/`（PL DTO 在 `domain/types`），Target 语义不变；端口抽出与 T1-T12 收口仍开放 | [#993](https://github.com/rushsinging/aemeath/issues/993) |

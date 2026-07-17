@@ -6,6 +6,7 @@ members = [
     "agent/features/audit",
     "agent/features/config",
     "agent/features/hook",
+    "agent/features/memory",
     "agent/features/policy",
     "agent/features/context",
     "agent/features/project",

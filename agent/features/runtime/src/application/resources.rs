@@ -11,7 +11,7 @@ use provider::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
 use storage::TaskStore;
 use task::TaskAccess;
-use tools::api::{AgentRunner, ToolRegistry};
+use tools::{AgentRunner, ToolRegistry};
 
 /// Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。
 ///

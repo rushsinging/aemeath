@@ -1,0 +1,13 @@
+[package]
+name = "memory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid = { version = "1", features = ["serde", "v7"] }
+
+[dev-dependencies]
+tokio.workspace = true

@@ -1,6 +1,6 @@
 use crate::application::agent::ToolCall;
-use share::tool::PolicyDecision;
-use tools::api::ToolRegistry;
+use tools::PolicyDecision;
+use tools::ToolRegistry;
 
 use super::engine::{DeniedCall, PolicyEngine};
 
@@ -54,7 +54,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::json;
-    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
     fn empty_read_files() -> std::sync::Mutex<std::collections::HashSet<String>> {
         std::sync::Mutex::new(std::collections::HashSet::new())
@@ -93,7 +93,7 @@ mod tests {
             input
                 .get("command")
                 .and_then(|v| v.as_str())
-                .map(tools::api::is_readonly_command)
+                .map(tools::is_readonly_command)
                 .unwrap_or(false)
         }
         async fn call(

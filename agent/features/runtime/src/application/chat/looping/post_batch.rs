@@ -3,7 +3,7 @@ use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use hook::api::{HookData, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::Path;
-use tools::api::ToolExecutionContext;
+use tools::ToolExecutionContext;
 
 pub(crate) async fn run_post_tool_batch<S>(
     sink: &S,

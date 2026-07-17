@@ -3,7 +3,7 @@
 > 层级：02-modules / provider（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#788（S2）
 > 本文只描述目标态；签名用于表达职责和不变量，不锁定具体 Rust API。实现差距统一记录在 `03-engineering/03-migration-governance.md`。
-> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型（`resolve_invocation_options` / `ResolvedInvocationOptions` / `CapabilityFingerprint`）已完成领域迁移，但 **未接生产链路**——Runtime 尚未在 `build_window` 前调用 resolver，effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
+> **v0.1.0 scope（#921/#906 收缩）**：Provider option resolver 领域模型（`resolve_invocation_options` / `ResolvedInvocationOptions` / `CapabilityFingerprint`）已完成领域迁移，但 **未接生产链路**——Runtime 尚未在 `build_window` 前调用 resolver，effective reasoning 尚未端到端冻结。#906 已让 pull-stream bridge 直接发布保留 `None`/`Some(0)` 的 `RawUsageSnapshot`，并让 OpenAI-compatible driver 的 maximum/legacy clamp 从唯一 `ReasoningCapability` 派生。完整 resolver 接线仍由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 ## 1. 边界语言
 

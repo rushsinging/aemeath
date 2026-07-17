@@ -184,14 +184,14 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
-    use tools::api::{AgentRunRequest, AgentRunner};
+    use tools::{AgentRunRequest, AgentRunner};
 
     struct NoopAgentRunner;
 
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::api::AgentRunTerminal {
-            tools::api::AgentRunTerminal::Completed {
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+            tools::AgentRunTerminal::Completed {
                 result: String::new(),
             }
         }
@@ -200,7 +200,7 @@ mod tests {
             &self,
             _prompt: &str,
             _system: &str,
-            _ctx: &tools::api::ToolExecutionContext,
+            _ctx: &tools::ToolExecutionContext,
         ) -> String {
             String::new()
         }
@@ -259,7 +259,7 @@ mod tests {
         let context = crate::ports::legacy::ChatRuntimeContext {
             resources: crate::application::resources::RuntimeResources {
                 client: client.clone(),
-                registry: Arc::new(tools::api::ToolRegistry::new()),
+                registry: Arc::new(tools::ToolRegistry::new()),
                 system_blocks: Vec::new(),
                 system_prompt_text: "真实 system prompt".to_string(),
                 user_context: String::new(),
@@ -292,7 +292,7 @@ mod tests {
             session_id: "test-session".to_string(),
             max_tool_concurrency: 1,
             max_agent_concurrency: 1,
-            _mcp_manager: Arc::new(tools::api::McpConnectionManager::with_servers(
+            _mcp_manager: Arc::new(tools::McpConnectionManager::with_servers(
                 std::collections::HashMap::new(),
             )),
             current_client: std::sync::RwLock::new(client),

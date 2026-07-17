@@ -145,12 +145,44 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
         ] if text == "response"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
+    let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+        panic!("expected completed event");
+    };
+    let usage = completion.usage.as_ref().expect("responses usage reported");
+    assert_eq!(usage.input_tokens, Some(1));
+    assert_eq!(usage.output_tokens, Some(1));
 }
 
 include!("tests/common.rs");
 include!("tests/reasoning.rs");
 include!("tests/provider_config.rs");
 include!("tests/clamp_effort.rs");
+
+#[test]
+fn raw_usage_parsers_preserve_missing_zero_and_unknown_fields() {
+    let missing = super::usage::parse_chat_raw_usage(&serde_json::json!({
+        "unknown": 42
+    }));
+    assert!(!missing.was_reported());
+
+    let zero = super::usage::parse_chat_raw_usage(&serde_json::json!({
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "prompt_tokens_details": {"cached_tokens": 0},
+        "completion_tokens_details": {"reasoning_tokens": 0}
+    }));
+    assert_eq!(zero.input_tokens, Some(0));
+    assert_eq!(zero.output_tokens, Some(0));
+    assert_eq!(zero.cache_read_tokens, Some(0));
+    assert_eq!(zero.reasoning_tokens, Some(0));
+
+    let overflow = super::usage::parse_responses_raw_usage(&serde_json::json!({
+        "input_tokens": 4_294_967_296_u64,
+        "output_tokens": 3
+    }));
+    assert_eq!(overflow.input_tokens, None);
+    assert_eq!(overflow.output_tokens, Some(3));
+}
 
 #[test]
 fn chat_usage_prefers_reported_total_without_double_counting_cache() {

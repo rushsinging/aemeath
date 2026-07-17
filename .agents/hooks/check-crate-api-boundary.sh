@@ -22,6 +22,7 @@ FEATURE_CRATES = {
     "project",
     "policy",
     "context",
+    "memory",
     "provider",
     "tools",
     "storage",
@@ -55,6 +56,56 @@ PROJECT_ROOT_ACCESS_ALLOW = {
 }
 PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
 # 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
+# Tools crate-root façade (#993): tools 已迁到 domain/adapters 六边形物理层，
+# 只经 crate 根发布 Published Language，禁止恢复 tools::api。
+TOOLS_DOMAIN_FACADE = {
+    "AgentProgressEvent",
+    "AgentProgressKind",
+    "AgentRunRequest",
+    "AgentRunTerminal",
+    "AgentRunner",
+    "AgentToolCallProgress",
+    "ImageData",
+    "PathAccess",
+    "PathKind",
+    "PolicyDecision",
+    "RegistryScopeName",
+    "SessionReminder",
+    "SessionReminders",
+    "Tool",
+    "ToolCatalogPort",
+    "ToolCatalogSnapshot",
+    "ToolExecutionContext",
+    "ToolExecutionOutcome",
+    "ToolExecutionPort",
+    "ToolInvocation",
+    "ToolListProvider",
+    "ToolOutcome",
+    "ToolProfileName",
+    "ToolResources",
+    "ToolResult",
+    "TypedTool",
+    "TypedToolAdapter",
+    "TypedToolResult",
+}
+TOOLS_ADAPTER_FACADE = {
+    "is_readonly_command",
+    "register_all_tools",
+    "register_all_tools_except_agent",
+    "register_subagent_tools",
+    "wire_tools",
+    "DefaultToolCatalogGateway",
+    "McpConnectionManager",
+    "McpServerConfig",
+    "McpToolDef",
+    "McpTransportKind",
+    "McpTool",
+    "ToolCatalog",
+    "ToolCatalogGateway",
+    "ToolRegistry",
+}
+TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE
+
 ROOT_ACCESS_ALLOW = {
     "provider": {
         "CancellationSignal",
@@ -109,8 +160,17 @@ ROOT_ACCESS_ALLOW = {
         "CURRENT_USAGE_SCHEMA_VERSION",
     },
     "runtime": {"AgentClientImpl", "UsageSink", "from_args"},
+    "policy": {
+        "format_warnings",
+        "scan_content",
+        "validate_and_normalize_path",
+        "validate_and_normalize_path_from_base",
+        "validate_search_path",
+        "validate_search_path_from_base",
+    },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
+    "tools": TOOLS_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
@@ -133,6 +193,20 @@ CONTEXT_FORBIDDEN_PATHS = {
     "agent/features/context/src/api.rs",
     "agent/features/context/src/gateway.rs",
     "agent/features/context/src/capabilities",
+}
+POLICY_FORBIDDEN_PATHS = {
+    "agent/features/policy/src/api.rs",
+    "agent/features/policy/src/api",
+    "agent/features/policy/src/business.rs",
+    "agent/features/policy/src/business",
+    "agent/features/policy/src/contract.rs",
+    "agent/features/policy/src/contract",
+    "agent/features/policy/src/core.rs",
+    "agent/features/policy/src/core",
+    "agent/features/policy/src/gateway.rs",
+    "agent/features/policy/src/gateway",
+    "agent/features/policy/src/capabilities.rs",
+    "agent/features/policy/src/capabilities",
 }
 PROJECT_FORBIDDEN_PATHS = {
     "agent/features/project/src/api.rs",
@@ -158,6 +232,7 @@ braced_pattern = re.compile(
     + "|".join(sorted(map(re.escape, FEATURE_CRATES)))
     + r")::\s*\{([^}]*)"
 )
+tools_legacy_api_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?tools\s*::\s*api\b")
 crate_reexport_pattern = re.compile(r"crate::([A-Za-z_][A-Za-z0-9_]*)")
 project_wildcard_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*\*")
 audit_wildcard_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?audit\s*::\s*\*")
@@ -244,7 +319,7 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_ACCESS_ALLOW.get(target, set()):
             continue
-        if target in {"audit", "provider", "project", "runtime"}:
+        if target in {"audit", "policy", "provider", "project", "runtime", "tools"}:
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use the registered {target} crate-root facade"
             )
@@ -275,7 +350,7 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
-            if target in {"audit", "provider", "project", "runtime"}:
+            if target in {"audit", "policy", "provider", "project", "runtime", "tools"}:
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use the registered {target} crate-root facade"
                 )
@@ -360,6 +435,47 @@ def project_public_facade_violations(text: str) -> list[str]:
     return violations
 
 
+def check_tools_facade() -> list[str]:
+    path = root / "agent/features/tools/src/lib.rs"
+    if not path.exists():
+        return ["agent/features/tools/src/lib.rs: tools crate-root facade is missing"]
+    text = path.read_text()
+    errors: list[str] = []
+    if (root / "agent/features/tools/src/api.rs").exists() or re.search(r"\bpub\s+mod\s+api\b", text):
+        errors.append("agent/features/tools/src: tools::api is forbidden after crate-root facade migration")
+    for module in ("domain", "adapters"):
+        if not re.search(rf"(?m)^\s*mod\s+{module}\s*;", text):
+            errors.append(f"agent/features/tools/src/lib.rs: internal module `{module}` must remain private")
+        if re.search(rf"\bpub(?:\([^)]*\))?\s+mod\s+{module}\b", text):
+            errors.append(f"agent/features/tools/src/lib.rs: internal module `{module}` must not be public")
+
+    def braced_names(source: str) -> set[str]:
+        match = re.search(rf"pub\s+use\s+{source}::\s*\{{(.*?)\}}\s*;", text, re.S)
+        if not match:
+            return set()
+        return {item.strip().split(" as ", 1)[-1].strip() for item in match.group(1).split(",") if item.strip()}
+
+    actual_domain = braced_names("domain")
+    actual_adapters = braced_names("adapters::wiring")
+    if not re.search(r"\bpub\s+use\s+domain::types\s*;", text):
+        errors.append("agent/features/tools/src/lib.rs: public `types` module facade is missing")
+    if actual_domain != TOOLS_DOMAIN_FACADE:
+        errors.append(
+            "agent/features/tools/src/lib.rs: domain facade drift; expected "
+            + str(sorted(TOOLS_DOMAIN_FACADE)) + ", found " + str(sorted(actual_domain))
+        )
+    if actual_adapters != TOOLS_ADAPTER_FACADE:
+        errors.append(
+            "agent/features/tools/src/lib.rs: adapter facade drift; expected "
+            + str(sorted(TOOLS_ADAPTER_FACADE)) + ", found " + str(sorted(actual_adapters))
+        )
+    actual_root = {"LOG_TARGET", "types"} | actual_domain | actual_adapters
+    if actual_root != ROOT_ACCESS_ALLOW["tools"]:
+        errors.append("ROOT_ACCESS_ALLOW[tools] must exactly match tools/src/lib.rs public facade")
+    return errors
+
+
+
 def run_sanity() -> None:
     allowed = [
         ("runtime", "use provider::LlmClient;"),
@@ -419,6 +535,7 @@ pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 
 run_sanity()
 violations: list[str] = []
+violations.extend(check_tools_facade())
 for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():
@@ -432,6 +549,10 @@ project_lib = root / "agent/features/project/src/lib.rs"
 if project_lib.exists():
     for violation in project_public_facade_violations(project_lib.read_text()):
         violations.append(f"agent/features/project/src/lib.rs: {violation}")
+for forbidden in sorted(POLICY_FORBIDDEN_PATHS):
+    path = root / forbidden
+    if path.exists():
+        violations.append(f"{forbidden}: Policy legacy fixed-layer path is forbidden")
 for forbidden in sorted(PROJECT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():
@@ -451,6 +572,9 @@ for base in [root / "agent", root / "apps", root / "packages"]:
         rel = path.relative_to(root)
         current = crate_for(rel)
         text = path.read_text()
+        stripped_text = re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
+        if current != "tools" and tools_legacy_api_pattern.search(stripped_text):
+            violations.append(f"{rel}: legacy tools::api path is forbidden; use the tools crate-root facade")
         for violation in project_import_violations(current, text):
             violations.append(f"{rel}: {violation}")
         # 将 rustfmt 产生的多行 use 语句折叠为一行，避免花括号导入绕过 façade 白名单。
