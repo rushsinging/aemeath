@@ -437,8 +437,8 @@
 - **扫描路径**：`agent/features/**`、`apps/cli/src/**`。
 - **业务 env 列表**：`AEMEATH_CONTEXT_SIZE`、`AEMEATH_PROVIDER`、`AEMEATH_API_KEY`、`AEMEATH_BASE_URL`、`AEMEATH_MODEL`、`AEMEATH_MAX_TOKENS`、`AEMEATH_PERMISSION_MODE`、`AEMEATH_MAX_TOOL_CONCURRENCY`、`AEMEATH_MAX_AGENT_CONCURRENCY`、`AEMEATH_VERBOSE`、`AEMEATH_LOG_LEVEL`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`CLAUDE_API_KEY`、`LLM_API_KEY`、`LLM_BASE_URL`、`DEEPSEEK_API_KEY`、`MINIMAX_API_KEY`、`MIMO_API_KEY`、`VOLCENGINE_CODING_PLAN_API_KEY`、`AGNES_API_KEY`、`OLLAMA_API_KEY`。
 - **白名单路径**：
-  - `agent/shared/src/config/adapter/env` — EnvAdapter，唯一业务 env 读取点
-  - `agent/shared/src/config/paths` — `AEMEATH_AGENTS_DIR`，路径根
+  - `agent/shared/src/config/adapters/env` — EnvAdapter，唯一业务 env 读取点
+  - `agent/shared/src/config/adapters/paths` — `AEMEATH_AGENTS_DIR`，路径根
   - `agent/shared/src/config/domain/driver_env` — driver→env name 映射
   - `agent/features/runtime/src/core/config_app_service.rs` — `resolve_provider_api_keys` 在 config 加载时从 env 注入 per-provider API key
   - `packages/global/logging/` — `AEMEATH_LOG_LEVEL` 在 logging 层处理
