@@ -1,7 +1,7 @@
 //! Typed tool input structs for the built-in tools.
 //!
 //! Thin re-export layer mirroring [`crate::tool_result`]. The authoritative
-//! definitions live in `share::tool::types::*`; this module lets `apps/cli`
+//! definitions live in `tools::types::*`; this module lets `apps/cli`
 //! (TUI) deserialize tool-call arguments without depending on the business
 //! layer.
 //!
@@ -12,22 +12,22 @@
 //! ```
 //! serde `#[serde(alias = "...)]` attributes are honoured, eliminating the
 //! snake_case / camelCase mismatch that `str_arg` caused (issue #839).
-pub use share::tool::types::agent::AgentInput;
-pub use share::tool::types::bash::BashInput;
-pub use share::tool::types::edit::EditInput;
-pub use share::tool::types::enter_worktree::EnterWorktreeInput;
-pub use share::tool::types::exit_worktree::ExitWorktreeInput;
-pub use share::tool::types::glob::GlobInput;
-pub use share::tool::types::grep::GrepInput;
-pub use share::tool::types::lsp::LspInput;
-pub use share::tool::types::plan_mode::{EnterPlanModeInput, ExitPlanModeInput};
-pub use share::tool::types::read::ReadInput;
-pub use share::tool::types::skill::SkillInput;
-pub use share::tool::types::task_create::TaskCreateInput;
-pub use share::tool::types::task_get::TaskGetInput;
-pub use share::tool::types::task_list_create::TaskListCreateInput;
-pub use share::tool::types::task_stop::TaskStopInput;
-pub use share::tool::types::task_update::TaskUpdateInput;
-pub use share::tool::types::web_fetch::WebFetchInput;
-pub use share::tool::types::web_search::WebSearchInput;
-pub use share::tool::types::write::WriteInput;
+pub use tools::types::agent::AgentInput;
+pub use tools::types::bash::BashInput;
+pub use tools::types::edit::EditInput;
+pub use tools::types::enter_worktree::EnterWorktreeInput;
+pub use tools::types::exit_worktree::ExitWorktreeInput;
+pub use tools::types::glob::GlobInput;
+pub use tools::types::grep::GrepInput;
+pub use tools::types::lsp::LspInput;
+pub use tools::types::plan_mode::{EnterPlanModeInput, ExitPlanModeInput};
+pub use tools::types::read::ReadInput;
+pub use tools::types::skill::SkillInput;
+pub use tools::types::task_create::TaskCreateInput;
+pub use tools::types::task_get::TaskGetInput;
+pub use tools::types::task_list_create::TaskListCreateInput;
+pub use tools::types::task_stop::TaskStopInput;
+pub use tools::types::task_update::TaskUpdateInput;
+pub use tools::types::web_fetch::WebFetchInput;
+pub use tools::types::web_search::WebSearchInput;
+pub use tools::types::write::WriteInput;

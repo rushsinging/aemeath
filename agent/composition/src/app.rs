@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use provider::LlmProviderGateway;
 use sdk::{AgentClient, MemoryConfigView, SdkError, SkillView};
-use tools::api::ToolCatalogGateway;
+use tools::ToolCatalogGateway;
 
 use crate::runtime::{AgentArgs, AgentClientImpl};
 

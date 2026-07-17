@@ -17,8 +17,8 @@ use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
 use provider::SystemBlock;
 use storage::TaskStore;
-use tools::api as tools_crate;
-use tools::api::ToolRegistry;
+use tools as tools_crate;
+use tools::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};
 use crate::LOG_TARGET;

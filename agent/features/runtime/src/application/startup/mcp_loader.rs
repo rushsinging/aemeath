@@ -3,9 +3,9 @@ use crate::LOG_TARGET;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tools::api::McpConnectionManager;
-use tools::api::McpServerConfig;
-use tools::api::ToolRegistry;
+use tools::McpConnectionManager;
+use tools::McpServerConfig;
+use tools::ToolRegistry;
 
 pub fn parse_mcp_servers_config(
     config: &serde_json::Value,
@@ -117,7 +117,7 @@ mod tests {
     use super::{merge_mcp_servers, parse_mcp_servers_config};
     use serde_json::json;
     use std::collections::HashMap;
-    use tools::api::McpServerConfig;
+    use tools::McpServerConfig;
 
     #[test]
     fn test_parse_mcp_servers_config_reads_mcp_servers() {

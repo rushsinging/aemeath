@@ -25,7 +25,7 @@ Storage 是数据 BC 与物理介质之间的机制边界：
 
 1. **数据本体归原 BC**：Session、Memory Entry、Task Snapshot、Workspace Snapshot、Tool Result 与 Audit Event 的 schema、不变量、迁移和生命周期由各自 BC 拥有。
 2. **Storage 发布机制语言**：跨边界只交换 `StorageKey`、字节/序列化 payload、读写选项、结果和结构化错误；Storage 不 import 领域聚合。
-3. **端口分两层归属**：Storage 只拥有机械 `AtomicBlobPort` 与 `AtomicDatasetPort` 两个整值原子替换 OHS，**NEVER** 发布 append-log OHS——stage/fsync/rename 的整值替换协议无法安全拼出增量 append + 逐行 flush 语义（每次追加都要整值重写，durability 与并发追加顺序都不成立）；数据 BC 拥有 `SessionSnapshotStore`、`UsageAppendStorePort` 等窄出站端口，其 integration adapter 位于消费方外层或 Composition，不让 Storage 反向依赖领域模型。`UsageAppendStorePort` 由 Audit adapter 直接以 file append detail 实现，只复用 Storage 发布的路径安全 primitive（`SafePathSegment` 校验、受约束根目录句柄解析），不经过 `AtomicBlobPort`/`AtomicDatasetPort`。
+3. **端口分两层归属**：Storage 只拥有机械 `AtomicBlobPort` 与 `AtomicDatasetPort` 两个整值原子替换 OHS，**NEVER** 发布 append-log OHS——stage/fsync/rename 的整值替换协议无法安全拼出增量 append + 逐行 flush 语义。数据 BC 拥有 `SessionSnapshotStore`、`UsageAppendStorePort` 等窄出站端口。Audit adapter 直接实现 append 语义，只复用 Storage Published Language 中的 `SafePathSegment` 与 `SafeStorageRoot`；`SafeStorageRoot` 只负责 capability-root 下 no-follow 打开安全目录/文件句柄，写入、同步、逐行读取与枚举策略仍归 Audit adapter。
 4. **原子可见**：单 blob 替换后，读者只能看见完整旧值或完整新值；由多个 member 构成的逻辑 dataset 必须经 dataset-level lock + journal / commit marker 作为一笔可恢复事务提交，领域 reader **NEVER** 看见成员混代。
 5. **保留上一代物理完整值**：启用恢复代际的 namespace 在替换已有值时保留上一代完整 bytes；是否符合领域 schema 只能由数据 BC 验证。
 6. **损坏不静默丢弃**：数据 BC 验证主值失败后可机械读取上一代，并显式请求 promote 或 quarantine；不得自动当作空数据继续。
@@ -46,7 +46,7 @@ src/
 ├── lib.rs                       # 窄 façade：发布 AtomicBlobPort / AtomicDatasetPort OHS，composition-only wiring
 ├── domain.rs                    # 领域策略入口
 ├── domain/
-│   ├── safe_path.rs             #   SafePathSegment 词法校验、受约束根目录句柄解析
+│   ├── safe_path.rs             #   SafePathSegment 纯路径段 PL
 │   ├── atomic_blob.rs           #   AtomicBlobPort 用例策略：write_atomic / read / promote_previous / quarantine
 │   ├── atomic_dataset.rs        #   AtomicDatasetPort 用例策略：read_manifest / read_consistent / commit_atomic
 │   └── published_language.rs    #   StorageKey / DatasetKey / Quarantine PL
@@ -54,11 +54,12 @@ src/
 │   ├── atomic_blob_port.rs      #   AtomicBlobPort OHS
 │   └── atomic_dataset_port.rs   #   AtomicDatasetPort OHS
 └── adapters/
+    ├── safe_storage_root.rs     #   SafeStorageRoot/Dir capability handle（稳定公开机制 façade）
     ├── blob_filesystem.rs       #   blob stage/fsync/rename/journal 文件系统实现
     └── dataset_filesystem.rs    #   dataset lock / journal 文件系统实现
 ```
 
-- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型，**NEVER** 转发内部结构。
+- `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型（含 `SafeStorageRoot`），**NEVER** 转发 blob/dataset adapter 内部结构。
 - `ports/` 只定义 Storage-owned `AtomicBlobPort` / `AtomicDatasetPort` OHS，并依赖 `domain` Published Language；它 **NEVER** 成为所有 trait 的垃圾桶，也不容纳消费方的 Session/Memory/Audit 出站端口。
 - `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；dataset 的 adapter-private manifest/journal schema 留在 `adapters/dataset_protocol.rs`。这正是 §3.5 所述“Storage 私有 backend SPI”的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
 - `safe_path` 是被 `atomic_blob` / `atomic_dataset` 消费的独立 domain 子模块：它拥有自己的校验协议与测试夹具，**NEVER** 因"看似工具函数"被内联进另外两个模块。
@@ -76,6 +77,37 @@ struct StorageKey {
 
 /// SafePathSegment 是受约束的路径段（词法校验：禁止 `..` / `/` / `\` / 前导 `.`）。
 struct SafePathSegment(String);
+
+/// SafeStorageRoot 是 cloneable capability-root 路径安全 PL。
+/// 它只在调用方提供的物理根上 no-follow 打开/创建安全 segment 目录，
+/// 并 no-follow 打开普通文件句柄；entries 只返回原始目录项元数据，
+/// NEVER 定义 Audit 的 write/append/flush/read-lines/list-streams 语义。
+struct SafeStorageRoot(/* opaque capability handle */);
+
+impl SafeStorageRoot {
+    fn open(root: &Path) -> Result<Self, StorageError>;
+    fn ensure_dir(&self, segments: &[SafePathSegment]) -> Result<SafeStorageDir, StorageError>;
+}
+
+struct SafeStorageDir(/* opaque capability handle */);
+
+struct SafeStorageEntry {
+    name: SafePathSegment,
+    file_type: SafeStorageFileType, // RegularFile / Directory；symlink 在 primitive 内 fail-closed
+}
+
+enum SafeStorageFileType { RegularFile, Directory }
+
+impl SafeStorageDir {
+    fn open_existing(&self, name: &SafePathSegment, options: SafeOpenOptions) -> Result<File, StorageError>;
+    fn create_or_open(&self, name: &SafePathSegment, options: SafeOpenOptions) -> Result<File, StorageError>;
+    fn entries(&self) -> Result<Vec<SafeStorageEntry>, StorageError>;
+}
+
+struct SafeOpenOptions {
+    read: bool,
+    append: bool,
+}
 
 enum StorageNamespace {
     Session,
@@ -254,7 +286,7 @@ enum StorageErrorKind {
 }
 ```
 
-> **Audit UsageAppendStorePort 所有权**：`UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。`AtomicBlobPort`/`AtomicDatasetPort` 的原子性建立在“整值 stage → fsync → rename”协议上，天然拼不出增量 append + 逐行 flush 语义；因此 Audit adapter **MUST** 直接以 file append（open-append 等价物 + write + fsync）detail 实现 append-log，只复用 Storage 发布的路径安全 primitive（`SafePathSegment` 校验、受约束根目录句柄解析），**NEVER** 组合调用 `AtomicBlobPort`/`AtomicDatasetPort` 来模拟追加。端口 trait 的定义、调用和语义归属 **MUST** 属于 Audit；Storage 只提供原子读写、路径安全和损坏兜底**机制**，不发布 append-log OHS。这样保持 Storage 的 blob/dataset 级抽象不被 append 语义污染，也避免两个 BC 同时声称拥有同一端口。
+> **Audit UsageAppendStorePort 所有权**：`UsageAppendStorePort` 是 **Audit BC 拥有的出站端口**，不是 Storage 发布的通用端口。`AtomicBlobPort`/`AtomicDatasetPort` 的原子性建立在“整值 stage → fsync → rename”协议上，天然拼不出增量 append + 逐行 flush 语义；因此 Audit adapter **MUST** 直接实现 append-log，只复用 Storage Published Language 的 `SafePathSegment`、`SafeStorageRoot` 与 `SafeStorageDir`。这些 primitive 只在 Composition 提供的根下执行 no-follow open-existing/open-or-create，返回 opaque directory / ordinary file handles；`write_all`、append framing、`sync_data`、逐行读取、枚举筛选与 Usage 语义全部留在 Audit adapter。Storage **NEVER** 发布 append-log OHS，也不组合 `AtomicBlobPort`/`AtomicDatasetPort` 模拟追加。
 
 `StorageKey` 表达逻辑位置，不暴露用户主目录或绝对路径。物理路径由 adapter 根据 ConfigSnapshot 提供的根目录与 namespace policy 解析。namespace policy 固定是否保留上一代；调用方不能逐次关闭该安全属性。Session、Memory、Task、History、ToolResult、Config、Workspace 与 Cost 使用 `PreviousPolicy::Retain`；AuditUsage 的增量 append 不经 AtomicBlobPort，因此使用 `Discard`。未来新增 namespace **MUST** 显式选择策略，禁止依赖默认分支。
 
@@ -483,6 +515,7 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-17 | #928 发布 `SafeStorageRoot` / `SafeStorageDir` capability-root 路径安全 PL，并冻结其只负责 no-follow 打开安全句柄；Audit 自有 append/write/sync/read/list 语义，Storage 不新增 AppendLog OHS | [#928](https://github.com/rushsinging/aemeath/issues/928) |
 | 2026-07-12 | 摘要初稿：数据所有权、原子写/backup/quarantine 机制、窄端口与路径安全 | #793 |
 | 2026-07-14 | 为 AtomicDataset 增加 expected-revision CAS 与 typed committed receipt，并移除 Task / Project 直连 Storage 路径 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 typed CorruptTransaction + quarantine disposition，统一 blob / dataset digest 歧义的 fail-closed 恢复语义 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

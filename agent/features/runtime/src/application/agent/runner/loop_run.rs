@@ -17,9 +17,9 @@ use provider::LlmClient;
 use provider::{StopReason, SystemBlock};
 use share::message::Message;
 use share::string_idx::slice_head;
-use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
-use tools::api::AgentRunTerminal;
+use tools::AgentRunTerminal;
+use tools::{AgentProgressEvent, AgentProgressKind};
 
 #[derive(Clone)]
 struct SubAgentEventSink;
@@ -673,7 +673,7 @@ mod tests {
                     parent_run_id: parent_run_id.clone(),
                     result: "done".to_string(),
                 },
-                Some(tools::api::AgentRunTerminal::Completed {
+                Some(tools::AgentRunTerminal::Completed {
                     result: "done".to_string(),
                 }),
             ),
@@ -683,7 +683,7 @@ mod tests {
                     parent_run_id: parent_run_id.clone(),
                     error: "boom".to_string(),
                 },
-                Some(tools::api::AgentRunTerminal::Failed {
+                Some(tools::AgentRunTerminal::Failed {
                     error: "boom".to_string(),
                 }),
             ),
@@ -692,7 +692,7 @@ mod tests {
                     run_id,
                     parent_run_id,
                 },
-                Some(tools::api::AgentRunTerminal::Cancelled),
+                Some(tools::AgentRunTerminal::Cancelled),
             ),
         ];
 
