@@ -16,6 +16,30 @@ pub struct TaskStoreState {
 }
 
 impl TaskStoreState {
+    pub(crate) fn from_snapshot(
+        tasks: HashMap<TaskId, Task>,
+        batches: HashMap<BatchId, Batch>,
+        next_task_id: TaskId,
+        next_batch_id: BatchId,
+        current_batch: Option<BatchId>,
+        revision: TaskRevision,
+    ) -> Self {
+        Self {
+            tasks,
+            batches,
+            next_task_id,
+            next_batch_id,
+            current_batch,
+            revision,
+        }
+    }
+
+    /// Captures all persisted aggregate fields from this state. Tombstones are
+    /// excluded, and the reverse `blocks` index remains runtime-derived data.
+    pub(crate) fn capture_snapshot(&self) -> super::TaskSnapshot {
+        super::TaskSnapshot::from_state(self)
+    }
+
     pub fn empty() -> Self {
         Self {
             tasks: HashMap::new(),
@@ -31,6 +55,12 @@ impl TaskStoreState {
     }
     pub(crate) fn batches(&self) -> &HashMap<BatchId, Batch> {
         &self.batches
+    }
+    pub(crate) fn next_task_id_for_snapshot(&self) -> TaskId {
+        self.next_task_id
+    }
+    pub(crate) fn next_batch_id_for_snapshot(&self) -> BatchId {
+        self.next_batch_id
     }
     #[cfg(test)]
     pub(crate) fn next_task_id(&self) -> TaskId {

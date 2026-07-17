@@ -3,6 +3,7 @@
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 Agent Runtime 的入站 OHS、所消费的能力契约、RuntimeContext 装配与 Composition Root。**只描述目标态**；实现缺口记入 `03-engineering/migration-governance`。
+> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但未接生产链路；Config `reasoning_graph` 已退役，五节点采用固定默认 effort；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线。Runtime/Context/TUI 尚未端到端消费 Provider resolver。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 ## 1. 入站端口（OHS + Published Language）
 
@@ -36,7 +37,7 @@ trait AgentClient {
         reason: InteractionCancelReason,
     ) -> InteractionCommandOutcome;
     /// /think 命令入站入口：设置下一个 Run 的 reasoning level 上限。
-    /// 返回 Workflow-owned requested 值（已受 user maximum clamp，NEVER 经 Provider resolver 计算 effective）。
+    /// 返回 Workflow-owned requested 值（Config user maximum clamp 已退役，#921；NEVER 经 Provider resolver 计算 effective）。
     fn set_reasoning_level(
         &self,
         session_hint: SessionId,
@@ -45,7 +46,7 @@ trait AgentClient {
 }
 
 enum ReasoningLevelOutcome {
-    Accepted { requested: ReasoningLevel }, // Workflow user-max clamp 后的 requested 值
+    Accepted { requested: ReasoningLevel }, // Workflow requested 值（Config user-max clamp 已退役，#921）
     Unsupported,
 }
 
@@ -129,6 +130,8 @@ trait ProviderPort: Send + Sync {
 ```
 
 Provider BC 的 ACL / adapter 实现该 Runtime-owned SPI；完整 stream、client scope 与能力映射说明见 [Provider adapter design](../provider/02-ports-stream-and-client-scope.md)，但不得在那里复制 trait。
+
+> **v0.1.0 scope（#921 收缩）**：`resolve_invocation_options` 领域模型已完成迁移，但 Runtime **尚未**在生产链路调用该方法；effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 #1142 决策。
 
 ### 2.2 Runtime-owned InteractionPort 与交互语言
 
@@ -332,7 +335,6 @@ fn assemble_with_scope(
     let reasoning = root.reasoning_for(
         &spec.reasoning,
         inherited_requested,
-        config.reasoning_graph(),
     );
 
     let runtime = RuntimeContext {
@@ -359,7 +361,9 @@ fn assemble_with_scope(
 }
 ```
 
-`reasoning_for` **MUST** 只构造 Workflow-owned requested-level 状态：GraphDriven 使用本 ConfigSnapshot 的 graph + user maximum，`EffortOnly(level)` 固定该 requested level，`Inherit` 使用上面冻结的父 requested value。它 **NEVER** 接收 ProviderPort、ModelCapability 或 provider ceiling。每次 invocation 的 model clamp 由 loop 在 `build_window` 前调用 `provider.resolve_invocation_options` 完成。
+`reasoning_for` **MUST** 只构造 Workflow-owned requested-level 状态：GraphDriven 使用五节点固定默认 effort（Config `reasoning_graph` 已退役，#921），`EffortOnly(level)` 固定该 requested level，`Inherit` 使用上面冻结的父 requested value。它 **NEVER** 接收 ProviderPort、ModelCapability 或 provider ceiling。每次 invocation 的 model clamp 由 loop 在 `build_window` 前调用 `provider.resolve_invocation_options` 完成。
+
+> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但 Runtime **尚未**在生产链路调用 `resolve_invocation_options`；ReasoningPort **尚未**接线到生产 loop。上述 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 Main 装配 **MUST** 要求 `WorkspaceMode::Inherit`，先 await `MainSessionWiring::bind_main_run()` 取得 Context / Memory / ConfigSnapshot / owned shared lease，再从 `MainAgentAssembly.task.access()` 取得同一 Task backing 的低权限 view，并原样传给 `assemble_with_scope`。`bind_main_run` 取得 lease 后才读取 active slots；返回的 Arc、snapshot 与 `TaskAccess` **MUST** 绑定该 lease 的逻辑生命周期，**NEVER** 缓存或逃逸到 lease 之外。由此 Context、Runtime、MemoryTool、TaskTool 与 Reflection 都看到同一实例与项目配置，而 restore authority 只留在 session wiring 持有的 `TaskPersist`。
 
@@ -431,3 +435,4 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 | 2026-07-14 | `ReasoningLevelOutcome::Accepted` 字段从 `effective` 改为 `requested`，对齐 Workflow 的 `/think` 反馈决策：命令层只暴露 user-max-clamped requested 值，NEVER 承诺尚未计算的 provider-ceiling-resolved effective 值 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 经能力事实复核，Runtime 当前只有单一 `agent_execution` 能力；端口与适配器作为 crate 根六边形层组织，`agent/composition` 保持唯一对象图与 factory 入口 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-15 | 曾按多个稳定能力递归竖切并把 Port/adapter 就近分散；此结论已由上一条复核记录取代 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
+| 2026-07-17 | #921 收缩范围：Config `reasoning_graph` 退役后 `reasoning_for` 移除 config graph 参数；Provider resolver 领域迁移完成但未接生产链路；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；Runtime/Context/TUI 均未端到端消费 resolver 或 ReasoningPort；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |

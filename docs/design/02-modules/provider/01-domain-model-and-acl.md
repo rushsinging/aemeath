@@ -3,6 +3,7 @@
 > 层级：02-modules / provider（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#788（S2）
 > 本文只描述目标态；签名用于表达职责和不变量，不锁定具体 Rust API。实现差距统一记录在 `03-engineering/03-migration-governance.md`。
+> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型（`resolve_invocation_options` / `ResolvedInvocationOptions` / `CapabilityFingerprint`）已完成领域迁移，但 **未接生产链路**——Runtime 尚未在 `build_window` 前调用 resolver，effective reasoning 尚未端到端冻结。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 ## 1. 边界语言
 
@@ -17,7 +18,7 @@ struct InvocationRequest {
 
 struct RequestedInvocationOptions {
     requested_max_output_tokens: Option<OutputTokenLimit>,
-    reasoning: ReasoningLevel, // Workflow 已应用 Config user maximum
+    reasoning: ReasoningLevel, // Workflow 固定默认 desired effort（Config user maximum 已退役，#921）
 }
 
 struct ResolvedInvocationOptions {
@@ -99,21 +100,23 @@ enum ReasoningMappingKind {
 统一职责链：
 
 ```text
-Requested Reasoning = min(Workflow Desired, Config User Maximum)
+Requested Reasoning = Workflow Desired（Config user maximum 已退役，#921）
 Effective Reasoning = greatest supported level <= Requested Reasoning
 ```
 
 其中：
 
-- Config 拥有用户默认值、静态上限及来源优先级；
-- Workflow 消费 ConfigSnapshot，把动态 desired 裁剪为 requested reasoning；
+- Config 拥有用户默认值与来源优先级（`reasoning_graph` 含 `max_reasoning` 已退役，#921）；如需 reasoning level 上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策
+- Workflow 发布 graph 的固定默认 desired effort（无 config clamp）
 - Runtime 在构建 Context Window **之前**调用 Provider-owned `resolve_invocation_options`；
 - resolver 根据 driver + model 的 `supported` 档位集合选择不高于 requested 的最高档位，同时解析 context/output limits（`context_size` 来源：`ModelCapability.context_limit`，若为 None 则 fallback 到 ConfigSnapshot 提供的 `context_size` 默认值），并返回不可变 `ResolvedInvocationOptions`；
 - Runtime 把同一个 `effective_reasoning` 同时放入 `ContextRequest`（供 Prompt guidance）与 `InvocationRequest.options`；
 - Provider `invoke` 只校验 `capability_fingerprint` 后映射 wire 字段，**NEVER** 静默再次 clamp。若 capability 已变化则返回 `CapabilityChanged`，Runtime 丢弃旧 window，重新 resolve + build；
 - Provider 在最终响应中回报 effective level，便于审计和诊断。
 
-因此单次模型调用只有一条 reasoning 数据流：
+> **v0.1.0 scope（#921 收缩）**：resolver 领域模型（`resolve_invocation_options` / `ResolvedInvocationOptions` / `CapabilityFingerprint`）已完成领域迁移，但 Runtime **尚未**在生产链路调用 resolver。上述端到端 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
+
+因此单次模型调用只有一条 reasoning 数据流（Target 设计）：
 
 ```text
 ReasoningPort.current_requested_level
@@ -297,7 +300,7 @@ struct ProviderError {
 
 /// 模型能力指纹——用于检测 capability 是否在 resolve → invoke 之间发生变化。
 /// 来源：ModelCapability 的关键字段 hash（context_limit / output_limit / reasoning.supported）。
-struct CapabilityFingerprint(String);
+struct CapabilityFingerprint(u64); // 仅用于同一进程内的 capability 变更比较，不持久化
 ```
 
 > **Runtime 侧匹配**：Runtime 在 `invoke` 返回 `Err(ProviderError { kind: CapabilityChanged, .. })` 时丢弃旧 window 并重新 resolve + build。`kind: ContextTooLong` 匹配为 `ContextExceeded` → compact 后重跑。其余不可恢复错误匹配为 `Fatal`。
@@ -338,3 +341,4 @@ struct CapabilityFingerprint(String);
 |---|---|---|
 | 2026-07-12 | 初稿：调用边界语言、模型能力、三层 clamp、双向 ACL、usage 与错误分类 | #788 |
 | 2026-07-14 | 在 Context build 前解析并冻结 model capability；InvocationRequest 直接复用 ContextWindow 的唯一 Tool schema 集 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-17 | #921 收缩范围：resolver 领域模型已完成迁移但未接生产链路；Config `max_reasoning` 退役后 §3 clamp 链移除 user-maximum；Runtime 尚未调用 resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |

@@ -9,6 +9,8 @@
 //!
 //! #901 冻结契约；现有 `contract.rs` 的 legacy 类型保留兼容，后续逐步退役。
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -62,7 +64,7 @@ impl std::fmt::Display for ModelId {
 pub use crate::ports::ReasoningLevel;
 
 /// Reasoning 映射方式——driver 如何把 ReasoningLevel 映射到 wire。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReasoningMappingKind {
     /// OpenAI 风格 effort 字符串。
     Effort,
@@ -77,21 +79,56 @@ pub enum ReasoningMappingKind {
 }
 
 /// 模型 reasoning 能力声明。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReasoningCapability {
-    /// 支持的最高档位。
-    pub maximum: ReasoningLevel,
+    supported: Vec<ReasoningLevel>,
     /// 映射方式。
     pub mapping: ReasoningMappingKind,
 }
 
 impl ReasoningCapability {
+    pub fn new(
+        supported: impl IntoIterator<Item = ReasoningLevel>,
+        mapping: ReasoningMappingKind,
+    ) -> Result<Self, ProviderError> {
+        let mut supported: Vec<_> = supported.into_iter().collect();
+        supported.sort_unstable();
+        supported.dedup();
+        if supported.first() != Some(&ReasoningLevel::Off) {
+            return Err(ProviderError::fatal(
+                ProviderErrorKind::Configuration,
+                "reasoning capability 必须包含 off 档位",
+            ));
+        }
+        Ok(Self { supported, mapping })
+    }
+
     /// 构造不支持 reasoning 的默认能力。
     pub fn none() -> Self {
         Self {
-            maximum: ReasoningLevel::Off,
+            supported: vec![ReasoningLevel::Off],
             mapping: ReasoningMappingKind::None,
         }
+    }
+
+    pub fn supported(&self) -> &[ReasoningLevel] {
+        &self.supported
+    }
+
+    pub fn maximum(&self) -> ReasoningLevel {
+        self.supported
+            .last()
+            .copied()
+            .unwrap_or(ReasoningLevel::Off)
+    }
+
+    pub fn resolve(&self, requested: ReasoningLevel) -> ReasoningLevel {
+        self.supported
+            .iter()
+            .rev()
+            .copied()
+            .find(|level| *level <= requested)
+            .unwrap_or(ReasoningLevel::Off)
     }
 }
 
@@ -116,6 +153,48 @@ pub struct ModelCapability {
     pub context_limit: Option<usize>,
     /// 最大输出 token 数，`None` 表示未知。
     pub output_limit: Option<usize>,
+}
+
+impl ModelCapability {
+    pub fn fingerprint(&self) -> CapabilityFingerprint {
+        let mut hasher = DefaultHasher::new();
+        self.model.hash(&mut hasher);
+        self.supports_tools.hash(&mut hasher);
+        self.supports_parallel_tool_calls.hash(&mut hasher);
+        self.supports_streaming.hash(&mut hasher);
+        self.reasoning.hash(&mut hasher);
+        self.context_limit.hash(&mut hasher);
+        self.output_limit.hash(&mut hasher);
+        CapabilityFingerprint(hasher.finish())
+    }
+
+    pub fn resolve_invocation_options(
+        &self,
+        requested: RequestedInvocationOptions,
+    ) -> Result<ResolvedInvocationOptions, ProviderError> {
+        if requested.context_size == 0
+            || requested.context_size == usize::MAX && self.context_limit.is_none()
+            || requested.max_output_tokens == 0
+        {
+            return Err(ProviderError::fatal(
+                ProviderErrorKind::Configuration,
+                "invocation token limit 必须大于零",
+            ));
+        }
+        let context_size = self.context_limit.unwrap_or(requested.context_size);
+        let max_output_tokens = self
+            .output_limit
+            .map_or(requested.max_output_tokens, |limit| {
+                requested.max_output_tokens.min(limit)
+            });
+        Ok(ResolvedInvocationOptions {
+            context_size,
+            max_output_tokens,
+            requested_reasoning: requested.reasoning,
+            effective_reasoning: self.reasoning.resolve(requested.reasoning),
+            capability_fingerprint: self.fingerprint(),
+        })
+    }
 }
 
 // ─── Tool Call（Provider 边界） ─────────────────────────
@@ -383,7 +462,72 @@ pub struct ModelToolSchema {
 
 // ─── InvocationOptions ──────────────────────────────────
 
-/// 一次调用的选项（不可变，固定在 InvocationScope 中）。
+/// 同一进程内检测 capability 变化的指纹；NEVER 持久化或跨构建比较。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CapabilityFingerprint(u64);
+
+impl CapabilityFingerprint {
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestedInvocationOptions {
+    context_size: usize,
+    max_output_tokens: usize,
+    reasoning: ReasoningLevel,
+}
+
+impl RequestedInvocationOptions {
+    /// 构造请求；若 capability 未声明 context limit，调用方必须用
+    /// `with_context_size` 提供实际 fallback，resolver 会拒绝未设置值。
+    pub fn new(max_output_tokens: usize, reasoning: ReasoningLevel) -> Self {
+        Self {
+            context_size: usize::MAX,
+            max_output_tokens,
+            reasoning,
+        }
+    }
+
+    pub fn with_context_size(mut self, context_size: usize) -> Self {
+        self.context_size = context_size;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedInvocationOptions {
+    context_size: usize,
+    max_output_tokens: usize,
+    requested_reasoning: ReasoningLevel,
+    effective_reasoning: ReasoningLevel,
+    capability_fingerprint: CapabilityFingerprint,
+}
+
+impl ResolvedInvocationOptions {
+    pub const fn context_size(&self) -> usize {
+        self.context_size
+    }
+
+    pub const fn max_output_tokens(&self) -> usize {
+        self.max_output_tokens
+    }
+
+    pub const fn requested_reasoning(&self) -> ReasoningLevel {
+        self.requested_reasoning
+    }
+
+    pub const fn effective_reasoning(&self) -> ReasoningLevel {
+        self.effective_reasoning
+    }
+
+    pub const fn capability_fingerprint(&self) -> CapabilityFingerprint {
+        self.capability_fingerprint
+    }
+}
+
+/// Legacy 一次调用选项；生产 resolver 接线延期到 v0.2.0 决策。
 #[derive(Debug, Clone)]
 pub struct InvocationOptions {
     /// 最大输出 token。
@@ -495,8 +639,91 @@ mod tests {
     #[test]
     fn reasoning_capability_none() {
         let cap = ReasoningCapability::none();
-        assert_eq!(cap.maximum, ReasoningLevel::Off);
+        assert_eq!(cap.supported(), &[ReasoningLevel::Off]);
+        assert_eq!(cap.maximum(), ReasoningLevel::Off);
         assert_eq!(cap.mapping, ReasoningMappingKind::None);
+    }
+
+    #[test]
+    fn resolver_selects_highest_supported_level_not_above_requested() {
+        let capability = ModelCapability {
+            model: ModelId {
+                provider: "fake".to_string(),
+                model: "sparse-levels".to_string(),
+            },
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            reasoning: ReasoningCapability::new(
+                [
+                    ReasoningLevel::Off,
+                    ReasoningLevel::Medium,
+                    ReasoningLevel::Max,
+                ],
+                ReasoningMappingKind::Effort,
+            )
+            .expect("valid sparse capability"),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
+        };
+
+        for (requested, expected) in [
+            (ReasoningLevel::Off, ReasoningLevel::Off),
+            (ReasoningLevel::Low, ReasoningLevel::Off),
+            (ReasoningLevel::Medium, ReasoningLevel::Medium),
+            (ReasoningLevel::High, ReasoningLevel::Medium),
+            (ReasoningLevel::Xhigh, ReasoningLevel::Medium),
+            (ReasoningLevel::Max, ReasoningLevel::Max),
+        ] {
+            let resolved = capability
+                .resolve_invocation_options(RequestedInvocationOptions::new(16_384, requested))
+                .expect("capability should resolve");
+            assert_eq!(resolved.requested_reasoning(), requested);
+            assert_eq!(resolved.effective_reasoning(), expected);
+            assert!(resolved.effective_reasoning() <= resolved.requested_reasoning());
+            assert_eq!(resolved.context_size(), 128_000);
+            assert_eq!(resolved.max_output_tokens(), 8_192);
+        }
+    }
+
+    #[test]
+    fn capability_fingerprint_is_stable_and_changes_with_semantics() {
+        let model = ModelId {
+            provider: "fake".to_string(),
+            model: "fingerprinted".to_string(),
+        };
+        let base = ModelCapability {
+            model: model.clone(),
+            supports_tools: true,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            reasoning: ReasoningCapability::new(
+                [ReasoningLevel::Off, ReasoningLevel::High],
+                ReasoningMappingKind::Effort,
+            )
+            .unwrap(),
+            context_limit: Some(100_000),
+            output_limit: Some(4_096),
+        };
+        let same = base.clone();
+        let mut changed = base.clone();
+        changed.reasoning = ReasoningCapability::new(
+            [ReasoningLevel::Off, ReasoningLevel::Medium],
+            ReasoningMappingKind::Effort,
+        )
+        .unwrap();
+
+        assert_eq!(base.fingerprint(), same.fingerprint());
+        assert_ne!(base.fingerprint(), changed.fingerprint());
+    }
+
+    #[test]
+    fn reasoning_capability_rejects_empty_or_missing_off_levels() {
+        assert!(ReasoningCapability::new([], ReasoningMappingKind::None).is_err());
+        assert!(
+            ReasoningCapability::new([ReasoningLevel::Medium], ReasoningMappingKind::Effort,)
+                .is_err()
+        );
     }
 
     #[test]
