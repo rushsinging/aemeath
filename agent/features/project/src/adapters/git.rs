@@ -1,58 +1,150 @@
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
-use crate::domain::git::GitWorktreeOps;
+use share::session_types::WorktreeKind;
+
+use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
+use crate::domain::types::{GitOperationError, GitProbeError};
 
 /// Production git adapter. Spawns the `git` CLI (project may spawn; share may not).
 pub(crate) struct GitCli;
 
+fn probe_spawn(error: std::io::Error) -> GitProbeError {
+    match error.kind() {
+        ErrorKind::NotFound => GitProbeError::GitUnavailable,
+        ErrorKind::PermissionDenied => GitProbeError::PermissionDenied,
+        _ => GitProbeError::CommandFailed { exit_code: None },
+    }
+}
+
+fn operation_spawn(error: std::io::Error) -> GitOperationError {
+    match error.kind() {
+        ErrorKind::NotFound => GitOperationError::GitUnavailable,
+        ErrorKind::PermissionDenied => GitOperationError::PermissionDenied,
+        _ => GitOperationError::CommandFailed { exit_code: None },
+    }
+}
+
+fn operation_output(output: Output) -> Result<String, GitOperationError> {
+    if !output.status.success() {
+        return Err(GitOperationError::CommandFailed {
+            exit_code: output.status.code(),
+        });
+    }
+    let value = std::str::from_utf8(&output.stdout)
+        .map_err(|_| GitOperationError::InvalidOutput)?
+        .trim();
+    if value.is_empty() {
+        Err(GitOperationError::InvalidOutput)
+    } else {
+        Ok(value.to_owned())
+    }
+}
+
+fn resolve_git_path(base: &Path, value: &str) -> Result<PathBuf, GitProbeError> {
+    let path = PathBuf::from(value);
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    };
+    absolute
+        .canonicalize()
+        .map_err(|_| GitProbeError::InvalidOutput)
+}
+
+fn git_command() -> Command {
+    let mut command = Command::new("git");
+    command.env("LC_ALL", "C").env("LANG", "C");
+    command
+}
+
 impl GitWorktreeOps for GitCli {
-    fn git_common_dir(&self, path: &Path) -> Result<PathBuf, String> {
-        let output = std::process::Command::new("git")
-            .args(["rev-parse", "--git-common-dir"])
+    fn probe_repository(&self, path: &Path) -> Result<RepositoryProbe, GitProbeError> {
+        let output = git_command()
+            .args([
+                "rev-parse",
+                "--show-toplevel",
+                "--git-common-dir",
+                "--git-dir",
+            ])
             .current_dir(path)
             .output()
-            .map_err(|e| format!("git rev-parse --git-common-dir 执行失败: {}", e))?;
+            .map_err(probe_spawn)?;
         if !output.status.success() {
-            return Err("无法获取 git common dir".to_string());
+            let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+            if stderr.contains("not a git repository") {
+                return Ok(RepositoryProbe::NonGit);
+            }
+            if stderr.contains("permission denied") {
+                return Err(GitProbeError::PermissionDenied);
+            }
+            return Err(GitProbeError::CommandFailed {
+                exit_code: output.status.code(),
+            });
         }
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let p = PathBuf::from(&s);
-        if p.is_absolute() {
-            Ok(p.canonicalize().unwrap_or(p))
+        let stdout =
+            std::str::from_utf8(&output.stdout).map_err(|_| GitProbeError::InvalidOutput)?;
+        let mut lines = stdout.lines().map(str::trim);
+        let top = lines
+            .next()
+            .filter(|s| !s.is_empty())
+            .ok_or(GitProbeError::InvalidOutput)?;
+        let common = lines
+            .next()
+            .filter(|s| !s.is_empty())
+            .ok_or(GitProbeError::InvalidOutput)?;
+        let git_dir = lines
+            .next()
+            .filter(|s| !s.is_empty())
+            .ok_or(GitProbeError::InvalidOutput)?;
+        if lines.next().is_some() {
+            return Err(GitProbeError::InvalidOutput);
+        }
+        let canonical_top_level = PathBuf::from(top)
+            .canonicalize()
+            .map_err(|_| GitProbeError::InvalidOutput)?;
+        let canonical_common_dir = resolve_git_path(path, common)?;
+        let canonical_git_dir = resolve_git_path(path, git_dir)?;
+        let worktree_kind = if canonical_git_dir == canonical_common_dir {
+            WorktreeKind::Primary
         } else {
-            Ok(path
-                .join(&s)
-                .canonicalize()
-                .unwrap_or_else(|_| path.join(&s)))
-        }
+            WorktreeKind::Linked
+        };
+        Ok(RepositoryProbe::Git {
+            canonical_top_level,
+            canonical_common_dir,
+            worktree_kind,
+        })
     }
 
-    fn show_toplevel(&self, path: &Path) -> Result<PathBuf, String> {
-        let output = std::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .current_dir(path)
-            .output()
-            .map_err(|e| format!("git rev-parse 执行失败: {}", e))?;
-        if !output.status.success() {
-            return Err(format!("路径 {} 不是 git 仓库或 worktree", path.display()));
-        }
-        Ok(PathBuf::from(
-            String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        ))
+    fn show_toplevel(&self, path: &Path) -> Result<PathBuf, GitOperationError> {
+        let value = operation_output(
+            git_command()
+                .args(["rev-parse", "--show-toplevel"])
+                .current_dir(path)
+                .output()
+                .map_err(operation_spawn)?,
+        )?;
+        PathBuf::from(value)
+            .canonicalize()
+            .map_err(|_| GitOperationError::InvalidOutput)
     }
 
-    fn in_worktree(&self, path: &Path) -> Result<bool, String> {
-        let output = std::process::Command::new("git")
-            .args(["rev-parse", "--git-dir"])
-            .current_dir(path)
-            .output()
-            .map_err(|error| format!("git rev-parse --git-dir 执行失败: {error}"))?;
-        if !output.status.success() {
-            return Err(format!("无法探测路径 {} 的 worktree 状态", path.display()));
+    fn is_linked_worktree(&self, path: &Path) -> Result<bool, GitOperationError> {
+        match self.probe_repository(path) {
+            Ok(RepositoryProbe::Git { worktree_kind, .. }) => {
+                Ok(worktree_kind == WorktreeKind::Linked)
+            }
+            Ok(RepositoryProbe::NonGit) => Ok(false),
+            Err(GitProbeError::GitUnavailable) => Err(GitOperationError::GitUnavailable),
+            Err(GitProbeError::PermissionDenied) => Err(GitOperationError::PermissionDenied),
+            Err(GitProbeError::CommandFailed { exit_code }) => {
+                Err(GitOperationError::CommandFailed { exit_code })
+            }
+            Err(GitProbeError::InvalidOutput) => Err(GitOperationError::InvalidOutput),
         }
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .contains("/.git/worktrees/"))
     }
 
     fn worktree_add(
@@ -61,42 +153,34 @@ impl GitWorktreeOps for GitCli {
         path: &Path,
         branch: &str,
         base: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), GitOperationError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建 worktree 父目录失败 {}: {}", parent.display(), e))?;
+            std::fs::create_dir_all(parent).map_err(operation_spawn)?;
         }
-        let output = std::process::Command::new("git")
+        let output = git_command()
             .args(["worktree", "add"])
             .arg(path)
             .args(["-b", branch, base])
             .current_dir(repo_root)
             .output()
-            .map_err(|e| format!("git worktree add 执行失败: {}", e))?;
-        if !output.status.success() {
-            return Err(format!(
-                "创建 worktree 失败：git worktree add {} -b {} {}\nstdout: {}\nstderr: {}",
-                path.display(),
-                branch,
-                base,
-                String::from_utf8_lossy(&output.stdout).trim(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+            .map_err(operation_spawn)?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(GitOperationError::CommandFailed {
+                exit_code: output.status.code(),
+            })
         }
-        Ok(())
     }
 
-    fn current_branch(&self, path: &Path) -> Result<Option<String>, String> {
-        let output = std::process::Command::new("git")
+    fn current_branch(&self, path: &Path) -> Result<Option<String>, GitOperationError> {
+        let output = git_command()
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .current_dir(path)
             .output()
-            .map_err(|e| format!("git rev-parse --abbrev-ref HEAD 执行失败: {}", e))?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if branch.is_empty() || branch == "HEAD" {
+            .map_err(operation_spawn)?;
+        let branch = operation_output(output)?;
+        if branch == "HEAD" {
             Ok(None)
         } else {
             Ok(Some(branch))

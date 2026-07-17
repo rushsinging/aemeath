@@ -36,13 +36,21 @@ ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
 PROJECT_ROOT_ACCESS_ALLOW = {
+    "GitOperationError",
+    "GitProbeError",
+    "PreparedWorkspaceRestore",
+    "ProjectIdentity",
     "WorkspaceControl",
     "WorkspaceError",
     "WorkspaceFrame",
+    "WorkspaceId",
+    "WorkspaceInitError",
     "WorkspacePersist",
     "WorkspaceRead",
+    "WorkspaceRestoreError",
     "WorkspaceViews",
     "WorkspaceWiring",
+    "WorktreeKind",
     "wire_production_workspace",
 }
 PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
@@ -372,7 +380,9 @@ def run_sanity() -> None:
     valid_facade = '''
 pub const LOG_TARGET: &str = "aemeath:agent:project";
 pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
-pub use domain::types::{WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead};
+pub use domain::state::PreparedWorkspaceRestore;
+pub use domain::types::{GitOperationError, GitProbeError, WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspaceInitError, WorkspacePersist, WorkspaceRead, WorkspaceRestoreError};
+pub use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 '''
     if project_public_facade_violations(valid_facade):
         raise AssertionError("sanity allow failed: registered Project façade")

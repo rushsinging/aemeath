@@ -307,7 +307,9 @@ mod tests {
                 lang: "en".to_string(),
                 allow_all: true,
             },
-            workspace: project::wire_production_workspace(cwd).into_views(),
+            workspace: project::wire_production_workspace(cwd)
+                .expect("workspace 初始化成功")
+                .into_views(),
             run_id: sdk::RunId::new_v7().to_string(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),

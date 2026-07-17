@@ -196,6 +196,7 @@
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
+  - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
@@ -204,7 +205,7 @@
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
 - **检查方式**：
   - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；
-  - 未迁移 feature 的跨 crate 入口仍必须是 `api`；Runtime、Context、Storage 只放行对应 `ROOT_ACCESS_ALLOW` 登记符号；Context `application/ports/adapters` 与 Storage 私有模块 **NEVER** 直接跨 crate 访问，`context::domain` 仅发布稳定 PL；
+  - 未迁移 feature 的跨 crate 入口仍必须是 `api`；Project、Runtime、Context、Storage 只放行对应 `ROOT_ACCESS_ALLOW` 登记符号；Project internal state/service/Git seam、Context `application/ports/adapters` 与 Storage 私有模块 **NEVER** 直接跨 crate 访问，`context::domain` 仅发布稳定 PL；
   - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
   - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
 - **例外**：无 path 级白名单。Context 与 Storage root 集合都是结构化 façade policy，不是 migration exception。

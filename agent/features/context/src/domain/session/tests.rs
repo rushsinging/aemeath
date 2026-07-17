@@ -1,5 +1,6 @@
 use super::*;
 use share::message::{ContentBlock, Message, Role};
+use share::session_types::{ProjectIdentity, WorkspaceId, WorktreeKind};
 
 fn make_session(title: Option<&str>, project: Option<&str>, messages: Vec<Message>) -> Session {
     let mut sess = Session::new("test-id".into(), "/tmp".into());
@@ -117,11 +118,18 @@ fn workspace_context_round_trips_through_json() {
         "/tmp/project".to_string(),
     );
     sess.workspace = Some(PersistedWorkspaceContext {
+        workspace_id: WorkspaceId::from("ws-session-test"),
+        project_identity: ProjectIdentity {
+            initial_cwd: "/tmp/project".to_string(),
+            git_common_dir: Some("/tmp/project/.git".to_string()),
+        },
         path_base: "/tmp/project/subdir".to_string(),
         workspace_root: "/tmp/project-worktree".to_string(),
+        worktree_kind: WorktreeKind::Linked,
         context_stack: vec![PersistedWorkspaceFrame {
             path_base: "/tmp/project".to_string(),
             workspace_root: "/tmp/project".to_string(),
+            worktree_kind: WorktreeKind::Primary,
         }],
     });
 

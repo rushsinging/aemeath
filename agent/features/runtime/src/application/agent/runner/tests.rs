@@ -315,7 +315,9 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
             lang: "en".to_string(),
             allow_all: true,
         },
-        workspace: project::wire_production_workspace(cwd).into_views(),
+        workspace: project::wire_production_workspace(cwd)
+            .expect("workspace 初始化成功")
+            .into_views(),
         run_id: sdk::RunId::new_v7().to_string(),
         cancel: cancel.clone(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
@@ -606,7 +608,9 @@ fn test_ctx() -> ToolExecutionContext {
             lang: "en".to_string(),
             allow_all: true,
         },
-        workspace: project::wire_production_workspace(cwd).into_views(),
+        workspace: project::wire_production_workspace(cwd)
+            .expect("workspace 初始化成功")
+            .into_views(),
         run_id: sdk::RunId::new_v7().to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),

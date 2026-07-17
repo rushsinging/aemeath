@@ -65,6 +65,7 @@ mod tests {
     fn test_ctx() -> ToolExecutionContext {
         ToolExecutionContext {
             workspace: project::wire_production_workspace(std::path::PathBuf::from("."))
+                .expect("workspace initialization")
                 .into_views(),
             run_id: "test-run".to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),

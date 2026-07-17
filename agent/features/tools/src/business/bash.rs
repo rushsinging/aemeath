@@ -156,7 +156,7 @@ impl TypedTool for BashTool {
                 // `cd` 改变了 path_base 时通知 workspace 并记录新值，回传给 LLM（#414）。
                 let cd_path_base: Option<std::path::PathBuf> = new_path_base.clone();
                 if let Some(new_path_base) = new_path_base {
-                    if let Err(e) = ctx.workspace_control().set_path_base(new_path_base) {
+                    if let Err(e) = ctx.workspace_control().change_directory(new_path_base) {
                         return TypedToolResult::error(e.to_string());
                     }
                 }

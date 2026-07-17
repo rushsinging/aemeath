@@ -33,7 +33,9 @@ impl AgentRunner for StubRunner {
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
-        workspace: project::wire_production_workspace(PathBuf::from(".")).into_views(),
+        workspace: project::wire_production_workspace(PathBuf::from("."))
+            .expect("workspace 初始化成功")
+            .into_views(),
         run_id: "01900000-0000-7000-8000-000000000001".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
@@ -170,41 +172,34 @@ async fn test_agent_tool_runs_without_task_id() {
 #[test]
 fn sub_agent_workspace_isolated() {
     use project::WorkspaceError;
-    use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
-    // 用真实存在的临时目录满足 restore 的路径校验。
     let main_dir = tempfile::tempdir().unwrap();
-    let wt_dir = tempfile::tempdir().unwrap();
-
-    // 父：进入一个伪 worktree（path_base/workspace_root = wt，栈里压入 main 帧）。
-    let parent = project::wire_production_workspace(main_dir.path().to_path_buf()).into_views();
-    let dto = PersistedWorkspaceContext {
-        path_base: wt_dir.path().display().to_string(),
-        workspace_root: wt_dir.path().display().to_string(),
-        context_stack: vec![PersistedWorkspaceFrame {
-            path_base: main_dir.path().display().to_string(),
-            workspace_root: main_dir.path().display().to_string(),
-        }],
-    };
+    let child_dir = main_dir.path().join("child");
+    std::fs::create_dir_all(&child_dir).unwrap();
+    let parent = project::wire_production_workspace(main_dir.path().to_path_buf())
+        .expect("workspace 初始化成功")
+        .into_views();
     parent
-        .persist()
-        .restore(&dto)
-        .expect("restore parent workspace");
+        .control()
+        .change_directory(child_dir.clone())
+        .expect("change parent directory");
 
-    // 子：从父快照派生。
     let child = parent.derive_isolated();
+    let canonical_main = main_dir.path().canonicalize().unwrap();
+    let canonical_child = child_dir.canonicalize().unwrap();
+    assert_eq!(child.read().current_path_base(), canonical_child);
+    assert_eq!(child.read().current_workspace_root(), canonical_main);
 
-    // 1) 子继承父当前位置，但后续变更隔离。
-    assert_eq!(child.read().current_path_base(), wt_dir.path());
-    assert_eq!(child.read().current_workspace_root(), wt_dir.path());
-
-    // 2) 子栈独立为空：exit 报 EmptyStack。
-    assert_eq!(child.control().exit(), Err(WorkspaceError::EmptyStack));
-
-    // 3) 父栈不受子影响：父仍可 exit 回到 main。
-    let prev = parent.control().exit().expect("parent still has a frame");
-    assert_eq!(prev.path_base, main_dir.path());
-    assert_eq!(parent.read().current_path_base(), main_dir.path());
+    child
+        .control()
+        .change_directory(main_dir.path().to_path_buf())
+        .expect("change child directory");
+    assert_eq!(child.read().current_path_base(), canonical_main);
+    assert_eq!(parent.read().current_path_base(), canonical_child);
+    assert_eq!(
+        child.control().exit(),
+        Err(WorkspaceError::UnsupportedForNonGit)
+    );
 }
 
 // ── #479 回归：text 字段必须包含子代理实际产出 ──

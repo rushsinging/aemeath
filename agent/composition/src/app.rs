@@ -55,7 +55,9 @@ async fn build_agent_client_with_gateways(
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd).into_views();
+    let workspace = project::wire_production_workspace(cwd)
+        .map_err(|error| SdkError::Init(error.to_string()))?
+        .into_views();
     let runtime_client = crate::runtime::from_args_with_gateways(args, gateways, workspace).await?;
     Ok(agent_client_from_runtime(runtime_client))
 }
@@ -67,7 +69,9 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd).into_views();
+    let workspace = project::wire_production_workspace(cwd)
+        .map_err(|error| SdkError::Init(error.to_string()))?
+        .into_views();
     let runtime_client = crate::runtime::from_args_with_gateways(args, gateways, workspace).await?;
     let launch = runtime_client.tui_launch_context();
     let thinking = !matches!(

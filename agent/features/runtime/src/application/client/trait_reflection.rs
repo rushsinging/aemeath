@@ -297,7 +297,9 @@ mod tests {
             current_chain: Arc::new(std::sync::Mutex::new(context::session::ChatChain::default())),
             frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
             active_summary: Arc::new(std::sync::Mutex::new(None)),
-            workspace: project::wire_production_workspace(std::env::temp_dir()).into_views(),
+            workspace: project::wire_production_workspace(std::env::temp_dir())
+                .expect("workspace 初始化成功")
+                .into_views(),
             event_sink_factory: Arc::new(|_| panic!("测试不应构造 SDK event sink")),
             session_reminders: Arc::new(std::sync::RwLock::new(
                 share::memory::SessionReminders::new(),

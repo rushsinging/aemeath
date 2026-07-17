@@ -6,7 +6,9 @@ fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext
     let mut read_files = HashSet::new();
     read_files.insert(read_file);
     ToolExecutionContext {
-        workspace: project::wire_production_workspace(root).into_views(),
+        workspace: project::wire_production_workspace(root)
+            .expect("workspace 初始化成功")
+            .into_views(),
         run_id: "test-run".to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(Mutex::new(read_files)),
