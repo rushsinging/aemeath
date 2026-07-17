@@ -11,6 +11,7 @@ project = { path = "../project" }
 policy = { path = "../policy" }
 context = { path = "../context" }
 storage = { path = "../storage" }
+task = { path = "../task" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
 workflow = { path = "../workflow" }

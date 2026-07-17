@@ -151,6 +151,7 @@ mod tests {
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
                 task_store: Arc::new(TaskStore::new()),
+                task_access: Arc::new(task::TaskStore::new()),
                 skills_map: HashMap::new(),
                 hook_runner: HookRunner::empty(),
                 memory_config: MemoryConfig::default(),

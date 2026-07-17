@@ -153,6 +153,7 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -195,6 +196,7 @@ async fn test_user_message_with_images_assembles_image_block() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -262,6 +264,7 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -308,6 +311,7 @@ async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -340,6 +344,7 @@ async fn test_run_loop_gate_preserves_side_effect_command_order() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -374,6 +379,7 @@ async fn test_run_loop_gate_clear_drops_following_events_and_prior_appends() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -405,6 +411,7 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;
@@ -441,6 +448,7 @@ async fn test_run_loop_gate_no_dedup_push_and_pull_same_text() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false,
     )
     .await;

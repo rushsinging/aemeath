@@ -7,7 +7,7 @@ fn test_ctx() -> ToolExecutionContext {
             .into_views(),
         run_id: "test-run".to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
-        read_files: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         resources: crate::api::ToolResources {
             agent_runner: None,
             registry: None,
@@ -19,120 +19,55 @@ fn test_ctx() -> ToolExecutionContext {
         plan_mode: None,
         max_tool_concurrency: 4,
         max_agent_concurrency: 4,
-        agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
     }
 }
 
 #[tokio::test]
-async fn test_empty_owner_not_stored() {
-    let store = Arc::new(TaskStore::new());
-    let tool = TaskCreateTool {
-        store: store.clone(),
-    };
+async fn task_create_uses_task_access_and_active_batch() {
+    let store = Arc::new(task::TaskStore::new());
+    let access: Arc<dyn task::TaskAccess> = store.clone();
+    let batch = access
+        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .unwrap();
+    let tool = TaskCreateTool { access };
 
-    tool.call(
-        serde_json::json!({
-            "subject": "测试任务",
-            "description": "描述",
-            "owner": ""
-        }),
-        &test_ctx(),
-    )
-    .await;
+    let result = tool
+        .call(
+            serde_json::json!({
+                "subject": "测试任务",
+                "description": "描述",
+                "priority": "high"
+            }),
+            &test_ctx(),
+        )
+        .await;
 
-    let snap = store.snapshot().await;
-    let task = &snap.tasks[0];
-    assert_eq!(task.owner, None);
+    assert!(!result.is_error, "{}", result.text);
+    let tasks = store.list();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].batch(), batch.value.id());
+    assert_eq!(tasks[0].priority(), task::TaskPriority::High);
+    assert_eq!(tasks[0].session_id(), None);
 }
 
 #[tokio::test]
-async fn test_empty_session_id_not_stored() {
-    let store = Arc::new(TaskStore::new());
-    let tool = TaskCreateTool {
-        store: store.clone(),
-    };
+async fn task_create_without_active_batch_returns_typed_error() {
+    let store = Arc::new(task::TaskStore::new());
+    let access: Arc<dyn task::TaskAccess> = store.clone();
+    let tool = TaskCreateTool { access };
 
-    tool.call(
-        serde_json::json!({
-            "subject": "测试任务",
-            "description": "描述",
-            "sessionId": ""
-        }),
-        &test_ctx(),
-    )
-    .await;
+    let result = tool
+        .call(
+            serde_json::json!({"subject": "任务", "description": "描述"}),
+            &test_ctx(),
+        )
+        .await;
 
-    let snap = store.snapshot().await;
-    let task = &snap.tasks[0];
-    assert_eq!(task.session_id, None);
-}
-
-#[tokio::test]
-async fn test_non_empty_owner_still_stored() {
-    let store = Arc::new(TaskStore::new());
-    let tool = TaskCreateTool {
-        store: store.clone(),
-    };
-
-    tool.call(
-        serde_json::json!({
-            "subject": "测试任务",
-            "description": "描述",
-            "owner": "alice"
-        }),
-        &test_ctx(),
-    )
-    .await;
-
-    let snap = store.snapshot().await;
-    let task = &snap.tasks[0];
-    assert_eq!(task.owner.as_deref(), Some("alice"));
-}
-
-// --- #979: 空白占位符拦截 ---
-
-#[tokio::test]
-async fn test_whitespace_owner_not_stored() {
-    let store = Arc::new(TaskStore::new());
-    let tool = TaskCreateTool {
-        store: store.clone(),
-    };
-
-    tool.call(
-        serde_json::json!({
-            "subject": "测试任务",
-            "description": "描述",
-            "owner": "  "
-        }),
-        &test_ctx(),
-    )
-    .await;
-
-    let snap = store.snapshot().await;
-    let task = &snap.tasks[0];
-    assert_eq!(task.owner, None);
-}
-
-#[tokio::test]
-async fn test_whitespace_session_id_not_stored() {
-    let store = Arc::new(TaskStore::new());
-    let tool = TaskCreateTool {
-        store: store.clone(),
-    };
-
-    tool.call(
-        serde_json::json!({
-            "subject": "测试任务",
-            "description": "描述",
-            "sessionId": "\t"
-        }),
-        &test_ctx(),
-    )
-    .await;
-
-    let snap = store.snapshot().await;
-    let task = &snap.tasks[0];
-    assert_eq!(task.session_id, None);
+    assert!(result.is_error);
+    assert!(result.text.contains("active"), "{}", result.text);
+    assert!(store.list().is_empty());
+    assert!(store.list_batches().is_empty());
 }

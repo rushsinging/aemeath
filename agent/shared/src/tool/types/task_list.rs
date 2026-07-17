@@ -19,7 +19,22 @@ pub struct TaskListInput {
     pub status: Option<String>,
     /// Filter by priority
     pub priority: Option<String>,
-    /// Filter by session ID
-    #[serde(alias = "sessionId")]
-    pub session_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::types::ToolSchema;
+
+    #[test]
+    fn task_list_schema_does_not_publish_session_id() {
+        let schema = TaskListInput::data_schema();
+        let properties = schema["properties"]
+            .as_object()
+            .expect("task list schema properties");
+        assert!(!properties.contains_key("session_id"));
+        assert!(!properties.contains_key("sessionId"));
+        assert!(properties.contains_key("status"));
+        assert!(properties.contains_key("priority"));
+    }
 }

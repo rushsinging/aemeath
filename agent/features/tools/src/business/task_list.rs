@@ -3,10 +3,48 @@ use async_trait::async_trait;
 use serde_json::Value;
 use share::tool::types::task_list::{TaskListInput, TaskListResult};
 use std::sync::Arc;
-use storage::{TaskPriority, TaskStatus, TaskStore};
+use task::{TaskAccess, TaskPriority, TaskStatus};
 
 pub struct TaskListTool {
-    pub store: Arc<TaskStore>,
+    pub access: Arc<dyn TaskAccess>,
+}
+
+fn parse_priority(value: &str) -> Option<TaskPriority> {
+    match value.to_ascii_lowercase().as_str() {
+        "low" => Some(TaskPriority::Low),
+        "normal" | "medium" => Some(TaskPriority::Normal),
+        "high" => Some(TaskPriority::High),
+        "urgent" | "critical" => Some(TaskPriority::Urgent),
+        _ => None,
+    }
+}
+
+/// Temporary anti-corruption mapping while tool results retain the legacy wire DTO.
+fn to_legacy_task(task: &task::Task) -> share::tool::types::task::Task {
+    use share::tool::types::task::{TaskPriority as LegacyPriority, TaskStatus as LegacyStatus};
+    share::tool::types::task::Task {
+        id: task.id().to_string(),
+        subject: task.subject().to_owned(),
+        description: task.description().to_owned(),
+        status: match task.status() {
+            TaskStatus::Pending => LegacyStatus::Pending,
+            TaskStatus::InProgress => LegacyStatus::InProgress,
+            TaskStatus::Completed => LegacyStatus::Completed,
+            TaskStatus::Deleted => LegacyStatus::Deleted,
+        },
+        owner: None,
+        blocked_by: task.blocked_by().iter().map(ToString::to_string).collect(),
+        priority: match task.priority() {
+            TaskPriority::Low => LegacyPriority::Low,
+            TaskPriority::Normal => LegacyPriority::Normal,
+            TaskPriority::High => LegacyPriority::High,
+            TaskPriority::Urgent => LegacyPriority::Urgent,
+        },
+        created_at: task.created_at(),
+        updated_at: task.updated_at(),
+        session_id: task.session_id().map(str::to_owned),
+        batch: task.batch().get(),
+    }
 }
 
 #[async_trait]
@@ -16,11 +54,7 @@ impl TypedTool for TaskListTool {
         "TaskList"
     }
     fn description(&self) -> &str {
-        "List all tasks and their status. Use to discover available work.\n\n\
-         Look for tasks that are pending with no unresolved blocked_by dependencies — \
-         these are ready to execute. You can work on them directly or launch Agent \
-         for tasks that can run in parallel.\n\n\
-         Call this after completing a task to find the next one to work on."
+        "List all tasks and their status. Use to discover pending work with no unresolved dependencies."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_list(lang))
@@ -42,120 +76,45 @@ impl TypedTool for TaskListTool {
 
     async fn call(
         &self,
-        input: serde_json::Value,
+        input: Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<TaskListResult> {
         let args: TaskListInput = match serde_json::from_value(input) {
-            Ok(a) => a,
-            Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
+            Ok(args) => args,
+            Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
-
-        // Parse filters
-        let status_filter = args.status.as_deref().and_then(|s| match s {
+        let status = args.status.as_deref().and_then(|value| match value {
             "pending" => Some(TaskStatus::Pending),
             "in_progress" => Some(TaskStatus::InProgress),
             "completed" => Some(TaskStatus::Completed),
             "deleted" => Some(TaskStatus::Deleted),
             _ => None,
         });
-
-        let priority_filter = args.priority.as_deref().and_then(TaskPriority::parse);
-
-        let session_filter = args.session_id.as_deref();
-
-        // Get tasks with filters
-        let mut tasks = self.store.list().await;
-
-        if let Some(status) = status_filter {
-            tasks.retain(|t| t.status == status);
+        let priority = args.priority.as_deref().and_then(parse_priority);
+        let mut tasks = self.access.list();
+        if let Some(status) = status {
+            tasks.retain(|task| task.status() == status);
         }
-        if let Some(priority) = priority_filter {
-            tasks.retain(|t| t.priority == priority);
+        if let Some(priority) = priority {
+            tasks.retain(|task| task.priority() == priority);
         }
-        if let Some(session_id) = session_filter {
-            tasks.retain(|t| t.session_id.as_deref() == Some(session_id));
-        }
-
-        if tasks.is_empty() {
-            return TypedToolResult::success("No tasks found", TaskListResult { tasks: vec![] });
-        }
-
-        let stats = self.store.stats().await;
-
-        let mut batches_json = serde_json::json!([]);
-        let batches = self.store.list_batches().await;
-        for batch in batches {
-            let batch_tasks = self
-                .store
-                .tasks_in_batch(
-                    batch.id,
-                    &[
-                        TaskStatus::Pending,
-                        TaskStatus::InProgress,
-                        TaskStatus::Completed,
-                    ],
-                )
-                .await;
-            if batch_tasks.is_empty() {
-                continue;
-            }
-            let done = batch_tasks
-                .iter()
-                .filter(|task| task.status == TaskStatus::Completed)
-                .count();
-            batches_json
-                .as_array_mut()
-                .unwrap()
-                .push(serde_json::json!({
-                    "id": batch.id,
-                    "status": format!("{:?}", batch.status),
-                    "done": done,
-                    "total": batch_tasks.len(),
-                    "summary": batch.summary
-                }));
-        }
-
-        let mut tasks_json = serde_json::json!([]);
-        for task in &tasks {
-            let display_id = self.store.format_display_id(&task.id).await;
-            let status_label = match task.status {
-                TaskStatus::Pending => "pending",
-                TaskStatus::InProgress => "in_progress",
-                TaskStatus::Completed => "completed",
-                TaskStatus::Deleted => "deleted",
-            };
-            let priority_label = task.priority.as_str();
-            let is_blocked = self.store.is_blocked(task).await;
-
-            let mut task_obj = serde_json::json!({
-                "id": display_id,
-                "subject": task.subject,
-                "status": status_label,
-                "priority": priority_label,
-                "description": task.description
-            });
-
-            if let Some(ref owner) = task.owner {
-                task_obj["owner"] = serde_json::Value::String(owner.clone());
-            }
-
-            if !task.blocked_by.is_empty() {
-                let dep_displays = self.store.to_display_ids(&task.blocked_by).await;
-                task_obj["blocked_by"] = serde_json::json!(dep_displays);
-                task_obj["is_blocked"] = serde_json::json!(is_blocked);
-            }
-
-            tasks_json.as_array_mut().unwrap().push(task_obj);
-        }
-
-        let msg = format!(
-            "{} tasks ({} pending, {} in_progress, {} completed)",
-            stats.total - stats.deleted,
-            stats.pending,
-            stats.in_progress,
-            stats.completed
-        );
-
-        TypedToolResult::success(msg, TaskListResult { tasks })
+        let stats = self.access.stats();
+        let message = if tasks.is_empty() {
+            "No tasks found".to_owned()
+        } else {
+            format!(
+                "{} tasks ({} pending, {} in_progress, {} completed)",
+                stats.total - stats.deleted,
+                stats.pending,
+                stats.in_progress,
+                stats.completed
+            )
+        };
+        TypedToolResult::success(
+            message,
+            TaskListResult {
+                tasks: tasks.iter().map(to_legacy_task).collect(),
+            },
+        )
     }
 }

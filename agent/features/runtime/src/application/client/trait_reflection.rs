@@ -265,6 +265,7 @@ mod tests {
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
                 task_store: Arc::new(storage::TaskStore::new()),
+                task_access: Arc::new(task::TaskStore::new()),
                 skills_map: std::collections::HashMap::new(),
                 hook_runner: hook::api::HookRunner::empty(),
                 memory_config,

@@ -197,6 +197,7 @@ pub async fn run_loop_gate<Q, I, S>(
     chain: &mut ChatChain,
     segment_id: &str,
     task_store: &storage::TaskStore,
+    task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
 where
@@ -205,7 +206,17 @@ where
     S: ChatEventSink,
 {
     drain_sources(buffer, queue, input_events).await;
-    apply_gate(kind, buffer, sink, chain, segment_id, task_store, is_idle).await
+    apply_gate(
+        kind,
+        buffer,
+        sink,
+        chain,
+        segment_id,
+        task_store,
+        task_access,
+        is_idle,
+    )
+    .await
 }
 
 pub async fn drain_sources<Q, I>(buffer: &mut PendingInputBuffer, queue: &Q, input_events: &I)
@@ -223,6 +234,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_gate<S>(
     kind: GateKind,
     buffer: &mut PendingInputBuffer,
@@ -230,6 +242,7 @@ pub async fn apply_gate<S>(
     chain: &mut ChatChain,
     segment_id: &str,
     task_store: &storage::TaskStore,
+    task_access: &dyn task::TaskAccess,
     is_idle: bool,
 ) -> GateOutcome
 where
@@ -298,11 +311,25 @@ where
             }
             ChatInputEvent::Reset => {
                 if is_idle {
-                    // idle：立即清空会话并通知 UI（保持 idle，不退出 loop）。
+                    // TaskAccess is authoritative since #889. Complete the only
+                    // fallible reset mutation before clearing conversation state,
+                    // so revision exhaustion cannot leave a partial reset.
+                    if let Err(error) = task_access.clear() {
+                        // Clear is atomic; failure (only revision exhaustion for
+                        // the in-memory backing) leaves authoritative state
+                        // untouched. Do not emit SessionReset or clear the
+                        // compatibility store while Tasks still exist.
+                        log::error!(target: LOG_TARGET, "failed to clear authoritative tasks: {error}");
+                        dropped_events = iter.count();
+                        decision = GateDecision::Proceed;
+                        break;
+                    }
+                    // idle：权威 Task 清理成功后再清空会话并通知 UI（保持 idle，不退出 loop）。
                     chain.clear();
                     added.clear();
                     appended_user_messages = 0;
-                    // #567 S5：task_store 清理从 TUI RPC 下沉到 gate（不再调 clear_tasks()）
+                    // Keep clearing the legacy store only as a compatibility
+                    // measure until #890/#891.
                     task_store.clear().await;
                     sink.send_event(RuntimeStreamEvent::SessionReset).await;
                     dropped_events = iter.count();

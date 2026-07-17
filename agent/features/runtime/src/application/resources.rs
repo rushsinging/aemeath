@@ -10,6 +10,7 @@ use hook::api::HookRunner;
 use provider::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
 use storage::TaskStore;
+use task::TaskAccess;
 use tools::api::{AgentRunner, ToolRegistry};
 
 /// Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。
@@ -22,7 +23,12 @@ pub struct RuntimeResources {
     // ── 服务句柄（Arc 共享）──
     pub client: Arc<LlmClient>,
     pub registry: Arc<ToolRegistry>,
+    /// Legacy 持久化兼容句柄（session snapshot/restore、input_gate clear）。
+    /// 仅供 #890/#891 迁移前保留，**不得**下发给 tools/reminder/snapshot 日常链路。
     pub task_store: Arc<TaskStore>,
+    /// Runtime/Tool 日常状态的唯一来源（#889）：工具 registry、reminder、
+    /// status snapshot、finalize 都经此 low-privilege 端口读写 Task 状态。
+    pub task_access: Arc<dyn TaskAccess>,
     pub hook_runner: HookRunner,
     pub agent_runner: Arc<dyn AgentRunner>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,

@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
-use storage::TaskStore;
 use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
 #[async_trait]
@@ -165,11 +164,13 @@ impl AgentRunner for CliAgentRunner {
             );
         };
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
-        let sub_task_store = std::sync::Arc::new(TaskStore::new());
+        // Sub Run 用独立的 task::TaskStore access，不共享父 Run 的 Task 状态（#889）。
+        let sub_task_access: std::sync::Arc<dyn task::TaskAccess> =
+            std::sync::Arc::new(task::TaskStore::new());
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        tools::api::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
+        tools::api::register_subagent_tools(&mut sub_registry, sub_task_access, sub_skills);
         let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
