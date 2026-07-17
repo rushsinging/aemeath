@@ -13,9 +13,10 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::ports::{
-    ContextPort, EventSink, HookPort, InputBuffer, MemoryPort, PolicyPort, ProviderPort,
-    ReasoningPort, TaskPort, ToolCatalogPort, ToolExecutionPort, UsageSink, WorkspacePort,
+    ContextPort, EventSink, HookPort, InputBuffer, MemoryPort, PolicyPort, ProviderPort, TaskPort,
+    ToolCatalogPort, ToolExecutionPort, UsageSink, WorkspacePort,
 };
+use workflow::api::ReasoningPort;
 
 /// per-Run 协作式取消作用域；属于 RuntimeContext 活资源，不持久化。
 ///

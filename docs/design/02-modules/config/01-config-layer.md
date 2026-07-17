@@ -319,6 +319,7 @@ impl ConfigSnapshot {
 - **复用 Config 字段定义**——避免重复维护
 - **不采用裸 `Arc<Config>`**（暴露 pub 字段）
 - **不采用独立 struct**（字段重复维护）
+- **accessor 返回最终有效值**——`max_tool_concurrency()` / `max_agent_concurrency()` 将底层 `0` 归一为 Config domain 的唯一默认值；Runtime 只叠加非零 CLI override，**NEVER** 复制 `10` / `4` 等业务默认值
 
 ### 4.2 active state 与 watch channel
 

@@ -37,8 +37,7 @@ use crate::application::loop_engine::{
 use crate::domain::agent_run::RunDomainEvent;
 use crate::LOG_TARGET;
 use context::session::ChatChain;
-use workflow::api::ReasoningSignal;
-use workflow::ReasoningGraph;
+use workflow::api::{ReasoningPort, ReasoningSignal};
 
 /// Main-chat adapter for the shared run loop.
 ///
@@ -77,8 +76,7 @@ where
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
     pub(crate) active_summary_arc: &'a Arc<std::sync::Mutex<Option<String>>>,
-    pub(crate) reasoning_graph: &'a mut Option<ReasoningGraph>,
-    pub(crate) session_reasoning: provider::ReasoningLevel,
+    pub(crate) reasoning: &'a dyn ReasoningPort,
     pub(crate) save_chain: &'a crate::application::chat::looping::loop_context::SaveChainFn,
     pub(crate) pending_input: &'a mut PendingInputBuffer,
     pub(crate) deferred_user_inputs: &'a mut VecDeque<sdk::ChatInputEvent>,
@@ -307,16 +305,7 @@ where
             &effective_system_blocks,
             &tool_schemas,
         );
-        let requested_reasoning = if matches!(self.session_reasoning, provider::ReasoningLevel::Off)
-        {
-            provider::ReasoningLevel::Off
-        } else {
-            self.reasoning_graph
-                .as_ref()
-                .filter(|graph| graph.enabled())
-                .map(|graph| graph.current_effort())
-                .unwrap_or(self.session_reasoning)
-        };
+        let requested_reasoning = self.reasoning.current_requested_level();
         let invocation_scope = self
             .client
             .invocation_scope(
@@ -470,17 +459,15 @@ where
             ));
         }
 
-        if let Some(graph) = self.reasoning_graph.as_mut() {
-            let previous = graph.current_node();
-            if graph.transition(ReasoningSignal::TextOnly) {
-                self.sink
-                    .send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                        node: graph.current_node(),
-                        effort: graph.current_effort(),
-                        prev: previous,
-                    })
-                    .await;
-            }
+        let observation = self.reasoning.observe(ReasoningSignal::TextOnly);
+        if observation.changed() {
+            self.sink
+                .send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                    node: observation.current,
+                    effort: observation.requested,
+                    prev: observation.previous,
+                })
+                .await;
         }
         if should_run_turn_reflection(
             self.memory_config,
@@ -645,37 +632,35 @@ where
             return Err(LoopEngineError::Cancelled);
         }
 
-        if let Some(graph) = self.reasoning_graph.as_mut() {
-            let metadata: HashMap<&str, (Option<&str>, Option<&str>)> = raw_calls
-                .iter()
-                .map(|call| {
-                    let command = (call.name == "Bash")
-                        .then(|| call.input.get("command").and_then(|value| value.as_str()))
-                        .flatten();
-                    let phase = call.input.get("phase").and_then(|value| value.as_str());
-                    (call.provider_id.as_str(), (command, phase))
-                })
-                .collect();
-            for result in &all_results {
-                let (command, phase) = metadata
-                    .get(result.provider_id.as_str())
-                    .copied()
-                    .unwrap_or((None, None));
-                let previous = graph.current_node();
-                if graph.transition(ReasoningSignal::ToolCompleted {
-                    tool_name: result.tool_name.clone(),
-                    bash_command: command.map(str::to_string),
-                    is_error: result.outcome.is_error,
-                    declared_phase: phase.map(str::to_string),
-                }) {
-                    self.sink
-                        .send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                            node: graph.current_node(),
-                            effort: graph.current_effort(),
-                            prev: previous,
-                        })
-                        .await;
-                }
+        let metadata: HashMap<&str, (Option<&str>, Option<&str>)> = raw_calls
+            .iter()
+            .map(|call| {
+                let command = (call.name == "Bash")
+                    .then(|| call.input.get("command").and_then(|value| value.as_str()))
+                    .flatten();
+                let phase = call.input.get("phase").and_then(|value| value.as_str());
+                (call.provider_id.as_str(), (command, phase))
+            })
+            .collect();
+        for result in &all_results {
+            let (command, phase) = metadata
+                .get(result.provider_id.as_str())
+                .copied()
+                .unwrap_or((None, None));
+            let observation = self.reasoning.observe(ReasoningSignal::ToolCompleted {
+                tool_name: result.tool_name.clone(),
+                bash_command: command.map(str::to_string),
+                is_error: result.outcome.is_error,
+                declared_phase: phase.map(str::to_string),
+            });
+            if observation.changed() {
+                self.sink
+                    .send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                        node: observation.current,
+                        effort: observation.requested,
+                        prev: observation.previous,
+                    })
+                    .await;
             }
         }
         let has_task_mutation = all_results.iter().any(|result| {

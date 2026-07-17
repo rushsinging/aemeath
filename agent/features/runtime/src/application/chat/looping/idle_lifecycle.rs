@@ -7,24 +7,34 @@ use crate::application::chat::looping::input_gate::{
 };
 use crate::LOG_TARGET;
 use context::session::ChatChain;
+use share::reasoning::ReasoningLevel;
+use workflow::api::ReasoningPort;
 
-pub(crate) async fn execute_set_thinking<S>(
-    current: provider::ReasoningLevel,
-    sink: &S,
+fn requested_level_for_thinking(
+    reasoning: &dyn ReasoningPort,
     desired: Option<bool>,
-) -> provider::ReasoningLevel
-where
-    S: ChatEventSink,
-{
-    use provider::ReasoningLevel;
-    let new_state = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
-    let level = if new_state {
+) -> ReasoningLevel {
+    let current = reasoning.current_requested_level();
+    let enabled = desired.unwrap_or(matches!(current, ReasoningLevel::Off));
+    reasoning.set_level(if enabled {
         ReasoningLevel::Medium
     } else {
         ReasoningLevel::Off
-    };
-    let label = if new_state { "ON" } else { "OFF" };
-    sink.send_event(RuntimeStreamEvent::ThinkingChanged { enabled: new_state })
+    })
+}
+
+pub(crate) async fn execute_set_thinking<S>(
+    reasoning: &dyn ReasoningPort,
+    sink: &S,
+    desired: Option<bool>,
+) -> ReasoningLevel
+where
+    S: ChatEventSink,
+{
+    let level = requested_level_for_thinking(reasoning, desired);
+    let enabled = !matches!(level, ReasoningLevel::Off);
+    let label = if enabled { "ON" } else { "OFF" };
+    sink.send_event(RuntimeStreamEvent::ThinkingChanged { enabled })
         .await;
     sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
         "[thinking mode: {label}]"
@@ -92,5 +102,57 @@ where
             IdleResult::Shutdown => return IdleResult::Shutdown,
             IdleResult::CommandRequested(command) => return IdleResult::CommandRequested(command),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use workflow::api::{ReasoningNode, ReasoningObservation, ReasoningSignal};
+
+    struct StubReasoningPort {
+        requested: Mutex<ReasoningLevel>,
+    }
+
+    impl ReasoningPort for StubReasoningPort {
+        fn observe(&self, _signal: ReasoningSignal) -> ReasoningObservation {
+            ReasoningObservation {
+                previous: ReasoningNode::Idle,
+                current: ReasoningNode::Idle,
+                requested: self.current_requested_level(),
+            }
+        }
+
+        fn current_requested_level(&self) -> ReasoningLevel {
+            *self.requested.lock().unwrap()
+        }
+
+        fn set_level(&self, level: ReasoningLevel) -> ReasoningLevel {
+            *self.requested.lock().unwrap() = level;
+            level
+        }
+
+        fn reset_default_level(&self, level: ReasoningLevel) -> ReasoningLevel {
+            *self.requested.lock().unwrap() = level;
+            level
+        }
+    }
+
+    #[test]
+    fn requested_level_for_thinking_uses_port_state_and_writes_toggle() {
+        let port = StubReasoningPort {
+            requested: Mutex::new(ReasoningLevel::Off),
+        };
+
+        assert_eq!(
+            requested_level_for_thinking(&port, Some(true)),
+            ReasoningLevel::Medium
+        );
+        assert_eq!(port.current_requested_level(), ReasoningLevel::Medium);
+        assert_eq!(
+            requested_level_for_thinking(&port, None),
+            ReasoningLevel::Off
+        );
     }
 }

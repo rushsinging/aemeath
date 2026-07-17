@@ -166,8 +166,7 @@ pub async fn from_args_with_workspace(
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
-        snapshot.max_tool_concurrency(),
-        snapshot.max_agent_concurrency(),
+        &snapshot,
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,
@@ -182,9 +181,7 @@ pub async fn from_args_with_workspace(
 
     // 18. 组装 context
     let memory_config = snapshot.memory().clone();
-    let reasoning_graph_config = Some(workflow::GraphRuntimeConfig::from_shared(
-        snapshot.reasoning_graph(),
-    ));
+    let reasoning_graph_config = snapshot.reasoning_graph().clone();
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
             client,
