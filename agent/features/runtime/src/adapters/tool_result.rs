@@ -4,7 +4,7 @@
 //! See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
 //! Phase 0a for the full design.
 use serde::de::DeserializeOwned;
-use share::tool::types::{
+use tools::types::{
     AgentResult, AskUserQuestionResult, BashResult, BriefResult, EditResult, EnterWorktreeResult,
     ExitWorktreeResult, GlobResult, GrepResult, ListMcpResourcesResult, LspResult,
     McpManagerResult, McpToolResult, MemoryResult, PlanModeResult, ReadMcpResourceResult,

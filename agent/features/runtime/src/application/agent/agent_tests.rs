@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, Notify};
-use tools::api::{
+use tools::{
     Tool, ToolExecutionContext, ToolRegistry, TypedTool, TypedToolAdapter, TypedToolResult,
 };
 
@@ -55,7 +55,7 @@ impl TypedTool for TimedTool {
 fn test_ctx() -> ToolExecutionContext {
     let cwd = std::env::current_dir().unwrap();
     ToolExecutionContext {
-        resources: tools::api::ToolResources {
+        resources: tools::ToolResources {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),

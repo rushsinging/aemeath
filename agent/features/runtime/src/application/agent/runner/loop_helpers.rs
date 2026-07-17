@@ -183,7 +183,7 @@ mod tests {
             sdk::ids::ToolCallId::from_legacy_or_new("runtime-id"),
             "provider-id".to_string(),
             "Bash".to_string(),
-            share::tool::ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
+            tools::ToolOutcome::new("ok", serde_json::json!({ "text": "ok" }), Vec::new()),
         )];
 
         let materializer = crate::application::testing::test_tool_result_materializer();
@@ -211,7 +211,7 @@ mod tests {
             sdk::ids::ToolCallId::from_legacy_or_new("tool-oversized"),
             "provider-oversized".to_string(),
             "Bash".to_string(),
-            share::tool::ToolOutcome::new(
+            tools::ToolOutcome::new(
                 oversized,
                 serde_json::json!({ "text": "oversized" }),
                 Vec::new(),

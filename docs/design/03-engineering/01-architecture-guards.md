@@ -131,14 +131,14 @@
 
 | 模式 | 理由 |
 |---|---|
-| `\bToolRegistry\b` | 属于 `tools::api` |
+| `\bToolRegistry\b` | 属于 `tools` crate-root façade |
 | `\bTaskStore\b` / `\bTaskStoreStats\b` | 属于 Storage crate-root façade |
 | `\bstd::fs::` / `\btokio::fs::` / `\bFile::` / `read_to_string` / `write(` / `create_dir` | share 不得做 fs IO |
 | `\bstd::process::` / `\btokio::process::` / `Command::new` | share 不得 spawn process |
 | `\breqwest::` / `\bhyper::` / `\bureq::` / `\bhttp::` | share 不得做网络/http IO |
 | `\bparking_lot::` / `\bRwLock\b` | 状态容器不属于 share |
 | `#[\s*async_trait\s*]` | async trait 行为属于 feature |
-| `\btrait\s+(Tool|AgentRunner)\b` | 行为 trait 属于 `tools::api` |
+| `\btrait\s+(Tool|AgentRunner)\b` | 行为 trait 属于 `tools` crate-root façade |
 | `Arc<\s*Mutex\b` | 运行时状态不属于 share kernel |
 | `\btokio::sync::(?:mpsc\|Semaphore\|oneshot\|{ ... })` | 并发原语属于 feature |
 | `\bCancellationToken\b` | 属于 feature |
@@ -511,7 +511,7 @@
 
 - **功能**：验证 Runtime 内只有一个共享 Loop Engine 实现，禁止在 `agent/shared/` 或其他 feature crate 中出现平行 run-loop 实现。
 - **守护**：确保 Loop Engine 的单一真相——所有 Main / Sub Run 共用同一驱动骨架（[03-loop-and-state-machine.md](../02-modules/runtime/03-loop-and-state-machine.md)）。
-- **检查方式**：扫描 `agent/shared/src/` 中是否存在 `run_loop` / `drive_loop` 等平行 loop 实现。
+- **检查方式**：确认 Runtime 的 Main/Sub 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。
 - **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
 
 ## 23. check-run-control-boundary.sh

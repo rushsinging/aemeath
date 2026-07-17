@@ -1,7 +1,7 @@
 use crate::LOG_TARGET;
 use share::message::{ContentBlock, Message};
-use share::tool::{ToolOutcome, ToolResult};
-use tools::api::{Tool, ToolExecutionContext, ToolRegistry};
+use tools::{Tool, ToolExecutionContext, ToolRegistry};
+use tools::{ToolOutcome, ToolResult};
 
 /// 一次工具调用的完整结果。取代历史的 6 元组 `ToolResultTuple` / `UiToolResult`，
 /// 让管线全程按字段名访问而非位置取值。
