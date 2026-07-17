@@ -5,7 +5,7 @@ use share::message::Message;
 use share::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;
 use std::pin::Pin;
-use workflow::ReasoningNode;
+use workflow::api::ReasoningNode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeTurnContext {

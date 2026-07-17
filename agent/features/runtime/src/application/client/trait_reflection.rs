@@ -178,8 +178,9 @@ fn parse_memory_category(value: &str) -> Result<share::memory::MemoryCategory> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::testing::text_completion_stream;
     use async_trait::async_trait;
-    use provider::{LlmProvider, StopReason, StreamHandler, StreamResponse, SystemBlock, Usage};
+    use provider::{InvocationStream, LlmProvider, ProviderError, SystemBlock};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -207,30 +208,27 @@ mod tests {
 
     struct StaticReflectionProvider {
         response: String,
-        usage: Usage,
+        input_tokens: u32,
+        output_tokens: u32,
         calls: Arc<AtomicUsize>,
     }
 
     #[async_trait]
     impl LlmProvider for StaticReflectionProvider {
-        async fn stream_message(
+        async fn invocation_stream(
             &self,
             _scope: &provider::InvocationScope,
             _system: &[SystemBlock],
             _messages: &[share::message::Message],
             _tool_schemas: &[serde_json::Value],
-            handler: &mut dyn StreamHandler,
             _cancel: &CancellationToken,
-        ) -> std::result::Result<StreamResponse, provider::LlmError> {
+        ) -> std::result::Result<InvocationStream, ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            handler.on_text(&self.response);
-            Ok(StreamResponse {
-                assistant_message: share::message::Message::placeholder(
-                    share::message::Role::Assistant,
-                ),
-                usage: self.usage.clone(),
-                stop_reason: StopReason::EndTurn,
-            })
+            Ok(text_completion_stream(
+                self.response.clone(),
+                self.input_tokens,
+                self.output_tokens,
+            ))
         }
 
         fn model_name(&self) -> &str {
@@ -253,14 +251,8 @@ mod tests {
         let client = Arc::new(provider::LlmClient::from_provider(Arc::new(
             StaticReflectionProvider {
                 response: response.to_string(),
-                usage: Usage {
-                    input_tokens: 11,
-                    output_tokens: 22,
-                    cached_tokens: None,
-                    cache_creation_tokens: None,
-                    reasoning_tokens: None,
-                    total_tokens: None,
-                },
+                input_tokens: 11,
+                output_tokens: 22,
                 calls,
             },
         )));
@@ -280,7 +272,7 @@ mod tests {
                 allow_all: false,
                 context_size: 200_000,
                 language: "en".to_string(),
-                reasoning_graph_config: None,
+                reasoning_graph_config: share::config::ReasoningGraphConfig::default(),
             },
             verbose: false,
             resume: None,

@@ -8,7 +8,7 @@ use crate::application::chat::looping::input_gate::InputEventDrainPort;
 use crate::application::chat::looping::queue::QueueDrainPort;
 use std::sync::Arc;
 use tools::api::ToolRegistry;
-use workflow::ReasoningGraph;
+use workflow::api::ReasoningPort;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
 /// `(LlmClient, ModelSwitchResult)` 或 `String` 错误。
@@ -72,9 +72,8 @@ where
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
     pub language: String,
-    /// Reasoning Graph 实例。`None` = 未启用（零行为变更）；`Some` = 启用，
-    /// loop 在 4 个集成点调 transition 调节 effort。
-    pub reasoning_graph: Option<ReasoningGraph>,
+    /// Workflow-owned Main adaptive reasoning capability。
+    pub reasoning: Arc<dyn ReasoningPort>,
     /// Compact 时冻结的旧链（保留在 session 文件中供审计，resume 不加载）。
     pub frozen_chats: Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     /// 活跃链的 compact summary（走 system 通道注入）。

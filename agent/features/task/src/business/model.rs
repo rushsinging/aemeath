@@ -29,6 +29,7 @@ macro_rules! numeric_id {
 
 numeric_id!(TaskId);
 numeric_id!(BatchId);
+numeric_id!(TaskRevision);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +84,12 @@ pub enum TaskCommandError {
     InvalidTaskSubject,
     #[error("批次摘要不能为空")]
     InvalidBatchSummary,
+    #[error("任务 ID 已耗尽")]
+    TaskIdExhausted,
+    #[error("批次 ID 已耗尽")]
+    BatchIdExhausted,
+    #[error("修订号已耗尽")]
+    RevisionExhausted,
     #[error("非法任务状态迁移：{from:?} -> {to:?}")]
     IllegalTransition { from: TaskStatus, to: TaskStatus },
     #[error("删除只能通过聚合删除命令执行")]
@@ -113,6 +120,8 @@ pub enum TaskCommandError {
     TaskBlocked { id: TaskId, blocked_by: Vec<TaskId> },
     #[error("批次 {active} 已经 active，不能恢复批次 {requested}")]
     ActiveBatchConflict { active: BatchId, requested: BatchId },
+    #[error("批次 {id} 当前状态为 {status:?}，只有 active 批次才能记录轮次")]
+    BatchNotActive { id: BatchId, status: BatchStatus },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +142,19 @@ pub enum TaskEvent {
         task_id: TaskId,
         blocked_by_id: TaskId,
     },
+    TaskPriorityChanged {
+        task_id: TaskId,
+        from: TaskPriority,
+        to: TaskPriority,
+    },
+    TaskTagAdded {
+        task_id: TaskId,
+        tag: String,
+    },
+    TaskTagRemoved {
+        task_id: TaskId,
+        tag: String,
+    },
     TaskDeleted {
         task_id: TaskId,
     },
@@ -142,6 +164,25 @@ pub enum TaskEvent {
 pub struct TaskCommandResult<T> {
     pub value: T,
     pub events: Vec<TaskEvent>,
+    revision: Option<TaskRevision>,
+}
+
+impl<T> TaskCommandResult<T> {
+    pub fn revision(&self) -> Option<TaskRevision> {
+        self.revision
+    }
+
+    pub(crate) fn uncommitted(value: T, events: Vec<TaskEvent>) -> Self {
+        Self {
+            value,
+            events,
+            revision: None,
+        }
+    }
+
+    pub(crate) fn commit(&mut self, revision: TaskRevision) {
+        self.revision = Some(revision);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,7 +258,7 @@ pub struct Task {
     completed_at: Option<u64>,
 }
 impl Task {
-    pub fn create(
+    pub(crate) fn create(
         id: TaskId,
         batch: BatchId,
         spec: TaskCreateSpec,
@@ -240,10 +281,7 @@ impl Task {
             started_at: None,
             completed_at: None,
         };
-        TaskCommandResult {
-            value: task,
-            events: vec![TaskEvent::TaskCreated { task_id: id }],
-        }
+        TaskCommandResult::uncommitted(task, vec![TaskEvent::TaskCreated { task_id: id }])
     }
     #[cfg(test)]
     pub(crate) fn with_status(
@@ -341,17 +379,20 @@ impl Task {
     pub fn priority(&self) -> TaskPriority {
         self.priority
     }
-    pub fn set_priority(&mut self, priority: TaskPriority, updated_at: u64) {
+    pub(crate) fn set_priority(&mut self, priority: TaskPriority, updated_at: u64) {
+        if self.priority == priority {
+            return;
+        }
         self.priority = priority;
         self.updated_at = updated_at;
     }
-    pub fn add_tag(&mut self, tag: String, updated_at: u64) {
+    pub(crate) fn add_tag(&mut self, tag: String, updated_at: u64) {
         if !self.tags.contains(&tag) {
             self.tags.push(tag);
             self.updated_at = updated_at;
         }
     }
-    pub fn remove_tag(&mut self, tag: &str, updated_at: u64) {
+    pub(crate) fn remove_tag(&mut self, tag: &str, updated_at: u64) {
         let old_len = self.tags.len();
         self.tags.retain(|existing| existing != tag);
         if self.tags.len() != old_len {
@@ -370,7 +411,7 @@ impl Task {
     pub fn completed_at(&self) -> Option<u64> {
         self.completed_at
     }
-    pub fn transition_to(
+    pub(crate) fn transition_to(
         &mut self,
         to: TaskStatus,
         updated_at: u64,
@@ -400,14 +441,14 @@ impl Task {
         if to == TaskStatus::Completed {
             self.completed_at = Some(updated_at);
         }
-        Ok(TaskCommandResult {
-            value: self.clone(),
-            events: vec![TaskEvent::TaskStatusChanged {
+        Ok(TaskCommandResult::uncommitted(
+            self.clone(),
+            vec![TaskEvent::TaskStatusChanged {
                 task_id: self.id,
                 from,
                 to,
             }],
-        })
+        ))
     }
 }
 
@@ -421,7 +462,7 @@ pub struct Batch {
     silence_turns: u64,
 }
 impl Batch {
-    pub fn create(id: BatchId, spec: BatchCreateSpec, created_at: u64) -> Self {
+    pub(crate) fn create(id: BatchId, spec: BatchCreateSpec, created_at: u64) -> Self {
         Self {
             id,
             summary: Some(spec.summary),
@@ -460,7 +501,39 @@ impl Batch {
     pub fn silence_turns(&self) -> u64 {
         self.silence_turns
     }
-    pub fn transition_to(&mut self, to: BatchStatus) -> Result<(), TaskCommandError> {
+    /// Records a turn outcome for this batch. Only an `Active` batch may
+    /// record turns; `Paused`/`Archived` batches reject the call with a typed
+    /// error and are left completely unchanged. Returns `Ok(true)` when the
+    /// call produced an actual state change, or `Ok(false)` when the request
+    /// was already reflected by the current state (idempotent no-op: the
+    /// same active turn with `silence_turns` already `0`, or a silent turn
+    /// once `silence_turns` has already saturated at `u64::MAX`).
+    pub(crate) fn record_turn(
+        &mut self,
+        turn: u64,
+        active: bool,
+    ) -> Result<bool, TaskCommandError> {
+        if self.status != BatchStatus::Active {
+            return Err(TaskCommandError::BatchNotActive {
+                id: self.id,
+                status: self.status,
+            });
+        }
+        if active {
+            if self.last_active_turn == turn && self.silence_turns == 0 {
+                return Ok(false);
+            }
+            self.last_active_turn = turn;
+            self.silence_turns = 0;
+        } else {
+            if self.silence_turns == u64::MAX {
+                return Ok(false);
+            }
+            self.silence_turns = self.silence_turns.saturating_add(1);
+        }
+        Ok(true)
+    }
+    pub(crate) fn transition_to(&mut self, to: BatchStatus) -> Result<(), TaskCommandError> {
         let from = self.status;
         if !matches!(
             (from, to),

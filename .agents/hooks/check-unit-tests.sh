@@ -20,6 +20,59 @@ echo "[hook-env] PWD=$PWD"
 # old public APIs from local path dependencies.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/hook-tests}"
 
+crate_timeout_secs="${AEMEATH_UNIT_TEST_TIMEOUT_SECS:-180}"
+if [[ ! "$crate_timeout_secs" =~ ^[1-9][0-9]*$ ]]; then
+  echo "AEMEATH_UNIT_TEST_TIMEOUT_SECS must be a positive integer, got: $crate_timeout_secs" >&2
+  exit 2
+fi
+
+run_with_timeout() {
+  local package="$1"
+  shift
+
+  perl -e '
+    use strict;
+    use warnings;
+    use POSIX qw(setpgid);
+
+    my ($timeout, $package, @command) = @ARGV;
+    my $pid = fork();
+    die "fork failed: $!\n" unless defined $pid;
+
+    if ($pid == 0) {
+      setpgid(0, 0) or die "setpgid failed: $!\n";
+      exec { $command[0] } @command;
+      die "exec failed: $!\n";
+    }
+
+    my $timed_out = 0;
+    local $SIG{ALRM} = sub {
+      $timed_out = 1;
+      kill "TERM", -$pid;
+      select undef, undef, undef, 0.2;
+      kill "KILL", -$pid;
+    };
+
+    alarm $timeout;
+    waitpid($pid, 0);
+    my $status = $?;
+    alarm 0;
+
+    if ($timed_out) {
+      print STDERR "[hook-timeout] package $package exceeded ${timeout}s\n";
+      exit 124;
+    }
+    if ($status == -1) {
+      print STDERR "[hook-error] failed to wait for package $package: $!\n";
+      exit 1;
+    }
+    if ($status & 127) {
+      exit 128 + ($status & 127);
+    }
+    exit $status >> 8;
+  ' "$crate_timeout_secs" "$package" "$@"
+}
+
 packages=(
   share
   workflow
@@ -37,11 +90,11 @@ packages=(
 
 for package in "${packages[@]}"; do
   if [[ "$package" == "cli" ]]; then
-    echo "==> cargo test -p cli --bin aemeath"
-    cargo test -p cli --bin aemeath
+    echo "==> cargo test -p cli --bin aemeath (timeout: ${crate_timeout_secs}s)"
+    run_with_timeout "$package" cargo test -p cli --bin aemeath
   else
-    echo "==> cargo test -p ${package} --lib"
-    cargo test -p "$package" --lib
+    echo "==> cargo test -p ${package} --lib (timeout: ${crate_timeout_secs}s)"
+    run_with_timeout "$package" cargo test -p "$package" --lib
   fi
   echo
 done

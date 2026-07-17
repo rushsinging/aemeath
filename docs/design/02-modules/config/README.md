@@ -52,4 +52,5 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-17 | #999 行为等价目录迁移：纯配置模型与策略归入 `domain/`，外部来源及路径解析归入 `adapters/`；保留既有 `share::config::*` 公共 façade，语义接线仍由 #933–#935 承接 | [#999](https://github.com/rushsinging/aemeath/issues/999) |
 | 2026-07-16 | 冻结 Config Target 物理目录：扁平 effective-config 核心 + 外部来源 `adapters/` 技术目录，明确不建 `capabilities/` 或横向 `ports/` | [#972](https://github.com/rushsinging/aemeath/issues/972) |

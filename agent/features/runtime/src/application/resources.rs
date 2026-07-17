@@ -38,7 +38,6 @@ pub struct RuntimeResources {
     /// Language code for prompt/reminder text selection (`"en"` / `"zh"`).
     pub language: String,
 
-    // ── Reasoning Graph 配置（session 级，loop 时实例化）──
-    /// Reasoning Graph 配置。`enabled=false` 时不创建 graph 实例（None）。
-    pub reasoning_graph_config: Option<workflow::GraphRuntimeConfig>,
+    /// Main adaptive reasoning 的 Config-owned 原始快照。
+    pub reasoning_graph_config: share::config::ReasoningGraphConfig,
 }

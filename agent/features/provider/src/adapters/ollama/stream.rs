@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use super::STREAM_IDLE_TIMEOUT;
 use crate::adapters::openai_compatible::reasoning_normalizer::ReasoningDeltaNormalizer;
 use crate::domain::invoke::StreamResponse;
-use crate::ports::StreamHandler;
+use crate::ports::LegacyStreamSink;
 use crate::LOG_TARGET;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
@@ -20,7 +20,7 @@ use crate::LOG_TARGET;
 /// Tool calls typically arrive in the final `done:true` chunk for qwen3-style models.
 pub(crate) async fn parse_ollama_stream(
     response: reqwest::Response,
-    handler: &mut dyn StreamHandler,
+    handler: &mut dyn LegacyStreamSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();

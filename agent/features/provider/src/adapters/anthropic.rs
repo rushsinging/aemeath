@@ -11,9 +11,9 @@ use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
     HttpFailureKind, NetworkFailureKind,
 };
-use crate::adapters::stream::parse_stream;
+use crate::adapters::stream::{parse_invocation_stream, parse_stream};
 use crate::domain::invoke::{CreateMessageRequest, StreamResponse, SystemBlock};
-use crate::ports::{LlmProvider, StreamHandler};
+use crate::ports::{LegacyStreamSink, LlmProvider};
 
 use message_conversion::{
     apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas,
@@ -96,17 +96,155 @@ impl AnthropicProvider {
         );
         Ok(headers)
     }
-}
 
-#[async_trait]
-impl LlmProvider for AnthropicProvider {
-    async fn stream_message(
+    pub(crate) async fn invoke_stream(
         &self,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(crate::ProviderError::cancelled());
+        }
+        let mut api_messages = convert_messages(messages);
+        apply_message_cache_breakpoint(&mut api_messages);
+        let mut cached_tools = sanitize_tool_schemas(tool_schemas);
+        if let Some(last_tool) = cached_tools.last_mut() {
+            if let Some(object) = last_tool.as_object_mut() {
+                object.insert(
+                    "cache_control".to_string(),
+                    serde_json::json!({"type": "ephemeral"}),
+                );
+            }
+        }
+        let effort = match scope.effective_reasoning() {
+            crate::ports::ReasoningLevel::Off => None,
+            level => Some(level.as_str().to_string()),
+        };
+        let request = CreateMessageRequest::new(
+            scope.model().to_string(),
+            scope.max_tokens(),
+            effort,
+            system.to_vec(),
+            api_messages,
+            cached_tools,
+            true,
+        );
+        let request_json = request.into_json();
+        let endpoint = format!("{}/v1/messages", self.base_url);
+        let request_bytes = serde_json::to_string(&request_json)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let context = HttpAttemptContext {
+            driver: "anthropic",
+            api: "messages_stream",
+            provider: "anthropic",
+            model: scope.model(),
+            method: "POST",
+            endpoint: &endpoint,
+            attempt: 1,
+            max_attempts: 1,
+            message_count: messages.len(),
+            tool_count: tool_schemas.len(),
+            request_bytes,
+        };
+        let response = HttpAttemptExecutor::execute(
+            self.http
+                .post(&endpoint)
+                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .json(&request_json),
+            &context,
+            cancel,
+        )
+        .await
+        .map_err(|failure| {
+            failure.log(AttemptDisposition::FinalFailure);
+            provider_error_from_attempt(failure)
+        })?
+        .response;
+        Ok(parse_invocation_stream(
+            response,
+            scope.effective_reasoning(),
+            cancel.child_token(),
+        ))
+    }
+}
+
+fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
+    let kind = match error {
+        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
+        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
+        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
+        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
+        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
+        crate::LlmError::StreamTruncated { .. } => crate::ProviderErrorKind::StreamTruncated,
+        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
+        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
+    };
+    crate::ProviderError::fatal(kind, error.to_string())
+}
+
+fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
+    match failure {
+        HttpAttemptFailure::Cancelled => crate::ProviderError::cancelled(),
+        HttpAttemptFailure::Network { source, kind, .. } => crate::ProviderError::fatal(
+            match kind {
+                NetworkFailureKind::Timeout => crate::ProviderErrorKind::Timeout,
+                _ => crate::ProviderErrorKind::Network,
+            },
+            source.to_string(),
+        ),
+        HttpAttemptFailure::Http {
+            status, kind, body, ..
+        } => {
+            let error_kind = match kind {
+                HttpFailureKind::RateLimited => crate::ProviderErrorKind::RateLimited,
+                HttpFailureKind::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
+                HttpFailureKind::Server => crate::ProviderErrorKind::UpstreamUnavailable,
+                HttpFailureKind::Client => crate::ProviderErrorKind::InvalidRequest,
+            };
+            let mut error = crate::ProviderError::fatal(error_kind, body.text());
+            error.provider_code = Some(status.to_string());
+            error
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for AnthropicProvider {
+    async fn invocation_stream(
+        &self,
+        scope: &crate::InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        cancel: &CancellationToken,
+    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+        self.invoke_stream(scope, system, messages, tool_schemas, cancel)
+            .await
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    fn provider_name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        crate::ports::ReasoningLevel::Max
+    }
+
+    async fn legacy_stream_message(
+        &self,
+        scope: &crate::InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
         let mut api_messages = convert_messages(messages);
@@ -339,25 +477,13 @@ impl LlmProvider for AnthropicProvider {
 
         Err(last_error.unwrap_or(crate::LlmError::Network("max retries exceeded".to_string())))
     }
-
-    fn model_name(&self) -> &str {
-        &self.model
-    }
-
-    fn provider_name(&self) -> &str {
-        "anthropic"
-    }
-
-    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        crate::ports::ReasoningLevel::Max
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::AnthropicProvider;
     use crate::domain::invoke::{CreateMessageRequest, InvocationScope};
-    use crate::ports::{LlmProvider, ReasoningLevel, StreamHandler};
+    use crate::ports::{LegacyStreamSink, LlmProvider, ReasoningLevel};
     use share::message::Message;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -366,7 +492,7 @@ mod tests {
 
     struct NoopHandler;
 
-    impl StreamHandler for NoopHandler {
+    impl LegacyStreamSink for NoopHandler {
         fn on_text(&mut self, _text: &str) {}
         fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
         fn on_error(&mut self, _error: &str) {}
@@ -397,7 +523,117 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_message_returns_context_too_long_on_413_without_retrying() {
+    async fn llm_client_invocation_stream_reaches_anthropic_without_callback() {
+        use futures_util::StreamExt;
+
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"production\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let (base_url, request_count) = spawn_counting_server(leaked).await;
+        let client = crate::LlmClient::from_config(crate::LlmConfigOptions {
+            driver: crate::ProviderDriverKind::Anthropic,
+            api_key: "test-key".to_string(),
+            base_url: Some(base_url),
+            model: "test-model".to_string(),
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_config: None,
+            openai_config: None,
+            timeout_secs: 60,
+        });
+        let scope =
+            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+                .expect("valid scope");
+
+        let events: Vec<_> = client
+            .invocation_stream(
+                &scope,
+                &[],
+                &[Message::user("hi")],
+                &[],
+                &CancellationToken::new(),
+            )
+            .await
+            .expect("production stream entry succeeds")
+            .collect()
+            .await;
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            &events[..],
+            [
+                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(text)),
+                crate::InvocationEvent::Completed(_)
+            ] if text == "production"
+        ));
+    }
+
+    #[tokio::test]
+    async fn invoke_stream_emits_ordered_deltas_and_single_completion_from_one_request() {
+        use futures_util::StreamExt;
+
+        let body = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hel\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n"
+        );
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let (base_url, request_count) = spawn_counting_server(leaked).await;
+        let provider = AnthropicProvider::new(
+            "test-key".to_string(),
+            Some(base_url),
+            Some("test-model".to_string()),
+            8192,
+            ReasoningLevel::Off,
+            60,
+        );
+        let scope =
+            InvocationScope::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
+                .expect("valid scope");
+        let cancel = CancellationToken::new();
+
+        let mut stream = provider
+            .invoke_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+            .await
+            .expect("stream creation succeeds");
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            events.push(event);
+        }
+
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            &events[..],
+            [
+                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(first)),
+                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(second)),
+                crate::InvocationEvent::Completed(_)
+            ] if first == "hel" && second == "lo"
+        ));
+        assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn legacy_stream_message_returns_context_too_long_on_413_without_retrying() {
         // 413 → HttpAttemptFailure::Http { kind: ContextTooLong } → driver
         // returns LlmError::ContextTooLong immediately. Verifies that the
         // executor-driven path preserves the original "no retry on 413"
@@ -422,7 +658,7 @@ mod tests {
         let mut handler = NoopHandler;
 
         let err = provider
-            .stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
+            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
             .await
             .expect_err("expected 413 → LlmError::ContextTooLong");
 
@@ -438,7 +674,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_message_returns_api_error_on_400_without_retrying() {
+    async fn legacy_stream_message_returns_api_error_on_400_without_retrying() {
         // 400 → HttpAttemptFailure::Http { kind: Client } → driver returns
         // LlmError::Api without retry. Verifies the executor-driven path
         // preserves the "client error → terminal" policy.
@@ -461,7 +697,7 @@ mod tests {
         let mut handler = NoopHandler;
 
         let err = provider
-            .stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
+            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
             .await
             .expect_err("expected 400 → LlmError::Api");
 
@@ -477,7 +713,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_message_retries_429_then_returns_rate_limited() {
+    async fn legacy_stream_message_retries_429_then_returns_rate_limited() {
         // 429 → HttpAttemptFailure::Http { kind: RateLimited } → driver
         // continues the retry loop. After max_retries is exhausted, the loop
         // falls through to Err(last_error) which is RateLimited. The executor
@@ -502,7 +738,7 @@ mod tests {
         let mut handler = NoopHandler;
 
         let err = provider
-            .stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
+            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
             .await
             .expect_err("expected retries exhausted → RateLimited");
 
@@ -581,9 +817,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_message_400_with_remaining_attempts_logs_final_failure_disposition() {
+    async fn legacy_stream_message_400_with_remaining_attempts_logs_final_failure_disposition() {
         // 400 is unconditionally terminal per
-        // `stream_message_returns_api_error_on_400_without_retrying` above —
+        // `legacy_stream_message_returns_api_error_on_400_without_retrying` above —
         // the driver returns `Err` immediately regardless of how much retry
         // budget remains. With the default `max_retries = 10`, attempt 0
         // still has 9 attempts of budget remaining, so the driver's
@@ -614,7 +850,7 @@ mod tests {
         let mut handler = NoopHandler;
 
         let err = provider
-            .stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
+            .legacy_stream_message(&scope, &[], &messages, &[], &mut handler, &cancel)
             .await
             .expect_err("expected 400 → terminal LlmError::Api");
         assert!(matches!(err, crate::LlmError::Api { .. }));
