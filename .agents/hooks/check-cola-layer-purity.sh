@@ -21,6 +21,7 @@ FEATURE_LAYERS = {"contract", "gateway", "core", "business", "utils"}
 RUNTIME_HEX_LAYERS = {"domain", "application", "ports", "adapters", "shared"}
 WORKFLOW_HEX_LAYERS = {"domain"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
+MEMORY_HEX_LAYERS = {"domain", "ports", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
 STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
@@ -83,6 +84,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
         if parts[0] == "workflow" and parts[2] in WORKFLOW_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "provider" and parts[2] in PROVIDER_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "memory" and parts[2] in MEMORY_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "storage" and parts[2] in STORAGE_HEX_LAYERS:
             return parts[0], parts[2]
@@ -214,6 +217,9 @@ for feature_src in sorted(features_root.glob("*/src")):
                 violations.append(
                     f"{child.relative_to(root)}: Storage directory must be a hexagonal layer {sorted(STORAGE_HEX_LAYERS)} or registered transitional module {sorted(STORAGE_TRANSITIONAL_MODULES)}"
                 )
+            continue
+        # Memory #895 建立 Hexagonal domain/ports/adapters 契约基线。
+        if crate_name == "memory" and child.is_dir() and child.name in MEMORY_HEX_LAYERS:
             continue
         if child.is_dir() and child.name not in FEATURE_LAYERS:
             # Runtime 已迁到单一 agent_execution 能力的六边形目标结构。

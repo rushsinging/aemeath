@@ -15,7 +15,7 @@ import json
 import subprocess
 import sys
 
-FEATURE_CRATES = {"runtime", "project", "policy", "context", "provider", "tools", "storage", "hook", "audit", "update", "workflow"}
+FEATURE_CRATES = {"runtime", "project", "policy", "context", "memory", "provider", "tools", "storage", "hook", "audit", "update", "workflow"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
@@ -28,6 +28,7 @@ business_allow = {
     "project": {"share"},
     "policy": {"share"},
     "context": {"share", "provider", "storage", "sdk"},
+    "memory": set(),
     "provider": {"share"},
     # Approved horizontal dependencies: tools -> project/storage, via their crate-root façades.
     "tools": {"share", "project", "storage"},
