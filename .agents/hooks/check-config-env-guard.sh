@@ -2,8 +2,8 @@
 # check-config-env-guard.sh
 # 禁止 config 包外读取业务 env（AEMEATH_*, *_API_KEY, LLM_*）。
 # 业务 env 只允许在以下白名单路径读取：
-#   - agent/shared/src/config/adapter/env.rs  (EnvAdapter, 唯一业务 env 读取点)
-#   - agent/shared/src/config/paths.rs         (AEMEATH_AGENTS_DIR, 路径根)
+#   - agent/shared/src/config/adapters/env.rs  (EnvAdapter, 唯一业务 env 读取点)
+#   - agent/shared/src/config/adapters/paths.rs (AEMEATH_AGENTS_DIR, 路径根)
 #   - packages/global/logging/                (AEMEATH_LOG_LEVEL, 日志层)
 #   - build.rs                                (编译期)
 set -euo pipefail
@@ -19,8 +19,8 @@ BUSINESS_ENV_PATTERN='AEMEATH_(CONTEXT_SIZE|PROVIDER|API_KEY|BASE_URL|MODEL|MAX_
 
 # 白名单路径（相对于项目根）
 WHITELIST_PATTERNS=(
-  'agent/shared/src/config/adapter/env'
-  'agent/shared/src/config/paths'
+  'agent/shared/src/config/adapters/env'
+  'agent/shared/src/config/adapters/paths'
   'agent/shared/src/config/domain/driver_env'
   'agent/features/runtime/src/application/config_app_service.rs'
   'packages/global/logging/'
@@ -69,7 +69,7 @@ for dir in "${SCAN_DIRS[@]}"; do
 done
 
 if [ -s "$tmp" ]; then
-  echo "Config env guard FAILED: 业务 env 变量只能在 config/adapter/env.rs、config/paths.rs、logging/、build.rs 中读取。" >&2
+  echo "Config env guard FAILED: 业务 env 变量只能在 config/adapters/env.rs、config/adapters/paths.rs、logging/、build.rs 中读取。" >&2
   echo "" >&2
   echo "以下位置违规读取了业务 env:" >&2
   cat "$tmp" >&2

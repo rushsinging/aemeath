@@ -8,7 +8,7 @@
 
 use super::usage::parse_responses_usage;
 use crate::domain::invoke::{StopReason, StreamResponse, Usage};
-use crate::ports::StreamHandler;
+use crate::ports::LegacyStreamSink;
 use crate::LOG_TARGET;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 /// 解析 Responses API SSE 流
 pub(crate) async fn parse_responses_stream(
     response: reqwest::Response,
-    handler: &mut dyn StreamHandler,
+    handler: &mut dyn LegacyStreamSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();

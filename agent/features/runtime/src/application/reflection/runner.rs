@@ -130,47 +130,53 @@ async fn call_llm_for_reflection(
     prompt: &str,
     system_prompt_text: &str,
 ) -> ReflectionResult<(String, u32, u32)> {
-    use provider::StreamHandler;
+    use futures::StreamExt;
     use provider::SystemBlock;
 
     let system_blocks = vec![SystemBlock::dynamic(system_prompt_text.to_string())];
     let messages = vec![share::message::Message::user(prompt)];
 
-    struct CollectHandler {
-        text: String,
-    }
-    impl StreamHandler for CollectHandler {
-        fn on_text(&mut self, text: &str) {
-            self.text.push_str(text);
-        }
-        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
-        fn on_error(&mut self, _error: &str) {}
-    }
-
-    let mut handler = CollectHandler {
-        text: String::new(),
-    };
     let cancel = tokio_util::sync::CancellationToken::new();
-
-    match client
-        .stream_message(
+    let mut stream = client
+        .invocation_stream(
             client.default_scope(),
             &system_blocks,
             &messages,
             &[],
-            &mut handler,
             &cancel,
         )
         .await
-    {
-        Ok(resp) => {
-            let text = handler.text.trim().to_string();
-            if text.is_empty() {
-                Err(ReflectionError::EmptyResponse)
-            } else {
-                Ok((text, resp.usage.input_tokens, resp.usage.output_tokens))
+        .map_err(|error| ReflectionError::LlmCall(error.to_string()))?;
+    while let Some(event) = stream.next().await {
+        match event {
+            provider::InvocationEvent::Completed(completion) => {
+                let text = completion
+                    .output
+                    .iter()
+                    .filter_map(|block| match block {
+                        provider::ProviderContentBlock::Text(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>()
+                    .trim()
+                    .to_string();
+                if text.is_empty() {
+                    return Err(ReflectionError::EmptyResponse);
+                }
+                let usage = completion.usage.unwrap_or_default();
+                return Ok((
+                    text,
+                    usage.input_tokens.unwrap_or(0),
+                    usage.output_tokens.unwrap_or(0),
+                ));
             }
+            provider::InvocationEvent::Failed(error) => {
+                return Err(ReflectionError::LlmCall(error.to_string()));
+            }
+            provider::InvocationEvent::Delta(_) => {}
         }
-        Err(e) => Err(ReflectionError::LlmCall(e.to_string())),
     }
+    Err(ReflectionError::LlmCall(
+        "provider stream ended without terminal event".to_string(),
+    ))
 }

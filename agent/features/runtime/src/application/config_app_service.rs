@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use share::config::adapter::env as env_adapter;
+use share::config::adapters::env as env_adapter;
 use share::config::domain::merge::{ConfigPatch, PriorityChain};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;

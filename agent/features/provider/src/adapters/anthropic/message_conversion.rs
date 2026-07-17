@@ -9,7 +9,7 @@ use crate::adapters::http_attempt::{
     HttpFailureKind, SuccessBodyReadError,
 };
 use crate::domain::invoke::{CreateMessageRequest, StopReason, StreamResponse, SystemBlock, Usage};
-use crate::ports::StreamHandler;
+use crate::ports::LegacyStreamSink;
 
 // ---------------------------------------------------------------------------
 // Tool schema sanitize — strip internal-only fields (data_schema etc.)
@@ -196,12 +196,12 @@ fn convert_block(block: &ContentBlock) -> serde_json::Value {
 /// Used to decide if a non-stream fallback is safe on stream errors — if any
 /// text/tool_use was already shown, falling back would duplicate it.
 pub(crate) struct TrackingHandler<'a> {
-    pub(crate) inner: &'a mut dyn StreamHandler,
+    pub(crate) inner: &'a mut dyn LegacyStreamSink,
     pub(crate) emitted: bool,
 }
 
 impl<'a> TrackingHandler<'a> {
-    pub(crate) fn new(inner: &'a mut dyn StreamHandler) -> Self {
+    pub(crate) fn new(inner: &'a mut dyn LegacyStreamSink) -> Self {
         Self {
             inner,
             emitted: false,
@@ -209,7 +209,7 @@ impl<'a> TrackingHandler<'a> {
     }
 }
 
-impl<'a> StreamHandler for TrackingHandler<'a> {
+impl<'a> LegacyStreamSink for TrackingHandler<'a> {
     fn on_text(&mut self, text: &str) {
         self.emitted = true;
         self.inner.on_text(text);
@@ -260,7 +260,7 @@ pub(crate) async fn send_message_non_stream(
     system: &[SystemBlock],
     messages: &[Message],
     tool_schemas: &[serde_json::Value],
-    handler: &mut dyn StreamHandler,
+    handler: &mut dyn LegacyStreamSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut api_messages = convert_messages(messages);
@@ -449,7 +449,7 @@ mod tests {
         apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas,
         send_message_non_stream, usage_from_anthropic_response, RequestParams,
     };
-    use crate::ports::StreamHandler;
+    use crate::ports::LegacyStreamSink;
     use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
     use share::message::{
         ContentBlock, ImageSource, Message, MessageMetadata, MessageSource, Role,
@@ -457,10 +457,10 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_util::sync::CancellationToken;
 
-    /// Minimal StreamHandler for tests — records calls without asserting layout.
+    /// Minimal LegacyStreamSink for tests — records calls without asserting layout.
     struct RecordingHandler;
 
-    impl StreamHandler for RecordingHandler {
+    impl LegacyStreamSink for RecordingHandler {
         fn on_text(&mut self, _text: &str) {}
         fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
         fn on_error(&mut self, _error: &str) {}
@@ -647,7 +647,7 @@ mod tests {
         );
     }
 
-    /// Minimal StreamHandler that records whether *any* output method fired —
+    /// Minimal LegacyStreamSink that records whether *any* output method fired —
     /// used to assert that a cancelled attempt produces no user-visible
     /// output at all.
     #[derive(Default)]
@@ -655,7 +655,7 @@ mod tests {
         called: bool,
     }
 
-    impl StreamHandler for CallTrackingHandler {
+    impl LegacyStreamSink for CallTrackingHandler {
         fn on_text(&mut self, _text: &str) {
             self.called = true;
         }

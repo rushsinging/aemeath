@@ -10,12 +10,91 @@ use crate::adapters::http_attempt::{
     HttpFailureKind, NetworkFailureKind,
 };
 use crate::domain::invoke::{InvocationScope, SystemBlock};
-use crate::ports::{LlmProvider, ReasoningLevel, StreamHandler};
+use crate::ports::{LegacyStreamSink, LlmProvider, ReasoningLevel};
 use crate::LOG_TARGET;
 
 use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
 
 impl OpenAICompatibleProvider {
+    pub(crate) async fn invoke_single_request_stream(
+        &self,
+        scope: &InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        cancel: &CancellationToken,
+    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(crate::ProviderError::cancelled());
+        }
+        let (request_body, url, api, decoder) = if self.config.use_responses_api {
+            (
+                self.build_responses_request_body(scope, system, messages, tool_schemas, true),
+                self.responses_url(),
+                "responses_stream",
+                crate::adapters::stream::LegacyStreamDecoder::OpenAiResponses,
+            )
+        } else {
+            let openai_messages = Self::convert_messages(
+                system,
+                messages,
+                !matches!(scope.effective_reasoning(), ReasoningLevel::Off),
+            )
+            .map_err(provider_error_from_llm)?;
+            let tools = Self::convert_tools(tool_schemas);
+            let mut body = self.base_request_body(scope, openai_messages, true);
+            self.apply_reasoning_fields(&mut body, scope);
+            if !tools.is_empty() {
+                body["tools"] = serde_json::Value::Array(tools);
+                body["parallel_tool_calls"] = serde_json::Value::Bool(true);
+            }
+            (
+                body,
+                self.chat_url(),
+                "chat_completions_stream",
+                crate::adapters::stream::LegacyStreamDecoder::OpenAiChat,
+            )
+        };
+        let request_bytes = serde_json::to_string(&request_body)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let context = HttpAttemptContext {
+            driver: "openai_compatible",
+            api,
+            provider: &self.config.source_key,
+            model: scope.model(),
+            method: "POST",
+            endpoint: &url,
+            attempt: 1,
+            max_attempts: 1,
+            message_count: messages.len(),
+            tool_count: tool_schemas.len(),
+            request_bytes,
+        };
+        let response = HttpAttemptExecutor::execute(
+            self.http
+                .post(&url)
+                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .json(&request_body),
+            &context,
+            cancel,
+        )
+        .await
+        .map_err(|failure| {
+            failure.log(AttemptDisposition::FinalFailure);
+            provider_error_from_attempt(failure)
+        })?
+        .response;
+        Ok(
+            crate::adapters::stream::invocation_stream_from_legacy_decoder(
+                response,
+                scope.effective_reasoning(),
+                cancel.child_token(),
+                decoder,
+            ),
+        )
+    }
+
     pub(crate) fn base_request_body(
         &self,
         scope: &InvocationScope,
@@ -73,15 +152,79 @@ impl OpenAICompatibleProvider {
     }
 }
 
+fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
+    let kind = match error {
+        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
+        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
+        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
+        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
+        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
+        crate::LlmError::StreamTruncated { .. } => crate::ProviderErrorKind::StreamTruncated,
+        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
+        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
+    };
+    crate::ProviderError::fatal(kind, error.to_string())
+}
+
+fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
+    match failure {
+        HttpAttemptFailure::Cancelled => crate::ProviderError::cancelled(),
+        HttpAttemptFailure::Network { source, kind, .. } => crate::ProviderError::fatal(
+            match kind {
+                NetworkFailureKind::Timeout => crate::ProviderErrorKind::Timeout,
+                _ => crate::ProviderErrorKind::Network,
+            },
+            source.to_string(),
+        ),
+        HttpAttemptFailure::Http {
+            status, kind, body, ..
+        } => {
+            let error_kind = match kind {
+                HttpFailureKind::RateLimited => crate::ProviderErrorKind::RateLimited,
+                HttpFailureKind::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
+                HttpFailureKind::Server => crate::ProviderErrorKind::UpstreamUnavailable,
+                HttpFailureKind::Client => crate::ProviderErrorKind::InvalidRequest,
+            };
+            let mut error = crate::ProviderError::fatal(error_kind, body.text());
+            error.provider_code = Some(status.to_string());
+            error
+        }
+    }
+}
+
 #[async_trait]
 impl LlmProvider for OpenAICompatibleProvider {
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+        self.invoke_single_request_stream(scope, system, messages, tool_schemas, cancel)
+            .await
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    fn provider_name(&self) -> &str {
+        &self.config.source_key
+    }
+
+    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        self.driver.max_reasoning_level()
+    }
+
+    async fn legacy_stream_message(
+        &self,
+        scope: &InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<crate::domain::invoke::StreamResponse, crate::LlmError> {
         // Responses API 分发（gpt-5.6-sol 等模型只支持 /v1/responses）
@@ -404,17 +547,5 @@ impl LlmProvider for OpenAICompatibleProvider {
             }
         }
         Err(last_error.unwrap_or(crate::LlmError::Network("max retries exceeded".to_string())))
-    }
-
-    fn model_name(&self) -> &str {
-        &self.model
-    }
-
-    fn provider_name(&self) -> &str {
-        &self.config.source_key
-    }
-
-    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        self.driver.max_reasoning_level()
     }
 }

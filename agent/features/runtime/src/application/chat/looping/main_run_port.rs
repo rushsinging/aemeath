@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -16,17 +17,18 @@ use crate::application::chat::looping::finalize::{
 };
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
-use crate::application::chat::looping::loop_helpers::is_user_cancelled_provider_error;
 use crate::application::chat::looping::loop_phases::build_api_messages;
 use crate::application::chat::looping::memory_inject::build_memory_block;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
-use crate::application::chat::looping::stream_handler::should_emit_model_stream_waiting;
+use crate::application::chat::looping::stream_handler::{
+    should_emit_model_stream_waiting, InvocationEventReducer,
+};
 use crate::application::chat::looping::task_reminder::TaskReminderState;
 use crate::application::chat::looping::tools::{execute_tool_round, tool_results_for_api};
 use crate::application::chat::looping::{
     ChatEventSink, InputEventDrainPort, PendingInputBuffer, QueueDrainPort, RuntimeStreamEvent,
-    RuntimeStreamHandler, RuntimeTurnContext,
+    RuntimeTurnContext,
 };
 use crate::application::loop_engine::{
     split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
@@ -318,21 +320,20 @@ where
         logging::context::set_current_role("default".to_string());
         logging::context::set_current_request_id(uuid::Uuid::now_v7().to_string());
 
-        let mut handler = RuntimeStreamHandler::with_tool_identity(
+        let mut reducer = InvocationEventReducer::with_tool_identity(
             self.sink.clone(),
             self.tool_identity.clone(),
             self.turn_context.clone(),
         );
         let api_start = Instant::now();
         let response = {
-            let progress_handle = handler.progress_handle();
+            let progress_handle = reducer.progress_handle();
             let stream_cancel = self.cancel.clone();
-            let stream_fut = self.client.stream_message(
+            let stream_fut = self.client.invocation_stream(
                 &invocation_scope,
                 &effective_system_blocks,
                 &messages_for_api,
                 &tool_schemas,
-                &mut handler,
                 &stream_cancel,
             );
             let waiting_sink = self.sink.clone();
@@ -358,7 +359,27 @@ where
             tokio::pin!(stream_fut);
             let result = loop {
                 tokio::select! {
-                    response = &mut stream_fut => break response,
+                    stream = &mut stream_fut => {
+                        let mut stream = match stream {
+                            Ok(stream) => stream,
+                            Err(error) => break Err(error),
+                        };
+                        let mut terminal = None;
+                        while let Some(event) = stream.next().await {
+                            match reducer.apply(event) {
+                                Ok(Some(response)) => terminal = Some(Ok(response)),
+                                Ok(None) => {}
+                                Err(error) => terminal = Some(Err(error)),
+                            }
+                            if terminal.is_some() {
+                                break;
+                            }
+                        }
+                        break terminal.unwrap_or_else(|| Err(provider::ProviderError::fatal(
+                            provider::ProviderErrorKind::Protocol,
+                            "provider stream ended without terminal event",
+                        )));
+                    }
                     event = self.input_events.recv_next_input() => {
                         if let Some(event) = event {
                             self.queue_busy_event(event).await;
@@ -372,9 +393,7 @@ where
         let api_elapsed = api_start.elapsed().as_secs_f64();
         let resp = match response {
             Ok(response) => response,
-            Err(error)
-                if is_user_cancelled_provider_error(&error) || self.cancel.is_cancelled() =>
-            {
+            Err(error) if error.is_cancelled() || self.cancel.is_cancelled() => {
                 return Err(LoopEngineError::Cancelled);
             }
             Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),

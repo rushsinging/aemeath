@@ -5,22 +5,20 @@ use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 pub use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
+use crate::domain::invoke::{InvocationScope, SystemBlock};
 
-/// Handler trait for streaming responses
-pub trait StreamHandler: Send {
+/// Provider 内部旧 decoder 使用的事件接收器。
+///
+/// 因仍出现在迁移期 legacy 方法签名中而保留隐藏导出；Provider crate 外的
+/// 生产代码与测试替身都不得依赖它。
+#[doc(hidden)]
+pub trait LegacyStreamSink: Send {
     fn on_text(&mut self, text: &str);
     fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize);
     fn on_error(&mut self, error: &str);
     fn on_raw_line(&mut self, _line: &str) {}
     fn on_block_complete(&mut self, _full_text: &str) {}
-    /// Called for reasoning/thinking content (e.g. GLM-5.1, DeepSeek-R1).
-    /// Default: ignored. Override to display thinking in a special style.
     fn on_thinking(&mut self, _text: &str) {}
-    /// Called when arguments delta arrives during streaming tool calls.
-    /// `index` is the tool call index, `name` is the tool name,
-    /// `provider_id` is the provider tool-use id when available,
-    /// `partial_args` is the accumulated arguments string so far.
     fn on_tool_arguments_delta(
         &mut self,
         _index: usize,
@@ -31,39 +29,38 @@ pub trait StreamHandler: Send {
     }
 }
 
-/// Simple callback handler for raw text streaming
-pub struct CallbackHandler {
-    callback: Box<dyn FnMut(&str) + Send>,
-}
-
-impl CallbackHandler {
-    pub fn new(callback: Box<dyn FnMut(&str) + Send>) -> Self {
-        Self { callback }
-    }
-}
-
-impl StreamHandler for CallbackHandler {
-    fn on_text(&mut self, text: &str) {
-        (self.callback)(text);
-    }
-    fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
-    fn on_error(&mut self, _error: &str) {}
-    fn on_block_complete(&mut self, _full_text: &str) {}
-}
-
 /// LLM Provider trait - all providers must implement this
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    /// Stream a message with tool support
-    async fn stream_message(
+    /// 返回由 Runtime 主动 poll 的单请求事件流。
+    async fn invocation_stream(
         &self,
         scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
-    ) -> Result<StreamResponse, crate::LlmError>;
+    ) -> Result<crate::InvocationStream, crate::ProviderError>;
+
+    /// 仅供迁移期 decoder 与测试替身使用；生产入口必须使用 `invocation_stream`。
+    #[doc(hidden)]
+    async fn legacy_stream_message(
+        &self,
+        scope: &InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        sink: &mut dyn LegacyStreamSink,
+        cancel: &CancellationToken,
+    ) -> Result<crate::StreamResponse, crate::LlmError> {
+        let _ = (scope, system, messages, tool_schemas, sink);
+        if cancel.is_cancelled() {
+            return Err(crate::LlmError::Cancelled);
+        }
+        Err(crate::LlmError::Config(
+            "legacy stream entry is unavailable for pull-stream providers".to_string(),
+        ))
+    }
 
     /// Get the model name
     fn model_name(&self) -> &str;

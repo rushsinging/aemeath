@@ -28,7 +28,7 @@ report \
   agent/features/runtime/src --include='*.rs'
 
 if ! grep -q 'scope: &InvocationScope' agent/features/provider/src/ports.rs; then
-  echo 'agent/features/provider/src/ports.rs: LlmProvider::stream_message must require &InvocationScope' >&2
+  echo 'agent/features/provider/src/ports.rs: LlmProvider::invocation_stream must require &InvocationScope' >&2
   fail=1
 fi
 

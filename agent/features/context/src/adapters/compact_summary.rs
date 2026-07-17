@@ -532,30 +532,32 @@ async fn llm_generate(
     request: Vec<Message>,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
-    let collected = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let collected_clone = collected.clone();
-    {
-        let mut handler = provider::CallbackHandler::new(Box::new(move |text: &str| {
-            if let Ok(mut guard) = collected_clone.lock() {
-                guard.push_str(text);
+    use futures_util::StreamExt;
+
+    let mut stream = client
+        .invocation_stream(client.default_scope(), &[], &request, &[], cancel)
+        .await
+        .map_err(|error| format!("LLM call failed: {error}"))?;
+    let full_text = loop {
+        match stream.next().await {
+            Some(provider::InvocationEvent::Completed(completion)) => {
+                break completion
+                    .output
+                    .iter()
+                    .filter_map(|block| match block {
+                        provider::ProviderContentBlock::Text(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>();
             }
-        }));
-
-        client
-            .stream_message(
-                client.default_scope(),
-                &[],
-                &request,
-                &[],
-                &mut handler,
-                cancel,
-            )
-            .await
-            .map_err(|e| format!("LLM call failed: {e}"))?;
-    }
-
-    let full_text = collected.lock().map_err(|e| format!("Lock error: {e}"))?;
-    let summary = parse_compact_response(full_text.as_str());
+            Some(provider::InvocationEvent::Failed(error)) => {
+                return Err(format!("LLM call failed: {error}"));
+            }
+            Some(provider::InvocationEvent::Delta(_)) => {}
+            None => return Err("LLM stream ended without terminal event".to_string()),
+        }
+    };
+    let summary = parse_compact_response(&full_text);
     if summary.is_empty() {
         return Err("LLM returned empty summary".into());
     }

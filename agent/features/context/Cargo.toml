@@ -21,3 +21,4 @@ uuid = { version = "1", features = ["v4", "v7"] }
 chrono = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+futures-util = { workspace = true }
