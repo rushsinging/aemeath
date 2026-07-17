@@ -42,6 +42,7 @@
 | INV-7 | 最多一个 Batch 为 Active，`current_batch` 必须精确指向它；没有 Active 时为 `None` | create / pause / resume / archive-by-id 在同一次 state mutation 中校验并更新 |
 | INV-8 | Archived 是 Batch 终态；Paused 只能由 Active 进入，且只能在无其他 Active 时 resume | `pause_batch` / `resume_batch` / `archive_batch` 的 typed transition 守护 |
 | INV-9 | 被未完成前置任务阻塞的 Task 不可进入 InProgress | `TaskAccess::transition(id, InProgress)` 在持有同一 store 写锁的一次 mutation 内读取依赖状态并迁移；失败返回 `TaskBlocked`，state 与事件均不变 |
+| INV-10 | 依赖边两端必须属于同一 Batch | `add_dependency` 在环检测和写边前比较两端 `BatchId`；跨 Batch 请求返回 `CrossBatchDependency`，state 与事件均不变 |
 
 ### 1.3 聚合方法
 
@@ -104,8 +105,10 @@ TaskStatus = Pending | InProgress | Completed | Deleted
 `blocked_by` 定义了一个有向无环图（DAG）：
 
 - 边 `A → B`（A.blocked_by 包含 B）表示"A 被 B 阻塞"，即 B 完成前 A 不能开始。
-- 添加边前必须检测是否会产生环。
+- 添加边前必须确认两个端点存在且均为 live Task，并检测是否会产生环。
+- 依赖边两端必须属于同一 Batch；跨 Batch 请求返回 typed error，且聚合与事件保持不变。
 - 自环（A.blocked_by 包含 A）等价于环，直接拒绝。
+- 重复添加已有边、移除不存在的边均是幂等成功：不修改 Task、不更新时间戳、不重复产生事件。
 
 ### 3.2 环检测算法
 
@@ -206,7 +209,7 @@ Batch **没有** `description` 字段。新建只接收 typed `BatchCreateSpec {
 | `detect_interrupted_batch` | 新话题打断旧批次 → 旧批次有未完成任务 | `Option<InterruptedBatchInfo>` |
 | `detect_stale_batches` | 批次静默过久 → 陈旧 | `Vec<StaleBatchInfo>` |
 
-> **Decision**：检测函数是纯函数，不产生副作用。调用方根据检测结果，以明确 `BatchId` 调用 `pause_batch` / `archive_batch`；恢复由 `resume_batch` 执行。状态变化与 `current_batch` 更新仍由 TaskAccess 实现原子守护。
+> **Decision**：检测函数是纯函数，不产生副作用。集合型输入的遍历顺序不是领域语义：返回的 Batch 与 Task ID 必须按强类型 ID 升序稳定排列；存在多个 interrupted 候选时选择最小 `BatchId`。调用方根据检测结果，以明确 `BatchId` 调用 `pause_batch` / `archive_batch`；恢复由 `resume_batch` 执行。状态变化与 `current_batch` 更新仍由 TaskAccess 实现原子守护。
 
 ## 5. TaskSnapshot
 
@@ -239,7 +242,7 @@ Session 落盘时，Context Management 经 `TaskPersist::collect_snapshot()` 获
 
 ### 6.1 v0.1.0 决定
 
-`TaskId(u64)` 与 `BatchId(u64)` 是 Task-owned 强类型；新 wire 使用十进制数字字符串（`"1"`、`"2"`、…），**NEVER** 以裸 `String` / `u64` 穿过 typed Task OHS。ID 在单 Session 内单调递增，由 `TaskStoreState.next_task_id` / `next_batch_id` 维护并随 snapshot 一起替换，**NEVER** 从 live state 继续旧计数器或重用已分配 ID。
+`TaskId(u64)` 与 `BatchId(u64)` 是 Task-owned 强类型；新 wire 使用十进制数字字符串（`"1"`、`"2"`、…），**NEVER** 以裸 `String` / `u64` 穿过 typed Task OHS。ID 在单 Session 内单调递增，由 `TaskStoreState.next_task_id` / `next_batch_id` 维护并随 snapshot 一起替换，**NEVER** 因 Batch pause / archive / create、Task delete 或失败命令而重置或重用已分配 ID。#886 只建立 live `TaskStoreState` 内的分配语义；snapshot 中 next ID 的 codec、校验与全量替换由 #888/#890 承接。
 
 wire 格式解析与 typed state 校验是两个阶段：Task-owned codec 先把 raw JSON 的全字符串新格式或全数字 legacy 格式转换为 `TaskSnapshot`，拒绝 invalid / mixed format；`TaskPersist::prepare_restore(&TaskSnapshot)` 接收的已经是强类型值，只校验 ID 唯一、引用、环与两个 next ID 严格大于各自已存最大值，**NEVER** 再声称“解析”ID。
 
