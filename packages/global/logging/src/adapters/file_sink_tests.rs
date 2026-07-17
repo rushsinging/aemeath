@@ -2,52 +2,42 @@ use super::*;
 
 #[test]
 fn sink_paths_in_logs_dir() {
-    let paths = SinkPaths::from_logs_dir(Path::new("/tmp/logs"));
-    assert_eq!(paths.aemeath, PathBuf::from("/tmp/logs/aemeath.log"));
-    assert_eq!(paths.tui, PathBuf::from("/tmp/logs/tui.log"));
-    assert_eq!(paths.shared, PathBuf::from("/tmp/logs/shared.log"));
+    let logger = rotate_test_logger(Path::new("/tmp/logs"), 1024, 3);
+    for spec in TargetCatalog::specs() {
+        let entry = logger.sinks.get(&spec.sink).expect("catalog sink");
+        assert_eq!(entry.path, PathBuf::from("/tmp/logs").join(spec.file_name));
+    }
+    let fallback = TargetCatalog::fallback();
     assert_eq!(
-        paths.composition,
-        PathBuf::from("/tmp/logs/composition.log")
+        logger.sinks.get(&fallback.sink).expect("fallback").path,
+        PathBuf::from("/tmp/logs/aemeath.log")
     );
-    assert_eq!(
-        paths.provider,
-        PathBuf::from("/tmp/logs/agent-provider.log")
-    );
-    assert_eq!(
-        paths.llm_api_error,
-        PathBuf::from("/tmp/logs/llm-api-error.log")
-    );
-    assert_eq!(paths.runtime, PathBuf::from("/tmp/logs/agent-runtime.log"));
-    assert_eq!(paths.tools, PathBuf::from("/tmp/logs/agent-tools.log"));
-    assert_eq!(paths.prompt, PathBuf::from("/tmp/logs/agent-prompt.log"));
-    assert_eq!(paths.hook, PathBuf::from("/tmp/logs/agent-hook.log"));
-    assert_eq!(paths.storage, PathBuf::from("/tmp/logs/agent-storage.log"));
-    assert_eq!(paths.project, PathBuf::from("/tmp/logs/agent-project.log"));
-    assert_eq!(paths.policy, PathBuf::from("/tmp/logs/agent-policy.log"));
-    assert_eq!(paths.audit, PathBuf::from("/tmp/logs/agent-audit.log"));
 }
 
-/// 构造一个仅用于测试 `maybe_rotate` 的最小 logger（其余 sink 留空）。
+/// 构造一个仅用于测试 `maybe_rotate` 的最小 logger。
 fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> UnifiedLogger {
+    let mut sinks = HashMap::new();
+    let fallback = TargetCatalog::fallback();
+    sinks.insert(
+        fallback.sink,
+        SinkEntry {
+            path: dir.join(fallback.file_name),
+            writer: Mutex::new(None),
+        },
+    );
+    for spec in TargetCatalog::specs() {
+        sinks.insert(
+            spec.sink,
+            SinkEntry {
+                path: dir.join(spec.file_name),
+                writer: Mutex::new(None),
+            },
+        );
+    }
     UnifiedLogger {
-        aemeath: Mutex::new(None),
-        tui: Mutex::new(None),
-        shared: Mutex::new(None),
-        composition: Mutex::new(None),
-        provider: Mutex::new(None),
-        llm_api_error: Mutex::new(None),
-        runtime: Mutex::new(None),
-        tools: Mutex::new(None),
-        prompt: Mutex::new(None),
-        hook: Mutex::new(None),
-        storage: Mutex::new(None),
-        project: Mutex::new(None),
-        policy: Mutex::new(None),
-        audit: Mutex::new(None),
+        sinks,
         stderr: Mutex::new(BufWriter::new(stderr())),
         output_mode: OutputMode::File,
-        paths: SinkPaths::from_logs_dir(dir),
         max_bytes,
         max_backups,
         filter: build_filter(LevelFilter::Off),
@@ -124,54 +114,47 @@ fn maybe_rotate_is_noop_when_file_missing() {
 #[test]
 fn route_returns_correct_sink_for_aemeath_targets() {
     let logger = rotate_test_logger(&std::env::temp_dir(), 1024, 3);
-
-    let (_, path) = logger.route("aemeath:tui");
-    assert_eq!(path, &logger.paths.tui);
-
-    let (_, path) = logger.route("aemeath:shared");
-    assert_eq!(path, &logger.paths.shared);
-
-    let (_, path) = logger.route("aemeath:composition");
-    assert_eq!(path, &logger.paths.composition);
-
-    let (_, path) = logger.route("aemeath:agent:provider");
-    assert_eq!(path, &logger.paths.provider);
-
-    let (_, path) = logger.route("aemeath:llm-api-error");
-    assert_eq!(path, &logger.paths.llm_api_error);
-
-    let (_, path) = logger.route("aemeath:agent:runtime");
-    assert_eq!(path, &logger.paths.runtime);
-
-    let (_, path) = logger.route("aemeath:agent:tools");
-    assert_eq!(path, &logger.paths.tools);
-
-    let (_, path) = logger.route("aemeath:agent:prompt");
-    assert_eq!(path, &logger.paths.prompt);
-
-    let (_, path) = logger.route("aemeath:agent:hook");
-    assert_eq!(path, &logger.paths.hook);
-
-    let (_, path) = logger.route("aemeath:agent:storage");
-    assert_eq!(path, &logger.paths.storage);
-
-    let (_, path) = logger.route("aemeath:agent:project");
-    assert_eq!(path, &logger.paths.project);
-
-    let (_, path) = logger.route("aemeath:agent:policy");
-    assert_eq!(path, &logger.paths.policy);
-
-    let (_, path) = logger.route("aemeath:agent:audit");
-    assert_eq!(path, &logger.paths.audit);
+    for spec in TargetCatalog::specs() {
+        let (_, path) = logger.route(spec.target.as_str());
+        assert_eq!(
+            path,
+            logger
+                .sinks
+                .get(&spec.sink)
+                .map(|entry| entry.path.as_path())
+                .unwrap()
+        );
+    }
 }
 
 #[test]
 fn route_returns_aemeath_for_unknown_target() {
     let logger = rotate_test_logger(&std::env::temp_dir(), 1024, 3);
+    let fallback_path = &logger
+        .sinks
+        .get(&TargetCatalog::fallback().sink)
+        .expect("fallback")
+        .path;
     let (_, path) = logger.route("unknown::module");
-    assert_eq!(path, &logger.paths.aemeath);
+    assert_eq!(path, fallback_path);
     let (_, path) = logger.route("app");
-    assert_eq!(path, &logger.paths.aemeath);
+    assert_eq!(path, fallback_path);
+}
+
+#[test]
+fn unknown_target_reports_are_limited_and_written_directly() {
+    let counter = AtomicUsize::new(0);
+    assert!(should_report_unknown(&counter));
+    assert!(should_report_unknown(&counter));
+    assert!(should_report_unknown(&counter));
+    assert!(!should_report_unknown(&counter));
+
+    let mut output = Vec::new();
+    write_unknown_target_report(&mut output, "unknown::module").unwrap();
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "aemeath logging fallback: unknown target \"unknown::module\"; using aemeath.log\n"
+    );
 }
 
 #[test]

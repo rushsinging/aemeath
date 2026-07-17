@@ -10,7 +10,7 @@ use hook::api::HookRunner;
 use provider::LlmClient;
 use provider::SystemBlock;
 use storage::TaskStore;
-use tools::api::{AgentRunner, ToolRegistry};
+use tools::{AgentRunner, ToolRegistry};
 
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {
@@ -33,7 +33,7 @@ pub struct TuiLaunchContext {
     pub skills_map: std::collections::HashMap<String, sdk::SkillView>,
     pub hook_runner: HookRunner,
     /// 本地 session reminders（用于 TUI 展示，独立于 RuntimeHandle 实例）
-    pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
+    pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
     /// #567：项目工作区根路径（替代 client.project() RPC）
     pub workspace_root: std::path::PathBuf,
 }

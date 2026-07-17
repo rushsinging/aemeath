@@ -3,6 +3,7 @@
 > 层级：02-modules / tools（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#787（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 Tool 双端口、ExecutionScope、协作取消、Skill/Command 协作边界与 MCP 生命周期。签名用于表达职责，不锁定具体 Rust API。
+> **当前落地（[#993](https://github.com/rushsinging/aemeath/issues/993)）**：Tool crate 已迁至过渡 Hexagonal `domain + adapters`；本文所述端口尚未抽出为独立 `ports/` 层，`Tool` / `TypedTool` / `ToolListProvider` / `AgentRunner` 等 trait 暂居 `domain/`。端口契约与生命周期语义保持 Target，未落地。
 
 ## 1. Tool 双端口
 
@@ -323,3 +324,4 @@ Deny: agent/features/** production code and apps/**
 |---|---|---|
 | 2026-07-12 | 初稿：双 Tool 端口、ExecutionScope、取消、Skill/Command 协作与 MCP 生命周期 | #787 |
 | 2026-07-14 | Tool 资源改为直接消费 Project-owned WorkspaceRead / WorkspaceControl，移除宽包装并将 Control 注入限于三个 Tool | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-17 | #993 落地状态：物理目录迁入过渡 Hexagonal `domain + adapters`，本文端口尚未抽出 `ports/` 层（trait 暂居 `domain/`）；端口契约与生命周期语义保持 Target | [#993](https://github.com/rushsinging/aemeath/issues/993) |

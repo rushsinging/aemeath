@@ -8,10 +8,10 @@ use async_trait::async_trait;
 use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
 use share::config::AgentRoleConfig;
 use share::message::Message;
-use share::tool::AgentProgressKind;
 use std::collections::HashSet;
 use std::sync::Arc;
-use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext};
+use tools::AgentProgressKind;
+use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
 fn format_grouped_tool_summaries(tool_calls: &[crate::application::agent::ToolCall]) -> String {
     let mut counts: Vec<(&str, usize)> = Vec::new();
@@ -247,7 +247,7 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
         .await;
 
     driver.await.unwrap();
-    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
     assert!(
         !ctx.cancel.is_cancelled(),
         "按 Sub Run ID 取消不得反向取消父 Run token"
@@ -271,7 +271,7 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
         })
         .await;
 
-    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
 }
 
 #[tokio::test]
@@ -294,7 +294,7 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
         })
         .await;
 
-    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
 }
 
 #[tokio::test]
@@ -308,7 +308,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     let cwd = std::env::current_dir().unwrap();
     let cancel = tokio_util::sync::CancellationToken::new();
     let ctx = ToolExecutionContext {
-        resources: tools::api::ToolResources {
+        resources: tools::ToolResources {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),
@@ -357,14 +357,14 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     .expect("run_agent 必须在 mid-flight cancel 后及时返回，不能挂起等待 provider 自然结束");
 
     canceller.await.unwrap();
-    assert_eq!(result, tools::api::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
 }
 
 // issue #646：SubAgentRun emit Started 事件测试
 #[tokio::test]
 async fn test_started_event_emitted_with_role_and_model() {
-    use share::tool::{AgentProgressEvent, AgentProgressKind};
     use tokio::sync::mpsc;
+    use tools::{AgentProgressEvent, AgentProgressKind};
 
     let runner = test_runner(ProviderError::retryable(
         ProviderErrorKind::Network,
@@ -399,8 +399,8 @@ async fn test_started_event_emitted_with_role_and_model() {
 
 #[tokio::test]
 async fn test_started_event_without_role_uses_main_agent_model() {
-    use share::tool::{AgentProgressEvent, AgentProgressKind};
     use tokio::sync::mpsc;
+    use tools::{AgentProgressEvent, AgentProgressKind};
 
     let runner = test_runner(ProviderError::retryable(
         ProviderErrorKind::Network,
@@ -459,7 +459,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
     // ErrorProvider 会返回 Err，但不应 panic
     assert!(matches!(
         result,
-        tools::api::AgentRunTerminal::Failed { ref error }
+        tools::AgentRunTerminal::Failed { ref error }
             if error.contains("setup-only") || error.contains("error") || !error.is_empty()
     ));
 }
@@ -482,7 +482,7 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
 
     assert_eq!(
         result,
-        tools::api::AgentRunTerminal::Failed {
+        tools::AgentRunTerminal::Failed {
             error: "loop adapter error: network error: boom".to_string(),
         }
     );
@@ -509,7 +509,7 @@ async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
 
     assert_eq!(
         result,
-        tools::api::AgentRunTerminal::Failed {
+        tools::AgentRunTerminal::Failed {
             error: "run timed out after 0 seconds".to_string(),
         }
     );
@@ -603,7 +603,7 @@ impl LlmProvider for BlockingThenCancelledProvider {
 fn test_ctx() -> ToolExecutionContext {
     let cwd = std::env::current_dir().unwrap();
     ToolExecutionContext {
-        resources: tools::api::ToolResources {
+        resources: tools::ToolResources {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),

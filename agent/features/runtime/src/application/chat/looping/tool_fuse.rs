@@ -1,8 +1,8 @@
 use crate::application::agent::{ToolCall, ToolExecution};
 use crate::LOG_TARGET;
 use serde_json::Value;
-use share::tool::ToolOutcome;
 use std::collections::VecDeque;
+use tools::ToolOutcome;
 
 const RECENT_TOOL_CALL_LIMIT: usize = 64;
 const CONSECUTIVE_TOOL_CALL_SOFT_LIMIT: usize = 3;

@@ -2,7 +2,7 @@
 //!
 //! # Module strategy (方案 D)
 //!
-//! The authoritative definitions live in `share::tool::types::*`. This module
+//! The authoritative definitions live in `tools::types::*`. This module
 //! is a **thin re-export layer** so that:
 //!
 //! - existing imports of the form `use sdk::tool_result::{Tool}Result` keep
@@ -18,39 +18,39 @@
 //!
 //! See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
 //! Phase 0a (方案 D) for the full design.
-pub use share::tool::types::agent::AgentResult;
-pub use share::tool::types::ask_user::AskUserQuestionResult;
-pub use share::tool::types::bash::BashResult;
-pub use share::tool::types::brief::BriefResult;
-pub use share::tool::types::edit::EditResult;
-pub use share::tool::types::enter_worktree::EnterWorktreeResult;
-pub use share::tool::types::exit_worktree::ExitWorktreeResult;
-pub use share::tool::types::glob::GlobResult;
-pub use share::tool::types::grep::GrepResult;
-pub use share::tool::types::list_mcp_resources::ListMcpResourcesResult;
-pub use share::tool::types::lsp::LspResult;
-pub use share::tool::types::mcp_manager::McpManagerResult;
-pub use share::tool::types::mcp_tool::McpToolResult;
-pub use share::tool::types::memory::MemoryResult;
-pub use share::tool::types::plan_mode::PlanModeResult;
-pub use share::tool::types::read::ReadResult;
-pub use share::tool::types::read_mcp_resource::ReadMcpResourceResult;
-pub use share::tool::types::skill::SkillResult;
-pub use share::tool::types::task_create::TaskCreateResult;
-pub use share::tool::types::task_get::TaskGetResult;
-pub use share::tool::types::task_list::TaskListResult;
-pub use share::tool::types::task_list_complete::TaskListCompleteResult;
-pub use share::tool::types::task_list_create::TaskListCreateResult;
-pub use share::tool::types::task_stop::TaskStopResult;
-pub use share::tool::types::task_update::TaskUpdateResult;
-pub use share::tool::types::tool_search::ToolSearchResult;
-pub use share::tool::types::web_fetch::WebFetchResult;
-pub use share::tool::types::web_search::WebSearchResult;
-pub use share::tool::types::write::WriteResult;
+pub use tools::types::agent::AgentResult;
+pub use tools::types::ask_user::AskUserQuestionResult;
+pub use tools::types::bash::BashResult;
+pub use tools::types::brief::BriefResult;
+pub use tools::types::edit::EditResult;
+pub use tools::types::enter_worktree::EnterWorktreeResult;
+pub use tools::types::exit_worktree::ExitWorktreeResult;
+pub use tools::types::glob::GlobResult;
+pub use tools::types::grep::GrepResult;
+pub use tools::types::list_mcp_resources::ListMcpResourcesResult;
+pub use tools::types::lsp::LspResult;
+pub use tools::types::mcp_manager::McpManagerResult;
+pub use tools::types::mcp_tool::McpToolResult;
+pub use tools::types::memory::MemoryResult;
+pub use tools::types::plan_mode::PlanModeResult;
+pub use tools::types::read::ReadResult;
+pub use tools::types::read_mcp_resource::ReadMcpResourceResult;
+pub use tools::types::skill::SkillResult;
+pub use tools::types::task_create::TaskCreateResult;
+pub use tools::types::task_get::TaskGetResult;
+pub use tools::types::task_list::TaskListResult;
+pub use tools::types::task_list_complete::TaskListCompleteResult;
+pub use tools::types::task_list_create::TaskListCreateResult;
+pub use tools::types::task_stop::TaskStopResult;
+pub use tools::types::task_update::TaskUpdateResult;
+pub use tools::types::tool_search::ToolSearchResult;
+pub use tools::types::web_fetch::WebFetchResult;
+pub use tools::types::web_search::WebSearchResult;
+pub use tools::types::write::WriteResult;
 
 // Re-export the module sub-paths (e.g. `sdk::tool_result::read`) so that
 // any code that imports the module form keeps compiling. Each submodule
-// is itself a thin `pub use share::tool::types::...;` re-export.
+// is itself a thin `pub use tools::types::...;` re-export.
 pub mod agent;
 pub mod ask_user;
 pub mod bash;
