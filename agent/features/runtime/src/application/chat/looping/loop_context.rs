@@ -63,6 +63,8 @@ where
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
     pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
+    pub tool_result_materializer:
+        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub allow_all: bool,
     pub(crate) active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     /// Legacy 持久化兼容句柄（input_gate clear，#890/#891）。

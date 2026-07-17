@@ -35,7 +35,7 @@ business_allow = {
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),
     "hook": {"share"},
-    "audit": {"share"},
+    "audit": {"share", "sdk"},
     "workflow": {"share"},
     # sdk is a thin re-export / protocol facade: it may depend on `share` (horizontal
     # shared types in agent/shared) so it can re-export typed result structs from

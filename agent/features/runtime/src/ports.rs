@@ -29,6 +29,7 @@ pub mod policy_port;
 pub mod provider_port;
 pub mod task_port;
 pub mod tool_port;
+pub mod tool_result_blob;
 pub mod usage_sink;
 pub mod workspace_port;
 
@@ -56,5 +57,6 @@ pub use tool_port::{
     RegistryScopeName, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort, ToolInvocation,
     ToolOutcome, ToolProfileName,
 };
-pub use usage_sink::{UsageEmitOutcome, UsageRecord, UsageSink};
+pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
+pub use usage_sink::{UsageDropReason, UsageEmitOutcome, UsageRecord, UsageSink};
 pub use workspace_port::{WorkspaceFrame, WorkspacePort};

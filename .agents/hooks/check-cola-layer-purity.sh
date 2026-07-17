@@ -4,7 +4,7 @@ set -euo pipefail
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
 #       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters；
-#       Audit 在 Usage 能力落地前只允许真实 lib.rs 入口，禁止恢复空 COLA 占位。
+#       Audit 仅允许随真实 Usage 交付增量建立的 Hexagonal 层，禁止恢复空 COLA 占位。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -28,7 +28,8 @@ STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 PROJECT_HEX_LAYERS = {"domain", "adapters"}
 PROJECT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
-AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs"}
+AUDIT_HEX_LAYERS = {"domain", "ports"}
+AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs"}
 AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
@@ -77,19 +78,24 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
     except ValueError:
         return None
     parts = rel.parts
-    if len(parts) >= 3 and parts[1] == "src":
-        if parts[0] == "runtime" and parts[2] in RUNTIME_HEX_LAYERS:
-            return parts[0], parts[2]
-        if parts[0] == "workflow" and parts[2] in WORKFLOW_HEX_LAYERS:
-            return parts[0], parts[2]
-        if parts[0] == "provider" and parts[2] in PROVIDER_HEX_LAYERS:
-            return parts[0], parts[2]
-        if parts[0] == "storage" and parts[2] in STORAGE_HEX_LAYERS:
-            return parts[0], parts[2]
-        if parts[0] == "context" and parts[2] in CONTEXT_HEX_LAYERS:
-            return parts[0], parts[2]
-        if parts[0] == "project" and parts[2] in PROJECT_HEX_LAYERS:
-            return parts[0], parts[2]
+    if len(parts) < 3:
+        return None
+    normalized_layer = parts[2].removesuffix(".rs")
+    if parts[1] == "src":
+        if parts[0] == "runtime" and normalized_layer in RUNTIME_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "workflow" and normalized_layer in WORKFLOW_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "provider" and normalized_layer in PROVIDER_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "storage" and normalized_layer in STORAGE_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "context" and normalized_layer in CONTEXT_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "project" and normalized_layer in PROJECT_HEX_LAYERS:
+            return parts[0], normalized_layer
+        if parts[0] == "audit" and normalized_layer in AUDIT_HEX_LAYERS:
+            return parts[0], normalized_layer
         if parts[0] == "storage":
             return None
         if parts[2] in FEATURE_LAYERS:
@@ -198,11 +204,15 @@ for feature_src in sorted(features_root.glob("*/src")):
         if crate_name == "audit":
             if child.stem in AUDIT_LEGACY_LAYERS:
                 violations.append(
-                    f"{child.relative_to(root)}: Audit empty or legacy fixed layer is forbidden; add only evidence-backed Usage hexagonal structure"
+                    f"{child.relative_to(root)}: Audit empty or legacy fixed layer is forbidden; use evidence-backed {sorted(AUDIT_HEX_LAYERS)}"
                 )
-            elif child.is_dir() or child.name not in AUDIT_ALLOWED_TOP_LEVEL_FILES:
+            elif child.is_dir() and child.name not in AUDIT_HEX_LAYERS:
                 violations.append(
-                    f"{child.relative_to(root)}: Audit source must contain only {sorted(AUDIT_ALLOWED_TOP_LEVEL_FILES)} until a Usage implementation issue adds evidence-backed structure"
+                    f"{child.relative_to(root)}: Audit source directories must be evidence-backed layers {sorted(AUDIT_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in AUDIT_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Audit top-level source files must be {sorted(AUDIT_ALLOWED_TOP_LEVEL_FILES)}"
                 )
             continue
         if crate_name == "storage":

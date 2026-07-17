@@ -11,7 +11,45 @@ use crate::config::models::{
     RuntimeModelRequest, RuntimeModelResolutionError, RuntimeModelResolver,
 };
 use crate::config::permissions::PermissionModeConfig;
-use crate::config::{AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, SkillsConfig};
+use crate::config::{
+    AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, SkillsConfig, ToolResultConfig,
+};
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ToolResultPolicy {
+    threshold_chars: usize,
+    preview_head_chars: usize,
+    preview_tail_chars: usize,
+}
+
+impl ToolResultPolicy {
+    fn from_config(config: &ToolResultConfig) -> Self {
+        let valid = config.threshold_chars > 0
+            && config.preview_head_chars + config.preview_tail_chars <= config.threshold_chars;
+        let config = if valid {
+            config.clone()
+        } else {
+            ToolResultConfig::default()
+        };
+        Self {
+            threshold_chars: config.threshold_chars,
+            preview_head_chars: config.preview_head_chars,
+            preview_tail_chars: config.preview_tail_chars,
+        }
+    }
+
+    pub fn threshold_chars(self) -> usize {
+        self.threshold_chars
+    }
+
+    pub fn preview_head_chars(self) -> usize {
+        self.preview_head_chars
+    }
+
+    pub fn preview_tail_chars(self) -> usize {
+        self.preview_tail_chars
+    }
+}
 
 /// Immutable snapshot of effective configuration.
 ///
@@ -94,6 +132,10 @@ impl ConfigSnapshot {
         } else {
             super::tools::default_max_agent_concurrency()
         }
+    }
+
+    pub fn tool_result_policy(&self) -> ToolResultPolicy {
+        ToolResultPolicy::from_config(&self.0.tools.tool_result)
     }
 
     // ── Logging ──────────────────────────────────────────────
@@ -513,6 +555,34 @@ mod tests {
 
         assert_eq!(snap.max_tool_concurrency(), 10);
         assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    #[test]
+    fn snapshot_exposes_validated_tool_result_policy() {
+        let mut config = Config::default();
+        config.tools.tool_result.threshold_chars = 8_000;
+        config.tools.tool_result.preview_head_chars = 1_000;
+        config.tools.tool_result.preview_tail_chars = 250;
+        let snap = ConfigSnapshot::new(config);
+
+        let policy = snap.tool_result_policy();
+        assert_eq!(policy.threshold_chars(), 8_000);
+        assert_eq!(policy.preview_head_chars(), 1_000);
+        assert_eq!(policy.preview_tail_chars(), 250);
+    }
+
+    #[test]
+    fn snapshot_normalizes_invalid_tool_result_policy_to_compatible_defaults() {
+        let mut config = Config::default();
+        config.tools.tool_result.threshold_chars = 0;
+        config.tools.tool_result.preview_head_chars = 9_000;
+        config.tools.tool_result.preview_tail_chars = 9_000;
+        let snap = ConfigSnapshot::new(config);
+
+        let policy = snap.tool_result_policy();
+        assert_eq!(policy.threshold_chars(), 50_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
     }
 
     /// resolve_context_size 在 CLI 传 0 时应忽略 CLI（用 snapshot 值），

@@ -150,6 +150,8 @@ mod tests {
                 system_prompt_text: String::new(),
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
+                tool_result_materializer:
+                    crate::application::testing::test_tool_result_materializer(),
                 task_store: Arc::new(TaskStore::new()),
                 task_access: Arc::new(task::TaskStore::new()),
                 skills_map: HashMap::new(),

@@ -31,6 +31,8 @@ pub struct RuntimeResources {
     pub task_access: Arc<dyn TaskAccess>,
     pub hook_runner: HookRunner,
     pub agent_runner: Arc<dyn AgentRunner>,
+    pub tool_result_materializer:
+        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
 
     // ── 配置（值类型，session 期间不变）──

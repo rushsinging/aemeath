@@ -426,7 +426,7 @@ consumer read Primary
 | Session / Memory schema | Context Management / Memory；Session 内嵌的 Task / Workspace DTO schema 仍分别由 Task / Project 发布 |
 | schema version 与 migration | 对应数据 BC |
 | 保存时机、turn-level save、级联删除 | 对应应用服务/数据 BC |
-| Tool Result 的落盘阈值和 preview | Config 静态值 + Tool/Context Management 策略 |
+| Tool Result 的落盘阈值和 preview | Config 静态值 + Runtime-owned materialization 策略；Runtime 的窄 `ToolResultBlobPort` adapter 只把逻辑标识翻译为 `StorageKey` 并调用 `AtomicBlobPort` |
 | retention、compact、archive、eviction | 数据 BC；Storage 只执行明确命令 |
 | Audit Event 的不可变语义与 retention policy | Audit；append-log 物理写入由 Audit adapter 以 file append detail 直接实现，只复用 Storage 路径安全 primitive |
 | 日志 rotation/retention | Logging，不复用 Storage 业务端口 |
@@ -438,7 +438,7 @@ Storage 可以提供 `delete_all_generations/list_primary` 等机械能力，但
 清理流程由拥有生命周期的 BC 发起：
 
 - Context Management 删除 Session 后明确删除关联 snapshot/blob；
-- Tool/Context Management 决定 Tool Result 是否成为孤儿并请求清理；
+- Runtime 决定 Tool Result 是否外置及其 preview/reference；未来 orphan/retention 清理由拥有 Session/Tool Result 生命周期的 BC 发起；
 - Memory 决定归档与淘汰；
 - Audit 决定审计 retention；
 - Storage 只保证命令的路径安全、幂等性和失败可观察。
@@ -490,4 +490,5 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-16 | 冻结 §3 Storage Hexagonal 物理结构为 `domain + ports + adapters`：三个机制由 domain 子模块表达，不叠加 `capabilities/`；以稳定层名、单向依赖和窄 façade 支持机械 Guard，防止 I/O 下沉、adapter 泄漏与公开面劣化 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
 | 2026-07-16 | 冻结 blob generation policy 与幂等结果：namespace 静态选择 Retain/Discard；promote 区分 Promoted/AlreadyPromoted/NotFound；quarantine 区分 Moved/AlreadyAbsent，且跨 reopen promote 证据归 #882 journal | [#881](https://github.com/rushsinging/aemeath/issues/881) |
 | 2026-07-16 | 冻结单 blob crash protocol：Prepared 前创建 previous.next 不得移动 Primary；atomic replace 是须证明的平台/文件系统 capability，禁止 remove+rename；提交后普通收尾失败返回 warning，证据矛盾优先返回 typed corruption | [#882](https://github.com/rushsinging/aemeath/issues/882) |
+| 2026-07-17 | #884 删除 Storage-owned Tool Result 业务 helper：阈值/Unicode preview/reference 迁至 Runtime materialization，Runtime-owned `ToolResultBlobPort` adapter 复用 AtomicBlob；AppendLog 保持 Audit-owned，History 不复活 | [#884](https://github.com/rushsinging/aemeath/issues/884) |
 | 2026-07-17 | 落地独立 AtomicDataset port/adapter：Prepared durable commit point、读取前 roll-forward、typed transaction corruption quarantine 与 L0–L5 验证；Memory integration deferred 至 #896，Guard/allowlist 净增 0 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
