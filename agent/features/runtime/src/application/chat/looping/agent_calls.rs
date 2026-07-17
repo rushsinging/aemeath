@@ -176,7 +176,7 @@ where
         .get("Agent")
         .expect("Agent tool not found in registry");
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
-    let workspace = project::WorkspacePersist::snapshot(ag_ctx.workspace.as_ref());
+    let workspace = ag_ctx.workspace.persist().snapshot();
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),
@@ -307,7 +307,7 @@ mod tests {
                 lang: "en".to_string(),
                 allow_all: true,
             },
-            workspace: project::WorkspaceService::new(cwd),
+            workspace: project::wire_production_workspace(cwd).into_views(),
             run_id: sdk::RunId::new_v7().to_string(),
             cancel: CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),

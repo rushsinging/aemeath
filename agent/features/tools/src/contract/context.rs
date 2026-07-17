@@ -1,5 +1,5 @@
 use super::resources::ToolResources;
-use project::{WorkspaceControl, WorkspaceRead, WorkspaceService};
+use project::{WorkspaceControl, WorkspaceRead, WorkspaceViews};
 use share::tool::{AgentProgressEvent, SessionReminders};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -15,8 +15,8 @@ pub struct ToolExecutionContext {
     /// 共享资源（agent_runner / registry / memory_config / lang / allow_all）。
     pub resources: ToolResources,
 
-    /// 唯一 workspace 状态源句柄（project 拥有）。
-    pub workspace: Arc<WorkspaceService>,
+    /// Project-owned 窄 workspace views；不暴露具体 service。
+    pub workspace: WorkspaceViews,
     /// Runtime Run ID 的 Published Language 字符串；Tools 只透传，不解释领域身份。
     pub run_id: String,
     pub cancel: CancellationToken,
@@ -42,11 +42,15 @@ pub struct ToolExecutionContext {
 
 impl ToolExecutionContext {
     /// 只读 workspace 能力（所有 tool）。
-    pub fn workspace_read(&self) -> &dyn WorkspaceRead {
-        self.workspace.as_ref()
+    pub fn workspace_read(&self) -> Arc<dyn WorkspaceRead> {
+        self.workspace.read()
     }
     /// 变更 workspace 能力（仅 bash + worktree 工具；由 guard 约束调用方）。
-    pub fn workspace_control(&self) -> &dyn WorkspaceControl {
-        self.workspace.as_ref()
+    pub fn workspace_control(&self) -> Arc<dyn WorkspaceControl> {
+        self.workspace.control()
+    }
+
+    pub fn derive_isolated_workspace(&self) -> WorkspaceViews {
+        self.workspace.derive_isolated()
     }
 }

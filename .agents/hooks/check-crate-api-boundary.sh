@@ -36,14 +36,14 @@ ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
 PROJECT_ROOT_ACCESS_ALLOW = {
-    "GitCli",
-    "GitWorktreeOps",
     "WorkspaceControl",
     "WorkspaceError",
     "WorkspaceFrame",
     "WorkspacePersist",
     "WorkspaceRead",
-    "WorkspaceService",
+    "WorkspaceViews",
+    "WorkspaceWiring",
+    "wire_production_workspace",
 }
 PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
 # 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
@@ -372,13 +372,11 @@ def run_sanity() -> None:
         raise AssertionError("sanity block failed: multiline Project internal import")
     if not project_import_violations("tools", "use project::\n domain::WorkspaceState;"):
         raise AssertionError("sanity block failed: multiline Project path import")
-    if project_import_violations("tools", "use project::{\n    WorkspaceRead,\n    WorkspaceService,\n};"):
-        raise AssertionError("sanity allow failed: multiline registered Project import")
+    if not project_import_violations("tools", "use project::{\n    WorkspaceRead,\n    WorkspaceService,\n};"):
+        raise AssertionError("sanity block failed: removed Project concrete service import")
     valid_facade = '''
 pub const LOG_TARGET: &str = "aemeath:agent:project";
-pub use adapters::git::GitCli;
-pub use domain::git::GitWorktreeOps;
-pub use domain::service::WorkspaceService;
+pub use adapters::wiring::{wire_production_workspace, WorkspaceViews, WorkspaceWiring};
 pub use domain::types::{WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead};
 '''
     if project_public_facade_violations(valid_facade):

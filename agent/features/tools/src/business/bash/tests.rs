@@ -14,7 +14,7 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
     let workspace = tempdir().unwrap();
     let worktree = workspace.path().join(".worktrees/bug35");
     std::fs::create_dir_all(&worktree).unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),
@@ -44,10 +44,9 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
         .await;
 
     assert!(!result.is_error);
-    use project::WorkspaceRead;
-    assert_eq!(ws.current_path_base(), worktree);
+    assert_eq!(ws.read().current_path_base(), worktree);
     // workspace_root 应该保持为原来的 git 仓库根目录，不会因为 cd 到非 git 目录而改变
-    assert_eq!(ws.current_workspace_root(), workspace.path());
+    assert_eq!(ws.read().current_workspace_root(), workspace.path());
 }
 
 #[tokio::test]
@@ -55,7 +54,7 @@ async fn test_bash_display_field_contains_stdout_not_message() {
     // 回归：Bash result 的 output 应包含 stdout（通过 display 字段），
     // 而非 "Command executed successfully" 元信息。
     let workspace = tempdir().unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),
@@ -110,7 +109,7 @@ async fn test_bash_result_cwd_reflects_cd() {
     let workspace = tempdir().unwrap();
     let subdir = workspace.path().join("subdir");
     std::fs::create_dir_all(&subdir).unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),
@@ -151,7 +150,7 @@ async fn test_bash_result_cwd_reflects_cd() {
 async fn test_bash_result_cwd_on_failed_command() {
     // AC6: 命令失败（非零 exit code）时 result 也带 cwd
     let workspace = tempdir().unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),
@@ -187,7 +186,7 @@ async fn test_bash_result_cwd_on_failed_command() {
 async fn test_bash_result_cwd_on_empty_output() {
     // AC5: stdout + stderr 均为空时的 "Command executed successfully" 也带 cwd
     let workspace = tempdir().unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),
@@ -229,7 +228,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
     use tokio::sync::mpsc;
 
     let workspace = tempdir().unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
@@ -319,7 +318,7 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 #[tokio::test]
 async fn test_bash_no_progress_tx_still_works() {
     let workspace = tempdir().unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),
@@ -465,7 +464,7 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
     // 而应包含 signal 信息。
     let workspace = tempdir().unwrap();
-    let ws = project::WorkspaceService::new(workspace.path().to_path_buf());
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf()).into_views();
     let ctx = ToolExecutionContext {
         workspace: ws.clone(),
         run_id: "test-run".to_string(),

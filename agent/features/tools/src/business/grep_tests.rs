@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 fn test_ctx(root: std::path::PathBuf) -> ToolExecutionContext {
     let read_files = HashSet::new();
     ToolExecutionContext {
-        workspace: project::WorkspaceService::new(root),
+        workspace: project::wire_production_workspace(root).into_views(),
         run_id: "test-run".to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(Mutex::new(read_files)),

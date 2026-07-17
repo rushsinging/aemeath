@@ -5,6 +5,17 @@ fn st(cwd: &str) -> WorkspaceState {
     WorkspaceState::new(PathBuf::from(cwd))
 }
 
+fn unique_temp_dir(name: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "aemeath_project_state_{name}_{}_{id}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    path.canonicalize().unwrap()
+}
+
 #[test]
 fn init_consistent() {
     let s = st("/repo");
@@ -88,6 +99,49 @@ fn restore_invalid_path_fails_whole() {
     ));
     // 状态未被部分修改
     assert_eq!(s.path_base, PathBuf::from("/repo"));
+}
+
+#[test]
+fn enter_with_stale_stack_clears_only_after_negative_probe() {
+    let target = unique_temp_dir("stale_stack_target");
+    let mut git = FakeGit::default();
+    git.toplevel
+        .insert(target.clone(), PathBuf::from("/repo/wt"));
+    git.common_dir
+        .insert(PathBuf::from("/repo"), PathBuf::from("/repo/.git"));
+    git.common_dir
+        .insert(PathBuf::from("/repo/wt"), PathBuf::from("/repo/.git"));
+    let mut state = st("/repo");
+    state.stack.push(WorkspaceFrame {
+        path_base: "/stale".into(),
+        workspace_root: "/stale".into(),
+    });
+
+    enter(&mut state, &git, Some(target), None).unwrap();
+
+    assert_eq!(state.stack.len(), 1, "残栈清理后只压入当前 frame");
+    assert_eq!(state.stack[0].workspace_root, PathBuf::from("/repo"));
+}
+
+#[test]
+fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
+    let git = FakeGit {
+        worktree_probe_error: Some("probe failed".into()),
+        ..FakeGit::default()
+    };
+    let mut state = st("/repo");
+    let frame = WorkspaceFrame {
+        path_base: "/stale".into(),
+        workspace_root: "/stale".into(),
+    };
+    state.stack.push(frame.clone());
+
+    let result = enter(&mut state, &git, Some("/target".into()), None);
+
+    assert_eq!(result, Err(WorkspaceError::Git("probe failed".into())));
+    assert_eq!(state.path_base, PathBuf::from("/repo"));
+    assert_eq!(state.workspace_root, PathBuf::from("/repo"));
+    assert_eq!(state.stack, vec![frame]);
 }
 
 #[test]

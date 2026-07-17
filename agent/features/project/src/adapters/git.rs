@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::domain::git::GitWorktreeOps;
 
 /// Production git adapter. Spawns the `git` CLI (project may spawn; share may not).
-pub struct GitCli;
+pub(crate) struct GitCli;
 
 impl GitWorktreeOps for GitCli {
     fn git_common_dir(&self, path: &Path) -> Result<PathBuf, String> {
@@ -41,20 +41,18 @@ impl GitWorktreeOps for GitCli {
         ))
     }
 
-    fn in_worktree(&self, path: &Path) -> bool {
-        std::process::Command::new("git")
+    fn in_worktree(&self, path: &Path) -> Result<bool, String> {
+        let output = std::process::Command::new("git")
             .args(["rev-parse", "--git-dir"])
             .current_dir(path)
             .output()
-            .ok()
-            .and_then(|o| {
-                o.status.success().then(|| {
-                    String::from_utf8_lossy(&o.stdout)
-                        .trim()
-                        .contains("/.git/worktrees/")
-                })
-            })
-            .unwrap_or(false)
+            .map_err(|error| format!("git rev-parse --git-dir 执行失败: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("无法探测路径 {} 的 worktree 状态", path.display()));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .contains("/.git/worktrees/"))
     }
 
     fn worktree_add(

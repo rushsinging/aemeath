@@ -79,8 +79,8 @@ where
     let mut client = client;
     let mut session_reasoning = client.default_scope().requested_reasoning();
     let hook_ui = HookUi::new(sink.clone());
-    let mut cwd = project::WorkspaceRead::current_workspace_root(workspace.as_ref());
-    let memory_cwd = project::WorkspaceRead::initial_cwd(workspace.as_ref());
+    let mut cwd = workspace.read().current_workspace_root();
+    let memory_cwd = workspace.read().initial_cwd();
     let mut active_summary = active_summary_arc
         .lock()
         .map(|value| value.clone())
@@ -434,7 +434,7 @@ where
             .unwrap_or_default();
         let rollback_active_summary = active_summary.clone();
         let started_at = Instant::now();
-        cwd = project::WorkspaceRead::current_workspace_root(workspace.as_ref());
+        cwd = workspace.read().current_workspace_root();
 
         if let Some(graph) = reasoning_graph.as_mut() {
             let text = chain
