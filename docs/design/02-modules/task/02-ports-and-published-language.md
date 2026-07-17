@@ -1,7 +1,7 @@
 # Task 端口与 Published Language
 
 > 层级：02-modules / task（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#791（S2）/ #890 / [#972](https://github.com/rushsinging/aemeath/issues/972)
+> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#791（S2）/ #887 / #888 / #890 / [#972](https://github.com/rushsinging/aemeath/issues/972)
 
 ## 1. TaskAccess 与 TaskPersist
 
@@ -82,40 +82,50 @@ pub trait TaskPersist: Send + Sync {
 }
 
 pub enum TaskCommandError {
-    NotFound { id: TaskId },
     InvalidTaskSubject,
     InvalidBatchSummary,
     TaskIdExhausted,
     BatchIdExhausted,
-    NoActiveBatch,
-    ActiveBatchExists { id: BatchId },
-    BatchNotFound { id: BatchId },
-    IllegalBatchTransition { id: BatchId, from: BatchStatus, to: BatchStatus },
+    RevisionExhausted,
     IllegalTransition { from: TaskStatus, to: TaskStatus },
-    TaskBlocked { id: TaskId, blocked_by: Vec<TaskId> },
     DeletedOnlyViaDelete,
-    DependencyNotFound { task_id: TaskId, missing_dependency: TaskId },
-    DuplicateDependency { id: TaskId },
-    DependencyCycle,
+    IllegalBatchTransition { id: BatchId, from: BatchStatus, to: BatchStatus },
+    TaskNotFound { id: TaskId },
+    BatchNotFound { id: BatchId },
+    NoActiveBatch,
+    DependencyCycle { task_id: TaskId, blocked_by_id: TaskId },
+    CrossBatchDependency { task_id: TaskId, blocked_by_id: TaskId },
+    TaskBlocked { id: TaskId, blocked_by: Vec<TaskId> },
+    ActiveBatchConflict { active: BatchId, requested: BatchId },
+    BatchNotActive { id: BatchId, status: BatchStatus },
 }
 
 pub struct TaskCommandResult<T> {
     pub value: T,
     pub events: Vec<TaskEvent>, // 与本次成功 mutation 原子产生、顺序稳定
+    revision: Option<TaskRevision>, // 私有；只经 revision() 读取
+}
+
+impl<T> TaskCommandResult<T> {
+    pub fn revision(&self) -> Option<TaskRevision>;
 }
 ```
+
+`TaskRevision` 是 Task backing 的单调提交版本，空 store 从 `0` 开始。每次实际改变 `TaskStoreState` 的成功命令只递增一次，即使命令原子修改多个 Task、Batch 或依赖边；此时 `TaskCommandResult::revision()` 返回提交后的权威 `Some(TaskRevision)`。失败命令、只读查询和幂等 no-op 均不递增；聚合内尚未提交的本地结果与 store 幂等 no-op 的 `revision()` 均返回 `None`。`revision` 字段及其写入能力保持 Task-private，外部调用方只能通过 accessor 读取，不能伪造提交信息。真实提交的 revision 与命令的 `value` / `events` 在同一 state transaction 中产生，调用方 **NEVER** 通过命令后另查 revision 拼接提交结果。revision 溢出返回结构化 `RevisionExhausted`，state、events 与 revision 全部不变。`#887` 不引入 expected-revision/CAS 参数；若未来出现多 writer 乐观并发需求，必须另行设计冲突协议。
 
 所有 mutation command 都返回 `TaskCommandResult<T>`；Runtime 必须先消费 `events` 并经 ACL 投影，再使用 `value` 更新本地 read model。失败没有事件。`add_dependency` 即使调用方先查询 `would_create_cycle`，也 **MUST** 在同一 store write mutation 内重新检查环；`transition(id, InProgress)` 同理必须锁内检查 blocked，查询方法只是 UI/规划提示，不能充当写入 precondition。
 
 `TaskCreateSpec` / `BatchCreateSpec` 是 Task-owned typed command input，**NEVER** 与 Tool wire DTO 共用类型。其字段与直接构造器保持私有：`try_new` 校验非空 subject / summary；`create_task` / `create_batch` 再校验当前 state，最后才分配 ID 并在一次 state mutation 中插入。任何校验或 ID 溢出都返回结构化 `TaskCommandError` 且 state / counter 不变，**NEVER** 以 panic、空字符串修补或半创建表示失败。
 
-`Task.batch` 是非可选引用，因此 `create_task` **MUST** 把新 Task 绑定到 `current_batch` 指向的唯一 `Active` Batch；合法空 snapshot 的 `current_batch=None` 时返回 `NoActiveBatch`，**NEVER** 隐式创建不可见 Batch、写入 `BatchId(0)` 或返回缺少 batch 的 Task。调用方必须先显式 `create_batch`。`create_batch` 要求当前没有 Active Batch，否则返回 `ActiveBatchExists`；新建命令只接收并持久化 `summary`，**NEVER** 发布 Batch 不拥有的 `description` 参数。
+`Task.batch` 是非可选引用，因此 `create_task` **MUST** 把新 Task 绑定到 `current_batch` 指向的唯一 `Active` Batch；合法空 snapshot 的 `current_batch=None` 时返回 `NoActiveBatch`，**NEVER** 隐式创建不可见 Batch、写入 `BatchId(0)` 或返回缺少 batch 的 Task。调用方必须先显式 `create_batch`。`create_batch` 要求当前没有 Active Batch，否则返回 `ActiveBatchConflict { active, requested }`；新建命令只接收并持久化 `summary`，**NEVER** 发布 Batch 不拥有的 `description` 参数。
 
 Batch lifecycle 命令全部按 id 且 fallible：`pause_batch(Active)` 原子变为 Paused 并清空 current；`resume_batch(Paused)` 仅在无其他 Active 时原子设为 Active/current；`archive_batch(Active|Paused)` 原子变为 Archived 并按需清空 current，重复 archive 幂等返回 Archived 实体。不存在、非法迁移或另一 Active 存在均返回 typed error 且不改 state。公开 Target **NEVER** 保留依赖隐式 current 的 `complete_batch()` shortcut。
 
 `TaskReminderSnapshot` 是 Task-owned 只读 PL，只包含 `current_batch` 与按稳定顺序排列的 `TaskReminderItem { id, subject, status, blocked }`；不含 store handle、依赖图内部缓存或渲染文本。Runtime `context_coordination` 可读取该纯值后传入 `ContextRequest`，Context Management 独占 reminder 的格式、位置与 token budget。
 
-### 1.2 恢复协议类型
+### 1.2 恢复协议类型（#888 / #890，非 #887 范围）
+
+`#887` 只建立 `TaskAccess`、revision 与单一事务 backing，不实现 snapshot codec、restore 校验、`TaskPersist` 或 Context/Composition 接线。下列恢复协议由 `#888` 定义版本化快照与安全校验，由 `#890` 发布 collect / prepare / commit 能力并从同一 backing 分发高权限 view。
 
 ```rust
 #[must_use]
