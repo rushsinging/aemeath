@@ -22,6 +22,9 @@ pub enum CorruptionReason {
     CommittedDigestMismatch,
     OrphanPreviousDigestMismatch,
     InvalidJournal,
+    /// A dataset member's staged or published bytes match neither the old nor
+    /// the new generation digest recorded in the durable journal.
+    DatasetMemberDigestMismatch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
