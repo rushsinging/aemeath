@@ -34,6 +34,17 @@ API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
 ROOT_REEXPORT_ALLOW = {
     "project": {"ProjectContext"},
 }
+PROJECT_ROOT_ACCESS_ALLOW = {
+    "GitCli",
+    "GitWorktreeOps",
+    "WorkspaceControl",
+    "WorkspaceError",
+    "WorkspaceFrame",
+    "WorkspacePersist",
+    "WorkspaceRead",
+    "WorkspaceService",
+}
+PROJECT_ROOT_PUBLIC_ALLOW = PROJECT_ROOT_ACCESS_ALLOW | {"LOG_TARGET"}
 # 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
 ROOT_ACCESS_ALLOW = {
     "provider": {
@@ -73,6 +84,7 @@ ROOT_ACCESS_ALLOW = {
         "wire_provider",
     },
     "runtime": {"AgentClientImpl", "from_args"},
+    "project": PROJECT_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
@@ -98,6 +110,19 @@ CONTEXT_FORBIDDEN_PATHS = {
     "agent/features/context/src/gateway.rs",
     "agent/features/context/src/capabilities",
 }
+PROJECT_FORBIDDEN_PATHS = {
+    "agent/features/project/src/api.rs",
+    "agent/features/project/src/business.rs",
+    "agent/features/project/src/business",
+    "agent/features/project/src/contract.rs",
+    "agent/features/project/src/contract",
+    "agent/features/project/src/core.rs",
+    "agent/features/project/src/core",
+    "agent/features/project/src/gateway.rs",
+    "agent/features/project/src/gateway",
+    "agent/features/project/src/capabilities.rs",
+    "agent/features/project/src/capabilities",
+}
 
 path_pattern = re.compile(
     r"(?<![A-Za-z0-9_:])(?:::)?("
@@ -110,6 +135,17 @@ braced_pattern = re.compile(
     + r")::\s*\{([^}]*)"
 )
 crate_reexport_pattern = re.compile(r"crate::([A-Za-z_][A-Za-z0-9_]*)")
+project_wildcard_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*\*")
+project_braced_full_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*\{(.*?)\}", re.DOTALL)
+project_path_full_pattern = re.compile(r"(?<![A-Za-z0-9_:])(?:::)?project\s*::\s*([A-Za-z_][A-Za-z0-9_]*)", re.DOTALL)
+project_pub_mod_pattern = re.compile(r"^\s*pub\s+mod\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.MULTILINE)
+project_pub_item_pattern = re.compile(
+    r"^\s*pub\s+(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]+\"\s+)?"
+    r"(fn|struct|enum|trait|type|static|union|macro)\s+(?:mut\s+)?([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.MULTILINE,
+)
+project_pub_const_pattern = re.compile(r"^\s*pub\s+const\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.MULTILINE)
+project_pub_use_pattern = re.compile(r"^\s*pub\s+use\s+([^;]+);", re.MULTILINE | re.DOTALL)
 
 
 def crate_for(path: Path) -> str | None:
@@ -179,9 +215,9 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_ACCESS_ALLOW.get(target, set()):
             continue
-        if target == "provider" and segment not in ROOT_ACCESS_ALLOW["provider"]:
+        if target in {"provider", "project"}:
             violations.append(
-                f"cross-feature access to provider::{segment} is forbidden; use the registered provider crate-root facade"
+                f"cross-feature access to {target}::{segment} is forbidden; use the registered {target} crate-root facade"
             )
             continue
         if segment != "api":
@@ -210,9 +246,9 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
-            if target == "provider" and item_name not in ROOT_ACCESS_ALLOW["provider"]:
+            if target in {"provider", "project"}:
                 violations.append(
-                    f"cross-feature braced import from provider exposes {item_name}; use the registered provider crate-root facade"
+                    f"cross-feature braced import from {target} exposes {item_name}; use the registered {target} crate-root facade"
                 )
                 continue
             if item_name != "api":
@@ -235,9 +271,70 @@ def check_api_line(line: str) -> list[str]:
     return violations
 
 
+def project_import_violations(current_crate: str | None, text: str) -> list[str]:
+    if current_crate in {"project", "share"}:
+        return []
+    stripped_text = re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
+    violations: list[str] = []
+    if project_wildcard_pattern.search(stripped_text):
+        violations.append("cross-feature wildcard import from project is forbidden; import registered crate-root symbols explicitly")
+    text_without_braces = project_braced_full_pattern.sub("", stripped_text)
+    for match in project_path_full_pattern.finditer(text_without_braces):
+        symbol = match.group(1)
+        prefix = text_without_braces[: match.start()].rstrip()
+        is_pub_use = prefix.endswith("pub use")
+        if symbol in ROOT_REEXPORT_ALLOW.get("project", set()) and is_pub_use:
+            continue
+        if symbol not in ROOT_ACCESS_ALLOW["project"]:
+            violations.append(
+                f"cross-feature access to project::{symbol} is forbidden; use the registered Project crate-root facade"
+            )
+    for match in project_braced_full_pattern.finditer(stripped_text):
+        for item in top_level_items(match.group(1)):
+            item_name = item.split("::", 1)[0].strip()
+            item_name = item_name.split(" as ", 1)[0].strip()
+            if item_name and item_name not in ROOT_ACCESS_ALLOW["project"]:
+                violations.append(
+                    f"cross-feature braced import from project exposes {item_name}; use the registered Project crate-root facade"
+                )
+    return violations
+
+
+def project_public_facade_violations(text: str) -> list[str]:
+    violations: list[str] = []
+    for module in project_pub_mod_pattern.findall(text):
+        violations.append(f"Project lib.rs must not expose public module `{module}`")
+    for kind, symbol in project_pub_item_pattern.findall(text):
+        violations.append(f"Project lib.rs must not define public {kind} `{symbol}`; use registered re-exports")
+    public_symbols = set(project_pub_const_pattern.findall(text))
+    for expression in project_pub_use_pattern.findall(text):
+        if "*" in expression:
+            violations.append("Project lib.rs must not use wildcard public re-exports")
+            continue
+        if "{" in expression:
+            inner = expression.split("{", 1)[1].rsplit("}", 1)[0]
+            for item in top_level_items(inner):
+                name = item.split(" as ", 1)[-1].strip()
+                name = name.rsplit("::", 1)[-1].strip()
+                if name:
+                    public_symbols.add(name)
+        else:
+            name = expression.split(" as ", 1)[-1].strip().rsplit("::", 1)[-1].strip()
+            if name:
+                public_symbols.add(name)
+    unexpected = public_symbols - PROJECT_ROOT_PUBLIC_ALLOW
+    missing = PROJECT_ROOT_PUBLIC_ALLOW - public_symbols
+    if unexpected:
+        violations.append("Project lib.rs exposes unregistered public symbols: " + ", ".join(sorted(unexpected)))
+    if missing:
+        violations.append("Project façade allowlist is stale or lib.rs is missing exports: " + ", ".join(sorted(missing)))
+    return violations
+
+
 def run_sanity() -> None:
     allowed = [
         ("runtime", "use provider::LlmClient;"),
+        ("tools", "use project::WorkspaceRead;"),
         ("tools", "let _ = ctx.workspace_read();"),
         ("provider", "use crate::adapters::client::LlmClient;"),
         ("share", "pub use storage::contract::StorageConfig;"),
@@ -247,6 +344,7 @@ def run_sanity() -> None:
     blocked = [
         ("runtime", "use provider::api::LlmClient;"),
         ("runtime", "use provider::core::client::LlmClient;"),
+        ("tools", "use project::api::WorkspaceRead;"),
         ("tools", "let _ = project::business::worktree::enter_worktree(args);"),
         ("runtime", "use storage::memory_store::MemoryStore;"),
         ("runtime", "use storage::HistoryManager;"),
@@ -261,6 +359,33 @@ def run_sanity() -> None:
         raise AssertionError("sanity block failed: feature api.rs re-exporting business")
     if check_api_line("pub use crate::contract::*;") or check_api_line("pub use crate::gateway::*;"):
         raise AssertionError("sanity allow failed: api contract/gateway re-export")
+    if not project_import_violations("tools", "use project::*;"):
+        raise AssertionError("sanity block failed: Project wildcard import")
+    if not project_import_violations("tools", "use project::{\n    WorkspaceRead,\n    domain::WorkspaceState,\n};"):
+        raise AssertionError("sanity block failed: multiline Project internal import")
+    if not project_import_violations("tools", "use project::\n domain::WorkspaceState;"):
+        raise AssertionError("sanity block failed: multiline Project path import")
+    if project_import_violations("tools", "use project::{\n    WorkspaceRead,\n    WorkspaceService,\n};"):
+        raise AssertionError("sanity allow failed: multiline registered Project import")
+    valid_facade = '''
+pub const LOG_TARGET: &str = "aemeath:agent:project";
+pub use adapters::git::GitCli;
+pub use domain::git::GitWorktreeOps;
+pub use domain::service::WorkspaceService;
+pub use domain::types::{WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead};
+'''
+    if project_public_facade_violations(valid_facade):
+        raise AssertionError("sanity allow failed: registered Project façade")
+    if not project_public_facade_violations(valid_facade + "pub mod domain;\n"):
+        raise AssertionError("sanity block failed: public Project internal module")
+    if not project_public_facade_violations(valid_facade + "pub fn leaked() {}\n"):
+        raise AssertionError("sanity block failed: public Project function")
+    if not project_public_facade_violations(valid_facade + "pub struct Leaked;\n"):
+        raise AssertionError("sanity block failed: public Project type")
+    if not project_public_facade_violations(valid_facade + "pub const fn leaked() {}\n"):
+        raise AssertionError("sanity block failed: public Project const function")
+    if not project_public_facade_violations(valid_facade + "pub static mut LEAKED: usize = 0;\n"):
+        raise AssertionError("sanity block failed: public Project mutable static")
 
 
 run_sanity()
@@ -269,6 +394,14 @@ for forbidden in sorted(CONTEXT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():
         violations.append(f"{forbidden}: forbidden fixed-layer Context path exists")
+project_lib = root / "agent/features/project/src/lib.rs"
+if project_lib.exists():
+    for violation in project_public_facade_violations(project_lib.read_text()):
+        violations.append(f"agent/features/project/src/lib.rs: {violation}")
+for forbidden in sorted(PROJECT_FORBIDDEN_PATHS):
+    path = root / forbidden
+    if path.exists():
+        violations.append(f"{forbidden}: Project legacy fixed-layer path is forbidden")
 for api_path in sorted((root / "agent" / "features").glob("*/src/api.rs")):
     rel = api_path.relative_to(root)
     for lineno, line in enumerate(api_path.read_text().splitlines(), 1):
@@ -284,6 +417,8 @@ for base in [root / "agent", root / "apps", root / "packages"]:
         rel = path.relative_to(root)
         current = crate_for(rel)
         text = path.read_text()
+        for violation in project_import_violations(current, text):
+            violations.append(f"{rel}: {violation}")
         # 将 rustfmt 产生的多行 use 语句折叠为一行，避免花括号导入绕过 façade 白名单。
         scan_lines: list[tuple[int, str]] = []
         pending_use: list[str] = []

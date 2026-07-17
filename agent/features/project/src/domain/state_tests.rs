@@ -1,5 +1,5 @@
 use super::*;
-use crate::business::git_ops::tests::FakeGit;
+use crate::domain::git::tests::FakeGit;
 
 fn st(cwd: &str) -> WorkspaceState {
     WorkspaceState::new(PathBuf::from(cwd))

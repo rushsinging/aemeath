@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 fn test_ctx(cwd: PathBuf) -> ToolExecutionContext {
     ToolExecutionContext {
-        workspace: project::api::WorkspaceService::new(cwd.clone()),
+        workspace: project::WorkspaceService::new(cwd.clone()),
         run_id: "test-run".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),

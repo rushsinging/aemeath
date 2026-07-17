@@ -48,7 +48,7 @@ pub struct RuntimeHandle {
     /// Resume 标志：load_session 后设为 true，chat_impl 消费后重置为 false。
     ///
     /// loop-top idle 门据此在首次遇到 pending user turn 时强制 idle 等待，
-    pub(crate) workspace: Arc<project::api::WorkspaceService>,
+    pub(crate) workspace: Arc<project::WorkspaceService>,
     pub(crate) event_sink_factory: Arc<
         dyn Fn(tokio::sync::mpsc::UnboundedSender<ChatEvent>) -> ChatEventSinkHandle + Send + Sync,
     >,

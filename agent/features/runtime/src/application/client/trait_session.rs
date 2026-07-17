@@ -23,7 +23,7 @@ pub(super) async fn save_chain_to_handle(
             Some(snap)
         }
     };
-    let workspace = Some(project::api::WorkspacePersist::snapshot(
+    let workspace = Some(project::WorkspacePersist::snapshot(
         inner.workspace.as_ref(),
     ));
     let frozen_chats = inner

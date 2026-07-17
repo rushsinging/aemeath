@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use share::session_types::PersistedWorkspaceContext;
 
-use crate::business::git_ops::{GitCli, GitWorktreeOps};
-use crate::business::workspace_state::{self as rules, WorkspaceState};
-use crate::business::workspace_types::{
+use crate::domain::git::GitWorktreeOps;
+use crate::domain::state::{self as rules, WorkspaceState};
+use crate::domain::types::{
     WorkspaceControl, WorkspaceError, WorkspaceFrame, WorkspacePersist, WorkspaceRead,
 };
 
@@ -16,10 +16,7 @@ pub struct WorkspaceService {
 }
 
 impl WorkspaceService {
-    pub fn new(cwd: PathBuf) -> Arc<Self> {
-        Self::with_git(cwd, Arc::new(GitCli))
-    }
-    pub fn with_git(cwd: PathBuf, git: Arc<dyn GitWorktreeOps>) -> Arc<Self> {
+    pub(crate) fn with_git(cwd: PathBuf, git: Arc<dyn GitWorktreeOps>) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(WorkspaceState::new(cwd)),
             git,
@@ -98,7 +95,7 @@ impl WorkspacePersist for WorkspaceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::business::git_ops::tests::FakeGit;
+    use crate::domain::git::tests::FakeGit;
 
     #[test]
     fn seed_isolated_inherits_position_empty_stack_independent_lock() {

@@ -23,6 +23,9 @@ PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
 STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
 STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
+PROJECT_HEX_LAYERS = {"domain", "adapters"}
+PROJECT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
+PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
 FORBIDDEN_LAYER_DEPS = {
@@ -54,6 +57,9 @@ RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/ports/legacy.rs", "application"),
 }
 use_crate_segment = re.compile(r"\b(?:use\s+)?crate::([A-Za-z_][A-Za-z0-9_]*)")
+project_domain_adapter_pattern = re.compile(
+    r"\bcrate\s*::\s*(?:adapters\b|\{[^}]*\badapters\s*::)", re.DOTALL
+)
 
 
 def is_test_path(path: Path) -> bool:
@@ -75,6 +81,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
         if parts[0] == "storage" and parts[2] in STORAGE_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "context" and parts[2] in CONTEXT_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "project" and parts[2] in PROJECT_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "storage":
             return None
@@ -109,6 +117,18 @@ def run_sanity() -> None:
         raise AssertionError("sanity allow failed: runtime application depending on domain")
     if line_layer_violations("adapters", "use crate::ports::EventSink;"):
         raise AssertionError("sanity allow failed: runtime adapter depending on ports")
+    if line_layer_violations("business", "use crate::utils::normalize_path;"):
+        raise AssertionError("sanity allow failed: business depending on utils")
+    if not line_layer_violations("domain", "use crate::adapters::git::GitCli;"):
+        raise AssertionError("sanity block failed: Project domain depending on adapters")
+    if line_layer_violations("adapters", "use crate::domain::git::GitWorktreeOps;"):
+        raise AssertionError("sanity allow failed: Project adapters depending on domain")
+    if not project_domain_adapter_pattern.search("use crate::{\n adapters::git::GitCli,\n};"):
+        raise AssertionError("sanity block failed: multiline braced Project domain dependency")
+    if not project_domain_adapter_pattern.search("use crate::{\n domain::types::WorkspaceRead,\n adapters::git::GitCli,\n};"):
+        raise AssertionError("sanity block failed: non-first braced Project domain dependency")
+    if not project_domain_adapter_pattern.search("use crate::\n adapters::git::GitCli;"):
+        raise AssertionError("sanity block failed: multiline Project domain dependency")
 
 
 run_sanity()
@@ -145,6 +165,20 @@ for feature_src in sorted(features_root.glob("*/src")):
                 )
                 continue
             continue
+        if crate_name == "project":
+            if child.stem in PROJECT_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Project legacy fixed layer is forbidden; use {sorted(PROJECT_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in PROJECT_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Project source directories must be {sorted(PROJECT_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in PROJECT_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Project top-level source files must be {sorted(PROJECT_ALLOWED_TOP_LEVEL_FILES)}"
+                )
+            continue
         if crate_name == "storage":
             if child.stem in STORAGE_LEGACY_LAYERS:
                 violations.append(
@@ -180,8 +214,11 @@ for path in sorted(features_root.rglob("*.rs")):
     layer_info = feature_layer_for(path)
     if not layer_info:
         continue
-    _feature, layer = layer_info
-    for lineno, line in enumerate(path.read_text().splitlines(), 1):
+    feature, layer = layer_info
+    text = path.read_text()
+    if feature == "project" and layer == "domain" and project_domain_adapter_pattern.search(text):
+        violations.append(f"{rel}: Project domain must not depend on crate::adapters")
+    for lineno, line in enumerate(text.splitlines(), 1):
         for target_layer, violation in line_layer_violations(layer, line):
             exception = (rel_s, target_layer)
             if exception in LAYER_MIGRATION_EXCEPTIONS:

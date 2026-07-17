@@ -449,7 +449,7 @@ mod tests {
                 lang: "en".to_string(),
                 allow_all: true,
             },
-            workspace: project::api::WorkspaceService::new(cwd),
+            workspace: project::WorkspaceService::new(cwd),
             run_id: sdk::RunId::new_v7().to_string(),
             cancel: tokio_util::sync::CancellationToken::new(),
             read_files: Arc::new(Mutex::new(HashSet::new())),

@@ -1,8 +1,7 @@
 //! Workspace 领域类型与能力端口（domain-owned）。
 //!
-//! 这些类型由 business 层的 `WorkspaceService` / `WorkspaceState` 实现与消费，
-//! 因此定义在 business（最内层）；`contract.rs` 仅作向外 re-export 门面。
-//! 如此 business 不再 `use crate::contract`，遵守 COLA 内层不依赖外层规则。
+//! 这些类型由 `WorkspaceService` / `WorkspaceState` 实现与消费，并由 crate root
+//! 精确 re-export 为 Project 的稳定 façade。
 
 use share::session_types::PersistedWorkspaceContext;
 use std::path::{Path, PathBuf};
