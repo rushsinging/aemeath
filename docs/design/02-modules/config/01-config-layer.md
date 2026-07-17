@@ -665,20 +665,20 @@ impl ConfigTranslator for ClaudeTranslator {
 ```rust
 struct ReasoningGraphConfig {
     enabled: bool,
-    nodes: HashMap<ReasoningNode, NodeConfig>,
+    nodes: HashMap<ReasoningNode, NodeOverrideConfig>,
     max_reasoning: Option<ReasoningLevel>,   // 用户配置上限
 }
 
-struct NodeConfig {
-    default_effort: ReasoningLevel,
-    override_effort: Option<ReasoningLevel>,
+struct NodeOverrideConfig {
+    override_effort: ReasoningLevel,
 }
 ```
 
 ### 7.2 静态阈值的含义
 
-- 节点 effort 映射是**静态配置**——从 config 文件读取，不动态计算
-- 有效节点集合由 Workflow Published Language 限定为 `Idle / Explore / Plan / Execute / Verify`；缺失条目使用 Workflow 公布的节点默认值，未知节点返回结构化校验错误
+- 节点默认 effort 映射由 Workflow 唯一拥有，Config **NEVER** 复制默认值
+- `nodes` 只保存非 Idle 节点的显式 override；缺失条目使用 Workflow 默认值，Idle 固定为 Off
+- 有效节点集合由 Workflow Published Language 限定为 `Idle / Explore / Plan / Execute / Verify`；目标态中未知节点或无效 effort 返回结构化校验错误。当前实现仍会忽略未知节点并对无效 effort 静默回退，校验收口由 #934 承接
 - `max_reasoning` 是用户配置的 reasoning level 上限
 - `max_reasoning` **MUST** 接入 ReasoningPort 的 clamp 链（见 [../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md) §5）
 
