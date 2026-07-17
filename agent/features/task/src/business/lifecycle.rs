@@ -36,24 +36,27 @@ pub fn detect_interrupted_batch(
     if !is_new_topic {
         return None;
     }
-    batches
+    let mut candidates: Vec<_> = batches
         .iter()
         .filter(|batch| batch.id() != current_batch && batch.status() == BatchStatus::Active)
-        .find_map(|batch| {
-            let incomplete_ids: Vec<_> = tasks
-                .iter()
-                .filter(|task| {
-                    task.batch() == batch.id()
-                        && !matches!(task.status(), TaskStatus::Completed | TaskStatus::Deleted)
-                })
-                .map(Task::id)
-                .collect();
-            (!incomplete_ids.is_empty()).then_some(InterruptedBatchInfo {
-                batch_id: batch.id(),
-                incomplete_count: incomplete_ids.len(),
-                incomplete_ids,
+        .collect();
+    candidates.sort_unstable_by_key(|batch| batch.id());
+    candidates.into_iter().find_map(|batch| {
+        let mut incomplete_ids: Vec<_> = tasks
+            .iter()
+            .filter(|task| {
+                task.batch() == batch.id()
+                    && !matches!(task.status(), TaskStatus::Completed | TaskStatus::Deleted)
             })
+            .map(Task::id)
+            .collect();
+        incomplete_ids.sort_unstable();
+        (!incomplete_ids.is_empty()).then_some(InterruptedBatchInfo {
+            batch_id: batch.id(),
+            incomplete_count: incomplete_ids.len(),
+            incomplete_ids,
         })
+    })
 }
 
 pub fn detect_stale_batches(
@@ -61,11 +64,11 @@ pub fn detect_stale_batches(
     batches: &[Batch],
     threshold: u64,
 ) -> Vec<StaleBatchInfo> {
-    batches
+    let mut result: Vec<_> = batches
         .iter()
         .filter(|batch| batch.status() == BatchStatus::Active && batch.silence_turns() >= threshold)
         .filter_map(|batch| {
-            let incomplete_ids: Vec<_> = tasks
+            let mut incomplete_ids: Vec<_> = tasks
                 .iter()
                 .filter(|task| {
                     task.batch() == batch.id()
@@ -73,13 +76,16 @@ pub fn detect_stale_batches(
                 })
                 .map(Task::id)
                 .collect();
+            incomplete_ids.sort_unstable();
             (!incomplete_ids.is_empty()).then_some(StaleBatchInfo {
                 batch_id: batch.id(),
                 silence_turns: batch.silence_turns(),
                 incomplete_ids,
             })
         })
-        .collect()
+        .collect();
+    result.sort_unstable_by_key(|info| info.batch_id);
+    result
 }
 
 #[cfg(test)]
@@ -131,6 +137,62 @@ mod tests {
         let stale = detect_stale_batches(&tasks, &batches, 3);
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].batch_id, BatchId::new(1));
+    }
+
+    #[test]
+    fn stale_threshold_boundaries_and_results_are_stable() {
+        let tasks = vec![
+            task(4, 2, TaskStatus::Pending),
+            task(2, 2, TaskStatus::InProgress),
+            task(3, 1, TaskStatus::Pending),
+            task(1, 3, TaskStatus::Completed),
+        ];
+        let batches = vec![
+            batch(2, BatchStatus::Active, 4),
+            batch(3, BatchStatus::Active, 10),
+            batch(1, BatchStatus::Active, 2),
+            batch(4, BatchStatus::Archived, 10),
+        ];
+        let stale = detect_stale_batches(&tasks, &batches, 3);
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].batch_id, BatchId::new(2));
+        assert_eq!(
+            stale[0].incomplete_ids,
+            vec![TaskId::new(2), TaskId::new(4)]
+        );
+
+        let at_threshold = detect_stale_batches(&tasks, &[batch(1, BatchStatus::Active, 3)], 3);
+        assert_eq!(at_threshold[0].batch_id, BatchId::new(1));
+    }
+
+    #[test]
+    fn interrupted_selection_is_independent_of_input_order() {
+        let tasks = vec![
+            task(3, 3, TaskStatus::Pending),
+            task(1, 1, TaskStatus::Pending),
+            task(2, 1, TaskStatus::InProgress),
+        ];
+        let forward = vec![
+            batch(3, BatchStatus::Active, 0),
+            batch(1, BatchStatus::Active, 0),
+        ];
+        let reverse = vec![
+            batch(1, BatchStatus::Active, 0),
+            batch(3, BatchStatus::Active, 0),
+        ];
+        let expected = InterruptedBatchInfo {
+            batch_id: BatchId::new(1),
+            incomplete_count: 2,
+            incomplete_ids: vec![TaskId::new(1), TaskId::new(2)],
+        };
+        assert_eq!(
+            detect_interrupted_batch(BatchId::new(9), &tasks, &forward, true),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            detect_interrupted_batch(BatchId::new(9), &tasks, &reverse, true),
+            Some(expected)
+        );
     }
 
     #[test]

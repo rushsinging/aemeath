@@ -93,6 +93,26 @@ pub enum TaskCommandError {
         from: BatchStatus,
         to: BatchStatus,
     },
+    #[error("任务不存在：{id}")]
+    TaskNotFound { id: TaskId },
+    #[error("批次不存在：{id}")]
+    BatchNotFound { id: BatchId },
+    #[error("当前没有 active 批次")]
+    NoActiveBatch,
+    #[error("依赖边会形成环：{task_id} -> {blocked_by_id}")]
+    DependencyCycle {
+        task_id: TaskId,
+        blocked_by_id: TaskId,
+    },
+    #[error("禁止跨批次依赖：{task_id} -> {blocked_by_id}")]
+    CrossBatchDependency {
+        task_id: TaskId,
+        blocked_by_id: TaskId,
+    },
+    #[error("任务 {id} 被前置任务阻塞：{blocked_by:?}")]
+    TaskBlocked { id: TaskId, blocked_by: Vec<TaskId> },
+    #[error("批次 {active} 已经 active，不能恢复批次 {requested}")]
+    ActiveBatchConflict { active: BatchId, requested: BatchId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +124,17 @@ pub enum TaskEvent {
         task_id: TaskId,
         from: TaskStatus,
         to: TaskStatus,
+    },
+    TaskDependencyAdded {
+        task_id: TaskId,
+        blocked_by_id: TaskId,
+    },
+    TaskDependencyRemoved {
+        task_id: TaskId,
+        blocked_by_id: TaskId,
+    },
+    TaskDeleted {
+        task_id: TaskId,
     },
 }
 
@@ -176,6 +207,8 @@ pub struct Task {
     active_form: Option<String>,
     session_id: Option<String>,
     tags: Vec<String>,
+    blocked_by: Vec<TaskId>,
+    blocks: Vec<TaskId>,
     status: TaskStatus,
     priority: TaskPriority,
     created_at: u64,
@@ -198,6 +231,8 @@ impl Task {
             active_form: spec.active_form,
             session_id: None,
             tags: Vec::new(),
+            blocked_by: Vec::new(),
+            blocks: Vec::new(),
             status: TaskStatus::Pending,
             priority: spec.priority,
             created_at: timestamp,
@@ -225,6 +260,8 @@ impl Task {
             active_form: None,
             session_id: None,
             tags: Vec::new(),
+            blocked_by: Vec::new(),
+            blocks: Vec::new(),
             status,
             priority: TaskPriority::Normal,
             created_at: timestamp,
@@ -253,6 +290,50 @@ impl Task {
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
+    }
+    pub fn blocked_by(&self) -> &[TaskId] {
+        &self.blocked_by
+    }
+    pub fn blocks(&self) -> &[TaskId] {
+        &self.blocks
+    }
+    pub(crate) fn add_blocked_by(&mut self, id: TaskId, updated_at: u64) {
+        if !self.blocked_by.contains(&id) {
+            self.blocked_by.push(id);
+            self.blocked_by.sort_unstable();
+            self.updated_at = updated_at;
+        }
+    }
+    pub(crate) fn add_blocks(&mut self, id: TaskId, updated_at: u64) {
+        if !self.blocks.contains(&id) {
+            self.blocks.push(id);
+            self.blocks.sort_unstable();
+            self.updated_at = updated_at;
+        }
+    }
+    pub(crate) fn remove_blocked_by(&mut self, id: TaskId, updated_at: u64) -> bool {
+        let old_len = self.blocked_by.len();
+        self.blocked_by.retain(|existing| *existing != id);
+        if self.blocked_by.len() != old_len {
+            self.updated_at = updated_at;
+            true
+        } else {
+            false
+        }
+    }
+    pub(crate) fn remove_blocks(&mut self, id: TaskId, updated_at: u64) -> bool {
+        let old_len = self.blocks.len();
+        self.blocks.retain(|existing| *existing != id);
+        if self.blocks.len() != old_len {
+            self.updated_at = updated_at;
+            true
+        } else {
+            false
+        }
+    }
+    pub(crate) fn mark_deleted(&mut self, updated_at: u64) {
+        self.status = TaskStatus::Deleted;
+        self.updated_at = updated_at;
     }
     pub fn status(&self) -> TaskStatus {
         self.status
