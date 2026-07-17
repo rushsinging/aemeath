@@ -3,7 +3,8 @@ set -euo pipefail
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
-#       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters。
+#       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters；
+#       Audit 在 Usage 能力落地前只允许真实 lib.rs 入口，禁止恢复空 COLA 占位。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -27,6 +28,8 @@ STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 PROJECT_HEX_LAYERS = {"domain", "adapters"}
 PROJECT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
+AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs"}
+AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
 FORBIDDEN_LAYER_DEPS = {
@@ -190,6 +193,16 @@ for feature_src in sorted(features_root.glob("*/src")):
             elif child.is_file() and child.name not in PROJECT_ALLOWED_TOP_LEVEL_FILES:
                 violations.append(
                     f"{child.relative_to(root)}: Project top-level source files must be {sorted(PROJECT_ALLOWED_TOP_LEVEL_FILES)}"
+                )
+            continue
+        if crate_name == "audit":
+            if child.stem in AUDIT_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Audit empty or legacy fixed layer is forbidden; add only evidence-backed Usage hexagonal structure"
+                )
+            elif child.is_dir() or child.name not in AUDIT_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Audit source must contain only {sorted(AUDIT_ALLOWED_TOP_LEVEL_FILES)} until a Usage implementation issue adds evidence-backed structure"
                 )
             continue
         if crate_name == "storage":
