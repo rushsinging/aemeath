@@ -26,13 +26,6 @@ impl HookRunner {
         }
     }
 
-    /// 从配置 HashMap 创建（兼容 CLI 层的 config_file 结构）
-    pub fn from_config(config: &share::config::Config) -> Self {
-        Self {
-            config: config.hooks.clone(),
-        }
-    }
-
     /// 返回配置的 hook 事件数量（用于调试日志）
     pub fn hook_count(&self) -> usize {
         self.config.events.len()

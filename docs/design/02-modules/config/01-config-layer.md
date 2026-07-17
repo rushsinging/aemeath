@@ -312,7 +312,7 @@ impl ConfigSnapshot {
 }
 ```
 
-- **消费方拿不到 `&Config`**——无法绕过 port
+- **消费方拿不到 `&Config`**——无法绕过 port；跨 BC 生产代码 **NEVER** 接受或构造裸 `Config`，ConfigAppService 的合并/更新内部除外
 - **复用 Config 字段定义**——避免重复维护
 - **不采用裸 `Arc<Config>`**（暴露 pub 字段）
 - **不采用独立 struct**（字段重复维护）
