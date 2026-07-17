@@ -29,6 +29,7 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
     session_id
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_agent_runner(
     models: Option<&ModelsConfig>,
     agents: Option<&AgentsConfig>,
@@ -37,6 +38,9 @@ pub fn build_agent_runner(
     reasoning: bool,
     timeout_secs: u64,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
+    tool_result_materializer: Arc<
+        crate::application::tool_result_materialization::ToolResultMaterializer,
+    >,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
     let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
@@ -50,6 +54,7 @@ pub fn build_agent_runner(
         hook_runner,
         reasoning,
         models_config,
+        tool_result_materializer,
     })
 }
 
@@ -78,10 +83,12 @@ fn has_multi_provider_or_agent_roles(
 }
 
 #[cfg(test)]
-fn resolve_role_logs_dir(config_file: Option<&share::config::Config>) -> PathBuf {
+fn resolve_role_logs_dir(
+    config_file: Option<&share::config::domain::snapshot::ConfigSnapshot>,
+) -> PathBuf {
     config_file
-        .and_then(|config| config.logging.logs_dir.as_ref())
-        .map(|dir| expand_tilde_path(dir))
+        .and_then(|config| config.logs_dir())
+        .map(expand_tilde_path)
         .unwrap_or_else(|| config_paths::global_logs_dir().join("logs"))
 }
 
@@ -100,18 +107,15 @@ mod tests {
     use super::*;
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
     use share::config::models::ProviderModelsConfig;
-    use share::config::{AgentRoleConfig, AgentsConfig, Config, LoggingConfig, ModelsConfig};
+    use share::config::{AgentRoleConfig, AgentsConfig, Config, ModelsConfig};
     use std::collections::HashMap;
 
-    fn config_with_logging(role_logs_enabled: bool, logs_dir: Option<&str>) -> Config {
-        Config {
-            logging: LoggingConfig {
-                role_logs_enabled,
-                logs_dir: logs_dir.map(str::to_string),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+    fn snapshot_with_logs_dir(
+        logs_dir: Option<&str>,
+    ) -> share::config::domain::snapshot::ConfigSnapshot {
+        let mut config = Config::default();
+        config.logging.logs_dir = logs_dir.map(str::to_string);
+        share::config::domain::snapshot::ConfigSnapshot::new(config)
     }
 
     #[test]
@@ -155,18 +159,18 @@ mod tests {
 
     #[test]
     fn test_resolve_role_logs_dir_uses_config_path() {
-        let config = config_with_logging(true, Some("custom-logs"));
+        let snapshot = snapshot_with_logs_dir(Some("custom-logs"));
 
-        let result = resolve_role_logs_dir(Some(&config));
+        let result = resolve_role_logs_dir(Some(&snapshot));
 
         assert_eq!(result, PathBuf::from("custom-logs"));
     }
 
     #[test]
     fn test_resolve_role_logs_dir_expands_tilde_path() {
-        let config = config_with_logging(true, Some("~/custom-logs"));
+        let snapshot = snapshot_with_logs_dir(Some("~/custom-logs"));
 
-        let result = resolve_role_logs_dir(Some(&config));
+        let result = resolve_role_logs_dir(Some(&snapshot));
 
         assert!(!result.to_string_lossy().starts_with('~'));
         assert!(result.ends_with("custom-logs"));

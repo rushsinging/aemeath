@@ -65,6 +65,8 @@ where
     pub(crate) read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(crate) session_reminders: &'a Arc<std::sync::Mutex<share::tool::SessionReminders>>,
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::api::AgentRunner>>,
+    pub(crate) tool_result_materializer:
+        &'a crate::application::tool_result_materialization::ToolResultMaterializer,
     pub(crate) allow_all: bool,
     pub(crate) task_store: &'a Arc<storage::TaskStore>,
     pub(crate) max_tool_concurrency: usize,
@@ -690,7 +692,7 @@ where
             crate::application::chat::looping::events::is_task_store_mutation(&result.tool_name)
         });
         self.chain.push(
-            tool_results_for_api(all_results, self.session_id),
+            tool_results_for_api(self.tool_result_materializer, all_results, self.session_id).await,
             self.segment_id,
         );
         self.sink

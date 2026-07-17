@@ -264,6 +264,8 @@ mod tests {
                 system_prompt_text: "真实 system prompt".to_string(),
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
+                tool_result_materializer:
+                    crate::application::testing::test_tool_result_materializer(),
                 task_store: Arc::new(storage::TaskStore::new()),
                 skills_map: std::collections::HashMap::new(),
                 hook_runner: hook::api::HookRunner::empty(),

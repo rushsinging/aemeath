@@ -1,20 +1,12 @@
 use share::config::hooks::{default_timeout_secs, ClaudeSettingsConfig, HookEntry};
-use share::config::{Config, HooksConfig};
+use share::config::HooksConfig;
 use std::collections::HashMap;
 
 pub trait ClaudeSettingsAdapter {
-    fn into_config(self) -> Config;
     fn into_hooks_config(self) -> HooksConfig;
 }
 
 impl ClaudeSettingsAdapter for ClaudeSettingsConfig {
-    fn into_config(self) -> Config {
-        Config {
-            hooks: self.into_hooks_config(),
-            ..Default::default()
-        }
-    }
-
     fn into_hooks_config(self) -> HooksConfig {
         let mut events = HashMap::new();
         for (event, groups) in self.hooks {

@@ -93,6 +93,7 @@ pub(super) async fn chat_impl(
                 read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
                 session_reminders: Arc::new(Mutex::new(Default::default())),
                 agent_runner: Some(inner.context.resources.agent_runner.clone()),
+                tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
                 allow_all: inner.context.resources.allow_all,
                 active_run: inner.active_run.clone(),
                 task_store: inner.context.resources.task_store.clone(),
