@@ -6,11 +6,13 @@
 
 ## 1. 定位
 
-ReasoningGraph 是 **Workflow 支撑域 BC 的聚合 / 策略核心**：
+ReasoningGraph 是 **独立 Workflow 支撑域 BC 的聚合 / 策略核心**：
 
 - 根据对话阶段（Explore / Plan / Execute / Verify）动态调节 reasoning effort
 - Workflow 独占节点迁移、desired effort 与**用户静态上限** clamp；Runtime 只负责在确定的 loop 时机发送信号
 - 通过 Workflow-owned `ReasoningPort` OHS 读写 requested reasoning level，与 Provider 的 model-capability clamp 解耦
+
+**版本边界**：v0.1.0 仅交付 Reasoning Graph / effort 调节；完整 Workflow Engine、DAG、恢复和持久化属于 v0.2.0。Workflow 始终是独立 BC，不因当前能力较窄而归入 Runtime。
 
 **不在本文范围**：Shared Kernel 的 `ReasoningLevel` 稳定枚举定义、Provider 的 per-driver wire format（见 [../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)）、Config 侧的 `ReasoningGraphConfig` 静态阈值（见 [../config/01-config-layer.md](../config/01-config-layer.md)）。
 

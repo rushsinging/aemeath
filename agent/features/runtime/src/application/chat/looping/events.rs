@@ -1,4 +1,3 @@
-use crate::application::reasoning_graph::ReasoningNode;
 use context::session::PersistedWorkspaceContext;
 use provider::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
@@ -6,6 +5,7 @@ use share::message::Message;
 use share::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;
 use std::pin::Pin;
+use workflow::ReasoningNode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeTurnContext {

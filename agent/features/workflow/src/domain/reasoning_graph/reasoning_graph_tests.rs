@@ -1,5 +1,5 @@
 use super::*;
-use provider::ReasoningLevel;
+use share::reasoning::ReasoningLevel;
 
 fn enabled_config() -> GraphRuntimeConfig {
     GraphRuntimeConfig {
