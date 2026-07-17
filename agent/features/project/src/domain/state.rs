@@ -8,6 +8,7 @@ use crate::domain::types::{WorkspaceError, WorkspaceFrame};
 const DEFAULT_WORKTREE_BASE: &str = "main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 
+#[derive(Clone)]
 pub struct WorkspaceState {
     pub initial_cwd: PathBuf,
     pub workspace_root: PathBuf,
@@ -121,13 +122,17 @@ pub fn enter(
     branch: Option<String>,
 ) -> Result<WorkspaceFrame, WorkspaceError> {
     if !state.stack.is_empty() {
-        if !git.in_worktree(&state.path_base) {
-            state.stack.clear(); // 残栈自愈（refs #96）
-        } else {
-            return Err(WorkspaceError::NestedWorktree {
-                current_workspace_root: state.workspace_root.clone(),
-                current_path_base: state.path_base.clone(),
-            });
+        match git
+            .in_worktree(&state.path_base)
+            .map_err(WorkspaceError::Git)?
+        {
+            false => state.stack.clear(),
+            true => {
+                return Err(WorkspaceError::NestedWorktree {
+                    current_workspace_root: state.workspace_root.clone(),
+                    current_path_base: state.path_base.clone(),
+                });
+            }
         }
     }
     let target = resolve_worktree_path(state, path, branch.as_deref())?;

@@ -4,5 +4,18 @@
 
 pub mod config;
 pub mod driver_env;
+pub mod file_snapshot;
+pub mod hooks;
+pub mod legacy;
+pub mod logging;
+pub mod memory;
 pub mod merge;
+pub mod models;
+pub mod permissions;
+pub mod reasoning_graph;
+pub mod skills;
 pub mod snapshot;
+pub mod storage;
+pub mod tools;
+pub mod ui;
+pub mod update;

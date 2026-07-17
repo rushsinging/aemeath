@@ -110,7 +110,7 @@ pub(super) async fn chat_impl(
                     .reasoning_graph_config
                     .as_ref()
                     .filter(|c| c.enabled)
-                    .map(|c| crate::application::reasoning_graph::ReasoningGraph::new(c.clone())),
+                    .map(|c| workflow::ReasoningGraph::new(c.clone())),
                 build_switched_client: {
                     let cwd = inner.cwd.clone();
                     std::sync::Arc::new(move |selection: &str| {

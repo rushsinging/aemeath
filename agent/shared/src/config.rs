@@ -7,22 +7,14 @@
 //! 4. Environment variables
 //! 5. Command line arguments
 
-pub mod adapter;
+pub mod adapters;
 pub mod domain;
-pub mod file_snapshot;
-pub mod hooks;
-pub mod legacy;
-pub mod logging;
-pub mod memory;
-pub mod models;
-pub mod paths;
-pub mod permissions;
-pub mod reasoning_graph;
-pub mod skills;
-pub mod storage;
-pub mod tools;
-pub mod ui;
-pub mod update;
+
+pub use adapters::paths;
+pub use domain::{
+    file_snapshot, hooks, legacy, logging, memory, models, permissions, reasoning_graph, skills,
+    storage, tools, ui, update,
+};
 
 // Re-exports for backward compatibility
 pub use domain::config::{Config, GuidanceConfig, GuidanceReloadPolicy};

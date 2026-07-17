@@ -1,53 +1,7 @@
 //! Provider driver capability.
 
 use serde::{Deserialize, Serialize};
-
-/// 统一推理深度级别——所有 provider 的共同语言。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningLevel {
-    Off,
-    Low,
-    Medium,
-    High,
-    Xhigh,
-    Max,
-}
-
-impl ReasoningLevel {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "off" => Some(Self::Off),
-            "low" => Some(Self::Low),
-            "medium" => Some(Self::Medium),
-            "high" => Some(Self::High),
-            "xhigh" => Some(Self::Xhigh),
-            "max" => Some(Self::Max),
-            _ => None,
-        }
-    }
-
-    pub fn clamped_to(self, max: Self) -> Self {
-        self.min(max)
-    }
-}
-
-impl std::fmt::Display for ReasoningLevel {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+pub use share::reasoning::ReasoningLevel;
 
 /// Provider driver kind. Every model source in config.json maps to one of these via its `driver` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

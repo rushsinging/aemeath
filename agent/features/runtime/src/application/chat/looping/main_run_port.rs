@@ -32,10 +32,11 @@ use crate::application::loop_engine::{
     split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
     ToolStep,
 };
-use crate::application::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::domain::agent_run::RunDomainEvent;
 use crate::LOG_TARGET;
 use context::session::ChatChain;
+use workflow::api::ReasoningSignal;
+use workflow::ReasoningGraph;
 
 /// Main-chat adapter for the shared run loop.
 ///
@@ -58,7 +59,7 @@ where
     pub(crate) user_context: &'a str,
     pub(crate) chain: &'a mut ChatChain,
     pub(crate) context_size: usize,
-    pub(crate) workspace: &'a Arc<project::WorkspaceService>,
+    pub(crate) workspace: &'a project::WorkspaceViews,
     pub(crate) session_id: &'a str,
     pub(crate) read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(crate) session_reminders: &'a Arc<std::sync::Mutex<share::tool::SessionReminders>>,
@@ -102,10 +103,10 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    /// 实时从 `WorkspaceService` 读取 `workspace_root`，避免 turn 内
+    /// 实时从 Project-owned `WorkspaceRead` 读取 `workspace_root`，避免 turn 内
     /// 切换 worktree 后使用过时路径。
     fn current_cwd(&self) -> PathBuf {
-        project::WorkspaceRead::current_workspace_root(self.workspace.as_ref())
+        self.workspace.read().current_workspace_root()
     }
 
     async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
@@ -151,7 +152,7 @@ where
         memory_config: &share::config::MemoryConfig,
         language: &str,
         allow_all: bool,
-        workspace: &Arc<project::WorkspaceService>,
+        workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
         session_reminders: &Arc<std::sync::Mutex<share::tool::SessionReminders>>,
@@ -452,7 +453,7 @@ where
 
         if let Some(graph) = self.reasoning_graph.as_mut() {
             let previous = graph.current_node();
-            if graph.transition(GraphSignal::TextOnly) {
+            if graph.transition(ReasoningSignal::TextOnly) {
                 self.sink
                     .send_event(RuntimeStreamEvent::GraphPhaseChanged {
                         node: graph.current_node(),
@@ -642,7 +643,7 @@ where
                     .copied()
                     .unwrap_or((None, None));
                 let previous = graph.current_node();
-                if graph.transition(GraphSignal::ToolCompleted {
+                if graph.transition(ReasoningSignal::ToolCompleted {
                     tool_name: result.tool_name.clone(),
                     bash_command: command.map(str::to_string),
                     is_error: result.outcome.is_error,

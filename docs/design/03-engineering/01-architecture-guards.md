@@ -69,7 +69,7 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
@@ -79,6 +79,7 @@
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
+| `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
 | `sdk` | `share`, `utils` |
 | `logging` | ∅ |
@@ -86,7 +87,7 @@
 
 > **Memory BC 当前物理落点**：Memory 领域逻辑当前位于 `share` crate（`share::memory::*`），不是独立 crate。Runtime 经 `share` 间接消费 Memory 能力。独立 Memory crate 的升塑见 [migration-governance.md](03-migration-governance.md) M5/M8。
 >
-> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）领域逻辑当前位于 `runtime` crate 内部（`runtime::business::reasoning_graph::*`），不是独立 crate。独立 Workflow crate 的升塑取决于 #972 目录调整后是否拆出。
+> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
 - **例外**：
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
@@ -436,8 +437,8 @@
 - **扫描路径**：`agent/features/**`、`apps/cli/src/**`。
 - **业务 env 列表**：`AEMEATH_CONTEXT_SIZE`、`AEMEATH_PROVIDER`、`AEMEATH_API_KEY`、`AEMEATH_BASE_URL`、`AEMEATH_MODEL`、`AEMEATH_MAX_TOKENS`、`AEMEATH_PERMISSION_MODE`、`AEMEATH_MAX_TOOL_CONCURRENCY`、`AEMEATH_MAX_AGENT_CONCURRENCY`、`AEMEATH_VERBOSE`、`AEMEATH_LOG_LEVEL`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`CLAUDE_API_KEY`、`LLM_API_KEY`、`LLM_BASE_URL`、`DEEPSEEK_API_KEY`、`MINIMAX_API_KEY`、`MIMO_API_KEY`、`VOLCENGINE_CODING_PLAN_API_KEY`、`AGNES_API_KEY`、`OLLAMA_API_KEY`。
 - **白名单路径**：
-  - `agent/shared/src/config/adapter/env` — EnvAdapter，唯一业务 env 读取点
-  - `agent/shared/src/config/paths` — `AEMEATH_AGENTS_DIR`，路径根
+  - `agent/shared/src/config/adapters/env` — EnvAdapter，唯一业务 env 读取点
+  - `agent/shared/src/config/adapters/paths` — `AEMEATH_AGENTS_DIR`，路径根
   - `agent/shared/src/config/domain/driver_env` — driver→env name 映射
   - `agent/features/runtime/src/core/config_app_service.rs` — `resolve_provider_api_keys` 在 config 加载时从 env 注入 per-provider API key
   - `packages/global/logging/` — `AEMEATH_LOG_LEVEL` 在 logging 层处理

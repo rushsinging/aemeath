@@ -6,9 +6,9 @@
 use crate::application::chat::looping::events::ChatEventSink;
 use crate::application::chat::looping::input_gate::InputEventDrainPort;
 use crate::application::chat::looping::queue::QueueDrainPort;
-use crate::application::reasoning_graph::ReasoningGraph;
 use std::sync::Arc;
 use tools::api::ToolRegistry;
+use workflow::ReasoningGraph;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
 /// `(LlmClient, ModelSwitchResult)` 或 `String` 错误。
@@ -58,7 +58,7 @@ where
     pub user_context: String,
     pub chain: context::session::ChatChain,
     pub context_size: usize,
-    pub workspace: Arc<project::WorkspaceService>,
+    pub workspace: project::WorkspaceViews,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,

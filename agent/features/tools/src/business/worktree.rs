@@ -12,20 +12,18 @@ use share::tool::types::exit_worktree::{ExitWorktreeInput, ExitWorktreeResult};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+fn current_branch(ctx: &ToolExecutionContext) -> String {
+    ctx.workspace_read()
+        .current_branch()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "(unknown)".to_string())
+}
 /// Tool to enter a git worktree directory
 pub struct EnterWorktreeTool;
 
 /// Tool to exit the current worktree and restore the previous context
 pub struct ExitWorktreeTool;
-
-/// 获取当前分支名；detached HEAD / 无法获取时返回 "(unknown)"。
-/// git 调用收敛在 project 的 `GitCli`（GitWorktreeOps port）。
-fn get_current_branch(dir: &Path) -> String {
-    project::GitWorktreeOps::current_branch(&project::GitCli, dir)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "(unknown)".to_string())
-}
 
 fn workspace_context_payload(
     _headline: &str,
@@ -94,7 +92,7 @@ impl TypedTool for EnterWorktreeTool {
             Ok(_frame) => {
                 let path_base = ctx.workspace_read().current_path_base();
                 let workspace_root = ctx.workspace_read().current_workspace_root();
-                let branch = get_current_branch(&workspace_root);
+                let branch = current_branch(ctx);
                 let headline = if ctx.resources.lang == "zh" {
                     format!("已进入 worktree：{}", display_target)
                 } else {
@@ -166,7 +164,7 @@ impl TypedTool for ExitWorktreeTool {
                 Ok(()) => {
                     let path_base = ctx.workspace_read().current_path_base();
                     let workspace_root = ctx.workspace_read().current_workspace_root();
-                    let branch = get_current_branch(&workspace_root);
+                    let branch = current_branch(ctx);
                     let headline = if ctx.resources.lang == "zh" {
                         format!("已切换到：{}", path)
                     } else {
@@ -190,7 +188,7 @@ impl TypedTool for ExitWorktreeTool {
                 Ok(prev) => {
                     let path_base = ctx.workspace_read().current_path_base();
                     let workspace_root = ctx.workspace_read().current_workspace_root();
-                    let branch = get_current_branch(&workspace_root);
+                    let branch = current_branch(ctx);
                     let headline = if ctx.resources.lang == "zh" {
                         format!("已退出 worktree，恢复到：{}", prev.path_base.display())
                     } else {

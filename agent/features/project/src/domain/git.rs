@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
 /// Outbound port for git worktree operations used by workspace transition rules.
-pub trait GitWorktreeOps: Send + Sync {
+pub(crate) trait GitWorktreeOps: Send + Sync {
     fn git_common_dir(&self, path: &Path) -> Result<PathBuf, String>;
     fn show_toplevel(&self, path: &Path) -> Result<PathBuf, String>;
-    fn in_worktree(&self, path: &Path) -> bool;
+    fn in_worktree(&self, path: &Path) -> Result<bool, String>;
     fn worktree_add(
         &self,
         repo_root: &Path,
@@ -28,6 +28,7 @@ pub(crate) mod tests {
         pub common_dir: HashMap<PathBuf, PathBuf>,
         pub toplevel: HashMap<PathBuf, PathBuf>,
         pub worktrees: HashSet<PathBuf>,
+        pub worktree_probe_error: Option<String>,
         pub added: Mutex<Vec<PathBuf>>,
         /// 按路径返回的当前分支名（缺省时返回 `Ok(None)`）。
         pub branches: HashMap<PathBuf, String>,
@@ -48,8 +49,11 @@ pub(crate) mod tests {
                 .ok_or_else(|| "not a repo".into())
         }
 
-        fn in_worktree(&self, path: &Path) -> bool {
-            self.worktrees.contains(path)
+        fn in_worktree(&self, path: &Path) -> Result<bool, String> {
+            match &self.worktree_probe_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(self.worktrees.contains(path)),
+            }
         }
 
         fn worktree_add(

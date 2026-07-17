@@ -19,9 +19,9 @@ use crate::application::chat::looping::{
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::loop_engine::run_loop;
-use crate::application::reasoning_graph::GraphSignal;
 use crate::domain::agent_run::{Run, RunSpec};
 use crate::LOG_TARGET;
+use workflow::api::ReasoningSignal;
 
 use super::loop_context::ChatLoopContext;
 
@@ -79,8 +79,8 @@ where
     let mut client = client;
     let mut session_reasoning = client.default_scope().requested_reasoning();
     let hook_ui = HookUi::new(sink.clone());
-    let mut cwd = project::WorkspaceRead::current_workspace_root(workspace.as_ref());
-    let memory_cwd = project::WorkspaceRead::initial_cwd(workspace.as_ref());
+    let mut cwd = workspace.read().current_workspace_root();
+    let memory_cwd = workspace.read().initial_cwd();
     let mut active_summary = active_summary_arc
         .lock()
         .map(|value| value.clone())
@@ -434,7 +434,7 @@ where
             .unwrap_or_default();
         let rollback_active_summary = active_summary.clone();
         let started_at = Instant::now();
-        cwd = project::WorkspaceRead::current_workspace_root(workspace.as_ref());
+        cwd = workspace.read().current_workspace_root();
 
         if let Some(graph) = reasoning_graph.as_mut() {
             let text = chain
@@ -442,7 +442,7 @@ where
                 .map(|message| message.text_content())
                 .unwrap_or_default();
             let previous = graph.current_node();
-            if graph.transition(GraphSignal::UserMessage { text, turn_count }) {
+            if graph.transition(ReasoningSignal::UserMessage { text, turn_count }) {
                 sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
                     node: graph.current_node(),
                     effort: graph.current_effort(),

@@ -2861,6 +2861,7 @@ dependencies = [
  "tokio-util",
  "tools",
  "uuid",
+ "workflow",
 ]
 
 [[package]]
@@ -4536,6 +4537,14 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "workflow"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "share",
 ]
 
 [[package]]

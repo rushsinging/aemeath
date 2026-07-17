@@ -62,7 +62,7 @@ fn test_ctx() -> ToolExecutionContext {
             lang: "en".to_string(),
             allow_all: true,
         },
-        workspace: project::WorkspaceService::new(cwd),
+        workspace: project::wire_production_workspace(cwd).into_views(),
         run_id: sdk::RunId::new_v7().to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
         read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),

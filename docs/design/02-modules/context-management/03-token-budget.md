@@ -140,7 +140,7 @@ struct TokenBudgetConfig {
     map_reduce_chunk_threshold: usize,      // 30_000
 
     /// Snip / Microcompact 统一 Run 保护窗口
-    compact_family_protect_recent_runs: usize, // 3
+    compact_family_protect_recent_runs: usize, // 2
 }
 ```
 

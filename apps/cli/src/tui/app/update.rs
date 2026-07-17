@@ -391,7 +391,7 @@ impl App {
     }
 
     /// 最大渲染行数。超过此值的旧消息被裁剪，滚到顶部时懒加载展开。
-    const MAX_RENDER_LINES: usize = 5000;
+    const MAX_RENDER_LINES: usize = 2000;
 
     /// 裁剪文档到最大行数，保留最新的行。如果裁剪了，顶部插入提示行。
     fn trim_document_to_max_lines(
