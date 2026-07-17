@@ -3,7 +3,7 @@ set -euo pipefail
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
-#       domain/application/ports/adapters/shared；Storage 使用 domain/ports/adapters。
+#       domain/application/ports/adapters/shared；Workflow 使用 domain；Storage 使用 domain/ports/adapters。
 # 例外：少量已登记的迁移期层级倒置（见脚本内 narrow migration exceptions 列表）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -18,6 +18,7 @@ import sys
 root = Path.cwd()
 FEATURE_LAYERS = {"contract", "gateway", "core", "business", "utils"}
 RUNTIME_HEX_LAYERS = {"domain", "application", "ports", "adapters", "shared"}
+WORKFLOW_HEX_LAYERS = {"domain"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
@@ -75,6 +76,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
     parts = rel.parts
     if len(parts) >= 3 and parts[1] == "src":
         if parts[0] == "runtime" and parts[2] in RUNTIME_HEX_LAYERS:
+            return parts[0], parts[2]
+        if parts[0] == "workflow" and parts[2] in WORKFLOW_HEX_LAYERS:
             return parts[0], parts[2]
         if parts[0] == "provider" and parts[2] in PROVIDER_HEX_LAYERS:
             return parts[0], parts[2]
@@ -152,6 +155,16 @@ for feature_src in sorted(features_root.glob("*/src")):
             violations.append(
                 f"{child.relative_to(root)}: Runtime legacy COLA directory is forbidden; use {sorted(RUNTIME_HEX_LAYERS)}"
             )
+            continue
+        if crate_name == "workflow":
+            if child.is_dir() and child.name not in WORKFLOW_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Workflow source directories must be {sorted(WORKFLOW_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in {"lib.rs", "domain.rs"}:
+                violations.append(
+                    f"{child.relative_to(root)}: Workflow top-level source files must be lib.rs or domain.rs"
+                )
             continue
         if crate_name == "provider":
             if child.stem in PROVIDER_LEGACY_LAYERS:

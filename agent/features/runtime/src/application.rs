@@ -10,7 +10,6 @@ pub mod interaction;
 pub mod loop_engine;
 pub mod model_invocation;
 pub mod prompt;
-pub mod reasoning_graph;
 pub mod reflection;
 pub mod resources;
 pub mod runtime_context;

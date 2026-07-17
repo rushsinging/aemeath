@@ -11,6 +11,7 @@
   "hook": ["agent/features/hook/**"],
   "audit": ["agent/features/audit/**"],
   "update": ["agent/features/update/**"],
+  "workflow": ["agent/features/workflow/**"],
   "shared": ["agent/shared/**"],
   "composition": ["agent/composition/**"],
   "sdk": ["packages/sdk/**"],

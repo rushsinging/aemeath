@@ -19,9 +19,9 @@ use crate::application::chat::looping::{
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::loop_engine::run_loop;
-use crate::application::reasoning_graph::GraphSignal;
 use crate::domain::agent_run::{Run, RunSpec};
 use crate::LOG_TARGET;
+use workflow::GraphSignal;
 
 use super::loop_context::ChatLoopContext;
 
