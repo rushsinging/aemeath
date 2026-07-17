@@ -103,7 +103,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 
 | 消费方（数据 BC） | 供应方（机制） | 模式 | 说明 |
 |---|---|---|---|
-| Context Management / Memory / Audit | Storage | C/S | Storage 提供原子写 / 损坏隔离**机制**，不拥有数据本体。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPersist` / Project-owned `WorkspacePersist` 收集）；TaskStore 是纯内存聚合，**NEVER** 另建 Task → Storage 路径。恢复时 Context Management 先取得同一排他 gate，再在 gate 内依次 prepare Project → Config → Memory → Task，执行无失败 commit 并发布 Session / active resources 后才释放。Project 也不单独持久化同一份 Workspace Snapshot。Memory 独立持久化 project memory；Audit 经 Audit-owned `UsageAppendStorePort` 持久化 Usage facts（adapter 内部消费 Storage 机制）。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
+| Context Management / Memory / Audit | Storage | C/S | Storage 通过相互独立的 `AtomicBlobPort` / `AtomicDatasetPort` OHS 与各自文件系统 adapter 提供原子写 / 损坏隔离**机制**，不拥有数据本体。多 member dataset 以 durable Prepared journal 为逻辑提交点，提交后只 roll-forward；无法归入完整 generation 的事务证据返回 typed `CorruptTransaction`，不得伪装为空数据。**Session 落盘时内嵌 Task / Project 快照**（Context Management 经 `TaskPersist` / Project-owned `WorkspacePersist` 收集）；TaskStore 是纯内存聚合，**NEVER** 另建 Task → Storage 路径。恢复时 Context Management 先取得同一排他 gate，再在 gate 内依次 prepare Project → Config → Memory → Task，执行无失败 commit 并发布 Session / active resources 后才释放。Project 也不单独持久化同一份 Workspace Snapshot。Memory 独立持久化 project memory；Memory active+archive 与 legacy key migration 对 `AtomicDatasetPort` 的集成 deferred 至 [#896](https://github.com/rushsinging/aemeath/issues/896)。Audit 经 Audit-owned `UsageAppendStorePort` 持久化 Usage facts（adapter 内部消费 Storage 机制）。Tool Result blob 由 Tool/Context Management 的窄端口按需写入 Storage。 |
 
 ## 7. Shared Kernel（谨慎，尽量小）
 
@@ -163,4 +163,5 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-15 | 修复评审 #11-#13：入站 C/S 表改为 CLI/TUI 是 Customer、Runtime 是 Supplier；Server 移出 v0.1.0 present 表、只保留于 §9 Future；新增 §4 表后说明，消费方 outbound SPI（如 `ProviderPort`）签名真相源统一指向 Runtime 端口与适配器，供应方模块设计不再称签名真相 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | §3 入站 C/S 表补齐 REPL 为 `AgentClient` 的 v0.1.0 Customer（与 CLI / TUI 并列，Server 仍只在 §9 Future），统一 Agent Runtime 是 AgentClient Supplier 的措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #927 明确跨 BC identity 发布机制：语义所有权不变，`SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 经 SDK 发布唯一 UUIDv7 newtype，Audit 与 Context/Runtime 复用而不重复定义 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
+| 2026-07-17 | 持久化边对齐 AtomicDataset 现状：独立 OHS/adapter、Prepared commit point、roll-forward 与 typed corruption；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
 | 2026-07-17 | #921 收缩范围：Provider resolver 领域迁移完成但未接生产链路；Config `reasoning_graph` 退役，Workflow 五节点固定默认 effort；Main ReasoningPort 已接线；Runtime/Context/TUI 尚未端到端消费 Provider resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |

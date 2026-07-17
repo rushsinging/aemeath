@@ -76,6 +76,12 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
             elapsed_secs,
             phase,
         },
+        sdk::ChatEvent::ModelInvocationRetrying { attempt, delay, .. } => {
+            UiEvent::SystemMessage(format!(
+                "模型调用重试：第 {attempt} 次，等待 {} ms",
+                delay.as_millis()
+            ))
+        }
         sdk::ChatEvent::Usage {
             input,
             output,

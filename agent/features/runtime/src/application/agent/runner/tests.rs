@@ -466,7 +466,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
 
 #[tokio::test]
 async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
-    let runner = test_runner(ProviderError::retryable(ProviderErrorKind::Network, "boom"));
+    let runner = test_runner(ProviderError::fatal(ProviderErrorKind::Network, "boom"));
     let ctx = test_ctx();
 
     let result = runner

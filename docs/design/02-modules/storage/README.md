@@ -1,7 +1,7 @@
 # Storage（通用域）
 
 > 层级：02-modules / storage（模块摘要设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#793（S2）
+> 状态：Target（AtomicBlob 与 AtomicDataset 机制已落地；过渡业务语义待迁出）｜Milestone：v0.1.0｜对应 Issue：#793（S2）、[#983](https://github.com/rushsinging/aemeath/issues/983)
 > Storage 提供可靠的物理持久化机制，但不拥有 Session、Memory、Task、Workspace、History、Tool Result 或 Audit Event 的业务语义。
 
 ## 1. 模块定位
@@ -60,7 +60,7 @@ src/
 
 - `lib.rs` 只受控 re-export `AtomicBlobPort` / `AtomicDatasetPort` 与 §4 Published Language 类型，**NEVER** 转发内部结构。
 - `ports/` 只定义 Storage-owned `AtomicBlobPort` / `AtomicDatasetPort` OHS，并依赖 `domain` Published Language；它 **NEVER** 成为所有 trait 的垃圾桶，也不容纳消费方的 Session/Memory/Audit 出站端口。
-- `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；这正是 §3.5 所述"Storage 私有 backend SPI"的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
+- `adapters/` 内的文件系统实现是各用例的私有技术 detail；`atomic_blob` 与 `atomic_dataset` 各自拥有自己的 stage/fsync/rename/journal 实现，互不复用同一文件系统 adapter；dataset 的 adapter-private manifest/journal schema 留在 `adapters/dataset_protocol.rs`。这正是 §3.5 所述“Storage 私有 backend SPI”的物理落点——driver 只在 `adapters/` 内实现该私有 SPI，对外仍只发布 `AtomicBlobPort` / `AtomicDatasetPort`。
 - `safe_path` 是被 `atomic_blob` / `atomic_dataset` 消费的独立 domain 子模块：它拥有自己的校验协议与测试夹具，**NEVER** 因"看似工具函数"被内联进另外两个模块。
 - Storage **NEVER** 建立按存储技术命名的模块级横向技术目录；sled 等未来 backend 若引入，仍 **MUST** 落在 `adapters/` 内，不形成横向替换层。
 
@@ -397,7 +397,7 @@ prepared journal 是 recovery 必须 roll-forward 的逻辑提交点：此前失
 
 `commit_atomic` 的 `members` 永远是新 generation 的完整清单：Storage 按 `DatasetManifest` 比较新旧成员名集合，新清单中缺席的旧成员名在同一 journal 内标记为 omitted=delete 并随 generation 切换一起物理删除，不允许残留孤儿文件，也不允许因为调用方“忘记带上”而静默保留旧成员。previous generation 是切换前完整旧成员集合的物理快照，和 blob 的 previous 一样只在启用恢复代际的 namespace 保留，可通过 `read_previous` / `promote_previous` / `quarantine` 显式访问、回滚或隔离；`read_consistent` 与 `read_manifest` 只服务当前 generation，**NEVER** 因为当前 generation 部分缺失就自动去读 previous 拼凑结果。
 
-可执行 crash-state test **MUST** 在每个 stage / fsync / journal / member publish / committed-marker 点中断，再证明 reopen 只得到完整旧 generation 或完整新 generation。相同 primitive 同时服务 Memory active+archive 与 legacy key migration，**NEVER** 复制领域专属事务算法。
+可执行 crash-state test **MUST** 在每个 stage / fsync / journal / member publish / committed-marker 点中断，再证明 reopen 只得到完整旧 generation 或完整新 generation。#983 已以独立 `AtomicDatasetPort`、`FileSystemDatasetAdapter` 与 adapter-private dataset protocol 落地该机制：Prepared durable 是逻辑 commit point，Prepared 后普通故障只产生 committed `RecoveryPending`，下一读取入口先 roll-forward；journal/member 证据矛盾则整笔 quarantine 并返回 typed `CorruptTransaction`。Memory active+archive 与 legacy key migration 的 integration 仍 deferred 至 [#896](https://github.com/rushsinging/aemeath/issues/896)，不得在 #983 内复制或提前接入领域专属事务算法。
 
 ## 6. 机械读取与领域恢复
 
@@ -490,3 +490,4 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 | 2026-07-16 | 冻结 §3 Storage Hexagonal 物理结构为 `domain + ports + adapters`：三个机制由 domain 子模块表达，不叠加 `capabilities/`；以稳定层名、单向依赖和窄 façade 支持机械 Guard，防止 I/O 下沉、adapter 泄漏与公开面劣化 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
 | 2026-07-16 | 冻结 blob generation policy 与幂等结果：namespace 静态选择 Retain/Discard；promote 区分 Promoted/AlreadyPromoted/NotFound；quarantine 区分 Moved/AlreadyAbsent，且跨 reopen promote 证据归 #882 journal | [#881](https://github.com/rushsinging/aemeath/issues/881) |
 | 2026-07-16 | 冻结单 blob crash protocol：Prepared 前创建 previous.next 不得移动 Primary；atomic replace 是须证明的平台/文件系统 capability，禁止 remove+rename；提交后普通收尾失败返回 warning，证据矛盾优先返回 typed corruption | [#882](https://github.com/rushsinging/aemeath/issues/882) |
+| 2026-07-17 | 落地独立 AtomicDataset port/adapter：Prepared durable commit point、读取前 roll-forward、typed transaction corruption quarantine 与 L0–L5 验证；Memory integration deferred 至 #896，Guard/allowlist 净增 0 | [#983](https://github.com/rushsinging/aemeath/issues/983) |

@@ -1,6 +1,6 @@
 use super::helpers::*;
 use crate::api::ToolExecutionContext;
-use share::memory_ops::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
+use share::memory::{MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};

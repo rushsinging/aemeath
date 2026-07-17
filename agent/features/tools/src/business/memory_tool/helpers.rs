@@ -1,6 +1,6 @@
 use crate::api::ToolExecutionContext;
 use serde_json::Value;
-use share::memory_ops::{parse_category, parse_layer, MemoryCategory, MemoryLayer};
+use share::memory::{parse_category, parse_layer, MemoryCategory, MemoryLayer};
 use std::path::PathBuf;
 use storage::{memory_base_dir, project_file_name_from_path, MemoryStore};
 

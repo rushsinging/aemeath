@@ -78,6 +78,10 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
         self.handler.progress_handle()
     }
 
+    pub fn saw_visible_delta(&self) -> bool {
+        self.saw_visible_delta
+    }
+
     pub fn apply(
         &mut self,
         event: InvocationEvent,
