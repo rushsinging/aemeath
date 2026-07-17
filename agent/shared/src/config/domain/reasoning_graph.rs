@@ -8,11 +8,11 @@
 //!     "enabled": true,
 //!     "max_reasoning": "high",
 //!     "nodes": {
-//!       "explore": { "effort": "medium" },
+//!       "explore": { "effort": "low" },
 //!       "plan":    { "effort": "high" },
-//!       "execute": { "effort": "low" },
-//!       "verify":  { "effort": "medium" }
-//!     }
+//!       "execute": { "effort": "medium" },
+//!       "verify":  { "effort": "high" }
+//!     } // 显式 override 示例，不代表 Workflow 节点默认值
 //!   }
 //! }
 //! ```
@@ -20,7 +20,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 单个节点的 effort 覆盖。`effort` 为字符串（`"off"`/`"low"`/`"medium"`/`"high"`/`"xhigh"`/`"max"`），
-/// 在 runtime crate 中 parse 为 `ReasoningLevel`。
+/// 由 Workflow BC parse 为 `ReasoningLevel`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeEffortConfig {
     pub effort: String,

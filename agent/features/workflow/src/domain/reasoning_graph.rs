@@ -1,6 +1,6 @@
 //! Reasoning Graph——阶段驱动的 reasoning effort 动态调节状态机。
 //!
-//! 设计文档：`docs/design/06-agent-reasoning-graph.md` §3.2
+//! 设计文档：`docs/design/02-modules/workflow/01-reasoning-graph.md`。
 //!
 //! 核心原则：Graph 是 effort 调节器，不是流程约束器——只推断阶段调 effort，
 //! 不阻塞 tool、不改 agent loop 控制流。
@@ -13,10 +13,10 @@
 //!
 //! ## Workflow 演进路线
 //!
-//! ### Phase 3: 完整 Workflow（远期，独立模块）
+//! ### v0.2.0: 完整 Workflow 能力
 //!
 //! 如果需要更强的流程控制（可阻塞 tool、可重试、可分支恢复、可持久化恢复），
-//! 新建 `business/workflow/` 模块，与本模块并行共存：
+//! 在独立 Workflow BC 内按真实能力证据扩展，与 Reasoning Graph 并存：
 //!
 //! ```text
 //!   agent loop ←→ ReasoningGraph (effort 调节，保持纯观察)
@@ -87,7 +87,7 @@ impl std::fmt::Display for ReasoningNode {
 ///
 /// 对应设计文档 §2.3 转移信号表。
 #[derive(Debug, Clone)]
-pub enum GraphSignal {
+pub enum ReasoningSignal {
     /// 新 user message 到达。`text` 用于判断初始节点（EXPLORE vs PLAN），
     /// `turn_count` 用于识别首个 turn。
     UserMessage { text: String, turn_count: usize },
@@ -143,7 +143,7 @@ impl ReasoningGraph {
     }
 
     /// 消费信号，更新当前节点。返回是否发生变化。
-    pub fn transition(&mut self, signal: GraphSignal) -> bool {
+    pub fn transition(&mut self, signal: ReasoningSignal) -> bool {
         let old = self.current;
         let new = self.next_node(&signal);
 
@@ -164,12 +164,12 @@ impl ReasoningGraph {
     }
 
     /// 根据当前节点和信号计算下一节点（纯函数，不修改状态）。
-    fn next_node(&self, signal: &GraphSignal) -> ReasoningNode {
+    fn next_node(&self, signal: &ReasoningSignal) -> ReasoningNode {
         match signal {
-            GraphSignal::UserMessage { text, turn_count } => {
+            ReasoningSignal::UserMessage { text, turn_count } => {
                 initial_node_for_message(text, *turn_count)
             }
-            GraphSignal::ToolCompleted {
+            ReasoningSignal::ToolCompleted {
                 tool_name,
                 bash_command,
                 is_error,
@@ -186,8 +186,8 @@ impl ReasoningGraph {
                 }
                 classify::infer_node_from_tool(tool_name, bash_command.as_deref(), self.current)
             }
-            GraphSignal::TextOnly => ReasoningNode::Idle,
-            GraphSignal::TurnBoundary => self.current, // 保持
+            ReasoningSignal::TextOnly => ReasoningNode::Idle,
+            ReasoningSignal::TurnBoundary => self.current, // 保持
         }
     }
 }
@@ -255,15 +255,15 @@ fn parse_declared_phase(phase: &Option<String>) -> Option<ReasoningNode> {
 }
 
 /// 信号的简短名称（用于日志）。
-fn signal_name(signal: &GraphSignal) -> &'static str {
+fn signal_name(signal: &ReasoningSignal) -> &'static str {
     match signal {
-        GraphSignal::UserMessage { .. } => "UserMessage",
-        GraphSignal::ToolCompleted { .. } => "ToolCompleted",
-        GraphSignal::TextOnly => "TextOnly",
-        GraphSignal::TurnBoundary => "TurnBoundary",
+        ReasoningSignal::UserMessage { .. } => "UserMessage",
+        ReasoningSignal::ToolCompleted { .. } => "ToolCompleted",
+        ReasoningSignal::TextOnly => "TextOnly",
+        ReasoningSignal::TurnBoundary => "TurnBoundary",
     }
 }
 
 #[cfg(test)]
-#[path = "reasoning_graph/reasoning_graph_tests.rs"]
+#[path = "reasoning_graph/tests.rs"]
 mod tests;
