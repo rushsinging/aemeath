@@ -165,8 +165,7 @@ pub async fn from_args_with_workspace(
     let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
-        snapshot.max_tool_concurrency(),
-        snapshot.max_agent_concurrency(),
+        &snapshot,
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
     log::info!(target: LOG_TARGET,

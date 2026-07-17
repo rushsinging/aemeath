@@ -84,11 +84,19 @@ impl ConfigSnapshot {
     // ── Tools / Agents ───────────────────────────────────────
 
     pub fn max_tool_concurrency(&self) -> usize {
-        self.0.tools.max_concurrency
+        if self.0.tools.max_concurrency > 0 {
+            self.0.tools.max_concurrency
+        } else {
+            super::tools::default_max_tool_concurrency()
+        }
     }
 
     pub fn max_agent_concurrency(&self) -> usize {
-        self.0.agents.max_concurrency
+        if self.0.agents.max_concurrency > 0 {
+            self.0.agents.max_concurrency
+        } else {
+            super::tools::default_max_agent_concurrency()
+        }
     }
 
     // ── Logging ──────────────────────────────────────────────
@@ -497,6 +505,25 @@ mod tests {
 
         // Act & Assert
         assert_eq!(snap.max_tool_concurrency(), 8);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    #[test]
+    fn snapshot_concurrency_limits_use_domain_defaults_for_default_config() {
+        let snap = ConfigSnapshot::new(Config::default());
+
+        assert_eq!(snap.max_tool_concurrency(), 10);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    #[test]
+    fn snapshot_concurrency_limits_normalize_zero_to_domain_defaults() {
+        let mut config = Config::default();
+        config.tools.max_concurrency = 0;
+        config.agents.max_concurrency = 0;
+        let snap = ConfigSnapshot::new(config);
+
+        assert_eq!(snap.max_tool_concurrency(), 10);
         assert_eq!(snap.max_agent_concurrency(), 4);
     }
 

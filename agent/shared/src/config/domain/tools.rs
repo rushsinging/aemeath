@@ -3,11 +3,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub(crate) fn default_max_tool_concurrency() -> usize {
+pub(super) fn default_max_tool_concurrency() -> usize {
     10
 }
 
-pub(crate) fn default_max_agent_concurrency() -> usize {
+pub(super) fn default_max_agent_concurrency() -> usize {
     4
 }
 
