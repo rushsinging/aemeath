@@ -2,9 +2,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use super::TaskAccess;
 use crate::business::{
-    Batch, BatchCreateSpec, BatchId, Task, TaskCommandError, TaskCommandResult, TaskCreateSpec,
-    TaskId, TaskLifecycleSnapshot, TaskPriority, TaskReminderSnapshot, TaskRevision, TaskStatus,
-    TaskStoreState, TaskStoreStats,
+    Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskCommandError,
+    TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority,
+    TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskStatus, TaskStoreState, TaskStoreStats,
 };
 
 /// Task BC 的内存事务 backing。
@@ -22,8 +22,8 @@ use crate::business::{
 ///
 /// `TaskStore` 只提供同步 API：不依赖任何异步运行时，锁守卫在方法返回前必然
 /// 释放，因而调用方也无法在持锁期间跨越 `.await`。这里实现同步的窄
-/// [`TaskAccess`] 端口，但不实现 `TaskPersist`、snapshot/restore 能力，也不做
-/// Runtime / Tool wiring 或 legacy storage 接线；那些属于后续 issue 的范围。
+/// [`TaskAccess`] 端口；snapshot capture/install 仅供 crate 内持久化装配使用，
+/// 不实现或公开 `TaskPersist`，也不做 Runtime / Tool wiring 或 legacy storage integration.
 #[derive(Debug, Default)]
 pub struct TaskStore {
     state: Mutex<TaskStoreState>,
@@ -48,6 +48,21 @@ impl TaskStore {
     #[cfg(test)]
     pub(crate) fn state_snapshot(&self) -> TaskStoreState {
         self.lock().clone()
+    }
+
+    /// Captures one coherent persistence image while holding the aggregate's
+    /// single lock. Deleted tombstones and runtime-only reverse indexes are not
+    /// persisted.
+    #[allow(dead_code, reason = "crate-private persistence wiring lands in #890")]
+    pub(crate) fn capture_snapshot(&self) -> TaskSnapshot {
+        self.lock().capture_snapshot()
+    }
+
+    /// Installs an already validated candidate with one lock acquisition and
+    /// one infallible whole-state assignment.
+    #[allow(dead_code, reason = "crate-private persistence wiring lands in #890")]
+    pub(crate) fn install_snapshot(&self, prepared: PreparedTaskRestore) {
+        *self.lock() = prepared.into_candidate();
     }
 
     /// 持锁；锁中毒意味着可能曾在事务中途 panic，必须停止而不是继续暴露内部状态。
