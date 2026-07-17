@@ -19,9 +19,9 @@ use crate::application::chat::looping::{
     QueueDrainPort, RuntimeStreamEvent, RuntimeTurnContext,
 };
 use crate::application::loop_engine::run_loop;
-use crate::application::reasoning_graph::GraphSignal;
 use crate::domain::agent_run::{Run, RunSpec};
 use crate::LOG_TARGET;
+use workflow::api::ReasoningSignal;
 
 use super::loop_context::ChatLoopContext;
 
@@ -442,7 +442,7 @@ where
                 .map(|message| message.text_content())
                 .unwrap_or_default();
             let previous = graph.current_node();
-            if graph.transition(GraphSignal::UserMessage { text, turn_count }) {
+            if graph.transition(ReasoningSignal::UserMessage { text, turn_count }) {
                 sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
                     node: graph.current_node(),
                     effort: graph.current_effort(),

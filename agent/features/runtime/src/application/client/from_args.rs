@@ -178,11 +178,9 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 18. 组装 context
     let memory_config = snapshot.memory().clone();
-    let reasoning_graph_config = Some(
-        crate::application::reasoning_graph::GraphRuntimeConfig::from_shared(
-            snapshot.reasoning_graph(),
-        ),
-    );
+    let reasoning_graph_config = Some(workflow::GraphRuntimeConfig::from_shared(
+        snapshot.reasoning_graph(),
+    ));
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
             client,

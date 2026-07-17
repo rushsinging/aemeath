@@ -22,6 +22,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/hook-tests}"
 
 packages=(
   share
+  workflow
   runtime
   project
   policy

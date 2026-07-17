@@ -32,10 +32,11 @@ use crate::application::loop_engine::{
     split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
     ToolStep,
 };
-use crate::application::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::domain::agent_run::RunDomainEvent;
 use crate::LOG_TARGET;
 use context::session::ChatChain;
+use workflow::api::ReasoningSignal;
+use workflow::ReasoningGraph;
 
 /// Main-chat adapter for the shared run loop.
 ///
@@ -452,7 +453,7 @@ where
 
         if let Some(graph) = self.reasoning_graph.as_mut() {
             let previous = graph.current_node();
-            if graph.transition(GraphSignal::TextOnly) {
+            if graph.transition(ReasoningSignal::TextOnly) {
                 self.sink
                     .send_event(RuntimeStreamEvent::GraphPhaseChanged {
                         node: graph.current_node(),
@@ -642,7 +643,7 @@ where
                     .copied()
                     .unwrap_or((None, None));
                 let previous = graph.current_node();
-                if graph.transition(GraphSignal::ToolCompleted {
+                if graph.transition(ReasoningSignal::ToolCompleted {
                     tool_name: result.tool_name.clone(),
                     bash_command: command.map(str::to_string),
                     is_error: result.outcome.is_error,
