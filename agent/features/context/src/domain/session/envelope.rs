@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use share::message::Message;
+use std::path::PathBuf;
 use storage::TaskSnapshot;
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
@@ -102,7 +103,9 @@ struct LegacySession {
     #[serde(default)]
     tasks: Option<TaskSnapshot>,
     #[serde(default)]
-    workspace: Option<PersistedWorkspaceContext>,
+    cwd: Option<String>,
+    #[serde(default)]
+    workspace: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +123,31 @@ pub enum SessionCodecError {
     },
     #[error("Session JSON decode failed: {0}")]
     InvalidJson(String),
+    #[error("Legacy Session cwd {cwd} conflicts with workspace identity cwd {identity_cwd}")]
+    LegacyCwdIdentityConflict { cwd: String, identity_cwd: String },
+    #[error("Legacy workspace path does not exist: {path}")]
+    LegacyWorkspacePathNotFound { path: PathBuf },
+    #[error("Legacy workspace path is not accessible: {path}")]
+    LegacyWorkspacePermissionDenied { path: PathBuf },
+    #[error("Legacy workspace path cannot be canonicalized: {path}")]
+    LegacyWorkspaceCanonicalizeFailed { path: PathBuf },
+    #[error("Git is unavailable while probing a legacy workspace")]
+    LegacyWorkspaceGitUnavailable,
+    #[error("Git probe failed for legacy workspace path {path} (exit code {exit_code:?})")]
+    LegacyWorkspaceGitProbeFailed {
+        path: PathBuf,
+        exit_code: Option<i32>,
+    },
+    #[error("Git returned invalid output while probing legacy workspace path {path}")]
+    LegacyWorkspaceInvalidGitOutput { path: PathBuf },
+    #[error("Legacy workspace path belongs to a different repository: {path}")]
+    LegacyWorkspaceRepositoryMismatch { path: PathBuf },
+    #[error("Legacy workspace path is not stored in canonical form: {path}")]
+    LegacyWorkspacePathNotCanonical { path: PathBuf },
+    #[error("Legacy non-git workspace layout is invalid: {path}")]
+    LegacyWorkspaceInvalidNonGitLayout { path: PathBuf },
+    #[error("Legacy workspace id does not match its derived identity")]
+    LegacyWorkspaceIdMismatch,
     #[error("Session JSON encode failed: {0}")]
     Encode(String),
 }
@@ -143,7 +171,16 @@ impl SessionCodec {
         .map_err(|error| SessionCodecError::Encode(error.to_string()))
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<DecodedSession, SessionCodecError> {
+    pub(crate) fn decode_with_workspace_upgrade<F>(
+        bytes: &[u8],
+        upgrade_workspace: F,
+    ) -> Result<DecodedSession, SessionCodecError>
+    where
+        F: FnOnce(
+            Option<String>,
+            Option<Value>,
+        ) -> Result<(Option<PersistedWorkspaceContext>, bool), SessionCodecError>,
+    {
         let value: Value = serde_json::from_slice(bytes)
             .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
         match value.get("schema_version").and_then(Value::as_u64) {
@@ -164,11 +201,20 @@ impl SessionCodec {
             Some(version) => Err(SessionCodecError::InvalidJson(format!(
                 "unsupported historical schema version {version}"
             ))),
-            None => Self::decode_legacy(value),
+            None => Self::decode_legacy(value, upgrade_workspace),
         }
     }
 
-    fn decode_legacy(value: Value) -> Result<DecodedSession, SessionCodecError> {
+    fn decode_legacy<F>(
+        value: Value,
+        upgrade_workspace: F,
+    ) -> Result<DecodedSession, SessionCodecError>
+    where
+        F: FnOnce(
+            Option<String>,
+            Option<Value>,
+        ) -> Result<(Option<PersistedWorkspaceContext>, bool), SessionCodecError>,
+    {
         let mut legacy: LegacySession = serde_json::from_value(value)
             .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
         if legacy.chats.is_empty() && !legacy.messages.is_empty() {
@@ -176,6 +222,12 @@ impl SessionCodec {
             segment.messages = std::mem::take(&mut legacy.messages);
             legacy.chats.push(segment);
         }
+        let (workspace, captured_workspace) = upgrade_workspace(legacy.cwd, legacy.workspace)?;
+        let tasks = match legacy.tasks {
+            Some(tasks) => SnapshotState::Captured(tasks),
+            None if captured_workspace => SnapshotState::CapturedEmpty,
+            None => SnapshotState::Missing,
+        };
         Ok(DecodedSession {
             session: CanonicalSession {
                 id: legacy.id,
@@ -183,12 +235,8 @@ impl SessionCodec {
                 created_at: legacy.created_at,
                 updated_at: legacy.updated_at,
                 metadata: legacy.metadata,
-                tasks: legacy
-                    .tasks
-                    .map_or(SnapshotState::Missing, SnapshotState::Captured),
-                workspace: legacy
-                    .workspace
-                    .map_or(SnapshotState::Missing, SnapshotState::Captured),
+                tasks,
+                workspace: workspace.map_or(SnapshotState::Missing, SnapshotState::Captured),
                 revision: 0,
                 committed_steps: Vec::new(),
             },

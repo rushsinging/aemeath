@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use context::adapters::LegacySessionDecoder;
 use context::application::{SessionLoadError, SessionPersistenceService};
 use context::domain::session::{CanonicalSession, SessionCodec};
 use context::ports::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
@@ -47,7 +48,7 @@ async fn valid_primary_is_returned_without_recovery_side_effects() {
     let store = Arc::new(ScriptedStore::default());
     *store.primary.lock().unwrap() =
         Some(SessionCodec::encode(&CanonicalSession::fixture("ok")).unwrap());
-    let loaded = SessionPersistenceService::new(store.clone())
+    let loaded = SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder))
         .load()
         .await
         .unwrap();
@@ -61,7 +62,7 @@ async fn invalid_primary_uses_valid_previous_and_promotes() {
     *store.primary.lock().unwrap() = Some(b"broken".to_vec());
     *store.previous.lock().unwrap() =
         Some(SessionCodec::encode(&CanonicalSession::fixture("old")).unwrap());
-    let loaded = SessionPersistenceService::new(store.clone())
+    let loaded = SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder))
         .load()
         .await
         .unwrap();
@@ -79,7 +80,9 @@ async fn both_invalid_generations_are_quarantined() {
     *store.primary.lock().unwrap() = Some(b"broken-primary".to_vec());
     *store.previous.lock().unwrap() = Some(b"broken-previous".to_vec());
     assert!(matches!(
-        SessionPersistenceService::new(store.clone()).load().await,
+        SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder))
+            .load()
+            .await,
         Err(SessionLoadError::NoDecodableGeneration)
     ));
     assert_eq!(
@@ -96,7 +99,7 @@ async fn future_primary_is_preserved_and_never_falls_back_or_writes() {
     *store.previous.lock().unwrap() =
         Some(SessionCodec::encode(&CanonicalSession::fixture("old")).unwrap());
     assert!(matches!(
-        SessionPersistenceService::new(store.clone()).load().await,
+        SessionPersistenceService::new(store.clone(), Arc::new(LegacySessionDecoder)).load().await,
         Err(SessionLoadError::UnsupportedFutureVersion { original_bytes, .. }) if original_bytes == future
     ));
     assert!(store.quarantined.lock().unwrap().is_empty());

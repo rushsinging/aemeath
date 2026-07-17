@@ -14,9 +14,8 @@ use share::message::Message;
 
 /// 从 `Session` 还原出的活跃链运行时状态。
 ///
-/// 字段都是「纯数据」——不包含 workspace 等 IO 副作用状态；调用方各自处理
-/// workspace 恢复（trait_session 走 `WorkspacePersist::restore`，loop_runner
-/// 由外部 set workspace）。
+/// 字段都是「纯数据」——不包含 workspace 等 IO 副作用状态；workspace 恢复由联合
+/// 协调器通过 `WorkspacePersist::prepare_restore` / `commit_restore` 处理。
 #[derive(Debug, Clone)]
 pub struct SessionRestore {
     /// 经过 sanitize + deep_clean 修剪后的活跃链消息。

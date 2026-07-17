@@ -243,7 +243,9 @@ pub async fn from_args(args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkEr
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd).into_views();
+    let workspace = project::wire_production_workspace(cwd)
+        .expect("workspace 初始化成功")
+        .into_views();
     from_args_with_workspace(args, workspace).await
 }
 
