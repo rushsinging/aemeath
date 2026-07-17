@@ -37,11 +37,14 @@ ROOT_REEXPORT_ALLOW = {
 # 已迁移 feature 的目标 façade 位于 crate 根；集合必须保持窄且由真实消费者证明。
 ROOT_ACCESS_ALLOW = {
     "provider": {
-        "CallbackHandler",
+        "CancellationSignal",
         "InvocationDelta",
+        "InvocationEvent",
         "InvocationOptions",
         "InvocationRequest",
+        "InvocationStream",
         "InvocationScope",
+        "LegacyStreamSink",
         "LlmClient",
         "LlmConfigOptions",
         "LlmError",
@@ -65,7 +68,6 @@ ROOT_ACCESS_ALLOW = {
         "ReasoningLevel",
         "ReasoningMappingKind",
         "StopReason",
-        "StreamHandler",
         "StreamResponse",
         "SystemBlock",
         "Usage",

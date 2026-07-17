@@ -15,39 +15,21 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use futures::Stream;
-use tokio_util::sync::CancellationToken;
 
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
 // 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReason 导出，此处还原为 StopReason。
 pub use provider::{
-    InvocationDelta, InvocationOptions, InvocationRequest, ModelCapability, ModelId,
-    ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,
-    ProviderStopReason as StopReason, ProviderToolCall, ProviderToolCallId, RawUsageSnapshot,
-    ReasoningCapability, ReasoningMappingKind,
+    CancellationSignal, InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest,
+    ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
+    ProviderError, ProviderErrorKind, ProviderStopReason as StopReason, ProviderToolCall,
+    ProviderToolCallId, RawUsageSnapshot, ReasoningCapability, ReasoningMappingKind,
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
 pub use provider::ReasoningLevel;
 
-// ─── InvocationEvent / InvocationStream ────────────────
-
-/// 一次调用的流式事件。
-///
-/// 终结语义：
-/// - `Delta` 只表达非终结增量；
-/// - `Completed` 与 `Failed` 互斥，恰好出现一个；
-/// - 取消以 `Failed(ProviderError::cancelled())` 终结；
-/// - 终结事件后下一次 `next()` 返回 `None`。
-#[derive(Debug, Clone)]
-pub enum InvocationEvent {
-    /// 非终结增量。
-    Delta(InvocationDelta),
-    /// 完成终结。
-    Completed(ProviderCompletion),
-    /// 失败终结（含取消）。
-    Failed(ProviderError),
-}
+// ─── InvocationStream ────────────────────────────────────
 
 /// 一次 LLM 调用的有序 pull-based 流。
 ///
@@ -77,7 +59,7 @@ pub trait ProviderPort: Send + Sync {
     async fn invoke(
         &self,
         request: InvocationRequest,
-        cancellation: &CancellationToken,
+        cancellation: &dyn CancellationSignal,
     ) -> Result<InvocationStream, ProviderError>;
 }
 
@@ -91,6 +73,7 @@ pub(crate) mod fake {
 
     use super::*;
     use futures::stream;
+    use tokio_util::sync::CancellationToken;
 
     /// 可编程的 fake provider：按预设事件列表依次产出。
     pub struct FakeProvider {
@@ -167,7 +150,7 @@ pub(crate) mod fake {
         async fn invoke(
             &self,
             _request: InvocationRequest,
-            cancellation: &CancellationToken,
+            cancellation: &dyn CancellationSignal,
         ) -> Result<InvocationStream, ProviderError> {
             if cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());
@@ -289,6 +272,39 @@ pub(crate) mod fake {
         assert_eq!(events.len(), 2);
         assert!(matches!(events[0], InvocationEvent::Delta(_)));
         assert!(matches!(events[1], InvocationEvent::Completed(_)));
+    }
+
+    #[tokio::test]
+    async fn provider_port_accepts_object_safe_cancellation_signal() {
+        struct AlwaysCancelled;
+
+        #[async_trait]
+        impl CancellationSignal for AlwaysCancelled {
+            fn is_cancelled(&self) -> bool {
+                true
+            }
+
+            async fn cancelled(&self) {}
+        }
+
+        let provider = FakeProvider::new();
+        let request = InvocationRequest::new(
+            ModelId {
+                provider: "fake".to_string(),
+                model: "test-model".to_string(),
+            },
+            Vec::new(),
+            InvocationOptions::new(8192, ReasoningLevel::Off),
+        );
+
+        let result = provider.invoke(request, &AlwaysCancelled).await;
+        assert!(matches!(result, Err(error) if error.is_cancelled()));
+    }
+
+    #[test]
+    fn invocation_event_is_the_provider_published_language_type() {
+        fn accepts_provider_event(_: provider::InvocationEvent) {}
+        accepts_provider_event(InvocationEvent::Failed(ProviderError::cancelled()));
     }
 
     #[test]

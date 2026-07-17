@@ -84,7 +84,7 @@ fn test_list_sessions() -> Arc<
 use ::tools::api::ToolRegistry;
 use async_trait::async_trait;
 use hook::api::HookRunner;
-use provider::{LlmProvider, StreamHandler};
+use provider::{LegacyStreamSink, LlmProvider};
 use provider::{StopReason, StreamResponse, SystemBlock, Usage};
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::message::{Message, MessageSource, Role};
@@ -279,13 +279,13 @@ struct TwoTurnProvider;
 
 #[async_trait]
 impl LlmProvider for TwoTurnProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         let text = if messages
@@ -342,13 +342,13 @@ impl SequenceProvider {
 
 #[async_trait]
 impl LlmProvider for SequenceProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         let text = self
@@ -1315,13 +1315,13 @@ impl IdenticalReplyProvider {
 
 #[async_trait]
 impl LlmProvider for IdenticalReplyProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         tokio::time::sleep(self.per_turn_delay).await;
@@ -1504,13 +1504,13 @@ impl RecordingProvider {
 
 #[async_trait]
 impl LlmProvider for RecordingProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         let last_user = messages
@@ -1994,13 +1994,13 @@ impl CancellableThenNormalProvider {
 
 #[async_trait]
 impl LlmProvider for CancellableThenNormalProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         let call_index = {
@@ -2225,13 +2225,13 @@ impl CompleteThenCancellableProvider {
 
 #[async_trait]
 impl LlmProvider for CompleteThenCancellableProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         let call_index = {
@@ -2503,13 +2503,13 @@ async fn test_chat_impl_idle_until_first_input_event() {
     }
     #[async_trait]
     impl LlmProvider for CountingProvider {
-        async fn stream_message(
+        async fn legacy_stream_message(
             &self,
             _scope: &provider::InvocationScope,
             _system: &[SystemBlock],
             _messages: &[Message],
             _tool_schemas: &[serde_json::Value],
-            handler: &mut dyn StreamHandler,
+            handler: &mut dyn LegacyStreamSink,
             _cancel: &CancellationToken,
         ) -> Result<StreamResponse, provider::LlmError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -2965,13 +2965,13 @@ impl ApiErrorThenNormalProvider {
 
 #[async_trait]
 impl LlmProvider for ApiErrorThenNormalProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         let call_index = {

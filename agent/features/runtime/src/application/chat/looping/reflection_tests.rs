@@ -1,6 +1,6 @@
 use super::*;
 use async_trait::async_trait;
-use provider::{LlmProvider, StreamHandler};
+use provider::{LegacyStreamSink, LlmProvider};
 use provider::{StopReason, StreamResponse, SystemBlock, Usage};
 use share::memory::{MemoryCategory, MemoryLayer, MemorySource};
 use std::sync::Arc;
@@ -14,13 +14,13 @@ struct StaticReflectionProvider {
 
 #[async_trait]
 impl LlmProvider for StaticReflectionProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[share::message::Message],
         _tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         _cancel: &CancellationToken,
     ) -> Result<StreamResponse, provider::LlmError> {
         handler.on_text(&self.response);

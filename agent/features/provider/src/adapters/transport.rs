@@ -15,9 +15,10 @@ use crate::LlmError;
 
 use crate::adapters::client::{LlmClient, LlmConfigOptions};
 use crate::adapters::pool::LlmClientPool;
-use crate::ports::StreamHandler;
+use crate::ports::LegacyStreamSink;
 
 use crate::ports::LlmProvider;
+use crate::published_language::{InvocationStream, ProviderError};
 
 /// OHS gateway for constructing provider clients and streaming model responses.
 #[async_trait]
@@ -33,15 +34,26 @@ pub trait LlmProviderGateway: Send + Sync {
         timeout_secs: u64,
     ) -> LlmClientPool;
 
-    #[allow(clippy::too_many_arguments)]
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         client: &LlmClient,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[Value],
-        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError>;
+
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    async fn legacy_stream_message(
+        &self,
+        client: &LlmClient,
+        scope: &crate::InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[Value],
+        sink: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, LlmError>;
 }
@@ -73,19 +85,34 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
         LlmClientPool::new(default_client, models_config, timeout_secs)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         client: &LlmClient,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[Value],
-        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        client
+            .invocation_stream(scope, system, messages, tool_schemas, cancel)
+            .await
+    }
+
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    async fn legacy_stream_message(
+        &self,
+        client: &LlmClient,
+        scope: &crate::InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[Value],
+        sink: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, LlmError> {
         client
-            .stream_message(scope, system, messages, tool_schemas, handler, cancel)
+            .legacy_stream_message(scope, system, messages, tool_schemas, sink, cancel)
             .await
     }
 }
@@ -93,7 +120,13 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CallbackHandler;
+    struct NoopSink;
+
+    impl LegacyStreamSink for NoopSink {
+        fn on_text(&mut self, _text: &str) {}
+        fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
+        fn on_error(&mut self, _error: &str) {}
+    }
     use async_trait::async_trait;
     use std::sync::Mutex;
     use tokio::sync::{Barrier, Notify};
@@ -130,13 +163,13 @@ mod tests {
     #[async_trait]
     impl LlmProvider for DummyProvider {
         #[allow(clippy::too_many_arguments)]
-        async fn stream_message(
+        async fn legacy_stream_message(
             &self,
             _scope: &crate::InvocationScope,
             _system: &[SystemBlock],
             messages: &[Message],
             _tool_schemas: &[Value],
-            _handler: &mut dyn StreamHandler,
+            _handler: &mut dyn LegacyStreamSink,
             _cancel: &CancellationToken,
         ) -> Result<StreamResponse, LlmError> {
             Ok(StreamResponse {
@@ -173,13 +206,13 @@ mod tests {
         #[async_trait]
         impl LlmProvider for BlockingProvider {
             #[allow(clippy::too_many_arguments)]
-            async fn stream_message(
+            async fn legacy_stream_message(
                 &self,
                 _scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
-                _handler: &mut dyn StreamHandler,
+                _handler: &mut dyn LegacyStreamSink,
                 cancel: &CancellationToken,
             ) -> Result<StreamResponse, LlmError> {
                 cancel.cancelled().await;
@@ -203,7 +236,7 @@ mod tests {
             tokio::task::yield_now().await;
             cancel_task.cancel();
         });
-        let mut handler = CallbackHandler::new(Box::new(|_| {}));
+        let mut handler = NoopSink;
 
         let scope = crate::InvocationScope::new(
             "blocking-model",
@@ -214,7 +247,7 @@ mod tests {
         .unwrap();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(1),
-            gateway.stream_message(&client, &scope, &[], &[], &[], &mut handler, &cancel),
+            gateway.legacy_stream_message(&client, &scope, &[], &[], &[], &mut handler, &cancel),
         )
         .await
         .expect("取消必须穿过 Gateway 唤醒 Provider future");
@@ -233,13 +266,13 @@ mod tests {
         #[async_trait]
         impl LlmProvider for ScopeRecordingProvider {
             #[allow(clippy::too_many_arguments)]
-            async fn stream_message(
+            async fn legacy_stream_message(
                 &self,
                 scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
-                _handler: &mut dyn StreamHandler,
+                _handler: &mut dyn LegacyStreamSink,
                 _cancel: &CancellationToken,
             ) -> Result<StreamResponse, LlmError> {
                 self.barrier.wait().await;
@@ -271,9 +304,9 @@ mod tests {
         let second_scope = scope("sub-model", 16_384, crate::ReasoningLevel::High);
 
         let first = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            let mut handler = NoopSink;
             first_client
-                .stream_message(
+                .legacy_stream_message(
                     &first_scope,
                     &[],
                     &[],
@@ -284,9 +317,9 @@ mod tests {
                 .await
         });
         let second = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            let mut handler = NoopSink;
             second_client
-                .stream_message(
+                .legacy_stream_message(
                     &second_scope,
                     &[],
                     &[],
@@ -320,13 +353,13 @@ mod tests {
         #[async_trait]
         impl LlmProvider for CancellationIsolationProvider {
             #[allow(clippy::too_many_arguments)]
-            async fn stream_message(
+            async fn legacy_stream_message(
                 &self,
                 scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
-                _handler: &mut dyn StreamHandler,
+                _handler: &mut dyn LegacyStreamSink,
                 cancel: &CancellationToken,
             ) -> Result<StreamResponse, LlmError> {
                 self.entered.wait().await;
@@ -362,9 +395,9 @@ mod tests {
         let survivor_token = CancellationToken::new();
 
         let cancelled = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            let mut handler = NoopSink;
             cancelled_client
-                .stream_message(
+                .legacy_stream_message(
                     &scope("cancelled-model", 2_048, crate::ReasoningLevel::Medium),
                     &[],
                     &[],
@@ -375,9 +408,9 @@ mod tests {
                 .await
         });
         let survivor = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
+            let mut handler = NoopSink;
             survivor_client
-                .stream_message(
+                .legacy_stream_message(
                     &scope("survivor-model", 8_192, crate::ReasoningLevel::High),
                     &[],
                     &[],

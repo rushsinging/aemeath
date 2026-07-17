@@ -12,20 +12,14 @@
 // 权威签名见 ../runtime/06-ports-and-adapters.md §2（trait ProviderPort），
 // 本文不重复定义：capabilities / resolve_invocation_options / invoke 三个方法。
 
-struct InvocationStream {
-    events: ProviderEventStream,
-}
-
 enum InvocationEvent {
     Delta(InvocationDelta),
     Completed(ProviderCompletion),
-    Failed(ProviderError),
-    Cancelled,
+    Failed(ProviderError), // 包含 ProviderErrorKind::Cancelled
 }
 
-impl InvocationStream {
-    async fn next(&mut self) -> Option<InvocationEvent>;
-}
+// 具体实现可使用 `Stream<Item = InvocationEvent>` 的关联类型或装箱流；
+// channel / SSE frame / reqwest bytes 均保持 adapter 私有。
 ```
 
 核心语义：
@@ -72,8 +66,10 @@ Created
 - `ProviderCompletion.output` 必须是所有已发 delta 的完整最终形态，并保留 provider tool-call ID；
 - Runtime 消费 delta/completion 时创建领域 ToolCallId、组装自己的 `InvocationResponse.message` 与 Run Step ToolCall；
 - `ProviderCompletion` 包含完整 output、stop reason、final usage snapshot 与 effective reasoning；
-- 完成、失败、取消互斥且恰有一个；
-- consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲。
+- 完成与失败互斥且恰有一个；显式取消、consumer drop、背压与 producer 异常都统一为 `Failed(ProviderError)`，取消使用 `ProviderErrorKind::Cancelled`；
+- 首个终态后必须结束，禁止再产出任何事件；
+- consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲；若使用 channel，producer 必须持有 bounded send permit，或使用不依赖 receiver 存活的独立终态状态，保证失败可观察，禁止仅依赖向已关闭 channel 发送终态；
+- `ProviderToolCallStart.id` 是 invocation-scoped 内置 `ProviderToolCallId`；adapter 必须先按稳定 stream index 建立该 ID，待 provider id 到达后再绑定，禁止直接把 provider id 当作领域身份。
 
 ### 3.2 可见内容与重复调用
 

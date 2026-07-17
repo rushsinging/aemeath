@@ -3,7 +3,8 @@ use crate::application::chat::looping::events::{
 };
 use crate::application::chat::looping::tool_identity::ToolIdentityRegistry;
 use crate::LOG_TARGET;
-use provider::StreamHandler;
+use provider::{InvocationDelta, InvocationEvent};
+use share::message::{ContentBlock, Message, Role};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,8 +50,156 @@ pub fn should_emit_model_stream_waiting(
         .is_none_or(|previous| previous == snapshot.visible_progress_version)
 }
 
+pub struct InvocationEventReducer<S: ChatEventSink> {
+    handler: RuntimeEventProjector<S>,
+    saw_visible_delta: bool,
+}
+
+impl<S: ChatEventSink> InvocationEventReducer<S> {
+    pub fn new(sink: S) -> Self {
+        Self {
+            handler: RuntimeEventProjector::new(sink),
+            saw_visible_delta: false,
+        }
+    }
+
+    pub fn with_tool_identity(
+        sink: S,
+        tool_identity: ToolIdentityRegistry,
+        context: RuntimeTurnContext,
+    ) -> Self {
+        Self {
+            handler: RuntimeEventProjector::with_tool_identity(sink, tool_identity, context),
+            saw_visible_delta: false,
+        }
+    }
+
+    pub fn progress_handle(&self) -> Arc<Mutex<StreamProgressState>> {
+        self.handler.progress_handle()
+    }
+
+    pub fn apply(
+        &mut self,
+        event: InvocationEvent,
+    ) -> Result<Option<provider::StreamResponse>, provider::ProviderError> {
+        match event {
+            InvocationEvent::Delta(delta) => {
+                match delta {
+                    InvocationDelta::Text(text) => {
+                        self.saw_visible_delta = true;
+                        self.handler.on_text(&text)
+                    }
+                    InvocationDelta::Thinking { thinking, .. } => {
+                        self.saw_visible_delta = true;
+                        self.handler.on_thinking(&thinking)
+                    }
+                    InvocationDelta::ToolCallStarted {
+                        index,
+                        provider_id,
+                        name,
+                    } => {
+                        self.saw_visible_delta = true;
+                        self.handler.on_tool_use_start(
+                            &name,
+                            provider_id.as_ref().map(|id| id.0.as_str()),
+                            index,
+                        )
+                    }
+                    InvocationDelta::ToolArgumentsDelta {
+                        index,
+                        provider_id,
+                        partial_json,
+                    } => {
+                        self.saw_visible_delta = true;
+                        self.handler.on_tool_arguments_delta(
+                            index,
+                            "",
+                            provider_id.as_ref().map(|id| id.0.as_str()),
+                            &partial_json,
+                        )
+                    }
+                    InvocationDelta::ToolCallCompleted { .. }
+                    | InvocationDelta::UsageSnapshot(_) => {}
+                }
+                Ok(None)
+            }
+            InvocationEvent::Completed(completion) => {
+                self.handler.complete_active_streaming_block();
+                if !self.saw_visible_delta {
+                    for block in &completion.output {
+                        match block {
+                            provider::ProviderContentBlock::Text(text) => {
+                                self.handler.on_text(text)
+                            }
+                            provider::ProviderContentBlock::Thinking { thinking, .. } => {
+                                self.handler.on_thinking(thinking)
+                            }
+                            provider::ProviderContentBlock::ToolCall(call) => self
+                                .handler
+                                .on_tool_use_start(&call.name, Some(&call.id.0), 0),
+                        }
+                    }
+                    self.handler.complete_active_streaming_block();
+                }
+                let content = completion
+                    .output
+                    .into_iter()
+                    .map(|block| match block {
+                        provider::ProviderContentBlock::Text(text) => ContentBlock::Text { text },
+                        provider::ProviderContentBlock::Thinking {
+                            thinking,
+                            signature,
+                        } => ContentBlock::Thinking {
+                            thinking,
+                            signature,
+                        },
+                        provider::ProviderContentBlock::ToolCall(call) => ContentBlock::ToolUse {
+                            id: call.id.0,
+                            name: call.name,
+                            input: call.arguments,
+                        },
+                    })
+                    .collect();
+                let usage = completion.usage.unwrap_or_default();
+                Ok(Some(provider::StreamResponse {
+                    assistant_message: Message {
+                        role: Role::Assistant,
+                        content,
+                        metadata: None,
+                    },
+                    usage: provider::Usage {
+                        input_tokens: usage.input_tokens.unwrap_or(0),
+                        output_tokens: usage.output_tokens.unwrap_or(0),
+                        cached_tokens: usage.cache_read_tokens,
+                        cache_creation_tokens: usage.cache_write_tokens,
+                        reasoning_tokens: usage.reasoning_tokens,
+                        total_tokens: usage
+                            .input_tokens
+                            .zip(usage.output_tokens)
+                            .map(|(input, output)| input.saturating_add(output)),
+                    },
+                    stop_reason: match completion.stop_reason {
+                        provider::ProviderStopReason::EndTurn => provider::StopReason::EndTurn,
+                        provider::ProviderStopReason::ToolUse => provider::StopReason::ToolUse,
+                        provider::ProviderStopReason::MaxOutputTokens => {
+                            provider::StopReason::MaxTokens
+                        }
+                        provider::ProviderStopReason::ContentFiltered
+                        | provider::ProviderStopReason::StopSequence
+                        | provider::ProviderStopReason::Other(_) => provider::StopReason::EndTurn,
+                    },
+                }))
+            }
+            InvocationEvent::Failed(error) => {
+                self.handler.complete_active_streaming_block();
+                Err(error)
+            }
+        }
+    }
+}
+
 /// Chat stream handler that forwards API streaming events to a runtime event sink.
-pub struct RuntimeStreamHandler<S: ChatEventSink> {
+struct RuntimeEventProjector<S: ChatEventSink> {
     pub sink: S,
     pub first_text_time: Option<std::time::Instant>,
     pub total_chars: usize,
@@ -60,7 +209,7 @@ pub struct RuntimeStreamHandler<S: ChatEventSink> {
     progress: Arc<Mutex<StreamProgressState>>,
 }
 
-impl<S: ChatEventSink> RuntimeStreamHandler<S> {
+impl<S: ChatEventSink> RuntimeEventProjector<S> {
     pub fn new(sink: S) -> Self {
         Self::with_tool_identity(
             sink,
@@ -128,10 +277,6 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
         }
     }
 
-    pub fn progress_snapshot(&self) -> StreamProgressSnapshot {
-        self.progress.lock().unwrap().snapshot()
-    }
-
     pub fn complete_active_streaming_block(&mut self) {
         let had_active = {
             let mut progress = self.progress.lock().unwrap();
@@ -144,9 +289,6 @@ impl<S: ChatEventSink> RuntimeStreamHandler<S> {
             });
         }
     }
-}
-
-impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
     fn on_text(&mut self, text: &str) {
         self.mark_visible_event("text", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Text);
@@ -194,26 +336,6 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
             index,
         });
     }
-    fn on_error(&mut self, error: &str) {
-        self.complete_active_streaming_block();
-        self.sink
-            .try_send_event(RuntimeStreamEvent::SystemMessage(format!(
-                "[warn] {}",
-                error
-            )));
-    }
-
-    fn on_block_complete(&mut self, text: &str) {
-        {
-            let mut progress = self.progress.lock().unwrap();
-            progress.active_streaming_block = None;
-        }
-        self.sink.try_send_event(RuntimeStreamEvent::BlockComplete {
-            context: self.context.clone(),
-            text: text.to_string(),
-        });
-    }
-
     fn on_thinking(&mut self, text: &str) {
         self.mark_visible_event("thinking", || format!("bytes={}", text.len()));
         self.begin_streaming_block(StreamingBlockKind::Thinking);
@@ -252,5 +374,71 @@ impl<S: ChatEventSink> StreamHandler for RuntimeStreamHandler<S> {
                 arguments: None,
                 status: RuntimeToolCallStatus::PendingArgs,
             });
+    }
+}
+
+#[cfg(test)]
+mod invocation_reducer_tests {
+    use super::*;
+    use crate::application::chat::looping::events::EventFuture;
+    use provider::{
+        InvocationDelta, InvocationEvent, ProviderCompletion, ProviderContentBlock, ProviderError,
+        ProviderStopReason, RawUsageSnapshot, ReasoningLevel,
+    };
+
+    #[derive(Clone, Default)]
+    struct RecordingSink(Arc<Mutex<Vec<RuntimeStreamEvent>>>);
+
+    impl ChatEventSink for RecordingSink {
+        fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+            Box::pin(async move { self.0.lock().unwrap().push(event) })
+        }
+
+        fn try_send_event(&self, event: RuntimeStreamEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    #[test]
+    fn reducer_projects_text_and_builds_completed_response() {
+        let sink = RecordingSink::default();
+        let events = sink.0.clone();
+        let mut reducer = InvocationEventReducer::new(sink);
+        assert!(reducer
+            .apply(InvocationEvent::Delta(InvocationDelta::Text(
+                "hi".to_string()
+            )))
+            .unwrap()
+            .is_none());
+        let completion = ProviderCompletion {
+            output: vec![ProviderContentBlock::Text("hi".to_string())],
+            stop_reason: ProviderStopReason::EndTurn,
+            usage: Some(RawUsageSnapshot {
+                input_tokens: Some(2),
+                output_tokens: Some(1),
+                ..Default::default()
+            }),
+            effective_reasoning: ReasoningLevel::Off,
+        };
+        let response = reducer
+            .apply(InvocationEvent::Completed(completion))
+            .unwrap()
+            .expect("completion produces response");
+        assert_eq!(response.assistant_message.text_content(), "hi");
+        assert_eq!(response.usage.input_tokens, 2);
+        assert!(matches!(
+            events.lock().unwrap().first(),
+            Some(RuntimeStreamEvent::Text { text, .. }) if text == "hi"
+        ));
+    }
+
+    #[test]
+    fn reducer_maps_failed_terminal_to_error() {
+        let sink = RecordingSink::default();
+        let mut reducer = InvocationEventReducer::new(sink);
+        let error = reducer
+            .apply(InvocationEvent::Failed(ProviderError::cancelled()))
+            .expect_err("failed terminal remains failure");
+        assert!(error.is_cancelled());
     }
 }

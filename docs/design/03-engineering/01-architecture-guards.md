@@ -23,7 +23,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 27 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 28 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
@@ -35,8 +35,9 @@
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
-| 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`stream_message` 必须显式接收不可变 Invocation Scope |
-| 6b | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
+| 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
+| 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
+| 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -191,7 +192,7 @@
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
+  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并仅为迁移期测试替身登记 `LegacyStreamSink`；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
   - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
   - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory/Tool Result façade 符号集合；最终随 #880/#983/#883/#884 收敛。
@@ -207,10 +208,17 @@
 
 - **功能**：锁定 #902 的调用隔离边界，防共享 Provider/client 恢复调用期可变状态。
 - **守护**：Provider 生产代码禁止 `AtomicU32/AtomicU8/AtomicBool`、`set_max_tokens`、`set_reasoning_level`、`current_reasoning_level` 与 `reasoning_config.lock()`；Runtime 禁止 `shared_client_lock` 与 setter/restore 路径。
-- **正向约束**：`LlmProvider::stream_message` 必须显式接收 `&InvocationScope`。
+- **正向约束**：`LlmProvider::invocation_stream` 必须显式接收 `&InvocationScope`。
 - **故意违规验证**：临时向 Provider source 加入 `set_max_tokens` 标记时脚本退出 2；移除后通过。
 
-### 6b. check-provider-http-attempt.sh
+### 6b. check-provider-pull-stream.sh
+
+- **功能**：锁定 #903 pull-based `InvocationStream` 生产边界，防止 Provider/Runtime/Context 恢复 callback 驱动。
+- **守护**：生产代码禁止 `CallbackHandler`、`StreamHandler`、`RuntimeStreamHandler`、`stream_message_raw` 与 `.stream_message(...)`；Runtime 与 Context 禁止引用迁移期 `LegacyStreamSink` / `legacy_stream_message`。
+- **正向约束**：`LlmProvider` 必须公开 `invocation_stream`；Runtime 通过 `InvocationEventReducer` 主动 poll 并投影事件。
+- **范围边界**：Provider 内部 decoder 与测试替身暂可使用明确命名的 legacy sink，不能成为跨 crate 生产入口。
+
+### 6c. check-provider-http-attempt.sh
 
 - **功能**：锁定 #1033 的单 attempt 机械收敛边界，防止各 driver 重新手写请求发送、错误响应体读取与 HTTP/network 诊断日志拼装。
 - **守护**：`agent/features/provider/src/adapters/http_attempt.rs` 的 `HttpAttemptExecutor` 是唯一允许发起请求发送与读取失败/成功响应体的入口（成功路径经其 `read_success_json` helper）；`error_log.rs` 的 `log_network_error` / `log_http_error` / `ErrorLogContext` / `LlmApiErrorRecord` 只能被 `http_attempt.rs` 与 `error_log.rs` 自身引用，其余 driver 只能调用窄的 `error_log::log_stream_protocol_error`。

@@ -556,13 +556,13 @@ struct BlockingThenCancelledProvider {
 
 #[async_trait]
 impl LlmProvider for BlockingThenCancelledProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        _handler: &mut dyn provider::StreamHandler,
+        _handler: &mut dyn provider::LegacyStreamSink,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StreamResponse, LlmError> {
         {
@@ -612,13 +612,13 @@ struct ErrorProvider {
 
 #[async_trait]
 impl LlmProvider for ErrorProvider {
-    async fn stream_message(
+    async fn legacy_stream_message(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        _handler: &mut dyn provider::StreamHandler,
+        _handler: &mut dyn provider::LegacyStreamSink,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<StreamResponse, LlmError> {
         Err(match &self.error {

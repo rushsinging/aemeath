@@ -1,11 +1,10 @@
 //! Unified LLM client that supports multiple providers
 
-use std::error::Error as StdError;
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
 use crate::domain::invoke::{StreamResponse, SystemBlock};
-use crate::ports::{CallbackHandler, LlmProvider, StreamHandler};
+use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
 use crate::LOG_TARGET;
 use share::message::Message;
@@ -55,56 +54,6 @@ fn truncate_preview(s: &str, max_bytes: usize) -> String {
         end -= 1;
     }
     format!("{}…", &s[..end])
-}
-
-fn llm_error_chain(error: &crate::LlmError) -> String {
-    let mut chain = String::new();
-    let mut source = StdError::source(error);
-    let mut depth = 1;
-    while let Some(cause) = source {
-        chain.push_str(&format!("\n  Cause #{}: {}", depth, cause));
-        source = cause.source();
-        depth += 1;
-    }
-    chain
-}
-
-fn messages_payload_bytes(messages: &[Message]) -> usize {
-    serde_json::to_string(messages)
-        .map(|s| s.len())
-        .unwrap_or(0)
-}
-
-fn content_block_counts(messages: &[Message]) -> (usize, usize, usize, usize, usize) {
-    let mut text = 0;
-    let mut thinking = 0;
-    let mut tool_use = 0;
-    let mut tool_result = 0;
-    let mut image = 0;
-    for msg in messages {
-        for block in &msg.content {
-            match block {
-                share::message::ContentBlock::Text { .. } => text += 1,
-                share::message::ContentBlock::Thinking { .. } => thinking += 1,
-                share::message::ContentBlock::ToolUse { .. } => tool_use += 1,
-                share::message::ContentBlock::ToolResult { .. } => tool_result += 1,
-                share::message::ContentBlock::Image { .. } => image += 1,
-            }
-        }
-    }
-    (text, thinking, tool_use, tool_result, image)
-}
-
-fn largest_message_summary(messages: &[Message]) -> (usize, String, usize) {
-    messages
-        .iter()
-        .enumerate()
-        .map(|(idx, msg)| {
-            let bytes = serde_json::to_string(msg).map(|s| s.len()).unwrap_or(0);
-            (idx, format!("{:?}", msg.role).to_lowercase(), bytes)
-        })
-        .max_by_key(|(_, _, bytes)| *bytes)
-        .unwrap_or((0, "none".to_string(), 0))
 }
 
 /// Configuration for OpenAI-compatible providers. The source key is used only
@@ -337,47 +286,33 @@ impl LlmClient {
         }
     }
 
-    pub async fn stream_message(
+    pub async fn invocation_stream(
         &self,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
-    ) -> Result<StreamResponse, crate::LlmError> {
+    ) -> Result<crate::InvocationStream, crate::ProviderError> {
         self.log_request(system, messages, tool_schemas);
-        let result = self
-            .provider
-            .stream_message(scope, system, messages, tool_schemas, handler, cancel)
-            .await;
-        if let Err(error) = &result {
-            self.log_stream_error("stream_message", system, messages, tool_schemas, error);
-        }
-        self.log_response(&result);
-        result
+        self.provider
+            .invocation_stream(scope, system, messages, tool_schemas, cancel)
+            .await
     }
 
-    pub async fn stream_message_raw(
+    #[doc(hidden)]
+    pub async fn legacy_stream_message(
         &self,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        callback: Box<dyn FnMut(&str) + Send>,
+        sink: &mut dyn crate::ports::LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
-        self.log_request(system, messages, tool_schemas);
-        let mut handler = CallbackHandler::new(callback);
-        let result = self
-            .provider
-            .stream_message(scope, system, messages, tool_schemas, &mut handler, cancel)
-            .await;
-        if let Err(error) = &result {
-            self.log_stream_error("stream_message_raw", system, messages, tool_schemas, error);
-        }
-        self.log_response(&result);
-        result
+        self.provider
+            .legacy_stream_message(scope, system, messages, tool_schemas, sink, cancel)
+            .await
     }
 
     fn log_request(
@@ -436,97 +371,6 @@ impl LlmClient {
         log::trace!(target: LOG_TARGET,
             "[LLM REQUEST] system: {:?}\n  messages: {}",
             system_preview, serde_json::to_string_pretty(&msg_summary).unwrap_or_default(),
-        );
-    }
-
-    fn log_response(&self, result: &Result<StreamResponse, crate::LlmError>) {
-        if !log::log_enabled!(log::Level::Debug) {
-            return;
-        }
-        if let Ok(resp) = result {
-            let text = resp.assistant_message.text_content();
-            let text_preview = truncate_preview(&text, 500);
-            let tool_uses = resp.assistant_message.extract_tool_uses();
-            let tools_summary: Vec<serde_json::Value> = tool_uses.iter().map(|(id, name, input)| {
-                let input_str = input.to_string();
-                serde_json::json!({"id":id,"name":name,"input_preview":truncate_preview(&input_str,300)})
-            }).collect();
-
-            // 提取 thinking 块诊断信息
-            let thinking_info: Vec<serde_json::Value> = resp
-                .assistant_message
-                .content
-                .iter()
-                .filter_map(|block| {
-                    if let share::message::ContentBlock::Thinking { thinking, .. } = block {
-                        let lines: Vec<&str> = thinking.lines().collect();
-                        let mut dup_lines = 0;
-                        for i in 1..lines.len() {
-                            if lines[i] == lines[i - 1] && !lines[i].trim().is_empty() {
-                                dup_lines += 1;
-                            }
-                        }
-                        Some(serde_json::json!({
-                            "thinking_len": thinking.len(),
-                            "thinking_chars": thinking.chars().count(),
-                            "dup_lines": dup_lines,
-                            "preview": truncate_preview(thinking, 200),
-                        }))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            log::debug!(target: LOG_TARGET,
-                "[LLM RESPONSE] stop_reason={:?} input_tokens={} output_tokens={} cached_tokens={} cache_creation_tokens={} reasoning_tokens={} tool_calls={} thinking_blocks={}",
-                resp.stop_reason, resp.usage.input_tokens, resp.usage.output_tokens,
-                resp.usage.cached_tokens.unwrap_or(0),
-                resp.usage.cache_creation_tokens.unwrap_or(0),
-                resp.usage.reasoning_tokens.unwrap_or(0),
-                tool_uses.len(), thinking_info.len(),
-            );
-            log::trace!(target: LOG_TARGET,
-                "[LLM RESPONSE] text: {}\n  thinking: {}\n  tools: {}",
-                text_preview,
-                serde_json::to_string_pretty(&thinking_info).unwrap_or_default(),
-                serde_json::to_string_pretty(&tools_summary).unwrap_or_default(),
-            );
-        }
-        // Error path already handled by log_stream_error() with comprehensive context;
-        // no need to log a redundant warn here.
-    }
-
-    fn log_stream_error(
-        &self,
-        phase: &str,
-        system: &[SystemBlock],
-        messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        error: &crate::LlmError,
-    ) {
-        let (text_blocks, thinking_blocks, tool_use_blocks, tool_result_blocks, image_blocks) =
-            content_block_counts(messages);
-        let (largest_idx, largest_role, largest_bytes) = largest_message_summary(messages);
-        log::warn!(target: LOG_TARGET,
-            "[LLM STREAM ERROR] phase={} provider={} model={} system_blocks={} messages={} tools={} messages_payload_bytes={} content_blocks={{text:{},thinking:{},tool_use:{},tool_result:{},image:{}}} largest_message={{index:{},role:{},bytes:{}}} error={}{}",
-            phase,
-            self.provider_name(),
-            self.model_name(),
-            system.len(),
-            messages.len(),
-            tool_schemas.len(),
-            messages_payload_bytes(messages),
-            text_blocks,
-            thinking_blocks,
-            tool_use_blocks,
-            tool_result_blocks,
-            image_blocks,
-            largest_idx,
-            largest_role,
-            largest_bytes,
-            error,
-            llm_error_chain(error),
         );
     }
 

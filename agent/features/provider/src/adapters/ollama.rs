@@ -11,12 +11,12 @@ use crate::adapters::http_attempt::{
     HttpFailureKind, NetworkFailureKind,
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
-use crate::ports::{LlmProvider, StreamHandler};
+use crate::ports::{LegacyStreamSink, LlmProvider};
 use crate::LOG_TARGET;
 
 mod conversion;
 mod non_stream;
-mod stream;
+pub(crate) mod stream;
 
 use conversion::OllamaProviderConversion;
 use non_stream::OllamaProviderNonStream;
@@ -106,15 +106,122 @@ impl OllamaProvider {
     }
 }
 
+fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
+    let kind = match error {
+        crate::LlmError::Cancelled => crate::ProviderErrorKind::Cancelled,
+        crate::LlmError::RateLimited => crate::ProviderErrorKind::RateLimited,
+        crate::LlmError::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
+        crate::LlmError::Network(_) => crate::ProviderErrorKind::Network,
+        crate::LlmError::Api { .. } => crate::ProviderErrorKind::UpstreamUnavailable,
+        crate::LlmError::StreamTruncated { .. } => crate::ProviderErrorKind::StreamTruncated,
+        crate::LlmError::Stream(_) => crate::ProviderErrorKind::Protocol,
+        crate::LlmError::Config(_) => crate::ProviderErrorKind::Configuration,
+    };
+    crate::ProviderError::fatal(kind, error.to_string())
+}
+
+fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
+    match failure {
+        HttpAttemptFailure::Cancelled => crate::ProviderError::cancelled(),
+        HttpAttemptFailure::Network { source, kind, .. } => crate::ProviderError::fatal(
+            match kind {
+                NetworkFailureKind::Timeout => crate::ProviderErrorKind::Timeout,
+                _ => crate::ProviderErrorKind::Network,
+            },
+            source.to_string(),
+        ),
+        HttpAttemptFailure::Http {
+            status, kind, body, ..
+        } => {
+            let error_kind = match kind {
+                HttpFailureKind::RateLimited => crate::ProviderErrorKind::RateLimited,
+                HttpFailureKind::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
+                HttpFailureKind::Server => crate::ProviderErrorKind::UpstreamUnavailable,
+                HttpFailureKind::Client => crate::ProviderErrorKind::InvalidRequest,
+            };
+            let mut error = crate::ProviderError::fatal(error_kind, body.text());
+            error.provider_code = Some(status.to_string());
+            error
+        }
+    }
+}
+
 #[async_trait]
 impl LlmProvider for OllamaProvider {
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         scope: &InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        cancel: &CancellationToken,
+    ) -> Result<crate::InvocationStream, crate::ProviderError> {
+        if cancel.is_cancelled() {
+            return Err(crate::ProviderError::cancelled());
+        }
+        let request_body = self
+            .build_request_body(scope, system, messages, tool_schemas, true)
+            .map_err(provider_error_from_llm)?;
+        let url = format!("{}/api/chat", self.base_url);
+        let request_bytes = serde_json::to_string(&request_body)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let context = HttpAttemptContext {
+            driver: "ollama",
+            api: "chat_stream",
+            provider: "ollama",
+            model: scope.model(),
+            method: "POST",
+            endpoint: &url,
+            attempt: 1,
+            max_attempts: 1,
+            message_count: messages.len(),
+            tool_count: tool_schemas.len(),
+            request_bytes,
+        };
+        let response = HttpAttemptExecutor::execute(
+            self.http
+                .post(&url)
+                .headers(self.build_headers().map_err(provider_error_from_llm)?)
+                .json(&request_body),
+            &context,
+            cancel,
+        )
+        .await
+        .map_err(|failure| {
+            failure.log(AttemptDisposition::FinalFailure);
+            provider_error_from_attempt(failure)
+        })?
+        .response;
+        Ok(
+            crate::adapters::stream::invocation_stream_from_legacy_decoder(
+                response,
+                scope.effective_reasoning(),
+                cancel.child_token(),
+                crate::adapters::stream::LegacyStreamDecoder::Ollama,
+            ),
+        )
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+
+    fn provider_name(&self) -> &str {
+        "ollama"
+    }
+
+    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
+        crate::ports::ReasoningLevel::Medium
+    }
+
+    async fn legacy_stream_message(
+        &self,
+        scope: &InvocationScope,
+        system: &[SystemBlock],
+        messages: &[Message],
+        tool_schemas: &[serde_json::Value],
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
         let request_body = self.build_request_body(scope, system, messages, tool_schemas, true)?;
@@ -335,16 +442,93 @@ impl LlmProvider for OllamaProvider {
             "Ollama: max retries exceeded".to_string(),
         )))
     }
+}
 
-    fn model_name(&self) -> &str {
-        &self.model
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+
+    async fn spawn_counting_server(raw_response: &'static str) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let observed = counter.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => break,
+                };
+                observed.fetch_add(1, Ordering::SeqCst);
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buffer = [0_u8; 8192];
+                let _ = socket.read(&mut buffer).await;
+                let _ = socket.write_all(raw_response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (format!("http://{addr}"), counter)
     }
 
-    fn provider_name(&self) -> &str {
-        "ollama"
-    }
+    #[tokio::test]
+    async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
+        let body = concat!(
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"ol\"},\"done\":false}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"lama\"},\"done\":false}\n",
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":1,\"eval_count\":1}\n"
+        );
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let leaked = Box::leak(response.into_boxed_str());
+        let (base_url, requests) = spawn_counting_server(leaked).await;
+        let client = crate::LlmClient::from_config(crate::LlmConfigOptions {
+            driver: crate::ProviderDriverKind::Ollama,
+            api_key: "ollama".to_string(),
+            base_url: Some(base_url),
+            model: "test-model".to_string(),
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_config: None,
+            openai_config: None,
+            timeout_secs: 60,
+        });
+        let scope = InvocationScope::new(
+            "test-model",
+            8192,
+            crate::ReasoningLevel::Off,
+            crate::ReasoningLevel::Off,
+        )
+        .unwrap();
 
-    fn max_reasoning_level(&self) -> crate::ports::ReasoningLevel {
-        crate::ports::ReasoningLevel::Medium
+        let events: Vec<_> = client
+            .invocation_stream(
+                &scope,
+                &[],
+                &[Message::user("hi")],
+                &[],
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+            .collect()
+            .await;
+
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            &events[..],
+            [
+                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(first)),
+                crate::InvocationEvent::Delta(crate::InvocationDelta::Text(second)),
+                crate::InvocationEvent::Completed(_)
+            ] if first == "ol" && second == "lama"
+        ));
+        assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
     }
 }

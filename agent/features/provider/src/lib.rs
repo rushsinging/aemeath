@@ -20,12 +20,12 @@ pub use domain::invoke::{
     InvocationScope, MessageDeltaPayload, MessageStartPayload, StopReason, StreamEvent,
     StreamResponse, SystemBlock, Usage,
 };
-pub use ports::{CallbackHandler, LlmProvider, StreamHandler};
+pub use ports::{LegacyStreamSink, LlmProvider};
 pub use published_language::{
-    InvocationDelta, InvocationOptions, InvocationRequest, ModelCapability, ModelId,
-    ModelToolSchema, ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind,
-    ProviderStopReason, ProviderToolCall, ProviderToolCallId, RawUsageSnapshot,
-    ReasoningCapability, ReasoningMappingKind,
+    CancellationSignal, InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest,
+    InvocationStream, ModelCapability, ModelId, ModelToolSchema, ProviderCompletion,
+    ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall,
+    ProviderToolCallId, RawUsageSnapshot, ReasoningCapability, ReasoningMappingKind,
 };
 
 /// Provider HTTP 超时常量。

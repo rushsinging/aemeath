@@ -9,9 +9,33 @@
 //!
 //! #901 冻结契约；现有 `contract.rs` 的 legacy 类型保留兼容，后续逐步退役。
 
+use std::pin::Pin;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use futures_util::Stream;
 use share::message::Message;
+
+/// Provider 只读消费的取消信号。
+///
+/// 端口不暴露取消发起、child token 或 deadline；consumer drop 由私有
+/// stream owner 负责转为 invocation-local 取消。
+#[async_trait]
+pub trait CancellationSignal: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+    async fn cancelled(&self);
+}
+
+#[async_trait]
+impl CancellationSignal for tokio_util::sync::CancellationToken {
+    fn is_cancelled(&self) -> bool {
+        tokio_util::sync::CancellationToken::is_cancelled(self)
+    }
+
+    async fn cancelled(&self) {
+        tokio_util::sync::CancellationToken::cancelled(self).await;
+    }
+}
 
 // ─── 模型标识 ───────────────────────────────────────────
 
@@ -210,16 +234,21 @@ pub enum InvocationDelta {
     },
     /// Tool call 开始。
     ToolCallStarted {
-        id: ProviderToolCallId,
+        index: usize,
+        provider_id: Option<ProviderToolCallId>,
         name: String,
     },
     /// Tool arguments 增量字符串片段。
     ToolArgumentsDelta {
-        id: ProviderToolCallId,
+        index: usize,
+        provider_id: Option<ProviderToolCallId>,
         partial_json: String,
     },
     /// Tool call 完成（给出验证过的 JSON 值）。
-    ToolCallCompleted(ProviderToolCall),
+    ToolCallCompleted {
+        index: usize,
+        call: ProviderToolCall,
+    },
     /// Usage 快照更新。
     UsageSnapshot(RawUsageSnapshot),
 }
@@ -419,6 +448,15 @@ pub enum InvocationEvent {
     Failed(ProviderError),
 }
 
+impl InvocationEvent {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed(_) | Self::Failed(_))
+    }
+}
+
+/// 一次上游语义请求的有序 pull stream。
+pub type InvocationStream = Pin<Box<dyn Stream<Item = InvocationEvent> + Send>>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,6 +538,62 @@ mod tests {
     #[test]
     fn invocation_event_delta_is_non_terminal() {
         let evt = InvocationEvent::Delta(InvocationDelta::Text("hi".to_string()));
-        assert!(matches!(evt, InvocationEvent::Delta(_)));
+        assert!(!evt.is_terminal());
+    }
+
+    #[test]
+    fn invocation_event_completed_and_failed_are_terminal() {
+        let completion = ProviderCompletion {
+            output: Vec::new(),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            effective_reasoning: ReasoningLevel::Off,
+        };
+        assert!(InvocationEvent::Completed(completion).is_terminal());
+        assert!(InvocationEvent::Failed(ProviderError::cancelled()).is_terminal());
+    }
+
+    #[test]
+    fn tool_call_identity_can_bind_provider_id_after_start() {
+        let started = InvocationDelta::ToolCallStarted {
+            index: 2,
+            provider_id: None,
+            name: "Write".to_string(),
+        };
+        let arguments = InvocationDelta::ToolArgumentsDelta {
+            index: 2,
+            provider_id: Some(ProviderToolCallId("call_late".to_string())),
+            partial_json: "{}".to_string(),
+        };
+
+        assert!(matches!(
+            started,
+            InvocationDelta::ToolCallStarted {
+                index: 2,
+                provider_id: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            arguments,
+            InvocationDelta::ToolArgumentsDelta {
+                index: 2,
+                provider_id: Some(ProviderToolCallId(ref id)),
+                ..
+            } if id == "call_late"
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_token_implements_object_safe_signal() {
+        fn assert_object_safe(_: &dyn CancellationSignal) {}
+
+        let token = tokio_util::sync::CancellationToken::new();
+        let signal: &dyn CancellationSignal = &token;
+        assert_object_safe(signal);
+        assert!(!signal.is_cancelled());
+        token.cancel();
+        signal.cancelled().await;
+        assert!(signal.is_cancelled());
     }
 }

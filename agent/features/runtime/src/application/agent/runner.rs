@@ -1,7 +1,6 @@
 use hook::api::HookRunner;
 use provider::LlmClient;
 use provider::LlmClientPool;
-use provider::StreamHandler;
 use share::config::{AgentRoleConfig, AgentsConfig, ModelsConfig};
 use std::sync::Arc;
 
@@ -32,14 +31,6 @@ pub struct CliAgentRunner {
     pub models_config: Arc<ModelsConfig>,
 }
 
-/// A no-op stream handler for sub-agents (output goes to result, not terminal)
-struct SilentHandler;
-
-impl StreamHandler for SilentHandler {
-    fn on_text(&mut self, _text: &str) {}
-    fn on_tool_use_start(&mut self, _name: &str, _provider_id: Option<&str>, _index: usize) {}
-    fn on_error(&mut self, _error: &str) {}
-}
 impl CliAgentRunner {
     /// Resolve a model spec to a concrete `"provider/model_id"` string.
     ///

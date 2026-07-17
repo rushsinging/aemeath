@@ -179,7 +179,7 @@ fn parse_memory_category(value: &str) -> Result<share::memory::MemoryCategory> {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use provider::{LlmProvider, StopReason, StreamHandler, StreamResponse, SystemBlock, Usage};
+    use provider::{LegacyStreamSink, LlmProvider, StopReason, StreamResponse, SystemBlock, Usage};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -213,13 +213,13 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for StaticReflectionProvider {
-        async fn stream_message(
+        async fn legacy_stream_message(
             &self,
             _scope: &provider::InvocationScope,
             _system: &[SystemBlock],
             _messages: &[share::message::Message],
             _tool_schemas: &[serde_json::Value],
-            handler: &mut dyn StreamHandler,
+            handler: &mut dyn LegacyStreamSink,
             _cancel: &CancellationToken,
         ) -> std::result::Result<StreamResponse, provider::LlmError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
