@@ -58,7 +58,7 @@ where
     pub user_context: String,
     pub chain: context::session::ChatChain,
     pub context_size: usize,
-    pub workspace: Arc<project::api::WorkspaceService>,
+    pub workspace: Arc<project::WorkspaceService>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,

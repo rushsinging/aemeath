@@ -21,7 +21,7 @@ pub struct ExitWorktreeTool;
 /// 获取当前分支名；detached HEAD / 无法获取时返回 "(unknown)"。
 /// git 调用收敛在 project 的 `GitCli`（GitWorktreeOps port）。
 fn get_current_branch(dir: &Path) -> String {
-    project::api::GitWorktreeOps::current_branch(&project::api::GitCli, dir)
+    project::GitWorktreeOps::current_branch(&project::GitCli, dir)
         .ok()
         .flatten()
         .unwrap_or_else(|| "(unknown)".to_string())

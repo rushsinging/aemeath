@@ -33,7 +33,7 @@ impl AgentRunner for StubRunner {
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
-        workspace: project::api::WorkspaceService::new(PathBuf::from(".")),
+        workspace: project::WorkspaceService::new(PathBuf::from(".")),
         run_id: "01900000-0000-7000-8000-000000000001".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
@@ -169,7 +169,7 @@ async fn test_agent_tool_runs_without_task_id() {
 /// 子的 worktree 进出不得影响父（修隔离 bug）。
 #[test]
 fn sub_agent_workspace_isolated() {
-    use project::api::{WorkspaceControl, WorkspaceError, WorkspacePersist, WorkspaceRead};
+    use project::{WorkspaceControl, WorkspaceError, WorkspacePersist, WorkspaceRead};
     use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
     // 用真实存在的临时目录满足 restore 的路径校验。
@@ -177,7 +177,7 @@ fn sub_agent_workspace_isolated() {
     let wt_dir = tempfile::tempdir().unwrap();
 
     // 父：进入一个伪 worktree（path_base/workspace_root = wt，栈里压入 main 帧）。
-    let parent = project::api::WorkspaceService::new(main_dir.path().to_path_buf());
+    let parent = project::WorkspaceService::new(main_dir.path().to_path_buf());
     let dto = PersistedWorkspaceContext {
         path_base: wt_dir.path().display().to_string(),
         workspace_root: wt_dir.path().display().to_string(),

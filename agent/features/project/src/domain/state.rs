@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
-use crate::business::git_ops::GitWorktreeOps;
-use crate::business::workspace_types::{WorkspaceError, WorkspaceFrame};
+use crate::domain::git::GitWorktreeOps;
+use crate::domain::types::{WorkspaceError, WorkspaceFrame};
 
 const DEFAULT_WORKTREE_BASE: &str = "main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
@@ -215,5 +215,5 @@ pub fn restore(
 }
 
 #[cfg(test)]
-#[path = "workspace_state_tests.rs"]
+#[path = "state_tests.rs"]
 mod tests;

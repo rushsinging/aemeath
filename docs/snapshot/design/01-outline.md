@@ -83,7 +83,7 @@ Aemeath 的核心域是 **Agent Runtime**——把一次用户输入推进成完
 
 ## COLA 工程分层
 
-DDD 决定边界，COLA 负责每个 feature 内部的工程分层。每个 feature 是一个 Bounded Context，内部私有，只有 `contract` + `gateway`（经 `api.rs`）可跨边界访问。
+DDD 决定边界，COLA 负责多数 feature 的内部工程分层。每个 feature 是一个 Bounded Context，内部私有；通常只有 `contract` + `gateway`（经 `api.rs`）可跨边界访问。Project 是已迁移的专用 Hexagonal 例外：内部只含私有 `domain` / `adapters`，由 crate root 精确发布能力。
 
 ```
 agent/
@@ -105,7 +105,7 @@ packages/
   global/logging/    # 日志 projection 适配
 ```
 
-Feature 内部分层：`contract/`（Published Language）→ `gateway/`（Open Host Service）→ `api.rs`（facade）→ `business/`（domain rules）→ `adapter/infra`。
+Feature 内部默认分层：`contract/`（Published Language）→ `gateway/`（Open Host Service）→ `api.rs`（facade）→ `business/`（domain rules）→ `adapter/infra`。Project 专用结构为私有 `domain/` + `adapters/`，`lib.rs` 通过精确 re-export 提供唯一窄 façade；跨 crate 使用 `project::<Symbol>`，不得穿透内部模块。
 
 ## 依赖铁律
 

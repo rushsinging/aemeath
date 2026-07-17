@@ -11,7 +11,7 @@ set -euo pipefail
 #   R3 仅 project 可定义 struct WorkspaceState；agent/features 内（project 除外）任何 struct
 #      不得同时打包 working_root + path_base + (context_stack|stack)（防 WorktreeWorkingContext 复活）。
 #   R4 生产代码调 .workspace_control() 仅限 tools 的 bash.rs / worktree.rs。
-#   R5 project 内非测试 Command::new("git") 仅限 business/git_ops.rs。
+#   R5 project 内非测试 Command::new("git") 仅限 adapters/git.rs。
 #   R6 WorkspacePersist 仅可出现在 project（def/impl）与 runtime；tools 禁用（与 R2 重叠）。
 #   R7 ToolExecutionContext / ChatLoopContext 定义不得含 cwd 字段（从 workspace 读取）。
 # 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
@@ -40,7 +40,7 @@ RUNTIME_DIR = "agent/features/runtime/"
 FEATURES_DIR = "agent/features/"
 
 TOOL_CTX_FILE = Path("agent/features/tools/src/contract/context.rs")
-GIT_OPS_FILE = Path("agent/features/project/src/business/git_ops.rs")
+GIT_OPS_FILE = Path("agent/features/project/src/adapters/git.rs")
 # 唯一允许出现生产 .workspace_control() 调用的文件。
 WORKSPACE_CONTROL_ALLOWED = {
     Path("agent/features/tools/src/business/bash.rs"),
@@ -230,7 +230,7 @@ def check_r5(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
     if command_git_re.search(code) and rel != GIT_OPS_FILE:
         violations.append(
             f"{rel_s}:{lineno}: [R5] within project, Command::new(\"git\") is allowed only in "
-            f"business/git_ops.rs (GitCli adapter); route git through GitWorktreeOps."
+            f"adapters/git.rs (GitCli adapter); route git through GitWorktreeOps."
         )
 
 

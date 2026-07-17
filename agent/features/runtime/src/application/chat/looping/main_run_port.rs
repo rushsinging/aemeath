@@ -58,7 +58,7 @@ where
     pub(crate) user_context: &'a str,
     pub(crate) chain: &'a mut ChatChain,
     pub(crate) context_size: usize,
-    pub(crate) workspace: &'a Arc<project::api::WorkspaceService>,
+    pub(crate) workspace: &'a Arc<project::WorkspaceService>,
     pub(crate) session_id: &'a str,
     pub(crate) read_files: &'a Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub(crate) session_reminders: &'a Arc<std::sync::Mutex<share::tool::SessionReminders>>,
@@ -105,7 +105,7 @@ where
     /// 实时从 `WorkspaceService` 读取 `workspace_root`，避免 turn 内
     /// 切换 worktree 后使用过时路径。
     fn current_cwd(&self) -> PathBuf {
-        project::api::WorkspaceRead::current_workspace_root(self.workspace.as_ref())
+        project::WorkspaceRead::current_workspace_root(self.workspace.as_ref())
     }
 
     async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
@@ -151,7 +151,7 @@ where
         memory_config: &share::config::MemoryConfig,
         language: &str,
         allow_all: bool,
-        workspace: &Arc<project::api::WorkspaceService>,
+        workspace: &Arc<project::WorkspaceService>,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
         session_reminders: &Arc<std::sync::Mutex<share::tool::SessionReminders>>,

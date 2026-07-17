@@ -413,8 +413,8 @@ async fn test_load_agents_md_dedupes_identical_content_different_paths() {
     std::fs::write(&path_b, "identical content").unwrap();
 
     let hook_runner = HookRunner::empty();
-    let content = load_agents_md_from_paths(&[], &[path_a, path_b], &hook_runner, base.path())
-        .await;
+    let content =
+        load_agents_md_from_paths(&[], &[path_a, path_b], &hook_runner, base.path()).await;
 
     // 内容去重：应只保留第一个
     assert_eq!(content.matches("<guidance source=").count(), 1);

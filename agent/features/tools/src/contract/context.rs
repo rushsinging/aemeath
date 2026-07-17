@@ -1,5 +1,5 @@
 use super::resources::ToolResources;
-use project::api::{WorkspaceControl, WorkspaceRead, WorkspaceService};
+use project::{WorkspaceControl, WorkspaceRead, WorkspaceService};
 use share::tool::{AgentProgressEvent, SessionReminders};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

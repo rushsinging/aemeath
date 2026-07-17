@@ -34,8 +34,8 @@ impl Default for OutputViewState {
             selection_end: None,
             last_visible_height: 0,
             last_document_total_lines: 0,
-                version: 0,
-                expanded: false,
+            version: 0,
+            expanded: false,
         }
     }
 }

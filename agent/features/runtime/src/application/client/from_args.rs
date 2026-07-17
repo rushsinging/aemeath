@@ -207,7 +207,7 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 19. 构建 handle
     let current_client = context.resources.client.clone();
-    let workspace = project::api::WorkspaceService::new(cwd.clone());
+    let workspace = project::WorkspaceService::new(cwd.clone());
     let handle = RuntimeHandle {
         context,
         cwd,
