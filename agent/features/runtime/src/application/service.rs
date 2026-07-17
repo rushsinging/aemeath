@@ -53,7 +53,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use storage::TaskStore;
-    use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
+    use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
@@ -65,8 +65,8 @@ mod tests {
 
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::api::AgentRunTerminal {
-            tools::api::AgentRunTerminal::Completed {
+        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+            tools::AgentRunTerminal::Completed {
                 result: String::new(),
             }
         }

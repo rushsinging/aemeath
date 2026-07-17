@@ -6,7 +6,7 @@ use crate::application::chat::ChatEventSinkHandle;
 use crate::ports::legacy::ChatRuntimeContext;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
-use tools::api::McpConnectionManager;
+use tools::McpConnectionManager;
 
 // ─── 结构体定义 ───
 
@@ -116,9 +116,7 @@ impl AgentClientImpl {
                 .map(|(name, skill)| (name, super::mapping::skill_to_sdk(skill)))
                 .collect(),
             hook_runner: ctx.resources.hook_runner,
-            session_reminders: Arc::new(
-                std::sync::Mutex::new(share::tool::SessionReminders::new()),
-            ),
+            session_reminders: Arc::new(std::sync::Mutex::new(tools::SessionReminders::new())),
             workspace_root: self.inner.cwd.clone(),
         }
     }

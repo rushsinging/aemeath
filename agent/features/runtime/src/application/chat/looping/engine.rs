@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::Value;
-use share::tool::{PathAccess, PathKind, PolicyDecision};
-use tools::api::Tool;
+use tools::Tool;
+use tools::{PathAccess, PathKind, PolicyDecision};
 
 use policy::{validate_and_normalize_path_from_base, validate_search_path_from_base};
 
@@ -221,11 +221,7 @@ mod tests {
         fn requires_read_before_write(&self) -> bool {
             true
         }
-        async fn call(
-            &self,
-            _: Value,
-            _: &tools::api::ToolExecutionContext,
-        ) -> share::tool::ToolResult {
+        async fn call(&self, _: Value, _: &tools::ToolExecutionContext) -> tools::ToolResult {
             unreachable!()
         }
     }

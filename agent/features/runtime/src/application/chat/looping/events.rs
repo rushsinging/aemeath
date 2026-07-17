@@ -2,9 +2,9 @@ use context::session::PersistedWorkspaceContext;
 use provider::ReasoningLevel;
 use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
 use share::message::Message;
-use share::tool::{AgentProgressEvent, ImageData};
 use std::future::Future;
 use std::pin::Pin;
+use tools::{AgentProgressEvent, ImageData};
 use workflow::api::ReasoningNode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

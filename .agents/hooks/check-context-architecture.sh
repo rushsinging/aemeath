@@ -39,12 +39,12 @@ PROJECT_DIR = "agent/features/project/"
 RUNTIME_DIR = "agent/features/runtime/"
 FEATURES_DIR = "agent/features/"
 
-TOOL_CTX_FILE = Path("agent/features/tools/src/contract/context.rs")
+TOOL_CTX_FILE = Path("agent/features/tools/src/domain/context.rs")
 GIT_OPS_FILE = Path("agent/features/project/src/adapters/git.rs")
 # 唯一允许出现生产 .workspace_control() 调用的文件。
 WORKSPACE_CONTROL_ALLOWED = {
-    Path("agent/features/tools/src/business/bash.rs"),
-    Path("agent/features/tools/src/business/worktree.rs"),
+    Path("agent/features/tools/src/adapters/bash.rs"),
+    Path("agent/features/tools/src/adapters/worktree.rs"),
 }
 
 TRIPLE_FIELDS_REQUIRED = ("working_root", "path_base")
@@ -170,7 +170,7 @@ def check_r1(violations: list[str]) -> None:
 def check_r7(violations: list[str]) -> None:
     """R7: ToolExecutionContext / ChatLoopContext must not carry `cwd` field."""
     targets = {
-        Path("agent/features/tools/src/contract/context.rs"): "ToolExecutionContext",
+        Path("agent/features/tools/src/domain/context.rs"): "ToolExecutionContext",
         Path("agent/features/runtime/src/application/chat/looping/loop_runner.rs"): "ChatLoopContext",
     }
     for path, target_name in targets.items():
@@ -219,7 +219,7 @@ def check_r4(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
     if workspace_control_call_re.search(code) and rel not in WORKSPACE_CONTROL_ALLOWED:
         violations.append(
             f"{rel.as_posix()}:{lineno}: [R4] production .workspace_control() calls are restricted to "
-            f"tools/src/business/bash.rs and worktree.rs."
+            f"tools/src/adapters/bash.rs and worktree.rs."
         )
 
 

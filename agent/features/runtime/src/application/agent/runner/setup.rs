@@ -5,12 +5,12 @@ use crate::LOG_TARGET;
 use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
-use share::tool::{AgentProgressEvent, AgentProgressKind};
-use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
+use tools::{AgentProgressEvent, AgentProgressKind};
+use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::api::AgentRunTerminal {
+    async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
         let prompt = request.prompt;
         let system = request.system;
         let ctx = request.ctx;
@@ -27,7 +27,7 @@ impl AgentRunner for CliAgentRunner {
             (Some(pool), Some(spec)) => match pool.get_isolated_client(spec) {
                 Ok(client) => std::sync::Arc::new(client),
                 Err(error) => {
-                    return tools::api::AgentRunTerminal::Failed { error };
+                    return tools::AgentRunTerminal::Failed { error };
                 }
             },
             _ => self.client.clone(),
@@ -78,7 +78,7 @@ impl AgentRunner for CliAgentRunner {
         ) {
             Ok(scope) => scope,
             Err(error) => {
-                return tools::api::AgentRunTerminal::Failed {
+                return tools::AgentRunTerminal::Failed {
                     error: error.to_string(),
                 };
             }
@@ -170,7 +170,7 @@ impl AgentRunner for CliAgentRunner {
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        tools::api::register_subagent_tools(&mut sub_registry, sub_task_access, sub_skills);
+        tools::register_subagent_tools(&mut sub_registry, sub_task_access, sub_skills);
         let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
@@ -207,7 +207,7 @@ impl AgentRunner for CliAgentRunner {
         };
         let sub_run_id = sdk::RunId::new_v7();
         let sub_ctx = ToolExecutionContext {
-            resources: tools::api::ToolResources {
+            resources: tools::ToolResources {
                 agent_runner: None, // No nested agents
                 registry: ctx.resources.registry.clone(),
                 memory_config: ctx.resources.memory_config.clone(),
