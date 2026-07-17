@@ -8,7 +8,7 @@
 
 Compact 家族是 Context Management 的**核心能力**：在 LLM context window 耗尽前，以最小代价回收 token 预算。
 
-- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 4 个稳定方法
+- **内聚于 ContextPort**：五级管线是 ContextPort 的实现细节，Runtime 只调用 §2 的 5 个稳定方法
 - **策略分层**：从零成本（规则）到高成本（LLM），逐级升级
 - **幂等性**：相同 Context backing revision + 相同 request → 相同压缩决策（#550）
 - **非破坏优先**：L1 先限制尚未进入 ChatChain 的单条 ToolResult；L2/L3/L4 只变换读模型；只有 L5 修改已持久化对话链
@@ -40,6 +40,13 @@ trait ContextPort: Send + Sync {
         &self,
         req: &CompactRequest,
     ) -> Result<CompactOutcome, ContextPortError>;
+
+    /// 查询当前 session 的 compact coverage、phase、circuit breaker 与 usage。
+    /// 返回只读 Published Language，NEVER 暴露 shard / manifest / sidecar 路径。
+    async fn compact_status(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<CompactStatus, ContextPortError>;
 
     /// 追加当前 finalized RunStep 产出、收集跨 BC snapshot 并原子持久化。
     async fn append_and_persist(
@@ -464,6 +471,16 @@ threshold = (effective - autocompact_buffer_tokens) * 0.8
 
 ### 8.3 Summary 生成
 
+L5 的 Target 摘要生成已经演进为**持久化增量摘要树**：平时在
+`append_and_persist` 后按 finalized RunStep 增量构建 Leaf / Branch，compact
+时优先本地激活 warm projection。领域模型、16K / 24K 分块、recent 3 Run
+保护区、per-session 1 / global 5 scheduler、checkpoint 恢复、第一次与第二次
+compact 生命周期以及 usage 总账的唯一真相见
+[06-persistent-summary-tree.md](06-persistent-summary-tree.md)。
+
+下面的同步单次 / map-reduce 流程只描述迁移期 Current 与 #1119 的 legacy
+backfill 来源，**NEVER** 再作为 Target 主路径：
+
 ```rust
 async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactError> {
     // 1. 从自身稳定 Session backing 取得一致性快照并切分窗口
@@ -505,10 +522,12 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
 }
 ```
 
-**Map-reduce 策略**：
+**Legacy map-reduce 策略**：
 - `early_tokens > 30,000` 时分块（每块 ≤ 30,000 tokens）
 - 每块独立 LLM 摘要 → 合并后再 LLM 摘要
 - LLM 摘要失败返回结构化 `CompactError`；若产品选择本地降级，结果 **MUST** 带显式 quality / fallback 标记，**NEVER** 静默伪装成 LLM 摘要成功。
+- #1119 负责把该同步路径迁移为持久化 checkpoint backfill；**NEVER** 实施单
+  session 并发 3。最终并发语义固定为 per-session 1、不同 session 全局 5。
 
 **Summary 保真度不变量**：
 
@@ -523,6 +542,11 @@ async fn compact(&self, req: &CompactRequest) -> Result<CompactResult, CompactEr
 - Recent tail 的切分位置与 summary 覆盖范围是两个独立概念：调整 summary 输入 **NEVER** 隐式改变 tail 的预算、Run/Step 边界或 `split_point`。
 
 ### 8.4 compact_window 切分
+
+Target 的 Leaf / Branch 与 recent raw 选择见
+[06-persistent-summary-tree.md](06-persistent-summary-tree.md) §4–§6。下面的
+`CompactWindow` 仍描述结构化 RunStep backing 的过渡目标；Current 的 message
+10% 行为见 §8.9。
 
 ```rust
 struct CompactWindow {
@@ -683,12 +707,14 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | #552 Snip 历史级回收 | L2 | §5 |
 | #553 Auto-compact 阈值优化 | L5 阈值 | [03-token-budget.md](03-token-budget.md) |
 | #671 摘要失真 | L5 summary 质量 | §8.3 |
+| #1162 持久化增量摘要树 | L5 增量摘要 / projection / usage | [06-persistent-summary-tree.md](06-persistent-summary-tree.md) |
 | #554 Context collapse | L4 | §7 |
 
 ## 12. 相关文档
 
 - Session 聚合（ChatChain/ChatSegment）：[01-session.md](01-session.md)
 - Token Budget 详解：[03-token-budget.md](03-token-budget.md)
+- 持久化增量摘要树：[06-persistent-summary-tree.md](06-persistent-summary-tree.md)
 - Memory 注入：[05-memory-injection.md](05-memory-injection.md)
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Run 状态机（Compacting 状态）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
@@ -704,3 +730,4 @@ chain.compact(result.summary, result.recent_runs, source.revision);
 | 2026-07-16 | compact 战术修改：Run 级冷却（每 Run 最多 compact 一次，防死循环）；compact 后重置 token 计数；recent tail 10%（从 30% 调低）；recent tail ToolResult 全部占位符替换；summary_budget 动态计算（context_size * 2%） | #1110 |
 | 2026-07-17 | 自动触发落地 Provider 标准化 last_total_tokens；明确 Snip/Microcompact 常驻、Run/Step-aware 30% recent tail 为 Deferred Target，Current tail 仍保持 message 10% | compact token reset design |
 | 2026-07-17 | 补充 L5 summary 保真度：所有被移除消息必须进入 summary；按序汇总用户输入且后续修正覆盖前述冲突要求；禁止动作层级升级；增加 continuation 三态 | [#671](https://github.com/rushsinging/aemeath/issues/671) |
+| 2026-07-18 | L5 Target 改为持久化增量摘要树；同步 map-reduce 降为 legacy backfill，冻结 per-session 1 / global 5 与 compact usage 总账 | [#1162](https://github.com/rushsinging/aemeath/issues/1162) |

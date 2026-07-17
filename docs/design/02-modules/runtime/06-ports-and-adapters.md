@@ -100,7 +100,7 @@ enum InteractionCommandOutcome {
 
 | 供应能力 | Runtime 消费的窄契约 | 用途 / 唯一真相 |
 |---|---|---|
-| Context Management | `ContextPort` | 构建 / 压缩 / 追加持久化 Context；见 [Context Management](../context-management/02-compact.md) |
+| Context Management | `ContextPort` | 构建 / 压缩 / 查询 compact 状态 / 追加持久化 Context；见 [Context Management](../context-management/02-compact.md) 与 [持久化摘要树](../context-management/06-persistent-summary-tree.md) |
 | Tool | `ToolCatalogPort` / `ToolExecutionPort` | schema 投影与单次执行；见 [Tool ports](../tools/02-ports-and-lifecycle.md) |
 | Policy | `PolicyPort` | 调用前决策；见 [Policy](../policy/README.md) |
 | Memory | `MemoryPort` / `ReflectionPromptPort` | 当前项目 Memory 与纯 Reflection prompt / parse；见 [Memory ports](../memory/04-ports-and-adapters.md) |
@@ -436,3 +436,4 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 | 2026-07-15 | 经能力事实复核，Runtime 当前只有单一 `agent_execution` 能力；端口与适配器作为 crate 根六边形层组织，`agent/composition` 保持唯一对象图与 factory 入口 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-15 | 曾按多个稳定能力递归竖切并把 Port/adapter 就近分散；此结论已由上一条复核记录取代 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-17 | #921 收缩范围：Config `reasoning_graph` 退役后 `reasoning_for` 移除 config graph 参数；Provider resolver 领域迁移完成但未接生产链路；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；Runtime/Context/TUI 均未端到端消费 resolver 或 ReasoningPort；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-18 | ContextPort 增加只读 `compact_status`，Runtime 只消费 coverage / phase / usage Published Language，不接触 scheduler、manifest 或 shard | [#1162](https://github.com/rushsinging/aemeath/issues/1162) |
