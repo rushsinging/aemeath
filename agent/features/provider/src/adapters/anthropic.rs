@@ -665,6 +665,12 @@ mod tests {
             ] if first == "hel" && second == "lo"
         ));
         assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
+        let crate::InvocationEvent::Completed(completion) = events.last().unwrap() else {
+            panic!("expected completed event");
+        };
+        let usage = completion.usage.as_ref().expect("anthropic usage reported");
+        assert_eq!(usage.input_tokens, Some(2));
+        assert_eq!(usage.output_tokens, Some(1));
     }
 
     #[tokio::test]

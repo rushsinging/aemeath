@@ -67,7 +67,7 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::to_string(&data).unwrap_or_default()
             );
         }
-        logging::context::set_current_turn(turn_number);
+        logging::set_current_turn(turn_number);
     }
 
     pub(super) async fn compact_now(&mut self, turn_number: usize) {

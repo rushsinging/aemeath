@@ -1960,6 +1960,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "memory"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2863,6 +2874,7 @@ dependencies = [
  "sha2",
  "share",
  "storage",
+ "task",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -3757,6 +3769,7 @@ dependencies = [
  "serde_json",
  "share",
  "storage",
+ "task",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

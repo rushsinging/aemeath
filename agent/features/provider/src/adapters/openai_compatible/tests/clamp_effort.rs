@@ -50,15 +50,15 @@ fn test_clamp_effort_litellm_passthrough_all_levels() {
 }
 
 #[test]
-fn test_clamp_effort_minimax_default_passthrough() {
+fn test_clamp_effort_minimax_derives_toggle_level_from_capability() {
     let driver = MinimaxDriver;
-    assert_eq!(driver.clamp_effort("high"), "high");
+    assert_eq!(driver.clamp_effort("high"), "medium");
 }
 
 #[test]
-fn test_clamp_effort_agnes_default_passthrough() {
+fn test_clamp_effort_agnes_derives_toggle_level_from_capability() {
     let driver = AgnesDriver;
-    assert_eq!(driver.clamp_effort("max"), "max");
+    assert_eq!(driver.clamp_effort("max"), "medium");
 }
 
 // === ReasoningConfig::clamped ===

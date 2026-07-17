@@ -31,8 +31,25 @@ pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,
-    /// Field to update. One of: status, subject, description, owner, priority, blocked_by_id
+    /// Field to update. One of: status, subject, description, priority, blocked_by_id
     pub key: String,
     /// New value for the field (always a string). For blocked_by_id, pass a single task ID.
     pub value: serde_json::Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::types::ToolSchema;
+
+    #[test]
+    fn task_update_schema_does_not_advertise_legacy_owner() {
+        let schema = TaskUpdateInput::data_schema();
+        let key_description = schema["properties"]["key"]["description"]
+            .as_str()
+            .expect("key description");
+        assert!(!key_description.contains("owner"));
+        assert!(key_description.contains("status"));
+        assert!(key_description.contains("description"));
+    }
 }

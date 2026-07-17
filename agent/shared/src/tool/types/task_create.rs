@@ -31,9 +31,23 @@ pub struct TaskCreateInput {
     pub description: String,
     /// Task priority level
     pub priority: Option<String>,
-    /// Session ID to associate with this task
-    #[serde(alias = "sessionId")]
-    pub session_id: Option<String>,
-    /// Task owner
-    pub owner: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::types::ToolSchema;
+
+    #[test]
+    fn task_create_schema_does_not_publish_legacy_fields() {
+        let schema = TaskCreateInput::data_schema();
+        let properties = schema["properties"]
+            .as_object()
+            .expect("task create schema properties");
+        assert!(!properties.contains_key("owner"));
+        assert!(!properties.contains_key("session_id"));
+        assert!(!properties.contains_key("sessionId"));
+        assert!(properties.contains_key("subject"));
+        assert!(properties.contains_key("description"));
+    }
 }

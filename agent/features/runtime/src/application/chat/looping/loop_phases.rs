@@ -98,7 +98,7 @@ pub(crate) async fn build_api_messages(
     language: &str,
     task_reminder_state: &mut TaskReminderState,
     turn_count: u64,
-    task_store: &storage::TaskStore,
+    task_access: &dyn task::TaskAccess,
     messages: &[Message],
 ) -> Vec<Message> {
     let mut api_msgs = Vec::new();
@@ -115,7 +115,7 @@ pub(crate) async fn build_api_messages(
     }
     // Inject task reminder if conditions are met
     if let Some(reminder) = task_reminder_state
-        .build_reminder(turn_count, task_store, language)
+        .build_reminder(turn_count, task_access, language)
         .await
     {
         api_msgs.push(reminder);
@@ -145,7 +145,7 @@ mod tests {
             }],
             metadata: None,
         }];
-        let store = storage::TaskStore::new();
+        let store = task::TaskStore::new();
         let mut reminder = TaskReminderState::new();
         let out = build_api_messages("", "en", &mut reminder, 1, &store, &messages).await;
 
@@ -176,7 +176,7 @@ mod tests {
             }],
             metadata: None,
         }];
-        let store = storage::TaskStore::new();
+        let store = task::TaskStore::new();
         let mut reminder = TaskReminderState::new();
         let out = build_api_messages("", "en", &mut reminder, 1, &store, &messages).await;
         let block = out

@@ -2,10 +2,12 @@ use super::*;
 
 fn test_ctx() -> ToolExecutionContext {
     ToolExecutionContext {
-        workspace: project::wire_production_workspace(std::path::PathBuf::from(".")).expect("workspace 初始化成功").into_views(),
+        workspace: project::wire_production_workspace(std::path::PathBuf::from("."))
+            .expect("workspace 初始化成功")
+            .into_views(),
         run_id: "test-run".to_string(),
         cancel: tokio_util::sync::CancellationToken::new(),
-        read_files: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         resources: crate::api::ToolResources {
             agent_runner: None,
             registry: None,
@@ -17,213 +19,123 @@ fn test_ctx() -> ToolExecutionContext {
         plan_mode: None,
         max_tool_concurrency: 4,
         max_agent_concurrency: 4,
-        agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         progress_tx: None,
         parent_session_id: None,
     }
 }
 
-async fn setup_task(store: &TaskStore) -> String {
-    let task = store
-        .create("原始标题".into(), "原始描述".into())
-        .await;
-    task.id
+fn setup() -> (
+    Arc<task::TaskStore>,
+    Arc<dyn task::TaskAccess>,
+    task::TaskId,
+) {
+    let store = Arc::new(task::TaskStore::new());
+    let access: Arc<dyn task::TaskAccess> = store.clone();
+    access
+        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .unwrap();
+    let created = access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "任务".into(),
+                "描述".into(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
+    let id = created.value.id();
+    (store, access, id)
 }
 
-// --- key-value 模式基本测试 ---
-
 #[tokio::test]
-async fn test_update_status() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
+async fn task_update_uses_task_access_and_direct_complete_is_one_commit() {
+    let (store, access, id) = setup();
+    let revision_before = access.revision();
+    let tool = TaskUpdateTool { access };
 
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
     let result = tool
         .call(
-            serde_json::json!({"taskId": task_id, "key": "status", "value": "in_progress"}),
+            serde_json::json!({"task_id": id.to_string(), "key": "status", "value": "completed"}),
             &test_ctx(),
         )
         .await;
 
-    assert!(!result.is_error);
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.status, TaskStatus::InProgress);
+    assert!(!result.is_error, "{}", result.text);
+    assert_eq!(store.revision().get(), revision_before.get() + 1);
+    let completed = store.get(id).unwrap();
+    assert_eq!(completed.status(), task::TaskStatus::Completed);
+    assert_eq!(completed.started_at(), completed.completed_at());
+    assert!(result.text.contains("Status: Completed"));
 }
 
 #[tokio::test]
-async fn test_update_subject() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "key": "subject", "value": "新标题"}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.subject, "新标题");
-}
-
-#[tokio::test]
-async fn test_update_description() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "key": "description", "value": "新描述"}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.description, "新描述");
-}
-
-#[tokio::test]
-async fn test_update_owner() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "key": "owner", "value": "alice"}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.owner.as_deref(), Some("alice"));
-}
-
-#[tokio::test]
-async fn test_update_priority() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    tool.call(
-        serde_json::json!({"taskId": task_id, "key": "priority", "value": "high"}),
-        &test_ctx(),
-    )
-    .await;
-
-    let task = store.get(&task_id).await.unwrap();
-    assert_eq!(task.priority, TaskPriority::High);
-}
-
-#[tokio::test]
-async fn test_invalid_key_returns_error() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
+async fn task_update_rejects_legacy_owner_field() {
+    let (_store, access, id) = setup();
+    let tool = TaskUpdateTool { access };
     let result = tool
         .call(
-            serde_json::json!({"taskId": task_id, "key": "unknown_field", "value": "x"}),
+            serde_json::json!({"task_id": id.to_string(), "key": "owner", "value": "alice"}),
             &test_ctx(),
         )
         .await;
-
     assert!(result.is_error);
     assert!(result.text.contains("unknown field"));
 }
 
 #[tokio::test]
-async fn test_non_string_value_returns_error() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
+async fn task_update_uses_typed_commands_for_fields_and_dependency() {
+    let (store, access, id) = setup();
+    let dependency = access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "前置".into(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            3,
+        )
+        .unwrap()
+        .value
+        .id();
+    let tool = TaskUpdateTool { access };
 
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
+    for (key, value) in [
+        ("subject", "新标题"),
+        ("description", "新描述"),
+        ("priority", "high"),
+        ("blocked_by_id", &dependency.to_string()),
+    ] {
+        let result = tool
+            .call(
+                serde_json::json!({"task_id": id.to_string(), "key": key, "value": value}),
+                &test_ctx(),
+            )
+            .await;
+        assert!(!result.is_error, "{}", result.text);
+    }
+    let updated = store.get(id).unwrap();
+    assert_eq!(updated.subject(), "新标题");
+    assert_eq!(updated.description(), "新描述");
+    assert_eq!(updated.priority(), task::TaskPriority::High);
+    assert_eq!(updated.blocked_by(), &[dependency]);
+}
+
+#[tokio::test]
+async fn task_update_rejects_non_decimal_ids_before_ohs() {
+    let (_store, access, _id) = setup();
+    let tool = TaskUpdateTool { access };
     let result = tool
         .call(
-            serde_json::json!({"taskId": task_id, "key": "status", "value": 123}),
+            serde_json::json!({"task_id": "legacy-uuid", "key": "status", "value": "completed"}),
             &test_ctx(),
         )
         .await;
-
     assert!(result.is_error);
-    assert!(result.text.contains("must be a string"));
-}
-
-#[tokio::test]
-async fn test_completed_status_output_contains_status_text() {
-    // hook 检测 output 中的 "Status: Completed" 来触发 TaskCompleted 事件
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    let result = tool
-        .call(
-            serde_json::json!({"taskId": task_id, "key": "status", "value": "completed"}),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(!result.is_error);
-    assert!(
-        result.text.contains("Status: Completed"),
-        "output 应包含 'Status: Completed' 以触发 hook: {}",
-        result.text
-    );
-}
-
-#[tokio::test]
-async fn test_blocked_by_id_adds_dependency() {
-    let store = Arc::new(TaskStore::new());
-    let blocking_task = store
-        .create("阻塞任务".into(), "描述".into())
-        .await;
-    let blocked_task = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    let result = tool
-        .call(
-            serde_json::json!({"taskId": blocked_task, "key": "blocked_by_id", "value": blocking_task.id}),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(!result.is_error);
-    let task = store.get(&blocked_task).await.unwrap();
-    assert!(task.blocked_by.contains(&blocking_task.id));
-}
-
-#[tokio::test]
-async fn test_blocked_by_id_nonexistent_returns_error() {
-    let store = Arc::new(TaskStore::new());
-    let task_id = setup_task(&store).await;
-
-    let tool = TaskUpdateTool {
-        store: store.clone(),
-    };
-    let result = tool
-        .call(
-            serde_json::json!({"taskId": task_id, "key": "blocked_by_id", "value": "nonexistent"}),
-            &test_ctx(),
-        )
-        .await;
-
-    assert!(result.is_error);
-    assert!(result.text.contains("not found"));
+    assert!(result.text.contains("decimal task ID"));
 }

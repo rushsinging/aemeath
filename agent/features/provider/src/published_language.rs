@@ -253,6 +253,38 @@ pub struct RawUsageSnapshot {
     pub reasoning_tokens: Option<u32>,
 }
 
+impl RawUsageSnapshot {
+    pub fn was_reported(&self) -> bool {
+        self.input_tokens.is_some()
+            || self.output_tokens.is_some()
+            || self.cache_read_tokens.is_some()
+            || self.cache_write_tokens.is_some()
+            || self.reasoning_tokens.is_some()
+    }
+
+    pub fn into_reported(self) -> Option<Self> {
+        self.was_reported().then_some(self)
+    }
+
+    pub fn merge_reported(&mut self, latest: Self) {
+        if latest.input_tokens.is_some() {
+            self.input_tokens = latest.input_tokens;
+        }
+        if latest.output_tokens.is_some() {
+            self.output_tokens = latest.output_tokens;
+        }
+        if latest.cache_read_tokens.is_some() {
+            self.cache_read_tokens = latest.cache_read_tokens;
+        }
+        if latest.cache_write_tokens.is_some() {
+            self.cache_write_tokens = latest.cache_write_tokens;
+        }
+        if latest.reasoning_tokens.is_some() {
+            self.reasoning_tokens = latest.reasoning_tokens;
+        }
+    }
+}
+
 // ─── Stop Reason ────────────────────────────────────────
 
 /// 统一停止原因。
@@ -739,6 +771,40 @@ mod tests {
     fn provider_tool_call_id_display() {
         let id = ProviderToolCallId("toolu_123".to_string());
         assert_eq!(id.to_string(), "toolu_123");
+    }
+
+    #[test]
+    fn raw_usage_distinguishes_unreported_from_reported_zero() {
+        let unreported = RawUsageSnapshot::default();
+        assert!(!unreported.was_reported());
+        assert!(unreported.into_reported().is_none());
+
+        let reported_zero = RawUsageSnapshot {
+            input_tokens: Some(0),
+            ..RawUsageSnapshot::default()
+        };
+        assert!(reported_zero.was_reported());
+        assert_eq!(reported_zero.into_reported().unwrap().input_tokens, Some(0));
+    }
+
+    #[test]
+    fn raw_usage_latest_reported_fields_merge_without_erasing_previous_values() {
+        let mut usage = RawUsageSnapshot {
+            input_tokens: Some(10),
+            cache_read_tokens: Some(3),
+            ..RawUsageSnapshot::default()
+        };
+        usage.merge_reported(RawUsageSnapshot {
+            output_tokens: Some(7),
+            cache_read_tokens: None,
+            reasoning_tokens: Some(0),
+            ..RawUsageSnapshot::default()
+        });
+
+        assert_eq!(usage.input_tokens, Some(10));
+        assert_eq!(usage.output_tokens, Some(7));
+        assert_eq!(usage.cache_read_tokens, Some(3));
+        assert_eq!(usage.reasoning_tokens, Some(0));
     }
 
     #[test]

@@ -60,6 +60,7 @@ where
         allow_all,
         active_run,
         task_store,
+        task_access,
         max_tool_concurrency,
         max_agent_concurrency,
         agent_semaphore,
@@ -93,7 +94,7 @@ where
     let tool_identity =
         crate::application::chat::looping::tool_identity::ToolIdentityRegistry::new();
     let chat_id = ChatId::new_v7();
-    logging::context::set_current_chat_id(chat_id.to_string());
+    logging::set_current_chat_id(chat_id.to_string());
     let mut config_snapshot =
         crate::application::chat::looping::config_reload::init_snapshot_registry(&cwd);
     macro_rules! handle_pending_command {
@@ -376,6 +377,7 @@ where
                 &mut chain,
                 &next_segment,
                 &task_store,
+                task_access.as_ref(),
                 true,
             )
             .await;
@@ -396,6 +398,7 @@ where
                 &mut chain,
                 &next_segment,
                 &task_store,
+                task_access.as_ref(),
                 true,
             )
             .await;
@@ -413,6 +416,7 @@ where
                 &mut pending_input,
                 &mut chain,
                 &task_store,
+                task_access.as_ref(),
             )
             .await
         };
@@ -482,7 +486,7 @@ where
             agent_runner: &agent_runner,
             tool_result_materializer: tool_result_materializer.as_ref(),
             allow_all,
-            task_store: &task_store,
+            task_access: &task_access,
             max_tool_concurrency,
             max_agent_concurrency,
             agent_semaphore: &agent_semaphore,

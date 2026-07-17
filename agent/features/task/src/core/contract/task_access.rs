@@ -301,6 +301,54 @@ pub(super) fn assert_task_access_contract(
     );
     assert_eq!(observable(access), observable_before_deleted_tag);
 
+    // Text field commands are typed intent operations: blank subjects fail
+    // atomically, duplicate values are true no-ops, and each real update has
+    // one revision plus one stable event.
+    let revision_before_subject = access.revision();
+    let renamed = access
+        .set_subject(alpha.id(), "renamed alpha".to_owned(), 26)
+        .expect("subject update succeeds");
+    assert_eq!(renamed.value.subject(), "renamed alpha");
+    assert_eq!(
+        renamed.events,
+        vec![TaskEvent::TaskSubjectChanged {
+            task_id: alpha.id(),
+        }]
+    );
+    assert_eq!(
+        renamed.revision(),
+        Some(TaskRevision::new(revision_before_subject.get() + 1))
+    );
+
+    let duplicate_subject = access
+        .set_subject(alpha.id(), "renamed alpha".to_owned(), 27)
+        .expect("duplicate subject succeeds");
+    assert_eq!(duplicate_subject.revision(), None);
+    assert!(duplicate_subject.events.is_empty());
+
+    let before_invalid_subject = observable(access);
+    assert_eq!(
+        access.set_subject(alpha.id(), "  ".to_owned(), 28),
+        Err(TaskCommandError::InvalidTaskSubject)
+    );
+    assert_eq!(observable(access), before_invalid_subject);
+
+    let revision_before_description = access.revision();
+    let described = access
+        .set_description(alpha.id(), "new description".to_owned(), 29)
+        .expect("description update succeeds");
+    assert_eq!(described.value.description(), "new description");
+    assert_eq!(
+        described.events,
+        vec![TaskEvent::TaskDescriptionChanged {
+            task_id: alpha.id(),
+        }]
+    );
+    assert_eq!(
+        described.revision(),
+        Some(TaskRevision::new(revision_before_description.get() + 1))
+    );
+
     // ---- record_batch_turn: Active admission plus idempotent no-op ----
     let revision_before_turn = access.revision();
     let turned = access
@@ -411,6 +459,33 @@ pub(super) fn assert_task_access_contract(
         })
     );
     assert_eq!(observable(access), observable_before_archived_ops);
+
+    // Whole-aggregate clear is one atomic command. It resets entities,
+    // allocation/current pointers, emits one aggregate event, and advances the
+    // monotonic revision once. Repeating it is an idempotent no-op.
+    let task_count = access.stats().total;
+    let batch_count = access.list_batches().len();
+    let revision_before_clear = access.revision();
+    let cleared = access.clear().expect("aggregate clear succeeds");
+    assert_eq!(
+        cleared.revision(),
+        Some(TaskRevision::new(revision_before_clear.get() + 1))
+    );
+    assert_eq!(
+        cleared.events,
+        vec![TaskEvent::TaskStoreCleared {
+            task_count,
+            batch_count,
+        }]
+    );
+    assert!(access.list().is_empty());
+    assert!(access.list_batches().is_empty());
+    assert_eq!(access.current_batch(), None);
+    let revision_after_clear = access.revision();
+    let duplicate_clear = access.clear().expect("empty clear succeeds");
+    assert_eq!(duplicate_clear.revision(), None);
+    assert!(duplicate_clear.events.is_empty());
+    assert_eq!(access.revision(), revision_after_clear);
 
     // ---- Revision overflow is atomic: no batch is admitted and the
     // authoritative revision never advances past `u64::MAX` ----

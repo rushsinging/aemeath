@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
-use storage::TaskStore;
 use tools::api::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
 #[async_trait]
@@ -150,7 +149,7 @@ impl AgentRunner for CliAgentRunner {
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
         // 将 sub-agent 的 model 同步到日志 context（影响 hook/audit 等共享 sink 的 model 字段）
-        logging::context::set_current_model(model_name.clone());
+        logging::set_current_model(model_name.clone());
         let progress = move |turn: Option<usize>, msg: &str| {
             let turn_str = turn
                 .map(|t| t.to_string())
@@ -165,11 +164,13 @@ impl AgentRunner for CliAgentRunner {
             );
         };
         // Build a fresh sub-agent registry with all tools except Agent (prevent recursion)
-        let sub_task_store = std::sync::Arc::new(TaskStore::new());
+        // Sub Run 用独立的 task::TaskStore access，不共享父 Run 的 Task 状态（#889）。
+        let sub_task_access: std::sync::Arc<dyn task::TaskAccess> =
+            std::sync::Arc::new(task::TaskStore::new());
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        tools::api::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
+        tools::api::register_subagent_tools(&mut sub_registry, sub_task_access, sub_skills);
         let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block

@@ -16,6 +16,8 @@ pub trait TaskAccess: Send + Sync {
     async fn create_task(&self, spec: TaskCreateSpec) -> Result<TaskCommandResult<Task>, TaskCommandError>;
     async fn get(&self, id: &TaskId) -> Option<Task>;
     async fn transition(&self, id: &TaskId, to: TaskStatus) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    async fn set_subject(&self, id: &TaskId, subject: String) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    async fn set_description(&self, id: &TaskId, description: String) -> Result<TaskCommandResult<Task>, TaskCommandError>;
     async fn set_priority(&self, id: &TaskId, priority: TaskPriority) -> Result<TaskCommandResult<Task>, TaskCommandError>;
     async fn add_dependency(&self, id: &TaskId, blocked_by: &TaskId) -> Result<TaskCommandResult<Task>, TaskCommandError>;
     async fn remove_dependency(&self, id: &TaskId, blocked_by: &TaskId) -> Result<TaskCommandResult<Task>, TaskCommandError>;
@@ -115,7 +117,7 @@ impl<T> TaskCommandResult<T> {
 
 所有 mutation command 都返回 `TaskCommandResult<T>`；Runtime 必须先消费 `events` 并经 ACL 投影，再使用 `value` 更新本地 read model。失败没有事件。`add_dependency` 即使调用方先查询 `would_create_cycle`，也 **MUST** 在同一 store write mutation 内重新检查环；`transition(id, InProgress)` 同理必须锁内检查 blocked，查询方法只是 UI/规划提示，不能充当写入 precondition。
 
-`TaskCreateSpec` / `BatchCreateSpec` 是 Task-owned typed command input，**NEVER** 与 Tool wire DTO 共用类型。其字段与直接构造器保持私有：`try_new` 校验非空 subject / summary；`create_task` / `create_batch` 再校验当前 state，最后才分配 ID 并在一次 state mutation 中插入。任何校验或 ID 溢出都返回结构化 `TaskCommandError` 且 state / counter 不变，**NEVER** 以 panic、空字符串修补或半创建表示失败。
+`TaskCreateSpec` / `BatchCreateSpec` 是 Task-owned typed command input，**NEVER** 与 Tool wire DTO 共用类型。其字段与直接构造器保持私有：`try_new` 校验非空 subject / summary；`create_task` / `create_batch` 再校验当前 state，最后才分配 ID 并在一次 state mutation 中插入。任何校验或 ID 溢出都返回结构化 `TaskCommandError` 且 state / counter 不变，**NEVER** 以 panic、空字符串修补或半创建表示失败。`set_subject` 同样拒绝空白标题；`set_subject` / `set_description` 是保留 Tool 编辑能力的 Task-owned 意图命令，真实修改各产生一次 revision 与对应封闭事件，重复值是无事件、无 revision 的幂等成功，**NEVER** 重新开放通用 update closure。
 
 `Task.batch` 是非可选引用，因此 `create_task` **MUST** 把新 Task 绑定到 `current_batch` 指向的唯一 `Active` Batch；合法空 snapshot 的 `current_batch=None` 时返回 `NoActiveBatch`，**NEVER** 隐式创建不可见 Batch、写入 `BatchId(0)` 或返回缺少 batch 的 Task。调用方必须先显式 `create_batch`。`create_batch` 要求当前没有 Active Batch，否则返回 `ActiveBatchConflict { active, requested }`；新建命令只接收并持久化 `summary`，**NEVER** 发布 Batch 不拥有的 `description` 参数。
 

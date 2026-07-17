@@ -22,6 +22,7 @@ FEATURE_CRATES = {
     "project",
     "policy",
     "context",
+    "memory",
     "provider",
     "tools",
     "storage",
@@ -117,6 +118,14 @@ ROOT_ACCESS_ALLOW = {
         "file_usage_append_store",
     },
     "runtime": {"AgentClientImpl", "UsageSink", "from_args"},
+    "policy": {
+        "format_warnings",
+        "scan_content",
+        "validate_and_normalize_path",
+        "validate_and_normalize_path_from_base",
+        "validate_search_path",
+        "validate_search_path_from_base",
+    },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
@@ -147,6 +156,20 @@ CONTEXT_FORBIDDEN_PATHS = {
     "agent/features/context/src/api.rs",
     "agent/features/context/src/gateway.rs",
     "agent/features/context/src/capabilities",
+}
+POLICY_FORBIDDEN_PATHS = {
+    "agent/features/policy/src/api.rs",
+    "agent/features/policy/src/api",
+    "agent/features/policy/src/business.rs",
+    "agent/features/policy/src/business",
+    "agent/features/policy/src/contract.rs",
+    "agent/features/policy/src/contract",
+    "agent/features/policy/src/core.rs",
+    "agent/features/policy/src/core",
+    "agent/features/policy/src/gateway.rs",
+    "agent/features/policy/src/gateway",
+    "agent/features/policy/src/capabilities.rs",
+    "agent/features/policy/src/capabilities",
 }
 PROJECT_FORBIDDEN_PATHS = {
     "agent/features/project/src/api.rs",
@@ -258,7 +281,7 @@ def check_cross_crate_line(
             continue
         if segment in ROOT_ACCESS_ALLOW.get(target, set()):
             continue
-        if target in {"audit", "provider", "project", "runtime"}:
+        if target in {"audit", "policy", "provider", "project", "runtime"}:
             violations.append(
                 f"cross-feature access to {target}::{segment} is forbidden; use the registered {target} crate-root facade"
             )
@@ -289,7 +312,7 @@ def check_cross_crate_line(
                 continue
             if item_name in ROOT_ACCESS_ALLOW.get(target, set()):
                 continue
-            if target in {"audit", "provider", "project", "runtime"}:
+            if target in {"audit", "policy", "provider", "project", "runtime"}:
                 violations.append(
                     f"cross-feature braced import from {target} exposes {item_name}; use the registered {target} crate-root facade"
                 )
@@ -446,6 +469,10 @@ project_lib = root / "agent/features/project/src/lib.rs"
 if project_lib.exists():
     for violation in project_public_facade_violations(project_lib.read_text()):
         violations.append(f"agent/features/project/src/lib.rs: {violation}")
+for forbidden in sorted(POLICY_FORBIDDEN_PATHS):
+    path = root / forbidden
+    if path.exists():
+        violations.append(f"{forbidden}: Policy legacy fixed-layer path is forbidden")
 for forbidden in sorted(PROJECT_FORBIDDEN_PATHS):
     path = root / forbidden
     if path.exists():
