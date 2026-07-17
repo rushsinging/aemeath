@@ -11,7 +11,7 @@ use crate::LOG_TARGET;
 use share::config::models::{RuntimeModelRequest, RuntimeModelResolver};
 use share::config::ModelsConfig;
 
-use crate::adapters::client::{LlmClient, OpenAIProviderConfig};
+use crate::adapters::client::LlmClient;
 
 /// A pool of `LlmClient` instances keyed by model spec (`"provider/model_id"`).
 ///
@@ -137,22 +137,7 @@ impl LlmClientPool {
         let driver = ProviderDriverKind::parse(&provider_config.driver)
             .unwrap_or(ProviderDriverKind::OpenAI);
 
-        // Build OpenAI provider config for OpenAI-compatible providers.
-        // Anthropic 与 Ollama 各有专用 provider，不生成 openai_config。
-        let openai_config = if !matches!(
-            driver,
-            ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama
-        ) {
-            let cfg = OpenAIProviderConfig::from_driver(driver, provider_name);
-            let use_responses = model_entry
-                .api_style
-                .as_deref()
-                .map(|s| s.eq_ignore_ascii_case("responses"))
-                .unwrap_or(false);
-            Some(cfg.with_responses_api(use_responses))
-        } else {
-            None
-        };
+        let api_style = model_entry.api_style.clone();
         // API key — 由 ConfigAppService::load() 的 resolve_provider_api_keys
         // 在 config 加载时从 env 注入，pool 只读 provider_config.api_key。
         let api_key = if provider_config.api_key.is_empty() {
@@ -173,19 +158,19 @@ impl LlmClientPool {
 
         let reasoning = true; // reasoning is now a runtime toggle, always start enabled
 
-        Ok(LlmClient::from_config(
-            crate::adapters::client::LlmConfigOptions {
-                driver,
-                api_key,
-                base_url,
-                model: model_entry.id.clone(),
-                max_tokens,
-                reasoning,
-                reasoning_config: None,
-                openai_config,
-                timeout_secs: self.timeout_secs,
-            },
-        ))
+        LlmClient::from_config(crate::adapters::client::LlmConfigOptions {
+            driver: driver.as_str().to_string(),
+            source_key: provider_name.to_string(),
+            api_style,
+            api_key,
+            base_url,
+            model: model_entry.id.clone(),
+            max_tokens,
+            reasoning,
+            reasoning_config: None,
+            timeout_secs: self.timeout_secs,
+        })
+        .map_err(|error| error.to_string())
     }
 
     /// Build an isolated client for a sub Run without inserting it into the shared cache.
@@ -233,22 +218,21 @@ mod tests {
     }
 
     fn default_client() -> Arc<LlmClient> {
-        Arc::new(LlmClient::from_config(
-            crate::adapters::client::LlmConfigOptions {
-                driver: ProviderDriverKind::Zhipu,
+        Arc::new(
+            LlmClient::from_config(crate::adapters::client::LlmConfigOptions {
+                driver: ProviderDriverKind::Zhipu.as_str().to_string(),
+                source_key: ProviderDriverKind::Zhipu.as_str().to_string(),
+                api_style: None,
                 api_key: "default-key".to_string(),
                 base_url: Some("https://default.example.com".to_string()),
                 model: "default-model".to_string(),
                 max_tokens: 4_096,
                 reasoning: false,
                 reasoning_config: None,
-                openai_config: Some(OpenAIProviderConfig::from_driver(
-                    ProviderDriverKind::Zhipu,
-                    "zhipu",
-                )),
                 timeout_secs: crate::DEFAULT_TIMEOUT_SECS,
-            },
-        ))
+            })
+            .expect("valid default client config"),
+        )
     }
 
     #[tokio::test]
