@@ -441,6 +441,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs",
+ "futures-util",
  "inventory",
  "log",
  "provider",

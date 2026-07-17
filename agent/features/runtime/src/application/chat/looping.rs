@@ -17,7 +17,6 @@ mod input_gate_tests;
 mod input_log;
 mod llm_log;
 mod loop_context;
-mod loop_helpers;
 mod loop_phases;
 mod loop_runner;
 #[cfg(test)]
@@ -53,4 +52,4 @@ pub use input_log::logged_input_messages;
 pub use loop_context::{ChatLoopContext, SwitchClientFn};
 pub use loop_runner::process_chat_loop;
 pub use queue::{append_queued_input, QueueDrainPort, QueueFuture};
-pub use stream_handler::RuntimeStreamHandler;
+pub(crate) use stream_handler::InvocationEventReducer;

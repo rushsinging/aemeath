@@ -4,7 +4,6 @@ use super::logging::{
 };
 use super::loop_helpers::append_tool_results;
 use super::progress::build_tool_calls_progress_event;
-use super::SilentHandler;
 use crate::application::agent::Agent;
 use crate::application::loop_engine::{
     run_loop as shared_run_loop, LoopEngineError, ModelStep, RunLoopPort, ToolGuardDecision,
@@ -13,6 +12,7 @@ use crate::application::loop_engine::{
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
+use futures::StreamExt;
 use provider::LlmClient;
 use provider::{StopReason, SystemBlock};
 use share::message::Message;
@@ -20,6 +20,20 @@ use share::string_idx::slice_head;
 use share::tool::{AgentProgressEvent, AgentProgressKind};
 use std::sync::Arc;
 use tools::api::AgentRunTerminal;
+
+#[derive(Clone)]
+struct SubAgentEventSink;
+
+impl crate::application::chat::looping::ChatEventSink for SubAgentEventSink {
+    fn send_event<'a>(
+        &'a self,
+        _event: crate::application::chat::looping::RuntimeStreamEvent,
+    ) -> crate::application::chat::looping::EventFuture<'a> {
+        Box::pin(async {})
+    }
+
+    fn try_send_event(&self, _event: crate::application::chat::looping::RuntimeStreamEvent) {}
+}
 
 struct ActiveRunRegistration {
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
@@ -57,7 +71,6 @@ pub(super) struct SubAgentRun<'a> {
     pub hook_runner: hook::api::HookRunner,
     pub sub_schemas: Vec<serde_json::Value>,
     pub messages: Vec<Message>,
-    pub handler: SilentHandler,
     pub system_blocks: Vec<SystemBlock>,
     pub log_request_messages: Box<dyn Fn(usize, &[Message]) + Send + Sync + 'a>,
     pub agent: Agent<'a>,
@@ -352,19 +365,43 @@ impl RunLoopPort for SubAgentRun<'_> {
         }
 
         let messages_for_api = messages_for_llm(&self.messages);
+        let mut reducer =
+            crate::application::chat::looping::InvocationEventReducer::new(SubAgentEventSink);
         let response = self
             .client
-            .stream_message(
+            .invocation_stream(
                 &self.invocation_scope,
                 &effective_blocks,
                 &messages_for_api,
                 &self.sub_schemas,
-                &mut self.handler,
                 &self.agent.ctx.cancel,
             )
             .await;
 
         let resp = match response {
+            Ok(mut stream) => {
+                let mut terminal = None;
+                while let Some(event) = stream.next().await {
+                    match reducer.apply(event) {
+                        Ok(Some(response)) => terminal = Some(Ok(response)),
+                        Ok(None) => {}
+                        Err(error) => terminal = Some(Err(error)),
+                    }
+                    if terminal.is_some() {
+                        break;
+                    }
+                }
+                terminal.unwrap_or_else(|| {
+                    Err(provider::ProviderError::fatal(
+                        provider::ProviderErrorKind::Protocol,
+                        "provider stream ended without terminal event",
+                    ))
+                })
+            }
+            Err(error) => Err(error),
+        };
+
+        let resp = match resp {
             Ok(resp) => resp,
             Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
                 self.agent.ctx.cancel.cancel();

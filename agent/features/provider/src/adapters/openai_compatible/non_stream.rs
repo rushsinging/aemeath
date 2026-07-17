@@ -6,7 +6,7 @@ use crate::adapters::http_attempt::{
     HttpFailureKind, SuccessBodyReadError,
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
-use crate::ports::{ReasoningLevel, StreamHandler};
+use crate::ports::{LegacyStreamSink, ReasoningLevel};
 use share::message::{ContentBlock, Message, Role};
 use tokio_util::sync::CancellationToken;
 
@@ -17,7 +17,7 @@ impl OpenAICompatibleProvider {
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
         let openai_messages = Self::convert_messages(
@@ -226,7 +226,7 @@ mod tests {
     use crate::domain::invoke::InvocationScope;
     use tokio::net::TcpListener;
 
-    /// Minimal StreamHandler that records whether *any* output method fired —
+    /// Minimal LegacyStreamSink that records whether *any* output method fired —
     /// used to assert that a cancelled attempt produces no user-visible
     /// output at all.
     #[derive(Default)]
@@ -234,7 +234,7 @@ mod tests {
         called: bool,
     }
 
-    impl StreamHandler for CallTrackingHandler {
+    impl LegacyStreamSink for CallTrackingHandler {
         fn on_text(&mut self, _text: &str) {
             self.called = true;
         }

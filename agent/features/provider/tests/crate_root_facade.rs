@@ -1,6 +1,6 @@
 use provider::{
-    CallbackHandler, LlmClient, LlmError, LlmProvider, LlmProviderGateway, ProviderDriverKind,
-    ReasoningLevel, StopReason, StreamHandler, StreamResponse, SystemBlock, Usage,
+    LlmClient, LlmError, LlmProvider, LlmProviderGateway, ProviderDriverKind, ReasoningLevel,
+    StopReason, StreamResponse, SystemBlock, Usage,
 };
 
 #[test]
@@ -17,6 +17,4 @@ fn crate_root_exposes_existing_provider_contract() {
 
     let _: Option<&dyn LlmProvider> = None;
     let _: Option<&dyn LlmProviderGateway> = None;
-    let _: Option<&dyn StreamHandler> = None;
-    let _ = CallbackHandler::new(Box::new(|_| {}));
 }

@@ -10,14 +10,13 @@ use share::message::Message;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::invoke::{StreamResponse, SystemBlock};
-use crate::LlmError;
+use crate::domain::invoke::SystemBlock;
 
 use crate::adapters::client::{LlmClient, LlmConfigOptions};
 use crate::adapters::pool::LlmClientPool;
-use crate::ports::StreamHandler;
 
 use crate::ports::LlmProvider;
+use crate::published_language::{InvocationStream, ProviderError};
 
 /// OHS gateway for constructing provider clients and streaming model responses.
 #[async_trait]
@@ -33,17 +32,15 @@ pub trait LlmProviderGateway: Send + Sync {
         timeout_secs: u64,
     ) -> LlmClientPool;
 
-    #[allow(clippy::too_many_arguments)]
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         client: &LlmClient,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[Value],
-        handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
-    ) -> Result<StreamResponse, LlmError>;
+    ) -> Result<InvocationStream, ProviderError>;
 }
 
 /// Default provider gateway backed by the existing provider client/pool API.
@@ -73,19 +70,17 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
         LlmClientPool::new(default_client, models_config, timeout_secs)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         client: &LlmClient,
         scope: &crate::InvocationScope,
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[Value],
-        handler: &mut dyn StreamHandler,
         cancel: &CancellationToken,
-    ) -> Result<StreamResponse, LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         client
-            .stream_message(scope, system, messages, tool_schemas, handler, cancel)
+            .invocation_stream(scope, system, messages, tool_schemas, cancel)
             .await
     }
 }
@@ -93,28 +88,20 @@ impl LlmProviderGateway for DefaultLlmProviderGateway {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CallbackHandler;
     use async_trait::async_trait;
+    use futures_util::stream;
     use std::sync::Mutex;
     use tokio::sync::{Barrier, Notify};
 
-    fn empty_response() -> StreamResponse {
-        StreamResponse {
-            assistant_message: Message {
-                role: share::message::Role::Assistant,
-                content: Vec::new(),
-                metadata: None,
-            },
-            usage: crate::domain::invoke::Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cached_tokens: None,
-                cache_creation_tokens: None,
-                reasoning_tokens: None,
-                total_tokens: None,
-            },
-            stop_reason: crate::domain::invoke::StopReason::EndTurn,
-        }
+    fn empty_stream() -> InvocationStream {
+        Box::pin(stream::once(async {
+            crate::InvocationEvent::Completed(crate::ProviderCompletion {
+                output: Vec::new(),
+                stop_reason: crate::ProviderStopReason::EndTurn,
+                usage: Some(crate::RawUsageSnapshot::default()),
+                effective_reasoning: crate::ReasoningLevel::Off,
+            })
+        }))
     }
 
     fn scope(
@@ -129,32 +116,15 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for DummyProvider {
-        #[allow(clippy::too_many_arguments)]
-        async fn stream_message(
+        async fn invocation_stream(
             &self,
             _scope: &crate::InvocationScope,
             _system: &[SystemBlock],
-            messages: &[Message],
+            _messages: &[Message],
             _tool_schemas: &[Value],
-            _handler: &mut dyn StreamHandler,
             _cancel: &CancellationToken,
-        ) -> Result<StreamResponse, LlmError> {
-            Ok(StreamResponse {
-                assistant_message: messages.last().cloned().unwrap_or_else(|| Message {
-                    role: share::message::Role::Assistant,
-                    content: Vec::new(),
-                    metadata: None,
-                }),
-                usage: crate::domain::invoke::Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cached_tokens: None,
-                    cache_creation_tokens: None,
-                    reasoning_tokens: None,
-                    total_tokens: None,
-                },
-                stop_reason: crate::domain::invoke::StopReason::EndTurn,
-            })
+        ) -> Result<InvocationStream, ProviderError> {
+            Ok(empty_stream())
         }
 
         fn model_name(&self) -> &str {
@@ -172,18 +142,16 @@ mod tests {
 
         #[async_trait]
         impl LlmProvider for BlockingProvider {
-            #[allow(clippy::too_many_arguments)]
-            async fn stream_message(
+            async fn invocation_stream(
                 &self,
                 _scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
-                _handler: &mut dyn StreamHandler,
                 cancel: &CancellationToken,
-            ) -> Result<StreamResponse, LlmError> {
+            ) -> Result<InvocationStream, ProviderError> {
                 cancel.cancelled().await;
-                Err(LlmError::Cancelled)
+                Err(ProviderError::cancelled())
             }
 
             fn model_name(&self) -> &str {
@@ -203,7 +171,6 @@ mod tests {
             tokio::task::yield_now().await;
             cancel_task.cancel();
         });
-        let mut handler = CallbackHandler::new(Box::new(|_| {}));
 
         let scope = crate::InvocationScope::new(
             "blocking-model",
@@ -214,13 +181,13 @@ mod tests {
         .unwrap();
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(1),
-            gateway.stream_message(&client, &scope, &[], &[], &[], &mut handler, &cancel),
+            gateway.invocation_stream(&client, &scope, &[], &[], &[], &cancel),
         )
         .await
         .expect("取消必须穿过 Gateway 唤醒 Provider future");
 
         canceller.await.unwrap();
-        assert!(matches!(result, Err(LlmError::Cancelled)));
+        assert!(matches!(result, Err(error) if error.is_cancelled()));
     }
 
     #[tokio::test]
@@ -232,23 +199,21 @@ mod tests {
 
         #[async_trait]
         impl LlmProvider for ScopeRecordingProvider {
-            #[allow(clippy::too_many_arguments)]
-            async fn stream_message(
+            async fn invocation_stream(
                 &self,
                 scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
-                _handler: &mut dyn StreamHandler,
                 _cancel: &CancellationToken,
-            ) -> Result<StreamResponse, LlmError> {
+            ) -> Result<InvocationStream, ProviderError> {
                 self.barrier.wait().await;
                 self.observed.lock().unwrap().push((
                     scope.model().to_string(),
                     scope.max_tokens(),
                     scope.effective_reasoning(),
                 ));
-                Ok(empty_response())
+                Ok(empty_stream())
             }
 
             fn model_name(&self) -> &str {
@@ -271,34 +236,18 @@ mod tests {
         let second_scope = scope("sub-model", 16_384, crate::ReasoningLevel::High);
 
         let first = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
             first_client
-                .stream_message(
-                    &first_scope,
-                    &[],
-                    &[],
-                    &[],
-                    &mut handler,
-                    &CancellationToken::new(),
-                )
+                .invocation_stream(&first_scope, &[], &[], &[], &CancellationToken::new())
                 .await
         });
         let second = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
             second_client
-                .stream_message(
-                    &second_scope,
-                    &[],
-                    &[],
-                    &[],
-                    &mut handler,
-                    &CancellationToken::new(),
-                )
+                .invocation_stream(&second_scope, &[], &[], &[], &CancellationToken::new())
                 .await
         });
 
-        first.await.unwrap().unwrap();
-        second.await.unwrap().unwrap();
+        let _first_stream = first.await.unwrap().unwrap();
+        let _second_stream = second.await.unwrap().unwrap();
         let mut observed = provider.observed.lock().unwrap().clone();
         observed.sort_by(|left, right| left.0.cmp(&right.0));
         assert_eq!(
@@ -319,24 +268,22 @@ mod tests {
 
         #[async_trait]
         impl LlmProvider for CancellationIsolationProvider {
-            #[allow(clippy::too_many_arguments)]
-            async fn stream_message(
+            async fn invocation_stream(
                 &self,
                 scope: &crate::InvocationScope,
                 _system: &[SystemBlock],
                 _messages: &[Message],
                 _tool_schemas: &[Value],
-                _handler: &mut dyn StreamHandler,
                 cancel: &CancellationToken,
-            ) -> Result<StreamResponse, LlmError> {
+            ) -> Result<InvocationStream, ProviderError> {
                 self.entered.wait().await;
                 if scope.model() == "cancelled-model" {
                     cancel.cancelled().await;
-                    Err(LlmError::Cancelled)
+                    Err(ProviderError::cancelled())
                 } else {
                     tokio::select! {
-                        () = self.survivor_release.notified() => Ok(empty_response()),
-                        () = cancel.cancelled() => Err(LlmError::Cancelled),
+                        () = self.survivor_release.notified() => Ok(empty_stream()),
+                        () = cancel.cancelled() => Err(ProviderError::cancelled()),
                     }
                 }
             }
@@ -362,27 +309,23 @@ mod tests {
         let survivor_token = CancellationToken::new();
 
         let cancelled = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
             cancelled_client
-                .stream_message(
+                .invocation_stream(
                     &scope("cancelled-model", 2_048, crate::ReasoningLevel::Medium),
                     &[],
                     &[],
                     &[],
-                    &mut handler,
                     &cancelled_task_token,
                 )
                 .await
         });
         let survivor = tokio::spawn(async move {
-            let mut handler = CallbackHandler::new(Box::new(|_| {}));
             survivor_client
-                .stream_message(
+                .invocation_stream(
                     &scope("survivor-model", 8_192, crate::ReasoningLevel::High),
                     &[],
                     &[],
                     &[],
-                    &mut handler,
                     &survivor_token,
                 )
                 .await
@@ -390,7 +333,7 @@ mod tests {
 
         provider.entered.wait().await;
         cancelled_token.cancel();
-        assert!(matches!(cancelled.await.unwrap(), Err(LlmError::Cancelled)));
+        assert!(matches!(cancelled.await.unwrap(), Err(error) if error.is_cancelled()));
         provider.survivor_release.notify_one();
         assert!(survivor.await.unwrap().is_ok());
     }

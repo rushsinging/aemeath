@@ -7,7 +7,7 @@ use crate::adapters::http_attempt::{
     HttpFailureKind, SuccessBodyReadError,
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
-use crate::ports::StreamHandler;
+use crate::ports::LegacyStreamSink;
 use crate::LOG_TARGET;
 use share::message::{ContentBlock, Message, Role};
 use tokio_util::sync::CancellationToken;
@@ -19,7 +19,7 @@ pub(crate) trait OllamaProviderNonStream {
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError>;
 }
@@ -31,7 +31,7 @@ impl OllamaProviderNonStream for OllamaProvider {
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
         let request_body = self.build_request_body(scope, system, messages, tool_schemas, false)?;
@@ -211,7 +211,7 @@ mod tests {
     use crate::domain::invoke::InvocationScope;
     use tokio::net::TcpListener;
 
-    /// Minimal StreamHandler that records whether *any* output method fired —
+    /// Minimal LegacyStreamSink that records whether *any* output method fired —
     /// used to assert that a cancelled attempt produces no user-visible
     /// output at all.
     #[derive(Default)]
@@ -219,7 +219,7 @@ mod tests {
         called: bool,
     }
 
-    impl StreamHandler for CallTrackingHandler {
+    impl LegacyStreamSink for CallTrackingHandler {
         fn on_text(&mut self, _text: &str) {
             self.called = true;
         }
