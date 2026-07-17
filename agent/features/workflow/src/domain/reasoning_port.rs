@@ -1,4 +1,4 @@
-use super::reasoning_graph::{GraphRuntimeConfig, ReasoningGraph, ReasoningNode, ReasoningSignal};
+use super::reasoning_graph::{ReasoningGraph, ReasoningNode, ReasoningSignal};
 use share::reasoning::ReasoningLevel;
 use std::sync::Mutex;
 
@@ -22,33 +22,32 @@ pub trait ReasoningPort: Send + Sync {
     fn reset_default_level(&self, level: ReasoningLevel) -> ReasoningLevel;
 }
 
+/// #920 Off 硬门：当 level 为 Off 时记为「粘性覆盖」，requested 冻结在 Off；
+/// 任何非 Off 的值都会清除覆盖，恢复自适应（requested 跟随 graph effort）。
 struct AdaptiveState {
     graph: ReasoningGraph,
     requested: ReasoningLevel,
-    manual_override: Option<ReasoningLevel>,
+    /// 仅在 level == Off 时为 `Some(Off)`，其余情况为 `None`。
+    off_override: Option<ReasoningLevel>,
 }
 
 pub struct AdaptiveReasoningPort {
     state: Mutex<AdaptiveState>,
-    user_max: ReasoningLevel,
 }
 
 impl AdaptiveReasoningPort {
-    pub fn new(config: GraphRuntimeConfig, initial: ReasoningLevel) -> Self {
-        let user_max = config.max_reasoning;
-        let initial = initial.clamped_to(user_max);
+    /// 创建自适应 reasoning port。
+    ///
+    /// 不再 clamp `initial`——调用方传入的值即初始 requested。
+    /// 若 `initial == Off` 则建立 Off 硬门（requested 冻结，直到非 Off 值解锁）。
+    pub fn new(initial: ReasoningLevel) -> Self {
         Self {
             state: Mutex::new(AdaptiveState {
-                graph: ReasoningGraph::new(config),
+                graph: ReasoningGraph::new(),
                 requested: initial,
-                manual_override: matches!(initial, ReasoningLevel::Off).then_some(initial),
+                off_override: matches!(initial, ReasoningLevel::Off).then_some(initial),
             }),
-            user_max,
         }
-    }
-
-    fn clamp(&self, desired: ReasoningLevel) -> ReasoningLevel {
-        desired.clamped_to(self.user_max)
     }
 }
 
@@ -56,11 +55,11 @@ impl ReasoningPort for AdaptiveReasoningPort {
     fn observe(&self, signal: ReasoningSignal) -> ReasoningObservation {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let previous = state.graph.current_node();
-        if state.graph.enabled() {
-            state.graph.transition(signal);
-            if state.manual_override.is_none() {
-                state.requested = self.clamp(state.graph.current_effort());
-            }
+        // Graph 始终运行，无条件消费信号推进节点。
+        state.graph.transition(signal);
+        // 仅当未处于 Off 硬门时，requested 跟随当前节点 effort（自适应）。
+        if state.off_override.is_none() {
+            state.requested = state.graph.current_effort();
         }
         ReasoningObservation {
             previous,
@@ -77,19 +76,20 @@ impl ReasoningPort for AdaptiveReasoningPort {
     }
 
     fn set_level(&self, level: ReasoningLevel) -> ReasoningLevel {
-        let requested = self.clamp(level);
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.manual_override = matches!(requested, ReasoningLevel::Off).then_some(requested);
-        state.requested = requested;
-        requested
+        // Off 建立硬门；非 Off 清除覆盖、恢复自适应。
+        state.off_override = matches!(level, ReasoningLevel::Off).then_some(level);
+        state.requested = level;
+        level
     }
 
     fn reset_default_level(&self, level: ReasoningLevel) -> ReasoningLevel {
-        let requested = self.clamp(level);
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.manual_override = matches!(requested, ReasoningLevel::Off).then_some(requested);
-        state.requested = requested;
-        requested
+        // reset default 同样以 Off 为硬门分界：非 Off 不留粘性覆盖，
+        // 下一次 observe 即恢复跟随 graph effort。
+        state.off_override = matches!(level, ReasoningLevel::Off).then_some(level);
+        state.requested = level;
+        level
     }
 }
 
@@ -97,42 +97,9 @@ impl ReasoningPort for AdaptiveReasoningPort {
 mod tests {
     use super::*;
 
-    fn config(max_reasoning: ReasoningLevel) -> GraphRuntimeConfig {
-        GraphRuntimeConfig {
-            enabled: true,
-            max_reasoning,
-            explore_effort: None,
-            plan_effort: None,
-            execute_effort: None,
-            verify_effort: None,
-        }
-    }
-
-    #[test]
-    fn adaptive_clamps_initial_and_observed_desired_to_user_max() {
-        for (maximum, expected) in [
-            (ReasoningLevel::Off, ReasoningLevel::Off),
-            (ReasoningLevel::Low, ReasoningLevel::Low),
-            (ReasoningLevel::Medium, ReasoningLevel::Medium),
-            (ReasoningLevel::High, ReasoningLevel::High),
-            (ReasoningLevel::Xhigh, ReasoningLevel::Xhigh),
-            (ReasoningLevel::Max, ReasoningLevel::Max),
-        ] {
-            let port = AdaptiveReasoningPort::new(config(maximum), ReasoningLevel::Max);
-            assert_eq!(port.current_requested_level(), expected);
-
-            let observation = port.observe(ReasoningSignal::UserMessage {
-                text: "请设计新的架构".to_string(),
-                turn_count: 1,
-            });
-            assert_eq!(observation.requested, expected);
-            assert_eq!(port.current_requested_level(), expected);
-        }
-    }
-
     #[test]
     fn adaptive_observation_reports_transition_and_requested_level() {
-        let port = AdaptiveReasoningPort::new(config(ReasoningLevel::Max), ReasoningLevel::Medium);
+        let port = AdaptiveReasoningPort::new(ReasoningLevel::Medium);
 
         let observation = port.observe(ReasoningSignal::UserMessage {
             text: "fix typo".to_string(),
@@ -146,9 +113,11 @@ mod tests {
     }
 
     #[test]
-    fn off_override_blocks_graph_until_thinking_is_enabled_again() {
-        let port = AdaptiveReasoningPort::new(config(ReasoningLevel::High), ReasoningLevel::Medium);
+    fn off_hard_door_freezes_requested_until_non_off_unlocks_adaptive() {
+        // 非 Off 初始：无覆盖，requested 跟随 graph。
+        let port = AdaptiveReasoningPort::new(ReasoningLevel::Medium);
 
+        // 建立 Off 硬门。
         assert_eq!(port.set_level(ReasoningLevel::Off), ReasoningLevel::Off);
         let observation = port.observe(ReasoningSignal::ToolCompleted {
             tool_name: "Edit".to_string(),
@@ -156,9 +125,11 @@ mod tests {
             is_error: false,
             declared_phase: Some("execute".to_string()),
         });
+        // graph 仍在推进节点，但 requested 冻结在 Off。
         assert_eq!(observation.current, ReasoningNode::Execute);
         assert_eq!(observation.requested, ReasoningLevel::Off);
 
+        // 非 Off 解锁：清除覆盖，恢复自适应。
         assert_eq!(
             port.set_level(ReasoningLevel::Medium),
             ReasoningLevel::Medium
@@ -169,13 +140,15 @@ mod tests {
             is_error: false,
             declared_phase: Some("plan".to_string()),
         });
-        assert_eq!(observation.requested, ReasoningLevel::High);
+        // 跟随 Plan 默认 effort = Max（无 user_max clamp）。
+        assert_eq!(observation.requested, ReasoningLevel::Max);
     }
 
     #[test]
     fn model_default_reset_replaces_previous_requested_without_sticky_override() {
-        let port = AdaptiveReasoningPort::new(config(ReasoningLevel::High), ReasoningLevel::Low);
+        let port = AdaptiveReasoningPort::new(ReasoningLevel::Low);
         assert_eq!(port.set_level(ReasoningLevel::Off), ReasoningLevel::Off);
+        // reset 到非 Off 默认值：不留粘性覆盖。
         assert_eq!(
             port.reset_default_level(ReasoningLevel::Medium),
             ReasoningLevel::Medium
@@ -187,24 +160,7 @@ mod tests {
             is_error: false,
             declared_phase: Some("plan".to_string()),
         });
-        assert_eq!(observation.requested, ReasoningLevel::High);
-    }
-
-    #[test]
-    fn disabled_graph_keeps_initial_requested_until_manual_override() {
-        let mut disabled = config(ReasoningLevel::High);
-        disabled.enabled = false;
-        let port = AdaptiveReasoningPort::new(disabled, ReasoningLevel::Medium);
-
-        let observation = port.observe(ReasoningSignal::UserMessage {
-            text: "请设计新的架构".to_string(),
-            turn_count: 1,
-        });
-        assert_eq!(observation.previous, ReasoningNode::Idle);
-        assert_eq!(observation.current, ReasoningNode::Idle);
-        assert_eq!(observation.requested, ReasoningLevel::Medium);
-        assert!(!observation.changed());
-
-        assert_eq!(port.set_level(ReasoningLevel::Max), ReasoningLevel::High);
+        // 无覆盖 → 跟随 Plan 默认 effort = Max。
+        assert_eq!(observation.requested, ReasoningLevel::Max);
     }
 }

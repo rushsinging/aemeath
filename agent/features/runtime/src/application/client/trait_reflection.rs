@@ -272,7 +272,6 @@ mod tests {
                 allow_all: false,
                 context_size: 200_000,
                 language: "en".to_string(),
-                reasoning_graph_config: share::config::ReasoningGraphConfig::default(),
             },
             verbose: false,
             resume: None,

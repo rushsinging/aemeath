@@ -22,10 +22,11 @@ pub use domain::invoke::{
 };
 pub use ports::{LegacyStreamSink, LlmProvider};
 pub use published_language::{
-    CancellationSignal, InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest,
-    InvocationStream, ModelCapability, ModelId, ModelToolSchema, ProviderCompletion,
-    ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall,
-    ProviderToolCallId, RawUsageSnapshot, ReasoningCapability, ReasoningMappingKind,
+    CancellationSignal, CapabilityFingerprint, InvocationDelta, InvocationEvent, InvocationOptions,
+    InvocationRequest, InvocationStream, ModelCapability, ModelId, ModelToolSchema,
+    ProviderCompletion, ProviderContentBlock, ProviderError, ProviderErrorKind, ProviderStopReason,
+    ProviderToolCall, ProviderToolCallId, RawUsageSnapshot, ReasoningCapability,
+    ReasoningMappingKind, RequestedInvocationOptions, ResolvedInvocationOptions,
 };
 
 /// Provider HTTP 超时常量。
