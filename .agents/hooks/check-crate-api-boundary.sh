@@ -28,6 +28,7 @@ FEATURE_CRATES = {
     "hook",
     "audit",
     "update",
+    "workflow",
 }
 INTERNAL_SEGMENTS = {"contract", "gateway", "core", "business", "utils"}
 API_FACADE_ALLOWED_SEGMENTS = {"contract", "gateway"}
@@ -84,6 +85,12 @@ ROOT_ACCESS_ALLOW = {
         "wire_provider",
     },
     "runtime": {"AgentClientImpl", "from_args"},
+    "workflow": {
+        "GraphRuntimeConfig",
+        "GraphSignal",
+        "ReasoningGraph",
+        "ReasoningNode",
+    },
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},

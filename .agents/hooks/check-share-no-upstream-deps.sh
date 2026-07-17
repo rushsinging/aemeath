@@ -27,6 +27,7 @@ upstream = [
     "storage",
     "hook",
     "audit",
+    "workflow",
     "composition",
     "cli",
     "sdk",

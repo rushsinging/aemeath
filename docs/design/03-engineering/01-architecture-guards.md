@@ -69,7 +69,7 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
@@ -79,6 +79,7 @@
 | `storage` | `share` |
 | `hook` | `share` |
 | `audit` | `share` |
+| `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
 | `sdk` | `share`, `utils` |
 | `logging` | ∅ |
@@ -86,7 +87,7 @@
 
 > **Memory BC 当前物理落点**：Memory 领域逻辑当前位于 `share` crate（`share::memory::*`），不是独立 crate。Runtime 经 `share` 间接消费 Memory 能力。独立 Memory crate 的升塑见 [migration-governance.md](03-migration-governance.md) M5/M8。
 >
-> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）领域逻辑当前位于 `runtime` crate 内部（`runtime::business::reasoning_graph::*`），不是独立 crate。独立 Workflow crate 的升塑取决于 #972 目录调整后是否拆出。
+> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
 - **例外**：
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。

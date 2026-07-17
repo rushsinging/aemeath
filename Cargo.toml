@@ -14,6 +14,7 @@ members = [
     "agent/features/task",
     "agent/features/tools",
     "agent/features/update",
+    "agent/features/workflow",
     "agent/shared",
     "packages/sdk",
     "packages/global/logging",
