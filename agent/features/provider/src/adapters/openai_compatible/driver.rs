@@ -1,9 +1,34 @@
 //! Chat Provider driver 抽象：不同供应商的推理字段差异化处理
 
 use crate::ports::ReasoningLevel;
-use crate::ProviderDriverKind;
+use crate::{ProviderDriverKind, ReasoningCapability, ReasoningMappingKind};
 
 use super::ReasoningConfig;
+
+fn effort_capability(maximum: ReasoningLevel) -> ReasoningCapability {
+    ReasoningCapability::new(
+        [
+            ReasoningLevel::Off,
+            ReasoningLevel::Low,
+            ReasoningLevel::Medium,
+            ReasoningLevel::High,
+            ReasoningLevel::Xhigh,
+            ReasoningLevel::Max,
+        ]
+        .into_iter()
+        .filter(|level| *level <= maximum),
+        ReasoningMappingKind::Effort,
+    )
+    .expect("driver capability includes off")
+}
+
+fn toggle_capability(on_level: ReasoningLevel) -> ReasoningCapability {
+    ReasoningCapability::new(
+        [ReasoningLevel::Off, on_level],
+        ReasoningMappingKind::ThinkingToggle,
+    )
+    .expect("toggle capability includes off")
+}
 
 /// 将 thinking tokens 数量映射到 effort 级别
 pub fn effort_from_thinking_tokens(tokens: u32) -> &'static str {
@@ -27,18 +52,17 @@ pub trait ChatApiDriver: Send + Sync {
         reasoning_enabled: bool,
     );
 
-    /// 将 effort 字符串映射到本 driver 支持的档位。
-    ///
-    /// 默认实现原样返回；各 driver 按自身能力覆盖，
-    /// 将不支持的档位降级到最接近的可用值。
+    /// 将 legacy effort 字符串投影到唯一 capability 声明允许的档位。
     fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
-        effort
+        ReasoningLevel::parse(effort)
+            .map(|requested| self.reasoning_capability().resolve(requested).as_str())
+            .unwrap_or(effort)
     }
 
-    /// 此 driver 支持的最高 ReasoningLevel。
-    /// 默认 High，各 driver 按能力覆盖。
+    fn reasoning_capability(&self) -> crate::ReasoningCapability;
+
     fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::High
+        self.reasoning_capability().maximum()
     }
 }
 
@@ -67,6 +91,10 @@ pub struct DeepSeekDriver;
 pub struct AgnesDriver;
 
 impl ChatApiDriver for OpenAiDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        effort_capability(ReasoningLevel::High)
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -80,17 +108,13 @@ impl ChatApiDriver for OpenAiDriver {
                 serde_json::json!({"effort": effort_from_thinking_tokens(*tokens)});
         }
     }
-
-    /// OpenAI API 最高支持 high，xhigh/max 降级到 high。
-    fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
-        match effort {
-            "xhigh" | "max" => "high",
-            _ => effort,
-        }
-    }
 }
 
 impl ChatApiDriver for ZhipuDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        effort_capability(ReasoningLevel::Max)
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -112,13 +136,13 @@ impl ChatApiDriver for ZhipuDriver {
             }
         }
     }
-
-    fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Max
-    }
 }
 
 impl ChatApiDriver for LiteLlmDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        effort_capability(ReasoningLevel::Max)
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -132,13 +156,13 @@ impl ChatApiDriver for LiteLlmDriver {
             request_body["reasoning_effort"] = serde_json::Value::String(effort);
         }
     }
-
-    fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Max
-    }
 }
 
 impl ChatApiDriver for VolcengineDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        effort_capability(ReasoningLevel::Medium)
+    }
+
     fn max_tokens_field(&self) -> &'static str {
         "max_output_tokens"
     }
@@ -166,21 +190,13 @@ impl ChatApiDriver for VolcengineDriver {
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({"type": thinking_type});
     }
-
-    /// Volcengine 最高支持 medium，high 以上降级到 medium。
-    fn clamp_effort<'a>(&self, effort: &'a str) -> &'a str {
-        match effort {
-            "high" | "xhigh" | "max" => "medium",
-            _ => effort,
-        }
-    }
-
-    fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Medium
-    }
 }
 
 impl ChatApiDriver for MinimaxDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        toggle_capability(ReasoningLevel::Medium)
+    }
+
     fn max_tokens_field(&self) -> &'static str {
         "max_completion_tokens"
     }
@@ -220,13 +236,13 @@ impl ChatApiDriver for MinimaxDriver {
         request_body["thinking"] = serde_json::json!({ "type": thinking_type });
         request_body["reasoning_split"] = serde_json::Value::Bool(true);
     }
-
-    fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Medium
-    }
 }
 
 impl ChatApiDriver for MimoDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        toggle_capability(ReasoningLevel::Medium)
+    }
+
     fn max_tokens_field(&self) -> &'static str {
         "max_completion_tokens"
     }
@@ -245,13 +261,13 @@ impl ChatApiDriver for MimoDriver {
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({ "type": thinking_type });
     }
-
-    fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Medium
-    }
 }
 
 impl ChatApiDriver for DeepSeekDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        effort_capability(ReasoningLevel::Max)
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -274,13 +290,13 @@ impl ChatApiDriver for DeepSeekDriver {
             }
         }
     }
-
-    fn max_reasoning_level(&self) -> ReasoningLevel {
-        ReasoningLevel::Max
-    }
 }
 
 impl ChatApiDriver for AgnesDriver {
+    fn reasoning_capability(&self) -> ReasoningCapability {
+        toggle_capability(ReasoningLevel::Medium)
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -312,5 +328,63 @@ pub(crate) fn driver_for_provider_driver(
         ProviderDriverKind::Agnes => Box::new(AgnesDriver),
         // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容驱动；兜底走 OpenAI 驱动。
         ProviderDriverKind::Anthropic | ProviderDriverKind::Ollama => Box::new(OpenAiDriver),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_openai_compatible_driver_derives_maximum_from_capability() {
+        for (kind, expected_maximum, expected_mapping) in [
+            (
+                ProviderDriverKind::OpenAI,
+                ReasoningLevel::High,
+                ReasoningMappingKind::Effort,
+            ),
+            (
+                ProviderDriverKind::Zhipu,
+                ReasoningLevel::Max,
+                ReasoningMappingKind::Effort,
+            ),
+            (
+                ProviderDriverKind::LiteLLM,
+                ReasoningLevel::Max,
+                ReasoningMappingKind::Effort,
+            ),
+            (
+                ProviderDriverKind::Volcengine,
+                ReasoningLevel::Medium,
+                ReasoningMappingKind::Effort,
+            ),
+            (
+                ProviderDriverKind::Minimax,
+                ReasoningLevel::Medium,
+                ReasoningMappingKind::ThinkingToggle,
+            ),
+            (
+                ProviderDriverKind::Mimo,
+                ReasoningLevel::Medium,
+                ReasoningMappingKind::ThinkingToggle,
+            ),
+            (
+                ProviderDriverKind::DeepSeek,
+                ReasoningLevel::Max,
+                ReasoningMappingKind::Effort,
+            ),
+            (
+                ProviderDriverKind::Agnes,
+                ReasoningLevel::Medium,
+                ReasoningMappingKind::ThinkingToggle,
+            ),
+        ] {
+            let driver = driver_for_provider_driver(kind);
+            let capability = driver.reasoning_capability();
+            assert_eq!(capability.maximum(), expected_maximum, "driver={kind:?}");
+            assert_eq!(capability.mapping, expected_mapping, "driver={kind:?}");
+            assert_eq!(driver.max_reasoning_level(), capability.maximum());
+            assert_eq!(capability.resolve(ReasoningLevel::Off), ReasoningLevel::Off);
+        }
     }
 }
