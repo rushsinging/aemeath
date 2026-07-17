@@ -330,7 +330,16 @@ pub(crate) async fn send_message_non_stream(
                 } => match kind {
                     HttpFailureKind::RateLimited => crate::LlmError::RateLimited,
                     HttpFailureKind::ContextTooLong => crate::LlmError::ContextTooLong,
-                    HttpFailureKind::Server | HttpFailureKind::Client => crate::LlmError::Api {
+                    // Server + generic client + authentication / permission /
+                    // model-unavailable all surface as a non-retryable Api
+                    // error on this single-attempt non-stream path (legacy
+                    // behavior preserved, match made exhaustive over the
+                    // widened HttpFailureKind).
+                    HttpFailureKind::Server
+                    | HttpFailureKind::Client
+                    | HttpFailureKind::Authentication
+                    | HttpFailureKind::PermissionDenied
+                    | HttpFailureKind::ModelUnavailable => crate::LlmError::Api {
                         error_type: status.to_string(),
                         message: body.text().to_string(),
                     },

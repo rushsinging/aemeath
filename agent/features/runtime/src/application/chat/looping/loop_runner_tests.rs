@@ -2953,7 +2953,7 @@ impl LlmProvider for ApiErrorThenNormalProvider {
         };
         if call_index == 0 {
             // 回合 1：模拟 provider 流中断（非取消类 API 错误）。
-            return Err(ProviderError::retryable(
+            return Err(ProviderError::fatal(
                 ProviderErrorKind::Protocol,
                 "stream interrupted after partial output: error decoding response body".to_string(),
             ));

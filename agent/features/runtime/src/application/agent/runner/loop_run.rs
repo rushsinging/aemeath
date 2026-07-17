@@ -365,49 +365,73 @@ impl RunLoopPort for SubAgentRun<'_> {
         }
 
         let messages_for_api = messages_for_llm(&self.messages);
-        let mut reducer =
-            crate::application::chat::looping::InvocationEventReducer::new(SubAgentEventSink);
-        let response = self
-            .client
-            .invocation_stream(
-                &self.invocation_scope,
-                &effective_blocks,
-                &messages_for_api,
-                &self.sub_schemas,
-                &self.agent.ctx.cancel,
-            )
-            .await;
+        let mut coordinator =
+            crate::application::model_invocation::ModelInvocationCoordinator::new();
+        let resp = loop {
+            let mut reducer =
+                crate::application::chat::looping::InvocationEventReducer::new(SubAgentEventSink);
+            let response = self
+                .client
+                .invocation_stream(
+                    &self.invocation_scope,
+                    &effective_blocks,
+                    &messages_for_api,
+                    &self.sub_schemas,
+                    &self.agent.ctx.cancel,
+                )
+                .await;
 
-        let resp = match response {
-            Ok(mut stream) => {
-                let mut terminal = None;
-                while let Some(event) = stream.next().await {
-                    match reducer.apply(event) {
-                        Ok(Some(response)) => terminal = Some(Ok(response)),
-                        Ok(None) => {}
-                        Err(error) => terminal = Some(Err(error)),
+            let response = match response {
+                Ok(mut stream) => {
+                    let mut terminal = None;
+                    while let Some(event) = stream.next().await {
+                        match reducer.apply(event) {
+                            Ok(Some(response)) => terminal = Some(Ok(response)),
+                            Ok(None) => {}
+                            Err(error) => terminal = Some(Err(error)),
+                        }
+                        if terminal.is_some() {
+                            break;
+                        }
                     }
-                    if terminal.is_some() {
-                        break;
-                    }
+                    terminal.unwrap_or_else(|| {
+                        Err(provider::ProviderError::fatal(
+                            provider::ProviderErrorKind::Protocol,
+                            "provider stream ended without terminal event",
+                        ))
+                    })
                 }
-                terminal.unwrap_or_else(|| {
-                    Err(provider::ProviderError::fatal(
-                        provider::ProviderErrorKind::Protocol,
-                        "provider stream ended without terminal event",
-                    ))
-                })
-            }
-            Err(error) => Err(error),
-        };
+                Err(error) => Err(error),
+            };
 
-        let resp = match resp {
-            Ok(resp) => resp,
-            Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
-                self.agent.ctx.cancel.cancel();
-                return Err(LoopEngineError::Cancelled);
+            match response {
+                Ok(resp) => break resp,
+                Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
+                    self.agent.ctx.cancel.cancel();
+                    return Err(LoopEngineError::Cancelled);
+                }
+                Err(error) => match coordinator
+                    .handle_failure(&error, reducer.saw_visible_delta(), &self.agent.ctx.cancel)
+                    .await
+                {
+                    crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
+                        log::info!(
+                            target: crate::LOG_TARGET,
+                            "sub-agent model invocation retrying: attempt={} delay_ms={}",
+                            attempt,
+                            delay.as_millis(),
+                        );
+                    }
+                    crate::application::model_invocation::RetryStep::Cancelled => {
+                        self.agent.ctx.cancel.cancel();
+                        return Err(LoopEngineError::Cancelled);
+                    }
+                    crate::application::model_invocation::RetryStep::Compact
+                    | crate::application::model_invocation::RetryStep::Fail => {
+                        return Err(LoopEngineError::Adapter(error.to_string()));
+                    }
+                },
             }
-            Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),
         };
 
         self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
