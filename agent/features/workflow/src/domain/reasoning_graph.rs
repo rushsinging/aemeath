@@ -137,11 +137,6 @@ impl ReasoningGraph {
         self.config.effort_for(self.current)
     }
 
-    /// 用户配置的最大 reasoning 深度。
-    pub fn user_max_level(&self) -> ReasoningLevel {
-        self.config.max_reasoning
-    }
-
     /// 消费信号，更新当前节点。返回是否发生变化。
     pub fn transition(&mut self, signal: ReasoningSignal) -> bool {
         let old = self.current;
