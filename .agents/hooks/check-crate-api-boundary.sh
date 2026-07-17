@@ -111,8 +111,6 @@ ROOT_ACCESS_ALLOW = {
     },
     "runtime": {"AgentClientImpl", "UsageSink", "from_args"},
     "policy": {
-        "format_warnings",
-        "scan_content",
         "validate_and_normalize_path",
         "validate_and_normalize_path_from_base",
         "validate_search_path",

@@ -2418,7 +2418,6 @@ name = "policy"
 version = "0.0.0"
 dependencies = [
  "log",
- "regex",
  "serde",
  "serde_json",
  "share",
