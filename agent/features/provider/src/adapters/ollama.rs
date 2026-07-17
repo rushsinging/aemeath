@@ -489,16 +489,18 @@ mod tests {
         let leaked = Box::leak(response.into_boxed_str());
         let (base_url, requests) = spawn_counting_server(leaked).await;
         let client = crate::LlmClient::from_config(crate::LlmConfigOptions {
-            driver: crate::ProviderDriverKind::Ollama,
+            driver: crate::ProviderDriverKind::Ollama.as_str().to_string(),
+            source_key: "ollama".to_string(),
+            api_style: None,
             api_key: "ollama".to_string(),
             base_url: Some(base_url),
             model: "test-model".to_string(),
             max_tokens: 8192,
             reasoning: false,
             reasoning_config: None,
-            openai_config: None,
             timeout_secs: 60,
-        });
+        })
+        .expect("valid ollama config");
         let scope = InvocationScope::new(
             "test-model",
             8192,

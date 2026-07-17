@@ -59,7 +59,7 @@ fn truncate_preview(s: &str, max_bytes: usize) -> String {
 /// Configuration for OpenAI-compatible providers. The source key is used only
 /// for display/logging; API behavior comes from `driver`.
 #[derive(Debug, Clone)]
-pub struct OpenAIProviderConfig {
+pub(crate) struct OpenAIProviderConfig {
     pub source_key: String,
     pub driver: ProviderDriverKind,
     pub chat_api_suffix: String,
@@ -68,7 +68,7 @@ pub struct OpenAIProviderConfig {
 }
 
 impl OpenAIProviderConfig {
-    pub fn from_driver(driver: ProviderDriverKind, source_key: &str) -> Self {
+    pub(crate) fn from_driver(driver: ProviderDriverKind, source_key: &str) -> Self {
         Self {
             source_key: source_key.to_string(),
             driver,
@@ -90,7 +90,7 @@ impl OpenAIProviderConfig {
         }
     }
 
-    pub fn with_responses_api(mut self, enabled: bool) -> Self {
+    pub(crate) fn with_responses_api(mut self, enabled: bool) -> Self {
         self.use_responses_api = enabled;
         self
     }
@@ -108,14 +108,15 @@ pub struct LlmProviderOptions {
 }
 
 pub struct LlmConfigOptions {
-    pub driver: ProviderDriverKind,
+    pub driver: String,
+    pub source_key: String,
+    pub api_style: Option<String>,
     pub api_key: String,
     pub base_url: Option<String>,
     pub model: String,
     pub max_tokens: u32,
     pub reasoning: bool,
     pub reasoning_config: Option<ReasoningConfig>,
-    pub openai_config: Option<OpenAIProviderConfig>,
     pub timeout_secs: u64,
 }
 
@@ -216,74 +217,63 @@ impl LlmClient {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_openai_config(
-        config: OpenAIProviderConfig,
-        api_key: String,
-        base_url: Option<String>,
-        model: Option<String>,
-        max_tokens: u32,
-        reasoning: bool,
-        reasoning_config: Option<ReasoningConfig>,
-        timeout_secs: u64,
-    ) -> Self {
-        let requested_reasoning =
-            reasoning_level_from_options(reasoning, reasoning_config.as_ref());
-        let model_for_scope = model.clone();
-        let provider_impl: Arc<dyn LlmProvider> =
-            Arc::new(crate::adapters::OpenAICompatibleProvider::new(
-                config,
-                api_key,
-                base_url,
-                model,
-                max_tokens,
-                reasoning,
-                reasoning_config,
-                timeout_secs,
-            ));
-        let effective_reasoning =
-            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-        let default_scope = crate::InvocationScope::new(
-            model_for_scope.unwrap_or_else(|| provider_impl.model_name().to_string()),
-            if max_tokens == 0 {
-                share::config::models::DEFAULT_MAX_TOKENS
-            } else {
-                max_tokens
-            },
-            requested_reasoning,
-            effective_reasoning,
-        )
-        .expect("provider options must form a valid invocation scope");
-        Self {
-            provider: provider_impl,
-            default_scope,
-        }
-    }
+    pub fn from_config(options: LlmConfigOptions) -> Result<Self, crate::LlmError> {
+        use crate::domain::driver_acl::{ApiStyle, DriverSpec, ProtocolFamily};
 
-    pub fn from_config(options: LlmConfigOptions) -> Self {
-        if let Some(config) = options.openai_config {
-            Self::with_openai_config(
-                config,
+        let spec = DriverSpec::parse(&options.driver, options.api_style.as_deref())
+            .map_err(|error| crate::LlmError::Config(error.to_string()))?;
+        let driver = spec.kind();
+        let requested_reasoning =
+            reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
+        let model = options.model.clone();
+        let provider_impl: Arc<dyn LlmProvider> = match spec.family() {
+            ProtocolFamily::AnthropicMessages => Arc::new(crate::adapters::AnthropicProvider::new(
+                options.api_key,
+                options.base_url,
+                Some(options.model),
+                options.max_tokens,
+                crate::ports::ReasoningLevel::Off,
+                options.timeout_secs,
+            )),
+            ProtocolFamily::OllamaNative => Arc::new(crate::adapters::OllamaProvider::new(
                 options.api_key,
                 options.base_url,
                 Some(options.model),
                 options.max_tokens,
                 options.reasoning,
-                options.reasoning_config,
                 options.timeout_secs,
-            )
-        } else {
-            Self::with_provider(LlmProviderOptions {
-                driver: options.driver,
-                api_key: options.api_key,
-                base_url: options.base_url,
-                model: Some(options.model),
-                max_tokens: options.max_tokens,
-                reasoning: options.reasoning,
-                reasoning_config: options.reasoning_config,
-                timeout_secs: options.timeout_secs,
-            })
-        }
+            )),
+            ProtocolFamily::OpenAi(api_style) => {
+                let config = OpenAIProviderConfig::from_driver(driver, &options.source_key)
+                    .with_responses_api(api_style == ApiStyle::Responses);
+                Arc::new(crate::adapters::OpenAICompatibleProvider::new(
+                    config,
+                    options.api_key,
+                    options.base_url,
+                    Some(options.model),
+                    options.max_tokens,
+                    options.reasoning,
+                    options.reasoning_config,
+                    options.timeout_secs,
+                ))
+            }
+        };
+        let effective_reasoning =
+            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
+        let default_scope = crate::InvocationScope::new(
+            model,
+            if options.max_tokens == 0 {
+                share::config::models::DEFAULT_MAX_TOKENS
+            } else {
+                options.max_tokens
+            },
+            requested_reasoning,
+            effective_reasoning,
+        )?;
+        Ok(Self {
+            provider: provider_impl,
+            default_scope,
+        })
     }
 
     pub async fn invocation_stream(

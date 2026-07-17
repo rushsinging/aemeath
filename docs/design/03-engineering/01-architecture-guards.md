@@ -23,7 +23,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 28 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 29 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
@@ -38,6 +38,7 @@
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
 | 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
+| 6d | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -193,7 +194,7 @@
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
+  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
   - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
@@ -234,6 +235,13 @@
 - **刻意的简化**：注释豁免只剔除"整行以 `//` 开头"的注释（含 `///` doc comment），不做完整词法级字符串/注释区分；当前代码库内所有已知的 `.json().await` 提及都落在这类整行注释里，足够覆盖真实场景，换取实现简单。
 - **故意违规验证**（#1033 doc audit，验证后已还原）：临时在 driver 文件末尾追加 `client.get(url).send().await`、跨行 `.json::<T>().await` 与 `crate::adapters::error_log::log_network_error(..)` 三类探针，单 Guard 分别以 exit 2 命中三条对应说明；另在 `openai_compatible.rs` 中段声明式 `#[cfg(test)] mod message_conversion_tests;` 之后插入 `.send().await` 探针，验证不会被误剥离，同样以 exit 2 命中；移除探针后单 Guard 与总编排均 clean pass。
 - **范围边界**：本守卫只锁定“单次 attempt 怎么发、怎么判失败、怎么记一条日志”的机械收敛；不覆盖、也不代表 Runtime 已接管跨调用 retry/backoff 或 stream→non-stream fallback（P6/P7，由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接收口），也不覆盖 pull-based `InvocationStream`（P4，由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接）；详见 [Migration Governance §4](03-migration-governance.md#4-provider-现状缺口s2-代码盘点)。
+- **失败模式**：命中任一模式即输出对应 `[architecture]` 说明并以 exit code 2 退出。
+
+### 6d. check-provider-driver-acl.sh
+
+- **功能**：锁定 #904 的 Provider-owned Driver ACL，避免 Runtime、Composition 或 CLI 重新解析 driver 并选择具体协议实现。
+- **守护**：外层生产代码禁止引用 `ProviderDriverKind::parse`、`OpenAIProviderConfig`、`ProtocolFamily` 或 `DriverSpec`；Provider crate-root 禁止重新导出 `OpenAIProviderConfig`；`LlmClient::from_config` 必须在 Provider 内调用 `DriverSpec::parse`。
+- **范围边界**：外层只传递配置中的 driver/source key/API style 原始值；协议族、OpenAI Chat Completions/Responses 方言及实现配置由 Provider 唯一 factory 决定。未知 driver 与非法组合必须 fail-closed。
 - **失败模式**：命中任一模式即输出对应 `[architecture]` 说明并以 exit code 2 退出。
 
 ## 7. check-context-architecture.sh

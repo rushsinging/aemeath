@@ -10,7 +10,7 @@ mod domain;
 mod ports;
 pub mod published_language;
 
-pub use adapters::client::{LlmClient, LlmConfigOptions, OpenAIProviderConfig};
+pub use adapters::client::{LlmClient, LlmConfigOptions};
 pub use adapters::openai_compatible::ReasoningConfig;
 pub use adapters::pool::LlmClientPool;
 pub use adapters::transport::{wire_provider, DefaultLlmProviderGateway, LlmProviderGateway};
