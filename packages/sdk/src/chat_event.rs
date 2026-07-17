@@ -83,6 +83,12 @@ pub enum ChatEvent {
         elapsed_secs: u64,
         phase: String,
     },
+    /// Runtime 将在延迟后发起新的模型调用 attempt。
+    ModelInvocationRetrying {
+        context: ChatEventContext,
+        attempt: u32,
+        delay: std::time::Duration,
+    },
     /// 用量统计。
     Usage {
         input: u32,
