@@ -33,8 +33,6 @@
 pub mod classify;
 pub mod config;
 
-pub use config::GraphRuntimeConfig;
-
 use share::reasoning::ReasoningLevel;
 
 /// 推理阶段节点。
@@ -108,23 +106,25 @@ pub enum ReasoningSignal {
 }
 
 /// Reasoning Graph 状态机。
+///
+/// v0.1.0 固定运行：Graph 始终启用，effort 直接取当前节点 `default_effort()`，
+/// 不再有 enabled / max / override 等可配置概念。
 pub struct ReasoningGraph {
     current: ReasoningNode,
-    config: GraphRuntimeConfig,
+}
+
+impl Default for ReasoningGraph {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ReasoningGraph {
-    /// 创建 graph 实例。初始节点为 `Idle`。
-    pub fn new(config: GraphRuntimeConfig) -> Self {
+    /// 创建 graph 实例。初始节点为 `Idle`，始终运行。
+    pub fn new() -> Self {
         Self {
             current: ReasoningNode::Idle,
-            config,
         }
-    }
-
-    /// graph 是否启用。
-    pub fn enabled(&self) -> bool {
-        self.config.enabled
     }
 
     /// 当前节点。
@@ -132,9 +132,9 @@ impl ReasoningGraph {
         self.current
     }
 
-    /// 当前节点对应的 effort（优先用 config 覆盖，否则用节点默认值）。
+    /// 当前节点对应的 effort（直接取节点 `default_effort`）。
     pub fn current_effort(&self) -> ReasoningLevel {
-        self.config.effort_for(self.current)
+        self.current.default_effort()
     }
 
     /// 消费信号，更新当前节点。返回是否发生变化。
@@ -148,7 +148,7 @@ impl ReasoningGraph {
                 "reasoning_graph transition: {} → {} (effort: {:?}, signal: {})",
                 old,
                 new,
-                self.config.effort_for(new),
+                new.default_effort(),
                 signal_name(&signal)
             );
             self.current = new;

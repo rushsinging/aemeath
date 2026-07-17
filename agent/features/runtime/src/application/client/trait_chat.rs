@@ -105,7 +105,6 @@ pub(super) async fn chat_impl(
                 frozen_chats: inner.frozen_chats.clone(),
                 active_summary: inner.active_summary.clone(),
                 reasoning: workflow::adaptive_reasoning(
-                    inner.context.resources.reasoning_graph_config.clone(),
                     inner
                         .context
                         .resources

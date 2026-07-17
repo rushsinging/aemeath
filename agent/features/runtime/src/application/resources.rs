@@ -37,7 +37,4 @@ pub struct RuntimeResources {
     pub allow_all: bool,
     /// Language code for prompt/reminder text selection (`"en"` / `"zh"`).
     pub language: String,
-
-    /// Main adaptive reasoning 的 Config-owned 原始快照。
-    pub reasoning_graph_config: share::config::ReasoningGraphConfig,
 }

@@ -9,12 +9,12 @@
 ReasoningGraph 是 **独立 Workflow 支撑域 BC 的聚合 / 策略核心**：
 
 - 根据对话阶段（Explore / Plan / Execute / Verify）动态调节 reasoning effort
-- Workflow 独占节点迁移、desired effort 与**用户静态上限** clamp；Runtime 只负责在确定的 loop 时机发送信号
+- Workflow 独占节点迁移与 desired effort；Runtime 只负责在确定的 loop 时机发送信号
 - 通过 Workflow-owned `ReasoningPort` OHS 读写 requested reasoning level，与 Provider 的 model-capability clamp 解耦
 
-**版本边界**：v0.1.0 仅交付 Reasoning Graph / effort 调节；完整 Workflow Engine、DAG、恢复和持久化属于 v0.2.0。Workflow 始终是独立 BC，不因当前能力较窄而归入 Runtime。
+**版本边界**：v0.1.0 只交付 Reasoning Graph 领域模型与五节点固定默认 effort（无 config override）；Config `reasoning_graph` 已退役（#921 收缩范围）。Workflow 始终是独立 BC，不因当前能力较窄而归入 Runtime。**v0.1.0 scope 收缩**：Provider resolver 领域迁移已完成但未接生产链路；Main 已接线消费 ReasoningPort；Runtime/Context/TUI **尚未**端到端消费 Provider resolver。是否保留 ReasoningGraph 能力并接线到生产链路，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。完整 Workflow Engine、DAG、恢复和持久化同样属于 v0.2.0。
 
-**不在本文范围**：Shared Kernel 的 `ReasoningLevel` 稳定枚举定义、Provider 的 per-driver wire format（见 [../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)）、Config 侧的 `ReasoningGraphConfig` 静态阈值（见 [../config/01-config-layer.md](../config/01-config-layer.md)）。
+**不在本文范围**：Shared Kernel 的 `ReasoningLevel` 稳定枚举定义、Provider 的 per-driver wire format（见 [../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)）。Config 侧的 `ReasoningGraphConfig` 已退役（#921）；五节点默认 effort 由 Workflow 唯一拥有且固定，不再从 Config 读取 override。
 
 ## 2. ReasoningNode 状态机
 
@@ -89,14 +89,10 @@ impl ReasoningGraph {
 
 ### 3.1 节点 → effort
 
-每个节点的默认 effort 由 Workflow 定义；除 Idle 外，可被 config 中的 `override_effort` 覆盖：
+每个节点的默认 effort 由 Workflow 唯一定义且固定（#921 收缩范围后不再支持 Config override）：
 
 ```rust
-struct NodeConfig {
-    override_effort: Option<ReasoningLevel>,
-}
-
-// 默认映射（Workflow 唯一拥有；Config 只可覆盖非 Idle 节点）
+// 固定默认映射（Workflow 唯一拥有；Config reasoning_graph 已退役）
 Idle    → Off
 Explore → Medium
 Plan    → Max
@@ -108,9 +104,8 @@ Verify  → Medium
 
 ```rust
 fn current_effort(&self) -> ReasoningLevel {
-    self.config
-        .override_effort(self.current_node)
-        .unwrap_or_else(|| self.current_node.default_effort())
+    // Config reasoning_graph 已退役；五节点 effort 固定
+    self.current_node.default_effort()
 }
 ```
 
@@ -120,25 +115,25 @@ fn current_effort(&self) -> ReasoningLevel {
 use share::ReasoningLevel; // Off | Low | Medium | High | Xhigh | Max
 ```
 
-- 枚举由 Shared Kernel 唯一定义，Workflow / Config / Runtime / Context Management / Provider 直接消费，**NEVER** 各自复制同名类型
+- 枚举由 Shared Kernel 唯一定义，Workflow / Runtime / Context Management / Provider 直接消费，**NEVER** 各自复制同名类型
 - 实现 `Ord` / `PartialOrd` / `clamp`——支持 `min()` 比较
 - per-provider 可能不支持全部级别（如 Ollama 只有 on/off）
 
-### 3.4 运行态 ReasoningGraph vs 配置态 ReasoningGraphConfig
+### 3.4 运行态 ReasoningGraph（Config 态已退役）
 
-| 维度 | ReasoningGraph（运行态） | ReasoningGraphConfig（配置态） |
-|---|---|---|
-| 归属 | Workflow BC 私有（仅 `AdaptiveReasoningPort` 持有，Runtime 不可见） | Config BC（见 [../config/01-config-layer.md](../config/01-config-layer.md)） |
-| 生命周期 | 与 Main Run 绑定，崩溃从头开始 | 静态，由 `ConfigSnapshot` 在 Run 启动时一次性提供；resume 时可能随 Config prepare 刷新 |
-| 内容 | 当前节点（`ReasoningNode`）+ 转移逻辑 + 私有 `observe()` 方法 | 静态开关、每节点 `override_effort`、`max_reasoning` |
-| 可变性 | 可变（状态机随 `ReasoningSignal` 转移） | 不可变（Run 内不变） |
-| 构造 | `ReasoningGraph::new(config: &ReasoningGraphConfig)` | 由 `ConfigSnapshot` 读取，Composition Root 在 `reasoning_for()` 中组装并注入 Workflow-owned port 实现 |
+| 维度 | ReasoningGraph（运行态） |
+|---|---|
+| 归属 | Workflow BC 私有（仅 `AdaptiveReasoningPort` 持有，Runtime 不可见） |
+| 生命周期 | 与 Main Run 绑定，崩溃从头开始 |
+| 内容 | 当前节点（`ReasoningNode`）+ 转移逻辑 + 私有 `observe()` 方法 + 五节点固定默认 effort |
+| 可变性 | 可变（状态机随 `ReasoningSignal` 转移） |
+| 构造 | `ReasoningGraph::new()`——无 config 参数（Config `ReasoningGraphConfig` 已退役，#921） |
 
-- `ReasoningGraphConfig` 是纯数据（开关、节点 override 与用户上限），不含行为。由 Config BC 定义，Workflow 直接消费。
-- 节点默认 effort 与复杂意图/fallback 策略由 Workflow 唯一拥有；Config **NEVER** 复制默认映射。
-- `ReasoningGraph` 持有配置快照，驱动状态转移和 `current_effort` 计算。
-- 两者 **MUST NOT** 合并为一个类型——运行态包含可变状态（当前节点），配置态是静态快照。
-- Idle 固定为 Off，不接受 Config override；其他节点缺失 override 时使用 Workflow 默认值。无效字符串必须由 Config 校验边界拒绝，迁移完成前的静默回退属于 Current 差距。
+- Config 侧的 `ReasoningGraphConfig`（含 `enabled`、`nodes` override 与 `max_reasoning`）已全部退役；Config 不再承载 reasoning graph 相关配置
+- 节点默认 effort 与复杂意图/fallback 策略由 Workflow 唯一拥有且固定，**无 config override**
+- `ReasoningGraph` 持有当前节点，驱动状态转移和 `current_effort` 计算（固定默认值）
+- 用户 reasoning level 上限（原 `max_reasoning`）不再存在于 Config；如需上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策
+- 是否保留 ReasoningGraph 能力并接线到生产链路，同样由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
 
 ## 4. ReasoningPort OHS
 
@@ -148,9 +143,9 @@ trait ReasoningPort: Send + Sync {
     /// 返回 Workflow-owned observation，只供 Runtime 保持 phase event 纯投影；
     /// desired effort 与 graph 本体均不透出。
     fn observe(&self, signal: ReasoningSignal) -> ReasoningObservation;
-    /// 当前 requested reasoning（已受 user maximum 限制，尚未按 model capability 裁剪）。
+    /// 当前 requested reasoning（Config user maximum 已退役，直接发布 graph desired value）。
     fn current_requested_level(&self) -> ReasoningLevel;
-    /// 设置本会话 thinking gate；Off 作为硬门，非 Off 恢复 graph 自适应，并返回 clamp 后值。
+    /// 设置本会话 thinking gate；Off 作为硬门，非 Off 恢复 graph 自适应。
     fn set_level(&self, level: ReasoningLevel) -> ReasoningLevel;
     /// 模型切换时刷新默认 requested，不制造永久 override。
     fn reset_default_level(&self, level: ReasoningLevel) -> ReasoningLevel;
@@ -171,17 +166,19 @@ struct ReasoningObservation {
 
 ### 5.1 两个所有者、两个不同 clamp
 
-Workflow 与 Provider 处理的是不同约束，**NEVER** 在 `ReasoningPort` 中读取 model capability：
+Workflow 与 Provider 处理的是不同约束，**NEVER** 在 `ReasoningPort` 中读取 model capability。#921 收缩范围后 Config `max_reasoning` 已退役，Workflow user-maximum clamp 暂不生效（如需恢复，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策）：
 
-1. Workflow 把 graph / explicit override 的 desired value clamp 到 Config user maximum，发布 `requested reasoning`；
-2. Provider-owned option resolver 再把 requested value clamp 到目标 model 的 supported levels，发布 `effective reasoning`；
+1. Workflow 发布 graph 的固定默认 desired effort（原 Config user maximum clamp 已退役）
+2. Provider-owned option resolver 把 desired value clamp 到目标 model 的 supported levels，发布 `effective reasoning`；
 3. Runtime 在 `build_window` 前取得一次 resolved options，把其中同一个 effective value 同时放入 `ContextRequest` 与 `InvocationRequest`。Provider `invoke` 只校验 resolved capability fingerprint，**NEVER** 静默生成第三个值。
+
+> **v0.1.0 scope**：Provider resolver 领域迁移已完成，但未接生产链路——Runtime **尚未**在 `build_window` 前调用 `resolve_invocation_options`，上述 clamp 链尚未端到端生效。
 
 ```rust
 impl AdaptiveReasoningPort {
     fn apply_desired(&self, desired: ReasoningLevel) {
-        let requested = desired.min(self.user_max_reasoning);
-        *self.requested.write().unwrap() = requested;
+        // Config user_max_reasoning 已退役（#921）；desired 直接发布
+        *self.requested.write().unwrap() = desired;
     }
 }
 
@@ -192,7 +189,8 @@ impl ReasoningPort for AdaptiveReasoningPort {
         if state.graph.enabled() {
             state.graph.transition(signal);
             if state.manual_override.is_none() {
-                state.requested = state.graph.current_effort().min(self.user_max_reasoning);
+                // 固定默认 effort；无 Config user maximum clamp
+                state.requested = state.graph.current_effort();
             }
         }
         ReasoningObservation {
@@ -205,7 +203,7 @@ impl ReasoningPort for AdaptiveReasoningPort {
     fn set_level(&self, desired: ReasoningLevel) -> ReasoningLevel {
         let mut state = self.state.lock().unwrap();
         state.manual_override = Some(desired);
-        state.requested = desired.min(self.user_max_reasoning);
+        state.requested = desired;
         state.requested
     }
 
@@ -215,7 +213,7 @@ impl ReasoningPort for AdaptiveReasoningPort {
 }
 ```
 
-- Workflow 内 graph observation、`/think` gate 与模型默认刷新共用 user maximum clamp，因此上限只有一个实现点
+- Workflow 内 graph observation 与 `/think` gate 共用同一 requested value（原 Config user maximum clamp 已退役，#921）
 - Runtime **NEVER** 取得 `ReasoningGraph`；只经 `observe` 输入事实、经 `current_requested_level` 读取 requested value
 - `set_level(Off)` 表达本会话硬关闭；设置为非 Off 时恢复 graph 自适应。模型切换经 `reset_default_level` 刷新默认值，避免把旧模型 requested 或永久 override 带入新模型
 - Workflow 只保存 requested 领域值，**NEVER** 保存 provider ceiling、capability snapshot 或 mutate Provider client
@@ -224,11 +222,11 @@ impl ReasoningPort for AdaptiveReasoningPort {
 ### 5.2 clamp 链
 
 ```
-desired = graph.current_effort()             // 图决定期望值
+desired = graph.current_effort()             // 图决定期望值（固定默认 effort）
   OR
 desired = config.default_reasoning           // 无图时从 config 继承
 
-requested = desired.min(user_max_reasoning)  // Workflow-owned
+requested = desired                           // Config user_max_reasoning 已退役（#921）
 
 resolved = provider.resolve_invocation_options(
     model,
@@ -252,15 +250,17 @@ effective = resolved.effective_reasoning     // Runtime 冻结；Context / Invoc
 // runner/setup.rs
 fn setup_sub_agent(parent: &ReasoningPort) -> Box<dyn ReasoningPort> {
     let inherited_requested = parent.current_requested_level();
-    // 子 agent 用继承的 requested level，无图调节；仍受子 ConfigSnapshot 的 user maximum 限制。
+    // 子 agent 用继承的 requested level，无图调节（Config user maximum 已退役，#921）。
     Box::new(FixedReasoningPort::new(inherited_requested, ...))
 }
 ```
 
 - 子 agent 从 `ReasoningPort.current_requested_level()` 继承，而非独立图推断
-- 子 agent 的 `set_level` 仍受 clamp 保护
+- 子 agent 的 `set_level` 直接生效（Config user maximum clamp 已退役）
 
 ## 7. Loop 集成点
+
+> **v0.1.0 scope**：以下 Loop 集成是 Target 设计；v0.1.0 中 Runtime **尚未**接线消费 `ReasoningPort`，Provider resolver 也 **尚未**接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 Runtime 只经 `ReasoningPort` OHS 集成；`ReasoningGraph` 是 Main 实现的私有状态：
 
@@ -306,9 +306,10 @@ reasoning_port.observe(ReasoningSignal::TurnBoundary);
 ```
 
 - 支持完整 6 级：`off` / `low` / `medium` / `high` / `xhigh` / `max`
-- 通过 `ReasoningPort.set_level()` 设置（受 clamp 保护）
+- 通过 `ReasoningPort.set_level()` 设置（Config user maximum clamp 已退役，#921）
 - 无参数时采用 Medium / Off binary toggle；显式参数总是优先
 - `set_level` 与命令确认反馈（CLI/TUI 回显）只暴露 `current_requested_level()`——即 §5.1 clamp 链中的 `requested` 值；**NEVER** 展示 provider `resolve_invocation_options` 产生的 model `effective` 值。同一 Run 尚未触发下一次 LLM 调用前不存在新的 effective reasoning，命令层没有能力提前得知它。
+- **v0.1.0 scope**：`/think` 命令的 Target 语义已冻结，但 Runtime/TUI **尚未**接线消费 `ReasoningPort`；接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
 
 ## 9. Workflow 远期方向
 
@@ -352,7 +353,7 @@ Workflow Engine **暂缓实现**，原因：
 
 - Runtime 装配（消费 Workflow-owned ReasoningPort）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Provider 端口（消费 Shared Kernel ReasoningLevel + provider clamp）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
-- Config 分层（ReasoningGraphConfig 静态阈值）：[../config/01-config-layer.md](../config/01-config-layer.md)
+- Config 分层（ReasoningGraphConfig 已退役，§7）：[../config/01-config-layer.md](../config/01-config-layer.md)
 - Run 状态机（Loop 集成点）：[../runtime/03-loop-and-state-machine.md](../runtime/03-loop-and-state-machine.md)
 - 上下文地图（Workflow = 支撑域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 - Current → Target 迁移责任：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
@@ -368,3 +369,4 @@ Workflow Engine **暂缓实现**，原因：
 | 2026-07-17 | #920 建立 Main adaptive ReasoningPort：graph 私有化、user-max clamp、manual override、observation 纯投影；Sub Fixed/Inherit/NoOp 延期 #875/#878 | [#920](https://github.com/rushsinging/aemeath/issues/920) |
 | 2026-07-14 | 明确私有 `ReasoningGraph` 只计算 desired effort，公开 `ReasoningPort::observe` 返回纯投影 observation；`/think` 命令反馈只暴露 requested 值，NEVER 暴露 model effective 值 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 新增 §3.4 运行态 ReasoningGraph vs 配置态 ReasoningGraphConfig 区分；两者 MUST NOT 合并为一个类型 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-07-17 | #921 收缩范围：Config `ReasoningGraphConfig` 全部退役（含 `max_reasoning`），五节点采用固定默认 effort 无 config override；§3.4 改为单列运行态；§5 clamp 链移除 user-maximum clamp；Provider resolver 领域迁移完成但未接生产链路；Runtime/Context/TUI 尚未接线；是否保留/接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |

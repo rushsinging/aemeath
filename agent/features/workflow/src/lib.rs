@@ -17,11 +17,7 @@ pub mod api {
 
 /// Composition-only wiring。
 pub fn adaptive_reasoning(
-    config: share::config::ReasoningGraphConfig,
     initial: share::reasoning::ReasoningLevel,
 ) -> std::sync::Arc<dyn api::ReasoningPort> {
-    std::sync::Arc::new(domain::reasoning_port::AdaptiveReasoningPort::new(
-        domain::reasoning_graph::GraphRuntimeConfig::from_shared(&config),
-        initial,
-    ))
+    std::sync::Arc::new(domain::reasoning_port::AdaptiveReasoningPort::new(initial))
 }
