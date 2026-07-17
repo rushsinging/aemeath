@@ -9,4 +9,9 @@ pub const LOG_TARGET: &str = "aemeath:agent:workflow";
 
 mod domain;
 
-pub use domain::reasoning_graph::{GraphRuntimeConfig, GraphSignal, ReasoningGraph, ReasoningNode};
+pub use domain::reasoning_graph::{GraphRuntimeConfig, ReasoningGraph, ReasoningNode};
+
+/// 跨 BC 公开 API。
+pub mod api {
+    pub use crate::domain::reasoning_graph::ReasoningSignal;
+}
