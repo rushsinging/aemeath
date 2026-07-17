@@ -254,3 +254,113 @@ fn load_configured_skills(
     let dirs = skills_config.map(|c| c.dirs.clone()).unwrap_or_default();
     load_all_skills(cwd, &dirs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let previous = std::env::var_os(key);
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn from_args_keeps_cloned_workspace_views_synchronized() {
+        let temp = tempfile::tempdir().expect("create temp root");
+        let root = temp.path().join("root");
+        let sub = root.join("sub");
+        let agents_dir = temp.path().join("agents");
+        std::fs::create_dir_all(&sub).expect("create workspace subdirectory");
+        std::fs::create_dir_all(&agents_dir).expect("create isolated agents directory");
+
+        let _env = EnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir);
+        std::fs::write(
+            agents_dir.join("aemeath.json"),
+            serde_json::json!({
+                "models": {
+                    "default": "local/test-model",
+                    "providers": {
+                        "local": {
+                            "baseUrl": "http://127.0.0.1:1/v1",
+                            "apiKey": "test-api-key",
+                            "driver": "openai",
+                            "models": [{
+                                "id": "test-model",
+                                "name": "Test Model",
+                                "input": ["text"],
+                                "contextWindow": 8192,
+                                "max_tokens": 1024
+                            }]
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("write isolated config");
+        std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
+            .expect("write isolated MCP config");
+
+        let workspace = project::wire_production_workspace(root.clone())
+            .expect("wire workspace")
+            .into_views();
+        let original = workspace.clone();
+        workspace
+            .control()
+            .change_directory(sub.clone())
+            .expect("change workspace to subdirectory");
+
+        let args = ChatBootstrapArgs {
+            cwd: Some(root.clone()),
+            api_key: Some("test-api-key".to_string()),
+            base_url: Some("http://127.0.0.1:1/v1".to_string()),
+            model: Some("local/test-model".to_string()),
+            context_size: 8192,
+            ..Default::default()
+        };
+        let client = from_args_with_workspace(args, workspace)
+            .await
+            .expect("build client with workspace");
+
+        assert_eq!(
+            client.inner.workspace.read().current_path_base(),
+            sub.canonicalize().expect("canonicalize subdirectory")
+        );
+
+        original
+            .control()
+            .change_directory(root.clone())
+            .expect("change original clone back to root");
+        assert_eq!(
+            client.inner.workspace.read().current_path_base(),
+            root.canonicalize().expect("canonicalize root")
+        );
+    }
+}
