@@ -33,7 +33,7 @@ impl AgentRunner for StubRunner {
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
     ToolExecutionContext {
-        workspace: project::WorkspaceService::new(PathBuf::from(".")),
+        workspace: project::wire_production_workspace(PathBuf::from(".")).into_views(),
         run_id: "01900000-0000-7000-8000-000000000001".to_string(),
         cancel: CancellationToken::new(),
         read_files: Arc::new(Mutex::new(HashSet::new())),
@@ -169,7 +169,7 @@ async fn test_agent_tool_runs_without_task_id() {
 /// 子的 worktree 进出不得影响父（修隔离 bug）。
 #[test]
 fn sub_agent_workspace_isolated() {
-    use project::{WorkspaceControl, WorkspaceError, WorkspacePersist, WorkspaceRead};
+    use project::WorkspaceError;
     use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
     // 用真实存在的临时目录满足 restore 的路径校验。
@@ -177,7 +177,7 @@ fn sub_agent_workspace_isolated() {
     let wt_dir = tempfile::tempdir().unwrap();
 
     // 父：进入一个伪 worktree（path_base/workspace_root = wt，栈里压入 main 帧）。
-    let parent = project::WorkspaceService::new(main_dir.path().to_path_buf());
+    let parent = project::wire_production_workspace(main_dir.path().to_path_buf()).into_views();
     let dto = PersistedWorkspaceContext {
         path_base: wt_dir.path().display().to_string(),
         workspace_root: wt_dir.path().display().to_string(),
@@ -186,31 +186,25 @@ fn sub_agent_workspace_isolated() {
             workspace_root: main_dir.path().display().to_string(),
         }],
     };
-    WorkspacePersist::restore(parent.as_ref(), &dto).expect("restore parent workspace");
+    parent
+        .persist()
+        .restore(&dto)
+        .expect("restore parent workspace");
 
     // 子：从父快照派生。
-    let child = parent.seed_isolated();
+    let child = parent.derive_isolated();
 
-    // 1) 不是同一个 Arc。
-    assert!(
-        !Arc::ptr_eq(&parent, &child),
-        "child workspace 必须是独立 Arc 实例"
-    );
+    // 1) 子继承父当前位置，但后续变更隔离。
+    assert_eq!(child.read().current_path_base(), wt_dir.path());
+    assert_eq!(child.read().current_workspace_root(), wt_dir.path());
 
-    // 2) 子继承父当前位置。
-    assert_eq!(child.current_path_base(), wt_dir.path());
-    assert_eq!(child.current_workspace_root(), wt_dir.path());
+    // 2) 子栈独立为空：exit 报 EmptyStack。
+    assert_eq!(child.control().exit(), Err(WorkspaceError::EmptyStack));
 
-    // 3) 子栈独立为空：exit 报 EmptyStack。
-    assert_eq!(
-        WorkspaceControl::exit(child.as_ref()),
-        Err(WorkspaceError::EmptyStack)
-    );
-
-    // 4) 父栈不受子影响：父仍可 exit 回到 main。
-    let prev = WorkspaceControl::exit(parent.as_ref()).expect("parent still has a frame");
+    // 3) 父栈不受子影响：父仍可 exit 回到 main。
+    let prev = parent.control().exit().expect("parent still has a frame");
     assert_eq!(prev.path_base, main_dir.path());
-    assert_eq!(parent.current_path_base(), main_dir.path());
+    assert_eq!(parent.read().current_path_base(), main_dir.path());
 }
 
 // ── #479 回归：text 字段必须包含子代理实际产出 ──

@@ -216,7 +216,7 @@ impl AgentRunner for CliAgentRunner {
             },
             // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
             // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
-            workspace: ctx.workspace.seed_isolated(),
+            workspace: ctx.derive_isolated_workspace(),
             run_id: sub_run_id.to_string(),
             cancel: ctx.cancel.child_token(),
             read_files: std::sync::Arc::new(

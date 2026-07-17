@@ -50,13 +50,25 @@ async fn build_agent_client_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
 ) -> Result<AgentClientHandle, SdkError> {
-    let runtime_client = crate::runtime::from_args_with_gateways(args, gateways).await?;
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let workspace = project::wire_production_workspace(cwd).into_views();
+    let runtime_client = crate::runtime::from_args_with_gateways(args, gateways, workspace).await?;
     Ok(agent_client_from_runtime(runtime_client))
 }
 
 pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstrap, SdkError> {
     let gateways = FeatureGateways::wire_default();
-    let runtime_client = crate::runtime::from_args_with_gateways(args, gateways).await?;
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let workspace = project::wire_production_workspace(cwd).into_views();
+    let runtime_client = crate::runtime::from_args_with_gateways(args, gateways, workspace).await?;
     let launch = runtime_client.tui_launch_context();
     let thinking = !matches!(
         launch.client.default_scope().effective_reasoning(),

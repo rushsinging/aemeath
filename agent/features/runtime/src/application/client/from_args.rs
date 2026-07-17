@@ -27,7 +27,10 @@ use crate::LOG_TARGET;
 /// 从 Args 初始化 AgentClient。
 ///
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
-pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
+pub async fn from_args_with_workspace(
+    mut args: ChatBootstrapArgs,
+    workspace: project::WorkspaceViews,
+) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -207,7 +210,6 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
 
     // 19. 构建 handle
     let current_client = context.resources.client.clone();
-    let workspace = project::WorkspaceService::new(cwd.clone());
     let handle = RuntimeHandle {
         context,
         cwd,
@@ -235,6 +237,16 @@ pub async fn from_args(mut args: ChatBootstrapArgs) -> Result<AgentClientImpl, S
     Ok(AgentClientImpl {
         inner: Arc::new(handle),
     })
+}
+
+pub async fn from_args(args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let workspace = project::wire_production_workspace(cwd).into_views();
+    from_args_with_workspace(args, workspace).await
 }
 
 // ─── 内部辅助 ───
