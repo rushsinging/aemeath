@@ -1,6 +1,6 @@
 use crate::{
     Batch, BatchCreateSpec, BatchId, BatchStatus, Task, TaskCommandError, TaskCreateSpec,
-    TaskEvent, TaskId, TaskPriority, TaskStatus,
+    TaskEvent, TaskId, TaskPriority, TaskRevision, TaskStatus,
 };
 
 #[test]
@@ -19,6 +19,24 @@ fn ids_specs_and_priority_validate_values() {
         BatchCreateSpec::try_new("\t".into()),
         Err(TaskCommandError::InvalidBatchSummary)
     );
+}
+
+#[test]
+fn task_revision_is_an_ordered_numeric_value() {
+    assert_eq!(TaskRevision::new(0).get(), 0);
+    assert_eq!(TaskRevision::new(7).to_string(), "7");
+    assert!(TaskRevision::new(2) > TaskRevision::new(1));
+}
+
+#[test]
+fn local_domain_results_are_uncommitted_until_store_transaction() {
+    let result = Task::create(
+        TaskId::new(1),
+        BatchId::new(1),
+        TaskCreateSpec::try_new("任务".into(), String::new(), None, TaskPriority::Normal).unwrap(),
+        1,
+    );
+    assert_eq!(result.revision(), None);
 }
 
 #[test]
@@ -124,6 +142,8 @@ fn task_local_mutations_update_timestamp_only_when_state_changes() {
 
     task.set_priority(TaskPriority::Urgent, 20);
     assert_eq!(task.priority(), TaskPriority::Urgent);
+    assert_eq!(task.updated_at(), 20);
+    task.set_priority(TaskPriority::Urgent, 25);
     assert_eq!(task.updated_at(), 20);
 
     task.add_tag("backend".into(), 30);
