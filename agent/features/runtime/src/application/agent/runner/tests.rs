@@ -5,7 +5,7 @@ use super::logging::{
 use super::progress::build_tool_calls_progress_event;
 use super::*;
 use async_trait::async_trait;
-use provider::{LlmError, LlmProvider, StreamResponse, SystemBlock};
+use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
 use share::config::AgentRoleConfig;
 use share::message::Message;
 use share::tool::AgentProgressKind;
@@ -257,7 +257,7 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
 
 #[tokio::test]
 async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
-    let runner = test_runner(LlmError::Cancelled);
+    let runner = test_runner(ProviderError::cancelled());
     let ctx = test_ctx();
 
     let result = runner
@@ -276,7 +276,10 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
 
 #[tokio::test]
 async fn test_run_agent_context_cancelled_after_provider_error_returns_user_cancelled() {
-    let runner = test_runner(LlmError::Network("interrupted".to_string()));
+    let runner = test_runner(ProviderError::retryable(
+        ProviderErrorKind::Network,
+        "interrupted",
+    ));
     let ctx = test_ctx();
     ctx.cancel.cancel();
 
@@ -361,7 +364,10 @@ async fn test_started_event_emitted_with_role_and_model() {
     use share::tool::{AgentProgressEvent, AgentProgressKind};
     use tokio::sync::mpsc;
 
-    let runner = test_runner(LlmError::Network("setup-only".into()));
+    let runner = test_runner(ProviderError::retryable(
+        ProviderErrorKind::Network,
+        "setup-only",
+    ));
     let ctx = test_ctx();
 
     let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(8);
@@ -394,7 +400,10 @@ async fn test_started_event_without_role_uses_main_agent_model() {
     use share::tool::{AgentProgressEvent, AgentProgressKind};
     use tokio::sync::mpsc;
 
-    let runner = test_runner(LlmError::Network("setup-only".into()));
+    let runner = test_runner(ProviderError::retryable(
+        ProviderErrorKind::Network,
+        "setup-only",
+    ));
     let ctx = test_ctx();
 
     let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(8);
@@ -427,7 +436,10 @@ async fn test_started_event_without_role_uses_main_agent_model() {
 #[tokio::test]
 async fn test_started_event_not_emitted_without_progress_tx() {
     // progress_tx = None → 不会 emit（也不会 panic）
-    let runner = test_runner(LlmError::Network("setup-only".into()));
+    let runner = test_runner(ProviderError::retryable(
+        ProviderErrorKind::Network,
+        "setup-only",
+    ));
     let ctx = test_ctx();
 
     // 不传 progress_tx，run_agent 应正常完成（即使 setup 内 try_send 被跳过）
@@ -452,7 +464,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
 
 #[tokio::test]
 async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
-    let runner = test_runner(LlmError::Network("boom".to_string()));
+    let runner = test_runner(ProviderError::retryable(ProviderErrorKind::Network, "boom"));
     let ctx = test_ctx();
 
     let result = runner
@@ -476,7 +488,10 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
 
 #[tokio::test]
 async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
-    let runner = test_runner(LlmError::Network("should not be invoked".to_string()));
+    let runner = test_runner(ProviderError::retryable(
+        ProviderErrorKind::Network,
+        "should not be invoked",
+    ));
     let ctx = test_ctx();
 
     let result = runner
@@ -520,7 +535,7 @@ fn test_tool_call_with_id(
     }
 }
 
-fn test_runner(error: LlmError) -> CliAgentRunner {
+fn test_runner(error: ProviderError) -> CliAgentRunner {
     CliAgentRunner {
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(
             ErrorProvider { error },
@@ -548,7 +563,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
     }
 }
 
-/// 模拟真实进行中的 LLM 流：`stream_message` 阻塞在 `cancel.cancelled()` 上，
+/// 模拟真实进行中的 LLM 流：`invocation_stream` 阻塞在 `cancel.cancelled()` 上，
 /// 而不是立刻返回，用于复现「cancel 在调用进行中才到达」的场景。
 struct BlockingThenCancelledProvider {
     calls: Arc<std::sync::Mutex<usize>>,
@@ -556,21 +571,20 @@ struct BlockingThenCancelledProvider {
 
 #[async_trait]
 impl LlmProvider for BlockingThenCancelledProvider {
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        _handler: &mut dyn provider::StreamHandler,
         cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<StreamResponse, LlmError> {
+    ) -> Result<InvocationStream, ProviderError> {
         {
             let mut guard = self.calls.lock().unwrap();
             *guard += 1;
         }
         cancel.cancelled().await;
-        Err(LlmError::Cancelled)
+        Err(ProviderError::cancelled())
     }
 
     fn model_name(&self) -> &str {
@@ -607,50 +621,20 @@ fn test_ctx() -> ToolExecutionContext {
 }
 
 struct ErrorProvider {
-    error: LlmError,
+    error: ProviderError,
 }
 
 #[async_trait]
 impl LlmProvider for ErrorProvider {
-    async fn stream_message(
+    async fn invocation_stream(
         &self,
         _scope: &provider::InvocationScope,
         _system: &[SystemBlock],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
-        _handler: &mut dyn provider::StreamHandler,
         _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<StreamResponse, LlmError> {
-        Err(match &self.error {
-            LlmError::Network(message) => LlmError::Network(message.clone()),
-            LlmError::Api {
-                error_type,
-                message,
-            } => LlmError::Api {
-                error_type: error_type.clone(),
-                message: message.clone(),
-            },
-            LlmError::RateLimited => LlmError::RateLimited,
-            LlmError::ContextTooLong => LlmError::ContextTooLong,
-            LlmError::Cancelled => LlmError::Cancelled,
-            LlmError::Stream(message) => LlmError::Stream(message.clone()),
-            LlmError::Config(message) => LlmError::Config(message.clone()),
-            LlmError::StreamTruncated {
-                tool_call_id,
-                tool_call_name,
-                accumulated_bytes,
-                delta_count,
-                head_preview,
-                tail_preview,
-            } => LlmError::StreamTruncated {
-                tool_call_id: tool_call_id.clone(),
-                tool_call_name: tool_call_name.clone(),
-                accumulated_bytes: *accumulated_bytes,
-                delta_count: *delta_count,
-                head_preview: head_preview.clone(),
-                tail_preview: tail_preview.clone(),
-            },
-        })
+    ) -> Result<InvocationStream, ProviderError> {
+        Err(self.error.clone())
     }
 
     fn model_name(&self) -> &str {

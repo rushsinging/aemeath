@@ -1,6 +1,11 @@
 //! Stream parsing utilities for Anthropic API format
 
 use crate::domain::invoke::*;
+use crate::{
+    InvocationDelta, InvocationEvent, InvocationStream, ProviderCompletion, ProviderContentBlock,
+    ProviderError, ProviderErrorKind, ProviderStopReason, ProviderToolCall, ProviderToolCallId,
+    RawUsageSnapshot, ReasoningLevel,
+};
 use futures_util::StreamExt;
 use reqwest::Response;
 use share::message::{ContentBlock, Message, Role};
@@ -9,13 +14,213 @@ use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
 
-// Re-export StreamHandler from provider module
-pub use crate::ports::StreamHandler;
+// Re-export LegacyStreamSink from provider module
+pub use crate::ports::LegacyStreamSink;
+
+const INVOCATION_STREAM_CAPACITY: usize = 1;
+
+pub(crate) enum LegacyStreamDecoder {
+    Anthropic,
+    OpenAiChat,
+    OpenAiResponses,
+    Ollama,
+}
+
+pub(crate) fn parse_invocation_stream(
+    response: Response,
+    effective_reasoning: ReasoningLevel,
+    cancel: CancellationToken,
+) -> InvocationStream {
+    invocation_stream_from_legacy_decoder(
+        response,
+        effective_reasoning,
+        cancel,
+        LegacyStreamDecoder::Anthropic,
+    )
+}
+
+pub(crate) fn invocation_stream_from_legacy_decoder(
+    response: Response,
+    effective_reasoning: ReasoningLevel,
+    cancel: CancellationToken,
+    decoder: LegacyStreamDecoder,
+) -> InvocationStream {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(INVOCATION_STREAM_CAPACITY);
+    let runtime = tokio::runtime::Handle::current();
+    let producer_cancel = cancel.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut handler = InvocationEventHandler::new(sender.clone(), producer_cancel.clone());
+        let terminal = runtime.block_on(async {
+            let result = match decoder {
+                LegacyStreamDecoder::Anthropic => {
+                    parse_stream(response, &mut handler, &producer_cancel).await
+                }
+                LegacyStreamDecoder::OpenAiChat => {
+                    crate::adapters::openai_compatible::parse_openai_stream(
+                        response,
+                        &mut handler,
+                        &producer_cancel,
+                    )
+                    .await
+                }
+                LegacyStreamDecoder::OpenAiResponses => {
+                    crate::adapters::openai_compatible::parse_responses_stream(
+                        response,
+                        &mut handler,
+                        &producer_cancel,
+                    )
+                    .await
+                }
+                LegacyStreamDecoder::Ollama => {
+                    crate::adapters::ollama::stream::parse_ollama_stream(
+                        response,
+                        &mut handler,
+                        &producer_cancel,
+                    )
+                    .await
+                }
+            };
+            match result {
+                Ok(response) => InvocationEvent::Completed(completion_from_legacy(
+                    response,
+                    effective_reasoning,
+                )),
+                Err(error) => InvocationEvent::Failed(provider_error_from_legacy(error)),
+            }
+        });
+        let _ = sender.send(terminal);
+    });
+    Box::pin(futures_util::stream::unfold(
+        receiver,
+        |receiver| async move {
+            tokio::task::spawn_blocking(move || receiver.recv().ok().map(|event| (event, receiver)))
+                .await
+                .ok()
+                .flatten()
+        },
+    ))
+}
+
+struct InvocationEventHandler {
+    sender: std::sync::mpsc::SyncSender<InvocationEvent>,
+    cancel: CancellationToken,
+}
+
+impl InvocationEventHandler {
+    fn new(
+        sender: std::sync::mpsc::SyncSender<InvocationEvent>,
+        cancel: CancellationToken,
+    ) -> Self {
+        Self { sender, cancel }
+    }
+
+    fn send_delta(&self, delta: InvocationDelta) {
+        if self.sender.send(InvocationEvent::Delta(delta)).is_err() {
+            self.cancel.cancel();
+        }
+    }
+}
+
+impl LegacyStreamSink for InvocationEventHandler {
+    fn on_text(&mut self, text: &str) {
+        self.send_delta(InvocationDelta::Text(text.to_string()));
+    }
+
+    fn on_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
+        self.send_delta(InvocationDelta::ToolCallStarted {
+            index,
+            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
+            name: name.to_string(),
+        });
+    }
+
+    fn on_error(&mut self, _error: &str) {}
+
+    fn on_thinking(&mut self, text: &str) {
+        self.send_delta(InvocationDelta::Thinking {
+            thinking: text.to_string(),
+            signature: None,
+        });
+    }
+
+    fn on_tool_arguments_delta(
+        &mut self,
+        index: usize,
+        _name: &str,
+        provider_id: Option<&str>,
+        partial_args: &str,
+    ) {
+        self.send_delta(InvocationDelta::ToolArgumentsDelta {
+            index,
+            provider_id: provider_id.map(|id| ProviderToolCallId(id.to_string())),
+            partial_json: partial_args.to_string(),
+        });
+    }
+}
+
+fn completion_from_legacy(
+    response: StreamResponse,
+    effective_reasoning: ReasoningLevel,
+) -> ProviderCompletion {
+    let output = response
+        .assistant_message
+        .content
+        .into_iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } => Some(ProviderContentBlock::Text(text)),
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+            } => Some(ProviderContentBlock::Thinking {
+                thinking,
+                signature,
+            }),
+            ContentBlock::ToolUse { id, name, input } => {
+                Some(ProviderContentBlock::ToolCall(ProviderToolCall {
+                    id: ProviderToolCallId(id),
+                    name,
+                    arguments: input,
+                }))
+            }
+            ContentBlock::ToolResult { .. } | ContentBlock::Image { .. } => None,
+        })
+        .collect();
+    ProviderCompletion {
+        output,
+        stop_reason: match response.stop_reason {
+            StopReason::EndTurn => ProviderStopReason::EndTurn,
+            StopReason::ToolUse => ProviderStopReason::ToolUse,
+            StopReason::MaxTokens => ProviderStopReason::MaxOutputTokens,
+        },
+        usage: Some(RawUsageSnapshot {
+            input_tokens: Some(response.usage.input_tokens),
+            output_tokens: Some(response.usage.output_tokens),
+            cache_read_tokens: response.usage.cached_tokens,
+            cache_write_tokens: response.usage.cache_creation_tokens,
+            reasoning_tokens: response.usage.reasoning_tokens,
+        }),
+        effective_reasoning,
+    }
+}
+
+fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
+    let kind = match error {
+        crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
+        crate::LlmError::RateLimited => ProviderErrorKind::RateLimited,
+        crate::LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
+        crate::LlmError::Network(_) => ProviderErrorKind::Network,
+        crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
+        crate::LlmError::StreamTruncated { .. } => ProviderErrorKind::StreamTruncated,
+        crate::LlmError::Stream(_) => ProviderErrorKind::Protocol,
+        crate::LlmError::Config(_) => ProviderErrorKind::Configuration,
+    };
+    ProviderError::fatal(kind, error.to_string())
+}
 
 /// Parse Anthropic-style SSE stream
 pub async fn parse_stream(
     response: Response,
-    handler: &mut dyn StreamHandler,
+    handler: &mut dyn LegacyStreamSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();

@@ -23,7 +23,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 27 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 28 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
@@ -35,8 +35,9 @@
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
-| 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`stream_message` 必须显式接收不可变 Invocation Scope |
-| 6b | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
+| 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
+| 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
+| 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
 | 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
 | 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
 | 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
@@ -192,7 +193,7 @@
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
+  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
   - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
   - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory/Tool Result façade 符号集合；最终随 #880/#983/#883/#884 收敛。
@@ -208,10 +209,17 @@
 
 - **功能**：锁定 #902 的调用隔离边界，防共享 Provider/client 恢复调用期可变状态。
 - **守护**：Provider 生产代码禁止 `AtomicU32/AtomicU8/AtomicBool`、`set_max_tokens`、`set_reasoning_level`、`current_reasoning_level` 与 `reasoning_config.lock()`；Runtime 禁止 `shared_client_lock` 与 setter/restore 路径。
-- **正向约束**：`LlmProvider::stream_message` 必须显式接收 `&InvocationScope`。
+- **正向约束**：`LlmProvider::invocation_stream` 必须显式接收 `&InvocationScope`。
 - **故意违规验证**：临时向 Provider source 加入 `set_max_tokens` 标记时脚本退出 2；移除后通过。
 
-### 6b. check-provider-http-attempt.sh
+### 6b. check-provider-pull-stream.sh
+
+- **功能**：锁定 #903 pull-based `InvocationStream` 生产边界，防止 Provider/Runtime/Context 恢复 callback 驱动。
+- **守护**：生产代码禁止 `CallbackHandler`、`StreamHandler`、`RuntimeStreamHandler`、`stream_message_raw` 与 `.stream_message(...)`；Runtime 与 Context 的生产代码和测试替身均禁止引用迁移期 `LegacyStreamSink` / `legacy_stream_message`。
+- **正向约束**：`LlmProvider` 必须公开 `invocation_stream`；Runtime 通过 `InvocationEventReducer` 主动 poll 并投影事件。
+- **范围边界**：Provider 内部 decoder 与测试替身暂可使用明确命名的 legacy sink，不能成为跨 crate 生产入口。
+
+### 6c. check-provider-http-attempt.sh
 
 - **功能**：锁定 #1033 的单 attempt 机械收敛边界，防止各 driver 重新手写请求发送、错误响应体读取与 HTTP/network 诊断日志拼装。
 - **守护**：`agent/features/provider/src/adapters/http_attempt.rs` 的 `HttpAttemptExecutor` 是唯一允许发起请求发送与读取失败/成功响应体的入口（成功路径经其 `read_success_json` helper）；`error_log.rs` 的 `log_network_error` / `log_http_error` / `ErrorLogContext` / `LlmApiErrorRecord` 只能被 `http_attempt.rs` 与 `error_log.rs` 自身引用，其余 driver 只能调用窄的 `error_log::log_stream_protocol_error`。
@@ -553,7 +561,9 @@
 - **行为**：
   1. 输出 hook 调试信息（`AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR` / `ROOT` / `PWD`）；
   2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
-  3. 对 11 个 crate 顺序跑 `cargo test --lib`（`cli` 用 `cargo test -p cli --bin aemeath`）。
+  3. 对 11 个 crate 顺序跑 `cargo test --lib`（`cli` 用 `cargo test -p cli --bin aemeath`）；
+  4. 每个 crate 默认最多运行 180 秒，可用 `AEMEATH_UNIT_TEST_TIMEOUT_SECS` 调整；超时会终止并回收该 cargo 进程组、输出 crate 名与上限并返回 124；
+  5. 任一 crate 超时或测试失败后立即退出，**NEVER** 继续执行后续 crate。
 - **被测 crates**：`share, runtime, project, policy, context, provider, tools, storage, hook, audit, cli`。
 
 ## 维护说明
@@ -574,6 +584,7 @@
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6b）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
+| 2026-07-17 | #903 收紧 `check-provider-pull-stream.sh`：Runtime/Context 的生产代码与测试替身统一禁止跨 crate 使用 legacy sink；同时为 Stop 单 crate 测试增加 180 秒默认超时、进程组回收与失败快速退出，避免单 crate 卡住整个 Hook | [#903](https://github.com/rushsinging/aemeath/issues/903) |
+| 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6c）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-16 | 文档审查修正：补登记此前文档从未登记、但脚本编排一直包含的 `check-run-control-boundary.sh`（新增 §23，原 §23/§24 顺延为 §24/§25）；同时收紧 `check-provider-http-attempt.sh` 扫描范围至整个 `agent/features/provider/src`（非仅 `adapters/`）、修复 `strip_test_tail` 首个 `#[cfg(test)]` 盲截尾问题、新增 `.text()/.json()/.bytes()/.chunk()` 跨行 body 读取绕过检测；串行守卫总数由 26 更正为 27，与 `check-architecture-guards.sh` 实际调用数一致 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |

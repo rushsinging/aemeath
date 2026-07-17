@@ -1,5 +1,5 @@
 use super::loop_run::SubAgentRun;
-use super::{CliAgentRunner, SilentHandler};
+use super::CliAgentRunner;
 use crate::application::agent::Agent;
 use crate::LOG_TARGET;
 use async_trait::async_trait;
@@ -172,7 +172,6 @@ impl AgentRunner for CliAgentRunner {
         tools::api::register_subagent_tools(&mut sub_registry, sub_task_store, sub_skills);
         let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
         let messages = vec![Message::user(prompt)];
-        let handler = SilentHandler;
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
         let client_for_log = client.clone();
@@ -262,7 +261,6 @@ impl AgentRunner for CliAgentRunner {
             hook_runner,
             sub_schemas,
             messages,
-            handler,
             system_blocks,
             log_request_messages: Box::new(log_request_messages),
             agent,
@@ -286,24 +284,43 @@ impl AgentRunner for CliAgentRunner {
     }
 
     async fn complete(&self, prompt: &str, system: &str, ctx: &ToolExecutionContext) -> String {
+        use futures::StreamExt;
+
         let system_blocks = vec![SystemBlock::cached(system.to_string())];
         let messages = vec![Message::user(prompt)];
-        let mut handler = SilentHandler;
 
-        match self
+        let mut stream = match self
             .client
-            .stream_message(
+            .invocation_stream(
                 self.client.default_scope(),
                 &system_blocks,
                 &messages,
                 &[],
-                &mut handler,
                 &ctx.cancel,
             )
             .await
         {
-            Ok(resp) => resp.assistant_message.text_content(),
-            Err(e) => format!("LLM error: {e}"),
+            Ok(stream) => stream,
+            Err(error) => return format!("LLM error: {error}"),
+        };
+        while let Some(event) = stream.next().await {
+            match event {
+                provider::InvocationEvent::Completed(completion) => {
+                    return completion
+                        .output
+                        .iter()
+                        .filter_map(|block| match block {
+                            provider::ProviderContentBlock::Text(text) => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                }
+                provider::InvocationEvent::Failed(error) => {
+                    return format!("LLM error: {error}");
+                }
+                provider::InvocationEvent::Delta(_) => {}
+            }
         }
+        "LLM error: provider stream ended without terminal event".to_string()
     }
 }

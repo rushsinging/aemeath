@@ -13,7 +13,7 @@ use crate::adapters::http_attempt::{
     HttpFailureKind, NetworkFailureKind,
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
-use crate::ports::{ReasoningLevel, StreamHandler};
+use crate::ports::{LegacyStreamSink, ReasoningLevel};
 use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
@@ -26,7 +26,7 @@ impl OpenAICompatibleProvider {
         system: &[SystemBlock],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
-        handler: &mut dyn StreamHandler,
+        handler: &mut dyn LegacyStreamSink,
         cancel: &CancellationToken,
     ) -> Result<StreamResponse, crate::LlmError> {
         let request_body =

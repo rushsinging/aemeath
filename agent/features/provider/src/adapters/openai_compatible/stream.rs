@@ -3,7 +3,7 @@
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
 use super::usage::parse_chat_usage;
 use crate::domain::invoke::StreamResponse;
-use crate::ports::StreamHandler;
+use crate::ports::LegacyStreamSink;
 use crate::LOG_TARGET;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
@@ -50,7 +50,7 @@ fn format_stream_snapshot(
 /// 解析 OpenAI 风格的 SSE 流
 pub(crate) async fn parse_openai_stream(
     response: reqwest::Response,
-    handler: &mut dyn StreamHandler,
+    handler: &mut dyn LegacyStreamSink,
     cancel: &CancellationToken,
 ) -> Result<StreamResponse, crate::LlmError> {
     let mut content_blocks: Vec<ContentBlock> = Vec::new();
