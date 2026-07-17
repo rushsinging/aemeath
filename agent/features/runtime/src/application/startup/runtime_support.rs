@@ -29,6 +29,7 @@ pub fn start_session(resume_session_id: Option<String>) -> String {
     session_id
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_agent_runner(
     models: Option<&ModelsConfig>,
     agents: Option<&AgentsConfig>,
@@ -37,6 +38,9 @@ pub fn build_agent_runner(
     reasoning: bool,
     timeout_secs: u64,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
+    tool_result_materializer: Arc<
+        crate::application::tool_result_materialization::ToolResultMaterializer,
+    >,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
     let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
@@ -50,6 +54,7 @@ pub fn build_agent_runner(
         hook_runner,
         reasoning,
         models_config,
+        tool_result_materializer,
     })
 }
 

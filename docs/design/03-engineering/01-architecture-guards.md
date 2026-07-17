@@ -201,7 +201,7 @@
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
   - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, from_args}`
   - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
-  - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory/Tool Result façade 符号集合；#983 已在 crate root 发布 `AtomicDatasetPort`、dataset PL 与 composition-only `FileSystemDatasetAdapter`，但 Memory 消费 deferred 至 #896，因此本 allowlist **不**提前登记这些符号。跨 crate 消费在 #896 出现真实调用点时再按窄 façade 治理；#983 未新增 path exception 或 Guard allowlist。过渡集合最终随 #880/#983/#883/#884 收敛。
+  - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory façade 符号集合；#884 已移除 Tool Result 的 `MAX_TOOL_RESULT_CHARS` / `persist_oversized_results`，Runtime 只经 `storage::api::AtomicBlobPort` 与 composition-only `FileSystemBlobAdapter` 接线，不再允许 Storage 业务 helper。#983 的 AtomicDataset 跨 crate 消费 deferred 至 #896，届时再按真实调用点治理；未新增 path exception 或 Guard allowlist。过渡集合最终随 #883/#896 收敛。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
 - **检查方式**：
   - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；

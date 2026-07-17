@@ -11,6 +11,38 @@ pub(super) fn default_max_agent_concurrency() -> usize {
     4
 }
 
+pub(super) fn default_tool_result_threshold_chars() -> usize {
+    50_000
+}
+
+pub(super) fn default_tool_result_preview_head_chars() -> usize {
+    2_000
+}
+
+pub(super) fn default_tool_result_preview_tail_chars() -> usize {
+    500
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolResultConfig {
+    #[serde(default = "default_tool_result_threshold_chars")]
+    pub threshold_chars: usize,
+    #[serde(default = "default_tool_result_preview_head_chars")]
+    pub preview_head_chars: usize,
+    #[serde(default = "default_tool_result_preview_tail_chars")]
+    pub preview_tail_chars: usize,
+}
+
+impl Default for ToolResultConfig {
+    fn default() -> Self {
+        Self {
+            threshold_chars: default_tool_result_threshold_chars(),
+            preview_head_chars: default_tool_result_preview_head_chars(),
+            preview_tail_chars: default_tool_result_preview_tail_chars(),
+        }
+    }
+}
+
 /// Tool configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsConfig {
@@ -29,6 +61,10 @@ pub struct ToolsConfig {
     /// Maximum number of concurrent tool executions (default: 10)
     #[serde(default = "default_max_tool_concurrency", alias = "maxConcurrency")]
     pub max_concurrency: usize,
+
+    /// Oversized tool-result materialization policy.
+    #[serde(default)]
+    pub tool_result: ToolResultConfig,
 }
 
 /// Agent role configuration — binds a named agent role to a specific LLM.
@@ -99,6 +135,7 @@ impl Default for ToolsConfig {
             disabled: Vec::new(),
             settings: HashMap::new(),
             max_concurrency: default_max_tool_concurrency(),
+            tool_result: ToolResultConfig::default(),
         }
     }
 }
@@ -152,6 +189,33 @@ mod tests {
             serde_json::to_value(snake).unwrap()["max_concurrency"],
             serde_json::json!(7)
         );
+    }
+
+    #[test]
+    fn tool_result_config_defaults_preserve_existing_materialization_behavior() {
+        let tools: ToolsConfig = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(tools.tool_result.threshold_chars, 50_000);
+        assert_eq!(tools.tool_result.preview_head_chars, 2_000);
+        assert_eq!(tools.tool_result.preview_tail_chars, 500);
+    }
+
+    #[test]
+    fn tool_result_config_accepts_snake_case_values() {
+        let tools: ToolsConfig = serde_json::from_str(
+            r#"{
+                "tool_result": {
+                    "threshold_chars": 12000,
+                    "preview_head_chars": 900,
+                    "preview_tail_chars": 300
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(tools.tool_result.threshold_chars, 12_000);
+        assert_eq!(tools.tool_result.preview_head_chars, 900);
+        assert_eq!(tools.tool_result.preview_tail_chars, 300);
     }
 
     #[test]

@@ -20,3 +20,4 @@ pub mod startup;
 pub(crate) mod testing;
 pub(crate) mod token_usage;
 pub mod tool_coordination;
+pub mod tool_result_materialization;

@@ -88,6 +88,8 @@ pub(super) struct SubAgentRun<'a> {
     pub resolved_spec: Option<String>,
     pub progress: Box<dyn Fn(Option<usize>, &str) + Send + Sync + 'a>,
     pub ctx_context_size: usize,
+    pub tool_result_materializer:
+        Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -537,7 +539,13 @@ impl RunLoopPort for SubAgentRun<'_> {
         self.progress_tools_done(turn_number, results.len());
         self.log_result_summaries(turn_number, &results, &call_info);
         self.log_tool_results(turn_number, &results, &call_info);
-        append_tool_results(&mut self.messages, results, &self.session_id);
+        append_tool_results(
+            self.tool_result_materializer.as_ref(),
+            &mut self.messages,
+            results,
+            &self.session_id,
+        )
+        .await;
         Ok(ToolStep::Continue)
     }
 

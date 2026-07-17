@@ -120,7 +120,30 @@ pub async fn from_args_with_workspace(
     let session_id = start_session(args.resume.clone());
     set_session_id(session_id.clone());
 
-    // 13. Agent runner 与 Main/Sub 共享同一个 per-Run registry。
+    // 13. Tool Result blob 与 materialization policy。
+    let blob_adapter = Arc::new(
+        storage::FileSystemBlobAdapter::new(share::config::paths::global_agents_dir())
+            .map_err(|error| SdkError::Init(error.to_string()))?,
+    );
+    let blob_store = Arc::new(
+        crate::adapters::tool_result_blob::AtomicBlobToolResultStore::new(
+            blob_adapter,
+            share::config::paths::global_agents_dir(),
+        ),
+    );
+    let tool_result_policy = snapshot.tool_result_policy();
+    let tool_result_materializer = Arc::new(
+        crate::application::tool_result_materialization::ToolResultMaterializer::new(
+            blob_store,
+            crate::application::tool_result_materialization::ToolResultMaterializationPolicy::new(
+                tool_result_policy.threshold_chars(),
+                tool_result_policy.preview_head_chars(),
+                tool_result_policy.preview_tail_chars(),
+            ),
+        ),
+    );
+
+    // 14. Agent runner 与 Main/Sub 共享同一个 per-Run registry 和 materializer。
     let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
     let agent_runner = build_agent_runner(
         Some(snapshot.models()),
@@ -130,6 +153,7 @@ pub async fn from_args_with_workspace(
         runtime_settings.reasoning,
         snapshot.api_timeout_secs(),
         active_run.clone(),
+        tool_result_materializer.clone(),
     );
 
     // 15. Prompt bundle
@@ -189,6 +213,7 @@ pub async fn from_args_with_workspace(
             system_prompt_text,
             user_context: prompt_parts.claude_md,
             agent_runner,
+            tool_result_materializer,
             task_store,
             skills_map,
             hook_runner,
