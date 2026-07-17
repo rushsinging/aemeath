@@ -15,11 +15,11 @@ use crate::application::chat::looping::engine::{DeniedCall, PolicyEngine};
 use crate::LOG_TARGET;
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
-use share::tool::ToolOutcome;
 use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::api::{ToolExecutionContext, ToolRegistry};
+use tools::ToolOutcome;
+use tools::{ToolExecutionContext, ToolRegistry};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
@@ -365,10 +365,10 @@ mod tests {
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
     use share::message::ContentBlock;
-    use share::tool::ToolOutcome;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
-    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::ToolOutcome;
+    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
     #[derive(Clone, Default)]
     struct RecordingSink {
@@ -443,7 +443,7 @@ mod tests {
     fn test_tool_context() -> ToolExecutionContext {
         let cwd = std::env::current_dir().unwrap();
         ToolExecutionContext {
-            resources: tools::api::ToolResources {
+            resources: tools::ToolResources {
                 agent_runner: None,
                 registry: None,
                 memory_config: share::config::MemoryConfig::default(),

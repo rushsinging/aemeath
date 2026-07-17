@@ -5,9 +5,9 @@ use crate::application::chat::looping::{
 };
 use hook::api::{HookData, ToolHookData};
 use share::config::hooks::HookEvent;
-use share::tool::ToolOutcome;
 use std::path::Path;
 use std::sync::Arc;
+use tools::ToolOutcome;
 
 use super::tools::{
     emit_json_hook_context, log_tool_result, run_post_tool_hooks, send_tool_call_status,
@@ -282,8 +282,7 @@ where
     let exec_results = if is_bash {
         // Set up progress channel for stdout streaming (mirrors agent_calls.rs
         // pattern).
-        let (prog_tx, mut prog_rx) =
-            tokio::sync::mpsc::channel::<share::tool::AgentProgressEvent>(32);
+        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
         let mut streaming_ctx = agent.ctx.clone();
         streaming_ctx.progress_tx = Some(prog_tx);
         let call_id = owned_call.id.clone();
@@ -427,7 +426,7 @@ mod tests {
     use serde_json::Value;
     use std::collections::HashSet;
     use std::sync::Arc;
-    use tools::api::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
     struct ConcurrencyFlagTool {
         name: &'static str,
@@ -466,7 +465,7 @@ mod tests {
     fn test_ctx() -> ToolExecutionContext {
         let cwd = std::env::current_dir().unwrap();
         ToolExecutionContext {
-            resources: tools::api::ToolResources {
+            resources: tools::ToolResources {
                 agent_runner: None,
                 registry: None,
                 memory_config: share::config::MemoryConfig::default(),

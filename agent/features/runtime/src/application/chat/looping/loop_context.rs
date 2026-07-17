@@ -7,7 +7,7 @@ use crate::application::chat::looping::events::ChatEventSink;
 use crate::application::chat::looping::input_gate::InputEventDrainPort;
 use crate::application::chat::looping::queue::QueueDrainPort;
 use std::sync::Arc;
-use tools::api::ToolRegistry;
+use tools::ToolRegistry;
 use workflow::api::ReasoningPort;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
@@ -61,8 +61,8 @@ where
     pub workspace: project::WorkspaceViews,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<share::tool::SessionReminders>>,
-    pub agent_runner: Option<Arc<dyn tools::api::AgentRunner>>,
+    pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
+    pub agent_runner: Option<Arc<dyn tools::AgentRunner>>,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub allow_all: bool,

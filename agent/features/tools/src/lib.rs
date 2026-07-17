@@ -3,9 +3,26 @@
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 pub const LOG_TARGET: &str = "aemeath:agent:tools";
 
-pub mod api;
-pub mod contract;
-pub mod gateway;
+mod adapters;
+mod domain;
 
-mod business;
-mod core;
+/// Published tool-domain DTO types (kept as a public module facade).
+pub use domain::types;
+
+// Published language: shared-kernel tool types, DTOs, and ports.
+pub use domain::{
+    AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal, AgentRunner,
+    AgentToolCallProgress, ImageData, PathAccess, PathKind, PolicyDecision, RegistryScopeName,
+    SessionReminder, SessionReminders, Tool, ToolCatalogPort, ToolCatalogSnapshot,
+    ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation,
+    ToolListProvider, ToolOutcome, ToolProfileName, ToolResources, ToolResult, TypedTool,
+    TypedToolAdapter, TypedToolResult,
+};
+
+// Gateway/OHS: tool catalog and registration wiring.
+pub use adapters::wiring::{
+    is_readonly_command, register_all_tools, register_all_tools_except_agent,
+    register_subagent_tools, wire_tools, DefaultToolCatalogGateway, McpConnectionManager,
+    McpServerConfig, McpTool, McpToolDef, McpTransportKind, ToolCatalog, ToolCatalogGateway,
+    ToolRegistry,
+};

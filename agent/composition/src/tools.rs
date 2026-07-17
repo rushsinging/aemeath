@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use ::tools::api::ToolCatalogGateway;
+use ::tools::ToolCatalogGateway;
 
 pub fn wire_tools() -> Arc<dyn ToolCatalogGateway> {
-    ::tools::api::wire_tools()
+    ::tools::wire_tools()
 }
 
 #[cfg(test)]
