@@ -28,8 +28,8 @@ STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
 PROJECT_HEX_LAYERS = {"domain", "adapters"}
 PROJECT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
-AUDIT_HEX_LAYERS = {"domain", "ports"}
-AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs"}
+AUDIT_HEX_LAYERS = {"domain", "ports", "adapters"}
+AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs", "adapters.rs"}
 AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.

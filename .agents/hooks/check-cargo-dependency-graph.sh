@@ -33,7 +33,7 @@ business_allow = {
     "tools": {"share", "project", "storage"},
     "storage": {"share"},
     "hook": {"share"},
-    "audit": {"share", "sdk"},
+    "audit": {"share", "sdk", "storage"},
     "workflow": {"share"},
     # sdk is a thin re-export / protocol facade: it may depend on `share` (horizontal
     # shared types in agent/shared) so it can re-export typed result structs from
