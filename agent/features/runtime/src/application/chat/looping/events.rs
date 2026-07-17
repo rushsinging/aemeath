@@ -105,6 +105,11 @@ pub enum RuntimeStreamEvent {
         elapsed_secs: u64,
         phase: String,
     },
+    ModelInvocationRetrying {
+        context: RuntimeTurnContext,
+        attempt: u32,
+        delay: std::time::Duration,
+    },
     Usage {
         input: u32,
         output: u32,

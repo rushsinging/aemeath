@@ -253,6 +253,15 @@ pub(crate) fn project_stream_event(
             elapsed_secs,
             phase,
         },
+        crate::application::chat::RuntimeStreamEvent::ModelInvocationRetrying {
+            context,
+            attempt,
+            delay,
+        } => ChatEvent::ModelInvocationRetrying {
+            context: turn_context_to_sdk(context),
+            attempt,
+            delay,
+        },
         crate::application::chat::RuntimeStreamEvent::Usage {
             input,
             output,

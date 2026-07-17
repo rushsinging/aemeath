@@ -322,84 +322,107 @@ where
         logging::context::set_current_role("default".to_string());
         logging::context::set_current_request_id(uuid::Uuid::now_v7().to_string());
 
-        let mut reducer = InvocationEventReducer::with_tool_identity(
-            self.sink.clone(),
-            self.tool_identity.clone(),
-            self.turn_context.clone(),
-        );
         let api_start = Instant::now();
-        let response = {
-            let progress_handle = reducer.progress_handle();
-            let stream_cancel = self.cancel.clone();
-            let stream_fut = self.client.invocation_stream(
-                &invocation_scope,
-                &effective_system_blocks,
-                &messages_for_api,
-                &tool_schemas,
-                &stream_cancel,
+        let mut coordinator =
+            crate::application::model_invocation::ModelInvocationCoordinator::new();
+        let resp = loop {
+            let mut reducer = InvocationEventReducer::with_tool_identity(
+                self.sink.clone(),
+                self.tool_identity.clone(),
+                self.turn_context.clone(),
             );
-            let waiting_sink = self.sink.clone();
-            let waiting_context = self.turn_context.clone();
-            let request_started_at = tokio::time::Instant::now();
-            let waiting_task = tokio::spawn(async move {
-                let mut next = request_started_at + Duration::from_secs(10);
-                let mut last_version = None;
-                loop {
-                    tokio::time::sleep_until(next).await;
-                    let snapshot = progress_handle.lock().unwrap().snapshot();
-                    if should_emit_model_stream_waiting(last_version, &snapshot) {
-                        waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                            context: waiting_context.clone(),
-                            elapsed_secs: request_started_at.elapsed().as_secs(),
-                            phase: snapshot.phase.to_string(),
-                        });
+            let response = {
+                let progress_handle = reducer.progress_handle();
+                let stream_cancel = self.cancel.clone();
+                let stream_fut = self.client.invocation_stream(
+                    &invocation_scope,
+                    &effective_system_blocks,
+                    &messages_for_api,
+                    &tool_schemas,
+                    &stream_cancel,
+                );
+                let waiting_sink = self.sink.clone();
+                let waiting_context = self.turn_context.clone();
+                let request_started_at = tokio::time::Instant::now();
+                let waiting_task = tokio::spawn(async move {
+                    let mut next = request_started_at + Duration::from_secs(10);
+                    let mut last_version = None;
+                    loop {
+                        tokio::time::sleep_until(next).await;
+                        let snapshot = progress_handle.lock().unwrap().snapshot();
+                        if should_emit_model_stream_waiting(last_version, &snapshot) {
+                            waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
+                                context: waiting_context.clone(),
+                                elapsed_secs: request_started_at.elapsed().as_secs(),
+                                phase: snapshot.phase.to_string(),
+                            });
+                        }
+                        last_version = Some(snapshot.visible_progress_version);
+                        next += Duration::from_secs(10);
                     }
-                    last_version = Some(snapshot.visible_progress_version);
-                    next += Duration::from_secs(10);
-                }
-            });
-            tokio::pin!(stream_fut);
-            let result = loop {
-                tokio::select! {
-                    stream = &mut stream_fut => {
-                        let mut stream = match stream {
-                            Ok(stream) => stream,
-                            Err(error) => break Err(error),
-                        };
-                        let mut terminal = None;
-                        while let Some(event) = stream.next().await {
-                            match reducer.apply(event) {
-                                Ok(Some(response)) => terminal = Some(Ok(response)),
-                                Ok(None) => {}
-                                Err(error) => terminal = Some(Err(error)),
+                });
+                tokio::pin!(stream_fut);
+                let result = loop {
+                    tokio::select! {
+                        stream = &mut stream_fut => {
+                            let mut stream = match stream {
+                                Ok(stream) => stream,
+                                Err(error) => break Err(error),
+                            };
+                            let mut terminal = None;
+                            while let Some(event) = stream.next().await {
+                                match reducer.apply(event) {
+                                    Ok(Some(response)) => terminal = Some(Ok(response)),
+                                    Ok(None) => {}
+                                    Err(error) => terminal = Some(Err(error)),
+                                }
+                                if terminal.is_some() {
+                                    break;
+                                }
                             }
-                            if terminal.is_some() {
-                                break;
+                            break terminal.unwrap_or_else(|| Err(provider::ProviderError::fatal(
+                                provider::ProviderErrorKind::Protocol,
+                                "provider stream ended without terminal event",
+                            )));
+                        }
+                        event = self.input_events.recv_next_input() => {
+                            if let Some(event) = event {
+                                self.queue_busy_event(event).await;
                             }
                         }
-                        break terminal.unwrap_or_else(|| Err(provider::ProviderError::fatal(
-                            provider::ProviderErrorKind::Protocol,
-                            "provider stream ended without terminal event",
-                        )));
                     }
-                    event = self.input_events.recv_next_input() => {
-                        if let Some(event) = event {
-                            self.queue_busy_event(event).await;
-                        }
-                    }
-                }
+                };
+                waiting_task.abort();
+                result
             };
-            waiting_task.abort();
-            result
+            match response {
+                Ok(response) => break response,
+                Err(error) if error.is_cancelled() || self.cancel.is_cancelled() => {
+                    return Err(LoopEngineError::Cancelled);
+                }
+                Err(error) => match coordinator
+                    .handle_failure(&error, reducer.saw_visible_delta(), &self.cancel)
+                    .await
+                {
+                    crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
+                        self.sink
+                            .try_send_event(RuntimeStreamEvent::ModelInvocationRetrying {
+                                context: self.turn_context.clone(),
+                                attempt,
+                                delay,
+                            });
+                    }
+                    crate::application::model_invocation::RetryStep::Cancelled => {
+                        return Err(LoopEngineError::Cancelled);
+                    }
+                    crate::application::model_invocation::RetryStep::Compact
+                    | crate::application::model_invocation::RetryStep::Fail => {
+                        return Err(LoopEngineError::Adapter(error.to_string()));
+                    }
+                },
+            }
         };
         let api_elapsed = api_start.elapsed().as_secs_f64();
-        let resp = match response {
-            Ok(response) => response,
-            Err(error) if error.is_cancelled() || self.cancel.is_cancelled() => {
-                return Err(LoopEngineError::Cancelled);
-            }
-            Err(error) => return Err(LoopEngineError::Adapter(error.to_string())),
-        };
 
         // Poll the non-blocking legacy queue at the model boundary. Busy user input is kept for a
         // fresh Run and never appended to this Run's model context.

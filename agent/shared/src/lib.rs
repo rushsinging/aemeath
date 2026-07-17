@@ -29,7 +29,6 @@ pub mod config;
 pub mod error;
 pub mod i18n;
 pub mod memory;
-pub mod memory_ops;
 pub mod message;
 pub mod reasoning;
 pub mod session_types;

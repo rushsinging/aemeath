@@ -107,6 +107,7 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         sdk::ChatEvent::BlockComplete { .. } => {}
         sdk::ChatEvent::Thinking { .. }
         | sdk::ChatEvent::ModelStreamWaiting { .. }
+        | sdk::ChatEvent::ModelInvocationRetrying { .. }
         | sdk::ChatEvent::TurnStarted { .. }
         | sdk::ChatEvent::MicrocompactDone { .. }
         | sdk::ChatEvent::StopHookBlocked { .. }

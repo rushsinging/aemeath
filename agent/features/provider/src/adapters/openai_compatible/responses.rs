@@ -99,9 +99,11 @@ impl OpenAICompatibleProvider {
                             HttpFailureKind::RateLimited | HttpFailureKind::Server => {
                                 AttemptDisposition::from_remaining(remaining)
                             }
-                            HttpFailureKind::ContextTooLong | HttpFailureKind::Client => {
-                                AttemptDisposition::FinalFailure
-                            }
+                            HttpFailureKind::Authentication
+                            | HttpFailureKind::PermissionDenied
+                            | HttpFailureKind::ContextTooLong
+                            | HttpFailureKind::ModelUnavailable
+                            | HttpFailureKind::Client => AttemptDisposition::FinalFailure,
                         },
                     };
                     // 单次记录：typed 分类决定 disposition 后，消费式
@@ -169,7 +171,10 @@ impl OpenAICompatibleProvider {
                                 });
                                 continue;
                             }
-                            HttpFailureKind::Client => {
+                            HttpFailureKind::Authentication
+                            | HttpFailureKind::PermissionDenied
+                            | HttpFailureKind::ModelUnavailable
+                            | HttpFailureKind::Client => {
                                 return Err(crate::LlmError::Api {
                                     error_type: status.to_string(),
                                     message: body.text().to_string(),
