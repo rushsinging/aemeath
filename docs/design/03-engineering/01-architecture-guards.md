@@ -72,14 +72,15 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
 | `context` | `share`, `provider`, `storage`, `sdk` |
 | `provider` | `share` |
-| `tools` | `share`, `project`, `storage` |
+| `tools` | `share`, `project`, `storage`, `task` |
 | `storage` | `share` |
+| `task` | ∅ |
 | `hook` | `share` |
 | `audit` | `share`, `sdk` |
 | `workflow` | `share` |
@@ -92,7 +93,8 @@
 >
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
-- **例外**：
+- **例外 / 已批准跨 BC 依赖**：
+  - `runtime/tools → task`：消费 Task-owned `TaskAccess` OHS 与 Published Language；`task` 反向依赖消费者仍被拒绝。
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。

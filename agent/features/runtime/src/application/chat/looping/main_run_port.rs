@@ -68,7 +68,8 @@ where
     pub(crate) tool_result_materializer:
         &'a crate::application::tool_result_materialization::ToolResultMaterializer,
     pub(crate) allow_all: bool,
-    pub(crate) task_store: &'a Arc<storage::TaskStore>,
+    /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
+    pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
     pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
@@ -202,7 +203,7 @@ where
     async fn project_done(&self, status: AgentRunStatus) {
         let outcome = self.outcome(status);
         log_agent_outcome(&outcome, self.session_id);
-        finish_completed_loop(&outcome, self.sink, &self.turn_context, self.task_store).await;
+        finish_completed_loop(&outcome, self.sink, &self.turn_context, &**self.task_access).await;
     }
 
     async fn rollback_cancelled(&mut self) {
@@ -281,7 +282,7 @@ where
             self.language,
             self.task_reminder_state,
             self.turn_count as u64,
-            self.task_store,
+            &**self.task_access,
             &self.chain.messages_flat(),
         )
         .await;
@@ -702,9 +703,8 @@ where
             .await;
         if has_task_mutation {
             let snapshot = crate::application::chat::looping::task_snapshot::build_task_snapshot(
-                self.task_store,
-            )
-            .await;
+                &**self.task_access,
+            );
             self.sink
                 .send_event(RuntimeStreamEvent::TasksSnapshot {
                     tasks: Box::new(snapshot),

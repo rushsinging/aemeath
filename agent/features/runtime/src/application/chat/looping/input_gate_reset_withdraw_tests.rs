@@ -10,6 +10,7 @@ use crate::application::chat::looping::input_gate::{
 use context::session::ChatChain;
 use sdk::ChatInputEvent;
 use share::message::Message;
+use task::TaskAccess;
 
 /// #391 S1-3：idle gate 收到 Reset → 清空 messages + 发 SessionReset，保持 idle。
 #[tokio::test]
@@ -21,6 +22,22 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
         ChatChain::from_flat_messages(vec![Message::user("old1"), Message::user("resp1")]);
 
     let task_store = test_task_store();
+    let task_access = task::TaskStore::new();
+    task_access
+        .create_batch(task::BatchCreateSpec::try_new("request".into()).unwrap(), 1)
+        .unwrap();
+    task_access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "authoritative".into(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -30,10 +47,16 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
         &mut chain,
         "seg",
         &task_store,
+        &task_access,
         true, // idle
     )
     .await;
 
+    assert!(
+        task_access.list().is_empty(),
+        "Reset must clear authoritative TaskAccess"
+    );
+    assert!(task_access.list_batches().is_empty());
     assert_eq!(outcome.decision, GateDecision::Proceed);
     assert!(
         chain.is_empty(),
@@ -67,6 +90,7 @@ async fn test_busy_gate_reset_defers_to_buffer() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false, // busy
     )
     .await;
@@ -99,6 +123,22 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
     let mut chain = ChatChain::from_flat_messages(vec![Message::user("old1")]);
 
     let task_store = test_task_store();
+    let task_access = task::TaskStore::new();
+    task_access
+        .create_batch(task::BatchCreateSpec::try_new("request".into()).unwrap(), 1)
+        .unwrap();
+    task_access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "authoritative".into(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -108,6 +148,7 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
         &mut chain,
         "seg",
         &task_store,
+        &task_access,
         true, // idle
     )
     .await;
@@ -129,6 +170,22 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
     let mut chain = ChatChain::from_flat_messages(Vec::new());
 
     let task_store = test_task_store();
+    let task_access = task::TaskStore::new();
+    task_access
+        .create_batch(task::BatchCreateSpec::try_new("request".into()).unwrap(), 1)
+        .unwrap();
+    task_access
+        .create_task(
+            task::TaskCreateSpec::try_new(
+                "authoritative".into(),
+                String::new(),
+                None,
+                task::TaskPriority::Normal,
+            )
+            .unwrap(),
+            2,
+        )
+        .unwrap();
     let outcome = run_loop_gate(
         GateKind::BeforeLlm,
         &mut buffer,
@@ -138,6 +195,7 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         &mut chain,
         "seg",
         &task_store,
+        &task_access,
         true, // idle
     )
     .await;
@@ -175,6 +233,7 @@ async fn test_withdraw_all_empty_buffer_is_noop() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         true,
     )
     .await;
@@ -210,6 +269,7 @@ async fn test_busy_gate_withdraw_all_executes_immediately() {
         &mut chain,
         "seg",
         &task_store,
+        &task::TaskStore::new(),
         false, // busy
     )
     .await;

@@ -5,7 +5,7 @@ use crate::LOG_TARGET;
 use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::{Path, PathBuf};
-use storage::{BatchStatus, TaskStore};
+use task::TaskAccess;
 
 const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
 
@@ -47,7 +47,7 @@ pub(crate) async fn finish_completed_loop<S>(
     outcome: &AgentRunOutcome,
     sink: &S,
     context: &RuntimeTurnContext,
-    task_store: &TaskStore,
+    access: &dyn TaskAccess,
 ) where
     S: ChatEventSink,
 {
@@ -58,14 +58,16 @@ pub(crate) async fn finish_completed_loop<S>(
         })
         .await;
 
-    if let Some(active) = task_store.active_list().await {
-        if task_store.is_batch_completed(active.id).await {
-            task_store
-                .set_batch_status(active.id, BatchStatus::Archived)
-                .await;
+    // #889：当 current batch 的全部任务完成时归档它。`all_completed` 与
+    // stale 阈值无关，此处传入 `0` 仅为满足 lifecycle_snapshot 签名。
+    if let Some(batch_id) = access.lifecycle_snapshot(0).all_completed {
+        if let Err(error) = access.archive_batch(batch_id) {
+            log::warn!(target: LOG_TARGET,
+                "[task_list_archive_failed] batch_id={batch_id}, error={error}"
+            );
+        } else {
             log::info!(target: LOG_TARGET,
-                "[task_list_archived] batch_id={}, status=archived, reason=all_tasks_completed",
-                active.id
+                "[task_list_archived] batch_id={batch_id}, status=archived, reason=all_tasks_completed"
             );
         }
     }

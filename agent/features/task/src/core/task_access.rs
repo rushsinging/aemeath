@@ -12,6 +12,11 @@ use crate::business::{
 pub trait TaskAccess: Send + Sync {
     fn revision(&self) -> TaskRevision;
 
+    /// Atomically clears the complete aggregate. A non-empty clear emits one
+    /// `TaskStoreCleared` event and advances revision once; an empty clear is a
+    /// no-op with no event/revision.
+    fn clear(&self) -> Result<TaskCommandResult<()>, TaskCommandError>;
+
     fn create_batch(
         &self,
         spec: BatchCreateSpec,
@@ -36,6 +41,18 @@ pub trait TaskAccess: Send + Sync {
         &self,
         id: TaskId,
         to: TaskStatus,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn set_subject(
+        &self,
+        id: TaskId,
+        subject: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn set_description(
+        &self,
+        id: TaskId,
+        description: String,
         updated_at: u64,
     ) -> Result<TaskCommandResult<Task>, TaskCommandError>;
     fn set_priority(
@@ -77,6 +94,7 @@ pub trait TaskAccess: Send + Sync {
     fn get(&self, id: TaskId) -> Option<Task>;
     fn list(&self) -> Vec<Task>;
     fn list_batches(&self) -> Vec<Batch>;
+    fn current_batch(&self) -> Option<BatchId>;
     fn stats(&self) -> TaskStoreStats;
     fn reminder_snapshot(&self) -> TaskReminderSnapshot;
     fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot;

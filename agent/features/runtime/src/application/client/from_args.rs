@@ -98,8 +98,10 @@ pub async fn from_args_with_workspace(
     );
 
     // 10. Tooling
+    // Legacy store 仅供持久化兼容（snapshot/restore、input_gate clear，#890/#891）。
     let task_store = Arc::new(TaskStore::new());
-    let _task_store_before = task_store.clone();
+    // #889：Runtime/Tool 日常状态唯一来源 —— low-privilege TaskAccess 端口。
+    let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
@@ -107,7 +109,7 @@ pub async fn from_args_with_workspace(
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let registry = {
         let reg = ToolRegistry::new();
-        tools_crate::register_all_tools(&reg, task_store.clone(), skills.clone());
+        tools_crate::register_all_tools(&reg, task_access.clone(), skills.clone());
         Arc::new(reg)
     };
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
@@ -215,6 +217,7 @@ pub async fn from_args_with_workspace(
             agent_runner,
             tool_result_materializer,
             task_store,
+            task_access,
             skills_map,
             hook_runner,
             memory_config,

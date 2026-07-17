@@ -4,8 +4,8 @@ set -euo pipefail
 # 功能：基于 cargo 元数据校验各 crate 的业务依赖是否落在显式白名单内。
 # 作用：固化 feature 依赖方向（cli→{composition,sdk}；runtime→全部 supporting；
 #       supporting→share；share/sdk→∅），默认拒绝未声明的业务依赖，防双向/横向乱依赖。
-# 例外（白名单内已批准）：tools→{project,storage}（§6.4.7 横向依赖登记）；
-#       composition→全部 feature（唯一装配根）。
+# 例外（白名单内已批准）：runtime/tools→task（Task-owned OHS/PL）；
+#       tools→{project,storage}（§6.4.7 横向依赖登记）；composition→全部 feature（唯一装配根）。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
@@ -15,23 +15,25 @@ import json
 import subprocess
 import sys
 
-FEATURE_CRATES = {"runtime", "project", "policy", "context", "provider", "tools", "storage", "hook", "audit", "update", "workflow"}
+FEATURE_CRATES = {"runtime", "project", "policy", "context", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
     "cli": {"composition", "sdk"},
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging", "update"},
-    "runtime": {"project", "policy", "context", "provider", "tools", "storage", "hook", "audit", "workflow", "share", "sdk", "logging"},
+    "runtime": {"project", "policy", "context", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share"},
     "context": {"share", "provider", "storage", "sdk"},
     "provider": {"share"},
-    # Approved horizontal dependencies: tools -> project/storage, via their crate-root façades.
-    "tools": {"share", "project", "storage"},
+    # Approved horizontal dependencies: tools -> project/storage and Task-owned OHS/PL.
+    "tools": {"share", "project", "storage", "task"},
     "storage": {"share"},
+    # Task owns its Published Language and OHS; it must not depend back on consumers.
+    "task": set(),
     "hook": {"share"},
     "audit": {"share", "sdk"},
     "workflow": {"share"},
@@ -69,6 +71,10 @@ def run_sanity() -> None:
         raise AssertionError("sanity allow failed: composition assembling runtime/share/sdk/provider")
     if validate_edges({"cli": {"composition", "sdk"}}, workspace):
         raise AssertionError("sanity allow failed: CLI composition + sdk")
+    if validate_edges({"runtime": {"task"}, "tools": {"task"}}, workspace):
+        raise AssertionError("sanity allow failed: Runtime/Tools consuming Task-owned OHS")
+    if not validate_edges({"task": {"runtime"}}, workspace):
+        raise AssertionError("sanity block failed: Task must not depend on Runtime consumer")
     if not validate_edges({"cli": {"runtime"}}, workspace):
         raise AssertionError("sanity block failed: CLI direct runtime dependency")
 
