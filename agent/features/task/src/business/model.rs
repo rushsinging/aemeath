@@ -257,6 +257,23 @@ pub struct Task {
     started_at: Option<u64>,
     completed_at: Option<u64>,
 }
+pub(crate) struct TaskSnapshotFields {
+    pub(crate) id: TaskId,
+    pub(crate) batch: BatchId,
+    pub(crate) subject: String,
+    pub(crate) description: String,
+    pub(crate) active_form: Option<String>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) blocked_by: Vec<TaskId>,
+    pub(crate) status: TaskStatus,
+    pub(crate) priority: TaskPriority,
+    pub(crate) created_at: u64,
+    pub(crate) updated_at: u64,
+    pub(crate) started_at: Option<u64>,
+    pub(crate) completed_at: Option<u64>,
+}
+
 impl Task {
     pub(crate) fn create(
         id: TaskId,
@@ -308,6 +325,25 @@ impl Task {
             completed_at: (status == TaskStatus::Completed).then_some(timestamp),
         }
     }
+    pub(crate) fn from_snapshot(fields: TaskSnapshotFields) -> Self {
+        Self {
+            id: fields.id,
+            batch: fields.batch,
+            subject: fields.subject,
+            description: fields.description,
+            active_form: fields.active_form,
+            session_id: fields.session_id,
+            tags: fields.tags,
+            blocked_by: fields.blocked_by,
+            blocks: Vec::new(),
+            status: fields.status,
+            priority: fields.priority,
+            created_at: fields.created_at,
+            updated_at: fields.updated_at,
+            started_at: fields.started_at,
+            completed_at: fields.completed_at,
+        }
+    }
     pub fn id(&self) -> TaskId {
         self.id
     }
@@ -334,6 +370,13 @@ impl Task {
     }
     pub fn blocks(&self) -> &[TaskId] {
         &self.blocks
+    }
+    /// Restores the derived reverse dependency index without changing the
+    /// persisted task timestamps. Snapshot validation calls this only after all
+    /// `blocked_by` edges have been accepted.
+    pub(crate) fn restore_blocks(&mut self, mut blocks: Vec<TaskId>) {
+        blocks.sort_unstable();
+        self.blocks = blocks;
     }
     pub(crate) fn add_blocked_by(&mut self, id: TaskId, updated_at: u64) {
         if !self.blocked_by.contains(&id) {
@@ -480,6 +523,23 @@ impl Batch {
             status,
             created_at: 0,
             last_active_turn: 0,
+            silence_turns,
+        }
+    }
+    pub(crate) fn from_snapshot(
+        id: BatchId,
+        summary: Option<String>,
+        status: BatchStatus,
+        created_at: u64,
+        last_active_turn: u64,
+        silence_turns: u64,
+    ) -> Self {
+        Self {
+            id,
+            summary,
+            status,
+            created_at,
+            last_active_turn,
             silence_turns,
         }
     }
