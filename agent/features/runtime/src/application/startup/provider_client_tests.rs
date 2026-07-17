@@ -1,4 +1,5 @@
 use super::*;
+use provider::ProviderDriverKind;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 
 fn resolved_model(
@@ -181,34 +182,12 @@ fn test_resolve_base_url_returns_none_when_missing() {
 }
 
 #[test]
-fn test_openai_config_skips_anthropic() {
-    let result = openai_config(ProviderDriverKind::Anthropic, "anthropic");
-
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_openai_config_uses_source_key_for_openai_compatible() {
-    let result = openai_config(ProviderDriverKind::Zhipu, "Zhipu").unwrap();
-
-    assert_eq!(result.source_key, "Zhipu");
-    assert_eq!(result.driver, ProviderDriverKind::Zhipu);
-}
-
-#[test]
-fn test_openai_config_skips_ollama() {
-    let result = openai_config(ProviderDriverKind::Ollama, "ollama");
-
-    assert!(result.is_none());
-}
-
-#[test]
 fn test_build_llm_client_ollama_constructs_ollama_provider() {
     let resolved = resolved_model(ProviderDriverKind::Ollama, "", "", "ollama");
     let settings = runtime_settings(false);
 
     let client = build_llm_client(
-        ProviderDriverKind::Ollama,
+        ProviderDriverKind::Ollama.as_str(),
         "ollama".to_string(),
         Some("http://localhost:11434".to_string()),
         "llama3.2".to_string(),
@@ -216,7 +195,8 @@ fn test_build_llm_client_ollama_constructs_ollama_provider() {
         &settings,
         None,
         30,
-    );
+    )
+    .expect("valid provider client config");
 
     assert_eq!(client.provider_name(), "ollama");
 }
@@ -251,7 +231,7 @@ fn test_build_llm_client_sets_reasoning_level() {
 
     let settings = runtime_settings(true);
     let client = build_llm_client(
-        ProviderDriverKind::OpenAI,
+        ProviderDriverKind::OpenAI.as_str(),
         "key".to_string(),
         None,
         "model-id".to_string(),
@@ -259,7 +239,8 @@ fn test_build_llm_client_sets_reasoning_level() {
         &settings,
         None,
         30,
-    );
+    )
+    .expect("valid provider client config");
 
     assert_eq!(
         client.default_scope().effective_reasoning(),
@@ -273,7 +254,7 @@ fn test_build_llm_client_reasoning_false_sets_off() {
 
     let settings = runtime_settings(false);
     let client = build_llm_client(
-        ProviderDriverKind::OpenAI,
+        ProviderDriverKind::OpenAI.as_str(),
         "key".to_string(),
         None,
         "model-id".to_string(),
@@ -281,7 +262,8 @@ fn test_build_llm_client_reasoning_false_sets_off() {
         &settings,
         None,
         30,
-    );
+    )
+    .expect("valid provider client config");
 
     assert_eq!(
         client.default_scope().effective_reasoning(),
@@ -296,7 +278,7 @@ fn test_build_llm_client_reasoning_effort_overrides_bool_default() {
 
     let settings = runtime_settings_with_effort(true, "xhigh");
     let client = build_llm_client(
-        ProviderDriverKind::Zhipu,
+        ProviderDriverKind::Zhipu.as_str(),
         "key".to_string(),
         None,
         "model-id".to_string(),
@@ -304,7 +286,8 @@ fn test_build_llm_client_reasoning_effort_overrides_bool_default() {
         &settings,
         None,
         30,
-    );
+    )
+    .expect("valid provider client config");
 
     assert_eq!(
         client.default_scope().effective_reasoning(),
@@ -319,7 +302,7 @@ fn test_build_llm_client_reasoning_effort_clamped_to_provider_ceiling() {
 
     let settings = runtime_settings_with_effort(true, "max");
     let client = build_llm_client(
-        ProviderDriverKind::OpenAI,
+        ProviderDriverKind::OpenAI.as_str(),
         "key".to_string(),
         None,
         "model-id".to_string(),
@@ -327,7 +310,8 @@ fn test_build_llm_client_reasoning_effort_clamped_to_provider_ceiling() {
         &settings,
         None,
         30,
-    );
+    )
+    .expect("valid provider client config");
 
     assert_eq!(
         client.default_scope().effective_reasoning(),
@@ -342,7 +326,7 @@ fn test_build_llm_client_reasoning_effort_off_disables_thinking() {
 
     let settings = runtime_settings_with_effort(true, "off");
     let client = build_llm_client(
-        ProviderDriverKind::Zhipu,
+        ProviderDriverKind::Zhipu.as_str(),
         "key".to_string(),
         None,
         "model-id".to_string(),
@@ -350,7 +334,8 @@ fn test_build_llm_client_reasoning_effort_off_disables_thinking() {
         &settings,
         None,
         30,
-    );
+    )
+    .expect("valid provider client config");
 
     assert_eq!(
         client.default_scope().effective_reasoning(),

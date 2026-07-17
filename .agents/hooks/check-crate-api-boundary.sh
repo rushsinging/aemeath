@@ -65,7 +65,6 @@ ROOT_ACCESS_ALLOW = {
         "ModelCapability",
         "ModelId",
         "ModelToolSchema",
-        "OpenAIProviderConfig",
         "ProviderCompletion",
         "ProviderContentBlock",
         "ProviderDriverKind",

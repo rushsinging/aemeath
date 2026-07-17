@@ -58,6 +58,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn driver_spec_rejects_unknown_driver_instead_of_falling_back_to_openai() {
+        let error = crate::domain::driver_acl::DriverSpec::parse("unknown", None)
+            .expect_err("unknown driver must fail closed");
+        assert!(matches!(
+            error,
+            crate::domain::driver_acl::DriverConfigError::UnknownDriver { .. }
+        ));
+    }
+
+    #[test]
+    fn driver_spec_maps_three_protocol_families() {
+        use crate::domain::driver_acl::{ApiStyle, DriverSpec, ProtocolFamily};
+
+        assert_eq!(
+            DriverSpec::parse("anthropic", None).unwrap().family(),
+            ProtocolFamily::AnthropicMessages
+        );
+        assert_eq!(
+            DriverSpec::parse("openai", Some("responses"))
+                .unwrap()
+                .family(),
+            ProtocolFamily::OpenAi(ApiStyle::Responses)
+        );
+        assert_eq!(
+            DriverSpec::parse("ollama", None).unwrap().family(),
+            ProtocolFamily::OllamaNative
+        );
+    }
+
+    #[test]
+    fn driver_spec_rejects_responses_style_for_non_openai_families() {
+        use crate::domain::driver_acl::{DriverConfigError, DriverSpec};
+
+        for driver in ["anthropic", "ollama"] {
+            assert!(matches!(
+                DriverSpec::parse(driver, Some("responses")),
+                Err(DriverConfigError::UnsupportedApiStyle { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn test_from_str_openai() {
         assert_eq!(
             ProviderDriverKind::parse("openai"),
