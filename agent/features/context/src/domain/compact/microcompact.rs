@@ -3,9 +3,9 @@
 //! 在 auto-compact（LLM 摘要）之前、budget reduction 之后运行。
 //! 纯规则判断，不调用 LLM，运行成本接近零。
 //!
-//! 两种入口：
-//! - **主循环**：`microcompact_chain(&mut ChatChain)` — 按 segment 边界保护最近 3 个大 loop。
-//! - **sub-agent**：`microcompact_messages(&mut [Message])` — 按 User turn 保护最近 2 轮。
+//! 两种入口都保护最近 N 个真实 user turn（= N 个 Run）：
+//! - **主循环**：`microcompact_chain(&mut ChatChain)` — 保护最近 2 个 Run。
+//! - **sub-agent**：`microcompact_messages(&mut [Message])` — 保护最近 2 个 Run。
 
 use crate::domain::session::ChatChain;
 use share::message::{ContentBlock, Message, MessageSource, Role};
@@ -23,11 +23,8 @@ pub const EXPLORATORY_TOOLS: &[&str] = &[
     "ToolSearch",
 ];
 
-/// 主循环：保护最近 N 个 segment 的探索类 ToolResult 不被清理。
-const PROTECT_RECENT_SEGMENTS: usize = 3;
-
-/// Sub-agent：保护最近 N 轮的 ToolResult 不被清理。
-/// "轮"以真实 User message 为分界（排除 ToolResult / 系统注入）。
+/// 保护最近 N 个真实 user turn（= N 个 Run）的 ToolResult 不被清理。
+/// 主循环与 sub-agent 共用同一阈值，保证行为一致。
 const PROTECT_RECENT_TURNS: usize = 2;
 
 /// 占位符模板。
@@ -35,30 +32,61 @@ const PLACEHOLDER_TEMPLATE: &str = "[Old tool result cleared (was {n} chars)]";
 
 // ── 主循环入口 ──────────────────────────────────────
 
-/// 对 ChatChain 执行 microcompact：保护最近 `PROTECT_RECENT_SEGMENTS` 个 segment，
-/// 折叠更早 segment 中的探索类 ToolResult 为占位符。
+/// 对 ChatChain 执行 microcompact：保护最近 `PROTECT_RECENT_TURNS` 个 Run（真实 user turn），
+/// 折叠更早 Run 中的探索类 ToolResult 为占位符。
 ///
 /// 返回被清理的 ToolResult 数量。
 pub fn microcompact_chain(chain: &mut ChatChain) -> usize {
-    let segments = chain.active_segments();
-    if segments.len() <= PROTECT_RECENT_SEGMENTS {
+    // 扁平化所有 active messages，按 user turn 计算保护边界
+    let flat: Vec<&Message> = chain
+        .active_segments()
+        .iter()
+        .flat_map(|seg| seg.messages.iter())
+        .collect();
+    if flat.len() <= 4 {
         return 0;
+    }
+
+    // 从末尾向前数 PROTECT_RECENT_TURNS 个真实 user turn，得到扁平 index 保护边界
+    let mut user_count = 0usize;
+    let mut protect_from = 0usize;
+    for (i, msg) in flat.iter().enumerate().rev() {
+        if is_real_user_turn(msg) {
+            user_count += 1;
+            if user_count == PROTECT_RECENT_TURNS {
+                protect_from = i;
+                break;
+            }
+        }
+    }
+    if protect_from == 0 && user_count < PROTECT_RECENT_TURNS {
+        return 0; // 不够 2 个 turn，整条链都在保护范围内
+    }
+    if protect_from == 0 {
+        return 0; // protect_from=0 表示保护起点在第一条，无可清理
     }
 
     // 建立 tool_use_id → tool_name 映射（全链扫描）
     let tool_names = build_tool_name_map_flat(chain);
 
+    // 计算扁平保护边界对应的全局 message index，然后映射回 segment/message 双层 index
     let mut cleared = 0;
-    let protect_from_seg = segments.len() - PROTECT_RECENT_SEGMENTS;
+    let mut global_idx = 0usize;
+    let mut reached_protect = false;
 
-    for (seg_idx, seg) in chain.active_segments_mut().iter_mut().enumerate() {
-        if seg_idx >= protect_from_seg {
+    for seg in chain.active_segments_mut().iter_mut() {
+        if reached_protect {
             break;
         }
         for msg in &mut seg.messages {
+            if global_idx >= protect_from {
+                reached_protect = true;
+                break;
+            }
             for block in &mut msg.content {
                 cleared += clear_if_exploratory(block, &tool_names);
             }
+            global_idx += 1;
         }
     }
 
@@ -498,19 +526,19 @@ mod tests {
     }
 
     #[test]
-    fn test_microcompact_chain_protects_recent_3_segments() {
-        // 5 segments, each with 1 Read result
+    fn test_microcompact_chain_protects_recent_2_runs() {
+        // 5 segments, each = 1 Run (user + assistant + Read result)
+        // 保护最近 2 个 Run（user turn），清理前 3 个
         let mut chain = make_chain(5, 1);
         let cleared = microcompact_chain(&mut chain);
-        // 最近 3 个保护，前 2 个折叠
-        assert_eq!(cleared, 2);
+        assert_eq!(cleared, 3, "应清理前 3 个 Run 的探索类 ToolResult");
     }
 
     #[test]
-    fn test_microcompact_chain_noop_with_few_segments() {
-        let mut chain = make_chain(3, 1);
+    fn test_microcompact_chain_noop_with_few_runs() {
+        // 仅 2 个 segment = 2 个 Run，全部在保护范围内
+        let mut chain = make_chain(2, 1);
         let cleared = microcompact_chain(&mut chain);
-        // 仅 3 个 segment，全部保护
         assert_eq!(cleared, 0);
     }
 
