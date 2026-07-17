@@ -32,10 +32,10 @@ use crate::application::loop_engine::{
     split_input_events, LoopEngineError, LoopInput, ModelStep, RunLoopPort, ToolGuardDecision,
     ToolStep,
 };
-use crate::application::reasoning_graph::{GraphSignal, ReasoningGraph};
 use crate::domain::agent_run::RunDomainEvent;
 use crate::LOG_TARGET;
 use context::session::ChatChain;
+use workflow::{GraphSignal, ReasoningGraph};
 
 /// Main-chat adapter for the shared run loop.
 ///
