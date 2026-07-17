@@ -31,22 +31,16 @@
 //! |------|------|
 //! | `panic.log` | panic_hook.rs 直写，不纳入 UnifiedLogger |
 
-pub mod context;
-pub mod format;
-pub mod rotation;
-#[cfg(test)]
-pub mod target_guard;
-pub mod unified_logger;
+mod adapters;
+mod domain;
 
-pub use context::{
+pub use adapters::{
     app_version, boot_ts, current_chat_id, current_model, current_provider, current_request_id,
-    current_role, current_turn, session_id, set_app_version, set_boot_ts, set_current_chat_id,
-    set_current_model, set_current_provider, set_current_request_id, set_current_role,
-    set_current_turn, set_session_id,
+    current_role, current_turn, is_rotated_log_path, rotated_path, session_id, set_app_version,
+    set_boot_ts, set_current_chat_id, set_current_model, set_current_provider,
+    set_current_request_id, set_current_role, set_current_turn, set_session_id,
+    timestamp_local_rfc3339, timestamp_rfc3339, OutputMode, UnifiedLogger,
 };
-pub use format::timestamp_local_rfc3339;
-pub use rotation::{is_rotated_log_path, rotated_path, timestamp_rfc3339};
-pub use unified_logger::{OutputMode, UnifiedLogger};
 
 /// 解析 `level` 字符串为 `log::LevelFilter`，解析失败时回退到 `Warn`。
 pub fn level_filter_from_str(level: &str) -> log::LevelFilter {

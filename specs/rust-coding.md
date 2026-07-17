@@ -77,7 +77,7 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 - **NEVER** 在生产代码中使用裸 `log::xxx!` 调用（不带 `target:`）。
 - **MUST** TUI 层使用 `crate::tui::log_xxx!` 宏（自动设置 `target: "cli::tui"`）。
 - **SHOULD** target 前缀与 crate 名一致（runtime crate 用 `runtime::`，provider crate 用 `provider::`，以此类推）。
-- 架构守卫（`target_guard.rs`）在 CI 中扫描全仓库确保合规。
+- 架构守卫（`packages/global/logging/src/domain/routing_guard.rs`）在 CI 中扫描全仓库确保合规。
 
 ## 测试规范
 
