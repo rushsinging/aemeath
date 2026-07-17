@@ -121,29 +121,7 @@ fn provider_error_from_llm(error: crate::LlmError) -> crate::ProviderError {
 }
 
 fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
-    match failure {
-        HttpAttemptFailure::Cancelled => crate::ProviderError::cancelled(),
-        HttpAttemptFailure::Network { source, kind, .. } => crate::ProviderError::fatal(
-            match kind {
-                NetworkFailureKind::Timeout => crate::ProviderErrorKind::Timeout,
-                _ => crate::ProviderErrorKind::Network,
-            },
-            source.to_string(),
-        ),
-        HttpAttemptFailure::Http {
-            status, kind, body, ..
-        } => {
-            let error_kind = match kind {
-                HttpFailureKind::RateLimited => crate::ProviderErrorKind::RateLimited,
-                HttpFailureKind::ContextTooLong => crate::ProviderErrorKind::ContextTooLong,
-                HttpFailureKind::Server => crate::ProviderErrorKind::UpstreamUnavailable,
-                HttpFailureKind::Client => crate::ProviderErrorKind::InvalidRequest,
-            };
-            let mut error = crate::ProviderError::fatal(error_kind, body.text());
-            error.provider_code = Some(status.to_string());
-            error
-        }
-    }
+    failure.into_provider_error()
 }
 
 #[async_trait]
@@ -310,9 +288,11 @@ impl LlmProvider for OllamaProvider {
                             HttpFailureKind::RateLimited | HttpFailureKind::Server => {
                                 AttemptDisposition::from_remaining(remaining)
                             }
-                            HttpFailureKind::ContextTooLong | HttpFailureKind::Client => {
-                                AttemptDisposition::FinalFailure
-                            }
+                            HttpFailureKind::ContextTooLong
+                            | HttpFailureKind::Client
+                            | HttpFailureKind::Authentication
+                            | HttpFailureKind::PermissionDenied
+                            | HttpFailureKind::ModelUnavailable => AttemptDisposition::FinalFailure,
                         },
                     };
                     // 单次记录：typed 分类决定 disposition 后，消费式
@@ -383,7 +363,10 @@ impl LlmProvider for OllamaProvider {
                                 });
                                 continue;
                             }
-                            HttpFailureKind::Client => {
+                            HttpFailureKind::Client
+                            | HttpFailureKind::Authentication
+                            | HttpFailureKind::PermissionDenied
+                            | HttpFailureKind::ModelUnavailable => {
                                 return Err(crate::LlmError::Api {
                                     error_type: status.to_string(),
                                     message: body.text().to_string(),
