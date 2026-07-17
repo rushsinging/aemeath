@@ -2,34 +2,11 @@
 //!
 //! 所有日志（诊断 + 审计）统一走 `log::log!` → `UnifiedLogger::log()` → `format_diag_json_line`。
 //!
-//! ## 文件路由（按 target 前缀匹配）
+//! ## 文件路由
 //!
-//! | 文件 | target 前缀 | 来源 |
-//! |------|-------------|------|
-//! | `aemeath.log` | 兜底 | shared/composition + 其他 |
-//! | `tui.log` | `aemeath:tui` | cli/tui |
-//! | `shared.log` | `aemeath:shared` | shared 层 |
-//! | `composition.log` | `aemeath:composition` | composition 层 |
-//! | `agent-provider.log` | `aemeath:agent:provider` | provider crate + LLM 输入/输出 |
-//! | `agent-runtime.log` | `aemeath:agent:runtime` | runtime crate |
-//! | `agent-tools.log` | `aemeath:agent:tools` | tools crate |
-//! | `agent-prompt.log` | `aemeath:agent:prompt` | prompt crate |
-//! | `agent-hook.log` | `aemeath:agent:hook` | hook crate |
-//! | `agent-storage.log` | `aemeath:agent:storage` | storage 层 |
-//! | `agent-project.log` | `aemeath:agent:project` | project 层 |
-//! | `agent-policy.log` | `aemeath:agent:policy` | policy 层 |
-//! | `agent-audit.log` | `aemeath:agent:audit` | audit 层 |
-//!
-//! ## 输出模式
-//!
-//! - `File`（默认）：写入上述日志文件。
-//! - `Stderr`：所有日志统一输出到 stderr（JSON Lines 格式）。
-//!
-//! ## 不变
-//!
-//! | 文件 | 说明 |
-//! |------|------|
-//! | `panic.log` | panic_hook.rs 直写，不纳入 UnifiedLogger |
+//! 合法 target、owner、sink ID 与文件名由私有 `domain::routing::TargetCatalog` 唯一定义；
+//! `UnifiedLogger` 只消费 catalog。未知 target 写入 `aemeath.log` 并限频报告到 stderr。
+//! `panic.log` 由 panic hook 直写，不纳入 UnifiedLogger。
 
 mod adapters;
 mod domain;

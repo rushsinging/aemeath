@@ -3,32 +3,21 @@
 > 路径触发：`packages/global/logging/**` —— 日志基础设施（UnifiedLogger、14 字段 schema、target 路由）
 > 场景触发：新增任何 `log::xxx!` 调用、修改日志字段或路由、新增日志文件
 
-**Scope**：日志 target 命名、13 字段 JSON Lines schema、日志级别策略、preview/脱敏策略。
+**Scope**：日志 target 命名、14 字段 JSON Lines schema、日志级别策略、preview/脱敏策略。
 **不适用**：日志 crate 内部实现细节（rotation、context 全局变量）见 `packages/global/logging/src/` 源码。
 
 ## target 命名
 
-- 统一前缀 `aemeath:`，三级结构 `aemeath:<layer>[:<feature>]`，最长到 `aemeath:agent:runtime`。
-- 所有 `log::xxx!` 调用的 target 值 **MUST** ∈ 下面白名单，**NEVER** 使用旧前缀（如 `runtime::`、`cli::`、`tools::`）。
+- 统一前缀 `aemeath:`，当前使用二级或三级结构，例如 `aemeath:context`、`aemeath:agent:runtime`。
+- 所有 `log::xxx!` 调用的 target 值 **MUST** 来自 `packages/global/logging/src/domain/routing.rs` 的 TargetCatalog，**NEVER** 使用旧前缀（如 `runtime::`、`cli::`、`tools::`）。
 - 各 crate **MUST** 在 `lib.rs` 定义 `pub const LOG_TARGET: &str = "aemeath:<target>"`，调用方 **MUST** import 此常量，**NEVER** 硬编码 target 字符串。
 - 守卫脚本 `.agents/hooks/check-log-target-prefix.sh` 强制检查。
 
-### 12 个合法 target 白名单
+### TargetCatalog
 
-| # | target | 说明 |
-|---|--------|------|
-| 1 | `aemeath:tui` | TUI / CLI 入口 |
-| 2 | `aemeath:shared` | shared 层（横切基础设施） |
-| 3 | `aemeath:composition` | composition 组合根 |
-| 4 | `aemeath:agent:provider` | provider HTTP / stream 实现 + LLM 输入/输出 |
-| 5 | `aemeath:agent:runtime` | agent 循环、tool 执行编排 |
-| 6 | `aemeath:agent:tools` | Tool trait、ToolRegistry、MCP |
-| 7 | `aemeath:agent:prompt` | Guidance 系统、系统提示 |
-| 8 | `aemeath:agent:hook` | hook 执行 |
-| 9 | `aemeath:agent:storage` | memory、task、history 持久化 |
-| 10 | `aemeath:agent:project` | worktree 工作区上下文 |
-| 11 | `aemeath:agent:policy` | 权限评估 |
-| 12 | `aemeath:agent:audit` | 审计 |
+合法 target、owner、sink ID 和日志文件名只在 `packages/global/logging/src/domain/routing.rs` 定义一次。当前 catalog 注册 TUI、Shared、Composition、LLM API Error、Provider、Runtime、Tools、Prompt、Hook、Storage、Project、Policy、Audit 诊断、Update、Workflow 与 Context。Config、Memory、Task 在出现独立生产 target 前 **NEVER** 预建空条目；其真实消费迁移由 #941 承接。
+
+下表是 TargetCatalog 的非规范性可读投影；代码 catalog 是唯一真相，测试负责校验 target、sink ID 与文件名唯一。
 
 ## 文件映射表
 
@@ -48,7 +37,11 @@ UnifiedLogger 按 target 前缀最长匹配路由到日志文件（JSON Lines，
 | 10 | `aemeath:agent:project` | `agent-project.log` | `agent/features/project` | worktree 进入/退出/持久化 |
 | 11 | `aemeath:agent:policy` | `agent-policy.log` | `agent/features/policy` | 权限评估决策 |
 | 12 | `aemeath:agent:audit` | `agent-audit.log` | `agent/features/audit` | 审计事件 |
-| — | 兜底 | `aemeath.log` | 不匹配任何白名单 target | 硬兜底 |
+| 13 | `aemeath:agent:update` | `agent-update.log` | `agent/features/update` | 更新检查与安装诊断 |
+| 14 | `aemeath:agent:workflow` | `agent-workflow.log` | `agent/features/workflow` | Reasoning Graph / effort 诊断 |
+| 15 | `aemeath:context` | `context.log` | `agent/features/context` | Context Management 诊断 |
+| 16 | `aemeath:llm-api-error` | `llm-api-error.log` | `agent/features/provider` | 脱敏后的 LLM API 失败诊断 |
+| — | 兜底 | `aemeath.log` | 未注册 target | 硬兜底并限频 direct stderr 报告 |
 | — | `panic.log` | `panic.log` | panic_hook.rs 直写 | panic 信息（不纳入 UnifiedLogger） |
 
 ### 已废弃文件

@@ -3,26 +3,10 @@
 //! 确保各 crate 的 `log::xxx!` 调用正确携带 `target:` 参数，
 //! 避免日志被路由到错误的文件。
 
+use super::routing::TargetSpec;
+use super::TargetCatalog;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// 合法 target 白名单 —— 所有 `LOG_TARGET` 常量的值。
-/// 每条必须以 `aemeath:` 开头，最多 3 段（`aemeath:<domain>:<crate>` 或 `aemeath:<name>`）。
-const ALLOWED_TARGETS: &[&str] = &[
-    "aemeath:tui",
-    "aemeath:composition",
-    "aemeath:shared",
-    "aemeath:llm-api-error",
-    "aemeath:agent:policy",
-    "aemeath:agent:project",
-    "aemeath:agent:hook",
-    "aemeath:agent:storage",
-    "aemeath:agent:provider",
-    "aemeath:agent:audit",
-    "aemeath:agent:prompt",
-    "aemeath:agent:runtime",
-    "aemeath:agent:tools",
-];
 
 /// 递归收集目录下所有 `.rs` 文件。
 fn rust_files_under(path: &Path) -> Vec<PathBuf> {
@@ -129,8 +113,17 @@ fn is_valid_target(target: &str) -> bool {
     if parts.len() > 3 {
         return false;
     }
-    // 必须在白名单内
-    ALLOWED_TARGETS.contains(&target)
+    TargetCatalog::exact(target).is_some()
+}
+
+fn extract_target_constant(line: &str) -> Option<String> {
+    let declaration = line.trim();
+    if !declaration.contains("const ") || !declaration.contains("TARGET") {
+        return None;
+    }
+    let value = declaration.split_once('=')?.1.trim();
+    let value = value.strip_prefix('"')?;
+    Some(value.split_once('"')?.0.to_string())
 }
 
 /// 检查源码中所有 `target: "xxx"` 字符串字面量是否合规。
@@ -141,7 +134,9 @@ fn validate_target_values(source: &str) -> Vec<String> {
         if trimmed.starts_with("//") || trimmed.starts_with("/*") {
             continue;
         }
-        if let Some(target_val) = extract_target_value(line) {
+        if let Some(target_val) =
+            extract_target_value(line).or_else(|| extract_target_constant(line))
+        {
             if !is_valid_target(&target_val) {
                 violations.push(format!("invalid target: \"{}\"", target_val));
             }
@@ -194,7 +189,7 @@ mod tests {
                 target_violations.is_empty(),
                 "{} production code uses invalid log target string literal.\nAllowed: {:#?}\nViolations:\n{}",
                 file.display(),
-                ALLOWED_TARGETS,
+                TargetCatalog::specs(),
                 target_violations.join("\n")
             );
         }
@@ -241,20 +236,21 @@ mod tests {
     }
 
     #[test]
-    fn allowed_targets_whitelist_is_valid() {
-        // 自检：白名单中每个 target 必须以 aemeath: 开头且最多 3 段
-        for target in ALLOWED_TARGETS {
-            assert!(
-                target.starts_with("aemeath:"),
-                "ALLOWED_TARGETS entry '{}' must start with 'aemeath:'",
-                target
-            );
-            let parts: Vec<&str> = target.split(':').collect();
-            assert!(
-                parts.len() <= 3,
-                "ALLOWED_TARGETS entry '{}' has more than 3 colon-separated segments",
-                target
-            );
+    fn update_layer_must_use_catalog_targets() {
+        check_layer("agent/features/update/src", "aemeath:agent:update");
+    }
+
+    #[test]
+    fn workflow_layer_must_use_catalog_targets() {
+        check_layer("agent/features/workflow/src", "aemeath:agent:workflow");
+    }
+
+    #[test]
+    fn catalog_targets_are_valid() {
+        for TargetSpec { target, .. } in TargetCatalog::specs() {
+            let target = target.as_str();
+            assert!(target.starts_with("aemeath:"));
+            assert!(target.split(':').count() <= 3);
         }
     }
 }
