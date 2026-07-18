@@ -47,11 +47,11 @@ pub(super) async fn add_memory(
         .get("pinned")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    if let Some(session_id) = &ctx.parent_session_id {
-        entry.source_ref = Some(session_id.clone());
+    if let Some(session_id) = ctx.parent_session_id() {
+        entry.source_ref = Some(session_id);
     }
 
-    match ctx.resources.memory.write(entry).await {
+    match ctx.memory().write(entry).await {
         Ok(WriteResult::Added { id }) => {
             let id = id.to_string();
             TypedToolResult::success(
@@ -96,7 +96,7 @@ pub(super) async fn delete_memory(
             Err(error) => return TypedToolResult::error(error),
         };
 
-    match ctx.resources.memory.delete(&id).await {
+    match ctx.memory().delete(&id).await {
         Ok(true) => TypedToolResult::success(
             "记忆已删除。",
             MemoryResult {
@@ -128,7 +128,7 @@ pub(super) async fn search_memory(
         include_archive: false,
         now: current_timestamp_secs(),
     };
-    let result = ctx.resources.memory.search(&query);
+    let result = ctx.memory().search(&query);
     let message = if result.hits.is_empty() {
         "暂无记忆。".to_string()
     } else {
@@ -156,7 +156,7 @@ pub(super) async fn pin_memory(
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
 
-    match ctx.resources.memory.pin(&id, pinned).await {
+    match ctx.memory().pin(&id, pinned).await {
         Ok(true) => TypedToolResult::success(
             if pinned {
                 "记忆已固定。"
@@ -180,7 +180,7 @@ pub(super) async fn list_memory(
         Ok(layer) => layer,
         Err(error) => return TypedToolResult::error(error),
     };
-    let entries = ctx.resources.memory.list(layer);
+    let entries = ctx.memory().list(layer);
     let message = if entries.is_empty() {
         "暂无记忆。".to_string()
     } else {
@@ -220,10 +220,10 @@ pub(super) fn add_reminder(
         return TypedToolResult::error(format!("无效 reminder priority: {priority}"));
     }
 
-    let Some(reminders) = &ctx.session_reminders else {
+    let Some(reminders) = ctx.session_reminders() else {
         return TypedToolResult::error("当前运行环境不支持 session reminder。");
     };
-    match reminders.lock() {
+    let result = match reminders.lock() {
         Ok(mut reminders) => {
             let id = uuid::Uuid::now_v7().to_string();
             match reminders.add(id.clone(), content.to_string(), current_timestamp_secs()) {
@@ -237,7 +237,8 @@ pub(super) fn add_reminder(
             }
         }
         Err(_) => TypedToolResult::error("session reminder 状态锁已损坏"),
-    }
+    };
+    result
 }
 
 pub(super) fn complete_reminder(
@@ -248,10 +249,10 @@ pub(super) fn complete_reminder(
         Ok(id) => id,
         Err(error) => return TypedToolResult::error(error),
     };
-    let Some(reminders) = &ctx.session_reminders else {
+    let Some(reminders) = ctx.session_reminders() else {
         return TypedToolResult::error("当前运行环境不支持 session reminder。");
     };
-    match reminders.lock() {
+    let result = match reminders.lock() {
         Ok(mut reminders) => match reminders.complete(id) {
             Ok(()) => TypedToolResult::success(
                 "会话提醒已完成。",
@@ -262,5 +263,6 @@ pub(super) fn complete_reminder(
             Err(error) => TypedToolResult::error(error.to_string()),
         },
         Err(_) => TypedToolResult::error("session reminder 状态锁已损坏"),
-    }
+    };
+    result
 }

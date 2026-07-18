@@ -99,7 +99,6 @@ pub(super) async fn chat_impl(
                 task_store: inner.context.resources.task_store.clone(),
                 task_access: inner.context.resources.task_access.clone(),
                 max_tool_concurrency: inner.max_tool_concurrency,
-                max_agent_concurrency: inner.max_agent_concurrency,
                 agent_semaphore: inner.context.resources.agent_semaphore.clone(),
                 hook_runner: inner.context.resources.hook_runner.clone(),
                 memory_config: inner.context.resources.memory_config.clone(),

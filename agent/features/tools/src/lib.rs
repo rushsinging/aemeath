@@ -11,12 +11,15 @@ pub use domain::types;
 
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
-    AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal, AgentRunner,
-    AgentToolCallProgress, ImageData, PolicyDecision, ProfileExpansionError, RegistryScopeName,
-    SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
-    ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolInvocation, ToolListProvider, ToolOutcome, ToolProfile, ToolProfileName, ToolResources,
-    ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
+    AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
+    AgentRunner, AgentToolCallProgress, CancellationSignal, CatalogQuery, ExecutionScope,
+    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
+    MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet,
+    RegistryScopeName, SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability,
+    ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome,
+    ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
+    ToolProfile, ToolProfileName, ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
+    WorkspaceReadAccess,
 };
 
 // Gateway/OHS: tool catalog and registration wiring.

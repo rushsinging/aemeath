@@ -62,6 +62,18 @@ mod tests {
     use parking_lot::Mutex;
     use std::sync::Arc;
 
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        let waker = std::task::Waker::noop();
+        let mut context = std::task::Context::from_waker(waker);
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                std::task::Poll::Ready(output) => return output,
+                std::task::Poll::Pending => std::thread::yield_now(),
+            }
+        }
+    }
+
     /// 用于测试的 Fake ToolCatalogPort。
     struct FakeCatalogPort {
         snapshot: ToolCatalogSnapshot,
@@ -119,23 +131,23 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_execution_port_known_tool_returns_success() {
+    #[test]
+    fn test_execution_port_known_tool_returns_success() {
         let port = FakeExecutionPort {
             outcomes: Arc::new(Mutex::new(vec![])),
         };
         let inv = ToolInvocation::new("Read", serde_json::json!({"path": "/tmp"}));
-        let outcome = port.execute(inv).await;
+        let outcome = block_on(port.execute(inv));
         assert!(outcome.is_success());
     }
 
-    #[tokio::test]
-    async fn test_execution_port_unknown_tool_returns_unavailable() {
+    #[test]
+    fn test_execution_port_unknown_tool_returns_unavailable() {
         let port = FakeExecutionPort {
             outcomes: Arc::new(Mutex::new(vec![])),
         };
         let inv = ToolInvocation::new("NonExistent", serde_json::json!({}));
-        let outcome = port.execute(inv).await;
+        let outcome = block_on(port.execute(inv));
         assert!(outcome.is_failure());
         match outcome {
             ToolOutcome::Failure(f) => assert_eq!(f.kind, ToolErrorKind::ToolUnavailable),
@@ -143,8 +155,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_execution_port_queued_outcome() {
+    #[test]
+    fn test_execution_port_queued_outcome() {
         let port = FakeExecutionPort {
             outcomes: Arc::new(Mutex::new(vec![ToolOutcome::failure(
                 ToolErrorKind::InvalidInput,
@@ -152,7 +164,7 @@ mod tests {
             )])),
         };
         let inv = ToolInvocation::new("Read", serde_json::json!({}));
-        let outcome = port.execute(inv).await;
+        let outcome = block_on(port.execute(inv));
         assert!(outcome.is_failure());
         match outcome {
             ToolOutcome::Failure(f) => {

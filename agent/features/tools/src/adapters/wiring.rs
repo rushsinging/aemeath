@@ -30,6 +30,7 @@ pub trait ToolCatalogGateway: Send + Sync {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        workspace_control: Arc<dyn project::WorkspaceControl>,
     );
 
     fn register_all_tools_except_agent(
@@ -37,6 +38,7 @@ pub trait ToolCatalogGateway: Send + Sync {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        workspace_control: Arc<dyn project::WorkspaceControl>,
     );
 
     fn register_subagent_tools(
@@ -44,6 +46,7 @@ pub trait ToolCatalogGateway: Send + Sync {
         registry: &mut ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        workspace_control: Arc<dyn project::WorkspaceControl>,
     );
 }
 
@@ -65,8 +68,9 @@ impl ToolCatalogGateway for DefaultToolCatalogGateway {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        workspace_control: Arc<dyn project::WorkspaceControl>,
     ) {
-        register_all_tools(registry, task_access, skills);
+        register_all_tools(registry, task_access, skills, workspace_control);
     }
 
     fn register_all_tools_except_agent(
@@ -74,8 +78,9 @@ impl ToolCatalogGateway for DefaultToolCatalogGateway {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        workspace_control: Arc<dyn project::WorkspaceControl>,
     ) {
-        register_all_tools_except_agent(registry, task_access, skills);
+        register_all_tools_except_agent(registry, task_access, skills, workspace_control);
     }
 
     fn register_subagent_tools(
@@ -83,8 +88,9 @@ impl ToolCatalogGateway for DefaultToolCatalogGateway {
         registry: &mut ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        workspace_control: Arc<dyn project::WorkspaceControl>,
     ) {
-        register_subagent_tools(registry, task_access, skills);
+        register_subagent_tools(registry, task_access, skills, workspace_control);
     }
 }
 
@@ -100,8 +106,13 @@ mod tests {
         let task_store = Arc::new(TaskStore::new());
         let task_access: Arc<dyn TaskAccess> = task_store.clone();
         let skills = Arc::new(Mutex::new(HashMap::new()));
+        let workspace = tempfile::tempdir().expect("workspace");
+        let control = project::wire_production_workspace(workspace.path().to_path_buf())
+            .expect("workspace wiring")
+            .into_views()
+            .control();
 
-        gateway.register_subagent_tools(&mut registry, task_access, skills);
+        gateway.register_subagent_tools(&mut registry, task_access, skills, control);
 
         assert!(registry.contains("Read"));
         assert!(registry.contains("Bash"));

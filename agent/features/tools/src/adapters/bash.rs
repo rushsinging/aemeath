@@ -5,7 +5,6 @@ mod stream;
 
 #[cfg(test)]
 mod tests;
-
 use crate::domain::types::bash::{BashInput, BashResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use crate::LOG_TARGET;
@@ -21,7 +20,12 @@ use std::os::unix::process::ExitStatusExt;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 
-pub struct BashTool;
+use project::WorkspaceControl;
+use std::sync::Arc;
+
+pub struct BashTool {
+    pub control: Arc<dyn WorkspaceControl>,
+}
 
 #[async_trait]
 impl TypedTool for BashTool {
@@ -107,13 +111,14 @@ impl TypedTool for BashTool {
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
 
-        let stdout_handle = tokio::spawn(stream::read_stdout(stdout_pipe, ctx.progress_tx.clone()));
+        let stdout_handle = tokio::spawn(stream::read_stdout(stdout_pipe, ctx.progress_sink()));
         let stderr_handle = tokio::spawn(stream::read_stderr(stderr_pipe));
 
         // Race: cancel signal vs timeout vs command completion
+        let cancellation = ctx.cancellation();
         let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
             biased;
-            _ = ctx.cancel.cancelled() => {
+            _ = cancellation.cancelled() => {
                 let _ = child.kill().await;
                 stdout_handle.abort();
                 stderr_handle.abort();
@@ -151,7 +156,7 @@ impl TypedTool for BashTool {
                 // `cd` 改变了 path_base 时通知 workspace 并记录新值，回传给 LLM（#414）。
                 let cd_path_base: Option<std::path::PathBuf> = new_path_base.clone();
                 if let Some(new_path_base) = new_path_base {
-                    if let Err(e) = ctx.workspace_control().change_directory(new_path_base) {
+                    if let Err(e) = self.control.change_directory(new_path_base) {
                         return TypedToolResult::error(e.to_string());
                     }
                 }

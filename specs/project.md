@@ -17,6 +17,9 @@
 - 领域状态、规则、类型与 `GitWorktreeOps` 出站端口归 `domain/`；`GitCli` 实现归 `adapters/git.rs`，默认生产装配由 adapter 层为 `WorkspaceService::new` 提供。`domain/` **NEVER** 依赖 `adapters/`。跨 crate 消费方 **MUST** 从 `project::<Symbol>` crate-root façade 导入，**NEVER** 穿透内部模块。
 - 新增公开符号 **MUST** 同步登记到 `check-crate-api-boundary.sh` 的 Project root allowlist，并更新 [Architecture Guards](../docs/design/03-engineering/01-architecture-guards.md)；Current → Target 差距、责任与退出条件见 [Migration Governance](../docs/design/03-engineering/03-migration-governance.md)。这不是迁移例外。
 
+- Project 发布彼此独立的 `WorkspaceRead` / `WorkspaceControl` / `WorkspacePersist`。不得用聚合 wrapper 向所有 Tool 广播三种能力：文件 Tool 只拿 Read；Bash、EnterWorktree、ExitWorktree 构造时才拿 Control；Runtime 自行持有 Persist。
+- `WorkspaceViews` 是 composition wiring 形态，只能由 Runtime adapter 转成消费能力，**NEVER** 出现在 Tools domain。
+
 ## 架构边界：git 出站端口
 
 - git 操作经 `GitWorktreeOps` 出站端口抽象，生产适配器 `GitCli` 位于 `src/adapters/git.rs` 并派生 `git` CLI。

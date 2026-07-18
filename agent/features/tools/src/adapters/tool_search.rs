@@ -48,7 +48,7 @@ impl TypedTool for ToolSearchTool {
         let query = args.query.to_lowercase();
 
         // 从注册表动态获取工具列表
-        let tools: Vec<ToolInfo> = match &ctx.resources.registry {
+        let tools: Vec<ToolInfo> = match ctx.catalog_query() {
             Some(reg) => reg
                 .tool_names()
                 .into_iter()

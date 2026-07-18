@@ -97,9 +97,9 @@ agent/features/runtime/src/
 - 依赖：调度 model_invocation / tool_coordination / context_coordination / interaction
 
 ### model_invocation
-- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `RawUsageSnapshot`（provider-neutral、单 attempt 累计快照）；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（≤10 次，退避封顶 5 分钟），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
+- **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `RawUsageSnapshot`（provider-neutral、单 attempt 累计快照）；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（首次调用 + 最多 10 次重试，共最多 11 attempts；单次退避封顶 60 秒），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
-- 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`ReasoningPort`（取 effort）
+- 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`UsageSink`；v0.1.0 保留现有 Main `ReasoningPort` 接线，但不在本模块接 Provider resolver → Context/Invocation effective reasoning 冻结链，该生产接线由 v0.2.0 #1142 决策
 
 ### tool_coordination
 - **职责**：ToolCall 双 ID 映射（领域 `ToolCallId` ↔ provider_id）、Policy/Hook/审批、timeout/cancellation、多调用并发、结果回收与 Run Step 写入
@@ -127,6 +127,7 @@ agent/features/runtime/src/
 ### model_invocation 的 Usage 出口
 - Provider ACL 返回 provider-neutral `RawUsageSnapshot` 后，model_invocation 在逻辑 Invocation 的 retry/fallback 收口点映射为 Runtime `UsageSnapshot`，再使用 SDK 发布的唯一 `SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 构造一条 Audit-owned `UsageRecord`；Runtime **NEVER** 解释 vendor wire 字段或重复定义 Usage DTO
 - 经 `UsageSink.try_record` 非阻塞提交；Audit 接受/丢弃均不改变 Run 状态
+- **v0.1.0 #875 边界**：本期交付每 attempt 唯一 `ModelInvocationId` 与 `RawUsageSnapshot → UsageRecord` 纯映射 seam；`None` 与 `Some(0)` 不得混淆，input/output 任一未报告时明确不构造记录。当前 legacy `RunLoopPort` 不发布 `RunStepId`，因此生产 `UsageSink` 写入由 #878 完成 shared Loop/RuntimeContext 切换后与 #931 的 Audit adapter 一起接通，#875 **NEVER** 伪造 identity 或零值。
 
 ### agent_client（入站 façade）
 - **职责**：实现入站端口 `AgentClient`（OHS + PL）；`RuntimeContext` 装配入口（含入站 `InputBuffer`）；SubAgent 派生时装配子 RuntimeContext
@@ -169,6 +170,8 @@ adapters ───────▶ ports ◀────── application
 
 ## 6. 迁移边界
 
+Runtime owns live execution mechanics—including semaphore, cancellation implementation, Project persistence view and channel adapters—and **MUST** convert them at its adapter boundary. `ExecutionScope` crossing into Tools is a fixed pure-value snapshot; no Runtime semaphore/token/channel or `WorkspaceViews` may enter Tools domain. Runtime retains `WorkspacePersist`, while Tools receive only their narrow Read/Control capabilities. This Target does not imply #911, #877, #897 or #912 is complete; Current status remains exclusively in Migration Governance.
+
 本文的 Target 模块图与依赖规则是验收目标；源码现状、迁移顺序、责任与退出条件 **MUST** 只在 [Migration Governance](../../03-engineering/03-migration-governance.md) 维护，本文 **NEVER** 复制 Current 类型或进度。
 
 ## 7. 相关文档
@@ -192,4 +195,5 @@ adapters ───────▶ ports ◀────── application
 | 2026-07-12 | tool_coordination 对齐 Catalog/Execution 双端口及 Runtime/Tool BC 职责分工 | #787 |
 | 2026-07-12 | model_invocation 对齐 ProviderCompletion、RawUsageSnapshot 与可见输出重试门禁 | #788 |
 | 2026-07-12 | Hook 边界补单端口与 3/15 两层重试；Usage 从 event_projection 分离到 model_invocation→UsageSink | #790 |
+| 2026-07-18 | #875 冻结重试口径为首次调用 + 最多 10 次重试（最多 11 attempts），单次退避封顶 60 秒；v0.1.0 不接 Provider resolver effective reasoning 链 | [#875](https://github.com/rushsinging/aemeath/issues/875) |
 | 2026-07-17 | Provider usage 出口改为 ACL 标准化 UsageSnapshot，Runtime 不再解释 provider 原始 token 字段 | compact token reset design |
