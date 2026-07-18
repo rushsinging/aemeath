@@ -311,6 +311,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
         resources: tools::ToolResources {
             agent_runner: None,
             registry: None,
+            memory: Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,
@@ -606,6 +607,7 @@ fn test_ctx() -> ToolExecutionContext {
         resources: tools::ToolResources {
             agent_runner: None,
             registry: None,
+            memory: Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: true,

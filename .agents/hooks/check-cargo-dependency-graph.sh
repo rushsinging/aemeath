@@ -18,24 +18,24 @@ import subprocess
 import sys
 
 FEATURE_CRATES = {"runtime", "config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
-TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task"}
+TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task", "memory"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
     "cli": {"composition", "sdk"},
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging", "update"},
-    "runtime": {"config", "project", "policy", "context", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
+    "runtime": {"config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
     "config": {"share"},
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share"},
-    "context": {"share", "provider", "storage", "task", "sdk"},
+    "context": {"share", "provider", "storage", "task", "memory", "sdk"},
     "memory": {"storage", "utils"},
     "provider": {"share"},
     # Approved horizontal dependencies: tools -> project/storage and Task-owned OHS/PL.
-    "tools": {"share", "project", "storage", "task"},
+    "tools": {"share", "project", "storage", "task", "memory"},
     "storage": {"share"},
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),

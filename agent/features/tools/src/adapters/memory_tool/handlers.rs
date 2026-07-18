@@ -1,14 +1,17 @@
 use crate::domain::types::memory::MemoryResult;
 use crate::domain::{ToolExecutionContext, TypedToolResult};
+use memory::api::{
+    MemoryCategory as Category, MemoryEntry, MemoryId as Id, MemoryLayer as Layer,
+    MemorySearchQuery as Query, MemorySource as Source, WriteResult,
+};
 use serde_json::Value;
-use share::memory::{AddResult, MemoryCategory, MemoryEntry, MemoryLayer, MemorySource};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::helpers::{
-    open_store, optional_category, optional_layer, parse_tags, required_string, validate_content,
+    optional_category, optional_layer, parse_tags, required_string, validate_content,
 };
 
-pub(super) fn add_memory(
+pub(super) async fn add_memory(
     input: Value,
     ctx: &ToolExecutionContext,
 ) -> TypedToolResult<MemoryResult> {
@@ -21,11 +24,11 @@ pub(super) fn add_memory(
     }
 
     let layer = match optional_layer(&input) {
-        Ok(layer) => layer.unwrap_or(MemoryLayer::Project),
+        Ok(layer) => layer.unwrap_or(Layer::Project),
         Err(error) => return TypedToolResult::error(error),
     };
     let category = match optional_category(&input) {
-        Ok(category) => category.unwrap_or(MemoryCategory::Fact),
+        Ok(category) => category.unwrap_or(Category::Fact),
         Err(error) => return TypedToolResult::error(error),
     };
     let tags = match parse_tags(&input) {
@@ -34,15 +37,12 @@ pub(super) fn add_memory(
     };
 
     let now = current_timestamp_secs();
-    let mut entry = MemoryEntry::new(
-        uuid::Uuid::now_v7().to_string(),
-        now,
-        layer,
-        category,
-        content,
-        MemorySource::Llm,
-    )
-    .with_tags(tags);
+    let mut entry = match MemoryEntry::new(Id::now_v7(), now, layer, category, content, Source::Llm)
+    {
+        Ok(entry) => entry,
+        Err(error) => return TypedToolResult::error(error.to_string()),
+    };
+    entry.tags = tags;
     entry.pinned = input
         .get("pinned")
         .and_then(|value| value.as_bool())
@@ -51,111 +51,113 @@ pub(super) fn add_memory(
         entry.source_ref = Some(session_id.clone());
     }
 
-    let mut store = match open_store(ctx) {
-        Ok(store) => store,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    match store.add(entry) {
-        Ok(AddResult::Added { id }) => TypedToolResult::success(
-            format!("记忆已添加。ID: {}", &id[..8.min(id.len())]),
-            MemoryResult {
-                action: "added".to_string(),
-            },
-        ),
-        Ok(AddResult::Merged { existing_id }) => TypedToolResult::success(
-            format!(
-                "已与相似记忆合并: {}",
-                &existing_id[..8.min(existing_id.len())]
-            ),
-            MemoryResult {
-                action: "merged".to_string(),
-            },
-        ),
-        Ok(AddResult::NeedsEviction { candidates: _ }) => {
+    match ctx.resources.memory.write(entry).await {
+        Ok(WriteResult::Added { id }) => {
+            let id = id.to_string();
+            TypedToolResult::success(
+                format!("记忆已添加。ID: {}", &id[..8.min(id.len())]),
+                MemoryResult {
+                    action: "added".to_string(),
+                },
+            )
+        }
+        Ok(WriteResult::Merged { existing_id }) => {
+            let existing_id = existing_id.to_string();
+            TypedToolResult::success(
+                format!(
+                    "已与相似记忆合并: {}",
+                    &existing_id[..8.min(existing_id.len())]
+                ),
+                MemoryResult {
+                    action: "merged".to_string(),
+                },
+            )
+        }
+        Ok(WriteResult::NeedsEviction { candidates: _ }) => {
             TypedToolResult::error("记忆数量已达上限，请先归档候选记忆")
         }
+        Ok(WriteResult::NoOp) => TypedToolResult::success(
+            "记忆写入已跳过。",
+            MemoryResult {
+                action: "noop".to_string(),
+            },
+        ),
         Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
-pub(super) fn delete_memory(
+pub(super) async fn delete_memory(
     input: Value,
     ctx: &ToolExecutionContext,
 ) -> TypedToolResult<MemoryResult> {
-    let id = match required_string(&input, "id") {
-        Ok(id) => id,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    let mut store = match open_store(ctx) {
-        Ok(store) => store,
-        Err(error) => return TypedToolResult::error(error),
-    };
+    let id =
+        match required_string(&input, "id").and_then(|id| Id::new(id).map_err(|e| e.to_string())) {
+            Ok(id) => id,
+            Err(error) => return TypedToolResult::error(error),
+        };
 
-    match store.delete(id) {
-        Ok(()) => TypedToolResult::success(
+    match ctx.resources.memory.delete(&id).await {
+        Ok(true) => TypedToolResult::success(
             "记忆已删除。",
             MemoryResult {
                 action: "delete".to_string(),
             },
         ),
+        Ok(false) => TypedToolResult::error("记忆不存在。"),
         Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
-pub(super) fn search_memory(
+pub(super) async fn search_memory(
     input: Value,
     ctx: &ToolExecutionContext,
 ) -> TypedToolResult<MemoryResult> {
-    let query = match required_string(&input, "query") {
-        Ok(query) => query,
+    let text = match required_string(&input, "query") {
+        Ok(query) => query.to_string(),
         Err(error) => return TypedToolResult::error(error),
     };
     let limit = input
         .get("limit")
         .and_then(|value| value.as_u64())
         .unwrap_or(10) as usize;
-    let store = match open_store(ctx) {
-        Ok(store) => store,
-        Err(error) => return TypedToolResult::error(error),
+    let query = Query {
+        text,
+        limit: limit.min(50),
+        layer: None,
+        category: None,
+        include_archive: false,
+        now: current_timestamp_secs(),
     };
-
-    match store.search(query, limit.min(50)) {
-        Ok(entries) => {
-            let message = if entries.is_empty() {
-                "暂无记忆。".to_string()
-            } else {
-                format!("找到 {} 条记忆。", entries.len())
-            };
-            TypedToolResult::success(
-                message,
-                MemoryResult {
-                    action: "search".to_string(),
-                },
-            )
-        }
-        Err(error) => TypedToolResult::error(error.to_string()),
-    }
+    let result = ctx.resources.memory.search(&query);
+    let message = if result.hits.is_empty() {
+        "暂无记忆。".to_string()
+    } else {
+        format!("找到 {} 条记忆。", result.hits.len())
+    };
+    TypedToolResult::success(
+        message,
+        MemoryResult {
+            action: "search".to_string(),
+        },
+    )
 }
 
-pub(super) fn pin_memory(
+pub(super) async fn pin_memory(
     input: Value,
     ctx: &ToolExecutionContext,
 ) -> TypedToolResult<MemoryResult> {
-    let id = match required_string(&input, "id") {
-        Ok(id) => id,
-        Err(error) => return TypedToolResult::error(error),
-    };
+    let id =
+        match required_string(&input, "id").and_then(|id| Id::new(id).map_err(|e| e.to_string())) {
+            Ok(id) => id,
+            Err(error) => return TypedToolResult::error(error),
+        };
     let pinned = input
         .get("pinned")
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
-    let mut store = match open_store(ctx) {
-        Ok(store) => store,
-        Err(error) => return TypedToolResult::error(error),
-    };
 
-    match store.pin(id, pinned) {
-        Ok(()) => TypedToolResult::success(
+    match ctx.resources.memory.pin(&id, pinned).await {
+        Ok(true) => TypedToolResult::success(
             if pinned {
                 "记忆已固定。"
             } else {
@@ -165,11 +167,12 @@ pub(super) fn pin_memory(
                 action: "pin".to_string(),
             },
         ),
+        Ok(false) => TypedToolResult::error("记忆不存在。"),
         Err(error) => TypedToolResult::error(error.to_string()),
     }
 }
 
-pub(super) fn list_memory(
+pub(super) async fn list_memory(
     input: Value,
     ctx: &ToolExecutionContext,
 ) -> TypedToolResult<MemoryResult> {
@@ -177,27 +180,18 @@ pub(super) fn list_memory(
         Ok(layer) => layer,
         Err(error) => return TypedToolResult::error(error),
     };
-    let store = match open_store(ctx) {
-        Ok(store) => store,
-        Err(error) => return TypedToolResult::error(error),
+    let entries = ctx.resources.memory.list(layer);
+    let message = if entries.is_empty() {
+        "暂无记忆。".to_string()
+    } else {
+        format!("共 {} 条记忆。", entries.len())
     };
-
-    match store.list(layer) {
-        Ok(entries) => {
-            let message = if entries.is_empty() {
-                "暂无记忆。".to_string()
-            } else {
-                format!("共 {} 条记忆。", entries.len())
-            };
-            TypedToolResult::success(
-                message,
-                MemoryResult {
-                    action: "list".to_string(),
-                },
-            )
-        }
-        Err(error) => TypedToolResult::error(error.to_string()),
-    }
+    TypedToolResult::success(
+        message,
+        MemoryResult {
+            action: "list".to_string(),
+        },
+    )
 }
 
 fn current_timestamp_secs() -> u64 {

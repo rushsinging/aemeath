@@ -76,14 +76,14 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `task`, `sdk` |
+| `context` | `share`, `provider`, `storage`, `task`, `memory`, `sdk` |
 | `memory` | `storage`, `utils` |
 | `provider` | `share` |
-| `tools` | `share`, `project`, `storage`, `task` |
+| `tools` | `share`, `project`, `storage`, `task`, `memory` |
 | `storage` | `share` |
 | `task` | ∅ |
 | `hook` | `share` |
@@ -164,7 +164,7 @@
 ### 4a. check-composition-layout.sh
 
 - **功能**：锁定 `agent/composition/src` 的 capability-first wiring modules 结构；Composition 按被装配职责分片，不机械复制 feature crate 的 Hexagonal 四层。
-- **允许的顶层源码**：`lib.rs`, `app.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/provider/runtime/tools/update` 五个 wiring module。
+- **允许的顶层源码**：`lib.rs`, `app.rs`, `memory.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/memory/provider/runtime/tools/update` 六个 wiring module。
 - **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
 - **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
 - **范围边界**：本守卫只证明 Composition 物理结构与 façade 模块声明；`FeatureGateways` 真实注入由 #948 承接，全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。

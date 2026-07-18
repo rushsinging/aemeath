@@ -27,12 +27,14 @@ use crate::LOG_TARGET;
 ///
 /// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
 /// Task BC 的 backing 或持久化封套（跨域越权，#890）。
+#[allow(clippy::too_many_arguments)]
 pub async fn from_args_with_workspace(
     mut args: ChatBootstrapArgs,
     workspace: project::WorkspaceViews,
     config_reader: Arc<dyn config::ConfigReader>,
     config_query: Arc<dyn config::ConfigQuery>,
     config_writer: Arc<dyn config::ConfigWriter>,
+    memory: Arc<dyn memory::MemoryPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 ) -> Result<AgentClientImpl, SdkError> {
@@ -224,6 +226,7 @@ pub async fn from_args_with_workspace(
             hook_runner,
             memory_config,
             agent_semaphore,
+            memory,
             allow_all: args.allow_all,
             context_size,
             language: snapshot.language().to_string(),
@@ -387,6 +390,7 @@ mod tests {
             config.reader(),
             config.query(),
             config.writer(),
+            Arc::new(memory::NoOpMemory),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         )

@@ -107,6 +107,7 @@ TOOLS_ADAPTER_FACADE = {
 TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE
 
 ROOT_ACCESS_ALLOW = {
+    "memory": {"api"},
     "provider": {
         "CancellationSignal",
         "InvocationDelta",
@@ -181,7 +182,7 @@ ROOT_ACCESS_ALLOW = {
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill", "compose_session_task_capture", "LegacyTaskCapture"},
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
     "storage": {
-        "Batch",
+        "FileSystemDatasetAdapter",
         "BatchStatus",
         "MemoryStore",
         "SafeOpenOptions",

@@ -54,11 +54,11 @@ impl TypedTool for MemoryTool {
         let action = args.action.as_str();
 
         match action {
-            "add" => handlers::add_memory(input, ctx),
-            "delete" => handlers::delete_memory(input, ctx),
-            "search" => handlers::search_memory(input, ctx),
-            "pin" => handlers::pin_memory(input, ctx),
-            "list" => handlers::list_memory(input, ctx),
+            "add" => handlers::add_memory(input, ctx).await,
+            "delete" => handlers::delete_memory(input, ctx).await,
+            "search" => handlers::search_memory(input, ctx).await,
+            "pin" => handlers::pin_memory(input, ctx).await,
+            "list" => handlers::list_memory(input, ctx).await,
             "add_reminder" => handlers::add_reminder(input, ctx),
             "complete_reminder" => handlers::complete_reminder(input, ctx),
             "" => TypedToolResult::error("缺少必需参数: action"),

@@ -16,8 +16,8 @@ import sys
 
 root = Path.cwd()
 src = root / "agent" / "composition" / "src"
-allowed_files = {"lib.rs", "app.rs", "provider.rs", "runtime.rs", "tools.rs", "update.rs"}
-expected_modules = {"app", "provider", "runtime", "tools", "update"}
+allowed_files = {"lib.rs", "app.rs", "memory.rs", "provider.rs", "runtime.rs", "tools.rs", "update.rs"}
+expected_modules = {"app", "memory", "provider", "runtime", "tools", "update"}
 forbidden_layers = {
     "domain", "application", "ports", "adapters",
     "api", "business", "contract", "core", "gateway", "capabilities",

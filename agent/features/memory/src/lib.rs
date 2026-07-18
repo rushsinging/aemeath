@@ -5,12 +5,25 @@
 mod adapters;
 mod codec;
 mod domain;
+mod noop;
 mod ports;
 mod service;
+
+pub mod api {
+    pub use crate::{
+        AtomicDatasetMemoryStore, CompactResult, LegacyMemoryLayer, LegacyMemoryMember,
+        LegacyMemorySource, LegacyMemorySourceError, MemoryCategory, MemoryEntry, MemoryError,
+        MemoryId, MemoryLayer, MemoryLocation, MemoryOpenerError, MemoryPolicy, MemoryPort,
+        MemoryQuery, MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
+        MemorySource, MemoryStats, NoOpMemory, ProjectMemoryKey, ProjectMemoryOpener,
+        ReflectionApplyResult, ReflectionOutput, WriteResult,
+    };
+}
 
 pub use adapters::{
     map_storage_error, AtomicDatasetMemoryStore, InMemoryMemory, MemoryPolicy, ProjectMemoryOpener,
 };
 pub use domain::*;
+pub use noop::NoOpMemory;
 pub use ports::*;
 pub use service::MemoryService;

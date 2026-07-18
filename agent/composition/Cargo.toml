@@ -11,7 +11,12 @@ provider = { path = "../features/provider" }
 project = { path = "../features/project" }
 update = { path = "../features/update" }
 context = { path = "../features/context" }
+memory = { path = "../features/memory" }
+storage = { path = "../features/storage" }
 task = { path = "../features/task" }
 share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
 async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
