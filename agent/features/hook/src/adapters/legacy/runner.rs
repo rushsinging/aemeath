@@ -5,7 +5,6 @@ use crate::adapters::legacy::result::{HookJsonOutput, HookResult};
 use crate::adapters::process::{
     ProcessDriver, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
 };
-use crate::LOG_TARGET;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use std::collections::HashMap;
 use std::path::Path;

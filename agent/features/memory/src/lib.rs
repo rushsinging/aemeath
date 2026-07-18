@@ -2,6 +2,8 @@
 
 //! Memory 支撑域。
 
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:memory";
+const _: &str = LOG_TARGET;
 mod adapters;
 mod codec;
 mod domain;

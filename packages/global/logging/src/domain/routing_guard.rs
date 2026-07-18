@@ -34,7 +34,6 @@ enum ViolationKind {
     WrongOwnerConstant,
     DuplicateOwnerConstant,
     MissingOwnerConstant,
-    EmptyOwnerConstant,
     LogMacroAlias,
 }
 #[derive(Debug)]
@@ -56,72 +55,88 @@ impl fmt::Display for Violation {
 
 const OWNERS: &[(&str, OwnerRule)] = &[
     (
-        "apps/cli/src",
+        "apps/cli",
         OwnerRule::new("tui", "aemeath:tui", "crate::LOG_TARGET"),
     ),
     (
-        "agent/composition/src",
+        "agent/composition",
         OwnerRule::new("composition", "aemeath:composition", "crate::LOG_TARGET"),
     ),
     (
-        "agent/shared/src",
-        OwnerRule::new("shared", "aemeath:shared", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/audit/src",
+        "agent/features/audit",
         OwnerRule::new("audit", "aemeath:agent:audit", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/config/src",
-        OwnerRule::new("config", "", "crate::LOG_TARGET"),
+        "agent/features/config",
+        OwnerRule::new("config", "aemeath:agent:config", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/context/src",
-        OwnerRule::new("context", "aemeath:context", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/hook/src",
+        "agent/features/hook",
         OwnerRule::new("hook", "aemeath:agent:hook", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/memory/src",
-        OwnerRule::new("memory", "", "crate::LOG_TARGET"),
+        "agent/features/memory",
+        OwnerRule::new("memory", "aemeath:agent:memory", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/policy/src",
+        "agent/features/policy",
         OwnerRule::new("policy", "aemeath:agent:policy", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/project/src",
+        "agent/features/context",
+        OwnerRule::new("context", "aemeath:context", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/project",
         OwnerRule::new("project", "aemeath:agent:project", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/provider/src",
+        "agent/features/provider",
         OwnerRule::new("provider", "aemeath:agent:provider", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/runtime/src",
+        "agent/features/runtime",
         OwnerRule::new("runtime", "aemeath:agent:runtime", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/storage/src",
+        "agent/features/storage",
         OwnerRule::new("storage", "aemeath:agent:storage", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/task/src",
-        OwnerRule::new("task", "", "crate::LOG_TARGET"),
+        "agent/features/task",
+        OwnerRule::new("task", "aemeath:agent:task", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/tools/src",
+        "agent/features/tools",
         OwnerRule::new("tools", "aemeath:agent:tools", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/update/src",
+        "agent/features/update",
         OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
     ),
     (
-        "agent/features/workflow/src",
+        "agent/features/workflow",
         OwnerRule::new("workflow", "aemeath:agent:workflow", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/shared",
+        OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
+    ),
+    (
+        "packages/sdk",
+        OwnerRule::new("sdk", "aemeath:sdk", "crate::LOG_TARGET"),
+    ),
+    (
+        "packages/global/logging",
+        OwnerRule::new("logging", "aemeath:logging", "crate::LOG_TARGET"),
+    ),
+    (
+        "packages/global/utils",
+        OwnerRule::new("utils", "aemeath:utils", "crate::LOG_TARGET"),
+    ),
+    (
+        "tools/xtask",
+        OwnerRule::new("xtask", "aemeath:xtask", "crate::LOG_TARGET"),
     ),
 ];
 
@@ -132,6 +147,53 @@ fn workspace_root() -> PathBuf {
         .unwrap()
         .to_path_buf()
 }
+fn workspace_members(root: &Path) -> std::io::Result<Vec<String>> {
+    let manifest = match fs::read_to_string(root.join("Cargo.toml")) {
+        Ok(manifest) => manifest,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let members = manifest
+        .split_once("members")
+        .and_then(|(_, rest)| rest.split_once('['))
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(list, _)| {
+            list.lines()
+                .filter_map(|line| line.split('"').nth(1))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(members)
+}
+
+fn crate_root(member: &Path) -> std::io::Result<PathBuf> {
+    for name in ["lib.rs", "main.rs"] {
+        let root = member.join("src").join(name);
+        if root.is_file() {
+            return Ok(root);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("{} has no crate root", member.display()),
+    ))
+}
+
+fn owner_constant_declarations(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .filter(|line| {
+            line.trim_start().starts_with("pub(crate) const LOG_TARGET") && line.contains('=')
+        })
+        .filter_map(|line| {
+            line.split_once('=')
+                .and_then(|(_, rhs)| rhs.split('"').nth(1))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 fn rust_files_under(path: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![path.to_path_buf()];
@@ -321,6 +383,7 @@ fn contains_identifier(source: &str, identifier: &str) -> bool {
 fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation> {
     let source = production_source(raw);
     let mut violations = Vec::new();
+    let inspect_constants = relative.ends_with("/lib.rs") || relative.ends_with("/main.rs");
     let mut search = 0;
     while let Some(offset) = source[search..].find("use") {
         let start = search + offset;
@@ -420,7 +483,7 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
         }
     }
     for (index, line) in raw.lines().enumerate() {
-        if line.contains("const LOG_TARGET") && line.contains('=') {
+        if inspect_constants && line.contains("const LOG_TARGET") && line.contains('=') {
             let value = line
                 .split_once('=')
                 .and_then(|(_, rhs)| rhs.split('"').nth(1))
@@ -450,10 +513,34 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
 
 fn inspect_workspace(root: &Path) -> std::io::Result<Vec<Violation>> {
     let mut violations = Vec::new();
-    for (scope, owner) in OWNERS {
-        let mut log_calls = 0usize;
+    let members = workspace_members(root)?;
+    for member in &members {
+        if !OWNERS.iter().any(|(registered, _)| registered == member) {
+            violations.push(Violation {
+                path: member.clone(),
+                line: 1,
+                kind: ViolationKind::MissingOwnerConstant,
+                detail: "workspace member has no log target owner rule".into(),
+            });
+        }
+    }
+    for (member, owner) in OWNERS {
+        if !members.is_empty()
+            && !members
+                .iter()
+                .any(|workspace_member| workspace_member == member)
+        {
+            violations.push(Violation {
+                path: (*member).into(),
+                line: 1,
+                kind: ViolationKind::MissingOwnerConstant,
+                detail: "owner rule is not a workspace member".into(),
+            });
+            continue;
+        }
+        let scope = format!("{member}/src");
         let mut constants = Vec::new();
-        for file in rust_files_under(&root.join(scope)) {
+        for file in rust_files_under(&root.join(&scope)) {
             let relative = file
                 .strip_prefix(root)
                 .unwrap()
@@ -464,46 +551,38 @@ fn inspect_workspace(root: &Path) -> std::io::Result<Vec<Violation>> {
             }
             let raw = fs::read_to_string(file)?;
             let production = production_source(&raw);
-            log_calls += ["trace", "debug", "info", "warn", "error"]
-                .iter()
-                .map(|l| production.matches(&format!("log::{l}!")).count())
-                .sum::<usize>();
-            if production
-                .lines()
-                .any(|line| line.contains("const LOG_TARGET"))
-            {
+            for _ in production.lines().filter(|line| {
+                relative != "packages/global/logging/src/domain/routing_guard.rs"
+                    && line.contains("const LOG_TARGET")
+            }) {
                 constants.push(relative.clone());
             }
             violations.extend(inspect_source(&raw, owner, &relative));
         }
-        if owner.target.is_empty() && !constants.is_empty() {
+        let root_path = crate_root(&root.join(member));
+        let root_declarations = root_path
+            .as_ref()
+            .ok()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .map(|source| owner_constant_declarations(&source))
+            .unwrap_or_default();
+        if constants.len() > 1 || root_declarations.len() > 1 {
             violations.push(Violation {
-                path: scope.to_string(),
+                path: scope,
                 line: 1,
-                kind: ViolationKind::EmptyOwnerConstant,
+                kind: ViolationKind::DuplicateOwnerConstant,
+                detail: constants.join(", "),
+            });
+        } else if constants.len() != 1 || root_declarations != [owner.target.to_owned()] {
+            violations.push(Violation {
+                path: member.to_string(),
+                line: 1,
+                kind: ViolationKind::MissingOwnerConstant,
                 detail: format!(
-                    "{} has no production logs and must not define LOG_TARGET",
-                    owner.name
+                    "{} crate root must define exactly one pub(crate) LOG_TARGET {:?}",
+                    owner.name, owner.target
                 ),
             });
-        } else if !owner.target.is_empty() {
-            // A registered owner must never declare more than one LOG_TARGET,
-            // regardless of whether it currently emits production logs.
-            if constants.len() > 1 {
-                violations.push(Violation {
-                    path: scope.to_string(),
-                    line: 1,
-                    kind: ViolationKind::DuplicateOwnerConstant,
-                    detail: constants.join(", "),
-                });
-            } else if log_calls > 0 && constants.is_empty() {
-                violations.push(Violation {
-                    path: scope.to_string(),
-                    line: 1,
-                    kind: ViolationKind::MissingOwnerConstant,
-                    detail: format!("{} must define one owner LOG_TARGET", owner.name),
-                });
-            }
         }
     }
     Ok(violations)

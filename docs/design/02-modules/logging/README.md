@@ -99,7 +99,7 @@ struct TargetSpec {
 }
 ```
 
-目标 catalog 至少覆盖：TUI、Shared、Composition、Provider、Runtime（含 Agent Execution / Loop Engine 子 target）、Tools、Prompt、Hook、Storage、Project、Policy、Update、Audit（诊断）、Config、Memory、Context、Task。Audit 不作为诊断 target 模拟审计存储；若 Audit BC 需要自身诊断日志，应注册诊断 target，但 Audit Event 仍走独立 `AuditSink`。
+目标 catalog 覆盖每个 Cargo workspace crate，每个 crate 都拥有独立 target、owner、sink ID 与日志文件；Provider 另保留 LLM API Error 专用 target，Runtime 的 Prompt target 作为专用子能力路由。crate 即使暂时没有生产日志，也必须预先声明自己的 crate-private `LOG_TARGET`，避免首次加日志时临时选择或借用其他 owner。Audit 不作为诊断 target 模拟审计存储；Audit Event 仍走独立 `AuditSink`。
 
 路由规则：
 
@@ -108,7 +108,7 @@ struct TargetSpec {
 3. target 与 sink 文件映射来自同一 catalog；
 4. 未注册 target 写 `aemeath.log`，同时向 stderr 产生限频告警；
 5. sink 文件名必须唯一；
-6. catalog guard 扫描全部生产 `log::xxx!` 调用和 target 常量。
+6. catalog guard 从根 `Cargo.toml` 的 workspace members 反向校验：每个 crate root 恰有一个 crate-private `LOG_TARGET`，且 target、owner、sink ID 与文件名唯一并在 Catalog 注册；同时扫描全部生产 `log::xxx!` 调用。
 
 ## 5. 级别、preview 与脱敏
 
