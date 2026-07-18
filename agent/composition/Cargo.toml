@@ -12,6 +12,15 @@ project = { path = "../features/project" }
 update = { path = "../features/update" }
 audit = { path = "../features/audit" }
 storage = { path = "../features/storage" }
+context = { path = "../features/context" }
+task = { path = "../features/task" }
 share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
 async-trait = { workspace = true }
+
+[dev-dependencies]
+task = { path = "../features/task" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"

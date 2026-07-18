@@ -24,8 +24,9 @@ pub use query::{
     TaskLifecycleSnapshot, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot,
     TaskStoreStats,
 };
-pub(crate) use snapshot::PreparedTaskRestore;
-pub use snapshot::{TaskSnapshot, TaskSnapshotCodecError, TaskSnapshotValidationError};
+pub use snapshot::{
+    PreparedTaskRestore, TaskSnapshot, TaskSnapshotCodecError, TaskSnapshotValidationError,
+};
 /// 聚合内部事务状态：仅 crate 内 `TaskStore` backing 可见，**NEVER** 进入
 /// 公开 façade（否则消费方可绕过窄端口直接改状态 / 触碰内部 map / counter）。
 pub(crate) use state::TaskStoreState;

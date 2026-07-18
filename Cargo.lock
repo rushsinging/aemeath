@@ -411,12 +411,18 @@ dependencies = [
  "async-trait",
  "audit",
  "config",
+ "context",
  "project",
  "provider",
  "runtime",
  "sdk",
+ "serde_json",
  "share",
  "storage",
+ "task",
+ "tempfile",
+ "tokio",
+ "tokio-util",
  "tools",
  "update",
 ]
@@ -475,6 +481,7 @@ dependencies = [
  "serde_yml",
  "share",
  "storage",
+ "task",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -1982,8 +1989,11 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "serde",
+ "serde_json",
+ "storage",
  "thiserror 2.0.18",
  "tokio",
+ "utils",
  "uuid",
 ]
 

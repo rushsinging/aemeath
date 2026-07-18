@@ -88,9 +88,16 @@ pub enum TaskSnapshotValidationError {
     InvalidTaskTimestamps { task_id: TaskId },
 }
 
-/// A validated restore candidate. The aggregate state stays inside the Task BC:
-/// only crate-private capture/install plumbing may construct or consume it.
-pub(crate) struct PreparedTaskRestore {
+/// A validated restore candidate produced by the Task BC persistence port.
+///
+/// The type name is public so consumers can name the token that
+/// [`crate::TaskPersist::prepare_restore`] returns and
+/// [`crate::TaskPersist::commit_restore`] consumes, but it is deliberately
+/// opaque: its single field is private, it exposes no accessors, and it
+/// implements neither `Clone` nor serde. That keeps the wrapped aggregate state
+/// inside the Task BC and makes a prepared token single-use — moving it into
+/// `commit_restore` is the only way to install it.
+pub struct PreparedTaskRestore {
     candidate: TaskStoreState,
 }
 
