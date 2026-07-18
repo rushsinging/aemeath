@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -339,13 +338,22 @@ where
             let response = {
                 let progress_handle = reducer.progress_handle();
                 let stream_cancel = self.cancel.clone();
-                let stream_fut = self.client.invocation_stream(
-                    &invocation_scope,
-                    &effective_system_blocks,
-                    &messages_for_api,
-                    &tool_schemas,
-                    &stream_cancel,
-                );
+                let invocation_fut = async {
+                    let stream = self
+                        .client
+                        .invocation_stream(
+                            &invocation_scope,
+                            &effective_system_blocks,
+                            &messages_for_api,
+                            &tool_schemas,
+                            &stream_cancel,
+                        )
+                        .await
+                        .map_err(|error| (error, false))?;
+                    coordinator
+                        .pull_stream(stream, &stream_cancel, true, |event| reducer.apply(event))
+                        .await
+                };
                 let waiting_sink = self.sink.clone();
                 let waiting_context = self.turn_context.clone();
                 let request_started_at = tokio::time::Instant::now();
@@ -366,30 +374,10 @@ where
                         next += Duration::from_secs(10);
                     }
                 });
-                tokio::pin!(stream_fut);
+                tokio::pin!(invocation_fut);
                 let result = loop {
                     tokio::select! {
-                        stream = &mut stream_fut => {
-                            let mut stream = match stream {
-                                Ok(stream) => stream,
-                                Err(error) => break Err(error),
-                            };
-                            let mut terminal = None;
-                            while let Some(event) = stream.next().await {
-                                match reducer.apply(event) {
-                                    Ok(Some(response)) => terminal = Some(Ok(response)),
-                                    Ok(None) => {}
-                                    Err(error) => terminal = Some(Err(error)),
-                                }
-                                if terminal.is_some() {
-                                    break;
-                                }
-                            }
-                            break terminal.unwrap_or_else(|| Err(provider::ProviderError::fatal(
-                                provider::ProviderErrorKind::Protocol,
-                                "provider stream ended without terminal event",
-                            )));
-                        }
+                        response = &mut invocation_fut => break response,
                         event = self.input_events.recv_next_input() => {
                             if let Some(event) = event {
                                 self.queue_busy_event(event).await;
@@ -401,12 +389,12 @@ where
                 result
             };
             match response {
-                Ok(response) => break response,
-                Err(error) if error.is_cancelled() || self.cancel.is_cancelled() => {
+                Ok((response, _)) => break response,
+                Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err(error) => match coordinator
-                    .handle_failure(&error, reducer.saw_visible_delta(), &self.cancel)
+                Err((error, visible_delta)) => match coordinator
+                    .handle_failure(&error, visible_delta, &self.cancel)
                     .await
                 {
                     crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
