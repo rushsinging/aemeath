@@ -2,6 +2,7 @@
 //!
 //! Pure domain logic. NEVER touches fs / env / network.
 
+pub mod audit;
 pub mod config;
 pub mod driver_env;
 pub mod file_snapshot;

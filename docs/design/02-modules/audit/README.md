@@ -84,8 +84,10 @@ enum UsageDropReason {
 
 - Runtime hot path 只做 try_record，永不 await Audit IO；
 - Runtime 不重试、不改变 Run 状态；
-- queue bounded；Composition 在 bootstrap / active wiring 发布前从已验证 `ConfigSnapshot` 提取 queue capacity 与 shutdown timeout 并按值注入 sink/worker；对应 Config 字段、merge/compat 与 accessor 由 #929 随首个真实消费者一起定义，Audit worker **NEVER** 持有 `ConfigReader`、`ConfigQuery` 或裸 Config 字段；
-- Dropped 由 sink 计数，并通过 Logging 低频聚合 warn；
+- queue bounded；默认 `capacity = 1024`，`shutdown_timeout = 5s`。native global/project `aemeath.json` 使用 `audit.usage_queue_capacity` 与 `audit.usage_shutdown_timeout_ms`，字段级 patch 合并；Compatibility/Env/CLI/RuntimeOverride 本期不产出这两个字段。`Config::default()` 直接保存默认值；显式 0 作为兼容 sentinel，由 `ConfigSnapshot::usage_worker_config()` 回退默认。Composition 仅在进程 bootstrap 捕获一次 validated `UsageWorkerConfig { capacity, shutdown_timeout }` 并按值注入，运行期 Config commit 不重启 worker；Audit worker **NEVER** 持有 `ConfigReader`、`ConfigQuery` 或裸 Config 字段；
+- `UsageSender::try_record` 的线性化点是 sender 内部短临界区：在同一 mutex 下检查 lifecycle 并执行 bounded `try_send`，**NEVER** await、序列化或 I/O；shutdown 获得该锁并切到 ShuttingDown 后，后续调用一律 WorkerUnavailable，已在线性化点前 Accepted 的记录属于 drain 集；
+- metrics 使用同一 `UsagePipelineState` mutex 维护一致快照与单调 counter：`accepted_total` 在 enqueue 成功的同一临界区增加；`completed_total` 在该记录的 encode/append/flush 流程终结（成功或失败）后增加；`dropped_total{reason}` 在返回 Dropped 时增加；`write_failed_total` 每条记录至多增加一次并记录首个 encode/append/flush failure kind；`drain_abandoned_total` 在 timeout 时增加 `accepted_total - completed_total`，二者同锁读取、不会下溢；
+- warning 分类固定为 `queue_full` / `worker_unavailable` / `encode` / `append` / `flush` / `drain_timeout`。每类累计计数从 0→1 及到达 64 的倍数时，在 `target: LOG_TARGET` 输出包含 kind 与 cumulative_total 的 warn；单条写流程首个失败后立即终结，不继续产生第二类写失败；drain_timeout 每次 shutdown timeout 立即 warn；
 - enqueue Accepted 只表示进入队列，不表示 worker 已接收或已经落盘；Accepted 到 flush 完成之间存在进程异常导致的静默丢失窗口，这是尽力审计的明确语义。
 
 `WorkerUnavailable` 仅在以下状态返回：Composition 尚未完成 worker 启动、worker 已不可恢复退出且 sender 关闭、或 graceful shutdown 已开始且不再接收新记录。
@@ -114,11 +116,13 @@ receive one UsageRecord
 
 正常退出采用固定时序：
 
-1. Composition 将 sink 标记为 shutting down，后续 try_record 返回 WorkerUnavailable；
-2. 关闭 queue sender；
-3. worker drain 已接受记录，并逐条 append + flush；
-4. 等待由 #929 定义并经 `ConfigSnapshot` accessor 按值提取的 usage shutdown timeout；
-5. 超时后放弃剩余记录，增加 `drain_abandoned_total` 并记录聚合 warn。
+1. `UsageWorkerHandle::shutdown()` 使用启动时注入的唯一 `UsageWorkerConfig.shutdown_timeout`；在 sender 同一短临界区把 lifecycle 从 Running 置为 ShuttingDown 并移走 queue sender。重复 shutdown 等待/返回同一个 completion；
+2. receiver 在 sender 关闭后 drain 已在线性化点前 Accepted 的记录；
+3. worker 按 dequeue 顺序 encode，并 await `UsageAppendStorePort.append + flush`。默认 File adapter 自己在内部 `spawn_blocking` 执行同步 syscall，worker 不绕过 port；
+4. handle 等待已注入的 shutdown timeout；
+5. 超时时在一致 state 锁下计算 `accepted_total - completed_total`，增加 `drain_abandoned_total` 并返回 `TimedOut { unconfirmed }`。这里 abandoned 表示“timeout 时未确认完成”，不是确定丢失：已进入不可取消 blocking syscall 的单条可能稍后落盘。worker task 可 abort，但 blocking closure 不可取消；completion 保留该 unconfirmed 语义。
+
+`Stopped` 包含自然 worker 退出、不可恢复 task failure 与 shutdown 完成；任何情况下 sender 检测非 Running 或 receiver closed 都返回 WorkerUnavailable。
 
 Audit 是尽力事实记录，不是 durable execution 或 Run checkpoint。
 
@@ -348,6 +352,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | #929 冻结 bounded sender/worker lifecycle：默认 capacity 1024、shutdown 5s；一致 state metrics、64 倍数聚合 warning、File adapter blocking boundary、超时 unconfirmed 计数与 Composition lifecycle assembly；Runtime bridge/Invocation wiring 仍归 #931 | [#929](https://github.com/rushsinging/aemeath/issues/929) |
 | 2026-07-17 | #927 冻结 Usage PL：跨 BC ID 复用 SDK 唯一 newtype，Audit 拥有 UsageRecord/V1 envelope/emit/query DTO，Runtime 仅拥有 UsageSink trait；配置归 #929，查询行为归 #930，并按真实交付增量建立 domain/ports 层 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | #988 删除无行为的 `api/contract/gateway` COLA 占位；Usage 实现前仅保留真实 crate 入口，后续按已冻结的 Usage Target 增量建层 | [#988](https://github.com/rushsinging/aemeath/issues/988) |
 | 2026-07-12 | 初稿：Usage-only Audit MVP、非阻塞 Sink、查询与独立 JSONL 分区 | #790 |
