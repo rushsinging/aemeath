@@ -1,0 +1,4 @@
+# Workspace bootstrap / composition constructors may accept up to eight
+# already-grouped dependency values. Larger signatures must introduce another
+# cohesive parameter object instead of raising this threshold.
+too-many-arguments-threshold = 8
