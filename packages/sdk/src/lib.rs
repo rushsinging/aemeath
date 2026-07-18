@@ -31,7 +31,7 @@ pub mod update;
 pub mod ids;
 pub mod interaction;
 
-pub use bootstrap::ChatBootstrapArgs;
+pub use bootstrap::{ChatBootstrapArgs, LoggingOutputMode};
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,

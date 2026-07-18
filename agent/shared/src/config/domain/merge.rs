@@ -726,7 +726,7 @@ pub(crate) fn apply_guidance_patch(
             "confirm" => GuidanceReloadPolicy::Confirm,
             _ => {
                 log::warn!(
-                    target: "aemeath:shared",
+                    target: crate::LOG_TARGET,
                     "[config] unknown guidance.reload_policy '{}', keeping default",
                     v
                 );

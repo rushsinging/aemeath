@@ -14,7 +14,6 @@ use crate::adapters::http_attempt::{
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{LegacyStreamSink, ReasoningLevel};
-use crate::LOG_TARGET;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -38,7 +37,7 @@ impl OpenAICompatibleProvider {
             .unwrap_or(0);
         let url = self.responses_url();
 
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[responses-stream] POST provider={} url={} body_bytes={}",
             self.config.source_key, url, request_body_bytes,
         );
@@ -123,7 +122,7 @@ impl OpenAICompatibleProvider {
                                 NetworkFailureKind::Decode => "response decode error",
                                 NetworkFailureKind::Unknown => "unknown",
                             };
-                            log::debug!(target: LOG_TARGET,
+                            log::debug!(target: crate::LOG_TARGET,
                                 "[responses-stream] HTTP send failed attempt={}/{} kind={}: {}",
                                 attempt + 1, self.max_retries, detail, source,
                             );
@@ -185,7 +184,7 @@ impl OpenAICompatibleProvider {
                 }
             };
 
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "[responses-stream] response received attempt={}/{}",
                 attempt + 1, self.max_retries,
             );
@@ -454,13 +453,7 @@ mod tests {
             crate::ports::ReasoningLevel::Off,
         )
         .expect("valid scope");
-        let body = provider.build_responses_request_body(
-            &scope,
-            &[],
-            &[],
-            &flat_schemas,
-            false,
-        );
+        let body = provider.build_responses_request_body(&scope, &[], &[], &flat_schemas, false);
 
         // tools 必须被注入（修复前 schema.get("function") = None 导致 tools 丢失）
         let tools = body.get("tools").expect("tools should be injected");
@@ -468,6 +461,9 @@ mod tests {
         assert_eq!(tools[0]["type"], "function");
         assert_eq!(tools[0]["name"], "get_weather");
         assert_eq!(tools[0]["description"], "Get weather");
-        assert_eq!(tools[0]["parameters"]["properties"]["city"]["type"], "string");
+        assert_eq!(
+            tools[0]["parameters"]["properties"]["city"]["type"],
+            "string"
+        );
     }
 }

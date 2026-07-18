@@ -184,14 +184,14 @@ impl OpenAICompatibleProvider {
                                         // 仍尝试启发式恢复（防 arguments 被切在 string 字面量中间），
                                         // 恢复失败则记 warn 用空对象兜底（避免整个响应失败）。
                                         log::warn!(
-                                            target: "aemeath:agent:provider",
+                                            target: crate::LOG_TARGET,
                                             "OpenAI 非流式 tool_call arguments 解析失败（id={}, name={}, err={}, raw_len={}），尝试恢复",
                                             id, name, e, arguments.len(),
                                         );
                                         crate::adapters::json_recovery::try_complete_truncated_json(arguments)
                                             .unwrap_or_else(|| {
                                                 log::warn!(
-                                                    target: "aemeath:agent:provider",
+                                                    target: crate::LOG_TARGET,
                                                     "启发式恢复未成功（id={}, name={}），使用空对象兜底",
                                                     id, name,
                                                 );

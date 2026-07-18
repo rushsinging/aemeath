@@ -3,7 +3,6 @@
 use crate::application::startup::config_paths as paths;
 
 use super::pricing::get_pricing;
-use crate::LOG_TARGET;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -182,7 +181,7 @@ impl CostTracker {
     pub fn clear(&mut self) {
         self.records.clear();
         if let Err(e) = self.save() {
-            log::warn!(target: LOG_TARGET, "Failed to save after clearing: {}", e);
+            log::warn!(target: crate::LOG_TARGET, "Failed to save after clearing: {}", e);
         }
     }
 

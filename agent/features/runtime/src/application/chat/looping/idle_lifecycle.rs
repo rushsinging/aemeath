@@ -5,7 +5,6 @@ use crate::application::chat::looping::events::{ChatEventSink, RuntimeStreamEven
 use crate::application::chat::looping::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
-use crate::LOG_TARGET;
 use context::session::ChatChain;
 use share::reasoning::ReasoningLevel;
 use workflow::api::ReasoningPort;
@@ -56,7 +55,7 @@ async fn await_idle_input<I: InputEventDrainPort>(
     match input_events.recv_next_input().await {
         Some(event) => {
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "session idle woken by event kind={}",
                 event_kind_name(&event)
             );

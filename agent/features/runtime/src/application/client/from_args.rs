@@ -17,7 +17,6 @@ use provider::SystemBlock;
 use storage::TaskStore;
 
 use super::{AgentClientImpl, RuntimeHandle};
-use crate::LOG_TARGET;
 
 // ─── RuntimeProjectionParticipant ────────────────────────────────────
 
@@ -189,7 +188,7 @@ pub async fn from_args_with_workspace(
         .await
         {
             Ok((_restore, sid)) => {
-                log::info!(target: LOG_TARGET, "startup resume: {}", sid);
+                log::info!(target: crate::LOG_TARGET, "startup resume: {}", sid);
                 sid
             }
             Err(error) => {
@@ -202,7 +201,7 @@ pub async fn from_args_with_workspace(
         // Non-resume: use the wiring's committed session id so Runtime
         // and the Context coordinator share the same canonical session.
         let session_id = wiring.committed_session().id.clone();
-        log::info!(target: LOG_TARGET, "session started");
+        log::info!(target: crate::LOG_TARGET, "session started");
         session_id
     };
     // Session id determined above; committed_config read below reflects
@@ -237,7 +236,7 @@ pub async fn from_args_with_workspace(
         !args.no_think,
     );
 
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "[main] source={} api={} model={} reasoning={} args.no_think={}",
         resolved_model.source_key,
         driver,
@@ -267,7 +266,7 @@ pub async fn from_args_with_workspace(
     let task_store = Arc::new(TaskStore::new());
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
-        log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
+        log::info!(target: crate::LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     // MemoryPortSource: delegates to wiring.committed_memory() at execution
@@ -335,7 +334,7 @@ pub async fn from_args_with_workspace(
         &snapshot,
     );
     let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "concurrency limits: max_tool={}, max_agent={}",
         max_tool_concurrency,
         max_agent_concurrency
@@ -391,7 +390,15 @@ pub async fn from_args_with_workspace(
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    // 19. context_size / verbose 合并
+    // 19. Concurrency
+    log::info!(
+        target: crate::LOG_TARGET,
+        "concurrency limits: max_tool={}, max_agent={}",
+        max_tool_concurrency,
+        max_agent_concurrency
+    );
+
+    // 20. context_size / verbose 合并
     let context_size =
         snapshot.resolve_context_size(Some(args.context_size), resolved_model.model.context_window);
 

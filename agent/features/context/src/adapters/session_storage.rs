@@ -17,9 +17,6 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
-/// Session 存储日志 target（迁移到 context crate 后用 `context::session::LOG_TARGET`）。
-const LOG_TARGET: &str = "aemeath:agent:storage";
-
 fn sessions_dir() -> PathBuf {
     paths::global_sessions_dir()
 }
@@ -53,7 +50,7 @@ pub enum SessionLoadError {
 fn migrate_legacy_messages(session: &mut Session) {
     if session.chats.is_empty() && !session.messages.is_empty() {
         log::info!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "session {} migrating legacy flat messages ({}) to chat chain",
             session.id,
             session.messages.len()
@@ -88,7 +85,7 @@ pub async fn save_session(session: &Session) -> Result<(), String> {
             if let Ok(existing_session) = serde_json::from_str::<Session>(&existing) {
                 if existing_session.updated_at > session.updated_at {
                     log::warn!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "session {} skipped save: disk updated_at={} > incoming updated_at={}",
                         session.id,
                         existing_session.updated_at,
@@ -160,7 +157,7 @@ pub async fn load_session(id: &str) -> Result<Session, SessionLoadError> {
         }
         Err(parse_err) => {
             log::warn!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "session {} JSON corrupted ({}), attempting .bak fallback",
                 id,
                 parse_err
@@ -170,7 +167,7 @@ pub async fn load_session(id: &str) -> Result<Session, SessionLoadError> {
                 if let Ok(bak_json) = tokio::fs::read_to_string(&bak_path).await {
                     if let Ok(mut session) = serde_json::from_str::<Session>(&bak_json) {
                         log::info!(
-                            target: LOG_TARGET,
+                            target: crate::LOG_TARGET,
                             "session {} recovered from .bak backup",
                             id
                         );
@@ -218,7 +215,7 @@ pub async fn load_canonical_session(id: &str) -> Result<CanonicalSession, Sessio
         Ok(decoded) => Ok(decoded.session),
         Err(codec_err) => {
             log::warn!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "session {} canonical decode failed ({}), attempting .bak fallback",
                 id,
                 codec_err
@@ -227,7 +224,7 @@ pub async fn load_canonical_session(id: &str) -> Result<CanonicalSession, Sessio
                 if let Ok(bak_bytes) = tokio::fs::read(&bak_path).await {
                     if let Ok(decoded) = crate::adapters::decode_session(&bak_bytes) {
                         log::info!(
-                            target: LOG_TARGET,
+                            target: crate::LOG_TARGET,
                             "session {} recovered canonical from .bak backup",
                             id
                         );

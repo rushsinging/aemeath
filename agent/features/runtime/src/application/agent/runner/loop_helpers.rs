@@ -4,7 +4,6 @@ use share::message::Message;
 
 use super::logging::build_json_logger_tool_result_data;
 use super::loop_run::SubAgentRun;
-use crate::LOG_TARGET;
 use provider::SystemBlock;
 
 impl<'a> SubAgentRun<'a> {
@@ -62,7 +61,7 @@ impl<'a> SubAgentRun<'a> {
                 call_info,
             );
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "tool_result: {}",
                 serde_json::to_string(&data).unwrap_or_default()
             );

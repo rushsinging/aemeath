@@ -11,7 +11,6 @@ use crate::adapters::http_attempt::{
 };
 use crate::domain::invoke::{InvocationScope, SystemBlock};
 use crate::ports::{LegacyStreamSink, LlmProvider, ReasoningLevel};
-use crate::LOG_TARGET;
 
 use super::{parse_openai_stream, OpenAICompatibleProvider, ReasoningConfig};
 
@@ -261,7 +260,7 @@ impl LlmProvider for OpenAICompatibleProvider {
             let body_bytes = serde_json::to_string(&request_body)
                 .map(|s| s.len())
                 .unwrap_or(0);
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "[openai-compat stream] POST provider={} body_bytes={} messages={}:{}",
                 self.config.source_key,
                 body_bytes,
@@ -376,7 +375,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                                 cause = c.source();
                                 depth += 1;
                             }
-                            log::debug!(target: LOG_TARGET,
+                            log::debug!(target: crate::LOG_TARGET,
                                 "[openai-compat stream] HTTP send failed provider={} model={} attempt={}/{} remaining_retries={} detail={} body_bytes={} messages={} tools={} error={}",
                                 self.config.source_key,
                                 scope.model(),
@@ -446,7 +445,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                 }
             };
 
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "[openai-compat stream] response received provider={} model={} attempt={}/{} body_bytes={} messages={} tools={}",
                 self.config.source_key,
                 scope.model(),
@@ -490,7 +489,7 @@ impl LlmProvider for OpenAICompatibleProvider {
                         fallback_planned,
                         protocol_disposition.log_level(),
                     );
-                    log::debug!(target: LOG_TARGET,
+                    log::debug!(target: crate::LOG_TARGET,
                         "[openai-compat stream] streaming parse failed provider={} model={} attempt={}/{} remaining_retries={} body_bytes={} messages={} tools={} error={}{}",
                         self.config.source_key,
                         scope.model(),

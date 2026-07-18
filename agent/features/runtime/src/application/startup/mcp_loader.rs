@@ -1,5 +1,4 @@
 use crate::application::startup::config_paths as paths;
-use crate::LOG_TARGET;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -33,7 +32,7 @@ async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, M
     let content = match tokio::fs::read_to_string(config_path).await {
         Ok(c) => c,
         Err(e) => {
-            log::warn!(target: LOG_TARGET, "failed to read MCP config {}: {e}", config_path.display());
+            log::warn!(target: crate::LOG_TARGET, "failed to read MCP config {}: {e}", config_path.display());
             return None;
         }
     };
@@ -41,7 +40,7 @@ async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, M
     let config: serde_json::Value = match serde_json::from_str(&content) {
         Ok(c) => c,
         Err(e) => {
-            log::warn!(target: LOG_TARGET, "invalid MCP config {}: {e}", config_path.display());
+            log::warn!(target: crate::LOG_TARGET, "invalid MCP config {}: {e}", config_path.display());
             return None;
         }
     };
@@ -49,7 +48,7 @@ async fn read_mcp_servers_config(config_path: &Path) -> Option<HashMap<String, M
     match parse_mcp_servers_config(&config) {
         Ok(servers) => Some(servers),
         Err(e) => {
-            log::warn!(target: LOG_TARGET, "invalid MCP config {}: {e}", config_path.display());
+            log::warn!(target: crate::LOG_TARGET, "invalid MCP config {}: {e}", config_path.display());
             None
         }
     }
@@ -66,7 +65,7 @@ pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
     let project_config_path = cwd.join(".mcp.json");
     if let Some(project_servers) = read_mcp_servers_config(&project_config_path).await {
         if !project_servers.is_empty() {
-            log::warn!(target: LOG_TARGET,
+            log::warn!(target: crate::LOG_TARGET,
                 "Loading MCP servers from project-level config {} — commands may be untrusted.",
                 project_config_path.display()
             );
@@ -76,7 +75,7 @@ pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
 
     let manager = Arc::new(McpConnectionManager::with_servers(servers));
     if let Err(e) = manager.initialize().await {
-        log::warn!(target: LOG_TARGET, "failed to initialize MCP manager: {e}");
+        log::warn!(target: crate::LOG_TARGET, "failed to initialize MCP manager: {e}");
     }
     manager
 }
@@ -90,24 +89,24 @@ pub async fn spawn_mcp_connect(
 ) -> Arc<McpConnectionManager> {
     let manager = load_mcp_manager(cwd).await;
 
-    log::info!(target: LOG_TARGET, "[MCP] connecting {} servers", manager.server_count());
+    log::info!(target: crate::LOG_TARGET, "[MCP] connecting {} servers", manager.server_count());
 
     for (name, result) in manager.connect_all().await {
         match result {
             Ok(connection) => {
-                log::info!(target: LOG_TARGET,
+                log::info!(target: crate::LOG_TARGET,
                     "[MCP] {} connected with {} tools",
                     name,
                     connection.tools.len()
                 );
             }
             Err(e) => {
-                log::warn!(target: LOG_TARGET, "[MCP] failed to connect to {}: {e}", name)
+                log::warn!(target: crate::LOG_TARGET, "[MCP] failed to connect to {}: {e}", name)
             }
         }
     }
     manager.register_tools(&registry).await;
-    log::info!(target: LOG_TARGET, "[MCP] all servers connected");
+    log::info!(target: crate::LOG_TARGET, "[MCP] all servers connected");
 
     manager
 }

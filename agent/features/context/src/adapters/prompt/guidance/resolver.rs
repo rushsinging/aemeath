@@ -1,7 +1,5 @@
 //! Guidance resolution logic: loading, prefix-matching, and assembly.
 
-use crate::adapters::prompt::LOG_TARGET;
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -206,7 +204,7 @@ fn load_prefix_matched_files_with_lang(model_id: &str, language: &str) -> Vec<Lo
     candidates
         .into_iter()
         .map(|(stem, guidance)| {
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "Matched guidance prefix '{}' for model '{}'",
                 stem,
                 model_lower
@@ -305,7 +303,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
         Ok(_) => return None,
         Err(error) => {
             if scan_security || path.exists() {
-                log::warn!(target: LOG_TARGET,
+                log::warn!(target: crate::LOG_TARGET,
                     "Failed to read guidance file {}: {}",
                     path.display(),
                     error
@@ -315,7 +313,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
         }
     };
 
-    log::debug!(target: LOG_TARGET, "Loaded guidance from {}", path.display());
+    log::debug!(target: crate::LOG_TARGET, "Loaded guidance from {}", path.display());
     if !scan_security {
         return Some(LoadedGuidance::file(path, content));
     }
@@ -323,7 +321,7 @@ fn read_guidance_file(path: PathBuf, scan_security: bool) -> Option<LoadedGuidan
     let display_path = path.to_string_lossy();
     let warnings = crate::adapters::prompt::security::scan_content(&display_path, &content);
     for warning in &warnings {
-        log::warn!(target: LOG_TARGET,
+        log::warn!(target: crate::LOG_TARGET,
             "[Security] {} in {} line {}: {}",
             warning.threat_type,
             warning.filename,
@@ -385,7 +383,7 @@ fn load_builtin_default(name: &str, language: &str) -> Option<String> {
 
     for &(file_name, content) in files {
         if file_name == filename {
-            log::debug!(target: LOG_TARGET, "Using built-in default for {} ({})", filename, language);
+            log::debug!(target: crate::LOG_TARGET, "Using built-in default for {} ({})", filename, language);
             return Some(content.trim().to_string());
         }
     }

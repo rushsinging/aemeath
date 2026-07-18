@@ -367,7 +367,7 @@ impl App {
                 };
                 self.append_system_notice(format!("{prefix}: {message}"));
                 log::warn!(
-                    target: "aemeath:tui",
+                    target: crate::LOG_TARGET,
                     "session resume failed: id={} kind={:?} msg={}",
                     id, kind, message
                 );

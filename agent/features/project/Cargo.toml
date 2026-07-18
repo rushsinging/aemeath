@@ -8,6 +8,7 @@ share = { path = "../../shared" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+log = "0.4"
 
 [dev-dependencies]
 tokio = { workspace = true }

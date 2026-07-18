@@ -1,4 +1,3 @@
-use crate::LOG_TARGET;
 use share::message::{ContentBlock, Message};
 use tools::{Tool, ToolExecutionContext, ToolRegistry};
 use tools::{ToolOutcome, ToolResult};
@@ -86,7 +85,7 @@ async fn call_tool_with_timeout(
     {
         let message = super::input_validation::format_tool_input_error(&mismatch);
         log::warn!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "tool input validation failed: tool={name}, message={message}"
         );
         return Ok(ToolResult {
@@ -103,7 +102,7 @@ async fn call_tool_with_timeout(
     tokio::select! {
         _ = cancellation.cancelled() => {
             let message = tool_call_cancelled_message(name);
-            log::debug!(target: LOG_TARGET, "{message}");
+            log::debug!(target: crate::LOG_TARGET, "{message}");
             Err(message)
         }
         result = tokio::time::timeout(
@@ -112,7 +111,7 @@ async fn call_tool_with_timeout(
         ) => {
             match result {
                 Ok(result) => {
-                    log::debug!(target: LOG_TARGET,
+                    log::debug!(target: crate::LOG_TARGET,
                         "tool.call execution finished: tool={}, timeout_secs={}, elapsed_ms={}",
                         name,
                         timeout,
@@ -123,7 +122,7 @@ async fn call_tool_with_timeout(
                 Err(_) => {
                     let elapsed = started.elapsed();
                     let message = tool_call_timeout_message(name, timeout, elapsed);
-                    log::warn!(target: LOG_TARGET, "{message}");
+                    log::warn!(target: crate::LOG_TARGET, "{message}");
                     Err(message)
                 }
             }

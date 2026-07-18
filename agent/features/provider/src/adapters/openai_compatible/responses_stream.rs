@@ -9,7 +9,6 @@
 use super::usage::parse_responses_usage;
 use crate::domain::invoke::{StopReason, StreamResponse, Usage};
 use crate::ports::LegacyStreamSink;
-use crate::LOG_TARGET;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -90,7 +89,7 @@ pub(crate) async fn parse_responses_stream(
         let event: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
             Err(e) => {
-                log::debug!(target: LOG_TARGET,
+                log::debug!(target: crate::LOG_TARGET,
                     "[responses-stream] JSON parse error: {} | line: {}",
                     e, &data[..data.len().min(200)]
                 );
