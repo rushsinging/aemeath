@@ -42,7 +42,10 @@ pub use chat::{
 pub use client::AgentClient;
 pub use commands::builtin_commands;
 pub use commands::{ContextEstimate, ModelSwitchResult};
-pub use config_view::ConfigView;
+pub use config_view::{
+    ConfigChangeCause, ConfigChangedEvent, ConfigField, ConfigUpdate, ConfigUpdateResult,
+    ConfigView, PermissionModeView,
+};
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
 pub use ids::{
