@@ -4,7 +4,8 @@ mod contract;
 
 pub use adapters::{
     encode_native_config, CliArgsAdapter, CliConfigInput, CompatibilityAdapter, ConfigAdapterError,
-    ConfigFormat, ConfigValidator, FileAdapter, NativeConfigStore,
+    ConfigFormat, ConfigValidator, EnvAdapter, EnvSource, FileAdapter, NativeConfigStore,
+    ProcessEnv,
 };
 pub use application::{wire_project_config, ConfigAppService, ConfigWiring};
 pub async fn wire_project_config_with_cli(

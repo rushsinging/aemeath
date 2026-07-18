@@ -186,6 +186,22 @@
       "status": "active"
     },
     {
+      "id": "policy.config.business-env-owner",
+      "guard": "check-config-env-guard.sh",
+      "module": "config",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/config/src/adapters.rs"
+      },
+      "classification": "target_capability_policy",
+      "owner": "config",
+      "reason": "All business environment variables are read only by the Config EnvAdapter",
+      "tracking_issue": 935,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Config-owned environment adapter policy",
+      "status": "active"
+    },
+    {
       "id": "scope.config.comments",
       "guard": "check-config-env-guard.sh",
       "module": "config",

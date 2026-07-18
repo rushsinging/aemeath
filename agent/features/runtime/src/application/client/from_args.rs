@@ -138,7 +138,7 @@ pub async fn from_args_with_workspace(
     let resolved_model = runtime_model.resolved_model().clone();
     let driver = resolved_model.driver.as_str();
     // 7. API key
-    let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
+    let api_key = resolve_api_key(&resolved_model).ok_or_else(|| {
         SdkError::Init(
             "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
         )
