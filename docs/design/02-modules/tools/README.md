@@ -80,7 +80,7 @@ Context Management 通过 `SkillMaterializationPort` 或 PromptInjection Command
 
 ### Policy / Hook / Audit
 
-Tool BC 不反向调用 Policy 或 Hook。Runtime 在调用 ToolExecutionPort 前后完成评估和通知，并发布审计事件。
+Tool BC 不反向调用 Policy 或 Hook。Runtime 在调用 ToolExecutionPort 前后完成评估和通知，并发布审计事件。路径 containment 是 Project `WorkspaceRead` 的不可绕过前置条件；文件 Tool 在自身 adapter 内调用安全解析。Bash command/injection safety 与 Write/Edit read-before-write 是 Tool 局部不变量，即使 PolicyMode=AllowAll 也必须执行。
 
 ### Config
 
@@ -98,6 +98,7 @@ MCP transport、JSON-RPC、认证和协议 DTO 是 Tool BC 的 adapter 私有实
 - **NEVER** 让 Slash Command 直接读取 Runtime 内部结构。
 - **NEVER** 依赖工具名称黑名单表达授权。
 - **MUST** 在 Catalog 与 Execution 两端检查 Scope/Profile。
+- **MUST** 文件 Tool 经 Project `WorkspaceRead` 安全解析；Bash safety 与 read-before-write 不受 AllowAll 影响。
 - **MUST** 让 Tool 调用结果保持领域语义，不依赖 SDK/TUI View。
 - **MUST** 将 MCP 未接线能力明确保留为 Target，不假定为现有能力。
 

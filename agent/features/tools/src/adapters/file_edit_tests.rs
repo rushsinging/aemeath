@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext {
     let mut read_files = HashSet::new();
-    read_files.insert(read_file);
+    if !read_file.is_empty() {
+        read_files.insert(read_file);
+    }
     ToolExecutionContext {
         workspace: project::wire_production_workspace(root)
             .expect("workspace 初始化成功")
@@ -44,6 +46,33 @@ fn test_start_line_of_match_boundary_first_line() {
 #[test]
 fn test_start_line_of_match_error_when_missing() {
     assert_eq!(start_line_of_match("one\ntwo\n", "missing"), None);
+}
+
+#[tokio::test]
+async fn file_edit_without_prior_read_is_rejected_even_when_allow_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sample.rs");
+    tokio::fs::write(&path, "one\ntwo\n").await.unwrap();
+    let mut ctx = test_ctx(dir.path().to_path_buf(), String::new());
+    ctx.resources.allow_all = true;
+
+    let result = FileEditTool
+        .call(
+            serde_json::json!({
+                "file_path": path,
+                "old_string": "two",
+                "new_string": "TWO"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("must read"));
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.unwrap(),
+        "one\ntwo\n"
+    );
 }
 
 #[tokio::test]

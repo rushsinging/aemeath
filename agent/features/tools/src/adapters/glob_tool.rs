@@ -1,15 +1,9 @@
 use crate::domain::types::glob::{GlobInput, GlobResult};
-use crate::domain::{PathAccess, PathKind};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
 pub struct GlobTool;
-
-const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "path",
-    kind: PathKind::SearchDir,
-}];
 
 #[async_trait]
 impl TypedTool for GlobTool {
@@ -37,14 +31,11 @@ impl TypedTool for GlobTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &PATH_ACCESS
-    }
 
     async fn call(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> TypedToolResult<GlobResult> {
         let args: GlobInput = match serde_json::from_value(input) {
             Ok(a) => a,
@@ -60,13 +51,15 @@ impl TypedTool for GlobTool {
             }
         };
         let pattern = args.pattern.as_str();
-        // Path has already been validated and normalised by PolicyEngine
         let base_dir = match args.path.as_deref() {
-            Some(p) => std::path::PathBuf::from(p),
-            None => {
-                // Fallback to cwd if path is missing
-                _ctx.workspace_read().current_path_base()
-            }
+            Some(path) => match ctx
+                .workspace_read()
+                .resolve_search_path(std::path::Path::new(path))
+            {
+                Ok(path) => path,
+                Err(error) => return TypedToolResult::error(error.to_string()),
+            },
+            None => ctx.workspace_read().current_path_base(),
         };
         let full_pattern = base_dir.join(pattern).to_string_lossy().to_string();
         match glob::glob(&full_pattern) {
