@@ -3,14 +3,12 @@ pub mod concurrency;
 pub mod config_paths;
 pub mod mcp_loader;
 pub mod model_runtime;
-pub mod permissions;
 pub mod provider_client;
 pub mod runtime_support;
 
 pub use concurrency::resolve_concurrency_limits;
 pub use mcp_loader::spawn_mcp_connect;
 pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
-pub use permissions::apply_config_permission_mode;
 pub use provider_client::{
     build_llm_client, build_llm_client_with_gateway, resolve_api_key, resolve_base_url,
 };

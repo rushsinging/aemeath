@@ -7,7 +7,6 @@ pub struct ChatLaunchOptions {
     pub markdown: bool,
     pub context_size: usize,
     pub resume: Option<String>,
-    pub allow_all: bool,
     pub max_tool_concurrency: usize,
 }
 
@@ -62,7 +61,6 @@ mod tests {
             markdown: true,
             context_size: 200_000,
             resume: None,
-            allow_all: false,
             max_tool_concurrency: 10,
         }
     }

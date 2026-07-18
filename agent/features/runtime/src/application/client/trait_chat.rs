@@ -98,7 +98,7 @@ pub(super) async fn chat_impl(
                 session_reminders: Arc::new(Mutex::new(Default::default())),
                 agent_runner: Some(inner.context.resources.agent_runner.clone()),
                 tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
-                allow_all: inner.context.resources.allow_all,
+                policy: inner.context.resources.policy.clone(),
                 active_run: inner.active_run.clone(),
                 task_store: inner.context.resources.task_store.clone(),
                 task_access: inner.context.resources.task_access.clone(),

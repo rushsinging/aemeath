@@ -309,6 +309,7 @@ impl AgentRunner for CliAgentRunner {
             progress: Box::new(progress),
             ctx_context_size: context_size,
             tool_result_materializer: self.tool_result_materializer.clone(),
+            policy: self.policy.clone(),
         }
         .run_loop()
         .await

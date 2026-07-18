@@ -35,6 +35,7 @@ pub struct CliAgentRunner {
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     /// Runtime-owned workspace source used to derive isolated sub-run views.
     pub workspace: crate::application::tool_execution_adapters::RuntimeWorkspaceAccess,
+    pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl CliAgentRunner {

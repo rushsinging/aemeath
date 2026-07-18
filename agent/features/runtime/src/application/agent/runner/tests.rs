@@ -61,6 +61,7 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        policy: Arc::new(policy::AllowAllPolicy),
     };
     let ctx_a = test_ctx();
     let ctx_b = test_ctx();
@@ -830,6 +831,7 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        policy: Arc::new(policy::AllowAllPolicy),
     }
 }
 
@@ -853,6 +855,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        policy: Arc::new(policy::AllowAllPolicy),
     }
 }
 
