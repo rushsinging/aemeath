@@ -142,7 +142,10 @@ impl PreparedProjectConfig {
 
 #[derive(Debug, Clone)]
 pub struct PreparedConfigUpdate {
+    pub(crate) project_key: String,
     pub(crate) snapshot: ConfigSnapshot,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) fields: Vec<ConfigField>,
 }
 
 impl PreparedConfigUpdate {
@@ -173,6 +176,7 @@ pub enum ConfigCommitWarning {
 #[derive(Debug, Clone)]
 pub struct ReadyConfigCommit {
     pub(crate) snapshot: ConfigSnapshot,
+    pub(crate) fields: Vec<ConfigField>,
     pub(crate) warning: Option<ConfigCommitWarning>,
 }
 
@@ -206,6 +210,12 @@ pub trait ProjectConfigParticipant: Send + Sync {
     ) -> Result<PreparedProjectConfig, ConfigError>;
     fn snapshot(&self) -> ConfigSnapshot;
     fn commit_project(&self, prepared: PreparedProjectConfig);
+    async fn prepare_update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<PreparedConfigUpdate, ConfigUpdateError>;
+    async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome;
+    fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet;
 }
 
 #[cfg(test)]

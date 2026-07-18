@@ -62,6 +62,39 @@ else:
         if unexpected:
             violations.append("agent/composition/src/lib.rs: unexpected public module declarations: " + ", ".join(sorted(unexpected)))
 
+    runtime_wiring = src / "runtime.rs"
+    if runtime_wiring.is_file():
+        text = runtime_wiring.read_text()
+        required_patterns = {
+            "provider gateway forwarding": r"gateways\.provider",
+            "tool gateway forwarding": r"gateways\.tools",
+        }
+        for label, pattern in required_patterns.items():
+            if not re.search(pattern, text):
+                violations.append(
+                    f"agent/composition/src/runtime.rs: missing {label}; FeatureGateways must be consumed"
+                )
+        if re.search(r"\b_gateways\s*:\s*FeatureGateways", text):
+            violations.append(
+                "agent/composition/src/runtime.rs: FeatureGateways must not be ignored"
+            )
+
+    runtime_bootstrap = root / "agent" / "features" / "runtime" / "src" / "application" / "client" / "from_args.rs"
+    if runtime_bootstrap.is_file():
+        text = runtime_bootstrap.read_text()
+        required_patterns = {
+            "injected provider gateway parameter": r"provider_gateway\s*:\s*Arc<dyn provider::LlmProviderGateway>",
+            "injected tool gateway parameter": r"tool_gateway\s*:\s*Arc<dyn tools::ToolCatalogGateway>",
+            "provider gateway client construction": r"build_llm_client_with_gateway\s*\(\s*provider_gateway\.as_ref\(\)",
+            "tool gateway registry construction": r"tool_gateway\.new_registry\s*\(\)",
+            "tool gateway registration": r"tool_gateway\.register_all_tools\s*\(",
+        }
+        for label, pattern in required_patterns.items():
+            if not re.search(pattern, text, re.DOTALL):
+                violations.append(
+                    f"{runtime_bootstrap.relative_to(root)}: missing {label}"
+                )
+
 if violations:
     reason = "Composition layout guard FAILED:\n" + "\n".join(violations)
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))

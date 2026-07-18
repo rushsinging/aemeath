@@ -80,6 +80,8 @@ pub enum ToolCapability {
     UserInteraction,
     /// 派发子 agent。
     AgentDispatch,
+    /// 读取 Task 列表或 Task 详情。
+    TaskRead,
     /// 修改 Task 列表。
     TaskMutation,
     /// 控制 workspace（worktree 进入 / 退出）。
@@ -105,6 +107,7 @@ bitflags::bitflags! {
         const TaskMutation     = 1 << 6;
         const WorkspaceControl = 1 << 7;
         const PlanControl      = 1 << 8;
+        const TaskRead         = 1 << 9;
     }
 }
 
@@ -140,6 +143,7 @@ impl From<ToolCapability> for ToolCapabilities {
             ToolCapability::NetworkAccess => Self::NetworkAccess,
             ToolCapability::UserInteraction => Self::UserInteraction,
             ToolCapability::AgentDispatch => Self::AgentDispatch,
+            ToolCapability::TaskRead => Self::TaskRead,
             ToolCapability::TaskMutation => Self::TaskMutation,
             ToolCapability::WorkspaceControl => Self::WorkspaceControl,
             ToolCapability::PlanControl => Self::PlanControl,

@@ -10,6 +10,41 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+async fn bash_allow_all_does_not_bypass_shell_injection_guard() {
+    let workspace = tempdir().unwrap();
+    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
+        .expect("workspace 初始化成功")
+        .into_views();
+    let ctx = ToolExecutionContext {
+        workspace: ws,
+        run_id: "test-run".to_string(),
+        cancel: CancellationToken::new(),
+        read_files: Arc::new(Mutex::new(HashSet::new())),
+        resources: ToolResources {
+            agent_runner: None,
+            registry: None,
+            memory_config: share::config::MemoryConfig::default(),
+            lang: "en".to_string(),
+            allow_all: true,
+        },
+        session_reminders: None,
+        plan_mode: None,
+        max_tool_concurrency: 4,
+        max_agent_concurrency: 4,
+        agent_semaphore: Arc::new(Semaphore::new(4)),
+        progress_tx: None,
+        parent_session_id: None,
+    };
+
+    let result = BashTool
+        .call(json!({ "command": "echo $(rm -rf /tmp/never-run)" }), &ctx)
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("blocked"));
+}
+
+#[tokio::test]
 async fn test_bash_persists_cd_for_subsequent_write_path_base() {
     let workspace = tempdir().unwrap();
     let worktree = workspace.path().join(".worktrees/bug35");

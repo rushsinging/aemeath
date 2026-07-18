@@ -1,3 +1,7 @@
+use crate::adapters::{
+    encode_native_config, CompatibilityAdapter, ConfigAdapterError, ConfigValidator, FileAdapter,
+    NativeConfigStore,
+};
 use crate::contract::*;
 use async_trait::async_trait;
 use share::config::adapters::env as env_adapter;
@@ -12,6 +16,7 @@ pub struct ConfigAppService {
     tx: watch::Sender<ConfigSnapshot>,
     inner: AsyncRwLock<Inner>,
     active_location: RwLock<Option<ProjectConfigLocation>>,
+    native_store: Option<NativeConfigStore>,
 }
 
 struct Inner {
@@ -48,6 +53,18 @@ impl ConfigWiring {
     }
 }
 
+pub async fn wire_project_config_with_cli(
+    project_dir: &Path,
+    cli: crate::adapters::CliConfigInput,
+) -> Result<ConfigWiring, ConfigError> {
+    let service = std::sync::Arc::new(ConfigAppService::new(Some(project_dir)));
+    service
+        .set_cli_patch(crate::adapters::CliArgsAdapter::read(&cli))
+        .await;
+    service.load().await.map_err(ConfigError::Load)?;
+    Ok(ConfigWiring { service })
+}
+
 pub async fn wire_project_config(project_dir: &Path) -> Result<ConfigWiring, ConfigError> {
     let service = std::sync::Arc::new(ConfigAppService::new(Some(project_dir)));
     service.load().await.map_err(ConfigError::Load)?;
@@ -75,7 +92,13 @@ impl ConfigAppService {
                 cli_patch: ConfigPatch::default(),
             }),
             active_location: RwLock::new(None),
+            native_store: None,
         }
+    }
+
+    pub fn with_native_store(mut self, native_store: NativeConfigStore) -> Self {
+        self.native_store = Some(native_store);
+        self
     }
 
     pub async fn set_cli_patch(&self, patch: ConfigPatch) {
@@ -90,33 +113,13 @@ impl ConfigAppService {
             inner.claude_project_settings_path.as_deref(),
             &inner.cli_patch,
         )
-        .await;
+        .await
+        .map_err(|error| format!("配置加载失败：{error:?}"))?;
         drop(inner);
         let snapshot = ConfigSnapshot::new(config.clone());
         self.inner.write().await.config = config;
         self.tx.send_replace(snapshot);
         Ok(())
-    }
-
-    async fn persist_and_publish(
-        &self,
-        config: Config,
-    ) -> Result<ConfigSnapshot, ConfigPersistError> {
-        let path = self.inner.read().await.global_path.clone();
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(map_io_error)?;
-        }
-        let content =
-            serde_json::to_string_pretty(&config).map_err(|_| ConfigPersistError::Serialization)?;
-        tokio::fs::write(&path, content)
-            .await
-            .map_err(map_io_error)?;
-        self.inner.write().await.config = config.clone();
-        let snapshot = ConfigSnapshot::new(config);
-        self.tx.send_replace(snapshot.clone());
-        Ok(snapshot)
     }
 }
 
@@ -125,20 +128,19 @@ async fn load_config(
     project_path: Option<&Path>,
     claude_project_settings_path: Option<&Path>,
     cli_patch: &ConfigPatch,
-) -> Config {
+) -> Result<Config, ConfigAdapterError> {
     let mut chain = PriorityChain::new();
-    for path in [
-        claude_project_settings_path,
-        Some(global_path),
-        project_path,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Ok(content) = tokio::fs::read_to_string(path).await {
-            if let Ok(patch) = serde_json::from_str::<ConfigPatch>(&content) {
-                chain.push(patch);
-            }
+    if let Some(patch) = FileAdapter::read(global_path).await? {
+        chain.push(patch);
+    }
+    if let Some(path) = project_path {
+        if let Some(patch) = FileAdapter::read(path).await? {
+            chain.push(patch);
+        }
+    }
+    if let Some(path) = claude_project_settings_path {
+        if let Some(patch) = CompatibilityAdapter::read_one(path).await? {
+            chain.push(patch);
         }
     }
     let env_patch = env_adapter::read();
@@ -150,7 +152,53 @@ async fn load_config(
     }
     let mut config = chain.merge(Config::default());
     resolve_provider_api_keys(&mut config);
-    config
+    ConfigValidator::validate(&config)?;
+    Ok(config)
+}
+
+fn apply_update(
+    config: &mut Config,
+    command: ConfigUpdate,
+) -> Result<ConfigField, ConfigUpdateError> {
+    match command {
+        ConfigUpdate::SetModel { model } => {
+            if model.trim().is_empty() {
+                return Err(ConfigUpdateError::Invalid("model 不能为空".into()));
+            }
+            config.models.default = model;
+            Ok(ConfigField::Model)
+        }
+        ConfigUpdate::SetPermissionMode { mode } => {
+            config.permissions.mode = mode;
+            Ok(ConfigField::PermissionMode)
+        }
+        ConfigUpdate::SetMemoryConfig { config: memory } => {
+            config.memory = memory;
+            Ok(ConfigField::Memory)
+        }
+    }
+}
+
+fn map_commit_warning(warning: storage::api::CommitWarning) -> ConfigCommitWarning {
+    match warning {
+        storage::api::CommitWarning::PreviousPromotionPending => {
+            ConfigCommitWarning::PreviousPromotionPending
+        }
+        storage::api::CommitWarning::JournalCleanupPending
+        | storage::api::CommitWarning::MemberPublishRecoveryPending => {
+            ConfigCommitWarning::JournalCleanupPending
+        }
+    }
+}
+
+fn map_adapter_persist_error(error: ConfigAdapterError) -> ConfigPersistError {
+    match error {
+        ConfigAdapterError::PermissionDenied => ConfigPersistError::PermissionDenied,
+        ConfigAdapterError::UnsupportedDurability => ConfigPersistError::UnsupportedDurability,
+        ConfigAdapterError::CorruptTransaction => ConfigPersistError::CorruptTransaction,
+        ConfigAdapterError::Parse => ConfigPersistError::Serialization,
+        ConfigAdapterError::Io | ConfigAdapterError::Invalid => ConfigPersistError::Io,
+    }
 }
 
 fn resolve_provider_api_keys(config: &mut Config) {
@@ -171,14 +219,6 @@ fn resolve_provider_api_keys(config: &mut Config) {
         } else if let Ok(value) = std::env::var("OPENAI_API_KEY") {
             provider.api_key = value;
         }
-    }
-}
-
-fn map_io_error(error: std::io::Error) -> ConfigPersistError {
-    if error.kind() == std::io::ErrorKind::PermissionDenied {
-        ConfigPersistError::PermissionDenied
-    } else {
-        ConfigPersistError::Io
     }
 }
 
@@ -208,33 +248,13 @@ impl ConfigQuery for ConfigAppService {
 #[async_trait]
 impl ConfigWriter for ConfigAppService {
     async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError> {
-        let mut config = self.inner.read().await.config.clone();
-        let field = match command {
-            ConfigUpdate::SetModel { model } => {
-                if model.trim().is_empty() {
-                    return Err(ConfigUpdateError::Invalid("model 不能为空".into()));
-                }
-                config.models.default = model;
-                ConfigField::Model
+        let prepared = ProjectConfigParticipant::prepare_update(self, command).await?;
+        match ProjectConfigParticipant::persist_update(self, prepared).await {
+            ConfigPersistOutcome::NotCommitted(error) => Err(ConfigUpdateError::Persist(error)),
+            ConfigPersistOutcome::Committed(ready) => {
+                Ok(ProjectConfigParticipant::commit_update(self, ready))
             }
-            ConfigUpdate::SetPermissionMode { mode } => {
-                config.permissions.mode = mode;
-                ConfigField::PermissionMode
-            }
-            ConfigUpdate::SetMemoryConfig { config: memory } => {
-                config.memory = memory;
-                ConfigField::Memory
-            }
-        };
-        let snapshot = self
-            .persist_and_publish(config)
-            .await
-            .map_err(ConfigUpdateError::Persist)?;
-        Ok(ConfigChangeSet {
-            cause: ConfigChangeCause::ClientUpdate,
-            fields: vec![field],
-            snapshot,
-        })
+        }
     }
 }
 
@@ -253,7 +273,8 @@ impl ProjectConfigParticipant for ConfigAppService {
             Some(&claude),
             &inner.cli_patch,
         )
-        .await;
+        .await
+        .map_err(|error| ConfigError::Load(format!("配置加载失败：{error:?}")))?;
         Ok(PreparedProjectConfig {
             location: location.clone(),
             snapshot: ConfigSnapshot::new(config),
@@ -268,6 +289,58 @@ impl ProjectConfigParticipant for ConfigAppService {
         *self.active_location.write().unwrap() = Some(prepared.location);
         self.tx.send_replace(prepared.snapshot);
     }
+
+    async fn prepare_update(
+        &self,
+        command: ConfigUpdate,
+    ) -> Result<PreparedConfigUpdate, ConfigUpdateError> {
+        let mut config = self.inner.read().await.config.clone();
+        let field = apply_update(&mut config, command)?;
+        ConfigValidator::validate(&config)
+            .map_err(|error| ConfigUpdateError::Invalid(format!("{error:?}")))?;
+        let bytes = encode_native_config(&config)
+            .map_err(|_| ConfigUpdateError::Persist(ConfigPersistError::Serialization))?;
+        let project_key = self
+            .active_location
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|location| location.key().to_string())
+            .unwrap_or_else(|| "global".to_string());
+        Ok(PreparedConfigUpdate {
+            project_key,
+            snapshot: ConfigSnapshot::new(config),
+            bytes,
+            fields: vec![field],
+        })
+    }
+
+    async fn persist_update(&self, prepared: PreparedConfigUpdate) -> ConfigPersistOutcome {
+        let Some(store) = &self.native_store else {
+            return ConfigPersistOutcome::NotCommitted(ConfigPersistError::UnsupportedDurability);
+        };
+        match store
+            .write_override(&prepared.project_key, &prepared.bytes)
+            .await
+        {
+            Ok(warning) => ConfigPersistOutcome::Committed(ReadyConfigCommit {
+                snapshot: prepared.snapshot,
+                fields: prepared.fields,
+                warning: warning.map(map_commit_warning),
+            }),
+            Err(error) => ConfigPersistOutcome::NotCommitted(map_adapter_persist_error(error)),
+        }
+    }
+
+    fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet {
+        let snapshot = ready.snapshot.clone();
+        self.tx.send_replace(snapshot.clone());
+        ConfigChangeSet {
+            cause: ConfigChangeCause::ClientUpdate,
+            fields: ready.fields,
+            snapshot,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -277,8 +350,10 @@ mod tests {
     #[tokio::test]
     async fn update_replaces_committed_snapshot_even_without_receiver() {
         let dir = tempfile::tempdir().unwrap();
+        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
         let service =
-            ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"));
+            ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+                .with_native_store(NativeConfigStore::new(storage));
         service
             .update(ConfigUpdate::SetModel {
                 model: "provider/model".into(),
@@ -289,6 +364,29 @@ mod tests {
             service.committed_snapshot().models().default,
             "provider/model"
         );
+    }
+
+    #[tokio::test]
+    async fn prepare_update_does_not_publish_before_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = std::sync::Arc::new(storage::FileSystemBlobAdapter::new(dir.path()).unwrap());
+        let service =
+            ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+                .with_native_store(NativeConfigStore::new(storage));
+        let before = service.committed_snapshot().models().default.clone();
+        let prepared = service
+            .prepare_update(ConfigUpdate::SetModel {
+                model: "local/model".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(service.committed_snapshot().models().default, before);
+        let ready = match service.persist_update(prepared).await {
+            ConfigPersistOutcome::Committed(ready) => ready,
+            ConfigPersistOutcome::NotCommitted(error) => panic!("unexpected {error:?}"),
+        };
+        service.commit_update(ready);
+        assert_eq!(service.committed_snapshot().models().default, "local/model");
     }
 
     #[tokio::test]

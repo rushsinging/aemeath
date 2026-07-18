@@ -1,5 +1,5 @@
 use super::ToolExecutionContext;
-use crate::domain::{types::tool_search::ToolInfo, ImageData, PathAccess, ToolResult};
+use crate::domain::{types::tool_search::ToolInfo, ImageData, ToolResult};
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
@@ -54,15 +54,7 @@ pub trait Tool: Send + Sync {
         120
     }
 
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &[]
-    }
-
     fn is_input_safe(&self, _input: &Value) -> bool {
-        false
-    }
-
-    fn requires_read_before_write(&self) -> bool {
         false
     }
 
@@ -146,15 +138,7 @@ pub trait TypedTool: Send + Sync {
         120
     }
 
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &[]
-    }
-
     fn is_input_safe(&self, _input: &Value) -> bool {
-        false
-    }
-
-    fn requires_read_before_write(&self) -> bool {
         false
     }
 
@@ -207,16 +191,8 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
         self.0.timeout_secs()
     }
 
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        self.0.path_accesses()
-    }
-
     fn is_input_safe(&self, input: &Value) -> bool {
         self.0.is_input_safe(input)
-    }
-
-    fn requires_read_before_write(&self) -> bool {
-        self.0.requires_read_before_write()
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {

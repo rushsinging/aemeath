@@ -39,14 +39,7 @@ pub(crate) async fn execute_tool_round<S>(
 where
     S: ChatEventSink,
 {
-    let path_base = agent.ctx.workspace_read().current_path_base();
-    let current_ws_root = agent.ctx.workspace_read().current_workspace_root();
-    let engine = PolicyEngine::new(
-        &path_base,
-        &current_ws_root,
-        allow_all,
-        &agent.ctx.read_files,
-    );
+    let engine = PolicyEngine::new(allow_all);
 
     let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
     let denied_results =

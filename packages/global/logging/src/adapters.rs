@@ -10,6 +10,6 @@ pub use context::{
     set_current_request_id, set_current_role, set_current_turn, set_session_id, spawn_instrumented,
     within,
 };
-pub use file_sink::{OutputMode, UnifiedLogger};
+pub use file_sink::UnifiedLogger;
 pub use formatter::timestamp_local_rfc3339;
 pub use lifecycle::{is_rotated_log_path, rotated_path, timestamp_rfc3339};
