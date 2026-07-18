@@ -78,6 +78,22 @@ impl OutputViewState {
         self.scroll_up(total_lines, total_lines);
     }
 
+    /// 到顶时展开懒加载（设置 expanded=true）。返回 true 表示本次触发了展开，
+    /// 调用方据此 mark_output_dirty 触发 document 重建。
+    /// 用于 scroll_up 后检查是否已到顶（含滚轮、PageUp、Shift+Up 等所有向上滚动路径）。
+    pub fn try_expand_at_top(&mut self, total_lines: usize) -> bool {
+        if self.expanded {
+            return false;
+        }
+        let max_offset = total_lines.saturating_sub(self.last_visible_height);
+        if self.scroll_offset >= max_offset {
+            self.expanded = true;
+            true
+        } else {
+            false
+        }
+    }
+
     /// 同步 document 指标并维护滚动真相。
     ///
     /// 每帧渲染前由 App 根据 Output document 与 layout/live-status 投影调用：

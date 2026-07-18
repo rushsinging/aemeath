@@ -125,12 +125,12 @@ impl App {
                 biased;
                 ev = ui_rx.recv() => { ev.map(TuiMsg::Ui) }
                 _ = async { match &mut sig_term { Some(s) => s.recv().await, None => std::future::pending().await } } => {
-                    log::info!(target: "aemeath:tui", "received SIGTERM, initiating graceful shutdown");
+                    log::info!(target: crate::LOG_TARGET, "received SIGTERM, initiating graceful shutdown");
                     self.layout.should_exit = true;
                     Some(TuiMsg::SpinnerTick) // 唤醒主 loop 让它检查 should_exit
                 }
                 _ = async { match &mut sig_hup { Some(s) => s.recv().await, None => std::future::pending().await } } => {
-                    log::info!(target: "aemeath:tui", "received SIGHUP, initiating graceful shutdown");
+                    log::info!(target: crate::LOG_TARGET, "received SIGHUP, initiating graceful shutdown");
                     self.layout.should_exit = true;
                     Some(TuiMsg::SpinnerTick)
                 }

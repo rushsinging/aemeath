@@ -5,6 +5,16 @@
 
 use std::path::PathBuf;
 
+/// Process-wide logging destination selected by the delivery layer at bootstrap.
+///
+/// This is an SDK contract type so callers do not need to depend on the Logging BC.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LoggingOutputMode {
+    #[default]
+    File,
+    Stderr,
+}
+
 /// 启动聊天运行时所需的参数。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChatBootstrapArgs {
@@ -22,4 +32,5 @@ pub struct ChatBootstrapArgs {
     pub max_agent_concurrency: Option<usize>,
     pub no_think: bool,
     pub max_reasoning: Option<String>,
+    pub logging_output: LoggingOutputMode,
 }

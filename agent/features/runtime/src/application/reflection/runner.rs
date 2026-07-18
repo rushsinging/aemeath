@@ -1,4 +1,3 @@
-use crate::LOG_TARGET;
 use memory::api::{
     MemoryLayer, MemoryPort, ReflectionApplyResult, ReflectionErrorCategory,
     ReflectionHistoryStore, ReflectionMessage, ReflectionOutput, ReflectionPromptPort,
@@ -340,11 +339,11 @@ impl ReflectionTaskAdapter {
             + 'static,
     {
         let Ok(mut slot) = self.slot.try_lock() else {
-            log::info!(target: LOG_TARGET, "{}", safe_log_line("busy", trigger, "busy", None));
+            log::info!(target: crate::LOG_TARGET, "{}", safe_log_line("busy", trigger, "busy", None));
             return ReflectionTaskSubmitOutcome::BusySkipped;
         };
         if slot.running.is_some() {
-            log::info!(target: LOG_TARGET, "{}", safe_log_line("busy", trigger, "busy", None));
+            log::info!(target: crate::LOG_TARGET, "{}", safe_log_line("busy", trigger, "busy", None));
             return ReflectionTaskSubmitOutcome::BusySkipped;
         }
 
@@ -355,7 +354,7 @@ impl ReflectionTaskAdapter {
         let timeout = self.timeout;
         let task_slot = std::sync::Arc::clone(&self.slot);
         let changed = std::sync::Arc::clone(&self.changed);
-        log::info!(target: LOG_TARGET, "{}", safe_log_line("accepted", trigger, "accepted", None));
+        log::info!(target: crate::LOG_TARGET, "{}", safe_log_line("accepted", trigger, "accepted", None));
         tokio::spawn(async move {
             let started = std::time::Instant::now();
             // Establish the durable fact before cancellation, timeout, LLM, or
@@ -447,7 +446,7 @@ impl ReflectionTaskAdapter {
                 None => "succeeded",
                 Some(category) => error_category_label(category),
             };
-            log::info!(target: LOG_TARGET, "{}", safe_log_line(event, trigger, completion_status_label(status), metadata.as_ref()));
+            log::info!(target: crate::LOG_TARGET, "{}", safe_log_line(event, trigger, completion_status_label(status), metadata.as_ref()));
 
             let mut slot = task_slot.lock().await;
             slot.running = None;
@@ -733,6 +732,10 @@ pub async fn run_complete_reflection(
                 suggestions_added,
                 outdated_marked,
             }) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "Reflection auto apply partially failed"
+                );
                 apply_result = Some(ReflectionApplyResult {
                     attempted: result_attempted,
                     completed: result_completed,
@@ -741,7 +744,8 @@ pub async fn run_complete_reflection(
                 });
                 error_category = Some(ReflectionErrorCategory::Apply);
             }
-            Err(_) => {
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "Reflection auto apply failed: {error}");
                 error_category = Some(ReflectionErrorCategory::Apply);
             }
         }

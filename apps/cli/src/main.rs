@@ -1,3 +1,5 @@
+pub(crate) const LOG_TARGET: &str = "aemeath:tui";
+
 mod args;
 mod chat;
 mod panic_hook;

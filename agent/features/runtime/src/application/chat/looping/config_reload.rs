@@ -4,7 +4,6 @@
 //! 检测到变更时返回 `ConfigDiff`，由调用方决定如何处理。
 
 use super::snapshot_registry::SourceSnapshotRegistry;
-use crate::LOG_TARGET;
 use share::config::file_snapshot::{FileChange, FileChangeKind};
 use share::config::paths;
 use share::config::GuidanceReloadPolicy;
@@ -79,7 +78,7 @@ pub fn init_snapshot_registry(cwd: &Path) -> SourceSnapshotRegistry {
     let mut registry = SourceSnapshotRegistry::new();
     registry.register_all(files);
     registry.take_baseline();
-    log::info!(target: LOG_TARGET,
+    log::info!(target: crate::LOG_TARGET,
         "[config_reload] snapshot registry initialized with {} files",
         registry.len()
     );
@@ -100,7 +99,7 @@ pub fn check_config_changes(registry: &mut SourceSnapshotRegistry) -> ConfigDiff
         };
     }
 
-    log::debug!(target: LOG_TARGET,
+    log::debug!(target: crate::LOG_TARGET,
         "[config_reload] detected {} file change(s)",
         changes.len()
     );
@@ -171,7 +170,7 @@ pub fn resolve_guidance_reload_policy() -> GuidanceReloadPolicy {
                     "remind" => GuidanceReloadPolicy::Remind,
                     "confirm" => GuidanceReloadPolicy::Confirm,
                     _ => {
-                        log::warn!(target: LOG_TARGET,
+                        log::warn!(target: crate::LOG_TARGET,
                             "[config_reload] unknown guidance.reload_policy '{}', using default",
                             policy_str
                         );

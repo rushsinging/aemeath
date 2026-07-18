@@ -1,6 +1,7 @@
 mod accessors;
 mod from_args;
 mod mapping;
+pub mod resume_helper;
 mod trait_chat;
 mod trait_impl;
 mod trait_memory;
@@ -16,6 +17,5 @@ pub(crate) use mapping::*;
 
 // 对外仅发布 Composition 装配所需的 workspace bootstrap。
 pub use accessors::AgentClientImpl;
-pub use from_args::{
-    from_args_with_workspace, RuntimeBootstrapDependencies, RuntimeConfigDependencies,
-};
+pub use from_args::{from_args_with_workspace, RuntimeBootstrapDependencies};
+pub use resume_helper::{resume_session_to_backing, ResumeError};

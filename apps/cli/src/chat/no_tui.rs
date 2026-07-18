@@ -104,11 +104,11 @@ async fn run_single_turn(
             biased;
             ev = stream.recv() => match ev { Some(e) => e, None => break, },
             _ = async { match &mut sig_term { Some(s) => s.recv().await, None => std::future::pending().await } } => {
-                log::info!(target: "aemeath:tui", "no_tui: received SIGTERM, draining stream");
+                log::info!(target: crate::LOG_TARGET, "no_tui: received SIGTERM, draining stream");
                 continue;
             }
             _ = async { match &mut sig_hup { Some(s) => s.recv().await, None => std::future::pending().await } } => {
-                log::info!(target: "aemeath:tui", "no_tui: received SIGHUP, draining stream");
+                log::info!(target: crate::LOG_TARGET, "no_tui: received SIGHUP, draining stream");
                 continue;
             }
         };

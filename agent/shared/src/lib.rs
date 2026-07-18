@@ -2,8 +2,7 @@
 
 //! agent 下所有库的共享依赖层。
 
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
-pub const LOG_TARGET: &str = "aemeath:shared";
+pub(crate) const LOG_TARGET: &str = "aemeath:shared";
 
 /// 编译期注入的版本号，来源于 build.rs 从 git tag 注入的 `AEMEATH_VERSION`；
 /// 取不到时 fallback 到 `Cargo.toml` 的 `version`（占位符 `0.0.0`）。

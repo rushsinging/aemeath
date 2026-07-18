@@ -1,5 +1,4 @@
 use crate::application::agent::{ToolCall, ToolExecution};
-use crate::LOG_TARGET;
 use serde_json::Value;
 use std::collections::VecDeque;
 use tools::ToolOutcome;
@@ -91,7 +90,7 @@ impl ToolCallFuse {
 
         self.blocked_count += 1;
         log::warn!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "tool call fuse triggered: tool={}, reason={}, blocked_count={}",
             fingerprint.tool_name,
             reason,

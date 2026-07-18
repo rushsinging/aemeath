@@ -59,6 +59,10 @@ where
     pub chain: context::session::ChatChain,
     pub context_size: usize,
     pub workspace: project::WorkspaceViews,
+    /// Context-owned Main Session coordinator. Used for:
+    /// - `bind_main_run` before each Run (admission gate)
+    /// - `resume_session_to_backing` for runtime ResumeSession commands
+    pub wiring: Arc<context::MainSessionWiring>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,

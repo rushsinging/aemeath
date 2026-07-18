@@ -8,7 +8,6 @@ use crate::adapters::http_attempt::{
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::LegacyStreamSink;
-use crate::LOG_TARGET;
 use share::message::{ContentBlock, Message, Role};
 use tokio_util::sync::CancellationToken;
 
@@ -38,7 +37,7 @@ impl OllamaProviderNonStream for OllamaProvider {
         let headers = self.build_headers()?;
         let url = format!("{}/api/chat", self.base_url);
 
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[ollama non-stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             scope.model(),

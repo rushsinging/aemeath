@@ -19,9 +19,12 @@ pub struct TaskWiring {
 
 /// Wires a fresh, empty Task BC and returns its composition root.
 pub fn wire_task() -> TaskWiring {
-    TaskWiring {
+    log::info!(target: crate::LOG_TARGET, "wire_task: enter");
+    let wiring = TaskWiring {
         store: Arc::new(TaskStore::new()),
-    }
+    };
+    log::info!(target: crate::LOG_TARGET, "wire_task: ready");
+    wiring
 }
 
 impl TaskWiring {
@@ -130,5 +133,95 @@ mod tests {
         // state is byte-for-byte unchanged.
         assert_eq!(invalid, TaskSnapshot::decode(bytes).unwrap());
         assert_eq!(persist.collect_snapshot(), before);
+    }
+
+    // -----------------------------------------------------------------
+    // Log-capture test infrastructure
+    // -----------------------------------------------------------------
+
+    thread_local! {
+        static CAPTURED_LOGS: std::cell::RefCell<Vec<(String, log::Level, String)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    struct CapturingLogger;
+
+    impl log::Log for CapturingLogger {
+        fn enabled(&self, _metadata: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            if record.target() == crate::LOG_TARGET {
+                CAPTURED_LOGS.with(|cell| {
+                    cell.borrow_mut().push((
+                        record.target().to_owned(),
+                        record.level(),
+                        format!("{}", record.args()),
+                    ));
+                });
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    /// Installs the capturing logger exactly once per test process. Safe to
+    /// call from every test: `log::set_logger` only succeeds once, subsequent
+    /// calls are no-ops via `Once`. Capture storage is thread-local, so tests
+    /// on different OS threads never observe each other's records.
+    fn install_capturing_logger() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            log::set_boxed_logger(Box::new(CapturingLogger))
+                .expect("capturing logger must install exactly once per process");
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+    }
+
+    /// Drains (and clears) whatever crate-targeted records this thread has
+    /// captured so far.
+    fn drain_captured_logs() -> Vec<(String, log::Level, String)> {
+        CAPTURED_LOGS.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+    }
+
+    #[test]
+    fn wire_task_logs_enter_and_ready_with_no_failure() {
+        install_capturing_logger();
+        drain_captured_logs();
+
+        let _wiring = wire_task();
+
+        let logs = drain_captured_logs();
+
+        // Contract: the real low-frequency entry records that it was entered …
+        let enter_pos = logs.iter().position(|(_, _, msg)| msg.contains("enter"));
+        assert!(
+            enter_pos.is_some(),
+            "wire_task must log an enter marker; got {logs:?}"
+        );
+        // … and that it reached a successful exit (ready).
+        let ready_pos = logs.iter().position(|(_, _, msg)| msg.contains("ready"));
+        assert!(
+            ready_pos.is_some(),
+            "wire_task must log a ready (success-exit) marker; got {logs:?}"
+        );
+        // enter precedes ready.
+        assert!(
+            enter_pos.is_some_and(|e| ready_pos.is_some_and(|r| e < r)),
+            "enter must precede ready; got {logs:?}"
+        );
+        // This entry has no failure path: it must not emit error/warn logs.
+        assert!(
+            logs.iter()
+                .all(|(_, level, _)| !matches!(level, log::Level::Error | log::Level::Warn)),
+            "wire_task must never emit failure-level logs; got {logs:?}"
+        );
+        // Every record carries the crate's LOG_TARGET.
+        assert!(
+            logs.iter()
+                .all(|(target, _, _)| target == crate::LOG_TARGET),
+            "all records must use crate LOG_TARGET; got {logs:?}"
+        );
     }
 }

@@ -9,14 +9,13 @@
 //! `load_session` 在主文件解析失败时依次尝试 `.bak` 回退、`.corrupt`
 //! 转存，确保损坏的会话文件不会被静默丢弃。
 
-use crate::domain::session::{now_iso, validate_session_id, ChatSegment, Session};
+use crate::domain::session::{
+    now_iso, validate_session_id, CanonicalSession, ChatSegment, Session,
+};
 use share::config::paths;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
-
-/// Session 存储日志 target（迁移到 context crate 后用 `context::session::LOG_TARGET`）。
-const LOG_TARGET: &str = "aemeath:agent:storage";
 
 fn sessions_dir() -> PathBuf {
     paths::global_sessions_dir()
@@ -51,7 +50,7 @@ pub enum SessionLoadError {
 fn migrate_legacy_messages(session: &mut Session) {
     if session.chats.is_empty() && !session.messages.is_empty() {
         log::info!(
-            target: LOG_TARGET,
+            target: crate::LOG_TARGET,
             "session {} migrating legacy flat messages ({}) to chat chain",
             session.id,
             session.messages.len()
@@ -86,7 +85,7 @@ pub async fn save_session(session: &Session) -> Result<(), String> {
             if let Ok(existing_session) = serde_json::from_str::<Session>(&existing) {
                 if existing_session.updated_at > session.updated_at {
                     log::warn!(
-                        target: LOG_TARGET,
+                        target: crate::LOG_TARGET,
                         "session {} skipped save: disk updated_at={} > incoming updated_at={}",
                         session.id,
                         existing_session.updated_at,
@@ -158,7 +157,7 @@ pub async fn load_session(id: &str) -> Result<Session, SessionLoadError> {
         }
         Err(parse_err) => {
             log::warn!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "session {} JSON corrupted ({}), attempting .bak fallback",
                 id,
                 parse_err
@@ -168,7 +167,7 @@ pub async fn load_session(id: &str) -> Result<Session, SessionLoadError> {
                 if let Ok(bak_json) = tokio::fs::read_to_string(&bak_path).await {
                     if let Ok(mut session) = serde_json::from_str::<Session>(&bak_json) {
                         log::info!(
-                            target: LOG_TARGET,
+                            target: crate::LOG_TARGET,
                             "session {} recovered from .bak backup",
                             id
                         );
@@ -182,6 +181,61 @@ pub async fn load_session(id: &str) -> Result<Session, SessionLoadError> {
             Err(SessionLoadError::Corrupt {
                 id: id.to_string(),
                 parse_err: parse_err.to_string(),
+                corrupt_path,
+            })
+        }
+    }
+}
+
+/// Load and decode a canonical session from disk by ID.
+///
+/// Reads the raw bytes and decodes via `SessionCodec` with workspace upgrade,
+/// producing a [`CanonicalSession`] suitable for `MainSessionWiring::resume_prepared`.
+/// Falls back to `.bak` if the primary file is corrupted; if no valid backup
+/// exists, moves the corrupted file to `.corrupt` and returns an error.
+pub async fn load_canonical_session(id: &str) -> Result<CanonicalSession, SessionLoadError> {
+    validate_session_id(id).map_err(|_| SessionLoadError::NotFound { id: id.to_string() })?;
+
+    let dir = sessions_dir();
+    let path = dir.join(format!("{id}.json"));
+    let bak_path = dir.join(format!("{id}.json.bak"));
+    let corrupt_path = dir.join(format!("{id}.json.corrupt"));
+
+    if !path.exists() {
+        return Err(SessionLoadError::NotFound { id: id.to_string() });
+    }
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| SessionLoadError::Io {
+            id: id.to_string(),
+            source: e,
+        })?;
+
+    match crate::adapters::decode_session(&bytes) {
+        Ok(decoded) => Ok(decoded.session),
+        Err(codec_err) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "session {} canonical decode failed ({}), attempting .bak fallback",
+                id,
+                codec_err
+            );
+            if bak_path.exists() {
+                if let Ok(bak_bytes) = tokio::fs::read(&bak_path).await {
+                    if let Ok(decoded) = crate::adapters::decode_session(&bak_bytes) {
+                        log::info!(
+                            target: crate::LOG_TARGET,
+                            "session {} recovered canonical from .bak backup",
+                            id
+                        );
+                        return Ok(decoded.session);
+                    }
+                }
+            }
+            let _ = tokio::fs::rename(&path, &corrupt_path).await;
+            Err(SessionLoadError::Corrupt {
+                id: id.to_string(),
+                parse_err: codec_err.to_string(),
                 corrupt_path,
             })
         }

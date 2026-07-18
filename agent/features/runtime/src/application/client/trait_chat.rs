@@ -75,10 +75,7 @@ pub(super) async fn chat_impl(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = (me.inner.event_sink_factory)(tx);
     let inner = me.inner.clone();
-    let session_context = logging::LogContext {
-        session_id: Some(inner.session_id.clone()),
-        ..logging::LogContext::default()
-    };
+    let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
         let final_chain = crate::application::chat::process_chat_loop(
             crate::application::chat::ChatLoopContext {
@@ -93,6 +90,7 @@ pub(super) async fn chat_impl(
                 chain,
                 context_size: inner.context.resources.context_size,
                 workspace: inner.workspace.clone(),
+                wiring: inner.wiring.clone(),
                 session_id: inner.session_id.clone(),
                 read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
                 session_reminders: Arc::new(Mutex::new(Default::default())),
@@ -106,7 +104,7 @@ pub(super) async fn chat_impl(
                 agent_semaphore: inner.context.resources.agent_semaphore.clone(),
                 hook_runner: inner.context.resources.hook_runner.clone(),
                 memory_config: inner.context.resources.memory_config.clone(),
-                memory: inner.context.resources.memory.clone(),
+                memory: inner.wiring.committed_memory(),
                 reflection_history: inner.context.resources.reflection_history.clone(),
                 language: inner.context.resources.language.clone(),
                 frozen_chats: inner.frozen_chats.clone(),
@@ -120,14 +118,14 @@ pub(super) async fn chat_impl(
                         .requested_reasoning(),
                 ),
                 build_switched_client: {
-                    let config_reader = inner.config_reader.clone();
+                    let config_query = inner.config_query.clone();
                     std::sync::Arc::new(move |selection: &str| {
                         let selection = selection.to_string();
-                        let config_reader = config_reader.clone();
+                        let config_query = config_query.clone();
                         Box::pin(async move {
                             super::trait_model::build_llm_client_for_switch(
                                 &selection,
-                                config_reader.as_ref(),
+                                config_query.as_ref(),
                             )
                             .await
                         })
@@ -193,7 +191,7 @@ pub(super) async fn chat_impl(
         // auto-save：loop 退出后自动保存当前 session。TUI 退出时只需 drop input_event_tx →
         // loop shutdown → runtime 自动 save，不再调 session RPC。
         if let Err(e) = super::trait_session::save_session_from_handle(&inner).await {
-            log::warn!(target: "aemeath:agent:runtime", "auto-save failed on loop exit: {e}");
+            log::warn!(target: crate::LOG_TARGET, "auto-save failed on loop exit: {e}");
         }
     });
 

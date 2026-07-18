@@ -1,7 +1,7 @@
 use crate::domain::types::memory::MemoryResult;
 use crate::domain::{ToolExecutionContext, TypedToolResult};
 use memory::api::{
-    MemoryCategory as Category, MemoryEntry, MemoryId as Id, MemoryLayer as Layer,
+    MemoryCategory as Category, MemoryEntry, MemoryId as Id, MemoryLayer as Layer, MemoryPort,
     MemorySearchQuery as Query, MemorySource as Source, WriteResult,
 };
 use serde_json::Value;
@@ -14,6 +14,7 @@ use super::helpers::{
 pub(super) async fn add_memory(
     input: Value,
     ctx: &ToolExecutionContext,
+    port: &dyn MemoryPort,
 ) -> TypedToolResult<MemoryResult> {
     let content = match input.get("content").and_then(|value| value.as_str()) {
         Some(content) => content.trim(),
@@ -51,28 +52,19 @@ pub(super) async fn add_memory(
         entry.source_ref = Some(session_id);
     }
 
-    match ctx.memory().write(entry).await {
-        Ok(WriteResult::Added { id }) => {
-            let id = id.to_string();
-            TypedToolResult::success(
-                format!("记忆已添加。ID: {}", &id[..8.min(id.len())]),
-                MemoryResult {
-                    action: "added".to_string(),
-                },
-            )
-        }
-        Ok(WriteResult::Merged { existing_id }) => {
-            let existing_id = existing_id.to_string();
-            TypedToolResult::success(
-                format!(
-                    "已与相似记忆合并: {}",
-                    &existing_id[..8.min(existing_id.len())]
-                ),
-                MemoryResult {
-                    action: "merged".to_string(),
-                },
-            )
-        }
+    match port.write(entry).await {
+        Ok(WriteResult::Added { id }) => TypedToolResult::success(
+            format!("记忆已添加。ID: {}", short_id(&id)),
+            MemoryResult {
+                action: "added".to_string(),
+            },
+        ),
+        Ok(WriteResult::Merged { existing_id }) => TypedToolResult::success(
+            format!("已与相似记忆合并: {}", short_id(&existing_id)),
+            MemoryResult {
+                action: "merged".to_string(),
+            },
+        ),
         Ok(WriteResult::NeedsEviction { candidates: _ }) => {
             TypedToolResult::error("记忆数量已达上限，请先归档候选记忆")
         }
@@ -88,7 +80,7 @@ pub(super) async fn add_memory(
 
 pub(super) async fn delete_memory(
     input: Value,
-    ctx: &ToolExecutionContext,
+    port: &dyn MemoryPort,
 ) -> TypedToolResult<MemoryResult> {
     let id =
         match required_string(&input, "id").and_then(|id| Id::new(id).map_err(|e| e.to_string())) {
@@ -96,7 +88,7 @@ pub(super) async fn delete_memory(
             Err(error) => return TypedToolResult::error(error),
         };
 
-    match ctx.memory().delete(&id).await {
+    match port.delete(&id).await {
         Ok(true) => TypedToolResult::success(
             "记忆已删除。",
             MemoryResult {
@@ -108,10 +100,7 @@ pub(super) async fn delete_memory(
     }
 }
 
-pub(super) async fn search_memory(
-    input: Value,
-    ctx: &ToolExecutionContext,
-) -> TypedToolResult<MemoryResult> {
+pub(super) fn search_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
     let text = match required_string(&input, "query") {
         Ok(query) => query.to_string(),
         Err(error) => return TypedToolResult::error(error),
@@ -120,15 +109,24 @@ pub(super) async fn search_memory(
         .get("limit")
         .and_then(|value| value.as_u64())
         .unwrap_or(10) as usize;
+    let layer = match optional_layer(&input) {
+        Ok(layer) => layer,
+        Err(error) => return TypedToolResult::error(error),
+    };
+    let category = match optional_category(&input) {
+        Ok(category) => category,
+        Err(error) => return TypedToolResult::error(error),
+    };
+    let now = current_timestamp_secs();
     let query = Query {
         text,
         limit: limit.min(50),
-        layer: None,
-        category: None,
+        layer,
+        category,
         include_archive: false,
-        now: current_timestamp_secs(),
+        now,
     };
-    let result = ctx.memory().search(&query);
+    let result = port.search(&query);
     let message = if result.hits.is_empty() {
         "暂无记忆。".to_string()
     } else {
@@ -144,7 +142,7 @@ pub(super) async fn search_memory(
 
 pub(super) async fn pin_memory(
     input: Value,
-    ctx: &ToolExecutionContext,
+    port: &dyn MemoryPort,
 ) -> TypedToolResult<MemoryResult> {
     let id =
         match required_string(&input, "id").and_then(|id| Id::new(id).map_err(|e| e.to_string())) {
@@ -156,7 +154,7 @@ pub(super) async fn pin_memory(
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
 
-    match ctx.memory().pin(&id, pinned).await {
+    match port.pin(&id, pinned).await {
         Ok(true) => TypedToolResult::success(
             if pinned {
                 "记忆已固定。"
@@ -172,15 +170,12 @@ pub(super) async fn pin_memory(
     }
 }
 
-pub(super) async fn list_memory(
-    input: Value,
-    ctx: &ToolExecutionContext,
-) -> TypedToolResult<MemoryResult> {
+pub(super) fn list_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
     let layer = match optional_layer(&input) {
         Ok(layer) => layer,
         Err(error) => return TypedToolResult::error(error),
     };
-    let entries = ctx.memory().list(layer);
+    let entries = port.list(layer);
     let message = if entries.is_empty() {
         "暂无记忆。".to_string()
     } else {
@@ -199,6 +194,11 @@ fn current_timestamp_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+fn short_id(id: &Id) -> String {
+    let s = id.to_string();
+    s[..8.min(s.len())].to_string()
 }
 
 pub(super) fn add_reminder(

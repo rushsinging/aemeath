@@ -37,8 +37,8 @@ struct ConfigSubscription {
 }
 
 enum ConfigQueryError {
-    MainSessionUnavailable,
-    SessionSwitchClosed,
+    /// gate 已关闭（exclusive holder 释放前 lock 被 drop）或内部 wiring 不可用。
+    Unavailable,
 }
 ```
 
@@ -46,7 +46,8 @@ enum ConfigQueryError {
 #[async_trait]
 trait ConfigWriter: Send + Sync {
     /// 应用类型化命令；其实现是 MainSessionWiring 提供的 gate-aware façade。
-    async fn update(&self, command: ConfigUpdate) -> Result<(), ConfigUpdateError>;
+    /// 返回 ConfigChangeSet 描述本次变更的字段与提交后 snapshot。
+    async fn update(&self, command: ConfigUpdate) -> Result<ConfigChangeSet, ConfigUpdateError>;
 }
 
 /// 跨 BC 写入命令；Config 域命令本身 NEVER 携带 session-switch 语义——
@@ -62,30 +63,43 @@ enum ConfigUpdate {
 }
 ```
 
+`MainSessionWiring` 通过两个 factory 发布 gate-aware façade。Query 由 `GateAwareConfigQuery` 承载，Writer 由 `GateAwareConfigWriter` 承载——两者 **NEVER** 统一成单个 struct，因为 Writer 额外持有 `MemoryOpener`、`WorkspaceRead` 与 `committed_memory` holder 用于 candidate re-bind：
+
 ```rust
-struct MainSessionConfigFacade {
-    gate: Arc<SessionSwitchGate>,        // #871 composition-owned；Config 域 NEVER 定义或构造该类型
-    reader: Arc<dyn ConfigReader>,
-    participant: Arc<dyn ProjectConfigParticipant>,
+// MainSessionWiring::config_query() -> Arc<dyn ConfigQuery>
+struct GateAwareConfigQuery {
+    gate: SessionSwitchGate,               // 克隆（内部 Arc）
+    config_reader: Arc<dyn ConfigReader>,
 }
 
 #[async_trait]
-impl ConfigQuery for MainSessionConfigFacade {
+impl ConfigQuery for GateAwareConfigQuery {
     async fn snapshot(&self) -> Result<ConfigSnapshot, ConfigQueryError> {
-        let _shared = self.gate.acquire_shared().await?;
-        Ok(self.reader.committed_snapshot())
+        let _shared = self.gate.acquire_shared().await
+            .map_err(|_| ConfigQueryError::Unavailable)?;
+        Ok(self.config_reader.committed_snapshot())
     }
 
     async fn subscribe(&self) -> Result<ConfigSubscription, ConfigQueryError> {
-        let _shared = self.gate.acquire_shared().await?;
-        let changes = self.reader.subscribe_committed();
+        let _shared = self.gate.acquire_shared().await
+            .map_err(|_| ConfigQueryError::Unavailable)?;
+        let changes = self.config_reader.subscribe_committed();
         let initial = changes.borrow().clone();
         Ok(ConfigSubscription { initial, changes })
     }
 }
+
+// MainSessionWiring::config_writer() -> Arc<dyn ConfigWriter>
+struct GateAwareConfigWriter {
+    gate: SessionSwitchGate,
+    config_participant: Arc<dyn ProjectConfigParticipant>,
+    workspace_read: Arc<dyn WorkspaceRead>,
+    memory_opener: Box<dyn MemoryOpener>,
+    committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
+}
 ```
 
-`ConfigReader` 本身不拥有 session gate，避免 Config → Context / Runtime 的反向依赖；Composition 只把它封装进 `MainSessionConfigFacade`。除 wiring 尚未发布的 bootstrap 外，production 调用 **MUST** 经该 async façade：shared permit 保证 query / subscribe 建立不会落在 resume 的 Project / Config / Memory / Task 无失败提交窗口。subscription 建立后只接收 Config commit 最后一步发布的完整 snapshot；`initial` 与 receiver 在同一 shared permit 下捕获，**NEVER** 丢失切换边界。
+`ConfigReader` 本身不拥有 session gate，避免 Config → Context / Runtime 的反向依赖；Composition 只把它封装进 `GateAwareConfigQuery`。除 wiring 尚未发布的 bootstrap 外，production 调用 **MUST** 经该 async façade：shared permit 保证 query / subscribe 建立不会落在 resume 的 Project / Config / Memory / Task 无失败提交窗口。subscription 建立后只接收 Config commit 最后一步发布的完整 snapshot；`initial` 与 receiver 在同一 shared permit 下捕获，**NEVER** 丢失切换边界。
 
 每个 Main Run 在 admission 的 shared lease 内捕获一次 `BoundMainRun.config`，随后只使用该不可变值；Run **NEVER** 调用 `ConfigQuery`、`ConfigReader` 或 watch。非 Run 的 AgentClient query / event projection 只持 `ConfigQuery`；TUI / CLI **NEVER** 获得 `ConfigSubscription` 或 watch receiver，只接收 SDK DTO / event。
 
@@ -93,7 +107,7 @@ impl ConfigQuery for MainSessionConfigFacade {
 
 | 方法 | 用途 | 消费方 |
 |---|---|---|
-| `ConfigReader::committed_snapshot / subscribe_committed` | 读取 Config-owned committed state | Composition bootstrap；MainSessionConfigFacade（已经持 permit） |
+| `ConfigReader::committed_snapshot / subscribe_committed` | 读取 Config-owned committed state | Composition bootstrap；`GateAwareConfigQuery`（已经持 permit） |
 | `ConfigQuery::snapshot()` | gate-aware 非 Run 配置查询 | AgentClient application implementation |
 | `ConfigQuery::subscribe()` | gate-aware 建立已提交配置订阅 | AgentClient event projection；先映射成 SDK/TUI-owned DTO |
 | `update()` | 运行时修改配置 | AgentClient application command → MainSession gate-aware façade |
@@ -105,7 +119,7 @@ CLI 参数覆盖是 Composition bootstrap 的 `ConfigSources.cli_args` 输入，
 | Issue | 独占范围 | 验收边界 |
 |---|---|---|
 | [#933](https://github.com/rushsinging/aemeath/issues/933) | 定义 `ConfigQuery` / `ConfigWriter` application seam、AgentClient command/query 与 SDK config event 映射 | 交付层只见 async façade / SDK DTO；无 raw `ConfigReader`、participant 或 watch receiver 泄漏 |
-| [#871](https://github.com/rushsinging/aemeath/issues/871) | 实现 `SessionSwitchGate`、联合 resume / update coordinator 与 `MainSessionConfigFacade` shared/exclusive permit 协调 | query / subscribe 建立不能观察切换中间态；update/resume 的 watch **MUST** 最后发布 |
+| [#871](https://github.com/rushsinging/aemeath/issues/871) | 实现 `SessionSwitchGate`、联合 resume / update coordinator 与 `GateAwareConfigQuery` / `GateAwareConfigWriter` shared/exclusive permit 协调 | query / subscribe 建立不能观察切换中间态；update/resume 的 watch **MUST** 最后发布 |
 | [#934](https://github.com/rushsinging/aemeath/issues/934) | Config 内部 layer / adapter / validation 与 durable file protocol | 不绕过 #871 gate，也不把 I/O 放入无失败 commit |
 
 #933 发布 seam 但 **NEVER** 自建第二把 gate 或复制 active snapshot；#871 消费该 seam 并提供唯一 gate-aware implementation，但 **NEVER** 重定义 AgentClient / SDK 配置语言。两者的依赖方向是“交付 seam 可先定义，联合协调器随后实现”；端到端验证 **MUST** 同时覆盖 DTO 映射与 shared/exclusive gate 时序。
@@ -243,6 +257,8 @@ watch::Sender::send_replace → composition-internal watch Receiver → SDK even
 ```
 
 `RuntimeOverrideAdapter` 是链上唯一的最高优先级层，只由 `ConfigWriter::update` 的 `SetModel` / `SetPermissionMode` / `SetMemoryConfig` 命令经 `prepare_update` / `persist_update` 写入；调用方 **NEVER** 绕过这两步直接构造它的 patch。持久化范围严格限定为发起命令时的 active `ProjectConfigLocation`——project-scoped，**NEVER** 跨 project 复用、**NEVER** 落入 global 层。`persist_update` 把它写进独立于 `FileAdapter (project)` 的 durable override store（与项目原生配置物理隔离的 native patch 段/journal），因此 bootstrap `load` 使用 global key，`prepare_for_project` 使用 location opaque key，且二者都在 `CliArgsAdapter` 之后读取并合并 native override。每次重放（含进程崩溃后 restart）都保持 runtime override 最高优先级：同一 project 下新的 `EnvAdapter` 读数或新的 CLI 参数 **NEVER** 覆盖已持久化的 runtime override，只有新的 `ConfigUpdate` 或显式重置命令才能替换它。`ConfigSnapshot` **NEVER** 暴露这一层的存在——消费方只看到合并后的单一有效值。
+
+> **已对齐（#871）**：`prepare_for_project` / `prepare_update` 均通过 `load_config_with_override` 从 `Config::default()` 重放完整 chain（File → Compatibility → Env → CLI → durable override），override 始终为最后一层。`wire_main_session` 在 bootstrap 阶段从已验证 Project identity 构造 `ProjectConfigLocation` 并执行 `prepare_for_project` + `commit_project`，确保 `active_location` 始终为 `Some`；`prepare_update` 缺 `active_location` 时返回 typed `Invalid` 错误，不再有 `"global"` fallback。生产 `wire_project_config` / `wire_project_config_with_cli` 接入 `NativeConfigStore`（`FileSystemBlobAdapter` backed by `global_agents_dir()`），`ConfigWriter` 持久化成功。
 
 ### 3.2 ConfigPatch
 
@@ -414,12 +430,12 @@ async fn prepare_for_project(
 async fn update_config(
     session: &Arc<MainSessionWiring>,
     command: ConfigUpdate,
-) -> Result<(), ConfigUpdateError> {
+) -> Result<ConfigChangeSet, ConfigUpdateError> {
     let exclusive: OwnedSessionSwitchPermit = session.acquire_owned_exclusive().await?;
     let prepared = session.config().prepare_update(command).await?;
 
     // 在 durable write 之前完成依赖资源的全部 fallible prepare。
-    let candidate_memory = session.memory_opener().open_for_project(
+    let candidate_memory = session.memory_opener().open_memory(
         session.workspace().project_identity(),
         prepared.memory_config(),
     ).await?;
@@ -439,7 +455,7 @@ async fn config_commit_critical_section(
     exclusive: OwnedSessionSwitchPermit,
     prepared: PreparedConfigUpdate,
     candidate_memory: Arc<dyn MemoryPort>,
-) -> Result<(), ConfigUpdateError> {
+) -> Result<ConfigChangeSet, ConfigUpdateError> {
     // 此 task 不继承 caller cancellation；persist 内部所有 await 都必须跑完。
     let ready = match session.config().persist_update(prepared).await {
         ConfigPersistOutcome::NotCommitted(error) => return Err(error.into()),
@@ -449,10 +465,10 @@ async fn config_commit_critical_section(
     // 无失败提交段：不 await、不做 I/O、不响应取消；Config watch 最后发布。
     session.install_memory(candidate_memory);
     let warning = ready.warning();
-    session.config().commit_update(ready);
+    let change_set = session.config().commit_update(ready);
     drop(exclusive);
     emit_config_commit_warning_best_effort(warning);
-    Ok(())
+    Ok(change_set)
 }
 ```
 
@@ -697,3 +713,4 @@ impl ConfigTranslator for ClaudeTranslator {
 | 2026-07-14 | 将非 Run query / subscribe 收口到 async gate-aware façade，明确 #933 delivery seam 与 #871 coordinator 的所有权 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 修复 review #5/#6/#18/#19：`ConfigUpdate` 删除 `SessionSwitchGate`（gate/coordinator 明确归属 #871 composition）；hooks 字段注释与 key 级 `merge_hooks` 算法对齐；新增最高优先级 `RuntimeOverrideAdapter` layer 并定义其 project-scoped 持久化范围；无失败提交段（Memory install 与 Config install 之间）只允许 panic/crash injection，失败/取消注入收口到 handoff 前与 `persist_update` await 点 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #921 收缩范围：`ReasoningGraphConfig`（含 `enabled`/`nodes`/`max_reasoning`）从 Config 全部退役；`ConfigPatch`/`ConfigSnapshot` 移除 `reasoning_graph` 字段与 accessor；§7 改为退役说明；Workflow 五节点采用固定默认 effort，是否保留/接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-18 | #871 回写实际实现：`ConfigQueryError` 只保留 `Unavailable`；`ConfigWriter::update` 返回 `ConfigChangeSet`；`MainSessionConfigFacade` 拆分为 `GateAwareConfigQuery` / `GateAwareConfigWriter`；§3.1 RuntimeOverride 补充实现差距说明（durable store 已存在但 chain-layer 重放未实现） | [#871](https://github.com/rushsinging/aemeath/issues/871) |

@@ -2,7 +2,6 @@ use crate::application::chat::looping::{
     ChatEventSink, RuntimeHookEvent, RuntimeHookEventStatus, RuntimeHookExecutionResult,
     RuntimeStreamEvent,
 };
-use crate::LOG_TARGET;
 use hook::api::{is_blocking, HookData, HookJsonOutput, HookResult, HookRunner};
 use share::config::hooks::{HookEntry, HookEvent};
 use std::path::Path;
@@ -52,7 +51,7 @@ where
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Vec<(HookEntry, HookResult, Option<HookJsonOutput>)> {
         let hooks = runner.matching_hooks(event, tool_name);
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "hook ui dispatch: event={} tool_name={:?} matched={}",
             hook_event_name(event),
             tool_name,
@@ -67,7 +66,7 @@ where
         let mut results = Vec::with_capacity(hooks.len());
 
         for hook in hooks {
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "hook timing start: event={} tool_name={:?} matcher={:?} command={} workspace_root={}",
                 event_name,
                 tool_name,
@@ -91,7 +90,7 @@ where
             let status = runtime_hook_event_status(&result, &json_output);
             let should_break =
                 result.blocked || json_output.as_ref().is_some_and(|j| !j.r#continue);
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "hook timing finish: event={} tool_name={:?} matcher={:?} status={:?} blocked={} exit_code={:?} elapsed_ms={} should_break={}",
                 event_name,
                 tool_name,

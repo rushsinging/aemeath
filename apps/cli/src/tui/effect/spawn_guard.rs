@@ -9,12 +9,15 @@ pub fn spawn_guarded<F>(label: &'static str, fut: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
-    tokio::spawn(async move {
-        if let Err(panic) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
-            let msg = crate::panic_hook::payload_message(panic.as_ref());
-            crate::tui::log_error!("后台任务 {} panic: {}", label, msg);
-        }
-    });
+    composition::delivery_logging::spawn_instrumented(
+        composition::delivery_logging::capture(),
+        async move {
+            if let Err(panic) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+                let msg = crate::panic_hook::payload_message(panic.as_ref());
+                crate::tui::log_error!("后台任务 {} panic: {}", label, msg);
+            }
+        },
+    );
 }
 
 #[cfg(test)]
@@ -49,6 +52,33 @@ mod tests {
         // started=true 证明 task 已运行并 panic，但 panic 未传播到此测试线程
         //（否则测试线程会被 abort，执行不到此断言）。
         assert!(started.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_spawn_guarded_propagates_captured_logging_context() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let expected = composition::delivery_logging::LogContext {
+            session_id: Some("frontend-session".to_string()),
+            ..composition::delivery_logging::LogContext::default()
+        };
+
+        composition::delivery_logging::instrument(expected.clone(), async move {
+            spawn_guarded("context", async move {
+                tx.send(composition::delivery_logging::capture()).unwrap();
+            });
+        })
+        .await;
+
+        assert_eq!(rx.await.unwrap(), expected);
+    }
+
+    #[test]
+    fn production_spawn_is_instrumented_at_creation() {
+        let source = include_str!("spawn_guard.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert!(production.contains("composition::delivery_logging::spawn_instrumented("));
+        assert!(production.contains("composition::delivery_logging::capture(),"));
+        assert!(!production.contains("tokio::spawn("));
     }
 
     #[tokio::test]

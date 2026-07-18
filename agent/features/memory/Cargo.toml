@@ -5,8 +5,10 @@ edition.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+log = "0.4"
 serde.workspace = true
 serde_json.workspace = true
+share = { path = "../../shared" }
 storage = { path = "../storage" }
 thiserror.workspace = true
 tokio.workspace = true

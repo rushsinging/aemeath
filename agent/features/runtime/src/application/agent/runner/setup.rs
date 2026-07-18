@@ -1,12 +1,30 @@
 use super::loop_run::SubAgentRun;
 use super::CliAgentRunner;
 use crate::application::agent::Agent;
-use crate::LOG_TARGET;
 use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
 use tools::{AgentProgressEvent, AgentProgressKind};
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
+
+/// #871 dynamic memory bridge for sub-agents.
+///
+/// Sub-agents receive the parent Run's already-resolved MemoryPort via
+/// [`AgentRunRequest::memory`] — the parent called `wiring.committed_memory()`
+/// at dispatch time. We wrap it in a [`tools::MemoryPortSource`] so that
+/// [`tools::register_subagent_tools`] can register the MemoryTool with the
+/// same dynamic-source contract the Main Run uses. For the sub-agent's
+/// lifetime the source always returns this same Arc; resume swaps are
+/// handled at the parent level before a new sub Run is dispatched.
+struct SubAgentMemoryPortSource {
+    memory: std::sync::Arc<dyn memory::MemoryPort>,
+}
+
+impl tools::MemoryPortSource for SubAgentMemoryPortSource {
+    fn current(&self) -> std::sync::Arc<dyn memory::MemoryPort> {
+        self.memory.clone()
+    }
+}
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -23,6 +41,7 @@ impl AgentRunner for CliAgentRunner {
         let timeout = request.timeout;
         let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
         let model_spec = request.model_spec;
+        let memory = request.memory;
         let progress_sink = request_progress.clone();
         // Resolve role and model
         let role = self.resolve_role(model_spec);
@@ -121,7 +140,7 @@ impl AgentRunner for CliAgentRunner {
         );
 
         logging::instrument(sub_run_context, async move {
-        log::info!(target: LOG_TARGET,
+        log::info!(target: crate::LOG_TARGET,
             "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
             reasoning,
             level,
@@ -171,7 +190,7 @@ impl AgentRunner for CliAgentRunner {
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "-".to_string());
             log::debug!(
-                target: LOG_TARGET,
+                target: crate::LOG_TARGET,
                 "[role:{} model:{} turn:{}] {}",
                 role_name,
                 model_name,
@@ -187,10 +206,17 @@ impl AgentRunner for CliAgentRunner {
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let sub_workspace = self.workspace.derive_isolated();
         let mut sub_registry = ToolRegistry::new();
+        // #871 dynamic memory: wrap the parent-provided MemoryPort in a source
+        // so the sub-agent's MemoryTool resolves through the same contract.
+        let sub_memory_source: std::sync::Arc<dyn tools::MemoryPortSource> =
+            std::sync::Arc::new(SubAgentMemoryPortSource {
+                memory: memory.clone(),
+            });
         tools::register_subagent_tools(
             &mut sub_registry,
             sub_task_access,
             sub_skills,
+            sub_memory_source,
             sub_workspace.control(),
         );
         let sub_schemas = sub_registry.schemas_for(guidance.language());
@@ -214,7 +240,7 @@ impl AgentRunner for CliAgentRunner {
                     })
                 })
                 .collect();
-            log::info!(target: LOG_TARGET,
+            log::info!(target: crate::LOG_TARGET,
                 "[subagent_llm_request] session={}, turn={}, provider={}, model={}, role={}, model_spec={}, messages={}, tools={}, latest_roles={}",
                 session_id_for_log,
                 turn,
@@ -248,7 +274,7 @@ impl AgentRunner for CliAgentRunner {
                     std::sync::Mutex::new(std::collections::HashSet::new()),
                 ))),
                 plan_mode,
-                std::sync::Arc::new(memory::NoOpMemory),
+                memory.clone(),
                 guidance,
             )
             .with_catalog(catalog)

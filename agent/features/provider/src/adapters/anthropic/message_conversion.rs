@@ -390,7 +390,7 @@ pub(crate) async fn send_message_non_stream(
                             // 记 warn 让 silent 变 visible；空对象作为兜底避免整个响应失败。
                             // 真正的"截断"问题在流式路径处理（见 business/stream.rs）。
                             log::warn!(
-                                target: "aemeath:agent:provider",
+                                target: crate::LOG_TARGET,
                                 "Anthropic 非流式响应 tool_use 块缺少 input 字段（id={}, name={}），使用空对象兜底",
                                 id, name,
                             );

@@ -2,7 +2,6 @@ use crate::application::chat::looping::events::{
     ChatEventSink, RuntimeStreamEvent, RuntimeToolCallStatus, RuntimeTurnContext,
 };
 use crate::application::chat::looping::tool_identity::ToolIdentityRegistry;
-use crate::LOG_TARGET;
 use provider::{InvocationDelta, InvocationEvent};
 use share::message::{ContentBlock, Message, Role};
 use std::sync::{Arc, Mutex};
@@ -268,7 +267,7 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             first
         };
         if first {
-            log::debug!(target: LOG_TARGET,
+            log::debug!(target: crate::LOG_TARGET,
                 "model stream first visible event: kind={} {} turn_id={}",
                 kind,
                 detail(),
@@ -322,7 +321,7 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
                 name, provider_id, index
             )
         });
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "on_tool_use_start: name={} provider_id={:?} index={} turn_id={}",
             name, provider_id, index, self.context.turn_id,
         );

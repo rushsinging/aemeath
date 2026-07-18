@@ -3,13 +3,20 @@ name = "context"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Enables test-only helpers (`test_support`). Consumers must add `context` to
+# `[dev-dependencies]` with `features = ["dev"]`. Never enabled in production.
+dev = []
+
 [dependencies]
 share = { path = "../../shared" }
 storage = { path = "../storage" }
 task = { path = "../task" }
+project = { path = "../project" }
+memory = { path = "../memory" }
+config = { path = "../config" }
 sdk = { path = "../../../packages/sdk" }
 provider = { path = "../provider" }
-memory = { path = "../memory" }
 log = "0.4"
 dirs = "6"
 serde = { workspace = true }

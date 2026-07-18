@@ -1,5 +1,3 @@
-use crate::LOG_TARGET;
-
 pub(super) fn enforce_openai_tool_pairs(messages: &mut Vec<serde_json::Value>) {
     use std::collections::HashSet;
 
@@ -23,14 +21,14 @@ pub(super) fn enforce_openai_tool_pairs(messages: &mut Vec<serde_json::Value>) {
         if m.get("role").and_then(|r| r.as_str()) == Some("tool") {
             let tcid = m.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
             if !all_call_ids.contains(tcid) {
-                log::warn!(target: LOG_TARGET, "[openai-compat] dropping orphan tool message id={}", tcid);
+                log::warn!(target: crate::LOG_TARGET, "[openai-compat] dropping orphan tool message id={}", tcid);
                 return false;
             }
         }
         true
     });
     if messages.len() != before {
-        log::warn!(target: LOG_TARGET,
+        log::warn!(target: crate::LOG_TARGET,
             "[openai-compat] dropped {} orphan tool messages",
             before - messages.len()
         );
@@ -73,7 +71,7 @@ pub(super) fn enforce_openai_tool_pairs(messages: &mut Vec<serde_json::Value>) {
         // 缺失的 id：插入占位 tool 消息
         let missing: Vec<&String> = pending.iter().filter(|id| !covered.contains(*id)).collect();
         if !missing.is_empty() {
-            log::warn!(target: LOG_TARGET,
+            log::warn!(target: crate::LOG_TARGET,
                 "[openai-compat] assistant at index {} has {} tool_calls but only {} are answered. Inserting {} placeholder tool message(s).",
                 i, pending.len(), covered.len(), missing.len()
             );

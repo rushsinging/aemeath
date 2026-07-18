@@ -5,7 +5,7 @@ use crate::adapters::git::GitCli;
 use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
 use crate::domain::service::WorkspaceService;
 use crate::domain::types::{WorkspaceControl, WorkspaceInitError, WorkspacePersist, WorkspaceRead};
-use share::session_types::ProjectIdentity;
+use share::session_types::{ProjectIdentity, WorktreeKind};
 
 #[derive(Clone)]
 pub struct WorkspaceWiring {
@@ -68,6 +68,39 @@ impl WorkspaceViews {
 }
 
 pub fn wire_production_workspace(cwd: PathBuf) -> Result<WorkspaceWiring, WorkspaceInitError> {
+    log::info!(target: crate::LOG_TARGET, "wire_production_workspace enter");
+    match build_workspace(cwd) {
+        Ok((wiring, kind)) => {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "wire_production_workspace success kind={kind:?}"
+            );
+            Ok(wiring)
+        }
+        Err(error) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "wire_production_workspace failure category={}",
+                init_error_category(&error)
+            );
+            Err(error)
+        }
+    }
+}
+
+/// 稳定的错误类别名（仅 discriminant，不含路径等敏感信息），供安全日志使用。
+fn init_error_category(error: &WorkspaceInitError) -> &'static str {
+    match error {
+        WorkspaceInitError::PathNotFound { .. } => "PathNotFound",
+        WorkspaceInitError::NotDirectory { .. } => "NotDirectory",
+        WorkspaceInitError::PermissionDenied { .. } => "PermissionDenied",
+        WorkspaceInitError::CanonicalizeFailed { .. } => "CanonicalizeFailed",
+        WorkspaceInitError::GitProbeFailed(_) => "GitProbeFailed",
+    }
+}
+
+/// 不含日志副作用的构造逻辑；行为与错误类型与重构前完全一致。
+fn build_workspace(cwd: PathBuf) -> Result<(WorkspaceWiring, WorktreeKind), WorkspaceInitError> {
     let metadata = std::fs::metadata(&cwd).map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => WorkspaceInitError::PathNotFound { path: cwd.clone() },
         std::io::ErrorKind::PermissionDenied => {
@@ -112,13 +145,16 @@ pub fn wire_production_workspace(cwd: PathBuf) -> Result<WorkspaceWiring, Worksp
             share::session_types::WorktreeKind::NonGit,
         ),
     };
-    Ok(WorkspaceWiring {
-        service: WorkspaceService::with_verified_git(
-            identity,
-            workspace_root,
-            canonical_path_base,
-            kind,
-            git,
-        ),
-    })
+    Ok((
+        WorkspaceWiring {
+            service: WorkspaceService::with_verified_git(
+                identity,
+                workspace_root,
+                canonical_path_base,
+                kind,
+                git,
+            ),
+        },
+        kind,
+    ))
 }

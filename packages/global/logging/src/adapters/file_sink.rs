@@ -109,6 +109,11 @@ impl UnifiedLogger {
         LOGGER.get().copied()
     }
 
+    /// Returns the immutable process-wide output mode selected at initialization.
+    pub fn output_mode(&self) -> LoggingOutputMode {
+        self.output_mode
+    }
+
     fn route(&self, target: &str) -> &SinkEntry {
         let spec = TargetCatalog::route(target).unwrap_or_else(|| {
             self.report_unknown_target(target);
@@ -119,11 +124,25 @@ impl UnifiedLogger {
             .expect("catalog sink must be installed")
     }
 
+    /// 未知 target 报告：写入 fallback sink（aemeath.log），**NEVER** 写 stderr。
+    /// 写 stderr 会污染 TUI 屏幕（alternatescreen 下 stderr 直接覆盖渲染区）。
+    /// 节流后仍只报告有限次数，避免日志膨胀。
     fn report_unknown_target(&self, target: &str) {
         if should_report_unknown(&UNKNOWN_TARGET_REPORTS) {
-            self.emergency.write(&format!(
-                "aemeath logging fallback: unknown target {target:?}; using aemeath.log"
-            ));
+            // 写入 fallback sink（aemeath.log），不写 emergency stderr
+            let fallback = TargetCatalog::fallback();
+            if let Some(entry) = self.sinks.get(&fallback.sink) {
+                match entry.lifecycle.lock() {
+                    Ok(mut lifecycle) => {
+                        if let Some(lifecycle) = lifecycle.as_mut() {
+                            lifecycle.write_line(&format!(
+                                "aemeath logging fallback: unknown target {target:?}; using aemeath.log"
+                            ));
+                        }
+                    }
+                    Err(_) => { /* sink 锁失败时静默，不退回 stderr */ }
+                }
+            }
         }
     }
 

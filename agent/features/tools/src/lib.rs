@@ -1,8 +1,8 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
-pub const LOG_TARGET: &str = "aemeath:agent:tools";
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:tools";
 
+/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod adapters;
 mod domain;
 
@@ -14,12 +14,12 @@ pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
     AgentRunner, AgentToolCallProgress, CancellationSignal, CatalogQuery, ExecutionScope,
     ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
-    MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet,
-    RegistryScopeName, SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability,
-    ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome,
-    ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
-    ToolProfile, ToolProfileName, ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
-    WorkspaceReadAccess,
+    MemoryPortSource, MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError,
+    ProgressSink, ReadSet, RegistryScopeName, SessionReminder, SessionReminders, Tool,
+    ToolCapabilities, ToolCapability, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext,
+    ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider,
+    ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult, TypedTool, TypedToolAdapter,
+    TypedToolResult, WorkspaceReadAccess,
 };
 
 // Gateway/OHS: tool catalog and registration wiring.

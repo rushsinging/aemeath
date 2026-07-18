@@ -12,7 +12,6 @@ use crate::adapters::http_attempt::{
 };
 use crate::domain::invoke::{InvocationScope, StreamResponse, SystemBlock};
 use crate::ports::{LegacyStreamSink, LlmProvider};
-use crate::LOG_TARGET;
 
 mod conversion;
 mod non_stream;
@@ -209,7 +208,7 @@ impl LlmProvider for OllamaProvider {
         let body_bytes = serde_json::to_string(&request_body)
             .map(|s| s.len())
             .unwrap_or(0);
-        log::debug!(target: LOG_TARGET,
+        log::debug!(target: crate::LOG_TARGET,
             "[ollama stream] POST {} model={} think={} msgs={} tools={} body_bytes={}",
             url,
             scope.model(),
@@ -228,7 +227,7 @@ impl LlmProvider for OllamaProvider {
             if attempt > 0 {
                 let delay =
                     std::time::Duration::from_millis((1000 * 2u64.pow(attempt)).min(30_000));
-                log::debug!(target: LOG_TARGET,
+                log::debug!(target: crate::LOG_TARGET,
                     "[ollama stream] retry {}/{} after {:?}",
                     attempt,
                     self.max_retries,

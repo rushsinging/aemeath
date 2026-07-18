@@ -8,7 +8,6 @@ use share::i18n::prompt::commit::commit_guidance_template;
 use share::i18n::prompt::system::{date_label, static_system_prompt};
 
 use super::git_context::{collect_git_context, is_git_repo};
-use crate::LOG_TARGET;
 
 /// System prompt split into a static (cacheable) part and a dynamic (per-session) part.
 #[derive(Clone)]
@@ -246,7 +245,7 @@ async fn load_agents_md_from_paths(
 fn scan_user_guidance(user_guidance: String) -> String {
     let assessment = context::guidance::assess_guidance("AGENTS.md", &user_guidance);
     for warning in &assessment.warnings {
-        log::warn!(target: LOG_TARGET,
+        log::warn!(target: crate::LOG_TARGET,
             "[Security] {} in {} line {}: {}",
             warning.threat_type,
             warning.filename,

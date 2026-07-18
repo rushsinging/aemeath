@@ -1,11 +1,9 @@
-use super::task_persistence::{TaskRestoreAdapter, TaskSnapshotSource};
+use super::task_persistence::{LegacyTaskCapture, TaskSnapshotSource};
 use crate::domain::session::SnapshotState;
 use task::{
-    wire_task, BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority, TaskSnapshot,
-    TaskSnapshotValidationError,
+    wire_task, BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority,
+    TaskSnapshot, TaskSnapshotValidationError,
 };
-
-use std::sync::Arc;
 
 fn batch_spec(name: &str) -> BatchCreateSpec {
     BatchCreateSpec::try_new(name.to_owned()).expect("valid batch")
@@ -93,14 +91,11 @@ fn restore_captured_snapshot_prepares_without_mutation_then_commit_replaces_live
     let target_persist = target_wiring.persist();
     add_task(target_access.as_ref(), "stale");
     let before_prepare = target_persist.collect_snapshot();
-    let adapter = TaskRestoreAdapter::new(Arc::clone(&target_persist));
-
-    let prepared = adapter
-        .prepare(&captured)
+    let prepared = prepare_task_restore(target_persist.as_ref(), &captured)
         .expect("captured valid snapshot must prepare");
     assert_eq!(target_persist.collect_snapshot(), before_prepare);
 
-    adapter.commit(prepared);
+    target_persist.commit_restore(prepared);
     assert_eq!(
         target_persist.collect_snapshot(),
         source_wiring.persist().collect_snapshot()
@@ -114,9 +109,10 @@ fn restore_rejects_invalid_captured_snapshot_during_prepare_and_keeps_live_state
     let persist = wiring.persist();
     add_task(access.as_ref(), "live");
     let before = persist.collect_snapshot();
-    let adapter = TaskRestoreAdapter::new(Arc::clone(&persist));
-
-    let result = adapter.prepare(&SnapshotState::Captured(invalid_self_dependency_snapshot()));
+    let result = prepare_task_restore(
+        persist.as_ref(),
+        &SnapshotState::Captured(invalid_self_dependency_snapshot()),
+    );
 
     assert!(matches!(
         result,
@@ -135,22 +131,31 @@ fn restore_missing_clears_stale_state_via_canonical_empty_snapshot() {
     assert_state_clears_stale_tasks(SnapshotState::Missing);
 }
 
+fn prepare_task_restore(
+    persist: &dyn TaskPersist,
+    state: &SnapshotState<TaskSnapshot>,
+) -> Result<task::PreparedTaskRestore, TaskSnapshotValidationError> {
+    match state {
+        SnapshotState::Captured(snapshot) => persist.prepare_restore(snapshot),
+        SnapshotState::Missing | SnapshotState::CapturedEmpty => {
+            persist.prepare_restore(&TaskSnapshot::empty())
+        }
+    }
+}
+
 fn assert_state_clears_stale_tasks(state: SnapshotState<TaskSnapshot>) {
     let wiring = wire_task();
     let access = wiring.access();
     let persist = wiring.persist();
     add_task(access.as_ref(), "stale");
-    let adapter = TaskRestoreAdapter::new(Arc::clone(&persist));
-
-    let prepared = adapter
-        .prepare(&state)
+    let prepared = prepare_task_restore(persist.as_ref(), &state)
         .expect("empty-compatible state must prepare as TaskSnapshot::empty");
     assert!(
         !access.list().is_empty(),
         "prepare must not mutate live state"
     );
 
-    adapter.commit(prepared);
+    persist.commit_restore(prepared);
     assert_eq!(persist.collect_snapshot(), TaskSnapshot::empty());
     assert!(access.list().is_empty());
     assert!(access.list_batches().is_empty());
