@@ -14,7 +14,7 @@ set -euo pipefail
 #   R5 project 内非测试 Command::new("git") 仅限 adapters/git.rs。
 #   R6 WorkspacePersist 仅可出现在 project（def/impl）与 runtime；tools 禁用（与 R2 重叠）。
 #   R7 ToolExecutionContext / ChatLoopContext 定义不得含 cwd 字段（从 workspace 读取）。
-# 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
+#   R8 Policy/Runtime 不得恢复路径 containment 或 read-before-write；Tool safety 不得读取 allow_all。# 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
 # 说明（narrowing）：R3 的 triple-bundle 检测限定 agent/features（project 除外），不扫
 #   agent/shared（持久化 DTO PersistedWorkspaceContext）与 packages/sdk（WorkspaceContextView 视图），
 #   这两者是设计允许的序列化/投影形态，不是运行期可变三元组。
@@ -57,6 +57,10 @@ command_git_re = re.compile(r'Command::new\(\s*"git"\s*\)')
 workspace_control_call_re = re.compile(r"\.workspace_control\s*\(")
 persisted_ctx_re = re.compile(r"\bPersistedWorkspaceContext\b")
 workspace_persist_re = re.compile(r"\bWorkspacePersist\b")
+retired_safety_re = re.compile(
+    r"\b(?:PathAccess|PathKind|path_accesses|requires_read_before_write|validate_and_normalize_path|validate_search_path)\b"
+)
+allow_all_safety_re = re.compile(r"(?:check_command_safety|check_shell_injection).*allow_all|allow_all.*(?:check_command_safety|check_shell_injection)")
 
 
 def is_test_path(path: Path) -> bool:
@@ -234,6 +238,20 @@ def check_r5(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
         )
 
 
+def check_r8(rel: Path, lineno: int, code: str, is_test: bool, violations: list[str]) -> None:
+    if is_test:
+        return
+    rel_s = rel.as_posix()
+    if (rel_s.startswith("agent/features/policy/") or rel_s.startswith("agent/features/runtime/")) and retired_safety_re.search(code):
+        violations.append(
+            f"{rel_s}:{lineno}: [R8] path containment/read-before-write belongs to Project/Tool, not Policy/Runtime."
+        )
+    if rel_s.startswith("agent/features/tools/src/adapters/bash") and allow_all_safety_re.search(code):
+        violations.append(
+            f"{rel_s}:{lineno}: [R8] Bash safety must not be conditional on allow_all."
+        )
+
+
 def check_r3_struct(rel: Path, text: str, violations: list[str]) -> None:
     rel_s = rel.as_posix()
     in_features = rel_s.startswith(FEATURES_DIR)
@@ -316,6 +334,7 @@ for path in sorted((root / "agent" / "features").rglob("*.rs")):
         check_r2_r6(rel, lineno, code, line_is_test, violations)
         check_r4(rel, lineno, code, line_is_test, violations)
         check_r5(rel, lineno, code, line_is_test, violations)
+        check_r8(rel, lineno, code, line_is_test, violations)
 
 if violations:
     reason = "Context architecture guard FAILED:\n" + "\n".join(violations[:100])

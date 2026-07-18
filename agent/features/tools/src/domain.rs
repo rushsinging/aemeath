@@ -27,6 +27,6 @@ pub use resources::ToolResources;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{
-    AgentProgressEvent, AgentProgressKind, AgentToolCallProgress, ImageData, PathAccess, PathKind,
-    PolicyDecision, SessionReminder, SessionReminders, ToolOutcome, ToolResult,
+    AgentProgressEvent, AgentProgressKind, AgentToolCallProgress, ImageData, PolicyDecision,
+    SessionReminder, SessionReminders, ToolOutcome, ToolResult,
 };

@@ -22,8 +22,8 @@
 
 use super::formatter::format_diag_json_line;
 use super::lifecycle::rotate_if_needed;
-use crate::domain::{DiagnosticSinkId, TargetCatalog};
-use log::{LevelFilter, Log, Metadata, Record};
+use crate::domain::{DiagnosticSinkId, LoggingOutputMode, LoggingSettings, TargetCatalog};
+use log::{Log, Metadata, Record};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, stderr, BufWriter, Stderr, Write};
@@ -33,15 +33,6 @@ use std::sync::{Mutex, OnceLock};
 
 const UNKNOWN_TARGET_REPORT_LIMIT: usize = 3;
 static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
-
-/// 输出模式。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputMode {
-    /// 按 catalog 路由到 17 个日志文件（含兜底）。
-    File,
-    /// 所有日志统一输出到 stderr（JSON Lines 格式）。
-    Stderr,
-}
 
 /// 按 catalog 建立的 sink 路径与 writer。
 struct SinkEntry {
@@ -56,7 +47,7 @@ struct SinkEntry {
 pub struct UnifiedLogger {
     sinks: HashMap<DiagnosticSinkId, SinkEntry>,
     stderr: Mutex<BufWriter<Stderr>>,
-    output_mode: OutputMode,
+    output_mode: LoggingOutputMode,
     max_bytes: u64,
     max_backups: usize,
     filter: env_logger::Logger,
@@ -66,24 +57,17 @@ pub struct UnifiedLogger {
 static LOGGER: OnceLock<&'static UnifiedLogger> = OnceLock::new();
 
 impl UnifiedLogger {
-    /// 初始化全局 logger。该函数只能调用一次（`log::set_logger` 限制）。
-    ///
-    /// - `logs_dir`：日志根目录（`File` 模式时不存在则创建）
-    /// - `max_bytes` / `max_backups`：单文件轮转阈值与保留份数
-    /// - `max_level`：最大日志级别（通常从 `config.level` 解析得到）
-    /// - `output_mode`：`File` 写文件 / `Stderr` 写 stderr
-    pub fn init(
-        logs_dir: &Path,
-        max_bytes: u64,
-        max_backups: usize,
-        max_level: LevelFilter,
-        output_mode: OutputMode,
-    ) -> io::Result<()> {
-        if output_mode == OutputMode::File {
+    /// 使用 Composition 提供的完整不可变 settings 初始化全局 logger。
+    pub fn init(settings: LoggingSettings) -> io::Result<()> {
+        let logs_dir = settings.logs_dir();
+        let max_bytes = settings.max_bytes();
+        let max_backups = settings.max_backups();
+        let output_mode = settings.output_mode();
+        if output_mode == LoggingOutputMode::File {
             fs::create_dir_all(logs_dir)?;
         }
         let open = |path: PathBuf| -> io::Result<SinkEntry> {
-            let writer = if output_mode == OutputMode::File {
+            let writer = if output_mode == LoggingOutputMode::File {
                 rotate_if_needed(&path, max_bytes, max_backups)?;
                 Some(open_buf(&path)?)
             } else {
@@ -110,11 +94,12 @@ impl UnifiedLogger {
             output_mode,
             max_bytes,
             max_backups,
-            filter: build_filter(max_level),
+            filter: build_filter(settings.filter_directive()),
         };
+        let max_level = settings.max_level();
         let leaked: &'static UnifiedLogger = Box::leak(Box::new(logger));
         log::set_logger(leaked).map_err(|e| io::Error::other(e.to_string()))?;
-        log::set_max_level(resolve_max_level(max_level));
+        log::set_max_level(max_level);
         // LOGGER 重复 set 会失败，但 init 只能调用一次，与 log::set_logger 一致
         let _ = LOGGER.set(leaked);
         Ok(())
@@ -150,7 +135,7 @@ impl UnifiedLogger {
     }
 
     fn write_line(&self, sink: &Mutex<Option<BufWriter<File>>>, path: &Path, line: &str) {
-        if self.output_mode == OutputMode::Stderr {
+        if self.output_mode == LoggingOutputMode::Stderr {
             if let Ok(mut w) = self.stderr.lock() {
                 let _ = writeln!(w, "{}", line);
                 let _ = w.flush();
@@ -202,7 +187,7 @@ impl Log for UnifiedLogger {
     }
 
     fn flush(&self) {
-        if self.output_mode == OutputMode::Stderr {
+        if self.output_mode == LoggingOutputMode::Stderr {
             if let Ok(mut w) = self.stderr.lock() {
                 let _ = w.flush();
             }
@@ -242,60 +227,10 @@ fn write_unknown_target_report(writer: &mut dyn Write, target: &str) -> io::Resu
     )
 }
 
-fn build_filter(config_level: LevelFilter) -> env_logger::Logger {
+fn build_filter(directive: &str) -> env_logger::Logger {
     let mut builder = env_logger::Builder::new();
-    builder.filter_level(config_level);
-    if let Ok(aemeath_log) = std::env::var("AEMEATH_LOG_LEVEL") {
-        builder.parse_filters(&aemeath_log);
-    }
+    builder.parse_filters(directive);
     builder.build()
-}
-
-/// Resolve the effective `set_max_level` from `AEMEATH_LOG_LEVEL` directive.
-///
-/// Scans the directive string for the most permissive level.
-/// If `AEMEATH_LOG_LEVEL` is unset, falls back to `config_level`.
-pub fn resolve_max_level(config_level: LevelFilter) -> LevelFilter {
-    match std::env::var("AEMEATH_LOG_LEVEL") {
-        Ok(directive) => parse_max_level(&directive).max(config_level),
-        Err(_) => config_level,
-    }
-}
-
-/// Parse a directive string and return the most permissive level found.
-///
-/// Examples:
-/// - `"info"` → `Info`
-/// - `"debug"` → `Debug`
-/// - `"aemeath:tui=debug,aemeath:agent:runtime=trace"` → `Trace`
-/// - `""` → `LevelFilter::max()` (off filter = allow all)
-fn parse_max_level(directive: &str) -> LevelFilter {
-    let directive = directive.trim();
-    if directive.is_empty() {
-        return LevelFilter::max();
-    }
-
-    let mut max = LevelFilter::Off;
-    for part in directive.split(|c: char| c == ',' || c == '=' || c.is_whitespace()) {
-        let level = match part.to_lowercase().as_str() {
-            "trace" => LevelFilter::Trace,
-            "debug" => LevelFilter::Debug,
-            "info" => LevelFilter::Info,
-            "warn" => LevelFilter::Warn,
-            "error" => LevelFilter::Error,
-            "off" => LevelFilter::Off,
-            _ => continue,
-        };
-        if level > max {
-            max = level;
-        }
-    }
-    // If no level keyword found at all (e.g. only target names),
-    // default to max to avoid blocking logs.
-    if max == LevelFilter::Off {
-        return LevelFilter::max();
-    }
-    max
 }
 
 fn open_buf(path: &Path) -> io::Result<BufWriter<File>> {

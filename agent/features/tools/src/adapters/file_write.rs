@@ -1,15 +1,23 @@
 use crate::domain::types::write::{WriteInput, WriteResult};
-use crate::domain::{PathAccess, PathKind};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
-pub struct FileWriteTool;
+fn has_read_evidence(
+    ctx: &ToolExecutionContext,
+    requested_path: &str,
+    resolved_path: &std::path::Path,
+) -> bool {
+    ctx.read_files
+        .lock()
+        .map(|read_files| {
+            read_files.contains(requested_path)
+                || read_files.contains(resolved_path.to_string_lossy().as_ref())
+        })
+        .unwrap_or(false)
+}
 
-const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "file_path",
-    kind: PathKind::File,
-}];
+pub struct FileWriteTool;
 
 #[async_trait]
 impl TypedTool for FileWriteTool {
@@ -34,17 +42,11 @@ impl TypedTool for FileWriteTool {
     fn is_concurrency_safe(&self) -> bool {
         false
     }
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &FILE_ACCESS
-    }
-    fn requires_read_before_write(&self) -> bool {
-        true
-    }
 
     async fn call(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> TypedToolResult<WriteResult> {
         let received_keys = input
             .as_object()
@@ -65,11 +67,22 @@ impl TypedTool for FileWriteTool {
                 )
             }
         };
-        let file_path = args.file_path.as_str();
+        let requested_path = args.file_path.as_str();
         let content = args.content.as_str();
-        // Path has already been validated and normalised by PolicyEngine,
-        // including the read-before-write check for existing files.
-        let path = std::path::PathBuf::from(file_path);
+        let path = match ctx
+            .workspace_read()
+            .resolve_file_path(std::path::Path::new(requested_path))
+        {
+            Ok(path) => path,
+            Err(error) => return TypedToolResult::error(error.to_string()),
+        };
+        let file_path = path.to_string_lossy().into_owned();
+        if path.exists() && !has_read_evidence(ctx, requested_path, &path) {
+            return TypedToolResult::error(format!(
+                "You must read {} before editing it. Use the Read tool first.",
+                path.display()
+            ));
+        }
         if let Some(parent) = path.parent() {
             if !parent.exists() {
                 if let Err(e) = tokio::fs::create_dir_all(parent).await {

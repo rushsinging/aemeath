@@ -34,13 +34,21 @@ fn rotate_test_logger(dir: &Path, max_bytes: u64, max_backups: usize) -> Unified
             },
         );
     }
+    let settings = LoggingSettings::new(
+        "off".to_string(),
+        LoggingOutputMode::File,
+        dir.to_path_buf(),
+        max_bytes,
+        max_backups,
+        30,
+    );
     UnifiedLogger {
         sinks,
         stderr: Mutex::new(BufWriter::new(stderr())),
-        output_mode: OutputMode::File,
-        max_bytes,
-        max_backups,
-        filter: build_filter(LevelFilter::Off),
+        output_mode: settings.output_mode(),
+        max_bytes: settings.max_bytes(),
+        max_backups: settings.max_backups(),
+        filter: build_filter(settings.filter_directive()),
     }
 }
 
@@ -155,38 +163,4 @@ fn unknown_target_reports_are_limited_and_written_directly() {
         String::from_utf8(output).unwrap(),
         "aemeath logging fallback: unknown target \"unknown::module\"; using aemeath.log\n"
     );
-}
-
-#[test]
-fn parse_max_level_global() {
-    assert_eq!(parse_max_level("info"), LevelFilter::Info);
-    assert_eq!(parse_max_level("debug"), LevelFilter::Debug);
-    assert_eq!(parse_max_level("trace"), LevelFilter::Trace);
-    assert_eq!(parse_max_level("warn"), LevelFilter::Warn);
-    assert_eq!(parse_max_level("error"), LevelFilter::Error);
-}
-
-#[test]
-fn parse_max_level_per_target() {
-    assert_eq!(
-        parse_max_level("aemeath:tui=debug,aemeath:agent:runtime=trace"),
-        LevelFilter::Trace
-    );
-    assert_eq!(
-        parse_max_level("aemeath:tui=info,aemeath:agent:runtime=warn"),
-        LevelFilter::Info
-    );
-}
-
-#[test]
-fn parse_max_level_empty() {
-    assert_eq!(parse_max_level(""), LevelFilter::max());
-    assert_eq!(parse_max_level("   "), LevelFilter::max());
-}
-
-#[test]
-fn resolve_max_level_uses_config_when_no_env() {
-    std::env::remove_var("AEMEATH_LOG_LEVEL");
-    assert_eq!(resolve_max_level(LevelFilter::Info), LevelFilter::Info);
-    assert_eq!(resolve_max_level(LevelFilter::Warn), LevelFilter::Warn);
 }
