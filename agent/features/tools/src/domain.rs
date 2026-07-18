@@ -8,7 +8,12 @@ pub mod context;
 pub mod ports;
 pub mod published_language;
 pub mod resources;
+pub mod schema_validator;
+#[cfg(test)]
+mod schema_validator_tests;
 pub mod scope_profile;
+pub mod shell_safety;
+pub mod suspension;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod tool;
@@ -24,13 +29,18 @@ pub use context::{
     Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
-pub use ports::{ToolCatalogPort, ToolExecutionPort};
+pub use ports::{
+    ToolCatalogPort, ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort,
+    ToolExecutionPort,
+};
 pub use published_language::{
-    RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogSnapshot, ToolInvocation,
-    ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
+    CancellationDeclaration, ConcurrencyDeclaration, InputSafetyDeclaration, RegistryScopeName,
+    ToolCapabilities, ToolCapability, ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind,
+    ToolInvocation, ToolName, ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };
 pub use resources::CatalogQuery;
 pub use scope_profile::{ProfileExpansionError, ToolProfile};
+pub use suspension::{ToolSuspension, UserInteractionSpec, UserOption, UserQuestion};
 pub use tool::{Tool, ToolListProvider, TypedTool, TypedToolAdapter, TypedToolResult};
 pub use tool_types::{
     AgentProgressEvent, AgentProgressKind, AgentToolCallProgress, ImageData, PolicyDecision,

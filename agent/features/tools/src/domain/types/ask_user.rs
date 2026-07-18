@@ -27,6 +27,8 @@ pub struct AskUserQuestionInput {
     pub question: String,
     /// Optional list of predefined answer choices. Each choice MUST be one separate array item — either a plain string or an object { title, description }. Do not combine choices into one string or embed them in question.
     pub options: Option<Vec<Value>>,
+    /// If true, the user may select more than one predefined choice
+    pub multi_select: Option<bool>,
     /// If true, user can provide any answer (not limited to options)
     pub allow_free_input: Option<bool>,
     /// Optional default answer if user skips

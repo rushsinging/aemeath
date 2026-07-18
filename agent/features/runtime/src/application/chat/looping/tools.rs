@@ -19,17 +19,18 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolOutcome;
-use tools::ToolRegistry;
+use tools::{ToolCatalogPort, ToolExecutionPort};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
-    registry: &Arc<ToolRegistry>,
+    tool_catalog: &Arc<dyn ToolCatalogPort>,
+    tool_execution: &Arc<dyn ToolExecutionPort>,
     policy: &dyn policy::PolicyPort,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
-    agent: &Agent<'_>,
+    agent: &Agent,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -41,9 +42,27 @@ pub(crate) async fn execute_tool_round<S>(
 where
     S: ChatEventSink,
 {
+    let catalog = match tool_catalog.snapshot(
+        &tools::RegistryScopeName::new("main"),
+        &tools::ToolProfileName::new("main-full"),
+    ) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            log::error!(target: LOG_TARGET, "tool catalog snapshot failed: {error}");
+            return tool_calls
+                .iter()
+                .map(|call| {
+                    ToolExecution::new(
+                        call,
+                        ToolOutcome::error(format!("tool catalog unavailable: {error}")),
+                    )
+                })
+                .collect();
+        }
+    };
     let (approved, denied) = evaluate_calls(
         tool_calls,
-        registry,
+        &catalog,
         policy,
         run_id,
         step_id,
@@ -76,12 +95,38 @@ where
     let (agent_approved, non_agent_approved): (Vec<ToolCall>, Vec<ToolCall>) =
         fuse_allowed.into_iter().partition(|c| c.name == "Agent");
 
+    // AskUser must cross the same execution port as every production tool.
+    // Only a typed Suspended outcome enters Runtime's existing waiter; every
+    // failure/cancellation remains a concrete ToolExecution result.
+    let mut ask_user_suspensions = Vec::new();
+    let mut ask_user_terminal = Vec::new();
+    for call in non_agent_approved
+        .iter()
+        .filter(|call| call.name == "AskUserQuestion")
+    {
+        let mut input = call.input.clone();
+        tools::strip_runtime_meta(&mut input);
+        let invocation =
+            tools::ToolInvocation::new(call.name.as_str(), input, agent.ctx.scope().clone());
+        match tool_execution
+            .execute(invocation, agent.ctx.cancellation().as_ref())
+            .await
+        {
+            tools::ToolExecutionOutcome::Suspended(suspension) => {
+                ask_user_suspensions.push((call, suspension));
+            }
+            outcome => ask_user_terminal.push(ToolExecution::new(
+                call,
+                crate::application::agent::legacy_outcome(outcome),
+            )),
+        }
+    }
     let ask_user_results = ask_user(
         context,
         sink,
         hook_ui,
         hook_runner,
-        &non_agent_approved,
+        &ask_user_suspensions,
         workspace_root,
     )
     .await;
@@ -99,7 +144,7 @@ where
     let agent_results = execute_agent_calls(
         context,
         &agent_approved,
-        registry,
+        tool_execution,
         &agent.ctx,
         &agent.agent_semaphore,
         &agent.workspace_persist,
@@ -113,6 +158,7 @@ where
 
     ask_user_results
         .into_iter()
+        .chain(ask_user_terminal)
         .chain(non_agent_results)
         .chain(agent_results)
         .chain(fused_results)
@@ -369,7 +415,7 @@ mod tests {
     use share::message::ContentBlock;
     use std::sync::{Arc, Mutex};
     use tools::ToolOutcome;
-    use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
+    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
     #[derive(Clone, Default)]
     struct RecordingSink {
@@ -460,11 +506,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_concurrency_safe_tools_emit_running_after_previous_result() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry.register_with_capabilities(
-            UnsafeLifecycleTool,
-            tools::ToolCapabilities::ReadWorkspace,
-        );
+        let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+        registry.register(UnsafeLifecycleTool);
         let ctx = test_tool_context();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
@@ -479,10 +522,14 @@ mod tests {
             .map(|call| (call, ToolGuardDecision::Allow))
             .collect::<Vec<_>>();
 
+        let ports = registry.build(agent.ctx.clone());
+        let catalog_port = ports.catalog_port();
+        let execution_port = ports.execution();
         let _ = execute_tool_round(
             &context,
             &calls,
-            &registry,
+            &catalog_port,
+            &execution_port,
             &policy::AllowAllPolicy,
             &sdk::RunId::new_v7(),
             &sdk::RunStepId::new_v7(),

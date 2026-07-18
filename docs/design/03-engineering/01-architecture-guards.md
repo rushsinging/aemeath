@@ -18,12 +18,12 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 31 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 41 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 29 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用 40 个独立脚本守卫，并运行 1 个内联结构守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
@@ -63,6 +63,7 @@
 | 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()` + 同步 `cancel_run(run_id)`；禁止恢复 `ChatInputEvent::Cancel` |
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
+| 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 | 26 | `check-no-inline-tests.sh` | 测试治理 | 源码文件禁止内嵌 `#[cfg(test)] mod tests { ... }`；测试 MUST 分离到 `*_tests.rs`，让 `cargo build` 天然暴露 dead code |
@@ -575,6 +576,17 @@
 - **检查方式**：`grep -nE` 分别扫描上述两个文件，命中即输出对应说明并 `exit 1`。
 - **白名单**：无。
 - **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `New run control APIs must not reach production AgentClient before #878 atomic cutover.`
+
+## 23a. check-tool-catalog-execution-boundary.sh
+
+- **位置**：`.agents/hooks/check-tool-catalog-execution-boundary.sh`；正反例脚本为 `check-tool-catalog-execution-boundary-tests.sh`。
+- **Runtime 生产边界**：扫描 `agent/features/runtime/src/**/*.rs` 的生产源码，禁止 `ToolRegistry`、`Arc<dyn Tool>`、`registry.get()`、`tool.call()` 与 `input_schema()` 直取。规则没有 composition/legacy 路径白名单；Composition 可通过 Tools 提供的窄 factory 装配双端口，但 Runtime 内仍存旧路径必须迁移或退役，不能以例外隐藏。
+- **Execution adapter 边界**：`tools/src/adapters/execution.rs` 禁止引用 `policy/hook/sdk/tui/runtime`，并禁止 `timeout`、`Semaphore`、`RunStep`、`approval`；这些编排职责归 Runtime。
+- **纯值 suspension / AskUser**：`tools/src/domain/suspension.rs` 禁止 tokio、Sender/Receiver、Mutex/RwLock/Arc、RuntimeHandle、request id 与 resume token；Tools AskUser 生产 adapter 禁止 `__ASK_USER__` / `__ASK_USER_SELECT__` 魔法协议及 oneshot/channel/waiter。Runtime-owned AskUser oneshot 明确不在该 Tools 扫描范围。
+- **façade 与 validator**：Tools crate-root 禁止公开 `ToolBacking` / `RegistryScopeBuilder` / `ToolRegistry` 和具体 `CatalogAdapter` / `ExecutionAdapter`；Catalog/Execution 只能经 composition factory 形成 trait-object 端口。schema validator 唯一实现必须位于 Tools；Runtime `input_validation.rs` 只允许兼容 re-export/phase peel，不得复制实现。
+- **排除语义**：只排除测试路径与精确 `#[cfg(test)]` item，不提供 migration exception、路径 allowlist 或 suppression。
+- **故意违规证据**：sanity 脚本先验证 Runtime-owned oneshot 正例，再分别注入 Runtime registry 直取、Execution→Hook、Suspension Sender、AskUser 魔法字符串、具体 adapter façade 与 Runtime schema copy；六类反例均必须由单 Guard 以 exit 2 拦截，恢复后 clean pass。
+- **失败模式**：逐项输出 `path:line: reason`，汇总后 exit 2。
 
 ## 24. check-config-reader-injection.sh
 

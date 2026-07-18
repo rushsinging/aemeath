@@ -203,10 +203,8 @@ mod tests {
     use share::config::{Config, ModelsConfig};
     use share::message::Message;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use task::TaskAccess;
-    use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
-    use tools::{DefaultToolCatalogGateway, ToolCatalogGateway, ToolRegistry};
+    use tools::composition::CountingToolCatalogGateway;
 
     #[derive(Default)]
     struct CountingProviderGateway {
@@ -245,65 +243,6 @@ mod tests {
             provider::wire_provider()
                 .invocation_stream(client, scope, system, messages, tool_schemas, cancel)
                 .await
-        }
-    }
-
-    #[derive(Default)]
-    struct CountingToolGateway {
-        new_registry_calls: AtomicUsize,
-        register_all_tools_calls: AtomicUsize,
-    }
-
-    impl ToolCatalogGateway for CountingToolGateway {
-        fn new_registry(&self) -> ToolRegistry {
-            self.new_registry_calls.fetch_add(1, Ordering::SeqCst);
-            DefaultToolCatalogGateway.new_registry()
-        }
-
-        fn register_all_tools(
-            &self,
-            registry: &ToolRegistry,
-            task_access: Arc<dyn TaskAccess>,
-            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            workspace_control: Arc<dyn project::WorkspaceControl>,
-        ) {
-            self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
-            DefaultToolCatalogGateway.register_all_tools(
-                registry,
-                task_access,
-                skills,
-                workspace_control,
-            );
-        }
-
-        fn register_all_tools_except_agent(
-            &self,
-            registry: &ToolRegistry,
-            task_access: Arc<dyn TaskAccess>,
-            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            workspace_control: Arc<dyn project::WorkspaceControl>,
-        ) {
-            DefaultToolCatalogGateway.register_all_tools_except_agent(
-                registry,
-                task_access,
-                skills,
-                workspace_control,
-            );
-        }
-
-        fn register_subagent_tools(
-            &self,
-            registry: &mut ToolRegistry,
-            task_access: Arc<dyn TaskAccess>,
-            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            workspace_control: Arc<dyn project::WorkspaceControl>,
-        ) {
-            DefaultToolCatalogGateway.register_subagent_tools(
-                registry,
-                task_access,
-                skills,
-                workspace_control,
-            );
         }
     }
 
@@ -349,7 +288,7 @@ mod tests {
         }
 
         let provider = Arc::new(CountingProviderGateway::default());
-        let tools = Arc::new(CountingToolGateway::default());
+        let tools = Arc::new(CountingToolCatalogGateway::default());
         let gateways = FeatureGateways::new(
             tools.clone(),
             provider.clone(),
@@ -378,8 +317,8 @@ mod tests {
         }
         result.expect("build client with injected gateways");
         assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tools.new_registry_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(tools.register_all_tools_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(tools.new_registry_calls(), 1);
+        assert_eq!(tools.register_all_tools_calls(), 1);
     }
 
     #[test]

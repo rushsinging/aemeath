@@ -6,26 +6,47 @@ pub const LOG_TARGET: &str = "aemeath:agent:tools";
 mod adapters;
 mod domain;
 
+/// Composition-only adapter construction. Concrete adapter and backing types
+/// remain private; production business code consumes the returned ports.
+pub mod composition {
+    pub use crate::adapters::composition::{
+        wire_builtin_catalog_execution, CatalogExecutionWiring,
+    };
+    #[cfg(feature = "test-harness")]
+    pub use crate::adapters::composition::{
+        CountingToolCatalogGateway, TestCatalogExecution, TestCatalogExecutionFactory,
+    };
+}
+
 /// Published tool-domain DTO types (kept as a public module facade).
 pub use domain::types;
 
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
-    AgentRunner, AgentToolCallProgress, CancellationSignal, CatalogQuery, ExecutionScope,
-    ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
-    MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet,
-    RegistryScopeName, SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability,
-    ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome,
+    AgentRunner, AgentToolCallProgress, CancellationDeclaration, CancellationSignal, CatalogQuery,
+    ConcurrencyDeclaration, ExecutionScope, ExecutionScopeBuilder, FixedGuidance, FixedPlanMode,
+    Guidance, ImageData, InputSafetyDeclaration, InvocationSource, MutexReadSet, PlanModeState,
+    PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet, RegistryScopeName,
+    SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
+    ToolCatalogSnapshot, ToolDescriptor, ToolErrorKind, ToolExecutionContext,
+    ToolExecutionContextBindingGuard, ToolExecutionContextBindingPort, ToolExecutionOutcome,
     ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
-    ToolProfile, ToolProfileName, ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
-    WorkspaceReadAccess,
+    ToolProfile, ToolProfileName, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter,
+    TypedToolResult, UserInteractionSpec, UserOption, UserQuestion, WorkspaceReadAccess,
 };
+
+// Schema validator (moved from runtime).
+pub use domain::schema_validator::{
+    format_tool_input_error, strip_runtime_meta, validate_tool_input, ToolInputMismatch,
+    RUNTIME_META_KEYS,
+};
+
+// Runtime's phase-peel seam delegates to this Tools-owned typed parser.
+pub use adapters::ask_user::ask_user_suspension;
 
 // Gateway/OHS: tool catalog and registration wiring.
 pub use adapters::wiring::{
-    is_readonly_command, register_all_tools, register_all_tools_except_agent,
-    register_subagent_tools, wire_tools, DefaultToolCatalogGateway, McpConnectionManager,
-    McpServerConfig, McpTool, McpToolDef, McpTransportKind, ToolCatalog, ToolCatalogGateway,
-    ToolRegistry,
+    is_readonly_command, wire_tools, DefaultToolCatalogGateway, McpConnectionManager,
+    McpServerConfig, McpTool, McpToolDef, McpTransportKind, ToolCatalogGateway,
 };

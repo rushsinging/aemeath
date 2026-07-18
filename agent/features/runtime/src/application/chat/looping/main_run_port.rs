@@ -77,7 +77,9 @@ where
     pub(crate) queue: &'a Q,
     pub(crate) input_events: &'a I,
     pub(crate) client: &'a Arc<provider::LlmClient>,
-    pub(crate) registry: &'a Arc<tools::ToolRegistry>,
+    pub(crate) tool_catalog: &'a Arc<dyn tools::ToolCatalogPort>,
+    pub(crate) tool_execution: &'a Arc<dyn tools::ToolExecutionPort>,
+    pub(crate) tool_context_binding: &'a Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub(crate) system_blocks: &'a [provider::SystemBlock],
     pub(crate) system_prompt_text: &'a str,
     pub(crate) user_context: &'a str,
@@ -172,8 +174,9 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn make_agent<'b>(
-        registry: &'b Arc<tools::ToolRegistry>,
+    fn make_agent(
+        tool_catalog: &Arc<dyn tools::ToolCatalogPort>,
+        tool_execution: &Arc<dyn tools::ToolExecutionPort>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
@@ -185,9 +188,16 @@ where
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
         run_id: &sdk::RunId,
-    ) -> Agent<'b> {
+    ) -> Agent {
+        let catalog = tool_catalog
+            .snapshot(
+                &tools::RegistryScopeName::new("main"),
+                &tools::ToolProfileName::new("main-full"),
+            )
+            .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
         Agent {
-            registry,
+            catalog,
+            execution: tool_execution.clone(),
             ctx: tools::ToolExecutionContext::new(
                 tools::ExecutionScope::builder(
                     run_id.to_string(),
@@ -213,8 +223,7 @@ where
                     Some(session_id.to_string()),
                     Some(session_reminders.clone()),
                 )
-                .with_agent(agent_runner.clone())
-                .with_catalog(Some(registry.clone() as Arc<dyn tools::CatalogQuery>)),
+                .with_agent(agent_runner.clone()),
             ),
             max_tool_concurrency,
             agent_semaphore: agent_semaphore.clone(),
@@ -320,7 +329,14 @@ where
             &self.chain.messages_flat(),
         )
         .await;
-        let tool_schemas = self.registry.schemas_for(self.language);
+        let tool_schemas = self
+            .tool_catalog
+            .snapshot(
+                &tools::RegistryScopeName::new("main"),
+                &tools::ToolProfileName::new("main-full"),
+            )
+            .map(|snapshot| snapshot.model_schemas())
+            .unwrap_or_default();
         let mut effective_system_blocks = self.system_blocks.to_vec();
         if self.memory_config.enabled && self.memory_config.inject_count > 0 {
             if let Some(block) =
@@ -655,7 +671,8 @@ where
         }
         let raw_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
         let agent = Self::make_agent(
-            self.registry,
+            self.tool_catalog,
+            self.tool_execution,
             self.agent_runner,
             self.memory,
             self.language,
@@ -668,10 +685,16 @@ where
             self.session_id,
             &self.run_id,
         );
+        let _binding = tools::ToolExecutionContextBindingGuard::bind(
+            (*self.tool_context_binding).clone(),
+            agent.ctx.clone(),
+        )
+        .map_err(LoopEngineError::Adapter)?;
         let all_results = execute_tool_round(
             &self.turn_context,
             &raw_calls,
-            self.registry,
+            self.tool_catalog,
+            self.tool_execution,
             self.policy,
             run_id,
             step_id,

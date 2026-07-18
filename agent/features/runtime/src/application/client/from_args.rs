@@ -26,7 +26,7 @@ pub struct RuntimeBootstrapDependencies {
     config_writer: Arc<dyn config::ConfigWriter>,
     memory: Arc<dyn memory::MemoryPort>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
-    tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+    _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
@@ -39,7 +39,7 @@ impl RuntimeBootstrapDependencies {
         config: RuntimeConfigDependencies,
         memory: Arc<dyn memory::MemoryPort>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
-        tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+        _tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
         policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
         session_tasks: Arc<dyn context::LegacyTaskCapture>,
@@ -51,7 +51,7 @@ impl RuntimeBootstrapDependencies {
             config_writer: config.writer,
             memory,
             provider_gateway,
-            tool_gateway,
+            _tool_gateway,
             policy,
             task_access,
             session_tasks,
@@ -104,7 +104,7 @@ pub async fn from_args_with_workspace(
         config_writer,
         memory,
         provider_gateway,
-        tool_gateway,
+        _tool_gateway: _,
         policy,
         task_access,
         session_tasks,
@@ -181,17 +181,16 @@ pub async fn from_args_with_workspace(
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
-    let registry = {
-        let reg = tool_gateway.new_registry();
-        tool_gateway.register_all_tools(
-            &reg,
-            task_access.clone(),
-            skills.clone(),
-            workspace.control(),
-        );
-        Arc::new(reg)
-    };
-    let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
+    let tool_wiring = tools::composition::wire_builtin_catalog_execution(
+        task_access.clone(),
+        skills.clone(),
+        workspace.control(),
+    )
+    .map_err(|error| SdkError::Init(error.to_string()))?;
+    let tool_catalog = tool_wiring.catalog();
+    let tool_execution = tool_wiring.execution();
+    let tool_context_binding = tool_wiring.binding();
+    let mcp_manager = spawn_mcp_connect(&tool_wiring, &cwd).await;
 
     // 11. Hook runner
     let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
@@ -244,6 +243,9 @@ pub async fn from_args_with_workspace(
         agent_semaphore.clone(),
         tool_result_materializer.clone(),
         workspace.clone(),
+        tool_catalog.clone(),
+        tool_execution.clone(),
+        tool_context_binding.clone(),
     );
 
     // 15. Prompt bundle
@@ -292,7 +294,9 @@ pub async fn from_args_with_workspace(
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
             client,
-            registry,
+            tool_catalog,
+            tool_execution,
+            tool_context_binding,
             system_blocks,
             system_prompt_text,
             user_context: prompt_parts.claude_md,

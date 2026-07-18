@@ -101,6 +101,15 @@ pub(crate) async fn from_args_with_gateways(
     );
 
     let task_wiring = task::wire_task();
+    // Consume the injected gateway at the composition boundary. Runtime receives
+    // only the catalog/execution ports assembled by its current bootstrap seam.
+    let registry = gateways.tools.new_registry();
+    gateways.tools.register_all_tools(
+        &registry,
+        task_wiring.access(),
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        workspace.control(),
+    );
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
         runtime::RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),

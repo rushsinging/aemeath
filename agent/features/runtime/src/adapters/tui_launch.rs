@@ -10,14 +10,15 @@ use hook::api::HookRunner;
 use provider::LlmClient;
 use provider::SystemBlock;
 use storage::TaskStore;
-use tools::{AgentRunner, ToolRegistry};
+use tools::{AgentRunner, ToolCatalogPort, ToolExecutionPort};
 
 /// TUI 启动所需的过渡上下文。
 pub struct TuiLaunchContext {
     pub session_id: String,
     pub model_display: String,
     pub client: Arc<LlmClient>,
-    pub registry: Arc<ToolRegistry>,
+    pub tool_catalog: Arc<dyn ToolCatalogPort>,
+    pub tool_execution: Arc<dyn ToolExecutionPort>,
     pub system_blocks: Vec<SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,

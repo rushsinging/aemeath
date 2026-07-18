@@ -7,7 +7,7 @@ edition.workspace = true
 share = { path = "../../shared" }
 config = { path = "../config" }
 provider = { path = "../provider" }
-tools = { path = "../tools" }
+tools = { path = "../tools", features = ["test-harness"] }
 project = { path = "../project" }
 memory = { path = "../memory" }
 policy = { path = "../policy" }

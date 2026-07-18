@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use provider::SystemBlock;
 use share::message::Message;
 use tools::{AgentProgressEvent, AgentProgressKind};
-use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
+use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
@@ -183,17 +183,19 @@ impl AgentRunner for CliAgentRunner {
         // Sub Run 用独立的 task::TaskStore access，不共享父 Run 的 Task 状态（#889）。
         let sub_task_access: std::sync::Arc<dyn task::TaskAccess> =
             std::sync::Arc::new(task::TaskStore::new());
-        let sub_skills =
-            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let sub_workspace = self.workspace.derive_isolated();
-        let mut sub_registry = ToolRegistry::new();
-        tools::register_subagent_tools(
-            &mut sub_registry,
-            sub_task_access,
-            sub_skills,
-            sub_workspace.control(),
-        );
-        let sub_schemas = sub_registry.schemas_for(guidance.language());
+        let sub_catalog = match self.tool_catalog.snapshot(
+            &tools::RegistryScopeName::new("sub-agent"),
+            &tools::ToolProfileName::new("sub-agent-restricted"),
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                return tools::AgentRunTerminal::Failed {
+                    error: error.to_string(),
+                }
+            }
+        };
+        let sub_schemas = sub_catalog.model_schemas();
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
@@ -254,8 +256,10 @@ impl AgentRunner for CliAgentRunner {
             .with_catalog(catalog)
             .with_progress(request_progress),
         );
+        let _ = sub_task_access;
         let agent = Agent {
-            registry: &sub_registry,
+            catalog: sub_catalog,
+            execution: self.tool_execution.clone(),
             ctx: sub_ctx,
             max_tool_concurrency: self.max_tool_concurrency,
             agent_semaphore: self.agent_semaphore.clone(),
@@ -310,6 +314,7 @@ impl AgentRunner for CliAgentRunner {
             ctx_context_size: context_size,
             tool_result_materializer: self.tool_result_materializer.clone(),
             policy: self.policy.clone(),
+            tool_context_binding: self.tool_context_binding.clone(),
         }
         .run_loop()
         .await

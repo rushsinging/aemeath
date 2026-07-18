@@ -91,6 +91,7 @@ mod tool_outcome_tests {
             text: "out".to_string(),
             data: serde_json::json!({"k": "v"}),
             is_error: false,
+            error_kind: None,
             images: vec![],
         };
         let o = ToolOutcome::from_tool_result(r);
@@ -131,6 +132,8 @@ pub struct ToolResult {
     /// 结构化数据（给 TUI 反序列化渲染）。
     pub data: serde_json::Value,
     pub is_error: bool,
+    /// Stable execution classification; absent on success.
+    pub error_kind: Option<crate::domain::ToolErrorKind>,
     /// Optional images to include in the tool result (for vision-capable models)
     pub images: Vec<ImageData>,
 }
@@ -149,6 +152,7 @@ impl ToolResult {
             text: text.into(),
             data: serde_json::Value::Null,
             is_error,
+            error_kind: is_error.then_some(crate::domain::ToolErrorKind::InvalidInput),
             images: Vec::new(),
         }
     }
@@ -165,6 +169,7 @@ impl Default for ToolResult {
             text: String::new(),
             data: serde_json::Value::Null,
             is_error: false,
+            error_kind: None,
             images: Vec::new(),
         }
     }

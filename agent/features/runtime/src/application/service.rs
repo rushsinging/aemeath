@@ -53,7 +53,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use storage::TaskStore;
-    use tools::{AgentRunRequest, AgentRunner, ToolRegistry};
+    use tools::{AgentRunRequest, AgentRunner};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
@@ -144,7 +144,12 @@ mod tests {
         ChatRuntimeContext {
             resources: crate::application::resources::RuntimeResources {
                 client: Arc::new(LlmClient::new(String::new())),
-                registry: Arc::new(ToolRegistry::new()),
+                tool_catalog: tools::composition::TestCatalogExecutionFactory::empty()
+                    .catalog_port(),
+                tool_execution: tools::composition::TestCatalogExecutionFactory::empty()
+                    .execution(),
+                tool_context_binding: tools::composition::TestCatalogExecutionFactory::empty()
+                    .binding(),
                 system_blocks: Vec::new(),
                 system_prompt_text: String::new(),
                 user_context: String::new(),

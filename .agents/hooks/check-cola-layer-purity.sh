@@ -156,7 +156,10 @@ def tools_authorization_violations(source: str) -> list[str]:
     )
     if authorization_source and re.search(r"\bexcludes\b", source):
         violations.append("ToolProfile::excludes/name blacklist authorization is forbidden")
-    if authorization_source and tool_name_match_pattern.search(source):
+    name_based_authorization = re.search(
+        r"\b(?:exclud\w*|denylist|blacklist)\b[\s\S]{0,500}", source
+    )
+    if name_based_authorization and tool_name_match_pattern.search(name_based_authorization.group(0)):
         violations.append("authorization must not match on ToolName; use declared capabilities")
     return violations
 

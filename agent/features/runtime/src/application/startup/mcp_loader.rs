@@ -5,7 +5,6 @@ use std::path::Path;
 use std::sync::Arc;
 use tools::McpConnectionManager;
 use tools::McpServerConfig;
-use tools::ToolRegistry;
 
 pub fn parse_mcp_servers_config(
     config: &serde_json::Value,
@@ -85,7 +84,7 @@ pub async fn load_mcp_manager(cwd: &Path) -> Arc<McpConnectionManager> {
 ///
 /// Awaits completion so that tools are available before the first LLM turn.
 pub async fn spawn_mcp_connect(
-    registry: Arc<ToolRegistry>,
+    tools: &tools::composition::CatalogExecutionWiring,
     cwd: &Path,
 ) -> Arc<McpConnectionManager> {
     let manager = load_mcp_manager(cwd).await;
@@ -106,7 +105,7 @@ pub async fn spawn_mcp_connect(
             }
         }
     }
-    manager.register_tools(&registry).await;
+    tools.sync_mcp_source(&manager).await;
     log::info!(target: LOG_TARGET, "[MCP] all servers connected");
 
     manager

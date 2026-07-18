@@ -7,7 +7,7 @@ use crate::application::chat::looping::events::ChatEventSink;
 use crate::application::chat::looping::input_gate::InputEventDrainPort;
 use crate::application::chat::looping::queue::QueueDrainPort;
 use std::sync::Arc;
-use tools::ToolRegistry;
+use tools::{ToolCatalogPort, ToolExecutionPort};
 use workflow::api::ReasoningPort;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
@@ -52,7 +52,9 @@ where
     pub queue: Q,
     pub input_events: I,
     pub client: Arc<provider::LlmClient>,
-    pub registry: Arc<ToolRegistry>,
+    pub tool_catalog: Arc<dyn ToolCatalogPort>,
+    pub tool_execution: Arc<dyn ToolExecutionPort>,
+    pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     pub system_blocks: Vec<provider::SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,

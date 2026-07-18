@@ -11,7 +11,7 @@ use provider::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
 use storage::TaskStore;
 use task::TaskAccess;
-use tools::{AgentRunner, ToolRegistry};
+use tools::{AgentRunner, ToolCatalogPort, ToolExecutionPort};
 
 /// Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。
 ///
@@ -22,7 +22,9 @@ use tools::{AgentRunner, ToolRegistry};
 pub struct RuntimeResources {
     // ── 服务句柄（Arc 共享）──
     pub client: Arc<LlmClient>,
-    pub registry: Arc<ToolRegistry>,
+    pub tool_catalog: Arc<dyn ToolCatalogPort>,
+    pub tool_execution: Arc<dyn ToolExecutionPort>,
+    pub tool_context_binding: Arc<dyn tools::ToolExecutionContextBindingPort>,
     /// Legacy 持久化兼容句柄（session snapshot/restore、input_gate clear）。
     /// 仅供 #890/#891 迁移前保留，**不得**下发给 tools/reminder/snapshot 日常链路。
     pub task_store: Arc<TaskStore>,
