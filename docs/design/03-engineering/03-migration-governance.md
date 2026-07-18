@@ -3,6 +3,8 @@
 > 层级：03-engineering（横切工程）
 > 状态：过渡追踪｜Milestone：v0.1.0｜对应 Issue：#743 / #761（S2 盘点）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > **本文是 Current → Target 差距、迁移责任、进度与退出条件的唯一真相源**。01-system / 02-modules 设计文档只写目标态；已启用守卫的脚本行为、常量与白名单以 [Architecture Guards](01-architecture-guards.md) 为真相源；开发者当前 **MUST** 遵守的 Project 操作约束见 [`specs/project.md`](../../../specs/project.md)。
+>
+> **#1021 Guard 例外治理基线（2026-07-18）**：`.agents/architecture-guard-registry.json` 已成为 Guard policy / scope / suppression / migration exception 的单一机器可读注册表；`check-guard-registry.sh` 通过 xtask 校验 stable id、必填归责、path stale、Shell 隐式排除引用和仓库/模块预算。Current migration debt 冻结为 repository `7`：Runtime `5`（4 个层间倒置 + 1 个 shared-adapter bridge）、Storage `1`（#883 承接的 transitional business modules）、TUI `1`（#947 承接的 slash async dispatch）。Storage 的 façade/Cargo edge、Composition 唯一装配点均归 Target policy，不计债务；Workflow、Audit、Project 机器报告 migration exception 为 `0`，与人工基线一致。该注册表只治理 Current 例外，capability-first 正式 Guard 与 legacy COLA 退役仍由 #1022 承接。
 
 ## 1. 代码组织、装配与守卫 Current → Target（#972）
 

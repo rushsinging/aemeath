@@ -39,8 +39,7 @@ run_tui_single_source_structure_guard() {
 
   report_matches \
     "TUI render widgets must not physically store app/domain mirror fields; keep truth in model/ or view_state/." \
-    bash -c "grep -RInE '^[[:space:]]*(pub(\\([^)]*\\))?[[:space:]]+)?(textarea|history|history_index|saved_input|status_type|vm|thinking|is_selecting|selection_start|selection_end|selection_row|selection_width|spinner|task_status_lines|queued_submission_lines)[[:space:]]*:' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area\" \"$ROOT/apps/cli/src/tui/render/status\" \"$ROOT/apps/cli/src/tui/render/output_area.rs\" \"$ROOT/apps/cli/src/tui/render/output_area\" \"$ROOT/apps/cli/src/tui/render/display/status_bar_selection.rs\" --include='*.rs' | grep -vE 'vm:\\s*&'; perl -ne 'if (/pub\\(super\\)[[:space:]]+(text|cursor):/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/editing.rs\"; grep -RInE '^[[:space:]]*pub\\(super\\)[[:space:]]+(focused|pending_images|content_width):' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area\" --include='*.rs'; grep -RInE '^[[:space:]]*(pub(\\([^)]*\\))?[[:space:]]+)?(last_visible_height|last_line_count|scroll_offset|auto_scroll)[[:space:]]*:' \"$ROOT/apps/cli/src/tui/render/output_area.rs\" \"$ROOT/apps/cli/src/tui/render/output_area\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/render/output_area/render.rs:' || true"
-
+    bash -c "grep -RInE '^[[:space:]]*(pub(\\([^)]*\\))?[[:space:]]+)?(textarea|history|history_index|saved_input|status_type|vm|thinking|is_selecting|selection_start|selection_end|selection_row|selection_width|spinner|task_status_lines|queued_submission_lines)[[:space:]]*:' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area\" \"$ROOT/apps/cli/src/tui/render/status\" \"$ROOT/apps/cli/src/tui/render/output_area.rs\" \"$ROOT/apps/cli/src/tui/render/output_area\" \"$ROOT/apps/cli/src/tui/render/display/status_bar_selection.rs\" --include='*.rs' | grep -vE 'vm:\\s*&'; perl -ne 'if (/pub\\(super\\)[[:space:]]+(text|cursor):/) { print \"\$ARGV:\$.:\$_\" }' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area/editing.rs\"; grep -RInE '^[[:space:]]*pub\\(super\\)[[:space:]]+(focused|pending_images|content_width):' \"$ROOT/apps/cli/src/tui/render/input/input_area.rs\" \"$ROOT/apps/cli/src/tui/render/input/input_area\" --include='*.rs'; grep -RInE '^[[:space:]]*(pub(\\([^)]*\\))?[[:space:]]+)?(last_visible_height|last_line_count|scroll_offset|auto_scroll)[[:space:]]*:' \"$ROOT/apps/cli/src/tui/render/output_area.rs\" \"$ROOT/apps/cli/src/tui/render/output_area\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/render/output_area/render.rs:' || true" # guard-registry:scope.tui.arch.inline-exclusions
   report_matches \
     "TUI render widgets must not restore completion/suggestions or spinner mirror storage/types." \
     grep -RInE '(pub\(super\)[[:space:]]+suggestions:[[:space:]]*Vec|pub[[:space:]]+selected_suggestion|pub[[:space:]]+show_suggestions|\bstruct[[:space:]]+SpinnerState\b|\bpub[[:space:]]+struct[[:space:]]+SpinnerState\b)' \
@@ -53,28 +52,25 @@ run_tui_single_source_structure_guard() {
   report_matches \
     "TUI production paths must not drive or read widget mirrors as truth; mutate model/view_state instead." \
     grep -RInE '\b(input_area|status_bar|output_area)\.(set_text|set_cursor_byte_index|set_pending_images|get_text|cursor_position|is_empty|is_showing_suggestions|selected_suggestion|get_selected_text|start_selection|start_selection_at|update_selection|update_selection_at|end_selection|scroll_up|scroll_down|scroll_to_bottom|scroll_to_top|start_spinner|stop_spinner|set_spinner_phase|tick_spinner|set_task_status)\(' \
-      "$ROOT/apps/cli/src/tui" --include='*.rs' --exclude='*_tests.rs'
+      "$ROOT/apps/cli/src/tui" --include='*.rs' --exclude='*_tests.rs' # guard-registry:scope.tui.arch.inline-exclusions
 
   report_matches \
     "TUI production paths must not write widget mirror fields directly; write model/view_state state instead." \
-    bash -c "grep -RInE '\\b(input_area|status_bar|output_area|output|self)\\.(scroll_offset|auto_scroll|is_selecting|selection_start|selection_end|selection_row|selection_width|spinner|task_status_lines|queued_submission_lines)\\s*=' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/view_state/' | grep -v 'view_state\\.' | grep -v '/render/output_area' | grep -v '/render/input/input_area/selection.rs' | grep -v '/render/display/status_bar_selection.rs'"
-
+    bash -c "grep -RInE '\\b(input_area|status_bar|output_area|output|self)\\.(scroll_offset|auto_scroll|is_selecting|selection_start|selection_end|selection_row|selection_width|spinner|task_status_lines|queued_submission_lines)\\s*=' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/view_state/' | grep -v 'view_state\\.' | grep -v '/render/output_area' | grep -v '/render/input/input_area/selection.rs' | grep -v '/render/display/status_bar_selection.rs'" # guard-registry:scope.tui.arch.inline-exclusions
   report_matches \
     "OutputArea selection/copy coordinate helpers must remain read-only pure projection helpers." \
     bash -c "perl -0ne 'while (/pub[[:space:]]+fn[[:space:]]+(get_line_content|screen_to_anchor|word_bounds_at|selected_text_for_view)[^{;]*&mut[[:space:]]+self/sg) { print \"\$ARGV:\$1 requires &mut self\\n\" } while (/fn[[:space:]]+selected_text_for_range[^{;]*&mut[[:space:]]+self/sg) { print \"\$ARGV:selected_text_for_range requires &mut self\\n\" }' \"$ROOT/apps/cli/src/tui/render/output_area/selection.rs\""
 
   report_matches \
     "TUI output document projection must stay centralized; render widgets must not own renderer cache or use legacy widget refresh APIs." \
-    bash -c "grep -RInE 'handle_resize\\([^)]*visible_height|visible_height_hint|output_area\\.last_visible_height|pub[[:space:]]+document_renderer|[[:space:]]document_renderer[[:space:]]*:|refresh_output_widget_from_model' \"$ROOT/apps/cli/src/tui\" --include='*.rs'; grep -RInE 'output_area\\.replace_document\\(|\\barea\\.replace_document\\(|\\boutput\\.replace_document\\(' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/app/update.rs:' | grep -v '/render/output_area.rs:' | grep -v '/render/output_area/render.rs:' | grep -v '/render/output_area/selection.rs:' | grep -v '/render/output/selection_tests.rs:' | grep -v '/adapter/output_widget.rs:'; grep -RInE '\\.[[:space:]]*set_document[[:space:]]*\\(' \"$ROOT/apps/cli/src/tui\" --include='*.rs' || true"
-
+    bash -c "grep -RInE 'handle_resize\\([^)]*visible_height|visible_height_hint|output_area\\.last_visible_height|pub[[:space:]]+document_renderer|[[:space:]]document_renderer[[:space:]]*:|refresh_output_widget_from_model' \"$ROOT/apps/cli/src/tui\" --include='*.rs'; grep -RInE 'output_area\\.replace_document\\(|\\barea\\.replace_document\\(|\\boutput\\.replace_document\\(' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '/app/update.rs:' | grep -v '/render/output_area.rs:' | grep -v '/render/output_area/render.rs:' | grep -v '/render/output_area/selection.rs:' | grep -v '/render/output/selection_tests.rs:' | grep -v '/adapter/output_widget.rs:'; grep -RInE '\\.[[:space:]]*set_document[[:space:]]*\\(' \"$ROOT/apps/cli/src/tui\" --include='*.rs' || true" # guard-registry:scope.tui.arch.inline-exclusions
   report_matches \
     "queued live-status lines must not be read as business truth from OutputArea; use ConversationModel.queued_submissions / LiveStatusViewModel." \
-    bash -c "grep -RInE 'queued_submission_lines' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '^[^:]*:[0-9][0-9]*:[[:space:]]*//' | grep -v '/app/update/notice.rs:'"
-
+    bash -c "grep -RInE 'queued_submission_lines' \"$ROOT/apps/cli/src/tui\" --include='*.rs' --exclude='*_tests.rs' | grep -v '^[^:]*:[0-9][0-9]*:[[:space:]]*//' | grep -v '/app/update/notice.rs:'" # guard-registry:scope.tui.arch.inline-exclusions
   report_matches \
     "model.input.document mutations outside InputModel are forbidden; use InputIntent -> InputModel::apply." \
     grep -RInE 'model\.input\.document\.(clear\(|insert_text\(|replace_text\(|move_|set_cursor_col|delete_)' \
-      "$ROOT/apps/cli/src/tui" --include='*.rs' --exclude-dir='model/input'
+      "$ROOT/apps/cli/src/tui" --include='*.rs' --exclude-dir='model/input' # guard-registry:scope.tui.arch.inline-exclusions
 
   report_matches \
     "ChatState must not mirror token/api/thinking usage; keep usage/thinking in RuntimeModel and derive status via StatusViewAssembler." \
@@ -87,6 +83,7 @@ run_tui_single_source_structure_guard() {
 echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] ROOT=$ROOT"
+"$HOOKS_DIR/check-guard-registry.sh"
 "$HOOKS_DIR/check-cargo-dependency-graph.sh"
 "$HOOKS_DIR/check-cli-thin-entry.sh"
 "$HOOKS_DIR/check-share-no-upstream-deps.sh"
@@ -109,6 +106,7 @@ echo "[hook-env] ROOT=$ROOT"
 run_tui_single_source_structure_guard
 "$HOOKS_DIR/check-tui-output-legacy-guards.sh"
 "$HOOKS_DIR/check-tui-block-nesting.sh"
+"$HOOKS_DIR/check-render-pure.sh"
 "$HOOKS_DIR/check-render-isolation.sh"
 "$HOOKS_DIR/check-unsafe-text-ops.sh"
 "$HOOKS_DIR/check-log-target-prefix.sh"

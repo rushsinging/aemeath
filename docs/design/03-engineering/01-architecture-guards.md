@@ -18,17 +18,18 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 27 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 35 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（依次调用下表 29 个守卫）。下表才是真正的守卫集合；序号大体按调用顺序排列，Provider（§6a/6b）与 TUI 单一真相（§20 `run_tui_single_source_structure_guard`）因历史编号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
+`check-architecture-guards.sh` 本身**不是**守卫，它只做编排（34 个独立脚本 + 1 个内联 `run_tui_single_source_structure_guard`，合计 35 个守卫）。下表才是真正的守卫集合；历史序号未逐次重排，实际调用顺序以 `check-architecture-guards.sh` 源码为准。
 
 ## 守卫索引
 
 | # | 守卫脚本 | 类别 | 守护不变量 |
 |---|---|---|---|
+| 0 | `check-guard-registry.sh` | Guard 治理 | 校验机器注册表、stable id、分类、迁移债务预算、stale scope 与 Shell 隐式排除引用 |
 | 1 | `check-cargo-dependency-graph.sh` | DDD 边界 | Cargo workspace 依赖方向白名单 |
 | 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
@@ -50,6 +51,7 @@
 | 12 | `check-tui-model-view-boundaries.sh` | TUI 架构 | model/render/view 边界 + 物理遗留 |
 | 13 | `check-tui-output-legacy-guards.sh` | TUI 遗留 | TUI M2 后选区/工具状态旁路守卫 |
 | 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
+| 15a | `check-render-pure.sh` | TUI 渲染 | render 禁止直读 conversation/runtime domain model，测试与登记 display bridge 除外 |
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
 | 16 | `check-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
 | 17 | `check-log-target-prefix.sh` | 日志架构 | log target 字符串字面量必须以 `aemeath:` 开头 |
@@ -60,9 +62,23 @@
 | 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns` |
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
+| 24a | `check-config-workflow-boundary.sh` | 配置架构 | Config 生产代码禁止重新拥有 Workflow Reasoning Graph 配置语义；仅兼容测试可引用退役字段 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
+
+## 0. check-guard-registry.sh
+
+- **功能**：调用 `cargo run -p xtask -- guard-registry check`，以 `.agents/architecture-guard-registry.json` 为单一机器可读治理注册表。
+- **分类**：`target_capability_policy`、`target_hexagonal_policy`、`scope_exclusion`、`false_positive_suppression`、`migration_exception`；只有最后一类计入迁移债务。
+- **schema**：每项使用全局唯一 stable id，并记录 guard、module、scope、owner、reason、tracking issue、introduced baseline、exit condition 与 status。迁移例外缺失归责或退出信息时 fail-closed。
+- **预算**：Current 冻结迁移债务为 repository `7`，其中 Runtime `5`、Storage `1`、TUI `1`；模块和仓库预算均只允许下降。
+- **stale / 隐式排除**：精确 path/path-prefix 不存在即 stale；每个注册项必须被其声明的 Guard 以精确 `guard-registry:<stable-id>` 引用；Shell 中 `grep -v`、`--exclude`、`--exclude-dir`、`EXEMPT_FILES`、migration exception 集合和自由格式 inline allow 必须在同一行或前一行引用同 Guard 下已登记 stable id。
+- **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
+- **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
+- **Current 基线复核**：Storage 的 Target policy 仍不计债务，但 `STORAGE_TRANSITIONAL_MODULES` 是 #883 承接的真实迁移债务 1；Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
+- **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
+- **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。
 
 ## 1. check-cargo-dependency-graph.sh
 

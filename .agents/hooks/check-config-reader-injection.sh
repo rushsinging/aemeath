@@ -12,9 +12,11 @@ fi
 violations=$(grep -rn "ConfigAppService::new" \
   "$ROOT/agent/features/runtime/src/" "$ROOT/apps/cli/src/" \
   --include="*.rs" 2>/dev/null | \
+# guard-registry:scope.config.reader-tests-and-reflection
   grep -v "_test" | \
+# guard-registry:scope.config.reader-tests-and-reflection
   grep -v "tests" | \
-  grep -v "trait_reflection.rs" || true)
+  grep -v "trait_reflection.rs" || true) # guard-registry:scope.config.reader-tests-and-reflection
 
 contract_leaks=$(grep -RInE '\b(ConfigReader|ConfigQuery|ConfigWriter|ProjectConfigParticipant|ConfigSubscription|watch::Receiver<ConfigSnapshot>)\b' \
   "$ROOT/apps/cli/src" 2>/dev/null || true)
