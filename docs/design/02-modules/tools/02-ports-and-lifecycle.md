@@ -107,6 +107,7 @@ struct ExecutionScope {
     invocation_source: InvocationSource,
     registry_scope: RegistryScopeName,
     profile: ToolProfileName,
+    deadline: Option<SystemTime>,
 }
 ```
 

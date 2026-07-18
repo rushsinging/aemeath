@@ -3,13 +3,13 @@ use crate::application::chat::looping::{ChatEventSink, RuntimeStreamEvent};
 use hook::api::{HookData, StopHookData};
 use share::config::hooks::HookEvent;
 use std::path::Path;
-use tools::ToolExecutionContext;
+use tokio_util::sync::CancellationToken;
 
 pub(crate) async fn run_post_tool_batch<S>(
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
-    ctx: &ToolExecutionContext,
+    cancel: &CancellationToken,
     turn_count: usize,
     workspace_root: &Path,
 ) where
@@ -22,7 +22,7 @@ pub(crate) async fn run_post_tool_batch<S>(
             None,
             HookData::Stop(StopHookData { turns: turn_count }),
             workspace_root,
-            &ctx.cancel,
+            cancel,
         )
         .await;
     for (_entry, _result, json_output) in &post_batch_results {

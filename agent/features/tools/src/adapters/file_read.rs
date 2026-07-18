@@ -75,10 +75,8 @@ impl TypedTool for FileReadTool {
                     .collect::<Vec<_>>()
                     .join("\n");
                 // Track this file as read
-                if let Ok(mut read_files) = ctx.read_files.lock() {
-                    read_files.insert(file_path.to_string());
-                    read_files.insert(path.to_string_lossy().to_string());
-                }
+                ctx.read_set().record(&file_path);
+                ctx.read_set().record(path.to_string_lossy().as_ref());
                 if numbered.is_empty() {
                     let data = ReadResult {
                         content: String::new(),

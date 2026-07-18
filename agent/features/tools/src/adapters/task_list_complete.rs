@@ -66,31 +66,10 @@ mod tests {
     use super::*;
 
     fn test_ctx() -> ToolExecutionContext {
-        ToolExecutionContext {
-            workspace: project::wire_production_workspace(std::path::PathBuf::from("."))
-                .expect("workspace initialization")
-                .into_views(),
-            run_id: "test-run".to_string(),
-            cancel: tokio_util::sync::CancellationToken::new(),
-            read_files: std::sync::Arc::new(
-                std::sync::Mutex::new(std::collections::HashSet::new()),
-            ),
-            resources: crate::domain::ToolResources {
-                agent_runner: None,
-                registry: None,
-                memory: std::sync::Arc::new(memory::NoOpMemory),
-                memory_config: share::config::MemoryConfig::default(),
-                lang: "en".to_string(),
-                allow_all: false,
-            },
-            session_reminders: None,
-            plan_mode: None,
-            max_tool_concurrency: 4,
-            max_agent_concurrency: 4,
-            agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
-            progress_tx: None,
-            parent_session_id: None,
-        }
+        crate::domain::test_support::TestToolExecutionContextBuilder::new(std::path::PathBuf::from(
+            ".",
+        ))
+        .build()
     }
 
     fn create_batch(access: &dyn task::TaskAccess) -> task::Batch {

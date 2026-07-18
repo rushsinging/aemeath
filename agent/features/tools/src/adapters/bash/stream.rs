@@ -1,4 +1,5 @@
-use crate::domain::{AgentProgressEvent, AgentProgressKind};
+use crate::domain::{AgentProgressEvent, AgentProgressKind, ProgressSink};
+use std::sync::Arc;
 use tokio::process::{ChildStderr, ChildStdout};
 
 use super::cwd::CWD_MARKER;
@@ -9,7 +10,7 @@ pub(super) const MAX_CAPTURE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
 
 pub(super) async fn read_stdout(
     mut stdout_pipe: Option<ChildStdout>,
-    progress_tx: Option<tokio::sync::mpsc::Sender<AgentProgressEvent>>,
+    progress_tx: Option<Arc<dyn ProgressSink>>,
 ) -> Vec<u8> {
     let mut buf = Vec::new();
     let mut sequence: usize = 0;
@@ -30,7 +31,7 @@ pub(super) async fn read_stdout(
             if !$text.is_empty() {
                 $seq += 1;
                 // Best-effort: drop chunks if channel is full/closed.
-                let _ = $tx.try_send(AgentProgressEvent {
+                $tx.emit(AgentProgressEvent {
                     sequence: $seq,
                     kind: AgentProgressKind::ToolOutput {
                         tool_name: "Bash".to_string(),

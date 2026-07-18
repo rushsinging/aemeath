@@ -300,15 +300,19 @@
 | CTX-R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
 | CTX-R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
 | CTX-R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
-| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
+| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/adapters/bash.rs` 与 `worktree.rs`（语义上恰为 Bash、EnterWorktree、ExitWorktree 三工具） | 控能力集中收口 |
 | CTX-R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
 | CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 CTX-R2 重叠的兜底 |
+| CTX-R9 | `ExecutionScope` 精确冻结八个纯值字段；`ToolExecutionContext` 精确冻结私有 `scope + ports` | 防结构与活资源膨胀 |
+| CTX-R10 | Tools domain 禁止 `WorkspaceViews` / 聚合 WorkspacePorts / Persist 与 Tokio channel/token/semaphore；整个 Tools 禁止 `WorkspaceViews` | 技术资源在 Runtime adapter 转换 |
+| CTX-R11 | `ToolExecutionPorts` 与 context 不得定义/暴露 control；Control 必须按 Bash / EnterWorktree / ExitWorktree constructor 注入 | 防 Control 全域公开 |
+| CTX-R12 | Runtime semaphore 不得流入 Tools context/ports；守卫不设置新增 allowlist | Runtime 并发所有权 |
 
 - **白名单**（路径级 allowlist）：
 
 | 规则 | 允许 | 说明 |
 |---|---|---|
-| CTX-R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
+| CTX-R4 | `agent/features/tools/src/adapters/bash.rs`, `agent/features/tools/src/adapters/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件；对应三个 Tool |
 | CTX-R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
 | 测试放行 | `*_test.rs`, `*_tests.rs`, `tests/` 目录, `#[cfg(test)]` 区域 | R4 / R5 / R6 对测试代码放行 |
 
