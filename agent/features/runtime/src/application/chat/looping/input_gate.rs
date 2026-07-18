@@ -27,8 +27,7 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ManageSession { .. } => "ManageSession",
         ChatInputEvent::ManageMemory { .. } => "ManageMemory",
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
-        ChatInputEvent::RunReflection => "RunReflection",
-        ChatInputEvent::ApplyReflection { .. } => "ApplyReflection",
+        ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
         ChatInputEvent::ListReminders => "ListReminders",
     }
@@ -96,11 +95,9 @@ pub enum PendingCommand {
     ResumeSession {
         id: String,
     },
-    /// 运行 reflection。
-    RunReflection,
-    /// 应用 reflection 结果。
-    ApplyReflection {
-        output: sdk::ReflectionOutputView,
+    /// 查询 reflection 历史；不触发执行或 apply。
+    QueryReflectionHistory {
+        limit: usize,
     },
     /// 查询模型列表。
     ListModels,
@@ -441,24 +438,14 @@ where
                     buffer.push(ChatInputEvent::ResumeSession { id });
                 }
             }
-            ChatInputEvent::RunReflection => {
+            ChatInputEvent::QueryReflectionHistory { limit } => {
                 if is_idle {
-                    pending_command = Some(PendingCommand::RunReflection);
+                    pending_command = Some(PendingCommand::QueryReflectionHistory { limit });
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;
                     break;
                 } else {
-                    buffer.push(ChatInputEvent::RunReflection);
-                }
-            }
-            ChatInputEvent::ApplyReflection { output } => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::ApplyReflection { output });
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::ApplyReflection { output });
+                    buffer.push(ChatInputEvent::QueryReflectionHistory { limit });
                 }
             }
             ChatInputEvent::ListModels => {

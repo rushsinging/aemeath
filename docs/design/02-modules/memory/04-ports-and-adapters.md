@@ -112,7 +112,7 @@ trait ReflectionPromptPort: Send + Sync {
     /// 解析 LLM 返回的 JSON
     fn parse_output(&self, raw: &str) -> Result<ReflectionOutput, ReflectionError>;
 
-    /// 格式化反思结果供 TUI 展示
+    /// 领域内部格式化（例如持久化/兼容文本）；不构成 TUI 展示契约
     fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String;
 
     /// 纯格式化当前 Run 经 MemoryPort 取得的项目记忆
@@ -123,13 +123,39 @@ trait ReflectionPromptPort: Send + Sync {
 }
 ```
 
+`format_output` 不是交付层协议。Runtime 后台任务完成后 **NEVER** 主动把该文本或完整 `ReflectionOutput` 投影到 TUI；交付层只能显式查询下面的安全 history projection。
+
+## 3. Reflection history 端口
+
+Memory BC 独占 Reflection 历史事实及其 durable adapter。Runtime 只负责在后台执行结束后 append，并为 `/reflect [limit]` 消费只读 query；Provider prompt 与 raw response 不得穿过该边界。
+
+```rust
+#[async_trait]
+trait ReflectionHistoryQuery: Send + Sync {
+    /// newest-first；至多 limit 条。
+    async fn list(&self, limit: usize)
+        -> Result<Vec<ReflectionRecord>, MemoryError>;
+}
+
+#[async_trait]
+trait ReflectionHistoryStore: ReflectionHistoryQuery {
+    async fn append(&self, record: &ReflectionRecord)
+        -> Result<(), MemoryError>;
+}
+```
+
+- `ReflectionRecord` 可持久化 parsed output、apply result、错误类别、token usage 与 duration；它属于 Memory，不是 SDK/TUI DTO。
+- query adapter 从 project-scoped durable dataset 读取；append 使用原子 dataset commit，并在 CAS 冲突时重读后重试，避免并发完成互相覆盖。
+- `/reflect [limit]` 经 Runtime/SDK 只投影 `ReflectionSafeSummary`：id、timestamp、trigger、status、三个数量、apply status、error category、token usage、duration。**NEVER** 返回 prompt、raw response、对话、Memory content 或 output 正文。
+- append/query 的诊断日志也只允许 metadata；不得记录正文或正文截断。
+
 ### 为什么不合并到 MemoryPort
 
 1. **职责分离**：MemoryPort 管记忆 CRUD、检索与对当前实例应用 Reflection；ReflectionPromptPort 只做纯 prompt / parse / format。Runtime 必须把当前 Run 的同一 `MemoryPort` Arc 用于检索和 `apply_reflection`，纯 Reflection port **NEVER** 隐式选择 store。
 2. **Sub 隔离**：Sub Run 装配 `NoOpMemory`（MemoryPort 的空实现），但 Reflection 在 Sub 中完全不触发——不需要 NoOpReflection。
 3. **演进独立**：检索升级（BM25/embedding）和 Reflection prompt 优化可以独立演进。
 
-## 3. NoOpMemory（Sub Run）
+## 4. NoOpMemory（Sub Run）
 
 Sub Run 装配 `NoOpMemory`——所有方法返回空值/空集合，不读写不报错：
 
@@ -162,7 +188,7 @@ impl MemoryPort for NoOpMemory {
 - Sub 不触发 Reflection（Runtime 根据 `MemoryMode::Disabled` 跳过）。
 - Main 可通过 `share_memory` 参数显式给 Sub 开启注入；此时 **MUST** clone 父 Run 在 shared lease 下持有的同一 MemoryPort Arc，**NEVER** 为同一 ProjectIdentity 再打开第二个 service。
 
-## 4. Storage 边界
+## 5. Storage 边界
 
 ### 职责拆分
 
@@ -182,7 +208,7 @@ Memory core 只依赖 Memory-owned `MemoryDatasetStore` port；`AtomicDatasetMem
 
 普通 write / update / delete 也遵循同一顺序；`archive` / `compact` **MUST** 把每个受影响 layer 的 active + archive member 放进同一 dataset transaction。若一次命令跨 Global / Project layer，全部受影响 member 必须进入同一 batch，或在领域 API 明确拆成两个可观察命令；**NEVER** 在一个成功 / 失败结果下静默部分提交。Storage 的 dataset lock、journal 与 recovery 是唯一 crash protocol，Memory adapter **NEVER** 复制一套。
 
-## 5. Composition Root 装配
+## 6. Composition Root 装配
 
 ```rust
 #[async_trait]
@@ -210,6 +236,13 @@ enum MemoryOpenError {
 fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort> {
     Arc::new(ReflectionEngine::new(config.reflection_config()))
 }
+
+fn assemble_reflection_history(
+    storage: Arc<dyn AtomicDatasetPort>,
+    project: ProjectMemoryKey,
+) -> Arc<dyn ReflectionHistoryStore> {
+    Arc::new(AtomicDatasetReflectionHistoryStore::new(storage, project))
+}
 ```
 
 - **Main agent 打开**：Composition 先准备 project-aware Config，再按 `WorkspaceRead::project_identity()` 与 candidate `MemoryConfig` await 一次 `open_for_project`，把真实 `MemoryService` 交给 Context-owned active Session slot；每个 Main Run 在 shared lease 下取得同一 Arc 并同时注入 Context、Runtime、MemoryTool 与 Reflection apply。
@@ -225,7 +258,7 @@ fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort>
 - **MUST** `open_for_project` 应用传入的 `MemoryConfig`，eager-read 并验证 active + archive 文件、schema 与权限后才返回可用 Arc；它 **NEVER** 自行读取全局 current ConfigSnapshot，lazy open **NEVER** 把 fallible I/O 推迟到 resume commit 之后。
 - **MUST** open 先在 dataset lock 下完成任何 prepared journal 的 roll-forward / rollback，再读取同一 committed generation；任一 recovery / decode / invariant 失败返回 `MemoryOpenError`，**NEVER** 发布部分 service。
 
-## 6. 持久化格式
+## 7. 持久化格式
 
 ### 文件布局
 
@@ -234,7 +267,8 @@ fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort>
 ├── _global.json              # Global 层 active 条目
 ├── _global_archive.json      # Global 层归档条目
 ├── {project_file_name}.json       # Project 层 active 条目
-└── {project_file_name}_archive.json  # Project 层归档条目
+├── {project_file_name}_archive.json  # Project 层归档条目
+└── <project-key>/reflection-history/ # ReflectionRecord 原子 dataset（逻辑布局）
 ```
 
 ### 序列化格式
@@ -259,11 +293,11 @@ fn assemble_reflection(config: &ConfigSnapshot) -> Arc<dyn ReflectionPromptPort>
 5. 迁移 **MUST** 复用 Storage `AtomicDatasetPort` 的 dataset lock、expected revision、stage、journal / commit marker 与 recovery primitive：先以 `read_consistent` 取得 new-key dataset revision，再把两份 new-key member作为一笔 CAS commit；进程中断后由 `read_consistent` 在开放 service 前 roll-forward / rollback，旧文件在 committed 证据完成前保持不动。Memory 只提供 legacy → candidate 的领域转换，**NEVER** 自建第二套事务算法。
 6. 成功后 active service 与所有后续 writer **MUST** 只写 versioned new key；legacy 文件可在独立退役步骤备份 / 删除，并记录来源诊断。
 
-## 7. 机械边界验收
+## 8. 机械边界验收
 
 Target 要求机械守卫证明：production Memory wiring 只由 Composition Root 发起；业务调用方只接收 `MemoryPort` / `ReflectionPromptPort`，不能直接构造或获得 `MemoryService` / Storage adapter；Memory 不能直接使用文件 I/O。具体守卫脚本、启用状态、临时白名单与替换责任只见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 和 [Migration Governance](../../03-engineering/03-migration-governance.md)，本文 **NEVER** 声称尚未登记的规则已在 CI / Stop 生效。
 
-## 8. 相关文档
+## 9. 相关文档
 
 - 模块入口：[README.md](README.md)
 - 领域模型：[01-domain-model.md](01-domain-model.md)
@@ -276,8 +310,11 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 
 ## 修改历史
 
+> **#899 durable lifecycle / compact boundary:** accepted job 先 append `Running`，成功、失败、partial apply、timeout/cancel 均以同 id `upsert` 终态；cancel 不删除 durable fact。PreCompact 只在 compact 成功产生 outcome 后 submit 预先冻结的“将被丢弃”快照；compact 失败不 submit，busy 结构化 warn 后立即 skip，绝不排队。
+
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | #899 实现 Memory-owned durable Reflection history append/query；冻结 `/reflect [limit]` 仅安全摘要、正文不进入 TUI/日志 | #899 |
 | 2026-07-18 | #897 落地 NoOpMemory、Composition active Memory prepare/install 与 Disabled/Shared 派生；Main 启动按 ProjectIdentity/committed Config 单次 open，Tool 通过同一 MemoryPort Arc 操作 | #897 |
 | 2026-07-12 | 初稿：MemoryPort trait、ReflectionPromptPort、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |
 | 2026-07-17 | #896 落地 MemoryService candidate/CAS/receipt、Global/Project 独立 dataset revision、Memory-owned AtomicDataset adapter、v2 project key 与 LegacyMemorySource/open migration seam | #896 |

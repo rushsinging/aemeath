@@ -242,9 +242,9 @@ pub enum RuntimeStreamEvent {
         id: String,
         message: String,
     },
-    /// #567：Reflection 结果回传。
-    ReflectionResult {
-        output: Box<sdk::ReflectionOutputView>,
+    /// Reflection 历史安全视图回传（#899）。
+    ReflectionHistory {
+        records: Vec<sdk::ReflectionHistoryView>,
     },
     /// #567：模型列表回传。
     ModelList {

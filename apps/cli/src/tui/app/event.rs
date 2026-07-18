@@ -150,15 +150,9 @@ pub enum AppEvent {
     SessionSaved {
         id: String,
     },
-    #[allow(dead_code)]
-    ReflectionDone {
-        output: sdk::ReflectionOutputView,
-    },
-    /// Reflection apply 完成/失败结果。携带提交时的 output，用于只清理对应 in-flight。
-    #[allow(dead_code)]
-    ReflectionApplyDone {
-        output: sdk::ReflectionOutputView,
-        result: Result<String, String>,
+    /// Safe reflection history metadata; never contains prompts or reflection body text.
+    ReflectionHistory {
+        records: Vec<sdk::ReflectionHistoryView>,
     },
     /// AskUserQuestion 批量请求——一次携带多个问题。
     AskUserBatch {

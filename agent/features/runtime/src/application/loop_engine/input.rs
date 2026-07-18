@@ -19,8 +19,7 @@ pub enum RuntimeControl {
     ManageSession(String),
     ManageMemory(String),
     ResumeSession(String),
-    RunReflection,
-    ApplyReflection(sdk::ReflectionOutputView),
+    QueryReflectionHistory(usize),
     ListModels,
     ListReminders,
 }
@@ -62,10 +61,9 @@ pub fn split_input_events(events: impl IntoIterator<Item = ChatInputEvent>) -> R
             ChatInputEvent::ResumeSession { id } => {
                 batch.controls.push(RuntimeControl::ResumeSession(id));
             }
-            ChatInputEvent::RunReflection => batch.controls.push(RuntimeControl::RunReflection),
-            ChatInputEvent::ApplyReflection { output } => {
-                batch.controls.push(RuntimeControl::ApplyReflection(output));
-            }
+            ChatInputEvent::QueryReflectionHistory { limit } => batch
+                .controls
+                .push(RuntimeControl::QueryReflectionHistory(limit)),
             ChatInputEvent::ListModels => batch.controls.push(RuntimeControl::ListModels),
             ChatInputEvent::ListReminders => batch.controls.push(RuntimeControl::ListReminders),
         }

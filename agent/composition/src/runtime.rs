@@ -78,14 +78,20 @@ pub(crate) async fn from_args_with_gateways(
     let identity = workspace.read().project_identity();
     let memory_config = config.reader().committed_snapshot().memory().clone();
     let legacy_base_dir = storage::memory_base_dir();
-    let dataset_adapter = storage::FileSystemDatasetAdapter::new(&legacy_base_dir)
-        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let dataset_adapter = Arc::new(
+        storage::FileSystemDatasetAdapter::new(&legacy_base_dir)
+            .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+    );
     let project_key = memory_api::ProjectMemoryKey::derive(
         &identity.initial_cwd,
         identity.git_common_dir.as_deref(),
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let store = memory_api::AtomicDatasetMemoryStore::new(Arc::new(dataset_adapter), project_key);
+    let store =
+        memory_api::AtomicDatasetMemoryStore::new(dataset_adapter.clone(), project_key.clone());
+    let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> = Arc::new(
+        memory_api::AtomicDatasetReflectionHistoryStore::new(dataset_adapter, project_key),
+    );
     let legacy = Arc::new(FileLegacyMemorySource::new(
         legacy_base_dir,
         &identity.initial_cwd,
@@ -105,6 +111,7 @@ pub(crate) async fn from_args_with_gateways(
         workspace,
         runtime::RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
         main_memory,
+        reflection_history,
         gateways.provider,
         gateways.tools,
         gateways.policy,

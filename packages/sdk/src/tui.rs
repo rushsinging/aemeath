@@ -74,26 +74,6 @@ impl From<ClipboardImageView> for crate::ChatInputImage {
     }
 }
 
-/// Reflection 建议记忆视图。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReflectionMemorySuggestionView {
-    pub content: String,
-    pub layer: String,
-    pub category: String,
-    pub tags: Vec<String>,
-}
-
-/// Reflection 输出视图。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReflectionOutputView {
-    pub content: String,
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-    pub suggested_memories: Vec<ReflectionMemorySuggestionView>,
-    pub outdated_memories: Vec<String>,
-    pub auto_applied: bool,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReflectionConfigView {
     pub enabled: bool,
@@ -215,27 +195,6 @@ mod tests {
         assert_eq!(image.media_type, "image/png");
         assert_eq!(image.final_size, 3);
         assert_eq!(image.display_path.as_deref(), Some("/tmp/a.png"));
-    }
-
-    #[test]
-    fn test_reflection_output_view_counts_suggestions() {
-        let output = ReflectionOutputView {
-            content: "summary".to_string(),
-            input_tokens: 1,
-            output_tokens: 2,
-            suggested_memories: vec![ReflectionMemorySuggestionView {
-                content: "remember".to_string(),
-                layer: "project".to_string(),
-                category: "decision".to_string(),
-                tags: Vec::new(),
-            }],
-            outdated_memories: vec!["old".to_string()],
-            auto_applied: false,
-        };
-
-        assert_eq!(output.suggested_memories.len(), 1);
-        assert_eq!(output.outdated_memories.len(), 1);
-        assert_eq!(output.content, "summary");
     }
 
     #[test]

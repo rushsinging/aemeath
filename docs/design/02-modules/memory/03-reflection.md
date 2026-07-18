@@ -56,7 +56,7 @@ struct ReflectionOutput {                // LLM 返回的完整反思结果
 }
 ```
 
-- **deviations**：LLM 观察到 agent 在对话中有偏离预期行为的描述（如重复尝试失败方案、忽略用户指令）。纯文本，供 TUI 展示。
+- **deviations**：LLM 观察到 agent 在对话中有偏离预期行为的描述（如重复尝试失败方案、忽略用户指令）。正文只保存在 Memory-owned history record 中；TUI 的只读查询只取得计数等安全摘要。
 - **suggested_memories**：LLM 认为值得持久化的新记忆建议。
 - **outdated_memories**：LLM 认为已过时的已有记忆 id 列表（apply 后标记 outdated）。
 - **user_alert**：LLM 认为需要提醒用户的重要事项（可选）。
@@ -74,61 +74,47 @@ pub deviations: Vec<String>,
 
 Runtime 负责判定是否触发 Reflection，Memory BC 提供配置读取辅助：
 
-### 触发模式
+### 触发来源
 
 ```rust
-enum ReflectionRunMode {
-    Interval { turn_count: usize },    // 间隔触发：每 N 轮
-    Forced,                             // 强制触发：用户 /reflection 或 pre-compact
+enum ReflectionTrigger {
+    Interval,       // 每 N 轮
+    PreCompact,     // compact 前快照
+    Manual,         // Runtime 显式手动请求；不是 /reflect 查询命令
 }
 ```
 
-### 判定逻辑（Runtime 侧）
-
-```rust
-fn should_run_reflection(mode: ReflectionRunMode, config: &MemoryConfig) -> bool {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_turns == 0 {
-        return false;
-    }
-    match mode {
-        Interval { turn_count } => turn_count.is_multiple_of(config.reflection.interval_turns),
-        Forced => true,
-    }
-}
-```
+Runtime 对三种来源统一做 enable / interval 判定并构造拥有消息快照的后台请求。`Manual` 与 `PreCompact` 在启用 Reflection 时不受 interval 限制，但仍使用相同异步单槽，不存在特殊执行通道。
 
 ### 三种触发时机
 
-| 时机 | 模式 | 执行方式 | 触发者 | 说明 |
+| 时机 | Trigger | 执行方式 | 触发者 | 说明 |
 |---|---|---|---|---|
-| **轮次间隔** | `Interval` | **异步 spawn** | Runtime loop | 每 `interval_turns`（默认 10）轮结束时触发；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
-| **Pre-compact** | `Forced` | **异步 spawn** | Runtime compact 前 | compact 前抓 messages 快照交给后台 reflection，compact 立即继续不等待；reflection 用快照跑，结果通过 channel 回传 |
-| **用户强制** | `Forced` | **同步 await** | 用户 `/reflection` | 用户主动请求反思，需等待结果展示 |
+| **轮次间隔** | `Interval` | Runtime 单槽异步 submit | Runtime loop | 每 `interval_turns`（默认 10）轮结束时提交；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
+| **Pre-compact** | `PreCompact` | Runtime 单槽异步 submit | Runtime compact 成功后 | compact 前冻结“将被丢弃”的 messages 快照；只有 compact 成功产生 outcome 后才 submit，不等待 Reflection |
+| **手动请求** | `Manual` | Runtime 单槽异步 submit | Runtime 显式请求入口 | 与另两种 trigger 共用 slot；busy 时同样 skip；`/reflect [limit]` **NEVER** 进入此入口 |
 
 ### 异步执行模型
 
-Interval、Pre-compact 与用户手动请求全部进入 Runtime 单槽后台协议，调用方不等待完整 Reflection 结果。后台任务完成后写入 Memory-owned `ReflectionRecord` history；只发送内部完成/失败信号供 slot 释放和诊断，**NEVER** 主动把完整结果推送到 TUI。`/reflect` 是只读 history query，不触发 LLM，也不执行 apply。
+三种 trigger 全部进入 Runtime-owned 的同一个单槽后台 adapter，调用方只得到 `Accepted`、`BusySkipped` 或 disabled skip，不 await 完整结果。slot 接受任务后，先 append `Running` durable fact；执行成功、失败、partial apply、timeout 或 cancel 时再以同一 id `upsert` 终态。Runtime 仅保留不含正文的 completion metadata 用于 slot 释放、drain 与诊断，**NEVER** 主动发出完整 `ReflectionResult`、正文或“完成”系统消息到 TUI。`/reflect [limit]` 是只读 history query，不触发 LLM，也不执行 apply。
 
 ```text
-Interval / Pre-compact 触发:
-  Runtime 判定 should_run → spawn 后台任务（携带 messages 快照）
-    │ (主循环不等待，继续处理 outcome / compact / 下一轮)
-    ▼
-  后台任务: build_prompt → call_llm → parse → apply
-    │
-    ▼
-  后台任务完成 → mpsc::Sender 发 ReflectionResult
-    │
-    ▼
-  主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
+Interval / PreCompact / Manual
+  → Runtime submit(messages snapshot)
+      ├─ slot busy → BusySkipped（不排队）
+      └─ Accepted → spawn: build_prompt → call_llm → parse → optional apply
+                       → append Running；upsert terminal record
+                       → 仅安全 completion metadata，释放 slot
+
+主 Run / compact 不等待结果，也不把结果主动投影到 TUI。
 ```
 
-### 并发控制
+### 并发与结束控制
 
-- **单一后台 slot**：同一时间最多一个后台 Reflection 任务（Interval 或 Pre-compact 共享一个 slot）。
-- **前一个未完成时跳过**：新触发时若 slot 被占用，跳过本次（log debug），不排队。
-- **Forced 不受限**：`/reflection` 是同步执行，不经过后台 slot，可与后台任务并发（但实际场景几乎不会同时发生）。
-- **Run 结束时 drain**：Run 结束时若后台任务仍在执行，等待其完成或超时后丢弃（避免孤儿任务）。
+- **单一后台 slot**：Interval、PreCompact、Manual 同一时间合计最多一个 Reflection job。
+- **busy skip**：slot 已占用或当前无法立即取得 slot 时，新触发返回 `BusySkipped`；不等待、不排队，也不另开并发路径。
+- **任务超时**：adapter 对后台执行施加 timeout；超时/取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
+- **Run 结束 drain/cancel**：先 drain 已完成/正在收口的 job；若在结束 deadline 内仍未完成，则 cancel，等待其释放 slot 后结束，避免孤儿任务及 Run lease 逃逸。
 
 ### 间隔触发的跳过条件
 
@@ -200,7 +186,7 @@ fn parse_output(raw: &str) -> Result<ReflectionOutput, serde_json::Error>;
 
 - LLM 返回纯 JSON 文本。
 - 使用 serde 反序列化为 `ReflectionOutput`。
-- 解析失败返回 `ReflectionError::Unparseable`，附带前 200 字符供调试。
+- 解析失败返回 `ReflectionError::Unparseable`，只携带稳定的安全类别/固定描述；**NEVER** 附带 raw response、prompt、对话或 Reflection 正文。
 
 ### ReflectionError
 
@@ -261,8 +247,8 @@ if config.reflection.auto_apply_suggestions {
 }
 ```
 
-- `auto_apply_suggestions = false`（默认）时，suggestion 只展示给用户，由用户决定是否手动写入。
-- `auto_apply_suggestions = true` 时，自动写入并标记过期，在输出中追加摘要。
+- `auto_apply_suggestions = false`（默认）时，不修改 active Memory；完整 output 只作为 Memory-owned `ReflectionRecord` 持久化，`/reflect` 仍只返回安全摘要。
+- `auto_apply_suggestions = true` 时，后台 job 自动写入 suggestion 并标记过期；apply 计数进入 record / safe summary，不触发 TUI 主动展示。
 
 ### ReflectionApplyResult
 
@@ -275,78 +261,42 @@ struct ReflectionApplyResult {
 
 ## 8. 完整编排流程（Runtime 侧）
 
-Memory BC 提供纯领域逻辑，Runtime 负责编排。Interval 和 Pre-compact 走异步路径，Forced 走同步路径。
-
-### 8.1 异步路径（Interval / Pre-compact）
+Memory BC 提供 prompt / parse / apply 与 history 端口；Runtime 统一编排 Interval、PreCompact、Manual 三种 trigger。不存在同步执行路径。
 
 ```text
-Runtime 判定 should_run_reflection
-  │  └─ 检查后台 slot 是否空闲（非空闲 → skip + log debug）
-  │
-  ▼
-Runtime: spawn 后台任务（携带 messages 快照 / clone）
-  │ (主循环不等待，继续处理 outcome / compact / 下一轮)
-  │
-  ▼
-后台任务:
-  Memory BC: build_reflection_prompt(project_memory, recent_summary, lang)
-    └─ Memory BC: memory_summary(store.list(Project))
-    └─ Memory BC: recent_messages_summary(messages_snapshot)
-  │
-  ▼
-  Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
-  │
-  ▼
-  Memory BC: parse_output(llm_response)
-  │
-  ▼
-  Memory BC: format_output(output, lang)  ──→ formatted_content
-  │
-  ▼
-  if auto_apply:
-    Memory BC: apply_output(output, &mut store)
-      └─ apply_suggestions → add_with_eviction_retry
-      └─ apply_outdated → mark_outdated
-  │
-  ▼
-  后台任务完成 → mpsc::Sender 发 ReflectionResult
-  │
-  ▼
-主循环 select! 分支收到结果 → emit SystemMessage / ReflectionResult
+Runtime trigger
+  ├─ capture owned messages snapshot
+  └─ ReflectionTaskAdapter.submit
+       ├─ BusySkipped → 安全日志（trigger/status 等 metadata），返回主流程
+       └─ Accepted → background job
+            Memory: format_memory_summary + recent_messages_summary + build_prompt
+            Runtime: Provider invocation
+            Memory: parse_output
+            Runtime: optional MemoryPort.apply_reflection
+            Memory: append Running → upsert terminal ReflectionRecord
+            Runtime: 保存安全 completion metadata 并释放 slot
+
+Run teardown
+  └─ drain → deadline 到期仍 busy 时 cancel → 等待 slot 收口
 ```
 
-### 8.2 同步路径（Forced / `/reflection`）
+### 8.1 Pre-compact 快照语义
 
-```text
-Runtime 处理 /reflection 命令
-  │
-  ▼
-Memory BC: build_reflection_prompt(project_memory, recent_summary, lang)
-  │
-  ▼
-Runtime: call_llm(prompt, system_prompt)  ──→ ProviderPort
-  │
-  ▼
-Memory BC: parse_output(llm_response)
-  │
-  ▼
-Memory BC: format_output(output, lang)  ──→ formatted_content
-  │
-  ▼
-if auto_apply:
-  Memory BC: apply_output(output, &mut store)
-  │
-  ▼
-Runtime: emit ReflectionResult{output, formatted_content, tokens, auto_applied}
-```
+PreCompact 在 compact 前把所选 `messages` clone 为 owned snapshot，但只有 compact 成功产生 outcome 后才尝试 submit。compact 失败、被 hook block、消息不足或取消时不 submit；`Accepted` / `BusySkipped` 都不影响已经成功的 compact outcome。后台 job 只使用冻结快照，因此不会观察 compact 后的消息变化。
 
-### 8.3 Pre-compact 快照语义
+- **快照时机**：compact 执行前冻结，`messages` 尚未被压缩；提交时机在 compact 成功 outcome 之后。
+- **快照内容**：`messages_selected_for_precompact_memory(messages)` 的结果（只取 compact 会丢掉的消息）。
+- **完成去向**：接受后 append `Running`，终态以同 id upsert；不通过结果通道回传完整结果，也不在后续轮次 emit 正文。
 
-Pre-compact 触发时，Runtime 在 compact 前把 `messages` clone 一份交给后台任务。后台任务用这份快照构建 `recent_messages_summary`。compact 正常执行不等待。
+### 8.2 History 与安全查询
 
-- **快照时机**：compact 函数入口处，`messages` 尚未被压缩时。
-- **快照内容**：`messages_selected_for_precompact_memory(messages)` 的结果（与现状一致，只取 compact 会丢掉的消息）。
-- **结果回传**：后台任务完成后通过 channel 回传，主循环在后续轮次 emit。用户可能在 compact 后才看到 reflection 结果——这是可接受的 trade-off。
+`ReflectionRecord` 是 Memory-owned 持久化事实，包含 trigger、状态、可选 parsed output / apply result、错误类别、token usage 与 duration。Runtime 接受任务后先通过 `ReflectionHistoryStore::append` 写入 `Running`，成功、失败、partial apply、timeout 或 cancel 后以同 id `upsert` 终态；adapter 使用 project-scoped durable dataset，append/upsert/query 均由 Memory 拥有。
+
+`/reflect [limit]` 只调用 `ReflectionHistoryQuery::list(limit)`，按 newest-first 返回至多 `limit` 条，再投影为 `ReflectionSafeSummary`：id、时间、trigger、状态、deviation/suggestion/outdated 数量、apply 状态、错误类别、token 计数与耗时。该查询**不运行 Reflection、不 apply、也不返回 output 正文**。
+
+### 8.3 安全日志
+
+Reflection 日志只能记录 event、trigger、status、error category、token/count、duration 与 record id 等 metadata。日志 **NEVER** 包含 prompt、对话消息、Memory content、provider raw response、parsed output、formatted content 或任何正文截断；解析失败也不得记录所谓“前 N 字符”。
 
 ## 9. model 覆盖
 
@@ -373,6 +323,6 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-18 | #898 将 Reflection PL/prompt/schema/parse/format/apply 归回 Memory；发布 history query 契约。统一异步、静默完成与 `/reflect` 只读查询的执行 adapter 由 #899 承接 | #898/#899 |
+| 2026-07-18 | #899 完成三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query 持久化、`/reflect [limit]` 只读安全摘要、安全日志与 Run teardown drain/cancel timeout | #899 |
 | 2026-07-12 | 初稿：ReflectionEngine 领域服务、MemorySuggestion、触发条件、prompt/output/apply、职责边界 | #789 |
-| 2026-07-12 | 补充：Interval 和 Pre-compact 改为异步 spawn，Forced 保持同步；并发控制和快照语义 | #789 |
+| 2026-07-12 | 早期并发方案已由 #899 的三 trigger 统一异步单槽语义取代 | #789/#899 |

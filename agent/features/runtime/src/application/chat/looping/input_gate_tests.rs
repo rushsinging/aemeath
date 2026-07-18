@@ -292,6 +292,35 @@ async fn test_user_message_with_multiple_images_interleaves_by_placeholder() {
 }
 
 #[tokio::test]
+async fn query_reflection_history_is_buffered_while_gate_is_busy() {
+    let mut buffer = PendingInputBuffer::default();
+    let input = TestInputEventPort::new(vec![ChatInputEvent::QueryReflectionHistory { limit: 7 }]);
+    let sink = TestSink::default();
+    let mut chain = ChatChain::from_flat_messages(Vec::new());
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &mut buffer,
+        &EmptyQueueDrainPort,
+        &input,
+        &sink,
+        &mut chain,
+        "seg",
+        &test_task_store(),
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert!(outcome.pending_command.is_none());
+    assert!(matches!(
+        buffer.drain_all().as_slice(),
+        [ChatInputEvent::QueryReflectionHistory { limit: 7 }]
+    ));
+    assert!(chain.is_empty());
+}
+
+#[tokio::test]
 async fn test_run_loop_gate_after_blocking_appends_without_continue_decision() {
     let mut buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![ChatInputEvent::user_message(

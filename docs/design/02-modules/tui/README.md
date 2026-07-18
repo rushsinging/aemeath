@@ -26,6 +26,13 @@ TUI 是**入站适配器**（Hexagonal Primary Adapter）：
 - 六 Context 核心字段私有，root reducer 是唯一写入口；ViewAssembler 只读 accessor，ViewState 只持瞬时交互 / 渲染状态
 - Conversation 的结构化投影（runs / queued / progress）与 `timeline` 是同一 reducer 事务原子维护的互补投影，只约束重叠事实，**NEVER** 假定可完整互相重建
 
+### Reflection 展示边界（#899）
+
+- Runtime 的 Interval / PreCompact / Manual Reflection 全部后台异步执行；完成时 **NEVER** 主动向 TUI 发送完整 `ReflectionResult`、formatted content、正文或完成通知块，TUI 不维护 reflection job 结果通道。
+- `/reflect [limit]` 是只读命令：只向 Runtime 查询 Memory-owned durable history，默认/显式 limit 均返回 newest-first 的安全摘要；命令不触发 Reflection、不等待 Provider、也不 apply Memory。
+- TUI 只能展示 SDK `ReflectionHistoryView` 中的 id、时间、trigger、status、deviation/suggestion/outdated 数量、apply status、error category、token usage 与 duration；**NEVER** 展示或记录 prompt、对话、Memory content、raw response、parsed output、formatted content 或正文截断。
+- Reflection 的 busy skip、后台成功/失败、drain/cancel/timeout 属 Runtime 诊断与生命周期语义，除显式 history query 返回的安全记录外不进入 Conversation timeline。
+
 ## Target 目录结构
 
 TUI 作为入站适配器与纯展示层，不采用 `capabilities/` 业务竖切，而采用与八层 TEA 管线一一对应的技术目录。判据与命名规则以 [代码组织规范 §3](../../01-system/06-code-organization.md) 为唯一真相源。
@@ -73,8 +80,11 @@ ViewModel / ViewState 作为 `view_assembler/` 产出的纯数据值类型就近
 
 ## 修改历史
 
+> **#899 durable lifecycle / compact boundary:** accepted job 先 append `Running`，成功、失败、partial apply、timeout/cancel 均以同 id `upsert` 终态；cancel 不删除 durable fact。PreCompact 只在 compact 成功产生 outcome 后 submit 预先冻结的“将被丢弃”快照；compact 失败不 submit，busy 结构化 warn 后立即 skip，绝不排队。
+
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | #899 冻结 Reflection 静默后台语义：TUI 不接收主动结果；`/reflect [limit]` 只读展示 Memory history 安全摘要且日志不含正文 | #899 |
 | 2026-07-12 | 初稿：八层 TEA 管线、六 Context 投影、SDK DTO 边界、架构门禁、reducer 纯化目标态 | #795 |
 | 2026-07-12 | 新增 02-model：六 Context 完整字段、投影状态机、Model 纯净性约束 | #796 |
 | 2026-07-12 | 新增 03-event-flow-and-acl：两层 ACL、六 Context Intent / Effect、agent_id / sub-agent 路由 | #797 |
