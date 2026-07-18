@@ -3,7 +3,7 @@
 //! Overlays sparse `ConfigPatch` layers onto a full `Config`, producing a
 //! merged result.  Pure domain logic — no I/O.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::{
@@ -26,7 +26,7 @@ use std::{collections::HashMap, path::PathBuf};
 // Patch structs
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ConfigPatch {
     #[serde(default)]
     pub api: Option<ApiConfigPatch>,
@@ -86,7 +86,7 @@ impl ConfigPatch {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ApiConfigPatch {
     #[serde(default)]
     pub provider: Option<String>,
@@ -102,7 +102,7 @@ pub struct ApiConfigPatch {
     pub retries: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ModelConfigPatch {
     #[serde(default)]
     pub name: Option<String>,
@@ -120,7 +120,7 @@ pub struct ModelConfigPatch {
     pub stop_sequences: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ModelsConfigPatch {
     #[serde(default)]
     pub mode: Option<String>,
@@ -136,7 +136,7 @@ pub struct ModelsConfigPatch {
     pub guidance: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ToolsConfigPatch {
     #[serde(default)]
     pub enabled: Option<Vec<String>>,
@@ -150,7 +150,7 @@ pub struct ToolsConfigPatch {
     pub tool_result: Option<ToolResultConfigPatch>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ToolResultConfigPatch {
     #[serde(default)]
     pub threshold_chars: Option<usize>,
@@ -160,7 +160,7 @@ pub struct ToolResultConfigPatch {
     pub preview_tail_chars: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AgentsConfigPatch {
     #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
@@ -170,7 +170,7 @@ pub struct AgentsConfigPatch {
     pub default_model: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct UiConfigPatch {
     #[serde(default)]
     pub markdown: Option<bool>,
@@ -190,7 +190,7 @@ pub struct UiConfigPatch {
     pub task_lifecycle: Option<TaskLifecycleConfigPatch>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TaskListConfigPatch {
     #[serde(default)]
     pub max_lines: Option<usize>,
@@ -198,7 +198,7 @@ pub struct TaskListConfigPatch {
     pub fold_hint_format: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TaskLifecycleConfigPatch {
     #[serde(default)]
     pub auto_clear_completed_on_new_turn: Option<bool>,
@@ -212,7 +212,7 @@ pub struct TaskLifecycleConfigPatch {
     pub stale_remind_repeat_interval: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PermissionConfigPatch {
     #[serde(default)]
     pub mode: Option<PermissionModeConfig>,
@@ -222,13 +222,13 @@ pub struct PermissionConfigPatch {
     pub deny: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SkillsConfigPatch {
     #[serde(default)]
     pub dirs: Option<Vec<PathBuf>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AuditConfigPatch {
     #[serde(default)]
     pub usage_queue_capacity: Option<usize>,
@@ -236,7 +236,7 @@ pub struct AuditConfigPatch {
     pub usage_shutdown_timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct StorageConfigPatch {
     #[serde(default)]
     pub sessions_dir: Option<PathBuf>,
@@ -250,7 +250,7 @@ pub struct StorageConfigPatch {
     pub history_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MemoryConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -259,10 +259,12 @@ pub struct MemoryConfigPatch {
     #[serde(default)]
     pub similarity_threshold: Option<f64>,
     #[serde(default)]
+    pub inject_count: Option<usize>,
+    #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ReflectionConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -272,9 +274,11 @@ pub struct ReflectionConfigPatch {
     pub auto_apply_suggestions: Option<bool>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub clear_model: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct LoggingConfigPatch {
     #[serde(default, alias = "default_level")]
     pub level: Option<String>,
@@ -292,7 +296,7 @@ pub struct LoggingConfigPatch {
     pub role_logs_enabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SubAgentLogConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -302,7 +306,7 @@ pub struct SubAgentLogConfigPatch {
     pub max_payload_bytes: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GuidanceConfigPatch {
     #[serde(default)]
     pub reload_policy: Option<String>,
@@ -637,6 +641,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     if let Some(v) = patch.similarity_threshold {
         base.similarity_threshold = v;
     }
+    if let Some(v) = patch.inject_count {
+        base.inject_count = v;
+    }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);
     }
@@ -656,7 +663,9 @@ pub(crate) fn apply_reflection_patch(
     if let Some(v) = patch.auto_apply_suggestions {
         base.auto_apply_suggestions = v;
     }
-    if let Some(v) = patch.model {
+    if patch.clear_model {
+        base.model = None;
+    } else if let Some(v) = patch.model {
         base.model = Some(v);
     }
     base

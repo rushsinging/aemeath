@@ -139,3 +139,54 @@ pub(crate) fn model_display(source_key: &str, model_name: &str, model_id: &str) 
     };
     format!("{}/{}", source_key, display_name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_snapshot_mapping_preserves_sdk_visible_fields() {
+        let mut config = share::config::Config::default();
+        config.model.name = "mapped/model".into();
+        config.api.provider = Some("mapped-provider".into());
+        config.api.key = Some("secret".into());
+        config.permissions.mode = share::config::PermissionModeConfig::AllowAll;
+        config.ui.markdown = false;
+        config.ui.verbose = true;
+        config.model.context_size = 42_000;
+        config.logging.level = "debug".into();
+
+        let view = config_snapshot_to_sdk(&share::config::domain::snapshot::ConfigSnapshot::new(
+            config,
+        ));
+
+        assert_eq!(view.model_name, "mapped/model");
+        assert_eq!(view.provider.as_deref(), Some("mapped-provider"));
+        assert!(view.has_api_key);
+        assert_eq!(view.permission_mode, "allow_all");
+        assert!(!view.markdown);
+        assert!(view.verbose);
+        assert_eq!(view.context_size, 42_000);
+        assert_eq!(view.logging_level, "debug");
+    }
+
+    #[test]
+    fn config_change_mapping_preserves_fields_and_committed_view() {
+        let mut config = share::config::Config::default();
+        config.model.name = "changed/model".into();
+        let result = config_change_to_sdk(config::ConfigChangeSet {
+            cause: config::ConfigChangeCause::ClientUpdate,
+            fields: vec![
+                config::ConfigField::Model,
+                config::ConfigField::PermissionMode,
+            ],
+            snapshot: share::config::domain::snapshot::ConfigSnapshot::new(config),
+        });
+
+        assert_eq!(
+            result.changed_fields,
+            vec![sdk::ConfigField::Model, sdk::ConfigField::PermissionMode]
+        );
+        assert_eq!(result.view.model_name, "changed/model");
+    }
+}
