@@ -5,9 +5,8 @@ use sdk::SdkError;
 use crate::adapters::runtime::LlmClientAdapter;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::application::startup::{
-    self as bootstrap, apply_config_permission_mode, build_agent_runner, build_hook_runner,
-    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
-    spawn_mcp_connect,
+    self as bootstrap, build_agent_runner, build_hook_runner, resolve_api_key, resolve_base_url,
+    resolve_concurrency_limits, resolve_model_runtime_settings, spawn_mcp_connect,
 };
 use crate::application::startup::{set_session_id, start_session, ChatBootstrapArgs};
 use crate::ports::legacy::ChatRuntimeContext;
@@ -95,7 +94,7 @@ impl RuntimeConfigDependencies {
 /// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
 /// Task BC 的 backing 或持久化封套（跨域越权，#890）。
 pub async fn from_args_with_workspace(
-    mut args: ChatBootstrapArgs,
+    args: ChatBootstrapArgs,
     dependencies: RuntimeBootstrapDependencies,
 ) -> Result<AgentClientImpl, SdkError> {
     let RuntimeBootstrapDependencies {
@@ -110,9 +109,6 @@ pub async fn from_args_with_workspace(
         task_access,
         session_tasks,
     } = dependencies;
-    // #917: Policy adapter 由 Composition 构造；#918 接入统一 tool coordination。
-    let _policy = policy;
-
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -129,7 +125,6 @@ pub async fn from_args_with_workspace(
     // 4. 日志已由 Composition 在进入 Runtime 前初始化。
 
     // 5. 权限模式
-    apply_config_permission_mode(&mut args, snapshot.allow_all());
 
     // 6. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
     let runtime_model = snapshot
@@ -245,6 +240,7 @@ pub async fn from_args_with_workspace(
         runtime_settings.reasoning,
         snapshot.api_timeout_secs(),
         active_run.clone(),
+        policy.clone(),
         max_tool_concurrency,
         agent_semaphore.clone(),
         tool_result_materializer.clone(),
@@ -309,6 +305,7 @@ pub async fn from_args_with_workspace(
             hook_runner,
             memory_config,
             memory,
+            policy,
             agent_semaphore,
             allow_all: args.allow_all,
             context_size,

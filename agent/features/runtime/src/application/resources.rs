@@ -37,6 +37,7 @@ pub struct RuntimeResources {
     /// Memory domain port（MemoryTool 使用）。
     /// TODO(#897 active wiring): 当前默认 NoOpMemory，待 Composition 提供真实实现。
     pub memory: Arc<dyn memory::api::MemoryPort>,
+    pub policy: Arc<dyn policy::PolicyPort>,
 
     // ── 配置（值类型，session 期间不变）──
     pub system_blocks: Vec<SystemBlock>,

@@ -640,6 +640,7 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        policy: Arc::new(policy::AllowAllPolicy),
     }
 }
 
@@ -663,6 +664,7 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
                 tokio_util::sync::CancellationToken::new(),
             ),
         ),
+        policy: Arc::new(policy::AllowAllPolicy),
     }
 }
 

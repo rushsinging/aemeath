@@ -159,6 +159,7 @@ mod tests {
                 memory_config: MemoryConfig::default(),
                 memory: std::sync::Arc::new(memory::NoOpMemory),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+                allow_all: true,
                 context_size: 200_000,
                 language: "en".to_string(),
             },

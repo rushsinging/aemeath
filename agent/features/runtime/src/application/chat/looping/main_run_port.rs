@@ -66,7 +66,7 @@ where
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
     pub(crate) tool_result_materializer:
         &'a crate::application::tool_result_materialization::ToolResultMaterializer,
-    pub(crate) allow_all: bool,
+    pub(crate) policy: &'a dyn policy::PolicyPort,
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
@@ -153,7 +153,6 @@ where
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
-        allow_all: bool,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
@@ -183,7 +182,7 @@ where
                     memory.clone(),
                     Arc::new(tools::FixedGuidance {
                         language: language.to_string(),
-                        allow_all,
+                        allow_all: false,
                     }),
                 )
                 .with_memory_context(
@@ -614,6 +613,8 @@ where
 
     async fn execute_tools(
         &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
@@ -629,7 +630,6 @@ where
             self.agent_runner,
             self.memory,
             self.language,
-            self.allow_all,
             self.workspace,
             &self.cancel,
             self.read_files,
@@ -643,7 +643,9 @@ where
             &self.turn_context,
             &raw_calls,
             self.registry,
-            self.allow_all,
+            self.policy,
+            run_id,
+            step_id,
             &agent,
             self.sink,
             &HookUi::new(self.sink.clone()),
