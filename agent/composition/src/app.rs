@@ -328,7 +328,11 @@ mod tests {
             .expect("write MCP config");
 
         let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
-        unsafe { std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir) };
+        let previous_home = std::env::var_os("HOME");
+        unsafe {
+            std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir);
+            std::env::set_var("HOME", temp.path());
+        }
 
         let provider = Arc::new(CountingProviderGateway::default());
         let tools = Arc::new(CountingToolGateway::default());
@@ -352,6 +356,10 @@ mod tests {
             match previous_agents_dir {
                 Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
                 None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
+            }
+            match previous_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
             }
         }
         result.expect("build client with injected gateways");
