@@ -38,6 +38,9 @@ pub mod web_fetch;
 pub mod web_search;
 pub mod worktree;
 
+#[cfg(test)]
+pub(crate) mod test_support_tests;
+
 /// core/mod.rs — 核心流程（指挥官）：Tool 注册编排
 pub mod registry;
 pub mod tool_registry;

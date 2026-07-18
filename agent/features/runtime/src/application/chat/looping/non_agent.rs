@@ -38,7 +38,7 @@ where
     }
 
     if other_calls.len() == 1 {
-        if agent.ctx.cancel.is_cancelled() {
+        if agent.ctx.cancellation().is_cancelled() {
             return vec![cancelled_result(other_calls[0], language)];
         }
         return execute_one_non_agent(
@@ -86,7 +86,7 @@ where
     let (concurrent_positions, sequential_positions) = partition_calls(agent, other_calls);
 
     if !concurrent_positions.is_empty() {
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(agent.ctx.max_tool_concurrency));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(agent.max_tool_concurrency));
         let futures: Vec<_> = concurrent_positions
             .iter()
             .map(|&pos| {
@@ -98,7 +98,7 @@ where
                 let context = context.clone();
                 let workspace_root = workspace_root.to_path_buf();
                 async move {
-                    if agent.ctx.cancel.is_cancelled() {
+                    if agent.ctx.cancellation().is_cancelled() {
                         return (pos, Vec::new());
                     }
                     let _permit = sem.acquire().await.expect("semaphore closed");
@@ -128,7 +128,7 @@ where
 
     for &pos in &sequential_positions {
         let call = other_calls[pos];
-        let result_vec = if agent.ctx.cancel.is_cancelled() {
+        let result_vec = if agent.ctx.cancellation().is_cancelled() {
             Vec::new()
         } else {
             execute_one_non_agent(
@@ -279,54 +279,57 @@ where
     // skip the channel setup to avoid unnecessary overhead.
     let is_bash = owned_call.name == "Bash";
 
-    let exec_results = if is_bash {
-        // Set up progress channel for stdout streaming (mirrors agent_calls.rs
-        // pattern).
-        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-        let mut streaming_ctx = agent.ctx.clone();
-        streaming_ctx.progress_tx = Some(prog_tx);
-        let call_id = owned_call.id.clone();
-        let stream_sink = sink.clone();
-        let stream_context = context.clone();
-        let forward_handle = tokio::spawn(async move {
-            while let Some(event) = prog_rx.recv().await {
-                let _ = stream_sink
-                    .send_event(RuntimeStreamEvent::AgentProgress {
-                        context: stream_context.clone(),
-                        tool_id: call_id.clone(),
-                        event,
-                    })
-                    .await;
+    let exec_results =
+        if is_bash {
+            // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
+            let (prog_tx, mut prog_rx) =
+                tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
+            let streaming_ctx = agent.ctx.with_progress(Some(
+                crate::application::tool_execution_adapters::progress(prog_tx),
+            ));
+            let call_id = owned_call.id.clone();
+            let stream_sink = sink.clone();
+            let stream_context = context.clone();
+            let progress_log_context = logging::capture();
+            let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
+                while let Some(event) = prog_rx.recv().await {
+                    let _ = stream_sink
+                        .send_event(RuntimeStreamEvent::AgentProgress {
+                            context: stream_context.clone(),
+                            tool_id: call_id.clone(),
+                            event,
+                        })
+                        .await;
+                }
+            });
+
+            let results = vec![
+                agent
+                    .execute_one_with_ctx(&owned_call, &streaming_ctx)
+                    .await,
+            ];
+
+            // Drop the sender so the forwarding task can complete naturally.
+            drop(streaming_ctx);
+
+            // Flush any remaining progress events before proceeding.
+            // Abort the forwarding task if it doesn't complete within 500ms
+            // to prevent task/resource leaks.
+            let mut forward_handle = forward_handle;
+            tokio::select! {
+                _ = &mut forward_handle => {}
+                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                    forward_handle.abort();
+                    let _ = forward_handle.await;
+                }
             }
-        });
+            results
+        } else {
+            // Non-Bash tools: execute without progress streaming.
+            vec![agent.execute_one_with_ctx(&owned_call, &agent.ctx).await]
+        };
 
-        let results = vec![
-            agent
-                .execute_one_with_ctx(&owned_call, &streaming_ctx)
-                .await,
-        ];
-
-        // Drop the sender so the forwarding task can complete naturally.
-        streaming_ctx.progress_tx = None;
-
-        // Flush any remaining progress events before proceeding.
-        // Abort the forwarding task if it doesn't complete within 500ms
-        // to prevent task/resource leaks.
-        let mut forward_handle = forward_handle;
-        tokio::select! {
-            _ = &mut forward_handle => {}
-            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
-                forward_handle.abort();
-                let _ = forward_handle.await;
-            }
-        }
-        results
-    } else {
-        // Non-Bash tools: execute without progress streaming.
-        vec![agent.execute_one_with_ctx(&owned_call, &agent.ctx).await]
-    };
-
-    let workspace = agent.ctx.workspace.persist().snapshot();
+    let workspace = agent.workspace_persist.snapshot();
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),
@@ -345,7 +348,7 @@ where
             &owned_call,
             &ex,
             workspace_root,
-            &agent.ctx,
+            &agent.runtime_cancellation,
         )
         .await;
         run_task_hooks(
@@ -424,22 +427,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::Value;
-    use std::collections::HashSet;
-    use std::sync::Arc;
     use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
-
-    fn test_memory_source() -> Arc<dyn ::tools::MemoryPortSource> {
-        struct TestSource;
-        impl ::tools::MemoryPortSource for TestSource {
-            fn current(&self) -> Arc<dyn memory::MemoryPort> {
-                Arc::new(
-                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
-                        .expect("valid default policy"),
-                )
-            }
-        }
-        Arc::new(TestSource)
-    }
 
     struct ConcurrencyFlagTool {
         name: &'static str,
@@ -476,30 +464,10 @@ mod tests {
     }
 
     fn test_ctx() -> ToolExecutionContext {
-        let cwd = std::env::current_dir().unwrap();
-        ToolExecutionContext {
-            resources: tools::ToolResources {
-                agent_runner: None,
-                registry: None,
-                memory_config: share::config::MemoryConfig::default(),
-                memory_source: test_memory_source(),
-                lang: "en".to_string(),
-                allow_all: true,
-            },
-            workspace: project::wire_production_workspace(cwd)
-                .expect("workspace 初始化成功")
-                .into_views(),
-            run_id: sdk::RunId::new_v7().to_string(),
-            cancel: tokio_util::sync::CancellationToken::new(),
-            read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
-            session_reminders: None,
-            plan_mode: None,
-            max_tool_concurrency: 10,
-            max_agent_concurrency: 4,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-            progress_tx: None,
-            parent_session_id: None,
-        }
+        crate::application::testing::test_tool_execution_context(
+            std::env::current_dir().unwrap(),
+            tokio_util::sync::CancellationToken::new(),
+        )
     }
 
     fn call(name: &str, index: usize) -> ToolCall {
@@ -523,10 +491,7 @@ mod tests {
             name: "safe_b",
             safe: true,
         });
-        let agent = Agent {
-            registry: &registry,
-            ctx: test_ctx(),
-        };
+        let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("safe_a", 0), call("safe_b", 1)];
         let refs = calls.iter().collect::<Vec<_>>();
 
@@ -547,10 +512,7 @@ mod tests {
             name: "unsafe_b",
             safe: false,
         });
-        let agent = Agent {
-            registry: &registry,
-            ctx: test_ctx(),
-        };
+        let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("unsafe_a", 0), call("unsafe_b", 1)];
         let refs = calls.iter().collect::<Vec<_>>();
 
@@ -571,10 +533,7 @@ mod tests {
             name: "unsafe",
             safe: false,
         });
-        let agent = Agent {
-            registry: &registry,
-            ctx: test_ctx(),
-        };
+        let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("safe", 0), call("unsafe", 1), call("safe", 2)];
         let refs = calls.iter().collect::<Vec<_>>();
 
@@ -587,10 +546,7 @@ mod tests {
     #[test]
     fn test_partition_calls_routes_unknown_tools_to_sequential() {
         let registry = ToolRegistry::new();
-        let agent = Agent {
-            registry: &registry,
-            ctx: test_ctx(),
-        };
+        let agent = Agent::for_test(&registry, test_ctx(), 10);
         let calls = [call("missing", 0)];
         let refs = calls.iter().collect::<Vec<_>>();
 

@@ -90,7 +90,7 @@ impl TypedTool for AskUserQuestionTool {
         // CLI 层应该处理这个交互
 
         // 使用取消令牌来检测是否被中断
-        if ctx.cancel.is_cancelled() {
+        if ctx.cancellation().is_cancelled() {
             return TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",

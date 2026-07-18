@@ -324,6 +324,8 @@ pub enum ChatEvent {
         message: String,
     },
     /// #567：Reflection 结果回传。
+    ///
+    /// Deprecated by #899: retained temporarily for the existing TUI delivery chain.
     ReflectionResult {
         output: Box<crate::ReflectionOutputView>,
     },

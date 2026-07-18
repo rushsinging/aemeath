@@ -1,4 +1,4 @@
-use memory::{MemoryCategory, MemoryLayer};
+use memory::api::{MemoryCategory, MemoryLayer};
 use serde_json::Value;
 
 pub(super) const MAX_CONTENT_CHARS: usize = 500;
@@ -16,18 +16,25 @@ pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str
 
 pub(super) fn optional_layer(input: &Value) -> Result<Option<MemoryLayer>, String> {
     match input.get("layer").and_then(|value| value.as_str()) {
-        Some(layer) => parse_memory_layer(layer)
-            .map(Some)
-            .ok_or_else(|| format!("无效 memory layer: {layer}")),
+        Some(layer) => match layer {
+            "global" => Ok(Some(MemoryLayer::Global)),
+            "project" => Ok(Some(MemoryLayer::Project)),
+            _ => Err(format!("无效 memory layer: {layer}")),
+        },
         None => Ok(None),
     }
 }
 
 pub(super) fn optional_category(input: &Value) -> Result<Option<MemoryCategory>, String> {
     match input.get("category").and_then(|value| value.as_str()) {
-        Some(category) => parse_memory_category(category)
-            .map(Some)
-            .ok_or_else(|| format!("无效 memory category: {category}")),
+        Some(category) => match category {
+            "fact" => Ok(Some(MemoryCategory::Fact)),
+            "decision" => Ok(Some(MemoryCategory::Decision)),
+            "preference" => Ok(Some(MemoryCategory::Preference)),
+            "pattern" => Ok(Some(MemoryCategory::Pattern)),
+            "pitfall" => Ok(Some(MemoryCategory::Pitfall)),
+            _ => Err(format!("无效 memory category: {category}")),
+        },
         None => Ok(None),
     }
 }
@@ -67,23 +74,4 @@ pub(super) fn validate_content(content: &str) -> Result<(), String> {
         return Err(format!("memory content 不能超过 {MAX_CONTENT_CHARS} 字符"));
     }
     Ok(())
-}
-
-fn parse_memory_layer(s: &str) -> Option<MemoryLayer> {
-    match s.to_ascii_lowercase().as_str() {
-        "global" => Some(MemoryLayer::Global),
-        "project" => Some(MemoryLayer::Project),
-        _ => None,
-    }
-}
-
-fn parse_memory_category(s: &str) -> Option<MemoryCategory> {
-    match s.to_ascii_lowercase().as_str() {
-        "fact" => Some(MemoryCategory::Fact),
-        "decision" => Some(MemoryCategory::Decision),
-        "preference" => Some(MemoryCategory::Preference),
-        "pattern" => Some(MemoryCategory::Pattern),
-        "pitfall" => Some(MemoryCategory::Pitfall),
-        _ => None,
-    }
 }

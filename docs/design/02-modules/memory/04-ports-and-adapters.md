@@ -289,6 +289,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | #897 落地 NoOpMemory、Composition active Memory prepare/install 与 Disabled/Shared 派生；Main 启动按 ProjectIdentity/committed Config 单次 open，Tool 通过同一 MemoryPort Arc 操作 | #897 |
 | 2026-07-12 | 初稿：MemoryPort trait、ReflectionPromptPort、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |
 | 2026-07-17 | #896 落地 MemoryService candidate/CAS/receipt、Global/Project 独立 dataset revision、Memory-owned AtomicDataset adapter、v2 project key 与 LegacyMemorySource/open migration seam | #896 |
 | 2026-07-14 | 将构造守卫语言对齐 capability-first 组织，移除固定横向层命名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

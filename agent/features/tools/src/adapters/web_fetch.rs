@@ -8,9 +8,6 @@ use tokio::process::Command;
 use url::Url;
 
 mod extract;
-#[cfg(test)]
-mod tests;
-
 pub struct WebFetchTool;
 
 /// Validate a URL against SSRF attacks.
@@ -299,3 +296,6 @@ impl TypedTool for WebFetchTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

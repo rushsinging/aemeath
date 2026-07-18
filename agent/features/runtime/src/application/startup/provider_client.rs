@@ -2,21 +2,9 @@ use super::model_runtime::ModelRuntimeSettings;
 use provider::ReasoningLevel;
 use provider::{LlmClient, LlmConfigOptions};
 use share::config::models::ResolvedModel;
-use std::env;
 
-type EnvReader<'a> = Option<&'a dyn Fn(&str) -> Option<String>>;
-
-pub fn resolve_api_key(
-    cli_api_key: Option<String>,
-    resolved_model: &ResolvedModel,
-    env_value: EnvReader<'_>,
-) -> Option<String> {
-    let driver = resolved_model.driver.as_str();
-    cli_api_key
-        .or_else(|| env_or_runtime("AEMEATH_API_KEY", env_value))
-        .or_else(|| provider_driver_api_key_from_env(driver, env_value))
-        .or_else(|| env_or_runtime("LLM_API_KEY", env_value))
-        .or_else(|| non_empty_string(&resolved_model.source_config.api_key))
+pub fn resolve_api_key(resolved_model: &ResolvedModel) -> Option<String> {
+    non_empty_string(&resolved_model.source_config.api_key)
 }
 
 pub fn resolve_base_url(
@@ -76,12 +64,8 @@ pub fn build_llm_client_with_gateway(
         timeout_secs,
     })?;
 
-    // CLI / env 指定的上限（优先级 CLI > env），clamp 到 provider 能力上限。
-    let max_level = max_reasoning.and_then(ReasoningLevel::parse).or_else(|| {
-        std::env::var("AEMEATH_MAX_REASONING")
-            .ok()
-            .and_then(|s| ReasoningLevel::parse(&s))
-    });
+    // Config reasoning 上限已退役；这里只应用模型请求与 provider 能力上限。
+    let max_level = max_reasoning.and_then(ReasoningLevel::parse);
 
     // 期望档位来源优先级：
     // 1) 模型配置的 reasoning_effort（显式档位，视为开启思考）
@@ -107,19 +91,6 @@ pub fn build_llm_client_with_gateway(
     };
 
     client.with_default_reasoning(final_level)
-}
-
-fn provider_driver_api_key_from_env(driver: &str, env_value: EnvReader<'_>) -> Option<String> {
-    share::config::domain::driver_env::driver_api_key_env_name(driver)
-        .and_then(|name| env_or_runtime(name, env_value))
-}
-
-fn env_or_runtime(name: &str, env_value: EnvReader<'_>) -> Option<String> {
-    if let Some(read_env) = env_value {
-        return read_env(name);
-    }
-
-    env::var(name).ok()
 }
 
 fn non_empty_string(value: &str) -> Option<String> {

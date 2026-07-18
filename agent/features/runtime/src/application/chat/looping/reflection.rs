@@ -1,67 +1,60 @@
-//! Shared reflection utilities used by both TUI and REPL paths.
-//!
-//! All paths drive reflection through a single bound `memory::MemoryPort`:
-//! Main-run callers pass `BoundMainRun::memory`; idle/forced callers acquire the
-//! committed memory under `wiring.with_shared`. The runtime never opens
-//! `storage::MemoryStore`.
+//! Shared reflection orchestration used by both TUI and REPL paths.
 
-use crate::application::reflection::run_complete_reflection;
-use crate::application::reflection::{CompleteReflectionResult, ReflectionRunMode};
+use crate::application::reflection::{run_complete_reflection, ReflectionRunMode};
 use crate::LOG_TARGET;
-use memory::MemoryPort;
+use memory::api::{MemoryPort, ReflectionEngine, ReflectionPromptPort};
 use provider::StopReason;
 
-/// Build the reflection context (memory + recent messages), call LLM, parse result.
-///
-/// Returns `Some(formatted_text)` if reflection was triggered and produced output,
-/// or `None` if reflection is disabled, not due yet, or failed silently.
+/// Build the reflection context, call the provider, and parse the Memory PL result.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_reflection(
     config: &share::config::MemoryConfig,
     turn_count: usize,
     messages: &[share::message::Message],
-    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
+    memory: &dyn MemoryPort,
+    reflection: &dyn ReflectionPromptPort,
 ) -> Option<String> {
-    run_complete(
+    run_reflection_mode(
         ReflectionRunMode::Interval { turn_count },
         config,
         messages,
-        memory,
         client,
         system_prompt_text,
         lang,
-        "Interval reflection failed",
+        memory,
+        reflection,
     )
     .await
-    .map(|result| result.formatted_content)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_precompact_reflection(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
+    memory: &dyn MemoryPort,
+    reflection: &dyn ReflectionPromptPort,
 ) -> Option<String> {
     let compacted_messages = context::compact::messages_selected_for_precompact_memory(messages);
     if compacted_messages.is_empty() {
         return None;
     }
-    run_complete(
+    run_reflection_mode(
         ReflectionRunMode::Forced,
         config,
         &compacted_messages,
-        memory,
         client,
         system_prompt_text,
         lang,
-        "Forced reflection failed",
+        memory,
+        reflection,
     )
     .await
-    .map(|result| result.formatted_content)
 }
 
 pub(crate) fn should_run_turn_reflection(
@@ -85,36 +78,36 @@ pub(crate) fn should_run_turn_reflection(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn run_complete(
+async fn run_reflection_mode(
     mode: ReflectionRunMode,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
-    failure_label: &str,
-) -> Option<CompleteReflectionResult> {
+    memory: &dyn MemoryPort,
+    reflection: &dyn ReflectionPromptPort,
+) -> Option<String> {
     match run_complete_reflection(
         mode,
         config,
         messages,
-        memory,
         client,
         system_prompt_text,
         lang,
+        memory,
+        reflection,
     )
     .await
     {
-        Ok(Some(result)) => Some(result),
+        Ok(Some(result)) => Some(result.formatted_content),
         Ok(None) => None,
-        Err(e) => {
-            log::warn!(target: LOG_TARGET, "{failure_label}: {e}");
+        Err(error) => {
+            log::warn!(target: LOG_TARGET, "Reflection failed: {error}");
             None
         }
     }
 }
 
-#[cfg(test)]
-#[path = "reflection_tests.rs"]
-mod reflection_tests;
+/// Production prompt implementation; exposed here to keep call sites explicit about the port.
+pub(crate) const REFLECTION_ENGINE: ReflectionEngine = ReflectionEngine;

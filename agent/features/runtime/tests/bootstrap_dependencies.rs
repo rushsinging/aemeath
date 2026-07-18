@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use context::{compose_session_task_capture, LegacyTaskCapture};
-use runtime::RuntimeBootstrapDependencies;
+use runtime::{RuntimeBootstrapDependencies, RuntimeConfigDependencies};
 
 #[tokio::test]
 async fn bootstrap_dependencies_preserve_injected_task_views() {
@@ -14,19 +14,13 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let access = task.access();
     let capture: Arc<dyn LegacyTaskCapture> = compose_session_task_capture(task.persist());
 
-    let wiring = context::test_support::wire_in_memory(
-        &workspace,
-        task.persist(),
-        config.reader(),
-        config.participant(),
-    )
-    .await;
-
     let dependencies = RuntimeBootstrapDependencies::new(
         workspace,
-        wiring,
+        RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
+        Arc::new(memory::NoOpMemory),
         provider::wire_provider(),
         tools::wire_tools(),
+        Arc::new(policy::AllowAllPolicy),
         access.clone(),
         capture.clone(),
     );

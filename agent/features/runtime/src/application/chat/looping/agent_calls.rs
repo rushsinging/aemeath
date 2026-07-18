@@ -20,6 +20,8 @@ pub(crate) async fn execute_agent_calls<S>(
     agent_approved: &[ToolCall],
     registry: &Arc<ToolRegistry>,
     agent_ctx: &ToolExecutionContext,
+    agent_semaphore: &Arc<tokio::sync::Semaphore>,
+    workspace_persist: &Arc<dyn project::WorkspacePersist>,
     sink: &S,
     hook_ui: &HookUi<S>,
     hook_runner: &hook::api::HookRunner,
@@ -43,6 +45,8 @@ where
             let sink = sink.clone();
             let hook_ui = hook_ui.clone();
             let mut ag_ctx = agent_ctx.clone();
+            let agent_semaphore = agent_semaphore.clone();
+            let workspace_persist = workspace_persist.clone();
             let hook_runner = hook_runner.clone();
             let registry_ref = registry.clone();
             let context = context.clone();
@@ -50,7 +54,7 @@ where
             let workspace_root = workspace_root.to_path_buf();
             async move {
                 let permit = tokio::select! {
-                    permit = ag_ctx.agent_semaphore.clone().acquire_owned() => permit.ok(),
+                    permit = agent_semaphore.clone().acquire_owned() => permit.ok(),
                     () = cancel.cancelled() => None,
                 }?;
                 if cancel.is_cancelled() {
@@ -64,7 +68,9 @@ where
                     hook_runner,
                     registry_ref,
                     &mut ag_ctx,
+                    &workspace_persist,
                     &workspace_root,
+                    &cancel,
                 )
                 .await;
                 drop(permit);
@@ -95,7 +101,9 @@ async fn execute_one_agent<S>(
     hook_runner: hook::api::HookRunner,
     registry: Arc<ToolRegistry>,
     ag_ctx: &mut ToolExecutionContext,
+    workspace_persist: &Arc<dyn project::WorkspacePersist>,
     workspace_root: &Path,
+    cancel: &CancellationToken,
 ) -> Vec<ToolExecution>
 where
     S: ChatEventSink,
@@ -156,11 +164,14 @@ where
     );
 
     let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
-    ag_ctx.progress_tx = Some(prog_tx);
+    *ag_ctx = ag_ctx.with_progress(Some(crate::application::tool_execution_adapters::progress(
+        prog_tx,
+    )));
     let call_id = call.id.clone();
     let ui_sink = sink.clone();
     let progress_context = context.clone();
-    let forward_handle = tokio::spawn(async move {
+    let progress_log_context = logging::capture();
+    let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
         while let Some(event) = prog_rx.recv().await {
             let _ = ui_sink
                 .send_event(RuntimeStreamEvent::AgentProgress {
@@ -176,7 +187,7 @@ where
         .get("Agent")
         .expect("Agent tool not found in registry");
     let result = agent_tool.call(call.input.clone(), ag_ctx).await;
-    let workspace = ag_ctx.workspace.persist().snapshot();
+    let workspace = workspace_persist.snapshot();
     let _ = sink
         .send_event(RuntimeStreamEvent::WorkingDirectoryChanged {
             path_base: workspace.path_base.clone(),
@@ -185,7 +196,7 @@ where
         })
         .await;
     let execution = ToolExecution::new(&call, ToolOutcome::from_tool_result(result));
-    ag_ctx.progress_tx = None;
+    *ag_ctx = ag_ctx.with_progress(None);
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), forward_handle).await;
 
     run_post_tool_hooks(
@@ -195,7 +206,7 @@ where
         &call,
         &execution,
         workspace_root,
-        ag_ctx,
+        cancel,
     )
     .await;
     send_tool_result(&sink, context, &execution).await;
@@ -209,24 +220,11 @@ mod tests {
     use async_trait::async_trait;
     use sdk::ids::{ChatId, ChatTurnId, ToolCallId};
     use serde_json::Value;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Notify};
-    use tools::{ToolResources, TypedTool, TypedToolResult};
-
-    fn test_memory_source() -> Arc<dyn ::tools::MemoryPortSource> {
-        struct TestSource;
-        impl ::tools::MemoryPortSource for TestSource {
-            fn current(&self) -> Arc<dyn memory::MemoryPort> {
-                Arc::new(
-                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
-                        .expect("valid default policy"),
-                )
-            }
-        }
-        Arc::new(TestSource)
-    }
+    use tools::{TypedTool, TypedToolResult};
 
     #[derive(Clone)]
     struct NoopSink;
@@ -292,6 +290,7 @@ mod tests {
         started: mpsc::UnboundedReceiver<String>,
         gates: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
         max_active: Arc<AtomicUsize>,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
     }
 
     fn harness(labels: &[&str], limit: usize) -> Harness {
@@ -312,35 +311,15 @@ mod tests {
             max_active: max_active.clone(),
         });
         let cwd = std::env::current_dir().unwrap();
-        let ctx = ToolExecutionContext {
-            resources: ToolResources {
-                agent_runner: None,
-                registry: None,
-                memory_config: share::config::MemoryConfig::default(),
-                memory_source: test_memory_source(),
-                lang: "en".to_string(),
-                allow_all: true,
-            },
-            workspace: project::wire_production_workspace(cwd)
-                .expect("workspace 初始化成功")
-                .into_views(),
-            run_id: sdk::RunId::new_v7().to_string(),
-            cancel: CancellationToken::new(),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            session_reminders: None,
-            plan_mode: None,
-            max_tool_concurrency: 10,
-            max_agent_concurrency: limit,
-            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(limit)),
-            progress_tx: None,
-            parent_session_id: None,
-        };
+        let ctx =
+            crate::application::testing::test_tool_execution_context(cwd, CancellationToken::new());
         Harness {
             registry,
             ctx,
             started,
             gates,
             max_active,
+            agent_semaphore: Arc::new(tokio::sync::Semaphore::new(limit)),
         }
     }
 
@@ -362,6 +341,7 @@ mod tests {
         registry: Arc<ToolRegistry>,
         ctx: ToolExecutionContext,
         calls: Vec<ToolCall>,
+        agent_semaphore: Arc<tokio::sync::Semaphore>,
         cancel: CancellationToken,
     ) -> tokio::task::JoinHandle<Vec<ToolExecution>> {
         tokio::spawn(async move {
@@ -372,6 +352,8 @@ mod tests {
                 &calls,
                 &registry,
                 &ctx,
+                &agent_semaphore,
+                &crate::application::testing::workspace_persist(&ctx),
                 &sink,
                 &hook_ui,
                 &hook::api::HookRunner::new(Default::default()),
@@ -389,6 +371,7 @@ mod tests {
             h.registry.clone(),
             h.ctx.clone(),
             vec![call("first", 0), call("slow", 1), call("next", 2)],
+            h.agent_semaphore.clone(),
             CancellationToken::new(),
         );
 
@@ -425,6 +408,7 @@ mod tests {
             h.registry.clone(),
             h.ctx.clone(),
             vec![call("one", 0)],
+            h.agent_semaphore.clone(),
             CancellationToken::new(),
         );
         assert_eq!(h.started.recv().await.unwrap(), "one");
@@ -432,6 +416,7 @@ mod tests {
             h.registry.clone(),
             h.ctx.clone(),
             vec![call("two", 0)],
+            h.agent_semaphore.clone(),
             CancellationToken::new(),
         );
 
@@ -457,6 +442,7 @@ mod tests {
             h.registry.clone(),
             h.ctx.clone(),
             vec![call("running", 0), call("waiting", 1)],
+            h.agent_semaphore.clone(),
             cancel.clone(),
         );
         assert_eq!(h.started.recv().await.unwrap(), "running");

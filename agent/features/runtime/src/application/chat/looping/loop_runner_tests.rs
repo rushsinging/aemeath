@@ -6,43 +6,6 @@ use super::*;
 
 use context::session::ChatChain;
 
-/// Test helper: creates a minimal `MainSessionWiring` for loop tests.
-///
-/// The wiring uses an `InMemoryTestOpener` (via test support) so tests
-/// don't need a real memory store. The admission gate is fully functional,
-/// allowing `bind_main_run` to work correctly.
-async fn test_wiring() -> Arc<context::MainSessionWiring> {
-    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let config_service = Arc::new(config::ConfigAppService::with_global_path(
-        None,
-        std::env::temp_dir().join(format!("runtime-test-config-{}.json", uuid::Uuid::new_v4())),
-    ));
-    let task_wiring = task::wire_task();
-    context::test_support::wire_in_memory(
-        &workspace,
-        task_wiring.persist(),
-        config_service.clone(),
-        config_service,
-    )
-    .await
-}
-
-/// Test helper: creates a no-op `MemoryPortSource` backed by `InMemoryMemory`.
-fn test_memory_source() -> Arc<dyn ::tools::MemoryPortSource> {
-    struct TestSource;
-    impl ::tools::MemoryPortSource for TestSource {
-        fn current(&self) -> Arc<dyn memory::MemoryPort> {
-            Arc::new(
-                memory::InMemoryMemory::new(memory::MemoryPolicy::default())
-                    .expect("valid default policy"),
-            )
-        }
-    }
-    Arc::new(TestSource)
-}
-
 fn test_save_chain() -> Arc<
     dyn Fn(
             &context::session::ChatChain,
@@ -158,10 +121,76 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
     // Architecture guard: behavioral tests below exercise this entry point, while this assertion
     // prevents a future reintroduction of the retired Main-only orchestration state machine.
     let source = include_str!("loop_runner.rs");
-    assert!(source.contains("run_loop(&mut run, &cancel, &mut port).await"));
+    assert!(source.contains("run_loop(&mut run, &cancel, &mut port)"));
     assert!(!source.contains("ChatLoopFsm"));
     assert!(!source.contains("StallDetector"));
     assert!(!source.contains("ChatLoopTransition"));
+}
+
+#[test]
+fn main_logging_path_uses_scopes_and_no_legacy_setters() {
+    let chat_source = include_str!("../../client/trait_chat.rs");
+    let runner_source = include_str!("loop_runner.rs");
+    let port_source = include_str!("main_run_port.rs");
+
+    assert!(chat_source.contains("logging::spawn_instrumented(session_context"));
+    assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
+    assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
+    assert!(runner_source.contains("turn: logging::FieldPatch::Set(turn_count)"));
+    assert!(port_source.contains("logging::spawn_instrumented("));
+    for source in [chat_source, runner_source, port_source] {
+        assert!(!source.contains("logging::set_current_"));
+        assert!(!source.contains("logging::set_session_id"));
+    }
+}
+
+#[test]
+fn progress_forwarders_capture_logging_context_before_instrumented_spawn() {
+    let agent_calls = include_str!("agent_calls.rs");
+    let non_agent = include_str!("non_agent.rs");
+
+    for source in [agent_calls, non_agent] {
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+        assert!(production.contains("let progress_log_context = logging::capture();"));
+        assert!(production.contains("logging::spawn_instrumented(progress_log_context, async move"));
+        assert!(!production.contains("tokio::spawn("));
+    }
+}
+
+#[test]
+fn each_request_attempt_has_complete_fresh_context() {
+    let parent = logging::LogContext {
+        session_id: Some("session".into()),
+        chat_id: Some("chat".into()),
+        turn: Some(3),
+        ..logging::LogContext::default()
+    };
+    let first = loop_runner::main_run_port::request_log_context(
+        &parent,
+        "model-a",
+        "provider-a",
+        "default",
+    );
+    let retry = loop_runner::main_run_port::request_log_context(
+        &parent,
+        "model-a",
+        "provider-a",
+        "default",
+    );
+
+    assert_eq!(first.session_id.as_deref(), Some("session"));
+    assert_eq!(first.chat_id.as_deref(), Some("chat"));
+    assert_eq!(first.turn, Some(3));
+    assert_eq!(first.model.as_deref(), Some("model-a"));
+    assert_eq!(first.provider.as_deref(), Some("provider-a"));
+    assert_eq!(first.role.as_deref(), Some("default"));
+    assert_ne!(
+        first.request_id, retry.request_id,
+        "retry must get a new request_id"
+    );
 }
 
 #[derive(Clone)]
@@ -460,6 +489,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -468,22 +498,19 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-stop-hook-blocked".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: blocking_then_success_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -580,6 +607,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -588,22 +616,19 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-stop-hook-metadata".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: blocking_then_success_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -773,28 +798,26 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
             SequenceProvider::new(vec!["final response"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
         workspace,
-        wiring: test_wiring().await,
         session_id: "test-worktree-stop-hook-env".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: HookRunner::new(HooksConfig { events }),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -870,6 +893,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
             TwoTurnProvider,
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -878,22 +902,19 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-session".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1043,6 +1064,7 @@ async fn test_continue_false_json_treated_as_block() {
             SequenceProvider::new(vec!["first response", "second response"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1051,22 +1073,19 @@ async fn test_continue_false_json_treated_as_block() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-continue-false".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: continue_false_then_allow_hook_runner(&flag_path),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1169,6 +1188,7 @@ async fn test_stall_triggers_stop_hook_check() {
             ]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1177,22 +1197,19 @@ async fn test_stall_triggers_stop_hook_check() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-stall-hook".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: block_n_times_hook_runner(&counter_path, 3),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1334,6 +1351,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1342,22 +1360,19 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-persistent-loop".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1501,6 +1516,7 @@ async fn test_stall_detector_resets_across_user_turns() {
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1509,22 +1525,19 @@ async fn test_stall_detector_resets_across_user_turns() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-stall-reset-across-turns".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1702,6 +1715,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1710,22 +1724,19 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-idle-control-command".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1828,6 +1839,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1836,22 +1848,19 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-idle-pending-save".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -1934,6 +1943,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1942,22 +1952,19 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-idle-pending-list-reminders".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2017,6 +2024,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
             SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2025,22 +2033,19 @@ async fn test_stop_hook_block_limit_stops_loop() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-block-limit".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: always_blocking_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2206,6 +2211,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2214,22 +2220,19 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-cancel-then-idle".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: active_run.clone(),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2444,6 +2447,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2452,22 +2456,19 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-cancel-preserves-prior-turns".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: active_run.clone(),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2672,6 +2673,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2680,22 +2682,19 @@ async fn test_chat_impl_idle_until_first_input_event() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-idle-until-first-input".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2800,6 +2799,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2808,22 +2808,19 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-no-turn-signal-before-first-input".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2899,6 +2896,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2907,22 +2905,19 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-resume-skip-pending".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -2978,6 +2973,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2986,22 +2982,19 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-user-tail-idle".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3127,6 +3120,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -3135,22 +3129,19 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
-        wiring: test_wiring().await,
         session_id: "test-api-error-finalize".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
         max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         hook_runner: test_hook_runner(),
         memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
+        memory: std::sync::Arc::new(memory::NoOpMemory),
         frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
         reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
@@ -3200,526 +3191,5 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
             .iter()
             .any(|e| e.contains("recovered final response")),
         "API 错误后应能正常开启下一回合: {events:?}"
-    );
-}
-
-/// Main memory injection must read from the `BoundMainRun`'s `MemoryPort`, not
-/// from legacy `storage::MemoryStore` files.
-///
-/// Writing an entry to the bound port must make it visible in the
-/// `<memory-context>` block. Because `build_memory_block_from_port` takes only
-/// the port (no filesystem path), legacy disk files structurally cannot
-/// participate in Main injection.
-#[tokio::test]
-async fn main_memory_block_reads_bound_memory_port_not_legacy_storage() {
-    let wiring = test_wiring().await;
-    let bound = wiring
-        .bind_main_run()
-        .await
-        .expect("bind_main_run should succeed with the gate open");
-
-    let now: u64 = 1_000_000;
-    let entry = memory::MemoryEntry::new(
-        memory::MemoryId::now_v7(),
-        now,
-        memory::MemoryLayer::Project,
-        memory::MemoryCategory::Decision,
-        "port-only-injected-decision",
-        memory::MemorySource::User,
-    )
-    .expect("entry is valid");
-    bound
-        .memory()
-        .write(entry)
-        .await
-        .expect("write to bound memory port succeeds");
-
-    let block = crate::application::chat::looping::memory_inject::build_memory_block_from_port(
-        bound.memory(),
-        now,
-        5,
-    )
-    .expect("block should be built from the bound port entries");
-
-    assert!(
-        block.text.contains("<memory-context>"),
-        "block must render the <memory-context> envelope: {}",
-        block.text
-    );
-    assert!(
-        block.text.contains("port-only-injected-decision"),
-        "block must surface the entry written to the BoundMainRun MemoryPort, not legacy storage: {}",
-        block.text
-    );
-}
-
-// ── #871: ManageMemory gate integration ───────────────────────────────
-
-/// Architecture guard: ManageMemory must go through the session-switch gate
-/// via `with_shared` and capture `committed_memory`, rather than opening a
-/// `storage::MemoryStore` directly.
-#[test]
-fn manage_memory_command_goes_through_session_switch_gate() {
-    let source = include_str!("loop_runner.rs");
-    let manage_memory_start = source
-        .find("PendingCommand::ManageMemory")
-        .expect("ManageMemory arm must exist in loop_runner");
-    let arm_body = &source[manage_memory_start..];
-    let arm_end = arm_body
-        .find("PendingCommand::ResumeSession")
-        .unwrap_or(arm_body.len());
-    let arm_body = &arm_body[..arm_end];
-    assert!(
-        arm_body.contains("with_shared"),
-        "ManageMemory must call with_shared to go through the session-switch gate"
-    );
-    assert!(
-        arm_body.contains("committed_memory"),
-        "ManageMemory must capture committed_memory through the gate"
-    );
-    assert!(
-        !arm_body.contains("storage::MemoryStore"),
-        "ManageMemory must not open legacy storage::MemoryStore"
-    );
-}
-
-/// #871: `with_shared` (used by ManageMemory) must block while an exclusive
-/// session-switch permit is held (e.g. during resume), then succeed once
-/// released.
-#[tokio::test]
-async fn test_manage_memory_with_shared_blocks_during_exclusive_switch() {
-    let wiring = test_wiring().await;
-    let gate = wiring.gate();
-
-    // Simulate an in-progress resume — exclusive permit held.
-    let exclusive = gate
-        .acquire_owned_exclusive()
-        .await
-        .expect("exclusive permit acquired");
-
-    // The shared permit (used by ManageMemory's with_shared) must block.
-    let wiring_for_block = wiring.clone();
-    let blocked = tokio::time::timeout(
-        std::time::Duration::from_millis(200),
-        wiring.with_shared(async move { wiring_for_block.committed_memory() }),
-    )
-    .await;
-    assert!(
-        blocked.is_err(),
-        "ManageMemory's with_shared must block while an exclusive session switch is in progress"
-    );
-
-    // After release, shared succeeds — ManageMemory would proceed.
-    drop(exclusive);
-    let wiring_for_ok = wiring.clone();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        wiring.with_shared(async move { wiring_for_ok.committed_memory() }),
-    )
-    .await;
-    assert!(
-        result.is_ok(),
-        "with_shared must succeed after the exclusive permit is released"
-    );
-}
-
-/// #871: full behavioral test — driving a ManageMemory command through
-/// `process_chat_loop` while the gate is blocked, then releasing the gate and
-/// verifying the command completes.
-#[tokio::test]
-async fn test_manage_memory_command_blocked_then_unblocked_by_gate() {
-    let wiring = test_wiring().await;
-    let gate = wiring.gate();
-
-    // Hold an exclusive permit to simulate an in-progress resume.
-    let exclusive = Some(
-        gate.acquire_owned_exclusive()
-            .await
-            .expect("exclusive permit"),
-    );
-
-    let sink = RecordingSink::default();
-    let (input_tx, input_events) = ChannelInputEvents::new();
-
-    // Send a ManageMemory command (stats — pure read, no mutation needed).
-    input_tx
-        .send(sdk::ChatInputEvent::ManageMemory {
-            args: "stats".to_string(),
-        })
-        .unwrap();
-
-    let driver_sink = sink.clone();
-    let driver_input_tx = input_tx;
-    let driver = tokio::spawn(async move {
-        // Wait for CommandResultText to appear, then drop input to trigger shutdown.
-        loop {
-            if driver_sink
-                .events()
-                .iter()
-                .any(|e| e == "CommandResultText")
-            {
-                drop(driver_input_tx);
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    });
-
-    let ctx = ChatLoopContext {
-        sink: sink.clone(),
-        queue: SequenceQueueDrainPort::new(vec![]),
-        input_events,
-        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
-            SequenceProvider::new(vec!["dummy"]),
-        ))),
-        registry: Arc::new(ToolRegistry::new()),
-        system_blocks: Vec::new(),
-        system_prompt_text: String::new(),
-        user_context: String::new(),
-        chain: ChatChain::from_flat_messages(vec![]),
-        context_size: 200_000,
-        workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
-            .expect("workspace init")
-            .into_views(),
-        wiring,
-        session_id: "test-manage-memory-gate".to_string(),
-        read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
-        agent_runner: None,
-        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
-        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-        task_store: Arc::new(storage::TaskStore::new()),
-        task_access: Arc::new(task::TaskStore::new()),
-        max_tool_concurrency: 1,
-        max_agent_concurrency: 1,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        hook_runner: test_hook_runner(),
-        memory_config: share::config::MemoryConfig::default(),
-        memory_source: test_memory_source(),
-        frozen_chats: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-        active_summary: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        reasoning: workflow::adaptive_reasoning(share::reasoning::ReasoningLevel::Off),
-        build_switched_client: Arc::new(test_build_switched_client),
-        save_chain: test_save_chain(),
-        language: "en".to_string(),
-        run_reflection_on_demand: test_run_reflection(),
-        apply_reflection_on_demand: test_apply_reflection(),
-        list_models: test_list_models(),
-        list_reminders: test_list_reminders(),
-        list_sessions: test_list_sessions(),
-    };
-    let loop_handle = tokio::spawn(async move {
-        tokio::time::timeout(std::time::Duration::from_secs(10), process_chat_loop(ctx))
-            .await
-            .expect("loop should complete after gate release and shutdown")
-    });
-
-    // While the gate is blocked, no CommandResultText should appear.
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert!(
-        !sink.events().iter().any(|e| e == "CommandResultText"),
-        "ManageMemory must be blocked while the gate is held exclusively"
-    );
-
-    // Release the gate — ManageMemory should now proceed.
-    drop(exclusive);
-
-    // The driver waits for CommandResultText, then drops input_tx to shutdown.
-    driver.await.unwrap();
-    loop_handle.await.unwrap();
-
-    assert!(
-        sink.events().iter().any(|e| e == "CommandResultText"),
-        "ManageMemory should produce a result after the gate is released"
-    );
-}
-
-// ── #871: ManageMemory mutation lifecycle under the gate ──────────────
-
-/// #871 test double: a [`memory::MemoryPort`] whose `write` mutation blocks
-/// until the test releases it. This lets a test observe the session-switch
-/// gate while a real mutation is genuinely in flight — not just while an
-/// `Arc` clone is captured. All other methods delegate to the wrapped port.
-struct BlockingMemoryPort {
-    inner: Arc<dyn memory::MemoryPort>,
-    started: tokio::sync::Notify,
-    release: tokio::sync::Notify,
-}
-
-impl BlockingMemoryPort {
-    fn wrapping(inner: Arc<dyn memory::MemoryPort>) -> Arc<Self> {
-        Arc::new(Self {
-            inner,
-            started: tokio::sync::Notify::new(),
-            release: tokio::sync::Notify::new(),
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl memory::MemoryPort for BlockingMemoryPort {
-    fn retrieve_for_inject(&self, query: &memory::MemoryQuery) -> memory::MemorySearchResult {
-        self.inner.retrieve_for_inject(query)
-    }
-    fn search(&self, query: &memory::MemorySearchQuery) -> memory::MemorySearchResult {
-        self.inner.search(query)
-    }
-    async fn write(
-        &self,
-        entry: memory::MemoryEntry,
-    ) -> Result<memory::WriteResult, memory::MemoryError> {
-        // Signal the mutation has begun and is now blocked, then wait for the
-        // test to release the gate observation before completing the write.
-        self.started.notify_one();
-        self.release.notified().await;
-        self.inner.write(entry).await
-    }
-    async fn update(
-        &self,
-        id: &memory::MemoryId,
-        content: &str,
-    ) -> Result<bool, memory::MemoryError> {
-        self.inner.update(id, content).await
-    }
-    async fn delete(&self, id: &memory::MemoryId) -> Result<bool, memory::MemoryError> {
-        self.inner.delete(id).await
-    }
-    async fn pin(&self, id: &memory::MemoryId, pinned: bool) -> Result<bool, memory::MemoryError> {
-        self.inner.pin(id, pinned).await
-    }
-    async fn mark_outdated(&self, id: &memory::MemoryId) -> Result<bool, memory::MemoryError> {
-        self.inner.mark_outdated(id).await
-    }
-    async fn apply_reflection(
-        &self,
-        output: &memory::ReflectionOutput,
-    ) -> Result<memory::ReflectionApplyResult, memory::MemoryError> {
-        self.inner.apply_reflection(output).await
-    }
-    async fn archive(&self, ids: &[memory::MemoryId]) -> Result<(), memory::MemoryError> {
-        self.inner.archive(ids).await
-    }
-    async fn compact(&self) -> Result<memory::CompactResult, memory::MemoryError> {
-        self.inner.compact().await
-    }
-    fn list(&self, layer: Option<memory::MemoryLayer>) -> Vec<memory::MemoryEntry> {
-        self.inner.list(layer)
-    }
-    fn stats(&self) -> memory::MemoryStats {
-        self.inner.stats()
-    }
-}
-
-/// #871: while a ManageMemory **mutation** (port `write`) is genuinely in
-/// flight inside `with_shared`, a concurrent session resume (`acquire_owned_exclusive`)
-/// must NOT be able to acquire the gate. Only after the mutation completes and the
-/// shared permit is dropped can the exclusive permit proceed.
-///
-/// This is the reverse of the capture-only tests: it drives a real, blocking
-/// mutation through the exact future shape the fixed ManageMemory arm uses
-/// (`committed_memory` + `execute_memory` entirely inside `with_shared`) and
-/// proves the shared permit spans the whole mutation, not just the `Arc` clone.
-#[tokio::test]
-async fn test_manage_memory_mutation_blocks_exclusive_until_released() {
-    let wiring = test_wiring().await;
-    let gate = wiring.gate();
-    let config = share::config::MemoryConfig::default();
-
-    // Wrap the real committed memory in a port whose `write` blocks until
-    // released, mirroring a slow MemoryPort mutation. The concrete handle is
-    // kept so the test can observe/release the in-flight mutation directly.
-    let port = BlockingMemoryPort::wrapping(wiring.committed_memory());
-
-    // Drive the exact future shape the fixed ManageMemory arm uses: the whole
-    // `execute_memory` (which calls `port.write().await`) runs inside
-    // `with_shared`, so the shared permit must span the full mutation.
-    let port_for_task = port.clone();
-    let config_for_task = config.clone();
-    let wiring_for_task = wiring.clone();
-    let mutation = tokio::spawn(async move {
-        wiring_for_task
-            .with_shared(async move {
-                let port_ref: &dyn memory::MemoryPort = port_for_task.as_ref();
-                super::idle_commands::execute_memory(
-                    "add mutation-blocks-resume",
-                    port_ref,
-                    &config_for_task,
-                )
-                .await
-            })
-            .await
-    });
-
-    // Wait until the mutation has actually entered `write` and is blocked.
-    port.started.notified().await;
-
-    // While the mutation is blocked inside `with_shared`, an exclusive acquire
-    // (resume) must be blocked by the held shared permit.
-    let blocked = tokio::time::timeout(
-        std::time::Duration::from_millis(400),
-        gate.acquire_owned_exclusive(),
-    )
-    .await;
-    assert!(
-        blocked.is_err(),
-        "exclusive acquire must block while a ManageMemory mutation is in \
-         progress under with_shared (permit must cover the mutation, not just \
-         the Arc capture)"
-    );
-
-    // Release the mutation — it completes, the shared permit drops, and the
-    // exclusive acquire can now proceed.
-    port.release.notify_one();
-    mutation
-        .await
-        .expect("mutation task completes after release")
-        .expect("with_shared should not be closed during the test");
-
-    let _exclusive = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        gate.acquire_owned_exclusive(),
-    )
-    .await
-    .expect(
-        "exclusive acquire must complete once the ManageMemory mutation has \
-         released the shared permit",
-    );
-}
-
-// ── #871: Manual compact lifecycle under the gate ─────────────────────
-
-/// Architecture guard: the Compact arm must run the whole `manual_compact`
-/// body (memory capture + precompact reflection + LLM summary +
-/// `apply_compact_outcome`) *inside* `with_shared`, so the shared
-/// session-switch permit spans the full compact — not just the
-/// `committed_memory()` Arc capture. A capture-then-release shape would let
-/// a concurrent resume (exclusive permit) swap memory mid-compact.
-#[test]
-fn compact_command_runs_manual_compact_inside_with_shared() {
-    let source = include_str!("loop_runner.rs");
-    let compact_start = source
-        .find("PendingCommand::Compact")
-        .expect("Compact arm must exist in loop_runner");
-    let arm_body = &source[compact_start..];
-    // Compact is the first arm; the next arm is SwitchModel.
-    let arm_end = arm_body
-        .find("PendingCommand::SwitchModel")
-        .unwrap_or(arm_body.len());
-    let arm_body = &arm_body[..arm_end];
-
-    let with_shared_idx = arm_body
-        .find(".with_shared(")
-        .expect("Compact arm must call with_shared");
-    let manual_compact_idx = arm_body
-        .find("manual_compact(")
-        .expect("Compact arm must call manual_compact");
-    assert!(
-        with_shared_idx < manual_compact_idx,
-        "manual_compact must be called inside the with_shared closure so the \
-         shared permit spans the full compact body, not just the \
-         committed_memory Arc capture"
-    );
-
-    // apply_compact_outcome (which mutates chain/active_summary) must also
-    // live inside with_shared, otherwise the chain mutation could race a
-    // concurrent resume.
-    let apply_idx = arm_body
-        .find("apply_compact_outcome(")
-        .expect("Compact arm must call apply_compact_outcome");
-    assert!(
-        with_shared_idx < apply_idx,
-        "apply_compact_outcome must be called inside the with_shared closure"
-    );
-
-    // The capture-only anti-pattern (committed_memory() then releasing the
-    // permit before manual_compact) must be gone: there must be no
-    // `manual_compact(` appearing *before* the `with_shared` call.
-    let before = &arm_body[..with_shared_idx];
-    assert!(
-        !before.contains("manual_compact("),
-        "manual_compact must not be invoked outside with_shared (the old \
-         capture-only shape released the permit before the LLM body)"
-    );
-}
-
-/// #871: while a manual compact — `committed_memory()` capture + the long
-/// precompact reflection/LLM body — is in flight inside `with_shared`, a
-/// concurrent session resume (`acquire_owned_exclusive`) must NOT be able to
-/// acquire the gate. Only after the compact body completes and the shared
-/// permit drops can the exclusive permit proceed.
-///
-/// This mirrors the exact future shape the fixed Compact arm drives:
-/// `committed_memory()` + a long-hanging body entirely inside
-/// `with_shared`. The body is represented by a controllable Notify pair
-/// (started/release) standing in for the slow precompact reflection + LLM
-/// summary that `manual_compact` awaits; the `memory` Arc is held for the
-/// whole body to match the production structure that passes
-/// `memory.as_ref()` into `manual_compact`.
-#[tokio::test]
-async fn test_manual_compact_with_shared_blocks_exclusive_until_released() {
-    let wiring = test_wiring().await;
-    let gate = wiring.gate();
-
-    let compact_started = std::sync::Arc::new(tokio::sync::Notify::new());
-    let compact_release = std::sync::Arc::new(tokio::sync::Notify::new());
-
-    // Drive the exact future shape the fixed Compact arm uses. Two wiring
-    // clones: `wiring_outer` is the `with_shared` receiver (moved into the
-    // outer async block); `wiring_inner` is captured by the inner
-    // `async move` to call `committed_memory()` *inside* the permit —
-    // matching the production structure.
-    let wiring_outer = wiring.clone();
-    let wiring_inner = wiring.clone();
-    let started_for_task = compact_started.clone();
-    let release_for_task = compact_release.clone();
-    let compact = tokio::spawn(async move {
-        wiring_outer
-            .with_shared(async move {
-                let memory = wiring_inner.committed_memory();
-                // Stand-in for manual_compact's long body (precompact
-                // reflection + LLM summary). The memory Arc is captured to
-                // mirror the production structure that passes
-                // memory.as_ref() into manual_compact.
-                started_for_task.notify_one();
-                release_for_task.notified().await;
-                let _ = memory.as_ref();
-            })
-            .await
-    });
-
-    // Wait until the compact body has actually entered and is hanging.
-    compact_started.notified().await;
-
-    // While the compact body is blocked inside with_shared, an exclusive
-    // acquire (resume) must be blocked by the held shared permit.
-    let blocked = tokio::time::timeout(
-        std::time::Duration::from_millis(400),
-        gate.acquire_owned_exclusive(),
-    )
-    .await;
-    assert!(
-        blocked.is_err(),
-        "exclusive acquire must block while the manual compact body is in \
-         flight under with_shared (the shared permit must span the whole \
-         manual_compact body, not just the committed_memory Arc capture)"
-    );
-
-    // Release the compact body — it completes, the shared permit drops, and
-    // the exclusive acquire can now proceed.
-    compact_release.notify_one();
-    compact
-        .await
-        .expect("compact task completes after release")
-        .expect("with_shared should not be closed during the test");
-
-    let _exclusive = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        gate.acquire_owned_exclusive(),
-    )
-    .await
-    .expect(
-        "exclusive acquire must complete once the manual compact body has \
-         released the shared permit",
     );
 }

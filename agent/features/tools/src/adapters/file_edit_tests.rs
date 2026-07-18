@@ -1,34 +1,11 @@
 use super::*;
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
 
 fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext {
-    let mut read_files = HashSet::new();
-    if !read_file.is_empty() {
-        read_files.insert(read_file);
-    }
-    ToolExecutionContext {
-        workspace: project::wire_production_workspace(root)
-            .expect("workspace 初始化成功")
-            .into_views(),
-        run_id: "test-run".to_string(),
-        cancel: tokio_util::sync::CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(read_files)),
-        resources: crate::domain::ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: false,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
+    let builder = crate::domain::test_support::TestToolExecutionContextBuilder::new(root);
+    if read_file.is_empty() {
+        builder.build()
+    } else {
+        builder.read_file(read_file).build()
     }
 }
 
@@ -54,8 +31,10 @@ async fn file_edit_without_prior_read_is_rejected_even_when_allow_all() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("sample.rs");
     tokio::fs::write(&path, "one\ntwo\n").await.unwrap();
-    let mut ctx = test_ctx(dir.path().to_path_buf(), String::new());
-    ctx.resources.allow_all = true;
+    let ctx =
+        crate::domain::test_support::TestToolExecutionContextBuilder::new(dir.path().to_path_buf())
+            .allow_all(true)
+            .build();
 
     let result = FileEditTool
         .call(

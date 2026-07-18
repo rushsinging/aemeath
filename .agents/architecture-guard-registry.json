@@ -186,6 +186,22 @@
       "status": "active"
     },
     {
+      "id": "policy.config.business-env-owner",
+      "guard": "check-config-env-guard.sh",
+      "module": "config",
+      "scope": {
+        "kind": "path",
+        "value": "agent/features/config/src/adapters.rs"
+      },
+      "classification": "target_capability_policy",
+      "owner": "config",
+      "reason": "All business environment variables are read only by the Config EnvAdapter",
+      "tracking_issue": 935,
+      "introduced_baseline": "v0.1.0",
+      "exit_condition": "replace only with an equivalent Config-owned environment adapter policy",
+      "status": "active"
+    },
+    {
       "id": "scope.config.comments",
       "guard": "check-config-env-guard.sh",
       "module": "config",
@@ -202,19 +218,19 @@
       "status": "active"
     },
     {
-      "id": "scope.config.reader-tests-and-reflection",
+      "id": "scope.config.reader-tests-only",
       "guard": "check-config-reader-injection.sh",
       "module": "config",
       "scope": {
         "kind": "pattern",
-        "value": "test paths and trait_reflection.rs"
+        "value": "test paths and file-tail cfg(test) inline modules"
       },
       "classification": "scope_exclusion",
       "owner": "config",
-      "reason": "Test construction and the registered Runtime reflection bridge are outside the production construction rule",
-      "tracking_issue": 879,
+      "reason": "Test-only ConfigAppService construction is outside the production construction rule",
+      "tracking_issue": 949,
       "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove trait_reflection scope when Runtime production cutover completes; retain test scope",
+      "exit_condition": "permanent while tests require direct fixture construction",
       "status": "active"
     },
     {

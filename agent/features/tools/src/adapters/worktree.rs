@@ -19,11 +19,18 @@ fn current_branch(ctx: &ToolExecutionContext) -> String {
         .flatten()
         .unwrap_or_else(|| "(unknown)".to_string())
 }
+use project::WorkspaceControl;
+use std::sync::Arc;
+
 /// Tool to enter a git worktree directory
-pub struct EnterWorktreeTool;
+pub struct EnterWorktreeTool {
+    pub control: Arc<dyn WorkspaceControl>,
+}
 
 /// Tool to exit the current worktree and restore the previous context
-pub struct ExitWorktreeTool;
+pub struct ExitWorktreeTool {
+    pub control: Arc<dyn WorkspaceControl>,
+}
 
 fn workspace_context_payload(
     _headline: &str,
@@ -68,7 +75,7 @@ impl TypedTool for EnterWorktreeTool {
         let args: EnterWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => {
-                return TypedToolResult::error(t::invalid_input_error(&ctx.resources.lang, e))
+                return TypedToolResult::error(t::invalid_input_error(ctx.guidance().language(), e))
             }
         };
 
@@ -77,7 +84,7 @@ impl TypedTool for EnterWorktreeTool {
                 .clone()
                 .map(|branch| format!("branch {branch}"))
                 .unwrap_or_else(|| {
-                    if ctx.resources.lang == "zh" {
+                    if ctx.guidance().language() == "zh" {
                         "未指定目标".to_string()
                     } else {
                         "(unspecified)".to_string()
@@ -85,15 +92,15 @@ impl TypedTool for EnterWorktreeTool {
                 })
         });
 
-        match ctx
-            .workspace_control()
+        match self
+            .control
             .enter(args.path.as_ref().map(PathBuf::from), args.branch.clone())
         {
             Ok(_frame) => {
                 let path_base = ctx.workspace_read().current_path_base();
                 let workspace_root = ctx.workspace_read().current_workspace_root();
                 let branch = current_branch(ctx);
-                let headline = if ctx.resources.lang == "zh" {
+                let headline = if ctx.guidance().language() == "zh" {
                     format!("已进入 worktree：{}", display_target)
                 } else {
                     format!("Entered worktree: {}", display_target)
@@ -105,11 +112,11 @@ impl TypedTool for EnterWorktreeTool {
                         &branch,
                         &path_base,
                         &workspace_root,
-                        &ctx.resources.lang,
+                        ctx.guidance().language(),
                     ),
                 )
             }
-            Err(e) => TypedToolResult::error(t::enter_error(&ctx.resources.lang, e)),
+            Err(e) => TypedToolResult::error(t::enter_error(ctx.guidance().language(), e)),
         }
     }
 
@@ -154,18 +161,18 @@ impl TypedTool for ExitWorktreeTool {
         let args: ExitWorktreeInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(e) => {
-                return TypedToolResult::error(t::invalid_input_error(&ctx.resources.lang, e))
+                return TypedToolResult::error(t::invalid_input_error(ctx.guidance().language(), e))
             }
         };
 
         if let Some(path) = args.path {
             // 直接切到指定路径：校验存在性 + 同源，不污染上下文栈（不留多余栈帧）。
-            match ctx.workspace_control().switch_to(PathBuf::from(&path)) {
+            match self.control.switch_to(PathBuf::from(&path)) {
                 Ok(()) => {
                     let path_base = ctx.workspace_read().current_path_base();
                     let workspace_root = ctx.workspace_read().current_workspace_root();
                     let branch = current_branch(ctx);
-                    let headline = if ctx.resources.lang == "zh" {
+                    let headline = if ctx.guidance().language() == "zh" {
                         format!("已切换到：{}", path)
                     } else {
                         format!("Switched to: {}", path)
@@ -176,20 +183,20 @@ impl TypedTool for ExitWorktreeTool {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
                             workspace_root: workspace_root.clone(),
-                            guidance: t::switch_guidance(&ctx.resources.lang, &path),
+                            guidance: t::switch_guidance(ctx.guidance().language(), &path),
                         },
                     )
                 }
-                Err(e) => TypedToolResult::error(t::switch_error(&ctx.resources.lang, e)),
+                Err(e) => TypedToolResult::error(t::switch_error(ctx.guidance().language(), e)),
             }
         } else {
             // 恢复上一上下文
-            match ctx.workspace_control().exit() {
+            match self.control.exit() {
                 Ok(prev) => {
                     let path_base = ctx.workspace_read().current_path_base();
                     let workspace_root = ctx.workspace_read().current_workspace_root();
                     let branch = current_branch(ctx);
-                    let headline = if ctx.resources.lang == "zh" {
+                    let headline = if ctx.guidance().language() == "zh" {
                         format!("已退出 worktree，恢复到：{}", prev.path_base.display())
                     } else {
                         format!("Exited worktree, restored to: {}", prev.path_base.display())
@@ -200,11 +207,11 @@ impl TypedTool for ExitWorktreeTool {
                             branch: branch.clone(),
                             path_base: path_base.clone(),
                             workspace_root: workspace_root.clone(),
-                            guidance: t::exit_guidance(&ctx.resources.lang, &prev.path_base),
+                            guidance: t::exit_guidance(ctx.guidance().language(), &prev.path_base),
                         },
                     )
                 }
-                Err(e) => TypedToolResult::error(t::exit_error(&ctx.resources.lang, e)),
+                Err(e) => TypedToolResult::error(t::exit_error(ctx.guidance().language(), e)),
             }
         }
     }
@@ -284,9 +291,35 @@ mod tests {
         assert!(status.success(), "git commit 退出码非 0");
     }
 
+    fn enter_tool(ctx: &ToolExecutionContext) -> EnterWorktreeTool {
+        EnterWorktreeTool {
+            control: crate::adapters::test_support_tests::production_workspace_control(ctx),
+        }
+    }
+    fn exit_tool(ctx: &ToolExecutionContext) -> ExitWorktreeTool {
+        ExitWorktreeTool {
+            control: crate::adapters::test_support_tests::production_workspace_control(ctx),
+        }
+    }
+
+    fn metadata_tools() -> (
+        tempfile::TempDir,
+        ToolExecutionContext,
+        EnterWorktreeTool,
+        ExitWorktreeTool,
+    ) {
+        let temp = tempfile::tempdir().expect("temp workspace");
+        let ctx = crate::adapters::test_support_tests::production_execution_context(
+            temp.path().to_path_buf(),
+        );
+        let enter = enter_tool(&ctx);
+        let exit = exit_tool(&ctx);
+        (temp, ctx, enter, exit)
+    }
+
     #[test]
     fn test_enter_worktree_schema() {
-        let tool = EnterWorktreeTool;
+        let (_temp, _ctx, tool, _) = metadata_tools();
         let schema = tool.input_schema();
 
         assert_eq!(schema["type"], "object");
@@ -302,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_exit_worktree_schema() {
-        let tool = ExitWorktreeTool;
+        let (_temp, _ctx, _, tool) = metadata_tools();
         let schema = tool.input_schema();
 
         assert_eq!(schema["type"], "object");
@@ -316,35 +349,37 @@ mod tests {
 
     #[test]
     fn test_enter_worktree_name() {
-        assert_eq!(EnterWorktreeTool.name(), "EnterWorktree");
+        let (_temp, _ctx, tool, _) = metadata_tools();
+        assert_eq!(tool.name(), "EnterWorktree");
     }
 
     #[test]
     fn test_exit_worktree_name() {
-        assert_eq!(ExitWorktreeTool.name(), "ExitWorktree");
+        let (_temp, _ctx, _, tool) = metadata_tools();
+        assert_eq!(tool.name(), "ExitWorktree");
     }
 
     #[test]
     fn test_enter_worktree_not_read_only() {
-        let tool = EnterWorktreeTool;
+        let (_temp, _ctx, tool, _) = metadata_tools();
         assert!(!tool.is_read_only());
     }
 
     #[test]
     fn test_exit_worktree_not_read_only() {
-        let tool = ExitWorktreeTool;
+        let (_temp, _ctx, _, tool) = metadata_tools();
         assert!(!tool.is_read_only());
     }
 
     #[test]
     fn test_enter_worktree_not_concurrency_safe() {
-        let tool = EnterWorktreeTool;
+        let (_temp, _ctx, tool, _) = metadata_tools();
         assert!(!tool.is_concurrency_safe());
     }
 
     #[test]
     fn test_exit_worktree_not_concurrency_safe() {
-        let tool = ExitWorktreeTool;
+        let (_temp, _ctx, _, tool) = metadata_tools();
         assert!(!tool.is_concurrency_safe());
     }
 
@@ -387,35 +422,7 @@ mod tests {
 
     /// 构造最小 `ToolExecutionContext`，workspace 指向 `cwd`，使用默认 ToolResources。
     fn build_ctx(cwd: PathBuf) -> ToolExecutionContext {
-        use crate::domain::ToolResources;
-        use std::collections::HashSet;
-        use std::sync::{Arc, Mutex};
-        use tokio::sync::Semaphore;
-        use tokio_util::sync::CancellationToken;
-
-        ToolExecutionContext {
-            workspace: project::wire_production_workspace(cwd)
-                .expect("workspace 初始化成功")
-                .into_views(),
-            run_id: "01900000-0000-7000-8000-000000000001".to_string(),
-            cancel: CancellationToken::new(),
-            read_files: Arc::new(Mutex::new(HashSet::new())),
-            resources: ToolResources {
-                agent_runner: None,
-                registry: None,
-                memory_config: share::config::MemoryConfig::default(),
-                memory_source: crate::domain::memory_source::test_memory_source(),
-                lang: "en".to_string(),
-                allow_all: false,
-            },
-            session_reminders: None,
-            plan_mode: None,
-            max_tool_concurrency: 4,
-            max_agent_concurrency: 4,
-            agent_semaphore: Arc::new(Semaphore::new(4)),
-            progress_tx: None,
-            parent_session_id: None,
-        }
+        crate::adapters::test_support_tests::production_execution_context(cwd)
     }
 
     /// 在 `path` 中执行 `git init`，建立最小 git 仓库。
@@ -446,9 +453,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = build_ctx(tmp.path().to_path_buf());
 
-        let before = ctx.workspace.persist().snapshot();
+        let before =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
 
-        let result = EnterWorktreeTool
+        let result = enter_tool(&ctx)
             .call(
                 serde_json::json!({ "path": tmp.path().display().to_string() }),
                 &ctx,
@@ -462,7 +470,8 @@ mod tests {
             result.data
         );
 
-        let after = ctx.workspace.persist().snapshot();
+        let after =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(before, after, "Enter 失败后 snapshot 必须完全不变");
     }
 
@@ -473,9 +482,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ctx = build_ctx(tmp.path().to_path_buf());
 
-        let before = ctx.workspace.persist().snapshot();
+        let before =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
 
-        let result = ExitWorktreeTool.call(serde_json::json!({}), &ctx).await;
+        let result = exit_tool(&ctx).call(serde_json::json!({}), &ctx).await;
 
         assert!(result.is_error, "NonGit Exit 必须返回 error");
         assert!(
@@ -484,7 +494,8 @@ mod tests {
             result.data
         );
 
-        let after = ctx.workspace.persist().snapshot();
+        let after =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(before, after, "Exit 失败后 snapshot 必须完全不变");
     }
 
@@ -495,9 +506,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         init_main_repo(tmp.path());
         let ctx = build_ctx(tmp.path().to_path_buf());
-        let before = ctx.workspace.persist().snapshot();
+        let before =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
 
-        let result = ExitWorktreeTool.call(serde_json::json!({}), &ctx).await;
+        let result = exit_tool(&ctx).call(serde_json::json!({}), &ctx).await;
 
         assert!(result.is_error, "Git primary 空栈 Exit 必须返回 error");
         assert!(result.data.is_none(), "失败时不应返回 data");
@@ -508,7 +520,7 @@ mod tests {
         );
         assert_eq!(
             before,
-            ctx.workspace.persist().snapshot(),
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot(),
             "EmptyStack 失败后 snapshot 必须完全不变"
         );
     }
@@ -524,9 +536,10 @@ mod tests {
 
         let ctx = build_ctx(repo_a.path().to_path_buf());
 
-        let before = ctx.workspace.persist().snapshot();
+        let before =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
 
-        let result = ExitWorktreeTool
+        let result = exit_tool(&ctx)
             .call(
                 serde_json::json!({
                     "path": repo_b.path().display().to_string(),
@@ -542,7 +555,8 @@ mod tests {
             result.data
         );
 
-        let after = ctx.workspace.persist().snapshot();
+        let after =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(before, after, "Switch 失败后 snapshot 必须完全不变");
     }
 
@@ -550,7 +564,7 @@ mod tests {
     //
     // 通过 `TypedTool::call()` 端到端验证真实 git 成功路径：
     //   1) EnterWorktree{branch}：用真实 `git worktree add` 创建 linked worktree，
-    //      断言 result data 字段与 mutation 后 `ctx.workspace.read()` 一致，
+    //      断言 result data 字段与 mutation 后 `ctx.workspace_read()` 一致，
     //      `WorkspacePersist::snapshot()` 的 `context_stack.len() == 1` 且 `worktree_kind == Linked`。
     //   2) ExitWorktree{}：弹出栈帧回到 primary，断言 data/read/snapshot 回到原根、
     //      stack 空、kind == Primary。
@@ -571,13 +585,14 @@ mod tests {
         let expected_wt = main_canonical.join(".worktrees").join("feature-x");
 
         // Pre-state：primary、空栈
-        let before = ctx.workspace.persist().snapshot();
+        let before =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(before.worktree_kind, WorktreeKind::Primary);
         assert!(before.context_stack.is_empty());
         assert_eq!(before.path_base, main_canonical.display().to_string());
         assert_eq!(before.workspace_root, main_canonical.display().to_string());
 
-        let result = EnterWorktreeTool
+        let result = enter_tool(&ctx)
             .call(serde_json::json!({ "branch": "feature-x" }), &ctx)
             .await;
 
@@ -585,7 +600,7 @@ mod tests {
         let data = result.data.expect("成功必须返回 data");
 
         // data.path_base / workspace_root / branch 与 mutation 后 read 一致
-        let read = ctx.workspace.read();
+        let read = ctx.workspace_read();
         assert_eq!(data.path_base, read.current_path_base());
         assert_eq!(data.workspace_root, read.current_workspace_root());
         let read_branch = read
@@ -600,7 +615,8 @@ mod tests {
         assert_eq!(data.branch, "feature-x");
 
         // snapshot：context_stack len=1、kind=Linked，path 指向 linked worktree
-        let snapshot = ctx.workspace.persist().snapshot();
+        let snapshot =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(
             snapshot.context_stack.len(),
             1,
@@ -641,7 +657,7 @@ mod tests {
         let main_canonical = tmp.path().canonicalize().unwrap();
 
         // 先 Enter 推 linked worktree
-        let enter = EnterWorktreeTool
+        let enter = enter_tool(&ctx)
             .call(serde_json::json!({ "branch": "to-exit" }), &ctx)
             .await;
         assert!(
@@ -651,7 +667,8 @@ mod tests {
         );
 
         // 中间状态：linked、栈长=1（后续 pop 的回归点）
-        let pre_exit = ctx.workspace.persist().snapshot();
+        let pre_exit =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(pre_exit.worktree_kind, WorktreeKind::Linked);
         assert_eq!(pre_exit.context_stack.len(), 1);
         let linked_root = main_canonical.join(".worktrees").join("to-exit");
@@ -659,13 +676,13 @@ mod tests {
         assert_eq!(pre_exit.workspace_root, linked_root.display().to_string());
 
         // Exit 空输入 pop 回 primary
-        let result = ExitWorktreeTool.call(serde_json::json!({}), &ctx).await;
+        let result = exit_tool(&ctx).call(serde_json::json!({}), &ctx).await;
 
         assert!(!result.is_error, "ExitWorktree 必须成功: {}", result.text);
         let data = result.data.expect("成功必须返回 data");
 
         // data.path_base / workspace_root / branch 与 read 一致且回到主根
-        let read = ctx.workspace.read();
+        let read = ctx.workspace_read();
         assert_eq!(data.path_base, read.current_path_base());
         assert_eq!(data.workspace_root, read.current_workspace_root());
         assert_eq!(data.path_base, main_canonical);
@@ -678,7 +695,8 @@ mod tests {
         assert_eq!(data.branch, "main");
 
         // snapshot 回原根、stack 空、kind=Primary
-        let snapshot = ctx.workspace.persist().snapshot();
+        let snapshot =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(snapshot.path_base, main_canonical.display().to_string());
         assert_eq!(
             snapshot.workspace_root,
@@ -710,7 +728,7 @@ mod tests {
         let other_canonical = other.canonicalize().unwrap();
 
         // 先 Enter 推 linked worktree（栈长=1）
-        let enter = EnterWorktreeTool
+        let enter = enter_tool(&ctx)
             .call(serde_json::json!({ "branch": "switch-test" }), &ctx)
             .await;
         assert!(
@@ -718,14 +736,18 @@ mod tests {
             "Enter 必须成功以建立 switch 场景: {}",
             enter.text
         );
-        let stack_after_enter = ctx.workspace.persist().snapshot().context_stack.len();
+        let stack_after_enter =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx)
+                .snapshot()
+                .context_stack
+                .len();
         assert_eq!(
             stack_after_enter, 1,
             "Enter 后栈长应=1（作为 switch 不压栈断言的基准）"
         );
 
         // ExitWorktree{path=other_subdir} 直接 switch 到 primary 子目录
-        let result = ExitWorktreeTool
+        let result = exit_tool(&ctx)
             .call(
                 serde_json::json!({ "path": other.display().to_string() }),
                 &ctx,
@@ -740,7 +762,7 @@ mod tests {
         let data = result.data.expect("成功必须返回 data");
 
         // data.path_base / workspace_root / branch 与 read 一致
-        let read = ctx.workspace.read();
+        let read = ctx.workspace_read();
         assert_eq!(data.path_base, read.current_path_base());
         assert_eq!(data.workspace_root, read.current_workspace_root());
         assert_eq!(data.path_base, other_canonical);
@@ -753,7 +775,8 @@ mod tests {
         assert_eq!(data.branch, "main");
 
         // 不压栈：栈长仍=1（Enter 推入的那一帧保留）
-        let snapshot = ctx.workspace.persist().snapshot();
+        let snapshot =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(
             snapshot.context_stack.len(),
             1,
@@ -792,12 +815,13 @@ mod tests {
         let ctx = build_ctx(tmp.path().to_path_buf());
 
         // 1) EnterWorktreeTool 创建 linked A（栈1）
-        let enter = EnterWorktreeTool
+        let enter = enter_tool(&ctx)
             .call(serde_json::json!({ "branch": "linked-a" }), &ctx)
             .await;
         assert!(!enter.is_error, "Enter linked-a 必须成功: {}", enter.text);
         let linked_a = main_canonical.join(".worktrees").join("linked-a");
-        let snapshot_after_enter = ctx.workspace.persist().snapshot();
+        let snapshot_after_enter =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(
             snapshot_after_enter.worktree_kind,
             WorktreeKind::Linked,
@@ -830,7 +854,7 @@ mod tests {
         let linked_b = main_canonical.join(".worktrees").join("linked-b");
 
         // 3) ExitWorktreeTool { path: linked B } switch
-        let result = ExitWorktreeTool
+        let result = exit_tool(&ctx)
             .call(
                 serde_json::json!({ "path": linked_b_raw.display().to_string() }),
                 &ctx,
@@ -845,7 +869,7 @@ mod tests {
         let data = result.data.expect("成功必须返回 data");
 
         // data.path_base / workspace_root / branch 与 read 一致且指向 B
-        let read = ctx.workspace.read();
+        let read = ctx.workspace_read();
         assert_eq!(data.path_base, read.current_path_base());
         assert_eq!(data.workspace_root, read.current_workspace_root());
         assert_eq!(data.path_base, linked_b);
@@ -858,7 +882,8 @@ mod tests {
         assert_eq!(data.branch, "linked-b");
 
         // snapshot 指向 B、kind=Linked
-        let snapshot = ctx.workspace.persist().snapshot();
+        let snapshot =
+            crate::adapters::test_support_tests::production_workspace_persist(&ctx).snapshot();
         assert_eq!(
             snapshot.path_base,
             linked_b.display().to_string(),

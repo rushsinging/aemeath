@@ -1,10 +1,6 @@
 use super::*;
-use crate::domain::{AgentRunRequest, AgentRunTerminal, AgentRunner, ToolResources};
-use std::collections::HashSet;
-use std::path::PathBuf;
+use crate::domain::{AgentRunRequest, AgentRunTerminal, AgentRunner};
 use std::sync::{Arc, Mutex};
-use tokio::sync::Semaphore;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct StubRunner {
@@ -19,42 +15,27 @@ impl AgentRunner for StubRunner {
     async fn run_agent(&self, request: AgentRunRequest<'_>) -> AgentRunTerminal {
         *self.captured_timeout.lock().unwrap() = request.timeout;
         *self.captured_system.lock().unwrap() = request.system.to_string();
-        *self.captured_parent_run_id.lock().unwrap() = Some(request.ctx.run_id.clone());
+        *self.captured_parent_run_id.lock().unwrap() = Some(request.identity.run_id().to_string());
         *self.run_count.lock().unwrap() += 1;
         AgentRunTerminal::Completed {
             result: request.prompt.to_string(),
         }
     }
 
-    async fn complete(&self, prompt: &str, _system: &str, _ctx: &ToolExecutionContext) -> String {
+    async fn complete(
+        &self,
+        prompt: &str,
+        _system: &str,
+        _cancellation: Arc<dyn crate::domain::CancellationSignal>,
+    ) -> String {
         prompt.to_string()
     }
 }
 
 fn test_ctx_with_runner(runner: Arc<dyn AgentRunner>) -> ToolExecutionContext {
-    ToolExecutionContext {
-        workspace: project::wire_production_workspace(PathBuf::from("."))
-            .expect("workspace 初始化成功")
-            .into_views(),
-        run_id: "01900000-0000-7000-8000-000000000001".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: Some(runner),
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: false,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    }
+    crate::domain::test_support::TestToolExecutionContextBuilder::new(std::path::PathBuf::from("."))
+        .agent(runner)
+        .build()
 }
 
 fn test_ctx() -> ToolExecutionContext {
@@ -144,7 +125,7 @@ async fn test_agent_tool_passes_parent_run_id_to_sub_agent_request() {
     assert!(!result.is_error);
     assert_eq!(
         runner.captured_parent_run_id.lock().unwrap().as_ref(),
-        Some(&ctx.run_id)
+        Some(&ctx.scope().run_id().to_string())
     );
 }
 
@@ -168,8 +149,8 @@ async fn test_agent_tool_runs_without_task_id() {
     assert_eq!(*runner.run_count.lock().unwrap(), 1);
 }
 
-/// 回归：子 agent 的 workspace 必须从父快照派生为独立实例（继承位置、空栈、独立 Arc/锁），
-/// 子的 worktree 进出不得影响父（修隔离 bug）。
+/// Regression: a sub-agent workspace is an isolated derivative of the parent:
+/// it inherits the current location but subsequent child mutations cannot affect the parent.
 #[test]
 fn sub_agent_workspace_isolated() {
     use project::WorkspaceError;
@@ -178,7 +159,7 @@ fn sub_agent_workspace_isolated() {
     let child_dir = main_dir.path().join("child");
     std::fs::create_dir_all(&child_dir).unwrap();
     let parent = project::wire_production_workspace(main_dir.path().to_path_buf())
-        .expect("workspace 初始化成功")
+        .expect("workspace initialization")
         .into_views();
     parent
         .control()
@@ -241,7 +222,7 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
             &self,
             _prompt: &str,
             _system: &str,
-            _ctx: &ToolExecutionContext,
+            _cancellation: Arc<dyn crate::domain::CancellationSignal>,
         ) -> String {
             String::new()
         }

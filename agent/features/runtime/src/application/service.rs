@@ -53,20 +53,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use storage::TaskStore;
-    use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
-
-    fn test_memory_source() -> Arc<dyn tools::MemoryPortSource> {
-        struct TestSource;
-        impl tools::MemoryPortSource for TestSource {
-            fn current(&self) -> Arc<dyn memory::MemoryPort> {
-                Arc::new(
-                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
-                        .expect("valid default policy"),
-                )
-            }
-        }
-        Arc::new(TestSource)
-    }
+    use tools::{AgentRunRequest, AgentRunner, ToolRegistry};
 
     #[derive(Default)]
     struct RecordingRuntimePort {
@@ -88,7 +75,7 @@ mod tests {
             &self,
             _prompt: &str,
             _system: &str,
-            _ctx: &ToolExecutionContext,
+            _cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
         ) -> String {
             String::new()
         }
@@ -124,7 +111,6 @@ mod tests {
             markdown: true,
             context_size: 200_000,
             resume: None,
-            allow_all: false,
             max_tool_concurrency: 10,
         }
     }
@@ -143,9 +129,9 @@ mod tests {
     fn valid_tui_launch() -> TuiChatLaunch {
         TuiChatLaunch {
             options: base_options(),
-            max_agent_concurrency: 4,
             session_id: "session-1".to_string(),
             model_display: "provider/model".to_string(),
+            max_agent_concurrency: 4,
         }
     }
     fn invalid_tui_launch() -> TuiChatLaunch {
@@ -163,6 +149,7 @@ mod tests {
                 system_prompt_text: String::new(),
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
+                policy: Arc::new(policy::AllowAllPolicy),
                 tool_result_materializer:
                     crate::application::testing::test_tool_result_materializer(),
                 task_store: Arc::new(TaskStore::new()),
@@ -170,9 +157,9 @@ mod tests {
                 skills_map: HashMap::new(),
                 hook_runner: HookRunner::empty(),
                 memory_config: MemoryConfig::default(),
-                memory_source: test_memory_source(),
+                memory: std::sync::Arc::new(memory::NoOpMemory),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-                allow_all: false,
+                allow_all: true,
                 context_size: 200_000,
                 language: "en".to_string(),
             },

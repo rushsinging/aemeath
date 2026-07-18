@@ -29,9 +29,11 @@ WORKFLOW_HEX_LAYERS = {"domain"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
 MEMORY_HEX_LAYERS = {"domain", "ports", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
-POLICY_HEX_LAYERS = set()
-POLICY_ALLOWED_TOP_LEVEL_FILES = {"lib.rs"}
+POLICY_HEX_LAYERS = {"domain", "adapters"}
+POLICY_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 POLICY_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
+POLICY_PRODUCTION_ADAPTER = root / "agent/features/policy/src/adapters.rs"
+POLICY_FORBIDDEN_ADAPTER_TYPES = re.compile(r"\b(?:struct|enum)\s+(?:Deny|Approval|RequireApproval)\w*Policy\b")
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
 STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
 STORAGE_LEGACY_LAYERS = {"api", "business", "contract", "gateway"}
@@ -44,6 +46,9 @@ TOOLS_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
 AUDIT_HEX_LAYERS = {"domain", "application", "ports", "adapters"}
 AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "application.rs", "ports.rs", "adapters.rs"}
 AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
+HOOK_HEX_LAYERS = {"domain", "ports", "adapters"}
+HOOK_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs", "adapters.rs"}
+HOOK_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
 FORBIDDEN_LAYER_DEPS = {
@@ -205,6 +210,8 @@ def feature_layer_for(path: Path) -> tuple[str, str] | None:
             return parts[0], normalized_layer
         if parts[0] == "audit" and normalized_layer in AUDIT_HEX_LAYERS:
             return parts[0], normalized_layer
+        if parts[0] == "hook" and normalized_layer in HOOK_HEX_LAYERS:
+            return parts[0], normalized_layer
         if parts[0] == "storage":
             return None
         if parts[2] in FEATURE_LAYERS:
@@ -299,6 +306,10 @@ run_sanity()
 violations: list[str] = []
 seen_exceptions: set[tuple[str, str]] = set()
 seen_runtime_exceptions: set[tuple[str, str]] = set()
+if POLICY_PRODUCTION_ADAPTER.is_file():
+    policy_adapter = strip_rust_comments(POLICY_PRODUCTION_ADAPTER.read_text())
+    if POLICY_FORBIDDEN_ADAPTER_TYPES.search(policy_adapter):
+        violations.append("agent/features/policy/src/adapters.rs: v0.1.0 production adapter must be AllowAll-only")
 for old_path in RUNTIME_PROVIDER_TOOLS_OLD_PATHS:
     if old_path.exists():
         violations.append(f"{old_path.relative_to(root)}: runtime/provider/tools must live under agent/features/*")
@@ -379,6 +390,20 @@ for feature_src in sorted(features_root.glob("*/src")):
             elif child.is_file() and child.name not in AUDIT_ALLOWED_TOP_LEVEL_FILES:
                 violations.append(
                     f"{child.relative_to(root)}: Audit top-level source files must be {sorted(AUDIT_ALLOWED_TOP_LEVEL_FILES)}"
+                )
+            continue
+        if crate_name == "hook":
+            if child.stem in HOOK_LEGACY_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Hook legacy fixed layer is forbidden; use {sorted(HOOK_HEX_LAYERS)}"
+                )
+            elif child.is_dir() and child.name not in HOOK_HEX_LAYERS:
+                violations.append(
+                    f"{child.relative_to(root)}: Hook source directories must be {sorted(HOOK_HEX_LAYERS)}"
+                )
+            elif child.is_file() and child.name not in HOOK_ALLOWED_TOP_LEVEL_FILES:
+                violations.append(
+                    f"{child.relative_to(root)}: Hook top-level source files must be {sorted(HOOK_ALLOWED_TOP_LEVEL_FILES)}"
                 )
             continue
         if crate_name == "tools":

@@ -1,43 +1,25 @@
 use super::bash_result::{exit_status_description, preview, signal_name, PREVIEW_MAX};
 use super::*;
-use crate::domain::ToolResources;
+
+fn bash_tool(ctx: &ToolExecutionContext) -> BashTool {
+    BashTool {
+        control: crate::domain::test_support::workspace_control(ctx),
+    }
+}
 use crate::domain::{AgentProgressEvent, AgentProgressKind};
 use serde_json::json;
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
-use tokio::sync::Semaphore;
-use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn bash_allow_all_does_not_bypass_shell_injection_guard() {
     let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws,
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool
+    let result = bash_tool(&ctx)
         .call(json!({ "command": "echo $(rm -rf /tmp/never-run)" }), &ctx)
         .await;
 
@@ -50,32 +32,13 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
     let workspace = tempdir().unwrap();
     let worktree = workspace.path().join(".worktrees/bug35");
     std::fs::create_dir_all(&worktree).unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool
+    let result = bash_tool(&ctx)
         .call(
             json!({ "command": format!("cd {}", worktree.display()) }),
             &ctx,
@@ -84,12 +47,12 @@ async fn test_bash_persists_cd_for_subsequent_write_path_base() {
 
     assert!(!result.is_error);
     assert_eq!(
-        ws.read().current_path_base(),
+        ctx.workspace_read().current_path_base(),
         worktree.canonicalize().unwrap()
     );
     // workspace_root 应该保持为原来的 git 仓库根目录，不会因为 cd 到非 git 目录而改变
     assert_eq!(
-        ws.read().current_workspace_root(),
+        ctx.workspace_read().current_workspace_root(),
         workspace.path().canonicalize().unwrap()
     );
 }
@@ -99,32 +62,13 @@ async fn test_bash_display_field_contains_stdout_not_message() {
     // 回归：Bash result 的 output 应包含 stdout（通过 display 字段），
     // 而非 "Command executed successfully" 元信息。
     let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool
+    let result = bash_tool(&ctx)
         .call(json!({ "command": "echo hello_world_12345" }), &ctx)
         .await;
 
@@ -157,32 +101,13 @@ async fn test_bash_result_cwd_reflects_cd() {
     let workspace = tempdir().unwrap();
     let subdir = workspace.path().join("subdir");
     std::fs::create_dir_all(&subdir).unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool
+    let result = bash_tool(&ctx)
         .call(
             json!({ "command": format!("cd {}", subdir.display()) }),
             &ctx,
@@ -201,32 +126,15 @@ async fn test_bash_result_cwd_reflects_cd() {
 async fn test_bash_result_cwd_on_failed_command() {
     // AC6: 命令失败（非零 exit code）时 result 也带 cwd
     let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool.call(json!({ "command": "false" }), &ctx).await;
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "false" }), &ctx)
+        .await;
 
     assert!(result.is_error);
     assert!(
@@ -240,32 +148,15 @@ async fn test_bash_result_cwd_on_failed_command() {
 async fn test_bash_result_cwd_on_empty_output() {
     // AC5: stdout + stderr 均为空时的 "Command executed successfully" 也带 cwd
     let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool.call(json!({ "command": "true" }), &ctx).await;
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "true" }), &ctx)
+        .await;
 
     assert!(!result.is_error);
     assert!(
@@ -284,34 +175,23 @@ async fn test_bash_result_cwd_on_empty_output() {
 async fn test_bash_streams_stdout_via_progress_tx() {
     use tokio::sync::mpsc;
 
-    let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: Some(tx),
-        parent_session_id: None,
-    };
+    struct ChannelProgressSink(mpsc::Sender<AgentProgressEvent>);
+    impl crate::domain::ProgressSink for ChannelProgressSink {
+        fn emit(&self, event: AgentProgressEvent) {
+            let _ = self.0.try_send(event);
+        }
+    }
 
-    let result = BashTool
+    let workspace = tempdir().unwrap();
+    let (tx, mut rx) = mpsc::channel::<AgentProgressEvent>(256);
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .progress_sink(std::sync::Arc::new(ChannelProgressSink(tx)))
+    .build();
+
+    let result = bash_tool(&ctx)
         .call(
             json!({ "command": "echo progress_stream_test_marker" }),
             &ctx,
@@ -378,32 +258,13 @@ async fn test_bash_streams_stdout_via_progress_tx() {
 #[tokio::test]
 async fn test_bash_no_progress_tx_still_works() {
     let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool
+    let result = bash_tool(&ctx)
         .call(json!({ "command": "echo no_channel_test_98765" }), &ctx)
         .await;
 
@@ -527,32 +388,13 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
     // 回归 #286：被信号杀死的命令不应只报 "exit code -1"，
     // 而应包含 signal 信息。
     let workspace = tempdir().unwrap();
-    let ws = project::wire_production_workspace(workspace.path().to_path_buf())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let ctx = ToolExecutionContext {
-        workspace: ws.clone(),
-        run_id: "test-run".to_string(),
-        cancel: CancellationToken::new(),
-        read_files: Arc::new(Mutex::new(HashSet::new())),
-        resources: ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory_config: share::config::MemoryConfig::default(),
-            memory_source: crate::domain::memory_source::test_memory_source(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 4,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
 
-    let result = BashTool
+    let result = bash_tool(&ctx)
         .call(json!({ "command": "kill -9 $$" }), &ctx)
         .await;
 

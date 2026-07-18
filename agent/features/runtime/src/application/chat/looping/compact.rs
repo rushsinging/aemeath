@@ -64,8 +64,8 @@ pub(crate) async fn auto_compact<S>(
     system_prompt_text: &str,
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
-    memory: &dyn memory::MemoryPort,
-    _cwd: &std::path::Path,
+    memory: &dyn memory::api::MemoryPort,
+    reflection: &dyn memory::api::ReflectionPromptPort,
     llm_client: &Arc<provider::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
@@ -128,10 +128,11 @@ where
     if let Some(text) = crate::application::chat::looping::reflection::run_precompact_reflection(
         memory_config,
         messages,
-        memory,
         llm_client.as_ref(),
         system_prompt_text,
         language,
+        memory,
+        reflection,
     )
     .await
     {
@@ -254,8 +255,8 @@ pub(crate) async fn manual_compact<S>(
     system_prompt_text: &str,
     context_size: usize,
     memory_config: &share::config::MemoryConfig,
-    memory: &dyn memory::MemoryPort,
-    _cwd: &std::path::Path,
+    memory: &dyn memory::api::MemoryPort,
+    reflection: &dyn memory::api::ReflectionPromptPort,
     llm_client: &Arc<provider::LlmClient>,
     language: &str,
     workspace_root: &std::path::Path,
@@ -322,10 +323,11 @@ where
     if let Some(text) = crate::application::chat::looping::reflection::run_precompact_reflection(
         memory_config,
         messages,
-        memory,
         llm_client.as_ref(),
         system_prompt_text,
         language,
+        memory,
+        reflection,
     )
     .await
     {

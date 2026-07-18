@@ -29,7 +29,7 @@ pub(crate) async fn build_llm_client_for_switch(
 
     let driver = resolved_model.driver.as_str();
 
-    let api_key = resolve_api_key(None, &resolved_model, None).ok_or_else(|| {
+    let api_key = resolve_api_key(&resolved_model).ok_or_else(|| {
         format!(
             "API key 未设置。请为 {} 配置 api_key，或设置对应环境变量。",
             resolved_model.source_key

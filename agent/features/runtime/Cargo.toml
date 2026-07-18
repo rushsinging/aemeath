@@ -9,13 +9,13 @@ config = { path = "../config" }
 provider = { path = "../provider" }
 tools = { path = "../tools" }
 project = { path = "../project" }
+memory = { path = "../memory" }
 policy = { path = "../policy" }
 context = { path = "../context" }
 storage = { path = "../storage" }
 task = { path = "../task" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
-memory = { path = "../memory" }
 workflow = { path = "../workflow" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

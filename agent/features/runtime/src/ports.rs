@@ -10,7 +10,7 @@
 //! - ProviderPort -> provider BC (#901) ✅ PL 已冻结
 //! - ToolCatalogPort / ToolExecutionPort -> tools BC (#908)
 //! - PolicyPort -> policy BC (#917)
-//! - MemoryPort -> memory BC (#895) ✅ 已迁移，Runtime 直接消费 memory crate
+//! - MemoryPort -> memory BC (#897) ✅ Port 由 memory crate 提供，runtime 通过 `memory::api::MemoryPort` 消费
 //! - TaskPort -> task BC (#885)
 //! - WorkspacePort -> project BC (#892)
 //! - HookPort -> hook BC (#922)
@@ -42,7 +42,10 @@ pub use event_sink::EventSink;
 pub use hook_port::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use input_buffer::InputBuffer;
 pub(crate) use input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
-pub use policy_port::{PolicyDecision, PolicyPort, PolicyRequest};
+pub use policy_port::{
+    ApprovalSubject, PolicyDecision, PolicyMode, PolicyPort, PolicyReason, PolicyRequest,
+    PolicyRequestError,
+};
 pub use provider_port::{
     InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, InvocationStream,
     ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,

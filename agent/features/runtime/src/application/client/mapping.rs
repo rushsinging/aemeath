@@ -5,7 +5,7 @@ use sdk::{
 };
 
 use context::skill::Skill;
-use share::memory::{MemoryCategory, MemoryLayer};
+use memory::api::{MemoryCategory, MemoryLayer};
 
 pub(crate) fn config_snapshot_to_sdk(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
@@ -66,7 +66,7 @@ pub(crate) fn skill_to_sdk(skill: Skill) -> SkillView {
 }
 
 pub(crate) fn reflection_output_to_sdk_with_content(
-    output: crate::application::reflection::ReflectionOutput,
+    output: memory::api::ReflectionOutput,
     content: String,
     input_tokens: u32,
     output_tokens: u32,

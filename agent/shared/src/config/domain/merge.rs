@@ -129,6 +129,10 @@ pub struct ModelsConfigPatch {
     #[serde(default)]
     pub providers: Option<HashMap<String, ProviderModelsConfig>>,
     #[serde(default)]
+    pub provider_api_keys: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub fallback_api_key: Option<String>,
+    #[serde(default)]
     pub guidance: Option<HashMap<String, String>>,
 }
 
@@ -419,6 +423,22 @@ pub(crate) fn apply_models_patch(mut base: ModelsConfig, patch: ModelsConfigPatc
     if let Some(providers) = patch.providers {
         for (k, v) in providers {
             base.providers.insert(k, v);
+        }
+    }
+    if let Some(key) = patch.fallback_api_key {
+        for provider in base.providers.values_mut() {
+            provider.api_key = key.clone();
+        }
+    }
+    if let Some(keys) = patch.provider_api_keys {
+        for (driver, key) in keys {
+            for provider in base
+                .providers
+                .values_mut()
+                .filter(|provider| provider.driver.eq_ignore_ascii_case(&driver))
+            {
+                provider.api_key = key.clone();
+            }
         }
     }
     if let Some(guidance) = patch.guidance {

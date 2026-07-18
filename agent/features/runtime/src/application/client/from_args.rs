@@ -5,12 +5,11 @@ use sdk::SdkError;
 
 use crate::adapters::runtime::LlmClientAdapter;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
+use crate::application::startup::ChatBootstrapArgs;
 use crate::application::startup::{
-    self as bootstrap, apply_config_permission_mode, build_agent_runner, build_hook_runner,
-    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
-    spawn_mcp_connect,
+    self as bootstrap, build_agent_runner, build_hook_runner, resolve_api_key, resolve_base_url,
+    resolve_concurrency_limits, resolve_model_runtime_settings, spawn_mcp_connect,
 };
-use crate::application::startup::{set_session_id, ChatBootstrapArgs};
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
@@ -122,7 +121,7 @@ impl RuntimeBootstrapDependencies {
 /// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
 /// Task BC 的 backing 或持久化封套（跨域越权，#890）。
 pub async fn from_args_with_workspace(
-    mut args: ChatBootstrapArgs,
+    args: ChatBootstrapArgs,
     dependencies: RuntimeBootstrapDependencies,
 ) -> Result<AgentClientImpl, SdkError> {
     let RuntimeBootstrapDependencies {
@@ -194,7 +193,8 @@ pub async fn from_args_with_workspace(
         log::info!(target: LOG_TARGET, "session started");
         session_id
     };
-    set_session_id(session_id.clone());
+    // Session id determined above; committed_config read below reflects
+    // the target project after any cross-project resume.
 
     // 4. Read committed config AFTER any startup resume so the snapshot
     //    reflects the target project. For non-resume this is identical to
@@ -203,17 +203,14 @@ pub async fn from_args_with_workspace(
 
     // 5. 日志已由 Composition 在进入 Runtime 前初始化。
 
-    // 6. 权限模式
-    apply_config_permission_mode(&mut args, snapshot.allow_all());
-
-    // 7. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
+    // 6. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
     let runtime_model = snapshot
         .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
         .map_err(|e| SdkError::Init(e.to_string()))?;
     let resolved_model = runtime_model.resolved_model().clone();
     let driver = resolved_model.driver.as_str();
     // 8. API key
-    let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
+    let api_key = resolve_api_key(&resolved_model).ok_or_else(|| {
         SdkError::Init(
             "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
         )
@@ -283,6 +280,7 @@ pub async fn from_args_with_workspace(
             task_access.clone(),
             skills.clone(),
             memory_source.clone(),
+            workspace.control(),
         );
         Arc::new(reg)
     };
@@ -317,6 +315,26 @@ pub async fn from_args_with_workspace(
 
     // 14. Agent runner 与 Main/Sub 共享同一个 per-Run registry 和 materializer。
     let active_run = Arc::new(crate::application::active_run::ActiveRunRegistry::default());
+
+    // 15. Concurrency limits — must resolve before building agent runner.
+    let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
+        args.max_tool_concurrency,
+        args.max_agent_concurrency,
+        &snapshot,
+    );
+    let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
+    log::info!(target: LOG_TARGET,
+        "concurrency limits: max_tool={}, max_agent={}",
+        max_tool_concurrency,
+        max_agent_concurrency
+    );
+
+    // 16. Policy port — derived from snapshot.allow_all().
+    let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+
+    // 17. Memory port — gate-aware, from wiring.
+    let memory: Arc<dyn memory::api::MemoryPort> = wiring.committed_memory();
+
     let agent_runner = build_agent_runner(
         Some(snapshot.models()),
         Some(snapshot.agents()),
@@ -325,10 +343,14 @@ pub async fn from_args_with_workspace(
         runtime_settings.reasoning,
         snapshot.api_timeout_secs(),
         active_run.clone(),
+        policy.clone(),
+        max_tool_concurrency,
+        agent_semaphore.clone(),
         tool_result_materializer.clone(),
+        workspace.clone(),
     );
 
-    // 15. Prompt bundle
+    // 18. Prompt bundle
     let client_adapter = LlmClientAdapter::new(client.clone());
     let prompt_context = PromptContext::new(
         &cwd,
@@ -358,24 +380,11 @@ pub async fn from_args_with_workspace(
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    // 16. Concurrency
-    let (max_tool_concurrency, max_agent_concurrency) = resolve_concurrency_limits(
-        args.max_tool_concurrency,
-        args.max_agent_concurrency,
-        &snapshot,
-    );
-    let agent_semaphore = Arc::new(tokio::sync::Semaphore::new(max_agent_concurrency));
-    log::info!(target: LOG_TARGET,
-        "concurrency limits: max_tool={}, max_agent={}",
-        max_tool_concurrency,
-        max_agent_concurrency
-    );
-
-    // 17. context_size / verbose 合并
+    // 19. context_size / verbose 合并
     let context_size =
         snapshot.resolve_context_size(Some(args.context_size), resolved_model.model.context_window);
 
-    // 18. 组装 context
+    // 20. 组装 context
     let memory_config = snapshot.memory().clone();
     let context = ChatRuntimeContext {
         resources: crate::application::resources::RuntimeResources {
@@ -393,6 +402,8 @@ pub async fn from_args_with_workspace(
             memory_config,
             memory_source,
             agent_semaphore,
+            memory,
+            policy,
             allow_all: args.allow_all,
             context_size,
             language: snapshot.language().to_string(),
@@ -401,7 +412,7 @@ pub async fn from_args_with_workspace(
         resume: args.resume,
     };
 
-    // 19. 构建 handle
+    // 21. 构建 handle
     let current_client = context.resources.client.clone();
     let handle = RuntimeHandle {
         context,
@@ -589,28 +600,29 @@ mod tests {
     /// config snapshot is read, so the snapshot reflects the target project
     /// after a cross-project resume.
     ///
-    /// The ordering invariant: `set_session_id` (post-resume) must appear
-    /// textually before `committed_config()` in `from_args_with_workspace`.
+    /// The ordering invariant: `resume_session_to_backing` (the resume block)
+    /// must appear textually before `committed_config()` in
+    /// `from_args_with_workspace`.
     #[test]
     fn startup_resume_precedes_committed_config_read() {
         let source = include_str!("from_args.rs");
         let resume_pos = source
             .find("startup resume")
             .expect("source should contain 'startup resume'");
-        let session_id_pos = source
-            .find("set_session_id(session_id.clone())")
-            .expect("source should contain set_session_id");
+        let resume_call_pos = source
+            .find("resume_session_to_backing")
+            .expect("source should contain resume_session_to_backing");
         let snapshot_pos = source
             .rfind("let snapshot = wiring.committed_config()")
             .expect("source should contain committed_config read");
 
         assert!(
-            resume_pos < session_id_pos,
-            "startup resume block should precede set_session_id"
+            resume_pos < resume_call_pos,
+            "startup resume comment should precede resume_session_to_backing call"
         );
         assert!(
-            session_id_pos < snapshot_pos,
-            "set_session_id (post-resume) should precede the committed_config snapshot read — \
+            resume_call_pos < snapshot_pos,
+            "resume_session_to_backing (post-resume) should precede the committed_config snapshot read — \
            H3: snapshot must be determined after startup resume so model/API key/MemoryConfig \
            come from the target project"
         );

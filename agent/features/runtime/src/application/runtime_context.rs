@@ -16,7 +16,7 @@ use crate::ports::{
     ContextPort, EventSink, HookPort, InputBuffer, PolicyPort, ProviderPort, TaskPort,
     ToolCatalogPort, ToolExecutionPort, UsageSink, WorkspacePort,
 };
-use memory::MemoryPort;
+use memory::api::MemoryPort;
 use workflow::api::ReasoningPort;
 
 /// per-Run 协作式取消作用域；属于 RuntimeContext 活资源，不持久化。

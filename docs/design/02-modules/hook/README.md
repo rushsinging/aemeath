@@ -220,8 +220,10 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 
 - Hook command 是用户配置 shell，必须明确 workspace_root 和环境变量白名单；
 - stdin 使用结构化 JSON；
-- stdout/stderr 应有大小上限，超限内容交 Storage 机制处理，不直接塞入模型窗口；
-- timeout 必须 kill + wait 回收子进程；
+- stdout/stderr 分别有内存字节上限；达到上限后继续 drain 管道以避免反压死锁，超限部分不进入模型窗口；Storage spill 由独立后续能力承接；
+- timeout/cancel/IO 故障使用同一完整 deadline 与回收路径；
+- Unix 下每次执行创建独立进程组，回收协议固定为进程组 `TERM → grace → KILL`，返回前必须 `wait` 直接子进程；
+- 不支持进程组语义的平台必须显式返回 ExecutionFailed，**NEVER** 用仅杀直接 child 伪造完成；
 - Hook 输出的 updated input 必须由调用方重新执行 schema/Policy 校验；
 - Hook BC 不决定 updated input 是否进入 Tool 或 Context Window。
 
@@ -258,25 +260,25 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 
 ## 12. Target 物理目录
 
-Hook 采用 Hexagonal + Clean 组织（`domain + adapters`）。单一 Hook dispatch 能力的匹配、重试、directive 语义和类型化协议围绕同一 `HookPort.dispatch` 用例紧密变化，收在 `domain/`；进程执行（spawn/wait/timeout/kill）和类型化协议（HookInvocation 枚举与各 point payload）是技术 detail，终止在 `adapters/`：
+Hook 采用 Hexagonal + Clean 组织（`domain + ports + adapters`）。单一 Hook dispatch 能力的稳定 Published Language、能力矩阵和 directive 分类语义收在 `domain/`；`HookPort` 位于 `ports.rs`，只依赖 domain；进程执行（spawn/wait/timeout/kill）与兼容旧协议的 wire 映射是技术 detail，终止在 `adapters/`：
 
 ```text
 src/
-├── lib.rs                 # 窄 façade：HookPort trait + dispatch 入口 + composition-only wiring
-├── domain.rs              # 领域策略入口
+├── lib.rs                 # 窄 façade：稳定 PL + HookPort；迁移期保留私有 api 兼容模块
+├── domain.rs              # 领域 Published Language 与纯策略入口
 ├── domain/
-│   ├── dispatch.rs         #   订阅匹配、order 排序、Block 短路、context 合并、UpdatedInput 串联
+│   ├── invocation.rs       #   HookInvocation 枚举 + 各 point typed payload
+│   ├── outcome.rs          #   HookOutcome / HookDirective / HookExecution
 │   ├── metadata.rs         #   HookPointMetadata / HookClass / 能力矩阵
-│   └── subscription.rs     #   HookSubscription / HookMatcher / HookFailurePolicy
-├── ports.rs               # 对外端口定义（HookPort trait 签名）
+│   └── protocol.rs         #   exit/stdout → directive 的纯分类规则
+├── ports.rs               # HookPort trait 签名，仅依赖 domain
+├── adapters.rs            # 技术实现入口
 └── adapters/
-    ├── protocol.rs         #   HookInvocation 枚举 + HookOutcome / HookDirective / HookExecution
-    ├── protocol/           #   仅在各 point typed payload 已独立变化时展开
-    ├── executor.rs         #   单 Hook 子进程执行：spawn/wait/timeout/kill 回收
-    └── executor/           #   仅在 env_clear / stdout·stderr 截断 / 回收已独立变化时展开
+    ├── process.rs          # 受管进程组、完整 deadline、有界并发 IO、TERM/KILL/wait
+    └── legacy/             # #926 前保留的 HookRunner / wire compatibility
 ```
 
-`domain/` 承载 dispatch 的匹配、排序、directive 聚合与失败策略语义。`adapters/protocol/` 是类型化协议的技术实现：HookInvocation 变体与各 point input payload 的 wire 映射；`adapters/executor/` 是进程执行的技术实现：子进程 spawn、timeout kill 回收、env_clear 白名单与输出截断。两者 **MUST** 私有，hook wire type 和进程安全 detail **NEVER** 泄漏到 façade 之外。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录。
+`domain/` 承载 Hook 对外稳定语言、能力矩阵和无 I/O 的协议分类规则；这些类型被 `HookPort` 签名直接使用，因而 **NEVER** 放入 adapters 形成 `ports → adapters` 反向依赖。`adapters/` 承载子进程 spawn、timeout/cancel、kill+wait、环境白名单、输出截断和外部 wire 映射；技术类型与具体 runner **NEVER** 成为最终 façade 的稳定 Published Language。#987 只迁移目录时，旧 `HookRunner` 及 `hook::api` 消费面可在 adapters 内作为迁移兼容面保留，必须由 #926 删除。单文件即可讲清时 **MUST** 保持为 `.rs` 文件而非空壳目录。
 
 ## 13. 相关文档
 
@@ -292,3 +294,5 @@ src/
 |---|---|---|
 | 2026-07-12 | 初稿：单 HookPort、类型化协议、失败策略与 3 次执行重试 | #790 |
 | 2026-07-16 | 冻结 Hook Target 物理目录：扁平核心 + `protocol/`（类型化协议）与 `executor/`（进程执行）技术目录；明确不建 `capabilities/`（单一 dispatch 能力无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
+| 2026-07-18 | 修正 Target 层级方向：HookPort 使用的稳定 PL 归 `domain`，进程与兼容 wire detail 归 `adapters`，避免 `ports → adapters` 反向依赖 | [#987](https://github.com/rushsinging/aemeath/issues/987) |
+| 2026-07-18 | 落地 Unix 受管 ProcessDriver：独立进程组、完整 deadline、有界并发 IO 与 `TERM → KILL → wait` 回收；retry 仍由 #924 承接 | [#923](https://github.com/rushsinging/aemeath/issues/923) |

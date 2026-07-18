@@ -34,13 +34,22 @@ pub struct RuntimeResources {
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Memory domain port（#897 MemoryPort）。Startup 快照，取自
+    /// `wiring.committed_memory()`。#871 动态语义由 `memory_source` 提供
+    /// （运行时 resolve），此字段仅供非 tool 链路快取。
+    pub memory: Arc<dyn memory::MemoryPort>,
+    /// #918 PolicyPort — 当前 AllowAllPolicy；后续可接入 permission gate。
+    pub policy: Arc<dyn policy::PolicyPort>,
 
     // ── 配置（值类型，session 期间不变）──
     pub system_blocks: Vec<SystemBlock>,
     pub system_prompt_text: String,
     pub user_context: String,
     pub memory_config: MemoryConfig,
-    /// MemoryPortSource（MemoryTool 使用）。从 wiring.committed_memory() 取值。
+    /// #871 dynamic memory source — delegates to `wiring.committed_memory()`
+    /// at execution time so resume swaps are transparent to already-registered
+    /// tools. `memory` above is the startup snapshot; this source is the
+    /// runtime-resolved port used by `MemoryTool` via `register_subagent_tools`.
     pub memory_source: Arc<dyn MemoryPortSource>,
     pub skills_map: HashMap<String, Skill>,
     pub context_size: usize,

@@ -1,7 +1,20 @@
 use crate::*;
 use async_trait::async_trait;
-use std::sync::RwLock;
+use std::{
+    sync::{Arc, RwLock},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::sync::Mutex;
+
+/// Injectable source of Unix time used when Reflection creates memories.
+pub type MemoryClock = Arc<dyn Fn() -> u64 + Send + Sync>;
+
+pub(crate) fn system_time_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
 
 /// One layer's committed dataset together with the Storage revision it was read
 /// or committed at. Each layer advances its own revision independently.
@@ -26,10 +39,19 @@ pub struct MemoryService<S: MemoryDatasetStore> {
     policy: MemoryPolicy,
     state: RwLock<CommittedState<S::Revision>>,
     mutation_gate: Mutex<()>,
+    clock: MemoryClock,
 }
 
 impl<S: MemoryDatasetStore> MemoryService<S> {
     pub async fn open(store: S, policy: MemoryPolicy) -> Result<Self, MemoryError> {
+        Self::open_with_clock(store, policy, system_time_seconds).await
+    }
+
+    pub async fn open_with_clock(
+        store: S,
+        policy: MemoryPolicy,
+        clock: impl Fn() -> u64 + Send + Sync + 'static,
+    ) -> Result<Self, MemoryError> {
         validate_policy(policy)?;
         let global = load_layer(&store, MemoryLayer::Global).await?;
         let project = load_layer(&store, MemoryLayer::Project).await?;
@@ -38,6 +60,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             policy,
             state: RwLock::new(CommittedState { global, project }),
             mutation_gate: Mutex::new(()),
+            clock: Arc::new(clock),
         })
     }
 
@@ -316,9 +339,45 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
 
     async fn apply_reflection(
         &self,
-        _output: &ReflectionOutput,
+        output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
-        Ok(ReflectionApplyResult::default())
+        let mut result = ReflectionApplyResult::default();
+        for suggestion in &output.suggested_memories {
+            let now = (self.clock)();
+            let id = reflection_memory_id(now)?;
+            let mut entry = MemoryEntry::new(
+                id,
+                now,
+                suggestion.layer,
+                suggestion.category,
+                suggestion.content.clone(),
+                MemorySource::Llm,
+            )?;
+            entry.tags = suggestion.tags.clone();
+            let policy = self.policy;
+            let write_result = self
+                .mutate_layer(entry.layer, move |dataset| {
+                    apply_reflection_entry(dataset, &entry, policy)
+                })
+                .await?;
+            match write_result {
+                WriteResult::Added { .. } | WriteResult::Merged { .. } => {
+                    result.suggestions_added += 1;
+                }
+                WriteResult::NeedsEviction { .. } => {
+                    return Err(reflection_capacity_error());
+                }
+                WriteResult::NoOp => {}
+            }
+        }
+
+        for raw_id in &output.outdated_memories {
+            let id = MemoryId::new(raw_id)?;
+            if self.mark_outdated(&id).await? {
+                result.outdated_marked += 1;
+            }
+        }
+        Ok(result)
     }
 
     async fn archive(&self, ids: &[MemoryId]) -> Result<(), MemoryError> {
@@ -385,6 +444,76 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             project_archive_count: project.archive().len(),
         }
     }
+}
+
+fn reflection_memory_id(now: u64) -> Result<MemoryId, MemoryError> {
+    let timestamp = uuid::Timestamp::from_unix_time(now, 0, 0, 0);
+    MemoryId::new(uuid::Uuid::new_v7(timestamp).to_string())
+}
+
+fn reflection_capacity_error() -> MemoryError {
+    MemoryError::InvalidEntry {
+        message: "Reflection 淘汰非 pinned 候选后重试一次仍超过记忆容量".to_string(),
+    }
+}
+
+/// Applies one Reflection suggestion as one dataset mutation. On capacity it
+/// archives non-pinned candidates and retries the insertion exactly once.
+fn apply_reflection_entry(
+    dataset: &mut MemoryDataset,
+    entry: &MemoryEntry,
+    policy: MemoryPolicy,
+) -> Result<(WriteResult, bool), MemoryError> {
+    validate_content(&entry.content)?;
+    if dataset
+        .active()
+        .iter()
+        .chain(dataset.archive())
+        .any(|stored| stored.id == entry.id)
+    {
+        return Err(MemoryError::InvalidEntry {
+            message: "记忆 ID 必须唯一".to_string(),
+        });
+    }
+    if let Some(existing) = dataset.active_mut().iter_mut().find(|stored| {
+        jaccard_similarity(&stored.content, &entry.content) >= policy.similarity_threshold
+    }) {
+        let mut tags = entry.tags.clone();
+        existing.tags.append(&mut tags);
+        existing.tags.sort();
+        existing.tags.dedup();
+        existing.accessed_at = entry.created_at;
+        existing.access_count = existing.access_count.saturating_add(1);
+        return Ok((
+            WriteResult::Merged {
+                existing_id: existing.id,
+            },
+            true,
+        ));
+    }
+    if dataset.active().len() >= policy.max_entries {
+        let candidates = eviction_candidates(dataset.active(), 3, entry.created_at);
+        let ids = candidates
+            .iter()
+            .map(|candidate| candidate.id)
+            .collect::<Vec<_>>();
+        let mut moved = Vec::new();
+        dataset.active_mut().retain(|stored| {
+            if ids.contains(&stored.id) && !stored.pinned {
+                moved.push(stored.clone());
+                false
+            } else {
+                true
+            }
+        });
+        dataset.archive_mut().extend(moved);
+        if dataset.active().len() >= policy.max_entries {
+            return Err(reflection_capacity_error());
+        }
+    }
+    let id = entry.id;
+    dataset.active_mut().push(entry.clone());
+    Ok((WriteResult::Added { id }, true))
 }
 
 fn validate_policy(policy: MemoryPolicy) -> Result<(), MemoryError> {
@@ -817,6 +946,75 @@ mod tests {
         assert_eq!(stats.global_archive_count, 1);
         assert_eq!(stats.project_count, 2);
         assert_eq!(stats.project_archive_count, 0);
+    }
+
+    fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {
+        ReflectionOutput {
+            suggested_memories: vec![MemorySuggestion {
+                layer,
+                category: MemoryCategory::Fact,
+                content: content.to_string(),
+                tags: vec!["reflected".to_string()],
+                reason: "test".to_string(),
+            }],
+            ..ReflectionOutput::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn reflection_commit_failure_propagates_and_keeps_committed_state() {
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![Ok(empty_layer(1, MemoryLayer::Project))],
+                vec![Err(storage(MemoryStorageErrorKind::Io))],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4242)
+            .await
+            .unwrap();
+
+        let error = service
+            .apply_reflection(&reflection_output(MemoryLayer::Project, "new reflection"))
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, storage(MemoryStorageErrorKind::Io));
+        assert!(service.list(None).is_empty());
+    }
+
+    #[tokio::test]
+    async fn reflection_recomputes_once_after_cas_conflict() {
+        let external = entry(MemoryLayer::Project, "external fact");
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+            layer_script(
+                vec![
+                    Ok(empty_layer(1, MemoryLayer::Project)),
+                    Ok(committed(2, MemoryLayer::Project, vec![external.clone()])),
+                ],
+                vec![
+                    Err(storage(MemoryStorageErrorKind::ConcurrentWrite)),
+                    Ok(receipt(3, MemoryCommitVisibility::Visible)),
+                ],
+            ),
+        );
+        let observer = store.clone();
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4242)
+            .await
+            .unwrap();
+
+        let result = service
+            .apply_reflection(&reflection_output(MemoryLayer::Project, "new reflection"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.suggestions_added, 1);
+        assert_eq!(observer.calls(MemoryLayer::Project), (2, 2));
+        let entries = service.list(Some(MemoryLayer::Project));
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].created_at, 4242);
+        assert_eq!(entries[1].id.as_uuid().get_version_num(), 7);
     }
 
     #[tokio::test]

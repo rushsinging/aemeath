@@ -78,6 +78,20 @@ fn message_regex_directive_is_preserved_and_uses_filter_level() {
 }
 
 #[test]
+fn zero_max_bytes_is_normalized_to_one() {
+    let settings = LoggingSettings::new(
+        "info".to_string(),
+        LoggingOutputMode::File,
+        PathBuf::from("logs"),
+        0,
+        1,
+        1,
+    );
+
+    assert_eq!(settings.max_bytes(), 1);
+}
+
+#[test]
 fn invalid_level_falls_back_to_warn_without_opening_filter() {
     let settings = LoggingSettings::new(
         "aemeath:tui=not-a-level".to_string(),

@@ -227,13 +227,23 @@ pub struct MemoryStats {
     pub project_archive_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReflectionOutput;
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReflectionApplyResult {
     pub suggestions_added: usize,
     pub outdated_marked: usize,
+}
+
+pub trait ReflectionPromptPort: Send + Sync {
+    fn build_prompt(&self, project_memory: &str, recent_summary: &str, lang: &str) -> String;
+    fn parse_output(&self, raw: &str) -> ReflectionResult<ReflectionOutput>;
+    fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String;
+    fn format_memory_summary(&self, entries: &[MemoryEntry]) -> String;
+    fn recent_messages_summary(&self, messages: &[ReflectionMessage], max_chars: usize) -> String;
+}
+
+#[async_trait]
+pub trait ReflectionHistoryQuery: Send + Sync {
+    async fn list(&self, limit: usize) -> Result<Vec<ReflectionRecord>, MemoryError>;
 }
 
 #[async_trait]

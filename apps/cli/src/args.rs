@@ -56,7 +56,7 @@ pub struct RunArgs {
     pub resume: Option<String>,
 
     /// Skip all permission prompts (auto-approve all tool calls)
-    #[arg(long)]
+    #[arg(long = "yolo", alias = "allow-all")]
     pub allow_all: bool,
 
     /// Maximum number of concurrent tool executions (default: 10)
@@ -182,6 +182,14 @@ impl From<Args> for sdk::ChatBootstrapArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn yolo_and_allow_all_alias_map_to_same_acl_flag() {
+        let yolo = Cli::try_parse_from(["aemeath", "--yolo"]).unwrap();
+        let alias = Cli::try_parse_from(["aemeath", "--allow-all"]).unwrap();
+        assert!(yolo.run_args.allow_all);
+        assert!(alias.run_args.allow_all);
+    }
 
     #[test]
     fn test_cli_rejects_provider_argument() {

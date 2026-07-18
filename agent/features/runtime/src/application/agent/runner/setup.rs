@@ -8,16 +8,42 @@ use share::message::Message;
 use tools::{AgentProgressEvent, AgentProgressKind};
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
+/// #871 dynamic memory bridge for sub-agents.
+///
+/// Sub-agents receive the parent Run's already-resolved MemoryPort via
+/// [`AgentRunRequest::memory`] — the parent called `wiring.committed_memory()`
+/// at dispatch time. We wrap it in a [`tools::MemoryPortSource`] so that
+/// [`tools::register_subagent_tools`] can register the MemoryTool with the
+/// same dynamic-source contract the Main Run uses. For the sub-agent's
+/// lifetime the source always returns this same Arc; resume swaps are
+/// handled at the parent level before a new sub Run is dispatched.
+struct SubAgentMemoryPortSource {
+    memory: std::sync::Arc<dyn memory::MemoryPort>,
+}
+
+impl tools::MemoryPortSource for SubAgentMemoryPortSource {
+    fn current(&self) -> std::sync::Arc<dyn memory::MemoryPort> {
+        self.memory.clone()
+    }
+}
+
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
     async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
         let prompt = request.prompt;
         let system = request.system;
-        let ctx = request.ctx;
+        let identity = request.identity;
+        let cancellation = request.cancellation.child_signal();
+        let runtime_cancellation = tokio_util::sync::CancellationToken::new().child_token();
+        let request_progress = request.progress;
+        let catalog = request.catalog;
+        let plan_mode = request.plan_mode;
+        let guidance = request.guidance;
         let timeout = request.timeout;
-        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(&ctx.run_id));
+        let parent_run_id = Some(sdk::RunId::from_legacy_or_new(identity.run_id()));
         let model_spec = request.model_spec;
-        let progress_tx = request.progress_tx;
+        let memory = request.memory;
+        let progress_sink = request_progress.clone();
         // Resolve role and model
         let role = self.resolve_role(model_spec);
         let resolved_spec = self.resolve_model_spec(model_spec);
@@ -83,6 +109,38 @@ impl AgentRunner for CliAgentRunner {
                 };
             }
         };
+        let session_id = identity
+            .parent_run_id()
+            .map(ToString::to_string)
+            .or_else(|| {
+                self.workspace
+                    .views()
+                    .read()
+                    .current_workspace_root()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_else(|| "subagent".to_string());
+        let role_name = model_spec.map(str::to_string).unwrap_or_else(|| {
+            resolved_spec
+                .clone()
+                .unwrap_or_else(|| client.model_name().to_string())
+        });
+        let model_name = resolved_spec
+            .clone()
+            .unwrap_or_else(|| client.model_name().to_string());
+        let sub_run_id = sdk::RunId::new_v7();
+        let sub_run_context = super::loop_run::sub_run_log_context(
+            &logging::capture(),
+            &session_id,
+            sub_run_id.as_ref(),
+            &model_name,
+            client.provider_name(),
+            &role_name,
+        );
+
+        logging::instrument(sub_run_context, async move {
         log::info!(target: LOG_TARGET,
             "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
             reasoning,
@@ -104,7 +162,7 @@ impl AgentRunner for CliAgentRunner {
         };
 
         // Call SubagentStart hook
-        let workspace_root = ctx.workspace_read().current_workspace_root();
+        let workspace_root = self.workspace.views().read().current_workspace_root();
         let hook_results = hook_runner
             .on_subagent_start(prompt, &system, resolved_spec.as_deref(), &workspace_root)
             .await;
@@ -112,8 +170,8 @@ impl AgentRunner for CliAgentRunner {
         for (_, _, json_output) in &hook_results {
             if let Some(ref output) = json_output {
                 if let Some(ref sys_msg) = output.system_message {
-                    if let Some(ref tx) = progress_tx {
-                        let _ = tx.try_send(AgentProgressEvent {
+                    if let Some(ref sink) = progress_sink {
+                        sink.emit(AgentProgressEvent {
                             sequence: 0,
                             kind: AgentProgressKind::Message {
                                 text: format!("[hook] {sys_msg}"),
@@ -125,31 +183,9 @@ impl AgentRunner for CliAgentRunner {
         }
 
         // Helper to emit progress — writes to aemeath.log via log::info! for diagnostics.
-        let session_id = ctx
-            .parent_session_id
-            .clone()
-            .or_else(|| {
-                ctx.workspace_read()
-                    .current_workspace_root()
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(ToString::to_string)
-            })
-            .unwrap_or_else(|| "subagent".to_string());
         let session_id_for_log = session_id.clone();
-        let role_name = model_spec.map(|s| s.to_string()).unwrap_or_else(|| {
-            // 未配 role 时 fallback 到实际 client 的 model 名，而非硬编码 "default"
-            resolved_spec
-                .clone()
-                .unwrap_or_else(|| client.model_name().to_string())
-        });
-        let model_name = resolved_spec
-            .clone()
-            .unwrap_or_else(|| client.model_name().to_string());
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
-        // 将 sub-agent 的 model 同步到日志 context（影响 hook/audit 等共享 sink 的 model 字段）
-        logging::set_current_model(model_name.clone());
         let progress = move |turn: Option<usize>, msg: &str| {
             let turn_str = turn
                 .map(|t| t.to_string())
@@ -169,14 +205,22 @@ impl AgentRunner for CliAgentRunner {
             std::sync::Arc::new(task::TaskStore::new());
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let sub_workspace = self.workspace.derive_isolated();
         let mut sub_registry = ToolRegistry::new();
+        // #871 dynamic memory: wrap the parent-provided MemoryPort in a source
+        // so the sub-agent's MemoryTool resolves through the same contract.
+        let sub_memory_source: std::sync::Arc<dyn tools::MemoryPortSource> =
+            std::sync::Arc::new(SubAgentMemoryPortSource {
+                memory: memory.clone(),
+            });
         tools::register_subagent_tools(
             &mut sub_registry,
             sub_task_access,
             sub_skills,
-            ctx.resources.memory_source.clone(),
+            sub_memory_source,
+            sub_workspace.control(),
         );
-        let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
+        let sub_schemas = sub_registry.schemas_for(guidance.language());
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
         let system_blocks = vec![SystemBlock::cached(system.clone())];
@@ -211,41 +255,46 @@ impl AgentRunner for CliAgentRunner {
             );
         };
         let sub_run_id = sdk::RunId::new_v7();
-        let sub_ctx = ToolExecutionContext {
-            resources: tools::ToolResources {
-                agent_runner: None, // No nested agents
-                registry: ctx.resources.registry.clone(),
-                memory_config: ctx.resources.memory_config.clone(),
-                memory_source: ctx.resources.memory_source.clone(),
-                lang: ctx.resources.lang.clone(),
-                allow_all: ctx.resources.allow_all,
-            },
-            // 子 agent 从父快照派生独立 workspace 实例（继承位置、空栈、独立锁），
-            // 子的 worktree 进出不影响父（修隔离 bug，原先 Arc::clone 共享可变状态）。
-            workspace: ctx.derive_isolated_workspace(),
-            run_id: sub_run_id.to_string(),
-            cancel: ctx.cancel.child_token(),
-            read_files: std::sync::Arc::new(
-                std::sync::Mutex::new(std::collections::HashSet::new()),
-            ),
-            session_reminders: ctx.session_reminders.clone(),
-            plan_mode: ctx.plan_mode,
-            max_tool_concurrency: ctx.max_tool_concurrency,
-            max_agent_concurrency: ctx.max_agent_concurrency,
-            agent_semaphore: ctx.agent_semaphore.clone(), // 全局限流共享
-            progress_tx: ctx.progress_tx.clone(), // 子 agent 复用父的 progress_tx，内部 tool 调用会通过 AgentProgress 转发到 TUI
-            parent_session_id: ctx.parent_session_id.clone(),
-        };
+        let sub_views = sub_workspace.views();
+        let sub_scope = tools::ExecutionScope::builder(
+            sub_run_id.to_string(),
+            sub_views.read().workspace_id(),
+            sub_views.read().current_workspace_root(),
+        )
+        .parent_run_id(identity.run_id())
+        .invocation_source(tools::InvocationSource::SubAgent)
+        .registry_scope(tools::RegistryScopeName::new("sub-agent"))
+        .profile(tools::ToolProfileName::new("sub-agent-restricted"))
+        .build();
+        let sub_ctx = ToolExecutionContext::new(
+            sub_scope,
+            tools::ToolExecutionPorts::new(
+                cancellation.clone(),
+                sub_workspace.read_access(),
+                std::sync::Arc::new(tools::MutexReadSet(std::sync::Arc::new(
+                    std::sync::Mutex::new(std::collections::HashSet::new()),
+                ))),
+                plan_mode,
+                memory.clone(),
+                guidance,
+            )
+            .with_catalog(catalog)
+            .with_progress(request_progress),
+        );
         let agent = Agent {
             registry: &sub_registry,
             ctx: sub_ctx,
+            max_tool_concurrency: self.max_tool_concurrency,
+            agent_semaphore: self.agent_semaphore.clone(),
+            workspace_persist: sub_workspace.persist(),
+            runtime_cancellation: runtime_cancellation.clone(),
         };
 
         let model_display = resolved_spec.as_deref().unwrap_or(&model_name_for_log);
         // issue #499：发送 Started 事件，让 TUI 在 Agent 工具 header 显示实际 role/model。
         // 这是 sub-agent 的第一个 progress 事件，早于 ToolCalls/Message。
-        if let Some(ref tx) = progress_tx {
-            let _ = tx.try_send(AgentProgressEvent {
+        if let Some(ref sink) = progress_sink {
+            sink.emit(AgentProgressEvent {
                 sequence: 0,
                 kind: AgentProgressKind::Started {
                     // 未配 role 时发 None，TUI 不显示 [role: ...] 标记。
@@ -262,7 +311,7 @@ impl AgentRunner for CliAgentRunner {
         SubAgentRun {
             prompt,
             system,
-            progress_tx,
+            progress_sink,
             client,
             invocation_scope,
             hook_runner,
@@ -271,6 +320,7 @@ impl AgentRunner for CliAgentRunner {
             system_blocks,
             log_request_messages: Box::new(log_request_messages),
             agent,
+            runtime_cancellation,
             timeout,
             turn_count: 0,
             last_total_tokens: None,
@@ -286,13 +336,27 @@ impl AgentRunner for CliAgentRunner {
             progress: Box::new(progress),
             ctx_context_size: context_size,
             tool_result_materializer: self.tool_result_materializer.clone(),
+            policy: self.policy.clone(),
         }
         .run_loop()
         .await
+        })
+        .await
     }
 
-    async fn complete(&self, prompt: &str, system: &str, ctx: &ToolExecutionContext) -> String {
+    async fn complete(
+        &self,
+        prompt: &str,
+        system: &str,
+        cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
+    ) -> String {
         use futures::StreamExt;
+
+        let runtime_cancellation = tokio_util::sync::CancellationToken::new();
+        let _signal_propagation = super::loop_run::CancellationPropagationGuard::new(
+            cancellation,
+            runtime_cancellation.clone(),
+        );
 
         let system_blocks = vec![SystemBlock::cached(system.to_string())];
         let messages = vec![Message::user(prompt)];
@@ -304,7 +368,7 @@ impl AgentRunner for CliAgentRunner {
                 &system_blocks,
                 &messages,
                 &[],
-                &ctx.cancel,
+                &runtime_cancellation,
             )
             .await
         {

@@ -1,6 +1,6 @@
 use share::config::domain::merge::{
-    AgentsConfigPatch, ApiConfigPatch, ConfigPatch, ModelConfigPatch, ModelsConfigPatch,
-    PermissionConfigPatch, ToolsConfigPatch, UiConfigPatch,
+    AgentsConfigPatch, ApiConfigPatch, ConfigPatch, LoggingConfigPatch, ModelConfigPatch,
+    ModelsConfigPatch, PermissionConfigPatch, ToolsConfigPatch, UiConfigPatch,
 };
 use share::config::hooks::{default_timeout_secs, ClaudeSettingsConfig, HookEntry, HooksConfig};
 use share::config::PermissionModeConfig;
@@ -21,6 +21,136 @@ pub enum ConfigAdapterError {
     Invalid,
     CorruptTransaction,
     UnsupportedDurability,
+}
+
+pub trait EnvSource: Send + Sync {
+    fn get(&self, name: &str) -> Option<String>;
+}
+
+pub struct ProcessEnv;
+
+impl EnvSource for ProcessEnv {
+    fn get(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
+}
+
+pub struct EnvAdapter;
+
+impl EnvAdapter {
+    pub fn read(source: &dyn EnvSource) -> ConfigPatch {
+        let global_key = source
+            .get("AEMEATH_API_KEY")
+            .or_else(|| source.get("LLM_API_KEY"));
+        let mut api = ApiConfigPatch {
+            provider: source.get("AEMEATH_PROVIDER"),
+            key: global_key.clone(),
+            base_url: source
+                .get("AEMEATH_BASE_URL")
+                .or_else(|| source.get("LLM_BASE_URL")),
+            ..Default::default()
+        };
+        if api.provider.as_deref().is_some_and(str::is_empty) {
+            api.provider = None;
+        }
+
+        let model_name = source.get("AEMEATH_MODEL");
+        let model = ModelConfigPatch {
+            name: model_name.clone(),
+            max_tokens: parse_positive(source.get("AEMEATH_MAX_TOKENS")),
+            context_size: parse_positive(source.get("AEMEATH_CONTEXT_SIZE")),
+            ..Default::default()
+        };
+        let mut provider_api_keys = HashMap::new();
+        for (driver, env_name) in driver_key_envs() {
+            if let Some(key) = source.get(env_name) {
+                provider_api_keys.insert(driver.to_string(), key);
+            }
+        }
+        let models = (model_name.is_some()
+            || !provider_api_keys.is_empty()
+            || global_key.is_some())
+        .then(|| ModelsConfigPatch {
+            default: model_name,
+            provider_api_keys: (!provider_api_keys.is_empty()).then_some(provider_api_keys),
+            fallback_api_key: global_key.clone(),
+            ..Default::default()
+        });
+        let permissions = source.get("AEMEATH_PERMISSION_MODE").and_then(|value| {
+            let mode = match value.to_ascii_lowercase().as_str() {
+                "ask" => PermissionModeConfig::Ask,
+                "auto_read" | "autoread" => PermissionModeConfig::AutoRead,
+                "allow_all" | "allowall" | "auto_all" | "autoall" => PermissionModeConfig::AllowAll,
+                _ => return None,
+            };
+            Some(PermissionConfigPatch {
+                mode: Some(mode),
+                ..Default::default()
+            })
+        });
+        let tools = parse_positive(source.get("AEMEATH_MAX_TOOL_CONCURRENCY")).map(|value| {
+            ToolsConfigPatch {
+                max_concurrency: Some(value),
+                ..Default::default()
+            }
+        });
+        let agents = parse_positive(source.get("AEMEATH_MAX_AGENT_CONCURRENCY")).map(|value| {
+            AgentsConfigPatch {
+                max_concurrency: Some(value),
+                ..Default::default()
+            }
+        });
+        let verbose = source.get("AEMEATH_VERBOSE").map(|_| true);
+        let color = source.get("NO_COLOR").map(|_| false);
+        let ui = (verbose.is_some() || color.is_some()).then_some(UiConfigPatch {
+            verbose,
+            color,
+            ..Default::default()
+        });
+        let logging = source
+            .get("AEMEATH_LOG_LEVEL")
+            .map(|level| LoggingConfigPatch {
+                level: Some(level),
+                ..Default::default()
+            });
+        ConfigPatch {
+            api: (api.provider.is_some() || api.key.is_some() || api.base_url.is_some())
+                .then_some(api),
+            model: (model.name.is_some()
+                || model.max_tokens.is_some()
+                || model.context_size.is_some())
+            .then_some(model),
+            models,
+            permissions,
+            tools,
+            agents,
+            ui,
+            logging,
+            ..Default::default()
+        }
+    }
+}
+
+fn parse_positive<T>(value: Option<String>) -> Option<T>
+where
+    T: std::str::FromStr + PartialOrd + From<u8>,
+{
+    value
+        .and_then(|value| value.parse::<T>().ok())
+        .filter(|value| *value > T::from(0))
+}
+
+fn driver_key_envs() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("volcengine", "VOLCENGINE_CODING_PLAN_API_KEY"),
+        ("minimax", "MINIMAX_API_KEY"),
+        ("mimo", "MIMO_API_KEY"),
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("agnes", "AGNES_API_KEY"),
+        ("ollama", "OLLAMA_API_KEY"),
+    ]
 }
 
 #[derive(Debug, Clone, Default)]
@@ -54,10 +184,12 @@ impl CliArgsAdapter {
                     context_size: input.context_size.filter(|value| *value > 0),
                     ..Default::default()
                 });
-        let models = input.model.as_ref().map(|selection| ModelsConfigPatch {
-            default: Some(selection.clone()),
-            ..Default::default()
-        });
+        let models =
+            (input.model.is_some() || input.api_key.is_some()).then(|| ModelsConfigPatch {
+                default: input.model.clone(),
+                fallback_api_key: input.api_key.clone(),
+                ..Default::default()
+            });
         let permissions = input.allow_all.then_some(PermissionConfigPatch {
             mode: Some(PermissionModeConfig::AllowAll),
             ..Default::default()
@@ -317,6 +449,44 @@ fn map_storage_error(error: storage::api::StorageError) -> ConfigAdapterError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FakeEnv(HashMap<String, String>);
+
+    impl EnvSource for FakeEnv {
+        fn get(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    #[test]
+    fn env_adapter_prefers_aemeath_key_and_maps_driver_keys() {
+        let source = FakeEnv(HashMap::from([
+            ("AEMEATH_API_KEY".into(), "aemeath-key".into()),
+            ("LLM_API_KEY".into(), "llm-key".into()),
+            ("ANTHROPIC_API_KEY".into(), "anthropic-key".into()),
+            ("AEMEATH_MODEL".into(), "anthropic/model".into()),
+        ]));
+        let patch = EnvAdapter::read(&source);
+        assert_eq!(patch.api.unwrap().key.as_deref(), Some("aemeath-key"));
+        let models = patch.models.unwrap();
+        assert_eq!(
+            models.provider_api_keys.unwrap()["anthropic"],
+            "anthropic-key"
+        );
+        assert_eq!(models.fallback_api_key.as_deref(), Some("aemeath-key"));
+    }
+
+    #[test]
+    fn env_adapter_ignores_invalid_and_retired_reasoning_env() {
+        let source = FakeEnv(HashMap::from([
+            ("AEMEATH_MAX_TOKENS".into(), "0".into()),
+            ("AEMEATH_MAX_TOOL_CONCURRENCY".into(), "bad".into()),
+            ("AEMEATH_MAX_REASONING".into(), "high".into()),
+        ]));
+        let patch = EnvAdapter::read(&source);
+        assert!(patch.model.is_none());
+        assert!(patch.tools.is_none());
+    }
 
     #[test]
     fn cli_adapter_only_maps_explicit_values() {

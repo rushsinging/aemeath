@@ -29,8 +29,13 @@ pub struct CliAgentRunner {
     pub reasoning: bool,
     /// Model entries config for reasoning lookup.
     pub models_config: Arc<ModelsConfig>,
+    pub max_tool_concurrency: usize,
+    pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
+    /// Runtime-owned workspace source used to derive isolated sub-run views.
+    pub workspace: crate::application::tool_execution_adapters::RuntimeWorkspaceAccess,
+    pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl CliAgentRunner {

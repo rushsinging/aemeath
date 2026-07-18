@@ -120,7 +120,7 @@ impl AgentClientImpl {
             context_size: ctx.resources.context_size,
             verbose: ctx.verbose,
             agent_runner: ctx.resources.agent_runner,
-            allow_all: ctx.resources.allow_all,
+            allow_all: self.inner.wiring.committed_config().allow_all(),
             task_store: ctx.resources.task_store,
             max_tool_concurrency: self.max_tool_concurrency(),
             max_agent_concurrency: self.max_agent_concurrency(),

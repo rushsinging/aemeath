@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -39,6 +38,30 @@ use crate::LOG_TARGET;
 use context::session::ChatChain;
 use workflow::api::{ReasoningPort, ReasoningSignal};
 
+/// Aborts a spawned request companion task even when the invocation future is dropped.
+struct AbortTaskOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortTaskOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+pub(crate) fn request_log_context(
+    parent: &logging::LogContext,
+    model: &str,
+    provider: &str,
+    role: &str,
+) -> logging::LogContext {
+    parent.patched(logging::LogContextPatch {
+        request_id: logging::FieldPatch::Set(uuid::Uuid::now_v7().to_string()),
+        model: logging::FieldPatch::Set(model.to_string()),
+        provider: logging::FieldPatch::Set(provider.to_string()),
+        role: logging::FieldPatch::Set(role.to_string()),
+        ..logging::LogContextPatch::default()
+    })
+}
+
 /// Main-chat adapter for the shared run loop.
 ///
 /// It owns no lifecycle state machine. `Run` is the only per-run state machine; this adapter
@@ -67,19 +90,14 @@ where
     pub(crate) agent_runner: &'a Option<Arc<dyn tools::AgentRunner>>,
     pub(crate) tool_result_materializer:
         &'a crate::application::tool_result_materialization::ToolResultMaterializer,
-    pub(crate) allow_all: bool,
+    pub(crate) policy: &'a dyn policy::PolicyPort,
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
-    pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
-    /// MemoryPortSource for ToolResources (sub-agent registration uses this).
-    pub(crate) memory_source: &'a Arc<dyn tools::MemoryPortSource>,
-    /// Bound Main Run 的 MemoryPort（来自 `BoundMainRun::memory`）。Main 注入
-    /// 只读此 port，不再打开旧 `storage::MemoryStore`。
-    pub(crate) memory: &'a dyn memory::MemoryPort,
+    pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
@@ -97,7 +115,6 @@ where
     pub(crate) rollback_chain: ChatChain,
     pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
-    pub(crate) memory_cwd: PathBuf,
     pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
@@ -157,43 +174,51 @@ where
     fn make_agent<'b>(
         registry: &'b Arc<tools::ToolRegistry>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
-        memory_config: &share::config::MemoryConfig,
-        memory_source: &Arc<dyn tools::MemoryPortSource>,
+        memory: &Arc<dyn memory::MemoryPort>,
         language: &str,
-        allow_all: bool,
         workspace: &project::WorkspaceViews,
         cancel: &CancellationToken,
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
         session_reminders: &Arc<std::sync::Mutex<tools::SessionReminders>>,
         max_tool_concurrency: usize,
-        max_agent_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
         run_id: &sdk::RunId,
     ) -> Agent<'b> {
         Agent {
             registry,
-            ctx: tools::ToolExecutionContext {
-                resources: tools::ToolResources {
-                    agent_runner: agent_runner.clone(),
-                    registry: Some(registry.clone() as Arc<dyn tools::ToolListProvider>),
-                    memory_config: memory_config.clone(),
-                    memory_source: memory_source.clone(),
-                    lang: language.to_string(),
-                    allow_all,
-                },
-                workspace: workspace.clone(),
-                run_id: run_id.to_string(),
-                cancel: cancel.clone(),
-                read_files: read_files.clone(),
-                session_reminders: Some(session_reminders.clone()),
-                plan_mode: None,
-                max_tool_concurrency,
-                max_agent_concurrency,
-                agent_semaphore: agent_semaphore.clone(),
-                progress_tx: None,
-                parent_session_id: Some(session_id.to_string()),
-            },
+            ctx: tools::ToolExecutionContext::new(
+                tools::ExecutionScope::builder(
+                    run_id.to_string(),
+                    workspace.read().workspace_id(),
+                    workspace.read().current_workspace_root(),
+                )
+                .build(),
+                tools::ToolExecutionPorts::new(
+                    crate::application::tool_execution_adapters::cancellation(cancel.clone()),
+                    crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
+                        workspace.clone(),
+                    )
+                    .read_access(),
+                    Arc::new(tools::MutexReadSet(read_files.clone())),
+                    Arc::new(tools::FixedPlanMode(None)),
+                    memory.clone(),
+                    Arc::new(tools::FixedGuidance {
+                        language: language.to_string(),
+                        allow_all: false,
+                    }),
+                )
+                .with_memory_context(
+                    Some(session_id.to_string()),
+                    Some(session_reminders.clone()),
+                )
+                .with_agent(agent_runner.clone())
+                .with_catalog(Some(registry.clone() as Arc<dyn tools::CatalogQuery>)),
+            ),
+            max_tool_concurrency,
+            agent_semaphore: agent_semaphore.clone(),
+            workspace_persist: workspace.persist(),
+            runtime_cancellation: cancel.clone(),
         }
     }
 
@@ -257,8 +282,8 @@ where
             self.system_prompt_text,
             self.context_size,
             self.memory_config,
-            self.memory,
-            &self.memory_cwd,
+            self.memory.as_ref(),
+            &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
             self.client,
             self.language,
             &self.current_cwd(),
@@ -296,14 +321,17 @@ where
         .await;
         let tool_schemas = self.registry.schemas_for(self.language);
         let mut effective_system_blocks = self.system_blocks.to_vec();
+        // #871: Main 注入走 MemoryPort（不再读旧 storage::MemoryStore 文件）。
         if self.memory_config.enabled && self.memory_config.inject_count > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            if let Some(block) =
-                build_memory_block_from_port(self.memory, now, self.memory_config.inject_count)
-            {
+            if let Some(block) = build_memory_block_from_port(
+                self.memory.as_ref(),
+                now,
+                self.memory_config.inject_count,
+            ) {
                 effective_system_blocks.push(block);
             }
         }
@@ -330,74 +358,67 @@ where
             )
             .map_err(|error| LoopEngineError::Adapter(error.to_string()))?;
 
-        logging::set_current_model(self.client.model_name().to_string());
-        logging::set_current_provider(self.client.provider_name().to_string());
-        logging::set_current_role("default".to_string());
-        logging::set_current_request_id(uuid::Uuid::now_v7().to_string());
-
         let api_start = Instant::now();
         let mut coordinator =
             crate::application::model_invocation::ModelInvocationCoordinator::new();
         let resp = loop {
+            let request_context = request_log_context(
+                &logging::capture(),
+                invocation_scope.model(),
+                self.client.provider_name(),
+                "default",
+            );
             let mut reducer = InvocationEventReducer::with_tool_identity(
                 self.sink.clone(),
                 self.tool_identity.clone(),
                 self.turn_context.clone(),
             );
-            let response = {
+            let response = logging::instrument(request_context.clone(), async {
                 let progress_handle = reducer.progress_handle();
                 let stream_cancel = self.cancel.clone();
-                let stream_fut = self.client.invocation_stream(
-                    &invocation_scope,
-                    &effective_system_blocks,
-                    &messages_for_api,
-                    &tool_schemas,
-                    &stream_cancel,
-                );
+                let invocation_fut = async {
+                    let stream = self
+                        .client
+                        .invocation_stream(
+                            &invocation_scope,
+                            &effective_system_blocks,
+                            &messages_for_api,
+                            &tool_schemas,
+                            &stream_cancel,
+                        )
+                        .await
+                        .map_err(|error| (error, false))?;
+                    coordinator
+                        .pull_stream(stream, &stream_cancel, true, |event| reducer.apply(event))
+                        .await
+                };
                 let waiting_sink = self.sink.clone();
                 let waiting_context = self.turn_context.clone();
                 let request_started_at = tokio::time::Instant::now();
-                let waiting_task = tokio::spawn(async move {
-                    let mut next = request_started_at + Duration::from_secs(10);
-                    let mut last_version = None;
-                    loop {
-                        tokio::time::sleep_until(next).await;
-                        let snapshot = progress_handle.lock().unwrap().snapshot();
-                        if should_emit_model_stream_waiting(last_version, &snapshot) {
-                            waiting_sink.try_send_event(RuntimeStreamEvent::ModelStreamWaiting {
-                                context: waiting_context.clone(),
-                                elapsed_secs: request_started_at.elapsed().as_secs(),
-                                phase: snapshot.phase.to_string(),
-                            });
+                let waiting_task =
+                    AbortTaskOnDrop(logging::spawn_instrumented(request_context, async move {
+                        let mut next = request_started_at + Duration::from_secs(10);
+                        let mut last_version = None;
+                        loop {
+                            tokio::time::sleep_until(next).await;
+                            let snapshot = progress_handle.lock().unwrap().snapshot();
+                            if should_emit_model_stream_waiting(last_version, &snapshot) {
+                                waiting_sink.try_send_event(
+                                    RuntimeStreamEvent::ModelStreamWaiting {
+                                        context: waiting_context.clone(),
+                                        elapsed_secs: request_started_at.elapsed().as_secs(),
+                                        phase: snapshot.phase.to_string(),
+                                    },
+                                );
+                            }
+                            last_version = Some(snapshot.visible_progress_version);
+                            next += Duration::from_secs(10);
                         }
-                        last_version = Some(snapshot.visible_progress_version);
-                        next += Duration::from_secs(10);
-                    }
-                });
-                tokio::pin!(stream_fut);
+                    }));
+                tokio::pin!(invocation_fut);
                 let result = loop {
                     tokio::select! {
-                        stream = &mut stream_fut => {
-                            let mut stream = match stream {
-                                Ok(stream) => stream,
-                                Err(error) => break Err(error),
-                            };
-                            let mut terminal = None;
-                            while let Some(event) = stream.next().await {
-                                match reducer.apply(event) {
-                                    Ok(Some(response)) => terminal = Some(Ok(response)),
-                                    Ok(None) => {}
-                                    Err(error) => terminal = Some(Err(error)),
-                                }
-                                if terminal.is_some() {
-                                    break;
-                                }
-                            }
-                            break terminal.unwrap_or_else(|| Err(provider::ProviderError::fatal(
-                                provider::ProviderErrorKind::Protocol,
-                                "provider stream ended without terminal event",
-                            )));
-                        }
+                        response = &mut invocation_fut => break response,
                         event = self.input_events.recv_next_input() => {
                             if let Some(event) = event {
                                 self.queue_busy_event(event).await;
@@ -405,16 +426,17 @@ where
                         }
                     }
                 };
-                waiting_task.abort();
+                drop(waiting_task);
                 result
-            };
+            })
+            .await;
             match response {
-                Ok(response) => break response,
-                Err(error) if error.is_cancelled() || self.cancel.is_cancelled() => {
+                Ok((response, _)) => break response,
+                Err((error, _)) if error.is_cancelled() || self.cancel.is_cancelled() => {
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err(error) => match coordinator
-                    .handle_failure(&error, reducer.saw_visible_delta(), &self.cancel)
+                Err((error, visible_delta)) => match coordinator
+                    .handle_failure(&error, visible_delta, &self.cancel)
                     .await
                 {
                     crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
@@ -518,10 +540,11 @@ where
                 self.memory_config,
                 self.turn_count,
                 &self.chain.messages_flat(),
-                self.memory,
                 self.client,
                 self.system_prompt_text,
                 self.language,
+                self.memory.as_ref(),
+                &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
             )
             .await
             {
@@ -625,6 +648,8 @@ where
 
     async fn execute_tools(
         &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
@@ -638,16 +663,13 @@ where
         let agent = Self::make_agent(
             self.registry,
             self.agent_runner,
-            self.memory_config,
-            self.memory_source,
+            self.memory,
             self.language,
-            self.allow_all,
             self.workspace,
             &self.cancel,
             self.read_files,
             self.session_reminders,
             self.max_tool_concurrency,
-            self.max_agent_concurrency,
             self.agent_semaphore,
             self.session_id,
             &self.run_id,
@@ -656,7 +678,9 @@ where
             &self.turn_context,
             &raw_calls,
             self.registry,
-            self.allow_all,
+            self.policy,
+            run_id,
+            step_id,
             &agent,
             self.sink,
             &HookUi::new(self.sink.clone()),
@@ -728,7 +752,7 @@ where
             self.sink,
             &HookUi::new(self.sink.clone()),
             self.hook_runner,
-            &agent.ctx,
+            &agent.runtime_cancellation,
             self.turn_count,
             &self.current_cwd(),
         )

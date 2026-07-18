@@ -98,7 +98,8 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 
 ### 目录组织
 
-- 小型 L1 测试 **SHOULD** 放在生产文件末尾 `#[cfg(test)] mod tests`；较大测试 **MAY** 放同级 `*_tests.rs`。
+- 测试文件 **MUST** 与源码分离：`foo.rs` ↔ `foo_tests.rs`（同级目录），通过 `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;` 引入。**NEVER** 在源码文件内嵌 `#[cfg(test)] mod tests { ... }`（由 `.agents/hooks/check-no-inline-tests.sh` 守卫）。
+  - 收益：`cargo build`（不带 `--cfg test`）天然暴露 dead code——任何只被测试引用的 pub 项会变 unused warning。移除 `*_tests.rs` 后 `cargo build` 即可发现仅在测试中使用的代码。
 - L2/L4 测试 **MUST** 使用同名文件与目录并存形状（`tests.rs` + `tests/`），**NEVER** 新增 `mod.rs`。
 - 测试模块与 fixture **MUST** 跟随被测能力的真实架构层和模块，**NEVER** 建立跨层万能 `test_utils` / `testing`。
 - **NEVER** 新增 `include!("tests/*.rs")` 拼接；**NEVER** 一次性移动全仓历史测试（渐进迁移）。

@@ -1,10 +1,9 @@
 use crate::adapters::{
-    encode_native_config, CompatibilityAdapter, ConfigAdapterError, ConfigValidator, FileAdapter,
-    NativeConfigStore,
+    encode_native_config, CompatibilityAdapter, ConfigAdapterError, ConfigValidator, EnvAdapter,
+    FileAdapter, NativeConfigStore, ProcessEnv,
 };
 use crate::contract::*;
 use async_trait::async_trait;
-use share::config::adapters::env as env_adapter;
 use share::config::domain::merge::{ConfigPatch, PriorityChain};
 use share::config::domain::snapshot::{ConfigRevision, ConfigSnapshot};
 use share::config::Config;
@@ -188,7 +187,7 @@ impl ConfigAppService {
         {
             chain.push(patch);
         }
-        let env_patch = env_adapter::read();
+        let env_patch = EnvAdapter::read(&ProcessEnv);
         if !env_patch.is_empty() {
             chain.push(env_patch);
         }
@@ -233,7 +232,7 @@ async fn load_config(
             chain.push(patch);
         }
     }
-    let env_patch = env_adapter::read();
+    let env_patch = EnvAdapter::read(&ProcessEnv);
     if !env_patch.is_empty() {
         chain.push(env_patch);
     }

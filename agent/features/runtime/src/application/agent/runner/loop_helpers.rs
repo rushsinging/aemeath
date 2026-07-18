@@ -50,7 +50,7 @@ impl<'a> SubAgentRun<'a> {
 
     pub(super) fn log_tool_results(
         &self,
-        turn_number: usize,
+        _turn_number: usize,
         results: &[crate::application::agent::ToolExecution],
         call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
@@ -67,7 +67,6 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::to_string(&data).unwrap_or_default()
             );
         }
-        logging::set_current_turn(turn_number);
     }
 
     pub(super) async fn compact_now(&mut self, turn_number: usize) {
@@ -81,15 +80,17 @@ impl<'a> SubAgentRun<'a> {
         let old_len = self.messages.len();
         let previous_summary =
             compact_summary_from_system_blocks(&self.system_blocks).map(str::to_owned);
+        let cancellation = self.agent.ctx.cancellation();
+        let cancel_token = self.runtime_cancellation.clone();
         let result = tokio::select! {
-            _ = self.agent.ctx.cancel.cancelled() => None,
+            _ = cancellation.cancelled() => None,
             result = context::compact::compact_messages_with_llm(
                 &self.messages,
                 previous_summary.as_deref(),
                 self.ctx_context_size,
                 Some(&self.client),
                 None,
-                &self.agent.ctx.cancel,
+                &cancel_token,
             ) => result,
         };
 
