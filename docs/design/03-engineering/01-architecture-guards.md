@@ -194,18 +194,20 @@
 | `gateway` | `business`, `utils` |
 
 - **检查方式**：
-  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Runtime、Context、Provider、Policy、Storage 与 Audit 使用各自目标规则。
+  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Runtime、Context、Provider、Policy、Storage、Hook 与 Audit 使用各自目标规则。
   - Policy 顶层只允许 `lib.rs/domain.rs/adapters.rs`；domain 发布 PL/Port，adapter 只实现 AllowAll；legacy/其他层直接失败。
   - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
-  - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
+  - Audit 顶层只允许 #927–#929 已证明的 `lib.rs/domain.rs/application.rs/ports.rs/adapters.rs` 与对应层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
+  - Hook 顶层只允许 #987 的 `lib.rs/domain.rs/ports.rs/adapters.rs` 与 `domain/ports/adapters`；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败。`domain` 禁止依赖 `ports/adapters`，`ports` 禁止依赖 `adapters`。
   - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
   - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败；新增其他未登记目录同样失败。
   - Storage `domain.rs` / `domain/` 若出现物理 fs API、`PathBuf` 或依赖 `crate::adapters`，直接失败。
-  - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime、Context、Provider、Storage Hexagonal 层。
+  - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime、Context、Provider、Storage、Hook Hexagonal 层。
   - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**。
 - **#988 故意违规证据**：临时恢复 `agent/features/audit/src/api.rs` 后，单 Guard 以 exit 2 命中 `Audit empty or legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。Audit 无路径白名单、整文件豁免或隐式 exclude，白名单预算保持 0。
 - **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
 - **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
+- **#987 故意违规证据**：临时恢复 `agent/features/hook/src/business.rs` 与在 Hook `domain` 引用 `crate::adapters` 时，单 Guard 与总编排均以 exit 2 阻断；删除探针后 clean pass。Hook 无路径白名单、整文件豁免或隐式 exclude，migration debt 保持 0。
 - **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**——已登记的迁移期层级倒置：
 
 | 路径 | 目标层 | 上下文 |

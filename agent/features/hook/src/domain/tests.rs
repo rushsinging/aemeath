@@ -4,9 +4,9 @@
 
 #![cfg(test)]
 
-use crate::contract::invocation::HookPoint;
-use crate::contract::outcome::{HookDirective, HookReason};
-use crate::contract::protocol::classify_directive;
+use crate::domain::invocation::HookPoint;
+use crate::domain::outcome::{HookDirective, HookReason};
+use crate::domain::protocol::classify_directive;
 
 // ════════════════════════════════════════════════════════════
 // 真值表测试
@@ -441,7 +441,7 @@ fn test_metadata_observation_points_all_false() {
 /// HookInvocation::point() 对每个变体返回正确的 HookPoint。
 #[test]
 fn test_invocation_point_roundtrip() {
-    use crate::contract::invocation::*;
+    use crate::domain::invocation::*;
 
     let cases: Vec<(HookInvocation, HookPoint)> = vec![
         (

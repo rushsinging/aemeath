@@ -3,7 +3,7 @@
 //! 对应设计：`docs/design/02-modules/hook/README.md` §3。
 //! 元数据由系统拥有，用户配置不直接声明 class。
 
-use crate::contract::invocation::HookPoint;
+use crate::domain::invocation::HookPoint;
 
 /// Hook 功能分类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

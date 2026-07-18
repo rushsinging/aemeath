@@ -2,9 +2,9 @@
 //!
 //! 每个便捷方法负责将参数包装为对应的 HookData 并调用 run_hooks 或 run_hooks_with_json。
 
-use crate::business::hook::data::*;
-use crate::business::hook::result::{HookJsonOutput, HookResult};
-use crate::business::hook::runner::HookRunner;
+use crate::adapters::legacy::data::*;
+use crate::adapters::legacy::result::{HookJsonOutput, HookResult};
+use crate::adapters::legacy::runner::HookRunner;
 use share::config::hooks::{HookEntry, HookEvent};
 use std::path::Path;
 

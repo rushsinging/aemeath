@@ -1,6 +1,6 @@
-use crate::business::hook::data::*;
-use crate::business::hook::result::HookResult;
-use crate::business::hook::runner::HookRunner;
+use crate::adapters::legacy::data::*;
+use crate::adapters::legacy::result::HookResult;
+use crate::adapters::legacy::runner::HookRunner;
 use share::config::hooks::HookEvent;
 use std::path::Path;
 
