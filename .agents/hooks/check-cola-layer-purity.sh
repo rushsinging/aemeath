@@ -23,8 +23,8 @@ WORKFLOW_HEX_LAYERS = {"domain"}
 PROVIDER_HEX_LAYERS = {"domain", "adapters"}
 MEMORY_HEX_LAYERS = {"domain", "ports", "adapters"}
 PROVIDER_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
-POLICY_HEX_LAYERS = {"domain"}
-POLICY_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs"}
+POLICY_HEX_LAYERS = set()
+POLICY_ALLOWED_TOP_LEVEL_FILES = {"lib.rs"}
 POLICY_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 STORAGE_HEX_LAYERS = {"domain", "ports", "adapters"}
 STORAGE_TRANSITIONAL_MODULES = {"memory_store", "task_store"}
@@ -70,6 +70,94 @@ use_crate_segment = re.compile(r"\b(?:use\s+)?crate::([A-Za-z_][A-Za-z0-9_]*)")
 project_domain_adapter_pattern = re.compile(
     r"\bcrate\s*::\s*(?:adapters\b|\{[^}]*\badapters\s*::)", re.DOTALL
 )
+tool_name_match_pattern = re.compile(
+    r"(?:\bmatch\s+[^{}]*?(?:\btool_?name\b|\.name\b)|"
+    r"\bmatches!\s*\([^,]*?(?:\bToolName\b|\btool_?name\b|\.name\b))",
+    re.DOTALL,
+)
+TOOL_PROFILE_PUBLIC_API = {"baseline", "derive_restricted", "allowed_capabilities"}
+
+
+def strip_rust_comments(source: str) -> str:
+    """Remove comments so architecture vocabulary in documentation is not code."""
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
+    return re.sub(r"//.*", "", source)
+
+
+def named_block(source: str, header: re.Pattern[str]) -> str | None:
+    """Return a simple Rust item's brace body; sufficient for source-policy checks."""
+    match = header.search(source)
+    if match is None:
+        return None
+    opening = source.find("{", match.end())
+    if opening < 0:
+        return None
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+    return None
+
+
+def tool_profile_violations(source: str) -> list[str]:
+    source = strip_rust_comments(source)
+    violations: list[str] = []
+    struct_body = named_block(source, re.compile(r"\bpub\s+struct\s+ToolProfile\b"))
+    if struct_body is not None:
+        fields = re.findall(
+            r"(?:^|,)\s*(pub(?:\([^)]*\))?\s+)?allowed_capabilities\s*:", struct_body
+        )
+        if len(fields) != 1 or fields[0]:
+            violations.append("ToolProfile.allowed_capabilities must remain a private field")
+    impl_body = named_block(source, re.compile(r"\bimpl\s+ToolProfile\b"))
+    if impl_body is not None:
+        public_methods = set(re.findall(r"\bpub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)", impl_body))
+        expansion_api = sorted(public_methods - TOOL_PROFILE_PUBLIC_API)
+        if expansion_api:
+            violations.append(
+                "ToolProfile must not expose capability-expanding mutation API: "
+                + ", ".join(expansion_api)
+            )
+        if re.search(r"\bfn\s+\w+\s*\([^)]*&mut\s+self", impl_body):
+            violations.append("ToolProfile must not expose in-place mutation")
+        if re.search(
+            r"self\.allowed_capabilities\s*(?:\|=|&=|\^=|=)|"
+            r"self\.allowed_capabilities\s*\.\s*(?:insert|extend|union)",
+            impl_body,
+        ):
+            violations.append("ToolProfile.allowed_capabilities must not be mutated")
+    return violations
+
+
+def tools_authorization_violations(source: str) -> list[str]:
+    source = strip_rust_comments(source)
+    violations: list[str] = []
+    authorization_source = re.search(
+        r"\b(?:ToolProfile|is_authorized|authoriz\w*|exclud\w*|denylist|blacklist)\b", source
+    )
+    if authorization_source and re.search(r"\bexcludes\b", source):
+        violations.append("ToolProfile::excludes/name blacklist authorization is forbidden")
+    if authorization_source and tool_name_match_pattern.search(source):
+        violations.append("authorization must not match on ToolName; use declared capabilities")
+    return violations
+
+
+def tools_boundary_violations(rel_s: str, source: str) -> list[str]:
+    source = strip_rust_comments(source)
+    violations: list[str] = []
+    if rel_s == "agent/features/tools/src/lib.rs" and re.search(
+        r"\bpub\s+(?:use\b[^;]*\b|(?:struct|enum|type)\s+)(?:RegistryScopeBuilder|RegistryScope)\b",
+        source,
+        re.DOTALL,
+    ):
+        violations.append("RegistryScopeBuilder/RegistryScope must not enter the tools crate-root facade")
+    if rel_s.startswith("agent/features/tools/src/domain") and re.search(r"\bToolRegistry\b", source):
+        violations.append("ToolRegistry is an adapter and must not enter tools domain")
+    return violations
 
 
 def is_test_path(path: Path) -> bool:
@@ -152,6 +240,49 @@ def run_sanity() -> None:
         raise AssertionError("sanity block failed: non-first braced Project domain dependency")
     if not project_domain_adapter_pattern.search("use crate::\n adapters::git::GitCli;"):
         raise AssertionError("sanity block failed: multiline Project domain dependency")
+    safe_profile = """
+        pub struct ToolProfile { allowed_capabilities: ToolCapabilities }
+        impl ToolProfile {
+            pub fn baseline(value: ToolCapabilities) -> Self { Self { allowed_capabilities: value } }
+            pub fn derive_restricted(parent: &Self, requested: ToolCapabilities) -> Self {
+                Self::baseline(requested & parent.allowed_capabilities)
+            }
+            pub fn allowed_capabilities(&self) -> ToolCapabilities { self.allowed_capabilities }
+        }
+    """
+    if tool_profile_violations(safe_profile):
+        raise AssertionError("sanity allow failed: private, shrink-only ToolProfile")
+    if not tool_profile_violations(
+        "pub struct ToolProfile { pub allowed_capabilities: ToolCapabilities }"
+    ):
+        raise AssertionError("sanity block failed: public ToolProfile capability field")
+    if not tool_profile_violations(
+        safe_profile.replace(
+            "pub fn allowed_capabilities",
+            "pub fn insert(&mut self, value: ToolCapabilities) { self.allowed_capabilities |= value; } pub fn allowed_capabilities",
+        )
+    ):
+        raise AssertionError("sanity block failed: capability-expanding ToolProfile API")
+    if not tools_authorization_violations(
+        "impl ToolProfile { fn excludes(&self, name: &ToolName) -> bool { matches!(name, ToolName::Bash) } }"
+    ):
+        raise AssertionError("sanity block failed: ToolProfile name blacklist")
+    if tools_authorization_violations(
+        "fn is_authorized(required: Caps, profile: ToolProfile) -> bool { required.is_subset_of(profile.allowed_capabilities()) }"
+    ):
+        raise AssertionError("sanity allow failed: capability authorization")
+    if not tools_boundary_violations(
+        "agent/features/tools/src/lib.rs", "pub use domain::RegistryScopeBuilder;"
+    ):
+        raise AssertionError("sanity block failed: RegistryScopeBuilder in crate-root facade")
+    if not tools_boundary_violations(
+        "agent/features/tools/src/domain/catalog.rs", "use crate::adapters::ToolRegistry;"
+    ):
+        raise AssertionError("sanity block failed: ToolRegistry in domain")
+    if tools_boundary_violations(
+        "agent/features/tools/src/adapters/catalog.rs", "use super::ToolRegistry;"
+    ):
+        raise AssertionError("sanity allow failed: ToolRegistry in adapters")
 
 
 run_sanity()
@@ -283,11 +414,18 @@ for path in sorted(features_root.rglob("*.rs")):
         continue
     rel = path.relative_to(root)
     rel_s = rel.as_posix()
+    source = path.read_text()
+    if rel_s.startswith("agent/features/tools/src/"):
+        for violation in tools_authorization_violations(source):
+            violations.append(f"{rel}: {violation}")
+        for violation in tools_boundary_violations(rel_s, source):
+            violations.append(f"{rel}: {violation}")
+        if re.search(r"\bpub\s+struct\s+ToolProfile\b", strip_rust_comments(source)):
+            for violation in tool_profile_violations(source):
+                violations.append(f"{rel}: {violation}")
     if rel_s.startswith("agent/features/storage/src/domain/") or rel_s == "agent/features/storage/src/domain.rs":
-        source = path.read_text()
         if re.search(r"\b(?:std|tokio)::fs::|\bPathBuf\b|\bcrate::adapters\b", source):
-            violations.append(
-                f"{rel}: Storage domain must not perform physical I/O, own PathBuf, or depend on adapters"
+            violations.append(                f"{rel}: Storage domain must not perform physical I/O, own PathBuf, or depend on adapters"
             )
     layer_info = feature_layer_for(path)
     if not layer_info:

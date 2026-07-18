@@ -31,8 +31,12 @@ pub trait WorkspaceRead: Send + Sync {
     fn current_workspace_root(&self) -> PathBuf;
     /// 当前路径基准
     fn current_path_base(&self) -> PathBuf;
-    /// 将相对路径解析为绝对路径
+    /// 将相对路径解析为绝对路径（纯拼接，不校验）
     fn resolve(&self, rel: &Path) -> PathBuf;
+    /// 安全解析文件路径并强制位于 workspace root；允许目标尚不存在
+    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
+    /// 安全解析已存在搜索目录并强制位于 workspace root
+    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     /// 当前是否位于 linked git worktree
     fn in_worktree(&self) -> bool;
     /// 当前分支名（detached HEAD 或 NonGit 返回 None）
@@ -44,7 +48,8 @@ pub trait WorkspaceRead: Send + Sync {
 
 | 消费方 | 用途 |
 |---|---|
-| **文件 Tool**（Read / Write / Edit / Glob / Grep） | `resolve()` 将相对路径解析为绝对路径 |
+| **文件 Tool**（Read / Write / Edit / LSP） | `resolve_file_path()` 规范化路径、解析 symlink/缺失父目录并强制 containment |
+| **搜索 Tool**（Glob / Grep） | `resolve_search_path()` 规范化已存在目录并强制 containment |
 | **Bash Tool** | `current_path_base()` 作为命令执行的 cwd |
 | **Context Management** | `project_identity()` / `current_workspace_root()` 获取项目身份与上下文路径 |
 | **Tool Scope builder** | `workspace_id()` / `current_workspace_root()` 取得调用开始时的稳定值快照 |
@@ -56,7 +61,7 @@ pub trait WorkspaceRead: Send + Sync {
 | `/abs/path` | `/abs/path`（原样） |
 | `relative/path` | `path_base.join("relative/path")` |
 
-> **Decision**：`resolve` 不做存在性校验——它只做路径拼接。存在性由调用方（Tool）在操作时检查。这避免了 `resolve` 变成 I/O 操作。
+> **Decision**：`resolve` 仅做纯路径拼接，供非文件操作兼容使用。文件/搜索 Tool **MUST** 使用 `resolve_file_path` / `resolve_search_path`：两者 lexical normalize 并强制最终路径位于 canonical workspace root；文件目标可尚不存在，此时 canonicalize 最近存在祖先后重接尾部；搜索目录必须已存在。该安全前置条件不接受 Policy/AllowAll 绕过。
 
 `in_worktree()` **MUST** 从已提交 WorkspaceState（例如非空 stack / 已验证 frame）纯读取，**NEVER** 临时 spawn git；NonGit 恒为 `false`。`current_branch()` 在 NonGit 返回 `Ok(None)`；Git identity 才调用 `GitWorktreeOps`，探测 / 命令失败返回结构化 `WorkspaceError`，**NEVER** 把失败伪装成 detached HEAD。
 

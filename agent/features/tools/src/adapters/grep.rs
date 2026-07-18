@@ -1,6 +1,5 @@
 use crate::domain::types::grep::{GrepInput, GrepResult};
 use crate::domain::types::support::Match;
-use crate::domain::{PathAccess, PathKind};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -8,11 +7,6 @@ use std::path::PathBuf;
 use tokio::process::Command;
 
 pub struct GrepTool;
-
-const PATH_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "path",
-    kind: PathKind::SearchDir,
-}];
 
 #[async_trait]
 impl TypedTool for GrepTool {
@@ -40,9 +34,6 @@ impl TypedTool for GrepTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &PATH_ACCESS
-    }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<GrepResult> {
         let args: GrepInput = match serde_json::from_value(input) {
@@ -62,10 +53,13 @@ impl TypedTool for GrepTool {
             }
         };
         let pattern = args.pattern.as_str();
-        // Path has already been validated and normalised by PolicyEngine
-        let workspace_root = ctx.workspace_read().current_workspace_root();
+        let workspace = ctx.workspace_read();
+        let workspace_root = workspace.current_workspace_root();
         let search_path = match args.path.as_deref() {
-            Some(p) => std::path::PathBuf::from(p),
+            Some(path) => match workspace.resolve_search_path(std::path::Path::new(path)) {
+                Ok(path) => path,
+                Err(error) => return TypedToolResult::error(error.to_string()),
+            },
             None => workspace_root.clone(),
         };
         let glob_filter = args.glob.as_deref();

@@ -1,16 +1,10 @@
 use crate::domain::types::read::{ReadInput, ReadResult};
-use crate::domain::{PathAccess, PathKind};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::Path;
 
 pub struct FileReadTool;
-
-const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "file_path",
-    kind: PathKind::File,
-}];
 
 #[async_trait]
 impl TypedTool for FileReadTool {
@@ -38,26 +32,28 @@ impl TypedTool for FileReadTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &FILE_ACCESS
-    }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<ReadResult> {
         let args: ReadInput = match serde_json::from_value(input) {
             Ok(a) => a,
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
-        let file_path = args.file_path.as_str();
-
-        // Path has already been validated and normalised by PolicyEngine
-        let path = std::path::PathBuf::from(file_path);
+        let requested_path = args.file_path.as_str();
+        let path = match ctx
+            .workspace_read()
+            .resolve_file_path(Path::new(requested_path))
+        {
+            Ok(path) => path,
+            Err(error) => return TypedToolResult::error(error.to_string()),
+        };
+        let file_path = path.to_string_lossy().into_owned();
         if !path.exists() {
             return TypedToolResult::error(format!("file not found: {file_path}"));
         }
 
         // Check if the file is an image
-        if is_image_extension(file_path) {
-            return read_image_file(file_path, &path).await;
+        if is_image_extension(&file_path) {
+            return read_image_file(&file_path, &path).await;
         }
 
         let offset = args.offset.unwrap_or(0) as usize;

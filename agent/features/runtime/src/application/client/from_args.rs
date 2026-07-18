@@ -6,8 +6,8 @@ use crate::adapters::runtime::LlmClientAdapter;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::application::startup::{
     self as bootstrap, apply_config_permission_mode, build_agent_runner, build_hook_runner,
-    init_logging, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
-    resolve_model_runtime_settings, spawn_mcp_connect,
+    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
+    spawn_mcp_connect,
 };
 use crate::application::startup::{set_session_id, start_session, ChatBootstrapArgs};
 use crate::ports::legacy::ChatRuntimeContext;
@@ -15,8 +15,6 @@ use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
 use provider::SystemBlock;
 use storage::TaskStore;
-use tools as tools_crate;
-use tools::ToolRegistry;
 
 use super::{AgentClientImpl, RuntimeHandle};
 use crate::LOG_TARGET;
@@ -33,6 +31,8 @@ pub async fn from_args_with_workspace(
     config_reader: Arc<dyn config::ConfigReader>,
     config_query: Arc<dyn config::ConfigQuery>,
     config_writer: Arc<dyn config::ConfigWriter>,
+    provider_gateway: Arc<dyn provider::LlmProviderGateway>,
+    tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 ) -> Result<AgentClientImpl, SdkError> {
@@ -49,8 +49,7 @@ pub async fn from_args_with_workspace(
     // 3. 使用 Composition 已加载的唯一 committed 配置。
     let snapshot = config_reader.committed_snapshot();
 
-    // 4. 日志初始化
-    init_logging(snapshot.logging());
+    // 4. 日志已由 Composition 在进入 Runtime 前初始化。
 
     // 5. 权限模式
     apply_config_permission_mode(&mut args, snapshot.allow_all());
@@ -88,7 +87,8 @@ pub async fn from_args_with_workspace(
 
     // 9. LLM client
     let client = Arc::new(
-        bootstrap::build_llm_client(
+        bootstrap::build_llm_client_with_gateway(
+            provider_gateway.as_ref(),
             driver,
             api_key,
             base_url,
@@ -110,8 +110,8 @@ pub async fn from_args_with_workspace(
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
     let registry = {
-        let reg = ToolRegistry::new();
-        tools_crate::register_all_tools(&reg, task_access.clone(), skills.clone());
+        let reg = tool_gateway.new_registry();
+        tool_gateway.register_all_tools(&reg, task_access.clone(), skills.clone());
         Arc::new(reg)
     };
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
@@ -387,6 +387,8 @@ mod tests {
             config.reader(),
             config.query(),
             config.writer(),
+            provider::wire_provider(),
+            tools::wire_tools(),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         )
