@@ -15,6 +15,7 @@ COUNT=0
 
 while IFS= read -r -d '' file; do
     rel="${file#$ROOT/}"
+    # guard-registry:scope.tui.safe-text-owners
     case "$rel" in
       apps/cli/src/tui/render/display/safe_text.rs)
           continue
@@ -34,6 +35,7 @@ while IFS= read -r -d '' file; do
     # 刻意不检测 get-range（返回 Option 不 panic，是 safe_text 推荐用法，flag 会误伤）
     # 与 truncate（本仓库内均为 Vec::truncate，flag 会产生误导性注解）。
     while IFS=: read -r line_no line; do
+      # guard-registry:false-positive.tui.unsafe-text-inline-allow
       if [[ "$line" == *"allow unsafe_text_op"* ]]; then
         continue
       fi

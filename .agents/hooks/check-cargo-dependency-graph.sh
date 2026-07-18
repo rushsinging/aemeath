@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# guard-registry:policy.cargo.capability-dependency-matrix
 
 # 功能：基于 cargo 元数据校验各 crate 的业务依赖是否落在显式白名单内。
 # 作用：固化 feature 依赖方向（cli→{composition,sdk}；runtime→全部 supporting；

@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# guard-registry:policy.hexagonal.current-layer-matrix
+# guard-registry:migration.runtime.application-accessors-to-adapters
+# guard-registry:migration.runtime.application-from-args-to-adapters
+# guard-registry:migration.runtime.input-buffer-port-to-application
+# guard-registry:migration.runtime.legacy-port-to-application
+# guard-registry:migration.storage.transitional-business-modules
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
@@ -60,6 +66,10 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
 # bootstrap/adapter still owns temporary wiring; tools MCP connection still
 # reaches the registry until the registry port is split.
 LAYER_MIGRATION_EXCEPTIONS = set()
+# guard-registry:migration.runtime.application-accessors-to-adapters
+# guard-registry:migration.runtime.application-from-args-to-adapters
+# guard-registry:migration.runtime.input-buffer-port-to-application
+# guard-registry:migration.runtime.legacy-port-to-application
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),

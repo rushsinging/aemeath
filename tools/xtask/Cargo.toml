@@ -10,3 +10,6 @@ serde.workspace = true
 serde_json.workspace = true
 quote = "1"
 syn = { version = "2", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"

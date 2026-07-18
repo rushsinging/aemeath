@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# guard-registry:migration.tui.tea-slash-dispatch
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 FAILED=0
@@ -34,6 +35,9 @@ TUI_PURE_DIRS=(
 # 注：A1-A4 已 Effect 化/转纯的文件（dialog.rs、suggestions.rs、已删除的
 # save.rs、memory.rs）已移出本名单，受严格纯度检查约束。
 # ---------------------------------------------------------------------------
+# guard-registry:migration.tui.tea-slash-dispatch
+# guard-registry:scope.tui.tea-runtime-files
+# guard-registry:scope.tui.tea-test-files
 EXEMPT_FILES=(
   "apps/cli/src/tui/app/mod.rs"
   "apps/cli/src/tui/app/run_loop.rs"
@@ -69,6 +73,7 @@ for dir in "${TUI_PURE_DIRS[@]}"; do
     fi
 
     while IFS=: read -r line_no line; do
+      # guard-registry:false-positive.tui.tea-inline-allow
       if [[ "$line" == *"allow tea_side_effect"* ]]; then
         continue
       fi

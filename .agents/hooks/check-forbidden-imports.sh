@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# guard-registry:policy.composition.unique-adapter-root
+# guard-registry:migration.runtime.shared-adapter-bridge
 
 # 功能：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
 # 作用：守住 §6.4.5 rule5——`share::adapter` / `shared::adapter` / agent/shared/src/adapter
@@ -23,6 +25,7 @@ violations: list[str] = []
 # shared adapter newtypes to runtime-local ports.  This remains until those port
 # impls can be split into feature-owned gateway factories without making share
 # depend on runtime/provider/hook.  Keep this list path- and count-limited.
+# guard-registry:migration.runtime.shared-adapter-bridge
 RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS = {
     Path("agent/features/runtime/src/adapters/runtime.rs"),
 }

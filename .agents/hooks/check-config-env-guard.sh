@@ -62,10 +62,10 @@ for dir in "${SCAN_DIRS[@]}"; do
     fi
 
     # 搜索业务 env 读取
+    # guard-registry:scope.config.comments
     if grep -nE "env::var\(.*($BUSINESS_ENV_PATTERN)" "$file" 2>/dev/null | grep -v '//' | sed "s|^|$rel:|" >>"$tmp"; then
       :
-    fi
-  done < <(find "$dir" -name '*.rs' -type f)
+    fi  done < <(find "$dir" -name '*.rs' -type f)
 done
 
 if [ -s "$tmp" ]; then

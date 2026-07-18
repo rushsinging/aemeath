@@ -20,7 +20,7 @@ report() {
 report \
   "provider invocation state must stay immutable; use InvocationScope instead of atomics or runtime setters." \
   grep -RInE 'Atomic(U32|U8|Bool)|set_(max_tokens|reasoning_level)|current_reasoning_level|reasoning_config\.lock\(' \
-  agent/features/provider/src --include='*.rs' --exclude-dir=tests
+  agent/features/provider/src --include='*.rs' --exclude-dir=tests # guard-registry:scope.provider.invocation-tests
 
 report \
   "runtime must not restore shared-client mutation or serialization locks." \

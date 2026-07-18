@@ -55,7 +55,9 @@ while IFS= read -r file; do
   # 排除注释行（///? | //!）—守卫针对实际代码/serde 声明，非文档说明；
   # 排除兼容测试字符串。
   echo "$prod" | grep -nE "$FORBIDDEN_PATTERN" 2>/dev/null | \
+# guard-registry:scope.config.workflow-comments-and-compat-test
     grep -vE '^[0-9]+:[[:space:]]*(///?|//!)' | \
+# guard-registry:scope.config.workflow-comments-and-compat-test
     grep -v "$ALLOWED_COMPAT_TEST" | \
     sed "s|^|$rel:|" >>"$violations" || true
 done < <(find "$CONFIG_DIR" -name '*.rs' -type f | sort)
