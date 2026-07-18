@@ -317,6 +317,7 @@ impl ConfigSnapshot {
 - **不采用裸 `Arc<Config>`**（暴露 pub 字段）
 - **不采用独立 struct**（字段重复维护）
 - **accessor 返回最终有效值**——`max_tool_concurrency()` / `max_agent_concurrency()` 将底层 `0` 归一为 Config domain 的唯一默认值；Runtime 只叠加非零 CLI override，**NEVER** 复制 `10` / `4` 等业务默认值
+- `usage_worker_config() -> UsageWorkerConfig` 返回 validated value：native 配置 schema 为 `audit.usage_queue_capacity`（usize）与 `audit.usage_shutdown_timeout_ms`（u64）；默认 `1024 / 5000ms`，显式 0 作为兼容 sentinel 回退默认。global 与 project FileAdapter 使用字段级 patch 合并，因此两层可分别覆盖 capacity/timeout；Compatibility/Env/CLI/RuntimeOverride 不产出这两个字段。Composition 只在进程 bootstrap 捕获一次并启动 Audit worker，运行期 Config commit 不重启 worker；Audit **NEVER** 持有 ConfigReader/ConfigQuery/裸 Config。
 
 ### 4.2 active state 与 watch channel
 

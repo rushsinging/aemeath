@@ -15,16 +15,13 @@ pub(crate) async fn from_args_with_gateways(
     let task_access = task_wiring.access();
     let session_tasks = context::compose_session_task_capture(task_wiring.persist());
 
-    runtime::from_args_with_workspace(
-        args,
+    let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
-        config.reader(),
-        config.query(),
-        config.writer(),
+        runtime::RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
         gateways.provider,
         gateways.tools,
         task_access,
         session_tasks,
-    )
-    .await
+    );
+    runtime::from_args_with_workspace(args, dependencies).await
 }

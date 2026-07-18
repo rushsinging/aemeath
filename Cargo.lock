@@ -134,6 +134,7 @@ name = "audit"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "log",
  "sdk",
  "serde",
  "serde_json",
@@ -408,6 +409,7 @@ name = "composition"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "audit",
  "config",
  "context",
  "log",
@@ -418,6 +420,7 @@ dependencies = [
  "sdk",
  "serde_json",
  "share",
+ "storage",
  "task",
  "tempfile",
  "tokio",

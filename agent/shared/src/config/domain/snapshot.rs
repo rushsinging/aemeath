@@ -5,7 +5,9 @@
 //! what consumers need.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use crate::config::audit::{DEFAULT_USAGE_QUEUE_CAPACITY, DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS};
 use crate::config::models::{
     ModelEntryConfig, ModelResolveError, ModelsConfig, ResolvedModel, ResolvedRuntimeModel,
     RuntimeModelRequest, RuntimeModelResolutionError, RuntimeModelResolver,
@@ -48,6 +50,22 @@ impl ToolResultPolicy {
 
     pub fn preview_tail_chars(self) -> usize {
         self.preview_tail_chars
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct UsageWorkerConfig {
+    capacity: usize,
+    shutdown_timeout: Duration,
+}
+
+impl UsageWorkerConfig {
+    pub fn capacity(self) -> usize {
+        self.capacity
+    }
+
+    pub fn shutdown_timeout(self) -> Duration {
+        self.shutdown_timeout
     }
 }
 
@@ -182,6 +200,25 @@ impl ConfigSnapshot {
 
     pub fn memory_enabled(&self) -> bool {
         self.0.memory.enabled
+    }
+
+    // ── Audit ───────────────────────────────────────────────
+
+    pub fn usage_worker_config(&self) -> UsageWorkerConfig {
+        UsageWorkerConfig {
+            capacity: if self.0.audit.usage_queue_capacity > 0 {
+                self.0.audit.usage_queue_capacity
+            } else {
+                DEFAULT_USAGE_QUEUE_CAPACITY
+            },
+            shutdown_timeout: Duration::from_millis(
+                if self.0.audit.usage_shutdown_timeout_ms > 0 {
+                    self.0.audit.usage_shutdown_timeout_ms
+                } else {
+                    DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS
+                },
+            ),
+        }
     }
 
     // ── Storage ──────────────────────────────────────────────

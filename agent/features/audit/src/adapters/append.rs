@@ -21,16 +21,17 @@ pub fn file_usage_append_store(root: SafeStorageRoot) -> FileUsageAppendStore {
     FileUsageAppendStore::new(root)
 }
 
+#[derive(Clone)]
 pub struct FileUsageAppendStore {
     root: SafeStorageRoot,
-    stream_locks: Mutex<HashMap<String, StreamLock>>,
+    stream_locks: Arc<Mutex<HashMap<String, StreamLock>>>,
 }
 
 impl FileUsageAppendStore {
     pub fn new(root: SafeStorageRoot) -> Self {
         Self {
             root,
-            stream_locks: Mutex::new(HashMap::new()),
+            stream_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -175,21 +176,38 @@ impl FileUsageAppendStore {
 #[async_trait]
 impl UsageAppendStorePort for FileUsageAppendStore {
     async fn append(&self, stream: &AppendLogStream, bytes: &[u8]) -> Result<(), AppendLogError> {
-        self.append_sync(stream, bytes)
+        let store = self.clone();
+        let stream = stream.clone();
+        let bytes = bytes.to_vec();
+        tokio::task::spawn_blocking(move || store.append_sync(&stream, &bytes))
+            .await
+            .map_err(|_| AppendLogError::Io)?
     }
 
     async fn flush(&self, stream: &AppendLogStream) -> Result<(), AppendLogError> {
-        self.flush_sync(stream)
+        let store = self.clone();
+        let stream = stream.clone();
+        tokio::task::spawn_blocking(move || store.flush_sync(&stream))
+            .await
+            .map_err(|_| AppendLogError::Io)?
     }
 
     async fn read(&self, stream: &AppendLogStream) -> Result<AppendLogReader, AppendLogError> {
-        self.read_sync(stream)
+        let store = self.clone();
+        let stream = stream.clone();
+        tokio::task::spawn_blocking(move || store.read_sync(&stream))
+            .await
+            .map_err(|_| AppendLogError::Io)?
     }
 
     async fn list_streams(
         &self,
         namespace: &AppendLogNamespace,
     ) -> Result<Vec<AppendLogStream>, AppendLogError> {
-        self.list_sync(namespace)
+        let store = self.clone();
+        let namespace = namespace.clone();
+        tokio::task::spawn_blocking(move || store.list_sync(&namespace))
+            .await
+            .map_err(|_| AppendLogError::Io)?
     }
 }
