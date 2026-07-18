@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# guard-registry:policy.hexagonal.current-layer-matrix
+# guard-registry:migration.runtime.application-accessors-to-adapters
+# guard-registry:migration.runtime.application-from-args-to-adapters
+# guard-registry:migration.runtime.input-buffer-port-to-application
+# guard-registry:migration.runtime.legacy-port-to-application
+# guard-registry:migration.storage.transitional-business-modules
 
 # 功能：检查未迁移 feature 的 COLA 分层，并锁定已迁移 feature 的目标目录。
 # 作用：普通 feature 继续受迁移期 COLA 依赖方向约束；Runtime 使用
@@ -35,8 +41,8 @@ PROJECT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capa
 TOOLS_HEX_LAYERS = {"domain", "adapters"}
 TOOLS_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "adapters.rs"}
 TOOLS_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway"}
-AUDIT_HEX_LAYERS = {"domain", "ports", "adapters"}
-AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "ports.rs", "adapters.rs"}
+AUDIT_HEX_LAYERS = {"domain", "application", "ports", "adapters"}
+AUDIT_ALLOWED_TOP_LEVEL_FILES = {"lib.rs", "domain.rs", "application.rs", "ports.rs", "adapters.rs"}
 AUDIT_LEGACY_LAYERS = {"api", "business", "contract", "core", "gateway", "capabilities"}
 # Dependency direction inside a feature: outer/application layers may depend inward;
 # domain/business must not depend on orchestration/gateway/contract, and utils must stay leaf-like.
@@ -60,6 +66,10 @@ RUNTIME_PROVIDER_TOOLS_OLD_PATHS = [
 # bootstrap/adapter still owns temporary wiring; tools MCP connection still
 # reaches the registry until the registry port is split.
 LAYER_MIGRATION_EXCEPTIONS = set()
+# guard-registry:migration.runtime.application-accessors-to-adapters
+# guard-registry:migration.runtime.application-from-args-to-adapters
+# guard-registry:migration.runtime.input-buffer-port-to-application
+# guard-registry:migration.runtime.legacy-port-to-application
 RUNTIME_LAYER_MIGRATION_EXCEPTIONS = {
     ("agent/features/runtime/src/application/client/accessors.rs", "adapters"),
     ("agent/features/runtime/src/application/client/from_args.rs", "adapters"),

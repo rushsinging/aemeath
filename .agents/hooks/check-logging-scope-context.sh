@@ -24,7 +24,9 @@ for path in root.rglob('*.rs'):
 PY
 )"
 
+# guard-registry:scope.logging.registered-process-statics
 static_violations="$(printf '%s\n' "$static_declarations" | grep -vE "$STATIC_ALLOW" || true)"
+# guard-registry:scope.logging.scope-context-tests
 macro_violations="$(grep -RInE '(lazy_static!|thread_local!)[[:space:]]*\{' "$LOGGING_SRC" --include='*.rs' --exclude='*test*.rs' || true)"
 
 if [ -n "$static_violations" ] || [ -n "$macro_violations" ]; then

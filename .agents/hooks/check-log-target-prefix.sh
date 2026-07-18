@@ -12,8 +12,7 @@ violations=$(rg 'target:\s*"([^"]*)"' \
   -g '!**/tests/**' \
   -g '!**/*test*.rs' \
   -g '!target/**' \
-  | grep -v 'aemeath:' \
-  || true)
+  | grep -v 'aemeath:' || true) # guard-registry:scope.logging.owned-targets
 
 if [ -n "$violations" ]; then
   echo "✗ log target must start with 'aemeath:' (or use LOG_TARGET constant):" >&2

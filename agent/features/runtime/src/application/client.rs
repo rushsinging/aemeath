@@ -16,4 +16,6 @@ pub(crate) use mapping::*;
 
 // 对外仅发布 Composition 装配所需的 workspace bootstrap。
 pub use accessors::AgentClientImpl;
-pub use from_args::from_args_with_workspace;
+pub use from_args::{
+    from_args_with_workspace, RuntimeBootstrapDependencies, RuntimeConfigDependencies,
+};

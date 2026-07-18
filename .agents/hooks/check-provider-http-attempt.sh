@@ -43,7 +43,7 @@ find "$PROVIDER_SRC_DIR" -type f -name '*.rs' \
   ! -path '*/tests/*' \
   | sort >"$DRIVER_FILES_LIST"
 
-grep -vF "$ERROR_LOG_FILE" "$DRIVER_FILES_LIST" >"$DRIVER_FILES_EXCEPT_ERROR_LOG_LIST" || true
+grep -vF "$ERROR_LOG_FILE" "$DRIVER_FILES_LIST" >"$DRIVER_FILES_EXCEPT_ERROR_LOG_LIST" || true # guard-registry:scope.provider.error-log-self-reference
 
 # Reliably strip only the trailing inline `#[cfg(test)] mod <name> { ... }`
 # test module that this crate conventionally appends at the bottom of a

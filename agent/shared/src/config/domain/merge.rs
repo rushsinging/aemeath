@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::config::{
+    audit::AuditConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -44,6 +45,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub skills: Option<SkillsConfigPatch>,
     #[serde(default)]
+    pub audit: Option<AuditConfigPatch>,
+    #[serde(default)]
     pub storage: Option<StorageConfigPatch>,
     #[serde(default)]
     pub hooks: Option<HooksConfig>,
@@ -74,6 +77,7 @@ impl ConfigPatch {
             && self.ui.is_none()
             && self.permissions.is_none()
             && self.skills.is_none()
+            && self.audit.is_none()
             && self.storage.is_none()
             && self.memory.is_none()
             && self.logging.is_none()
@@ -221,6 +225,14 @@ pub struct SkillsConfigPatch {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+pub struct AuditConfigPatch {
+    #[serde(default)]
+    pub usage_queue_capacity: Option<usize>,
+    #[serde(default)]
+    pub usage_shutdown_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct StorageConfigPatch {
     #[serde(default)]
     pub sessions_dir: Option<PathBuf>,
@@ -324,6 +336,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(skills) = patch.skills {
         base.skills = apply_skills_patch(base.skills, skills);
+    }
+    if let Some(audit) = patch.audit {
+        base.audit = apply_audit_patch(base.audit, audit);
     }
     if let Some(storage) = patch.storage {
         base.storage = apply_storage_patch(base.storage, storage);
@@ -548,6 +563,16 @@ pub(crate) fn apply_permission_patch(
 pub(crate) fn apply_skills_patch(mut base: SkillsConfig, patch: SkillsConfigPatch) -> SkillsConfig {
     if let Some(v) = patch.dirs {
         base.dirs = v;
+    }
+    base
+}
+
+pub(crate) fn apply_audit_patch(mut base: AuditConfig, patch: AuditConfigPatch) -> AuditConfig {
+    if let Some(value) = patch.usage_queue_capacity {
+        base.usage_queue_capacity = value;
+    }
+    if let Some(value) = patch.usage_shutdown_timeout_ms {
+        base.usage_shutdown_timeout_ms = value;
     }
     base
 }
