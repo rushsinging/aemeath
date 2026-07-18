@@ -18,7 +18,7 @@
 │                             不可解析三类诊断                 │
 │                                                              │
 │ Stop（任务结束）                                              │
-│   └─ check-architecture-guards.sh    串行执行 27 个守卫       │
+│   └─ check-architecture-guards.sh    串行执行 30 个守卫       │
 │   └─ check-unit-tests.sh            cargo test --lib         │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -53,6 +53,7 @@
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
 | 16 | `check-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
 | 17 | `check-log-target-prefix.sh` | 日志架构 | log target 字符串字面量必须以 `aemeath:` 开头 |
+| 17a | `check-logging-scope-context.sh` | 日志架构 | 禁止在 legacy 精确基线外新增进程级 `CURRENT_*` / `SESSION_ID` 执行上下文状态；新路径必须使用 `LogContext` task-local scope |
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
@@ -461,6 +462,14 @@
 - **例外**：`packages/global/logging/src/`（该目录的精确白名单校验由 Rust 测试 `domain/routing_guard.rs` 覆盖；#936 将其切换为消费唯一 TargetCatalog）。
 - **错误信息**：`log target must start with 'aemeath:' (or use LOG_TARGET constant)`。
 - **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
+
+### 17a. check-logging-scope-context.sh
+
+- **功能**：扫描整个 `packages/global/logging/src` 的生产 Rust 文件，拒绝未登记的 `static`、`static mut`、`lazy_static!` 与 `thread_local!` 状态；`pub`、多行声明同样参与检查。
+- **守护**：新日志执行上下文只能通过不可变 `LogContext` 与 Tokio task-local scope 传播；禁止以改名或移动文件的方式恢复 Main/Sub 共享的进程级可变 current 状态。
+- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / LEGACY_EXECUTION_CONTEXT / BOOT_TS / APP_VERSION / PID / TEST_LOCK`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。其中 `LEGACY_EXECUTION_CONTEXT` 只为 #940 消费迁移及 #942 退役保留；白名单 **NEVER** 扩张，新增进程元数据必须有独立设计证据。
+- **故意违规证据**：在 `formatter.rs` 临时新增带 `pub(crate)`、多行声明且不使用 `CURRENT_*` 命名的 `ACTIVE_REQUEST` 后，单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
+- **退出条件**：#942 删除 legacy setters 与 `LEGACY_EXECUTION_CONTEXT` 后，从精确白名单删除该项。
 
 ## 18. no_mod_rs.sh
 
