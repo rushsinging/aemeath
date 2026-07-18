@@ -1,9 +1,13 @@
-//! Tool 注册编排：将各 business 层 Tool 实现注册到 `ToolRegistry`。
+//! Built-in tool registration and named registry-scope assembly.
 
 use crate::adapters::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep, lsp,
     memory_tool, plan_mode, skill_tool, task_create, task_get, task_list, task_list_complete,
     task_list_create, task_stop, task_update, tool_search, web_fetch, web_search, worktree,
+};
+use crate::domain::published_language::ToolCapabilities as Caps;
+use crate::domain::scope_profile::{
+    is_authorized, RegistryScope, RegistryScopeBuilder, ToolProfile, ToolRegistrationSpec,
 };
 use share::skill_ops::Skill;
 use std::collections::HashMap;
@@ -13,269 +17,455 @@ use tokio::sync::Mutex;
 
 use super::tool_registry::ToolRegistry;
 
-/// 工具集 profile：决定哪些工具被注册。取代历史的 3 个近重复 `register_*` 函数，
-/// 工具清单只定义一次（见 [`register_tools`]）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolProfile {
-    /// 主 agent：全部工具。
-    Full,
-    /// 子 agent：排除协调类工具（Agent / AskUserQuestion / Task* / Worktree / PlanMode）——
-    /// 子 agent 不与用户交互、不操作父任务列表。
+enum BuiltinRegistryScope {
+    Main,
     SubAgent,
-    /// 排除 Agent 自身（避免子 agent 递归派发），同时不含 ToolSearch / PlanMode。
-    NoAgent,
+    /// Exact compatibility scope retained until #914.
+    LegacyNoAgent,
 }
 
-impl ToolProfile {
-    /// 该 profile 是否排除指定 registry 工具名。
-    fn excludes(self, name: &str) -> bool {
+impl BuiltinRegistryScope {
+    fn name(self) -> &'static str {
         match self {
-            ToolProfile::Full => false,
-            ToolProfile::SubAgent => matches!(
-                name,
-                "Agent"
-                    | "AskUserQuestion"
-                    | "TaskCreate"
-                    | "TaskUpdate"
-                    | "TaskList"
-                    | "TaskListCreate"
-                    | "TaskListComplete"
-                    | "TaskGet"
-                    | "TaskStop"
-                    | "EnterWorktree"
-                    | "ExitWorktree"
-                    | "EnterPlanMode"
-                    | "ExitPlanMode"
-            ),
-            ToolProfile::NoAgent => {
-                matches!(
-                    name,
-                    "Agent" | "ToolSearch" | "EnterPlanMode" | "ExitPlanMode"
-                )
-            }
+            Self::Main => "main",
+            Self::SubAgent => "sub-agent",
+            Self::LegacyNoAgent => "legacy-no-agent",
         }
     }
 }
 
-/// 单一注册入口：按 `profile` 把内置工具注册到 `registry`。
-///
-/// 工具清单在此**定义一次**（DRY）；各 profile 通过 [`ToolProfile::excludes`] 过滤。
-/// MCP 工具由 connector 动态注册，不在此列。
-pub fn register_tools(
+fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
+    let requested = match scope {
+        BuiltinRegistryScope::Main | BuiltinRegistryScope::LegacyNoAgent => Caps::all(),
+        BuiltinRegistryScope::SubAgent => {
+            Caps::ReadWorkspace
+                | Caps::WriteWorkspace
+                | Caps::ExecuteProcess
+                | Caps::NetworkAccess
+                | Caps::WorkspaceControl
+        }
+    };
+
+    match scope {
+        BuiltinRegistryScope::Main => *main_parent,
+        BuiltinRegistryScope::SubAgent | BuiltinRegistryScope::LegacyNoAgent => {
+            ToolProfile::derive_restricted(main_parent, requested)
+                .expect("built-in child profiles must only restrict the main profile")
+        }
+    }
+}
+
+fn belongs_to(scope: BuiltinRegistryScope, main: bool, sub: bool, no_agent: bool) -> bool {
+    match scope {
+        BuiltinRegistryScope::Main => main,
+        BuiltinRegistryScope::SubAgent => sub,
+        BuiltinRegistryScope::LegacyNoAgent => no_agent,
+    }
+}
+
+fn register_named_scope(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
-    profile: ToolProfile,
-) {
-    macro_rules! reg {
-        ($name:literal, $tool:expr) => {
-            if !profile.excludes($name) {
-                registry.register($tool);
+    selected_scope: BuiltinRegistryScope,
+) -> RegistryScope {
+    let mut scope = RegistryScopeBuilder::new(selected_scope.name());
+    let main_profile = ToolProfile::baseline(Caps::all());
+    let profile = profile_for(selected_scope, &main_profile);
+
+    // This macro is the single built-in registration specification: each row
+    // declares identity, required capabilities, scope membership, and factory.
+    macro_rules! builtin {
+        ($name:literal, $caps:expr, [$main:literal, $sub:literal, $no_agent:literal], $tool:expr) => {{
+            if belongs_to(selected_scope, $main, $sub, $no_agent) {
+                let spec = ToolRegistrationSpec::new($name, $caps);
+                scope
+                    .register_mut(spec.clone())
+                    .expect("built-in tool registration specification must be valid");
+                if is_authorized(&spec, &profile) {
+                    registry.register($tool);
+                }
             }
-        };
+        }};
     }
 
-    // Core tools
-    reg!("Bash", bash::BashTool);
-    reg!("Read", file_read::FileReadTool);
-    reg!("Write", file_write::FileWriteTool);
-    reg!("Edit", file_edit::FileEditTool);
-    reg!("Glob", glob_tool::GlobTool);
-    reg!("Grep", grep::GrepTool);
-    reg!("LSP", lsp::LspTool);
-
-    // Web tools
-    reg!("WebFetch", web_fetch::WebFetchTool);
-    reg!("WebSearch", web_search::WebSearchTool);
-
-    // Agent dispatch
-    reg!("Agent", agent_tool::AgentTool);
-
-    // Task management tools
-    reg!(
+    builtin!(
+        "Bash",
+        Caps::ReadWorkspace | Caps::ExecuteProcess | Caps::WorkspaceControl,
+        [true, true, true],
+        bash::BashTool
+    );
+    builtin!(
+        "Read",
+        Caps::ReadWorkspace,
+        [true, true, true],
+        file_read::FileReadTool
+    );
+    builtin!(
+        "Write",
+        Caps::ReadWorkspace | Caps::WriteWorkspace,
+        [true, true, true],
+        file_write::FileWriteTool
+    );
+    builtin!(
+        "Edit",
+        Caps::ReadWorkspace | Caps::WriteWorkspace,
+        [true, true, true],
+        file_edit::FileEditTool
+    );
+    builtin!(
+        "Glob",
+        Caps::ReadWorkspace,
+        [true, true, true],
+        glob_tool::GlobTool
+    );
+    builtin!(
+        "Grep",
+        Caps::ReadWorkspace,
+        [true, true, true],
+        grep::GrepTool
+    );
+    builtin!(
+        "LSP",
+        Caps::ReadWorkspace | Caps::ExecuteProcess,
+        [true, true, true],
+        lsp::LspTool
+    );
+    builtin!(
+        "WebFetch",
+        Caps::NetworkAccess,
+        [true, true, true],
+        web_fetch::WebFetchTool
+    );
+    builtin!(
+        "WebSearch",
+        Caps::NetworkAccess,
+        [true, true, true],
+        web_search::WebSearchTool
+    );
+    builtin!(
+        "Agent",
+        Caps::AgentDispatch,
+        [true, false, false],
+        agent_tool::AgentTool
+    );
+    builtin!(
         "TaskCreate",
+        Caps::TaskMutation,
+        [true, false, true],
         task_create::TaskCreateTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-    reg!(
+    builtin!(
         "TaskUpdate",
+        Caps::TaskMutation,
+        [true, false, true],
         task_update::TaskUpdateTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-    reg!(
+    builtin!(
         "TaskList",
+        Caps::TaskRead,
+        [true, false, true],
         task_list::TaskListTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-    reg!(
+    builtin!(
         "TaskListCreate",
+        Caps::TaskMutation,
+        [true, false, true],
         task_list_create::TaskListCreateTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-    reg!(
+    builtin!(
         "TaskListComplete",
+        Caps::TaskMutation,
+        [true, false, true],
         task_list_complete::TaskListCompleteTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-    reg!(
+    builtin!(
         "TaskGet",
+        Caps::TaskRead,
+        [true, false, true],
         task_get::TaskGetTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-    reg!(
+    builtin!(
         "TaskStop",
+        Caps::TaskMutation,
+        [true, false, true],
         task_stop::TaskStopTool {
-            access: task_access.clone(),
+            access: task_access.clone()
         }
     );
-
-    // Skill and memory tools (MCP tools are dynamically registered)
-    reg!(
+    builtin!(
         "Skill",
+        Caps::empty(),
+        [true, true, true],
         skill_tool::SkillTool {
-            skills: skills.clone(),
+            skills: skills.clone()
         }
     );
-    reg!("Memory", memory_tool::MemoryTool);
+    builtin!(
+        "Memory",
+        Caps::empty(),
+        [true, true, true],
+        memory_tool::MemoryTool
+    );
+    builtin!(
+        "AskUserQuestion",
+        Caps::UserInteraction,
+        [true, false, true],
+        ask_user::AskUserQuestionTool
+    );
+    builtin!("Brief", Caps::empty(), [true, true, true], brief::BriefTool);
+    builtin!(
+        "ToolSearch",
+        Caps::empty(),
+        [true, true, false],
+        tool_search::ToolSearchTool
+    );
+    builtin!(
+        "EnterPlanMode",
+        Caps::PlanControl,
+        [true, false, false],
+        plan_mode::EnterPlanModeTool
+    );
+    builtin!(
+        "ExitPlanMode",
+        Caps::PlanControl,
+        [true, false, false],
+        plan_mode::ExitPlanModeTool
+    );
+    builtin!(
+        "EnterWorktree",
+        Caps::ReadWorkspace | Caps::WorkspaceControl,
+        [true, false, true],
+        worktree::EnterWorktreeTool
+    );
+    builtin!(
+        "ExitWorktree",
+        Caps::ReadWorkspace | Caps::WorkspaceControl,
+        [true, false, true],
+        worktree::ExitWorktreeTool
+    );
 
-    // Utility tools
-    reg!("AskUserQuestion", ask_user::AskUserQuestionTool);
-    reg!("Brief", brief::BriefTool);
-
-    // Tool discovery
-    reg!("ToolSearch", tool_search::ToolSearchTool);
-
-    // Plan mode tools
-    reg!("EnterPlanMode", plan_mode::EnterPlanModeTool);
-    reg!("ExitPlanMode", plan_mode::ExitPlanModeTool);
-
-    // Worktree tools
-    reg!("EnterWorktree", worktree::EnterWorktreeTool);
-    reg!("ExitWorktree", worktree::ExitWorktreeTool);
+    let built_scope = scope.build();
+    debug_assert_eq!(built_scope.name().as_str(), selected_scope.name());
+    debug_assert_eq!(built_scope.len(), registry.len());
+    debug_assert!(built_scope
+        .iter()
+        .all(|spec| built_scope.get(spec.name()).is_some()));
+    built_scope
 }
 
-/// 主 agent 全量工具（[`register_tools`] 的 `Full` profile 便捷封装）。
 pub fn register_all_tools(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    register_tools(registry, task_access, skills, ToolProfile::Full);
+    register_named_scope(registry, task_access, skills, BuiltinRegistryScope::Main);
 }
 
-/// 子 agent 工具集（排除协调类工具；[`ToolProfile::SubAgent`] 封装）。
 pub fn register_subagent_tools(
     registry: &mut ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    register_tools(registry, task_access, skills, ToolProfile::SubAgent);
+    register_named_scope(
+        registry,
+        task_access,
+        skills,
+        BuiltinRegistryScope::SubAgent,
+    );
 }
 
-/// 排除 Agent 的工具集（[`ToolProfile::NoAgent`] 封装）。
+/// Compatibility façade preserving the historical set exactly until #914.
 pub fn register_all_tools_except_agent(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
 ) {
-    register_tools(registry, task_access, skills, ToolProfile::NoAgent);
+    register_named_scope(
+        registry,
+        task_access,
+        skills,
+        BuiltinRegistryScope::LegacyNoAgent,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use task::TaskStore;
 
+    fn assembled_scope(scope: BuiltinRegistryScope) -> RegistryScope {
+        let registry = ToolRegistry::new();
+        let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
+        register_named_scope(
+            &registry,
+            task_access,
+            Arc::new(Mutex::new(HashMap::new())),
+            scope,
+        )
+    }
+
+    fn names_for(scope: BuiltinRegistryScope) -> BTreeSet<String> {
+        assembled_scope(scope)
+            .iter()
+            .map(|spec| spec.name().as_str().to_owned())
+            .collect()
+    }
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| name.to_ascii_lowercase()).collect()
+    }
+
+    const FULL: &[&str] = &[
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "LSP",
+        "WebFetch",
+        "WebSearch",
+        "Agent",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskListCreate",
+        "TaskListComplete",
+        "TaskGet",
+        "TaskStop",
+        "Skill",
+        "Memory",
+        "AskUserQuestion",
+        "Brief",
+        "ToolSearch",
+        "EnterPlanMode",
+        "ExitPlanMode",
+        "EnterWorktree",
+        "ExitWorktree",
+    ];
+    const SUB_AGENT: &[&str] = &[
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "LSP",
+        "WebFetch",
+        "WebSearch",
+        "Skill",
+        "Memory",
+        "Brief",
+        "ToolSearch",
+    ];
+    const NO_AGENT: &[&str] = &[
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "LSP",
+        "WebFetch",
+        "WebSearch",
+        "TaskCreate",
+        "TaskUpdate",
+        "TaskList",
+        "TaskListCreate",
+        "TaskListComplete",
+        "TaskGet",
+        "TaskStop",
+        "Skill",
+        "Memory",
+        "AskUserQuestion",
+        "Brief",
+        "EnterWorktree",
+        "ExitWorktree",
+    ];
+
     #[test]
-    fn test_register_subagent_tools_excludes_coordination_tools() {
-        let mut registry = ToolRegistry::new();
-        let task_store = Arc::new(TaskStore::new());
-        let task_access: Arc<dyn TaskAccess> = task_store.clone();
-        let skills = Arc::new(Mutex::new(HashMap::new()));
+    fn production_profiles_are_main_baseline_or_restricted_children() {
+        let main = ToolProfile::baseline(Caps::all());
+        let main_profile = profile_for(BuiltinRegistryScope::Main, &main);
+        assert_eq!(main_profile.allowed_capabilities(), Caps::all());
 
-        register_subagent_tools(&mut registry, task_access, skills);
+        for child_scope in [
+            BuiltinRegistryScope::SubAgent,
+            BuiltinRegistryScope::LegacyNoAgent,
+        ] {
+            let child = profile_for(child_scope, &main);
+            assert!(child
+                .allowed_capabilities()
+                .is_subset_of(main.allowed_capabilities()));
+        }
+        assert_ne!(
+            profile_for(BuiltinRegistryScope::SubAgent, &main).allowed_capabilities(),
+            main.allowed_capabilities()
+        );
+    }
 
-        for forbidden in [
-            "Agent",
-            "AskUserQuestion",
+    #[test]
+    fn side_effect_capability_characterization_matches_builtin_behavior() {
+        let main_scope = assembled_scope(BuiltinRegistryScope::Main);
+        let lsp = main_scope
+            .get(&crate::domain::published_language::ToolName::new("LSP"))
+            .unwrap();
+        assert_eq!(
+            lsp.required_capabilities(),
+            Caps::ReadWorkspace | Caps::ExecuteProcess,
+            "LSP invokes cargo/npx/python/go/grep and may write compiler caches"
+        );
+
+        for name in ["TaskGet", "TaskList"] {
+            let spec = main_scope
+                .get(&crate::domain::published_language::ToolName::new(name))
+                .unwrap();
+            assert_eq!(spec.required_capabilities(), Caps::TaskRead);
+        }
+        for name in [
             "TaskCreate",
             "TaskUpdate",
-            "TaskList",
             "TaskListCreate",
             "TaskListComplete",
-            "TaskGet",
             "TaskStop",
-            "EnterWorktree",
-            "ExitWorktree",
         ] {
-            assert!(
-                !registry.contains(forbidden),
-                "{forbidden} should be unavailable to sub-agents"
-            );
-        }
-        assert!(registry.contains("Read"));
-        assert!(registry.contains("Grep"));
-        assert!(registry.contains("Bash"));
-        assert!(registry.contains("Skill"));
-    }
-
-    #[test]
-    fn test_full_profile_registers_all_27_tools() {
-        let registry = ToolRegistry::new();
-        let task_store = Arc::new(TaskStore::new());
-        let task_access: Arc<dyn TaskAccess> = task_store.clone();
-        register_tools(
-            &registry,
-            task_access,
-            Arc::new(Mutex::new(HashMap::new())),
-            ToolProfile::Full,
-        );
-        for name in [
-            "Bash",
-            "Read",
-            "Agent",
-            "TaskCreate",
-            "AskUserQuestion",
-            "ToolSearch",
-            "EnterPlanMode",
-            "ExitPlanMode",
-            "EnterWorktree",
-            "ExitWorktree",
-        ] {
-            assert!(registry.contains(name), "Full 应包含 {name}");
+            let spec = main_scope
+                .get(&crate::domain::published_language::ToolName::new(name))
+                .unwrap();
+            assert_eq!(spec.required_capabilities(), Caps::TaskMutation);
         }
     }
 
     #[test]
-    fn test_no_agent_profile_excludes_agent_toolsearch_planmode_only() {
-        // NoAgent 的 quirk：排除 Agent / ToolSearch / PlanMode，但保留 Task / AskUser / Worktree。
-        let registry = ToolRegistry::new();
-        let task_store = Arc::new(TaskStore::new());
-        let task_access: Arc<dyn TaskAccess> = task_store.clone();
-        register_tools(
-            &registry,
-            task_access,
-            Arc::new(Mutex::new(HashMap::new())),
-            ToolProfile::NoAgent,
+    fn full_scope_characterization_is_exact() {
+        assert_eq!(names_for(BuiltinRegistryScope::Main), set(FULL));
+    }
+
+    #[test]
+    fn sub_agent_scope_characterization_is_exact() {
+        assert_eq!(names_for(BuiltinRegistryScope::SubAgent), set(SUB_AGENT));
+    }
+
+    #[test]
+    fn legacy_no_agent_scope_characterization_is_exact() {
+        assert_eq!(
+            names_for(BuiltinRegistryScope::LegacyNoAgent),
+            set(NO_AGENT)
         );
-        for excluded in ["Agent", "ToolSearch", "EnterPlanMode", "ExitPlanMode"] {
-            assert!(!registry.contains(excluded), "NoAgent 应排除 {excluded}");
-        }
-        for included in [
-            "Bash",
-            "TaskCreate",
-            "TaskStop",
-            "AskUserQuestion",
-            "EnterWorktree",
-            "ExitWorktree",
-        ] {
-            assert!(registry.contains(included), "NoAgent 应保留 {included}");
-        }
     }
 }
