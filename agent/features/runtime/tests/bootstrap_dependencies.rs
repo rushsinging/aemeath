@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use context::{compose_session_task_capture, LegacyTaskCapture};
-use runtime::{RuntimeBootstrapDependencies, RuntimeConfigDependencies};
+use runtime::RuntimeBootstrapDependencies;
 
 struct NoopReflectionHistory;
 
@@ -42,16 +42,28 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let task = task::wire_task();
     let access = task.access();
     let capture: Arc<dyn LegacyTaskCapture> = compose_session_task_capture(task.persist());
+    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+        Arc::new(storage::FileSystemDatasetAdapter::new(temp.path()).unwrap()),
+        Arc::new(memory::FileLegacyMemorySourceFactory::new(temp.path())),
+    ));
+    let wiring = context::wire_main_session(context::MainSessionDependencies {
+        workspace: workspace.clone(),
+        task_persist: task.persist(),
+        config_reader: config.reader(),
+        config_participant: config.participant(),
+        memory_opener,
+    })
+    .await
+    .unwrap();
 
     let history: Arc<dyn memory::ReflectionHistoryStore> = Arc::new(NoopReflectionHistory);
 
     let dependencies = RuntimeBootstrapDependencies::new(
         workspace,
-        RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
-        Arc::new(memory::NoOpMemory),
-        history.clone(),
+        wiring,
         provider::wire_provider(),
         tools::wire_tools(),
+        history.clone(),
         Arc::new(policy::AllowAllPolicy),
         access.clone(),
         capture.clone(),

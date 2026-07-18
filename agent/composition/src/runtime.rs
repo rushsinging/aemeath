@@ -96,7 +96,7 @@ pub(crate) async fn from_args_with_gateways(
         legacy_base_dir,
         &identity.initial_cwd,
     ));
-    let main_memory: Arc<dyn memory_api::MemoryPort> = Arc::new(
+    let _main_memory: Arc<dyn memory_api::MemoryPort> = Arc::new(
         memory_api::ProjectMemoryOpener::new(store, legacy)
             .open(memory_api::MemoryPolicy {
                 max_entries: memory_config.max_entries,
@@ -107,13 +107,30 @@ pub(crate) async fn from_args_with_gateways(
     );
 
     let task_wiring = task::wire_task();
+    let deps = context::MainSessionDependencies {
+        workspace: workspace.clone(),
+        task_persist: task_wiring.persist(),
+        config_reader: config.reader(),
+        config_participant: config.participant(),
+        memory_opener: Box::new(memory::DatasetMemoryOpener::new(
+            Arc::new(
+                storage::FileSystemDatasetAdapter::new(share::config::paths::global_agents_dir())
+                    .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+            ),
+            Arc::new(memory::FileLegacyMemorySourceFactory::new(
+                share::config::paths::global_memory_dir(),
+            )),
+        )),
+    };
+    let wiring = context::wire_main_session(deps)
+        .await
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let dependencies = runtime::RuntimeBootstrapDependencies::new(
         workspace,
-        runtime::RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
-        main_memory,
-        reflection_history,
+        wiring,
         gateways.provider,
         gateways.tools,
+        reflection_history,
         gateways.policy,
         task_wiring.access(),
         context::compose_session_task_capture(task_wiring.persist()),

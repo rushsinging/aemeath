@@ -1,6 +1,7 @@
 use crate::*;
 use async_trait::async_trait;
 use std::{
+    path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -466,6 +467,164 @@ impl ProjectMemoryOpener {
         MemoryService::open(self.store, policy)
             .await
             .map_err(map_memory_open_error)
+    }
+}
+
+/// Concrete [`MemoryOpener`] backed by atomic-dataset Storage. Cloning shares
+/// the same Storage port and legacy source factory, so each clone can
+/// independently open Memory for any project identity.
+///
+/// The opener holds a [`LegacyMemorySourceFactory`] rather than a single
+/// [`LegacyMemorySource`] because legacy file positions are project-specific
+/// (the project layer's legacy file stem is derived from the caller's cwd).
+/// For each `open_memory` call the factory creates a fresh source pre-bound
+/// to the correct project positions; `probe(layer)` then only needs the
+/// layer argument.
+///
+/// This reuses [`ProjectMemoryOpener`] for the actual eager-open and legacy
+/// migration logic; the seam only adds the project-key-scoped store
+/// construction and the `MemoryConfig` → [`MemoryPolicy`] mapping so that
+/// callers obtain `Arc<dyn MemoryPort>` without depending on concrete Memory
+/// types.
+#[derive(Clone)]
+pub struct DatasetMemoryOpener {
+    storage: Arc<dyn storage_api::AtomicDatasetPort>,
+    legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+}
+
+impl DatasetMemoryOpener {
+    pub fn new(
+        storage: Arc<dyn storage_api::AtomicDatasetPort>,
+        legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+    ) -> Self {
+        Self {
+            storage,
+            legacy_factory,
+        }
+    }
+}
+
+#[async_trait]
+impl MemoryOpener for DatasetMemoryOpener {
+    async fn open_memory(
+        &self,
+        key: &ProjectMemoryKey,
+        config: &share::config::MemoryConfig,
+    ) -> Result<Arc<dyn MemoryPort>, MemoryOpenerError> {
+        let store = AtomicDatasetMemoryStore::new(Arc::clone(&self.storage), key.clone());
+        let policy = MemoryPolicy {
+            max_entries: config.max_entries,
+            similarity_threshold: config.similarity_threshold,
+        };
+        let legacy = self.legacy_factory.create_for(key);
+        let service = ProjectMemoryOpener::new(store, legacy).open(policy).await?;
+        Ok(Arc::new(service))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn MemoryOpener> {
+        Box::new(self.clone())
+    }
+}
+
+/// Fixed segments used by the predecessor `MemoryStore` file layout.
+const LEGACY_GLOBAL_STEM: &str = "_global";
+const LEGACY_ARCHIVE_SUFFIX: &str = "_archive";
+const LEGACY_FILE_EXT: &str = ".json";
+
+/// Production [`LegacyMemorySource`] backed by the predecessor memory file
+/// layout (`~/.agents/memory/`).
+///
+/// A single instance is **pre-bound** at construction to the four file
+/// positions (global active/archive, project active/archive) for exactly one
+/// project. [`LegacyMemorySource::probe`] then only needs the `layer` argument
+/// to select which pair to read — it never sees a filesystem path. Files are
+/// plain JSON arrays of entries; a missing file maps to [`LegacyMemoryMember::Missing`].
+struct FileLegacyMemorySource {
+    global_active: PathBuf,
+    global_archive: PathBuf,
+    project_active: PathBuf,
+    project_archive: PathBuf,
+}
+
+impl FileLegacyMemorySource {
+    fn new(base_dir: &Path, key: &ProjectMemoryKey) -> Self {
+        let project_stem = key.legacy_project_name();
+        Self {
+            global_active: base_dir.join(format!("{LEGACY_GLOBAL_STEM}{LEGACY_FILE_EXT}")),
+            global_archive: base_dir.join(format!(
+                "{LEGACY_GLOBAL_STEM}{LEGACY_ARCHIVE_SUFFIX}{LEGACY_FILE_EXT}"
+            )),
+            project_active: base_dir.join(format!("{project_stem}{LEGACY_FILE_EXT}")),
+            project_archive: base_dir.join(format!(
+                "{project_stem}{LEGACY_ARCHIVE_SUFFIX}{LEGACY_FILE_EXT}"
+            )),
+        }
+    }
+
+    fn paths_for(&self, layer: MemoryLayer) -> (&Path, &Path) {
+        match layer {
+            MemoryLayer::Global => (&self.global_active, &self.global_archive),
+            MemoryLayer::Project => (&self.project_active, &self.project_archive),
+        }
+    }
+}
+
+#[async_trait]
+impl LegacyMemorySource for FileLegacyMemorySource {
+    async fn probe(
+        &self,
+        layer: MemoryLayer,
+    ) -> Result<LegacyMemoryLayer, LegacyMemorySourceError> {
+        let (active_path, archive_path) = self.paths_for(layer);
+        let active = read_legacy_member(active_path)?;
+        let archive = read_legacy_member(archive_path)?;
+        Ok(LegacyMemoryLayer { active, archive })
+    }
+}
+
+fn read_legacy_member(path: &Path) -> Result<LegacyMemoryMember, LegacyMemorySourceError> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(LegacyMemoryMember::Present(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(LegacyMemoryMember::Missing)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(LegacyMemorySourceError::PermissionDenied)
+        }
+        Err(_) => Err(LegacyMemorySourceError::Io),
+    }
+}
+
+/// Production [`LegacyMemorySourceFactory`]. Reads old-format JSON files from
+/// the legacy memory directory layout.
+///
+/// The factory holds only the legacy base directory. When [`create_for`] is
+/// called with a [`ProjectMemoryKey`], it resolves the project-specific file
+/// stems (from the key's cwd-derived name) and returns a [`FileLegacyMemorySource`]
+/// pre-bound to those positions. No path ever crosses the port boundary — the
+/// created source exposes only bytes through `probe`.
+///
+/// [`create_for`]: LegacyMemorySourceFactory::create_for
+#[derive(Clone)]
+pub struct FileLegacyMemorySourceFactory {
+    base_dir: PathBuf,
+}
+
+impl FileLegacyMemorySourceFactory {
+    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            base_dir: base_dir.into(),
+        }
+    }
+}
+
+impl LegacyMemorySourceFactory for FileLegacyMemorySourceFactory {
+    fn create_for(&self, key: &ProjectMemoryKey) -> Arc<dyn LegacyMemorySource> {
+        Arc::new(FileLegacyMemorySource::new(&self.base_dir, key))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn LegacyMemorySourceFactory> {
+        Box::new(self.clone())
     }
 }
 

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
+use task::{TaskPersist, TaskSnapshot};
 
 use crate::domain::session::{Session, SnapshotState};
 
@@ -18,14 +18,13 @@ use crate::domain::session::{Session, SnapshotState};
 ///
 /// Published by Context so the composition root can hand Runtime an
 /// [`Arc<dyn LegacyTaskCapture>`] instead of [`TaskPersist`] or
-/// [`SessionTaskAdapters`]. Runtime (and any other downstream consumer) can
+/// [`TaskRestoreAdapter`]. Runtime (and any other downstream consumer) can
 /// *capture* the live task image into a legacy session but has **no** restore
 /// authority: `prepare_restore` / `commit_restore` / `PreparedTaskRestore`
 /// never appear on this trait.
 ///
-/// Restore authority remains inside Context; #871 will wire this participant
-/// into the cross-BC prepare/commit coordinator. Runtime only receives this
-/// capture-only facade.
+/// Restore authority lives inside [`MainSessionWiring`], which wires
+/// [`TaskRestoreAdapter`] into its cross-BC prepare/commit coordinator.
 pub trait LegacyTaskCapture: Send + Sync {
     /// Writes the Task-owned image into the legacy Session facade.
     fn capture_legacy_session(&self, session: &mut Session) -> Result<(), String>;
@@ -33,37 +32,13 @@ pub trait LegacyTaskCapture: Send + Sync {
 
 /// Composition factory: wraps the narrow [`TaskPersist`] port into an
 /// [`Arc<dyn LegacyTaskCapture>`] whose only capability is legacy-session
-/// capture. The returned trait object has no restore methods; #871 will wire
-/// Context's restore participant into the joint coordinator.
+/// capture. The returned trait object has no restore methods; restore
+/// authority lives inside [`MainSessionWiring`].
 pub fn compose_session_task_capture(persist: Arc<dyn TaskPersist>) -> Arc<dyn LegacyTaskCapture> {
-    Arc::new(SessionTaskAdapters::new(persist))
+    Arc::new(TaskSnapshotSource::new(persist))
 }
 
 // ─── Concrete adapter structs (Context-internal) ─────────────────────
-
-pub struct SessionTaskAdapters {
-    source: TaskSnapshotSource,
-}
-
-impl SessionTaskAdapters {
-    /// Builds the Context-owned capture adapter from the Task persistence view.
-    /// Restore authority is constructed separately by the session restore path.
-    pub fn new(persist: Arc<dyn TaskPersist>) -> Self {
-        Self {
-            source: TaskSnapshotSource::new(persist),
-        }
-    }
-
-    pub fn capture_legacy_session(&self, session: &mut Session) -> Result<(), String> {
-        self.source.capture_legacy_session(session)
-    }
-}
-
-impl LegacyTaskCapture for SessionTaskAdapters {
-    fn capture_legacy_session(&self, session: &mut Session) -> Result<(), String> {
-        SessionTaskAdapters::capture_legacy_session(self, session)
-    }
-}
 
 /// Captures the live Task aggregate as the envelope's task snapshot slot.
 ///
@@ -86,14 +61,16 @@ impl TaskSnapshotSource {
     pub fn source(&self) -> SnapshotState<TaskSnapshot> {
         SnapshotState::Captured(self.persist.collect_snapshot())
     }
+}
 
+impl LegacyTaskCapture for TaskSnapshotSource {
     /// Writes the Task-owned image into the legacy Session facade.
     ///
     /// Runtime can keep using the current cross-workspace/chat writer without
     /// gaining the Task persistence capability or projecting the aggregate by
     /// hand. Context owns this temporary boundary until that writer moves to
     /// [`crate::domain::session::CanonicalSession`].
-    pub fn capture_legacy_session(&self, session: &mut Session) -> Result<(), String> {
+    fn capture_legacy_session(&self, session: &mut Session) -> Result<(), String> {
         let snapshot = match self.source() {
             SnapshotState::Captured(snapshot) => snapshot,
             SnapshotState::Missing | SnapshotState::CapturedEmpty => {
@@ -161,55 +138,5 @@ fn parse_wire_u64(value: Option<&serde_json::Value>, field: &str) -> Result<u64,
             .as_u64()
             .ok_or_else(|| format!("invalid {field}: {value}")),
         _ => Err(format!("invalid {field}: {value}")),
-    }
-}
-
-/// Restores the Task aggregate from a persisted envelope task slot.
-///
-/// Restore is split into a fallible [`prepare`](Self::prepare) that validates
-/// without touching live state and an infallible [`commit`](Self::commit) that
-/// installs the already validated candidate. The two `SnapshotState` variants
-/// that carry no typed image — `Missing` and `CapturedEmpty` — both map to the
-/// canonical [`TaskSnapshot::empty`], so restoring either one clears any stale
-/// live tasks rather than leaving them behind.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "#871 将其接入跨 BC restore coordinator")
-)]
-pub(crate) struct TaskRestoreAdapter {
-    persist: Arc<dyn TaskPersist>,
-}
-
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "#871 将其接入跨 BC restore coordinator")
-)]
-impl TaskRestoreAdapter {
-    pub(crate) fn new(persist: Arc<dyn TaskPersist>) -> Self {
-        Self { persist }
-    }
-
-    /// Validates the restore candidate against every aggregate invariant and, on
-    /// success, returns a single-use [`PreparedTaskRestore`] token. The live
-    /// backing is neither read nor mutated: `Captured` forwards its snapshot
-    /// verbatim, while `Missing` / `CapturedEmpty` prepare the canonical empty
-    /// snapshot.
-    pub(crate) fn prepare(
-        &self,
-        state: &SnapshotState<TaskSnapshot>,
-    ) -> Result<PreparedTaskRestore, TaskSnapshotValidationError> {
-        match state {
-            SnapshotState::Captured(snapshot) => self.persist.prepare_restore(snapshot),
-            SnapshotState::Missing | SnapshotState::CapturedEmpty => {
-                self.persist.prepare_restore(&TaskSnapshot::empty())
-            }
-        }
-    }
-
-    /// Installs a previously prepared candidate, replacing the whole aggregate in
-    /// one infallible step. Consuming the token by value keeps a prepared
-    /// candidate single-use.
-    pub(crate) fn commit(&self, prepared: PreparedTaskRestore) {
-        self.persist.commit_restore(prepared);
     }
 }

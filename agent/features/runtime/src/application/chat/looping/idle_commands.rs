@@ -3,6 +3,10 @@
 //! 从旧 CommandRegistry 迁移，每个命令是独立函数。
 //! 结果通过 RuntimeStreamEvent::CommandResultText { text, is_error } 回传 TUI。
 
+use memory::{
+    MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPort, MemorySearchQuery,
+    MemorySource, MemoryStats, WriteResult,
+};
 use share::config::MemoryConfig;
 
 /// 执行 /init 命令。force = true 时强制重新初始化。
@@ -120,22 +124,26 @@ pub async fn execute_session(args: &str, session_id: &str) -> (String, bool) {
 }
 
 /// 执行 /memory 命令（非 remind 子命令）。
-pub async fn execute_memory(args: &str, cwd: &str, mem: &MemoryConfig) -> (String, bool) {
+///
+/// #871：所有 memory 查询/变更均通过 `MemoryPort` API，不再直接打开
+/// `storage::MemoryStore`。调用方（loop_runner）负责通过 session-switch gate
+/// 捕获 `committed_memory` 后传入。
+pub async fn execute_memory(
+    args: &str,
+    port: &dyn MemoryPort,
+    config: &MemoryConfig,
+) -> (String, bool) {
+    if !config.enabled {
+        return ("Memory 系统已禁用。".to_string(), true);
+    }
+
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() || parts[0] == "list" {
-        let store = match open_memory_store(cwd, mem).await {
-            Ok(s) => s,
-            Err(e) => return (format!("Failed to open memory store: {}", e), true),
-        };
-        match store.list(None) {
-            Ok(entries) => {
-                if entries.is_empty() {
-                    return ("(no memories stored)".to_string(), false);
-                }
-                (share::memory::format_memory_list(&entries), false)
-            }
-            Err(e) => (format!("Failed to list memories: {}", e), true),
+        let entries = port.list(None);
+        if entries.is_empty() {
+            return ("(no memories stored)".to_string(), false);
         }
+        (format_entry_list(&entries), false)
     } else {
         match parts[0] {
             "add" => {
@@ -143,221 +151,190 @@ pub async fn execute_memory(args: &str, cwd: &str, mem: &MemoryConfig) -> (Strin
                     return ("Usage: /memory add <content>".to_string(), true);
                 }
                 let content = parts[1..].join(" ");
-                let mut store = match open_memory_store(cwd, mem).await {
-                    Ok(s) => s,
-                    Err(e) => return (format!("Failed to open memory store: {}", e), true),
-                };
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let entry = share::memory::MemoryEntry::new(
-                    uuid::Uuid::now_v7().to_string(),
+                let now = unix_now();
+                let entry = match MemoryEntry::new(
+                    MemoryId::now_v7(),
                     now,
-                    share::memory::MemoryLayer::Project,
-                    share::memory::MemoryCategory::Fact,
+                    MemoryLayer::Project,
+                    MemoryCategory::Fact,
                     content,
-                    share::memory::MemorySource::User,
-                );
-                match store.add(entry) {
-                    Ok(result) => (share::memory::format_add_result(result), false),
-                    Err(e) => (format!("Failed to add memory: {}", e), true),
+                    MemorySource::User,
+                ) {
+                    Ok(entry) => entry,
+                    Err(e) => return (format!("Failed to create memory entry: {e}"), true),
+                };
+                match port.write(entry).await {
+                    Ok(result) => (format_write_result(&result), false),
+                    Err(e) => (format!("Failed to add memory: {e}"), true),
                 }
             }
             "delete" | "del" | "remove" | "rm" => {
                 if parts.len() < 2 {
                     return ("Usage: /memory delete <id>".to_string(), true);
                 }
-                let mut store = match open_memory_store(cwd, mem).await {
-                    Ok(s) => s,
-                    Err(e) => return (format!("Failed to open memory store: {}", e), true),
+                let id = match MemoryId::new(parts[1]) {
+                    Ok(id) => id,
+                    Err(e) => return (format!("Invalid memory id: {e}"), true),
                 };
-                match store.delete(parts[1]) {
-                    Ok(_) => (format!("Deleted memory: {}", parts[1]), false),
-                    Err(e) => (format!("Failed: {}", e), true),
+                match port.delete(&id).await {
+                    Ok(true) => (format!("Deleted memory: {id}"), false),
+                    Ok(false) => (format!("Memory not found: {id}"), true),
+                    Err(e) => (format!("Failed: {e}"), true),
                 }
             }
             "pin" | "unpin" => {
                 if parts.len() < 2 {
                     return (format!("Usage: /memory {} <id>", parts[0]), true);
                 }
-                let mut store = match open_memory_store(cwd, mem).await {
-                    Ok(s) => s,
-                    Err(e) => return (format!("Failed to open memory store: {}", e), true),
+                let id = match MemoryId::new(parts[1]) {
+                    Ok(id) => id,
+                    Err(e) => return (format!("Invalid memory id: {e}"), true),
                 };
                 let pin = parts[0] == "pin";
-                match store.pin(parts[1], pin) {
-                    Ok(_) => (
-                        format!(
-                            "Memory {} {}",
-                            parts[1],
-                            if pin { "pinned" } else { "unpinned" }
-                        ),
+                match port.pin(&id, pin).await {
+                    Ok(true) => (
+                        format!("Memory {id} {}", if pin { "pinned" } else { "unpinned" }),
                         false,
                     ),
-                    Err(e) => (format!("Failed: {}", e), true),
+                    Ok(false) => (format!("Memory not found: {id}"), true),
+                    Err(e) => (format!("Failed: {e}"), true),
                 }
             }
             "search" => {
                 if parts.len() < 2 {
                     return ("Usage: /memory search <query>".to_string(), true);
                 }
-                let query = parts[1..].join(" ");
-                let store = match open_memory_store(cwd, mem).await {
-                    Ok(s) => s,
-                    Err(e) => return (format!("Failed to open memory store: {}", e), true),
+                let text = parts[1..].join(" ");
+                let query = MemorySearchQuery {
+                    text,
+                    limit: 20,
+                    layer: None,
+                    category: None,
+                    include_archive: false,
+                    now: unix_now(),
                 };
-                match store.search(&query, 20) {
-                    Ok(results) => {
-                        if results.is_empty() {
-                            return ("(no results)".to_string(), false);
-                        }
-                        (share::memory::format_memory_list(&results), false)
-                    }
-                    Err(e) => (format!("Failed: {}", e), true),
+                let result = port.search(&query);
+                if result.hits.is_empty() {
+                    return ("(no results)".to_string(), false);
                 }
+                let entries: Vec<MemoryEntry> =
+                    result.hits.iter().map(|hit| hit.entry.clone()).collect();
+                (format_entry_list(&entries), false)
             }
-            "compact" => {
-                let mut store = match open_memory_store(cwd, mem).await {
-                    Ok(s) => s,
-                    Err(e) => return (format!("Failed to open memory store: {}", e), true),
-                };
-                match store.compact() {
-                    Ok(result) => (
-                        format!(
-                            "Memory compact 完成：归档 {} 条，剩余 {} 条。",
-                            result.archived, result.remaining
-                        ),
-                        false,
+            "compact" => match port.compact().await {
+                Ok(result) => (
+                    format!(
+                        "Memory compact 完成：归档 {} 条，剩余 {} 条。",
+                        result.archived, result.remaining
                     ),
-                    Err(e) => (format!("Failed: {}", e), true),
-                }
-            }
-            "stats" => {
-                let store = match open_memory_store(cwd, mem).await {
-                    Ok(s) => s,
-                    Err(e) => return (format!("Failed to open memory store: {}", e), true),
-                };
-                match store.stats(0) {
-                    Ok(stats) => (
-                        format!(
-                            "📊 Memory Stats\n\n\
-                             Global: {}\n\
-                             Global archive: {}\n\
-                             Project: {}\n\
-                             Project archive: {}\n\
-                             Reminders: {}",
-                            stats.global_count,
-                            stats.global_archive_count,
-                            stats.project_count,
-                            stats.project_archive_count,
-                            stats.reminders_count,
-                        ),
-                        false,
-                    ),
-                    Err(e) => (format!("Failed: {}", e), true),
-                }
-            }
+                    false,
+                ),
+                Err(e) => (format!("Failed: {e}"), true),
+            },
+            "stats" => (format_stats(&port.stats()), false),
             _ => (format!("Unknown memory subcommand: {}", parts[0]), true),
         }
     }
 }
 
-/// 打开 memory store（从旧 memory_support.rs 提取）。
-///
-/// 接收已由调用方（composition 层）解析好的 `MemoryConfig`，避免 business 层
-/// 反向依赖 core 的 ConfigAppService（COLA 分层：business 不得依赖 core）。
-async fn open_memory_store(cwd: &str, mem: &MemoryConfig) -> Result<storage::MemoryStore, String> {
-    use storage::{memory_base_dir, project_file_name, MemoryStore};
+// ── formatting helpers (share::memory DTO → memory crate types) ──────────
 
-    if !mem.enabled {
-        return Err("Memory 系统已禁用。".to_string());
+fn format_entry_list(entries: &[MemoryEntry]) -> String {
+    if entries.is_empty() {
+        return "暂无记忆。".to_string();
     }
-    MemoryStore::new(
-        memory_base_dir(),
-        project_file_name(cwd),
-        mem.max_entries,
-        mem.similarity_threshold,
+    let mut output = String::new();
+    for entry in entries {
+        output.push_str(&format_single_entry(entry));
+    }
+    output
+}
+
+fn format_single_entry(entry: &MemoryEntry) -> String {
+    let status = if entry.pinned { "pinned" } else { "active" };
+    let tags = if entry.tags.is_empty() {
+        String::new()
+    } else {
+        format!(" #{}", entry.tags.join(" #"))
+    };
+    format!(
+        "- {} [{} {:?}/{:?}] {}{}\n",
+        entry.id, status, entry.layer, entry.category, entry.content, tags
     )
-    .map_err(|e| e.to_string())
+}
+
+fn format_write_result(result: &WriteResult) -> String {
+    match result {
+        WriteResult::Added { id } => {
+            format!("记忆已添加。ID: {id}")
+        }
+        WriteResult::Merged { existing_id } => {
+            format!("已与相似记忆合并: {existing_id}")
+        }
+        WriteResult::NeedsEviction { candidates } => {
+            let mut output = String::from("记忆数量已达上限，请先归档候选记忆：\n");
+            output.push_str(&format_entry_list(candidates));
+            output
+        }
+        WriteResult::NoOp => "记忆未变更。".to_string(),
+    }
+}
+
+fn format_stats(stats: &MemoryStats) -> String {
+    format!(
+        "📊 Memory Stats\n\n\
+         Global: {}\n\
+         Global archive: {}\n\
+         Project: {}\n\
+         Project archive: {}",
+        stats.global_count,
+        stats.global_archive_count,
+        stats.project_count,
+        stats.project_archive_count,
+    )
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use share::config::MemoryConfig;
+    use memory::{InMemoryMemory, MemoryPolicy};
 
-    // ── open_memory_store ──────────────────────────────────────────────
-
-    /// 回归 PR-C：enabled=true 时不应返回"已禁用"错误。
-    ///
-    /// 修复前 `open_memory_store` 内部用 `Config::default()`，
-    /// 其 `memory.enabled` 恒为 false（注：此处为该函数旧实现的缺陷，
-    /// 现已改为显式接收 `&MemoryConfig`）。本测试锁定注入路径生效。
-    #[tokio::test]
-    async fn test_open_memory_store_enabled_returns_store() {
-        // Arrange
-        let mem = MemoryConfig {
-            enabled: true,
+    /// Creates a fresh `InMemoryMemory` port for each test (no filesystem IO).
+    fn test_port() -> InMemoryMemory {
+        InMemoryMemory::new(MemoryPolicy {
             max_entries: 100,
-            similarity_threshold: 0.7,
-            ..MemoryConfig::default()
-        };
-
-        // Act
-        let result = open_memory_store("/tmp/aemeath-test-nonexistent", &mem).await;
-
-        // Assert —— 成功构造 store；"已禁用"只会出现在 Err 分支，Ok 即证明未被禁用
-        assert!(
-            result.is_ok(),
-            "enabled store should open, got err: {:?}",
-            result.err()
-        );
+            similarity_threshold: 0.9,
+        })
+        .expect("valid policy")
     }
 
-    /// 回归 PR-C：enabled=false 时必须返回"已禁用"。
-    ///
-    /// 这正是修复前 `/memory` 命令永远报"已禁用"的根因所在——
-    /// 现在只有显式禁用才会触发，本测试锁定该行为不被回退。
-    #[tokio::test]
-    async fn test_open_memory_store_disabled_returns_disabled_message() {
-        // Arrange
-        let mem = MemoryConfig {
-            enabled: false,
+    fn enabled_config() -> MemoryConfig {
+        MemoryConfig {
+            enabled: true,
             ..MemoryConfig::default()
-        };
-
-        // Act
-        let result = open_memory_store("/tmp/aemeath-test-nonexistent", &mem).await;
-
-        // Assert —— 用 match 避免 MemoryStore: Debug 约束
-        match result {
-            Ok(_) => panic!("disabled store must error, but got Ok"),
-            Err(err) => assert!(
-                err.contains("已禁用"),
-                "disabled path should report disabled, got: {err}"
-            ),
         }
     }
 
-    // ── execute_memory ────────────────────────────────────────────────
-
-    /// 回归 PR-C：通过 `execute_memory` 端到端验证禁用路径。
-    ///
-    /// `execute_memory` 会把 `open_memory_store` 的 `Err` 包裹为
-    /// `"Failed to open memory store: ..."` 并标记 `is_error = true`。
-    #[tokio::test]
-    async fn test_execute_memory_disabled_returns_disabled_message() {
-        // Arrange
-        let mem = MemoryConfig {
+    fn disabled_config() -> MemoryConfig {
+        MemoryConfig {
             enabled: false,
             ..MemoryConfig::default()
-        };
+        }
+    }
 
-        // Act —— /memory 无参数（list 分支）
-        let (text, is_error) = execute_memory("", "/tmp/aemeath-test-nonexistent", &mem).await;
+    // ── disabled path ─────────────────────────────────────────────────
 
-        // Assert
+    #[tokio::test]
+    async fn test_execute_memory_disabled_returns_disabled_message() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("", &port, &disabled_config()).await;
         assert!(is_error, "disabled memory should be an error");
         assert!(
             text.contains("已禁用"),
@@ -365,23 +342,10 @@ mod tests {
         );
     }
 
-    /// 回归 PR-C：`execute_memory` 在 enabled=true 时绝不返回"已禁用"。
-    ///
-    /// 使用不存在的 cwd 触发 `list` 空结果路径，验证文本不含禁用字样。
     #[tokio::test]
     async fn test_execute_memory_enabled_does_not_return_disabled() {
-        // Arrange
-        let mem = MemoryConfig {
-            enabled: true,
-            max_entries: 100,
-            similarity_threshold: 0.7,
-            ..MemoryConfig::default()
-        };
-
-        // Act —— /memory 无参数（list 分支）
-        let (text, is_error) = execute_memory("", "/tmp/aemeath-test-nonexistent", &mem).await;
-
-        // Assert —— 非错误，且不含禁用字样
+        let port = test_port();
+        let (text, is_error) = execute_memory("", &port, &enabled_config()).await;
         assert!(
             !is_error,
             "enabled memory list should not be an error, got: {text}"
@@ -390,5 +354,210 @@ mod tests {
             !text.contains("已禁用"),
             "enabled path must never surface disabled message, got: {text}"
         );
+    }
+
+    // ── list ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_list_empty() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("", &port, &enabled_config()).await;
+        assert!(!is_error);
+        assert_eq!(text, "(no memories stored)");
+    }
+
+    #[tokio::test]
+    async fn test_execute_memory_list_after_add() {
+        let port = test_port();
+        execute_memory("add hello world", &port, &enabled_config()).await;
+
+        let (text, is_error) = execute_memory("", &port, &enabled_config()).await;
+        assert!(!is_error);
+        assert!(
+            text.contains("hello world"),
+            "list should show entry: {text}"
+        );
+    }
+
+    // ── add ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_add_success() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("add my fact", &port, &enabled_config()).await;
+        assert!(!is_error, "add should succeed: {text}");
+        assert!(text.contains("记忆已添加"), "got: {text}");
+        // The full UUID is included so the user can reference it with delete/pin.
+        assert!(
+            text.contains("ID: 0"),
+            "add result should include a UUID v7 (starts with 0): {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_memory_add_missing_content() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("add", &port, &enabled_config()).await;
+        assert!(is_error);
+        assert!(text.contains("Usage"));
+    }
+
+    // ── delete ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_delete_invalid_uuid_returns_clear_error() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("delete not-a-uuid", &port, &enabled_config()).await;
+        assert!(is_error);
+        assert!(
+            text.contains("Invalid memory id"),
+            "should surface clear UUID parse error, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_memory_delete_valid_uuid_not_found() {
+        let port = test_port();
+        let (text, is_error) = execute_memory(
+            "delete 01890f3c-7c00-7000-8000-000000000001",
+            &port,
+            &enabled_config(),
+        )
+        .await;
+        assert!(is_error);
+        assert!(
+            text.contains("not found"),
+            "non-existent id should report not found, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_memory_add_then_delete_roundtrip() {
+        let port = test_port();
+        // add
+        let (add_text, _) = execute_memory("add roundtrip fact", &port, &enabled_config()).await;
+        // extract full UUID from "记忆已添加。ID: <uuid>"
+        let id = add_text.rsplit("ID: ").next().unwrap().trim();
+        assert!(
+            MemoryId::new(id).is_ok(),
+            "add result should include valid UUID: {id}"
+        );
+
+        // delete using the extracted UUID
+        let (del_text, del_error) =
+            execute_memory(&format!("delete {id}"), &port, &enabled_config()).await;
+        assert!(!del_error, "delete should succeed: {del_text}");
+        assert!(del_text.contains("Deleted"));
+
+        // verify list is empty again
+        let (list_text, _) = execute_memory("", &port, &enabled_config()).await;
+        assert_eq!(list_text, "(no memories stored)");
+    }
+
+    // ── pin / unpin ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_pin_invalid_uuid_returns_clear_error() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("pin nope", &port, &enabled_config()).await;
+        assert!(is_error);
+        assert!(
+            text.contains("Invalid memory id"),
+            "should surface clear UUID parse error, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_memory_add_then_pin_then_unpin() {
+        let port = test_port();
+        let (add_text, _) = execute_memory("add pinnable", &port, &enabled_config()).await;
+        let id = add_text.rsplit("ID: ").next().unwrap().trim();
+
+        // pin
+        let (pin_text, pin_error) =
+            execute_memory(&format!("pin {id}"), &port, &enabled_config()).await;
+        assert!(!pin_error, "pin should succeed: {pin_text}");
+        assert!(pin_text.contains("pinned"));
+
+        // verify pinned shows in list
+        let (list_text, _) = execute_memory("", &port, &enabled_config()).await;
+        assert!(
+            list_text.contains("pinned"),
+            "list should show pinned: {list_text}"
+        );
+
+        // unpin
+        let (unpin_text, unpin_error) =
+            execute_memory(&format!("unpin {id}"), &port, &enabled_config()).await;
+        assert!(!unpin_error, "unpin should succeed: {unpin_text}");
+        assert!(unpin_text.contains("unpinned"));
+    }
+
+    // ── search ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_search_no_results() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("search nothing", &port, &enabled_config()).await;
+        assert!(!is_error);
+        assert_eq!(text, "(no results)");
+    }
+
+    #[tokio::test]
+    async fn test_execute_memory_search_finds_entry() {
+        let port = test_port();
+        execute_memory("add rust memory port", &port, &enabled_config()).await;
+
+        let (text, is_error) = execute_memory("search rust", &port, &enabled_config()).await;
+        assert!(!is_error);
+        assert!(
+            text.contains("rust memory port"),
+            "search should find matching entry: {text}"
+        );
+    }
+
+    // ── compact ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_compact_empty() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("compact", &port, &enabled_config()).await;
+        assert!(!is_error);
+        assert!(
+            text.contains("compact") || text.contains("归档"),
+            "compact result: {text}"
+        );
+    }
+
+    // ── stats ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_stats() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("stats", &port, &enabled_config()).await;
+        assert!(!is_error);
+        assert!(text.contains("Memory Stats"), "got: {text}");
+        assert!(
+            text.contains("Global: 0"),
+            "stats should show zero counts: {text}"
+        );
+
+        // add one and re-check
+        execute_memory("add stat test", &port, &enabled_config()).await;
+        let (text, _) = execute_memory("stats", &port, &enabled_config()).await;
+        assert!(
+            text.contains("Project: 1"),
+            "stats should reflect added entry: {text}"
+        );
+    }
+
+    // ── unknown subcommand ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_execute_memory_unknown_subcommand() {
+        let port = test_port();
+        let (text, is_error) = execute_memory("bogus arg", &port, &enabled_config()).await;
+        assert!(is_error);
+        assert!(text.contains("Unknown memory subcommand"));
     }
 }

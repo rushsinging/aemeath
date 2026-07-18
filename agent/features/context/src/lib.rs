@@ -10,6 +10,15 @@ pub mod ports;
 
 pub use adapters::{compose_session_task_capture, LegacyTaskCapture};
 
+// Main Session coordinator — cross-BC wiring for Runtime bootstrap.
+#[cfg(any(test, feature = "dev"))]
+pub use application::test_support;
+pub use application::{
+    wire_main_session, BoundMainRun, MainSessionDependencies, MainSessionError, MainSessionWiring,
+    MainSessionWiringBuilder, OwnedSessionExclusivePermit, OwnedSessionSharedPermit,
+    SessionProjectionParticipant, SessionSwitchClosed, SessionSwitchGate, SessionSwitchInProgress,
+};
+
 pub mod context_port {
     pub use crate::domain::*;
     pub use crate::ports::ContextPort;
@@ -41,12 +50,12 @@ pub mod skill {
 pub mod session {
     pub use crate::adapters::session_search::search_sessions;
     pub use crate::adapters::session_storage::{
-        delete_session, list_sessions, load_session, save_session, update_session_metadata,
-        SessionLoadError,
+        delete_session, list_sessions, load_canonical_session, load_session, save_session,
+        update_session_metadata, SessionLoadError,
     };
     pub use crate::domain::session::{
-        extract_project_name, new_session_id, now_iso, validate_session_id, ChatChain, ChatSegment,
-        PersistedWorkspaceContext, PersistedWorkspaceFrame, SegmentKind, Session, SessionFilter,
-        SessionMetadata, SessionRestore,
+        extract_project_name, new_session_id, now_iso, validate_session_id, CanonicalSession,
+        ChatChain, ChatSegment, PersistedWorkspaceContext, PersistedWorkspaceFrame, SegmentKind,
+        Session, SessionFilter, SessionMetadata, SessionRestore, SnapshotState,
     };
 }

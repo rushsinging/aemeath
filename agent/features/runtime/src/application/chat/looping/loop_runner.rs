@@ -61,6 +61,7 @@ where
                 mut chain,
                 mut context_size,
                 workspace,
+                wiring,
                 session_id,
                 read_files,
                 session_reminders,
@@ -95,7 +96,6 @@ where
                 );
             let hook_ui = HookUi::new(sink.clone());
             let mut cwd = workspace.read().current_workspace_root();
-            let memory_cwd = workspace.read().initial_cwd();
             let mut active_summary = active_summary_arc
                 .lock()
                 .map(|value| value.clone())
@@ -210,12 +210,18 @@ where
                     continue;
                 }
                 PendingCommand::ManageMemory { args } => {
-                    let (text, is_error) = super::idle_commands::execute_memory(
-                        &args,
-                        &memory_cwd.display().to_string(),
-                        &memory_config,
-                    )
-                    .await;
+                    let wiring_for_memory = wiring.clone();
+                    let config = memory_config.clone();
+                    let result = wiring
+                        .with_shared(async move {
+                            let memory = wiring_for_memory.committed_memory();
+                            super::idle_commands::execute_memory(&args, memory.as_ref(), &config)
+                                .await
+                        })
+                        .await;
+                    let (text, is_error) = result.unwrap_or_else(|_| {
+                        ("Session is being switched, please retry.".to_string(), true)
+                    });
                     let _ = sink
                         .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                         .await;
@@ -504,7 +510,6 @@ where
                     rollback_chain,
                     rollback_frozen_chats,
                     rollback_active_summary,
-                    memory_cwd: memory_cwd.clone(),
                     last_total_tokens: &mut last_total_tokens,
                     task_reminder_state: &mut task_reminder_state,
                     tool_identity: &tool_identity,

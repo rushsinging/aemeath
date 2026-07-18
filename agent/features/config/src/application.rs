@@ -357,11 +357,13 @@ impl ProjectConfigParticipant for ConfigAppService {
 
     async fn commit_project(&self, prepared: PreparedProjectConfig) {
         let _mutation = self.mutation_lock.lock().await;
+        let revision = self.committed_snapshot().revision().next();
+        let snapshot = prepared.snapshot.with_revision(revision);
         let mut active = self.active.write().unwrap();
         active.location = Some(prepared.location);
         active.config = prepared.config;
         drop(active);
-        self.tx.send_replace(prepared.snapshot);
+        self.tx.send_replace(snapshot);
     }
 
     async fn prepare_update(
@@ -425,7 +427,8 @@ impl ProjectConfigParticipant for ConfigAppService {
     }
 
     fn commit_update(&self, ready: ReadyConfigCommit) -> ConfigChangeSet {
-        let snapshot = ready.snapshot.clone();
+        let revision = self.committed_snapshot().revision().next();
+        let snapshot = ready.snapshot.with_revision(revision);
         self.active.write().unwrap().config = ready.config;
         self.tx.send_replace(snapshot.clone());
         ConfigChangeSet {

@@ -14,12 +14,12 @@ pub use domain::{
     AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentRunRequest, AgentRunTerminal,
     AgentRunner, AgentToolCallProgress, CancellationSignal, CatalogQuery, ExecutionScope,
     ExecutionScopeBuilder, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
-    MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError, ProgressSink, ReadSet,
-    RegistryScopeName, SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability,
-    ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome,
-    ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider, ToolName, ToolOutcome,
-    ToolProfile, ToolProfileName, ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
-    WorkspaceReadAccess,
+    MemoryPortSource, MutexReadSet, PlanModeState, PolicyDecision, ProfileExpansionError,
+    ProgressSink, ReadSet, RegistryScopeName, SessionReminder, SessionReminders, Tool,
+    ToolCapabilities, ToolCapability, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionContext,
+    ToolExecutionOutcome, ToolExecutionPort, ToolExecutionPorts, ToolInvocation, ToolListProvider,
+    ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult, TypedTool, TypedToolAdapter,
+    TypedToolResult, WorkspaceReadAccess,
 };
 
 // Gateway/OHS: tool catalog and registration wiring.

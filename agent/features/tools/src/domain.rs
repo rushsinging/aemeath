@@ -5,6 +5,7 @@
 
 pub mod agent_port;
 pub mod context;
+pub mod memory_source;
 pub mod ports;
 pub mod published_language;
 pub mod resources;
@@ -24,6 +25,7 @@ pub use context::{
     Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
     ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
+pub use memory_source::MemoryPortSource;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
     RegistryScopeName, ToolCapabilities, ToolCapability, ToolCatalogSnapshot, ToolInvocation,

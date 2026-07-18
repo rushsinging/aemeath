@@ -17,7 +17,7 @@ use crate::application::chat::looping::finalize::{
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::loop_phases::build_api_messages;
-use crate::application::chat::looping::memory_inject::build_memory_block;
+use crate::application::chat::looping::memory_inject::build_memory_block_from_port;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{
     should_run_turn_reflection, submit_interval_reflection,
@@ -119,7 +119,6 @@ where
     pub(crate) rollback_chain: ChatChain,
     pub(crate) rollback_frozen_chats: Vec<context::session::ChatSegment>,
     pub(crate) rollback_active_summary: Option<String>,
-    pub(crate) memory_cwd: PathBuf,
     pub(crate) last_total_tokens: &'a mut Option<u64>,
     pub(crate) task_reminder_state: &'a mut TaskReminderState,
     pub(crate) tool_identity:
@@ -327,10 +326,17 @@ where
         .await;
         let tool_schemas = self.registry.schemas_for(self.language);
         let mut effective_system_blocks = self.system_blocks.to_vec();
+        // #871: Main 注入走 MemoryPort（不再读旧 storage::MemoryStore 文件）。
         if self.memory_config.enabled && self.memory_config.inject_count > 0 {
-            if let Some(block) =
-                build_memory_block(&self.memory_cwd, self.memory_config.inject_count)
-            {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if let Some(block) = build_memory_block_from_port(
+                self.memory.as_ref(),
+                now,
+                self.memory_config.inject_count,
+            ) {
                 effective_system_blocks.push(block);
             }
         }
