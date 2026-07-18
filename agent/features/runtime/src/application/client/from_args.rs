@@ -8,7 +8,7 @@ use crate::application::startup::{
     self as bootstrap, build_agent_runner, build_hook_runner, resolve_api_key, resolve_base_url,
     resolve_concurrency_limits, resolve_model_runtime_settings, spawn_mcp_connect,
 };
-use crate::application::startup::{set_session_id, start_session, ChatBootstrapArgs};
+use crate::application::startup::{start_session, ChatBootstrapArgs};
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
@@ -199,7 +199,6 @@ pub async fn from_args_with_workspace(
 
     // 12. Session
     let session_id = start_session(args.resume.clone());
-    set_session_id(session_id.clone());
 
     // 13. Tool Result blob 与 materialization policy。
     let blob_adapter = Arc::new(

@@ -75,7 +75,11 @@ pub(super) async fn chat_impl(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = (me.inner.event_sink_factory)(tx);
     let inner = me.inner.clone();
-    tokio::spawn(async move {
+    let session_context = logging::LogContext {
+        session_id: Some(inner.session_id.clone()),
+        ..logging::LogContext::default()
+    };
+    logging::spawn_instrumented(session_context, async move {
         let final_chain = crate::application::chat::process_chat_loop(
             crate::application::chat::ChatLoopContext {
                 sink,

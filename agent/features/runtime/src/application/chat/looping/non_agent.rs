@@ -281,8 +281,7 @@ where
 
     let exec_results =
         if is_bash {
-            // Set up progress channel for stdout streaming (mirrors agent_calls.rs
-            // pattern).
+            // Set up progress channel for stdout streaming (mirrors agent_calls.rs pattern).
             let (prog_tx, mut prog_rx) =
                 tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
             let streaming_ctx = agent.ctx.with_progress(Some(
@@ -291,7 +290,8 @@ where
             let call_id = owned_call.id.clone();
             let stream_sink = sink.clone();
             let stream_context = context.clone();
-            let forward_handle = tokio::spawn(async move {
+            let progress_log_context = logging::capture();
+            let forward_handle = logging::spawn_instrumented(progress_log_context, async move {
                 while let Some(event) = prog_rx.recv().await {
                     let _ = stream_sink
                         .send_event(RuntimeStreamEvent::AgentProgress {

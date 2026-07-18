@@ -4,6 +4,7 @@ use super::logging::{
 };
 use super::progress::build_tool_calls_progress_event;
 use super::*;
+use ::logging as scoped_logging;
 use async_trait::async_trait;
 use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
 use share::config::AgentRoleConfig;
@@ -36,6 +37,195 @@ fn format_grouped_tool_summaries(tool_calls: &[crate::application::agent::ToolCa
         })
         .collect::<Vec<_>>()
         .join(" | ")
+}
+
+#[tokio::test]
+async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_parent() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let runner = CliAgentRunner {
+        client: Arc::new(provider::LlmClient::from_provider(Arc::new(
+            ContextRecordingProvider { seen: seen.clone() },
+        ))),
+        pool: None,
+        active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
+        agents_config: Arc::new(share::config::AgentsConfig::default()),
+        hook_runner: hook::api::HookRunner::empty(),
+        reasoning: false,
+        models_config: Arc::new(share::config::ModelsConfig::default()),
+        max_tool_concurrency: 10,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
+        tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        workspace: crate::application::testing::runtime_workspace(
+            &crate::application::testing::test_tool_execution_context(
+                std::env::temp_dir(),
+                tokio_util::sync::CancellationToken::new(),
+            ),
+        ),
+    };
+    let ctx_a = test_ctx();
+    let ctx_b = test_ctx();
+    let parent = scoped_logging::LogContext {
+        session_id: Some("parent-session".into()),
+        chat_id: Some("parent-chat".into()),
+        turn: Some(99),
+        request_id: Some("parent-request".into()),
+        model: Some("parent-model".into()),
+        provider: Some("parent-provider".into()),
+        role: Some("parent-role".into()),
+    };
+
+    scoped_logging::instrument(parent.clone(), async {
+        let (a, b) = tokio::join!(
+            runner.run_agent(AgentRunRequest {
+                prompt: "a",
+                system: "system",
+                identity: ctx_a.scope(),
+                cancellation: ctx_a.cancellation(),
+                progress: ctx_a.progress_sink(),
+                memory: ctx_a.memory(),
+                catalog: ctx_a.catalog_query(),
+                read_set: ctx_a.read_set(),
+                plan_mode: ctx_a.plan_mode_state(),
+                guidance: ctx_a.guidance(),
+                timeout: std::time::Duration::from_secs(5),
+                model_spec: Some("role-a/model-a"),
+            }),
+            runner.run_agent(AgentRunRequest {
+                prompt: "b",
+                system: "system",
+                identity: ctx_b.scope(),
+                cancellation: ctx_b.cancellation(),
+                progress: ctx_b.progress_sink(),
+                memory: ctx_b.memory(),
+                catalog: ctx_b.catalog_query(),
+                read_set: ctx_b.read_set(),
+                plan_mode: ctx_b.plan_mode_state(),
+                guidance: ctx_b.guidance(),
+                timeout: std::time::Duration::from_secs(5),
+                model_spec: Some("role-b/model-b"),
+            }),
+        );
+        assert!(matches!(a, tools::AgentRunTerminal::Failed { .. }));
+        assert!(matches!(b, tools::AgentRunTerminal::Failed { .. }));
+        assert_eq!(scoped_logging::capture(), parent);
+    })
+    .await;
+
+    let mut seen = seen.lock().unwrap().clone();
+    seen.sort_by(|a, b| a.role.cmp(&b.role));
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].role.as_deref(), Some("role-a/model-a"));
+    assert_eq!(seen[0].model.as_deref(), Some("role-a/model-a"));
+    assert_eq!(seen[1].role.as_deref(), Some("role-b/model-b"));
+    assert_eq!(seen[1].model.as_deref(), Some("role-b/model-b"));
+    for context in &seen {
+        assert_eq!(context.turn, Some(1));
+        assert_eq!(context.provider.as_deref(), Some("recording-provider"));
+        assert!(context.request_id.is_some());
+        assert_ne!(context.chat_id.as_deref(), Some("parent-chat"));
+    }
+    assert_ne!(seen[0].chat_id, seen[1].chat_id);
+    assert_ne!(seen[0].request_id, seen[1].request_id);
+}
+
+#[tokio::test]
+async fn sub_logging_scopes_isolate_concurrent_roles_turns_and_restore_parent() {
+    let parent = scoped_logging::LogContext {
+        session_id: Some("parent-session".into()),
+        chat_id: Some("parent-chat".into()),
+        turn: Some(9),
+        request_id: Some("parent-request".into()),
+        model: Some("parent-model".into()),
+        provider: Some("parent-provider".into()),
+        role: Some("parent-role".into()),
+    };
+
+    scoped_logging::instrument(parent.clone(), async {
+        let run_a = super::loop_run::sub_run_log_context(
+            &scoped_logging::capture(),
+            "sub-session-a",
+            "sub-run-a",
+            "model-a",
+            "provider-a",
+            "role-a",
+        );
+        let run_b = super::loop_run::sub_run_log_context(
+            &scoped_logging::capture(),
+            "sub-session-b",
+            "sub-run-b",
+            "model-b",
+            "provider-b",
+            "role-b",
+        );
+
+        let (a, b) = tokio::join!(
+            scoped_logging::instrument(run_a, async {
+                scoped_logging::within(
+                    scoped_logging::LogContextPatch {
+                        turn: scoped_logging::FieldPatch::Set(1),
+                        ..Default::default()
+                    },
+                    async { scoped_logging::capture() },
+                )
+                .await
+            }),
+            scoped_logging::instrument(run_b, async {
+                scoped_logging::within(
+                    scoped_logging::LogContextPatch {
+                        turn: scoped_logging::FieldPatch::Set(1),
+                        ..Default::default()
+                    },
+                    async { scoped_logging::capture() },
+                )
+                .await
+            }),
+        );
+
+        assert_eq!(a.session_id.as_deref(), Some("sub-session-a"));
+        assert_eq!(a.chat_id.as_deref(), Some("sub-run-a"));
+        assert_eq!(a.model.as_deref(), Some("model-a"));
+        assert_eq!(a.provider.as_deref(), Some("provider-a"));
+        assert_eq!(a.role.as_deref(), Some("role-a"));
+        assert_eq!(a.turn, Some(1));
+        assert_eq!(b.session_id.as_deref(), Some("sub-session-b"));
+        assert_eq!(b.chat_id.as_deref(), Some("sub-run-b"));
+        assert_eq!(b.model.as_deref(), Some("model-b"));
+        assert_eq!(b.provider.as_deref(), Some("provider-b"));
+        assert_eq!(b.role.as_deref(), Some("role-b"));
+        assert_eq!(b.turn, Some(1));
+        assert_eq!(scoped_logging::capture(), parent);
+    })
+    .await;
+}
+
+#[test]
+fn sub_logging_path_uses_scopes_and_no_legacy_setters() {
+    let setup = include_str!("setup.rs");
+    let run = include_str!("loop_run.rs");
+    let helpers = include_str!("loop_helpers.rs");
+
+    assert!(setup.contains("logging::instrument(sub_run_context"));
+    assert!(run.contains("turn: logging::FieldPatch::Set(turn_number)"));
+    assert!(run.contains("sub_request_log_context("));
+    for source in [setup, run, helpers] {
+        assert!(!source.contains("logging::set_current_model"));
+        assert!(!source.contains("logging::set_current_turn"));
+    }
+}
+
+#[test]
+fn sub_request_retry_gets_a_fresh_request_id() {
+    let turn = scoped_logging::LogContext {
+        session_id: Some("session".into()),
+        chat_id: Some("sub-run".into()),
+        turn: Some(1),
+        ..Default::default()
+    };
+    let first = super::loop_run::sub_request_log_context(&turn, "model-a", "provider-a", "role-a");
+    let retry = super::loop_run::sub_request_log_context(&turn, "model-a", "provider-a", "role-a");
+
+    assert_eq!(first.turn, Some(1));
+    assert_ne!(first.request_id, retry.request_id);
 }
 
 #[test]
@@ -706,6 +896,33 @@ fn test_ctx() -> ToolExecutionContext {
         std::env::current_dir().unwrap(),
         tokio_util::sync::CancellationToken::new(),
     )
+}
+
+struct ContextRecordingProvider {
+    seen: Arc<std::sync::Mutex<Vec<scoped_logging::LogContext>>>,
+}
+
+#[async_trait]
+impl LlmProvider for ContextRecordingProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &provider::InvocationScope,
+        _system: &[SystemBlock],
+        _messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<InvocationStream, ProviderError> {
+        self.seen.lock().unwrap().push(scoped_logging::capture());
+        Err(ProviderError::fatal(ProviderErrorKind::Network, "recorded"))
+    }
+
+    fn model_name(&self) -> &str {
+        "recording-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "recording-provider"
+    }
 }
 
 struct ErrorProvider {

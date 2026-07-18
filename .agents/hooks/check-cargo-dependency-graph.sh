@@ -34,7 +34,9 @@ business_allow = {
     "policy": {"share", "sdk", "tools"},
     "context": {"share", "provider", "storage", "task", "memory", "sdk"},
     "memory": {"storage", "utils"},
-    "provider": {"share"},
+    # Provider may consume Logging only as shared diagnostic infrastructure and opaque
+    # LogContext propagation; it must not interpret Runtime session/run semantics.
+    "provider": {"share", "logging"},
     # Approved horizontal dependencies: tools -> project/memory and Task-owned OHS/PL.
     "tools": {"share", "project", "task", "memory"},
     "storage": {"share"},

@@ -20,6 +20,40 @@ use std::sync::Arc;
 use tools::AgentRunTerminal;
 use tools::{AgentProgressEvent, AgentProgressKind};
 
+pub(super) fn sub_run_log_context(
+    parent: &logging::LogContext,
+    session_id: &str,
+    sub_run_id: &str,
+    model: &str,
+    provider: &str,
+    role: &str,
+) -> logging::LogContext {
+    parent.patched(logging::LogContextPatch {
+        session_id: logging::FieldPatch::Set(session_id.to_string()),
+        chat_id: logging::FieldPatch::Set(sub_run_id.to_string()),
+        turn: logging::FieldPatch::Clear,
+        request_id: logging::FieldPatch::Clear,
+        model: logging::FieldPatch::Set(model.to_string()),
+        provider: logging::FieldPatch::Set(provider.to_string()),
+        role: logging::FieldPatch::Set(role.to_string()),
+    })
+}
+
+pub(super) fn sub_request_log_context(
+    parent: &logging::LogContext,
+    model: &str,
+    provider: &str,
+    role: &str,
+) -> logging::LogContext {
+    parent.patched(logging::LogContextPatch {
+        request_id: logging::FieldPatch::Set(uuid::Uuid::now_v7().to_string()),
+        model: logging::FieldPatch::Set(model.to_string()),
+        provider: logging::FieldPatch::Set(provider.to_string()),
+        role: logging::FieldPatch::Set(role.to_string()),
+        ..logging::LogContextPatch::default()
+    })
+}
+
 #[derive(Clone)]
 struct SubAgentEventSink;
 
