@@ -504,6 +504,32 @@ mod tests {
     async fn from_args_keeps_cloned_workspace_views_synchronized() {
         // Capture-only fake for tests — no-op that never reaches the real Task BC.
         struct NoOpTaskCapture;
+        struct TestReflectionHistory;
+
+        #[async_trait::async_trait]
+        impl memory::api::ReflectionHistoryQuery for TestReflectionHistory {
+            async fn list(
+                &self,
+                _limit: usize,
+            ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+                Ok(Vec::new())
+            }
+        }
+        #[async_trait::async_trait]
+        impl memory::api::ReflectionHistoryStore for TestReflectionHistory {
+            async fn append(
+                &self,
+                _record: &memory::api::ReflectionRecord,
+            ) -> Result<(), memory::api::MemoryError> {
+                Ok(())
+            }
+            async fn upsert(
+                &self,
+                _record: &memory::api::ReflectionRecord,
+            ) -> Result<(), memory::api::MemoryError> {
+                Ok(())
+            }
+        }
         impl context::LegacyTaskCapture for NoOpTaskCapture {
             fn capture_legacy_session(
                 &self,
@@ -581,6 +607,7 @@ mod tests {
             wiring,
             provider::wire_provider(),
             tools::wire_tools(),
+            Arc::new(TestReflectionHistory),
             Arc::new(policy::AllowAllPolicy),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),

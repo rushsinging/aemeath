@@ -14,14 +14,14 @@ pub mod api {
         AtomicDatasetMemoryStore, AtomicDatasetReflectionHistoryStore, CompactResult,
         InMemoryMemory, LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySource,
         LegacyMemorySourceError, MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer,
-        MemoryLocation, MemoryOpenerError, MemoryPolicy, MemoryPort, MemoryQuery,
-        MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult, MemorySource,
-        MemoryStats, MemorySuggestion, NoOpMemory, ProjectMemoryKey, ProjectMemoryOpener,
-        ReflectionApplyResult, ReflectionApplyStatus, ReflectionEngine, ReflectionError,
-        ReflectionErrorCategory, ReflectionHistoryQuery, ReflectionHistoryStore, ReflectionMessage,
-        ReflectionOutput, ReflectionPromptPort, ReflectionRecord, ReflectionResult,
-        ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
-        WriteResult,
+        MemoryLocation, MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort,
+        MemoryQuery, MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
+        MemorySource, MemoryStats, MemorySuggestion, NoOpMemory, ProjectMemoryKey,
+        ProjectMemoryOpener, ReflectionApplyResult, ReflectionApplyStatus, ReflectionEngine,
+        ReflectionError, ReflectionErrorCategory, ReflectionHistoryQuery, ReflectionHistoryStore,
+        ReflectionMessage, ReflectionOutput, ReflectionPromptPort, ReflectionRecord,
+        ReflectionResult, ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage,
+        ReflectionTrigger, WriteResult,
     };
 }
 
