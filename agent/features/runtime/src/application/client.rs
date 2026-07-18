@@ -16,4 +16,6 @@ pub(crate) use mapping::*;
 
 // 对外公开导出（gateway 通过 runtime::{from_args, AgentClientImpl} 公开）
 pub use accessors::AgentClientImpl;
-pub use from_args::from_args_with_workspace;
+pub use from_args::{
+    from_args_with_workspace, RuntimeBootstrapDependencies, RuntimeConfigDependencies,
+};

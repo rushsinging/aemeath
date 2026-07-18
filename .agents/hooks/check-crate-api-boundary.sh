@@ -177,7 +177,13 @@ ROOT_ACCESS_ALLOW = {
         "file_usage_append_store",
         "start_usage_worker",
     },
-    "runtime": {"AgentClientImpl", "UsageSink", "from_args_with_workspace"},
+    "runtime": {
+        "AgentClientImpl",
+        "RuntimeBootstrapDependencies",
+        "RuntimeConfigDependencies",
+        "UsageSink",
+        "from_args_with_workspace",
+    },
     "policy": {
         "validate_and_normalize_path",
         "validate_and_normalize_path_from_base",
