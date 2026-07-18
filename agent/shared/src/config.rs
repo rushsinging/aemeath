@@ -7,24 +7,17 @@
 //! 4. Environment variables
 //! 5. Command line arguments
 
-pub mod adapter;
+pub mod adapters;
 pub mod domain;
-pub mod file_snapshot;
-pub mod hooks;
-pub mod legacy;
-pub mod logging;
-pub mod memory;
-pub mod models;
-pub mod paths;
-pub mod permissions;
-pub mod reasoning_graph;
-pub mod skills;
-pub mod storage;
-pub mod tools;
-pub mod ui;
-pub mod update;
+
+pub use adapters::paths;
+pub use domain::{
+    audit, file_snapshot, hooks, legacy, logging, memory, models, permissions, skills, storage,
+    tools, ui, update,
+};
 
 // Re-exports for backward compatibility
+pub use audit::AuditConfig;
 pub use domain::config::{Config, GuidanceConfig, GuidanceReloadPolicy};
 pub use file_snapshot::{FileChange, FileChangeKind, FileSnapshot};
 pub use hooks::HooksConfig;
@@ -33,10 +26,9 @@ pub use logging::LoggingConfig;
 pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
-pub use reasoning_graph::{NodeEffortConfig, ReasoningGraphConfig, ReasoningGraphNodesConfig};
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
-pub use tools::{AgentRoleConfig, AgentsConfig, ToolsConfig};
+pub use tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig};
 pub use ui::{TaskLifecycleConfig, TaskListConfig, UiConfig};
 pub use update::UpdateConfig;
 

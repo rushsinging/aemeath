@@ -12,6 +12,38 @@ use ratatui::text::Span;
 pub const GUTTER_WIDTH: usize = 2;
 const PER_DEPTH_INDENT: usize = 2;
 pub const TOOL_MARKER_BLINK_DIVISOR: u64 = 4;
+/// 窄屏阈值：低于此宽度时缩减 gutter 缩进为 0（仅保留 marker）。
+const NARROW_NO_INDENT_THRESHOLD: u16 = 50;
+/// 极窄屏阈值：低于此宽度时完全移除 gutter。
+const NARROW_NO_GUTTER_THRESHOLD: u16 = 30;
+/// 窄屏阈值：低于此宽度时状态栏显示提示。
+pub const NARROW_STATUS_HINT_THRESHOLD: u16 = 40;
+/// 窄屏阈值：低于此宽度时禁用 markdown 表格，改逐行输出。
+pub const NARROW_DISABLE_TABLE_THRESHOLD: u16 = 60;
+
+/// 窄屏模式下实际使用的 per-depth 缩进列数。
+fn effective_per_depth_indent(outer_width: u16) -> usize {
+    if outer_width < NARROW_NO_INDENT_THRESHOLD {
+        0
+    } else {
+        PER_DEPTH_INDENT
+    }
+}
+
+/// 窄屏模式下实际使用的 gutter 总宽度（含 marker + indent）。
+fn effective_gutter_width(outer_width: u16, depth: usize) -> usize {
+    if outer_width < NARROW_NO_GUTTER_THRESHOLD {
+        0
+    } else {
+        gutter_width_with_indent(depth, effective_per_depth_indent(outer_width))
+    }
+}
+
+/// 是否完全移除 gutter（极窄屏）。
+pub fn is_gutter_suppressed(outer_width: u16) -> bool {
+    outer_width < NARROW_NO_GUTTER_THRESHOLD
+}
+
 /// depth 上限防御（防 `" ".repeat()` 爆内存）。实际对话树深度通常 ≤ 4
 /// （root + tool result 子块），256 已是巨幅冗余，仅用于 fuzz / 错误输入。
 const MAX_GUTTER_DEPTH: usize = 256;
@@ -84,9 +116,12 @@ fn marker_color(kind: &OutputBlockKind) -> ratatui::style::Color {
 /// 任意 `usize` depth 都安全：saturating 运算保证不溢出（防御性 depth 来自
 /// `effective_block_width` 的错误路径测试）。
 pub fn gutter_width(depth: usize) -> usize {
-    depth
-        .saturating_mul(PER_DEPTH_INDENT)
-        .saturating_add(GUTTER_WIDTH)
+    gutter_width_with_indent(depth, PER_DEPTH_INDENT)
+}
+
+/// 指定 per-depth 缩进的 gutter 总宽度。
+fn gutter_width_with_indent(depth: usize, per_depth: usize) -> usize {
+    depth.saturating_mul(per_depth).saturating_add(GUTTER_WIDTH)
 }
 
 /// block 文本可用宽度 = `outer_width - gutter_width(depth)`。
@@ -101,8 +136,8 @@ pub fn gutter_width(depth: usize) -> usize {
 /// 边界：outer 不够时 `saturating_sub` 保证返回非负；`outer=0` 时返回 0，
 /// 让上层 wrap 路径走 `max_width=0` 短路分支（见 `wrap_spans_to_rendered_lines`）。
 pub fn effective_block_width(outer_width: u16, depth: usize) -> u16 {
-    let gw = u16::try_from(gutter_width(depth)).unwrap_or(u16::MAX);
-    outer_width.saturating_sub(gw)
+    let gw = effective_gutter_width(outer_width, depth.min(MAX_GUTTER_DEPTH));
+    outer_width.saturating_sub(u16::try_from(gw).unwrap_or(u16::MAX))
 }
 
 /// 为一个 block 的所有行前置 gutter（首行带 marker，余行等宽空白）。gutter 只进 spans，不进 plain。
@@ -148,6 +183,7 @@ pub fn apply_gutter_with_frame(
             gutted.style = line.style;
             gutted.gutter_cols = gutter_cols;
             gutted.fill_style = line.fill_style;
+            gutted.links = line.links;
             gutted
         })
         .collect()
@@ -351,17 +387,17 @@ mod tests {
 
     #[test]
     fn test_effective_block_width_saturates_when_outer_equals_gutter() {
-        // 边界：outer 刚好等于 gutter（depth=0）→ 0（让 wrap 走短路分支）
-        assert_eq!(effective_block_width(2, 0), 0);
-        assert_eq!(effective_block_width(4, 1), 0);
+        // 极窄屏（<30）gutter 完全移除 → effective == outer
+        assert_eq!(effective_block_width(2, 0), 2);
+        assert_eq!(effective_block_width(4, 1), 4);
     }
 
     #[test]
     fn test_effective_block_width_saturates_when_outer_less_than_gutter() {
-        // 边界：outer < gutter → 0（saturating_sub），不允许 wrap 占用 gutter 列
-        assert_eq!(effective_block_width(1, 0), 0);
+        // 极窄屏（<30）gutter 移除 → effective == outer
+        assert_eq!(effective_block_width(1, 0), 1);
         assert_eq!(effective_block_width(0, 0), 0);
-        assert_eq!(effective_block_width(2, 1), 0);
+        // 正常屏：depth 100 gutter > 100 → 0
         assert_eq!(effective_block_width(100, 100), 0);
     }
 
@@ -369,17 +405,15 @@ mod tests {
     fn test_effective_block_width_handles_huge_depth_without_overflow() {
         // 错误路径：usize::MAX depth 不应 panic，u16::try_from 失败时用 u16::MAX 兜底 → 0
         assert_eq!(effective_block_width(80, usize::MAX), 0);
-        assert_eq!(
-            effective_block_width(80, 70),
-            0,
-            "depth 70 gutter=142 > 80 → 0"
-        );
+        // depth 70 gutter=142 > 80 → 0（正常屏缩进=2*70=140+2=142）
+        assert_eq!(effective_block_width(80, 70), 0);
     }
 
     #[test]
     fn test_effective_block_width_plus_gutter_round_trip_equals_outer_when_within_budget() {
-        // 不变式：effective + gutter == outer（前提：outer ≥ gutter）
-        for outer in [10u16, 20, 50, 77, 120, 200] {
+        // 不变式：effective + gutter == outer（前提：outer ≥ gutter 且在正常屏模式下）
+        // 只测 outer ≥ 50（正常屏，缩进=PER_DEPTH_INDENT），避免窄屏逻辑干扰。
+        for outer in [50u16, 77, 120, 200] {
             for depth in [0usize, 1, 2, 3, 5] {
                 let gw = gutter_width(depth) as u16;
                 if outer < gw {

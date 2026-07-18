@@ -6,7 +6,8 @@ edition.workspace = true
 [dependencies]
 share = { path = "../../shared" }
 project = { path = "../project" }
-storage = { path = "../storage" }
+memory = { path = "../memory" }
+task = { path = "../task" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -17,15 +18,19 @@ glob = "0.3"
 reqwest = { version = "0.12", features = ["blocking", "stream"] }
 chrono = "0.4"
 log = "0.4"
-tokio-util = { workspace = true }
 url = "2"
 percent-encoding = "2"
 bytes = "1"
 futures-util = { workspace = true }
 parking_lot = "0.12"
+bitflags = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v7"] }
 htmd = "0.5"
 scraper = "0.27"
+
+[build-dependencies]
+syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
+proc-macro2 = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,0 +1,264 @@
+//! Reasoning Graph——阶段驱动的 reasoning effort 动态调节状态机。
+//!
+//! 设计文档：`docs/design/02-modules/workflow/01-reasoning-graph.md`。
+//!
+//! 核心原则：Graph 是 effort 调节器，不是流程约束器——只推断阶段调 effort，
+//! 不阻塞 tool、不改 agent loop 控制流。
+//!
+//! ## 阶段推断策略（Phase 2 已实现）
+//!
+//! LLM 在 tool call 的 input 中声明 `phase` 字段（`"explore"` / `"plan"` /
+//! `"execute"` / `"verify"`）。Graph 优先使用声明值（ground truth），
+//! `classify.rs` 关键词分类器作为 fallback（仅在 LLM 未声明 phase 时使用）。
+//!
+//! ## Workflow 演进路线
+//!
+//! ### v0.2.0: 完整 Workflow 能力
+//!
+//! 如果需要更强的流程控制（可阻塞 tool、可重试、可分支恢复、可持久化恢复），
+//! 在独立 Workflow BC 内按真实能力证据扩展，与 Reasoning Graph 并存：
+//!
+//! ```text
+//!   agent loop ←→ ReasoningGraph (effort 调节，保持纯观察)
+//!        ↑
+//!   WorkflowEngine (流程控制，独立层)
+//!        ↓
+//!   可阻塞/重试/分支/持久化
+//! ```
+//!
+//! 关键区别：Workflow Engine 拥有控制权（可阻塞 tool 执行），ReasoningGraph
+//! 只做观察调 effort。两者不合并——职责不同、生命周期不同、LLM 交互模型不同。
+//! 详见设计文档 §6.3「Workflow 扩展空间」。
+
+pub mod classify;
+pub mod config;
+
+use share::reasoning::ReasoningLevel;
+
+/// 推理阶段节点。
+///
+/// 对应设计文档 §2.2 五节点定义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReasoningNode {
+    /// 空闲，等待用户输入（不调 LLM）
+    Idle,
+    /// 探索：收集信息，理解现状
+    Explore,
+    /// 规划：深度推理，定方案，处理异常
+    Plan,
+    /// 执行：机械执行已确定的改动
+    Execute,
+    /// 验证：检查执行结果
+    Verify,
+}
+
+impl ReasoningNode {
+    /// 节点的默认 effort 值（设计文档 §3.2 `default_effort()`）。
+    pub fn default_effort(&self) -> ReasoningLevel {
+        match self {
+            Self::Idle => ReasoningLevel::Off,
+            Self::Explore => ReasoningLevel::Medium,
+            Self::Plan => ReasoningLevel::Max,
+            Self::Execute => ReasoningLevel::Off,
+            Self::Verify => ReasoningLevel::Medium,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Explore => "explore",
+            Self::Plan => "plan",
+            Self::Execute => "execute",
+            Self::Verify => "verify",
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// 转移信号——runtime 观察到的事件，驱动节点转换。
+///
+/// 对应设计文档 §2.3 转移信号表。
+#[derive(Debug, Clone)]
+pub enum ReasoningSignal {
+    /// 新 user message 到达。`text` 用于判断初始节点（EXPLORE vs PLAN），
+    /// `turn_count` 用于识别首个 turn。
+    UserMessage { text: String, turn_count: usize },
+    /// tool 执行完成。`tool_name` 用于 fallback 推断（classify.rs），
+    /// `bash_command` 仅在 tool=Bash 且未声明 phase 时用于细分类。
+    ToolCompleted {
+        tool_name: String,
+        bash_command: Option<String>,
+        is_error: bool,
+        /// LLM 在 tool call input 中声明的 phase（Phase 2）。
+        /// 有值时优先使用（ground truth），跳过 classify 关键词推断。
+        declared_phase: Option<String>,
+    },
+    /// LLM 回复无 tool call（纯文本回复）。
+    TextOnly,
+    /// agent loop 新轮次（保持上一轮节点）。
+    TurnBoundary,
+}
+
+/// Reasoning Graph 状态机。
+///
+/// v0.1.0 固定运行：Graph 始终启用，effort 直接取当前节点 `default_effort()`，
+/// 不再有 enabled / max / override 等可配置概念。
+pub struct ReasoningGraph {
+    current: ReasoningNode,
+}
+
+impl Default for ReasoningGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReasoningGraph {
+    /// 创建 graph 实例。初始节点为 `Idle`，始终运行。
+    pub fn new() -> Self {
+        Self {
+            current: ReasoningNode::Idle,
+        }
+    }
+
+    /// 当前节点。
+    pub fn current_node(&self) -> ReasoningNode {
+        self.current
+    }
+
+    /// 当前节点对应的 effort（直接取节点 `default_effort`）。
+    pub fn current_effort(&self) -> ReasoningLevel {
+        self.current.default_effort()
+    }
+
+    /// 消费信号，更新当前节点。返回是否发生变化。
+    pub fn transition(&mut self, signal: ReasoningSignal) -> bool {
+        let old = self.current;
+        let new = self.next_node(&signal);
+
+        if new != old {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "reasoning_graph transition: {} → {} (effort: {:?}, signal: {})",
+                old,
+                new,
+                new.default_effort(),
+                signal_name(&signal)
+            );
+            self.current = new;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 根据当前节点和信号计算下一节点（纯函数，不修改状态）。
+    fn next_node(&self, signal: &ReasoningSignal) -> ReasoningNode {
+        match signal {
+            ReasoningSignal::UserMessage { text, turn_count } => {
+                initial_node_for_message(text, *turn_count)
+            }
+            ReasoningSignal::ToolCompleted {
+                tool_name,
+                bash_command,
+                is_error,
+                declared_phase,
+            } => {
+                // tool_error 优先：任何节点都可能触发 PLAN
+                if *is_error {
+                    return ReasoningNode::Plan;
+                }
+                // Phase 2: 优先使用 LLM 声明的 phase（ground truth）。
+                // 仅当 LLM 未声明 phase 或声明无效时，才回退到关键词推断。
+                if let Some(node) = parse_declared_phase(declared_phase) {
+                    return node;
+                }
+                classify::infer_node_from_tool(tool_name, bash_command.as_deref(), self.current)
+            }
+            ReasoningSignal::TextOnly => ReasoningNode::Idle,
+            ReasoningSignal::TurnBoundary => self.current, // 保持
+        }
+    }
+}
+
+/// 根据用户消息文本和 turn 计数推断初始节点。
+///
+/// 设计文档 §2.3「Turn 开始时的初始节点」：
+/// - 首个 turn → EXPLORE
+/// - 复杂意图关键词 → PLAN
+/// - 简单指令 → EXPLORE
+fn initial_node_for_message(text: &str, turn_count: usize) -> ReasoningNode {
+    // 首个 turn 默认从 EXPLORE 开始
+    if turn_count <= 1 {
+        // 但如果首条消息就含复杂意图关键词，直接 PLAN
+        if has_complex_intent(text) {
+            return ReasoningNode::Plan;
+        }
+        return ReasoningNode::Explore;
+    }
+
+    // 后续 turn：用户追加信息时，按意图分类
+    if has_complex_intent(text) {
+        ReasoningNode::Plan
+    } else {
+        ReasoningNode::Explore
+    }
+}
+
+/// 检测用户消息是否含复杂意图关键词（设计文档 §2.3）。
+fn has_complex_intent(text: &str) -> bool {
+    // 注意：中英文双语关键词
+    let keywords = [
+        "设计",
+        "重构",
+        "架构",
+        "排查",
+        "为什么",
+        "分析",
+        "调研",
+        "评估",
+        "方案",
+        "design",
+        "refactor",
+        "architect",
+        "investigate",
+        "why",
+        "analyze",
+        "debug root cause",
+    ];
+    let lower = text.to_lowercase();
+    keywords.iter().any(|kw| lower.contains(kw))
+}
+
+/// 解析 LLM 声明的 phase 字符串为 ReasoningNode。
+/// 无效值返回 None（由调用方走 fallback）。
+fn parse_declared_phase(phase: &Option<String>) -> Option<ReasoningNode> {
+    let p = phase.as_ref()?.trim().to_lowercase();
+    match p.as_str() {
+        "explore" | "exploring" => Some(ReasoningNode::Explore),
+        "plan" | "planning" => Some(ReasoningNode::Plan),
+        "execute" | "executing" => Some(ReasoningNode::Execute),
+        "verify" | "verifying" => Some(ReasoningNode::Verify),
+        _ => None,
+    }
+}
+
+/// 信号的简短名称（用于日志）。
+fn signal_name(signal: &ReasoningSignal) -> &'static str {
+    match signal {
+        ReasoningSignal::UserMessage { .. } => "UserMessage",
+        ReasoningSignal::ToolCompleted { .. } => "ToolCompleted",
+        ReasoningSignal::TextOnly => "TextOnly",
+        ReasoningSignal::TurnBoundary => "TurnBoundary",
+    }
+}
+
+#[cfg(test)]
+#[path = "reasoning_graph/tests.rs"]
+mod tests;

@@ -2,6 +2,7 @@ use sdk::{char_to_byte, CharIdx, StrSlice};
 
 use crate::tui::render::display::safe_text::safe_char_slice;
 use crate::tui::view_model::LiveStatusViewModel;
+#[cfg(test)]
 use crate::tui::view_state::OutputViewState;
 
 impl super::OutputArea {
@@ -75,6 +76,38 @@ impl super::OutputArea {
         self.screen_line_map
             .last()
             .map(|&(logic_idx, _, char_end)| (logic_idx, char_end))
+    }
+
+    /// 屏幕坐标 → link URL（如果点击位置在 link 范围内）。
+    pub fn link_at(&self, row: u16, col: u16, rect: &ratatui::layout::Rect) -> Option<&str> {
+        let rel_row = row.saturating_sub(rect.y) as usize;
+        let rel_col = col.saturating_sub(rect.x) as usize;
+        if rel_row >= self.screen_line_map.len() {
+            return None;
+        }
+        let (logic_idx, _, _) = self.screen_line_map.get(rel_row).copied()?;
+        let line = self.document.iter_lines().nth(logic_idx)?;
+        let gutter = line.gutter_cols;
+        let content_col = rel_col.saturating_sub(gutter);
+        // plain 包含 gutter 前缀，但 link 偏移基于 content 部分（不含 gutter）。
+        // 截取 content 部分的 plain 子串做坐标转换。
+        let content_plain = if gutter > 0 {
+            line.plain.chars().skip(gutter).collect::<String>()
+        } else {
+            line.plain.clone()
+        };
+        let char_col = crate::tui::render::output_area::display::screen_col_to_char_idx(
+            &content_plain,
+            content_col,
+        );
+        let char_idx = char_col.as_usize();
+        line.links.iter().find_map(|ls| {
+            if char_idx >= ls.col_start && char_idx < ls.col_end {
+                Some(ls.url.as_str())
+            } else {
+                None
+            }
+        })
     }
 
     /// 屏幕坐标 → 整词边界 `(逻辑行, word_start, word_end)`（半开区间）的纯换算。
@@ -180,6 +213,7 @@ impl super::OutputArea {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn output_selection_view_for_test(
     start: (usize, CharIdx),
     end: (usize, CharIdx),

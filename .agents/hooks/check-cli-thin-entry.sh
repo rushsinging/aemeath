@@ -22,7 +22,7 @@ FORBIDDEN_DOMAIN_CRATES = {
     "runtime",
     "project",
     "policy",
-    "prompt",
+    "context",
     "provider",
     "tools",
     "storage",
@@ -30,6 +30,7 @@ FORBIDDEN_DOMAIN_CRATES = {
     "audit",
     "share",
     "update",
+    "workflow",
 }
 BOOTSTRAP_DETAIL = re.compile(
     r"\bAgentClientImpl\b|"

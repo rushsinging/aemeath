@@ -9,17 +9,20 @@
 
 Anthropic、OpenAI、OpenRouter、DeepSeek、Moonshot、Zhipu、DashScope、MiniMax、Ollama、OpenAICompatible。
 
-实现层（`agent/features/provider/src/business/providers/`）按 driver 归并：
+实现按六边形职责组织：
 
-- **Anthropic 原生 driver**：`anthropic.rs`（+ `anthropic/message_conversion.rs`）——Messages API、流式/非流式、thinking budget、重试、tool use。
-- **Ollama driver**：`ollama.rs`（+ `ollama/{non_stream,stream,conversion}.rs`）。
-- **OpenAI 兼容 driver**：`openai_compatible.rs`（+ `openai_compatible/{non_stream,stream,message_conversion,provider,request_body,message_helpers,driver,reasoning}.rs`）——覆盖其余 OpenAI 兼容 provider。
-
-provider 抽象与连接池：`agent/features/provider/src/core/{provider,client,pool}.rs`。
+- `domain/capability.rs`：driver 与模型能力解析。
+- `domain/invoke.rs`：既有调用 DTO 与统一流结果语义。
+- `ports.rs`：Provider、stream handler 等端口。
+- `adapters/client.rs`、`adapters/pool.rs`、`adapters/transport.rs`：客户端、连接池和兼容 wiring。
+- `adapters/anthropic.rs`（+ `adapters/anthropic/`）：Messages API、流式/非流式、thinking budget、重试、tool use。
+- `adapters/ollama.rs`（+ `adapters/ollama/`）。
+- `adapters/openai_compatible.rs`（+ `adapters/openai_compatible/`）：覆盖其余 OpenAI 兼容 provider。
+- `lib.rs`：跨 crate 使用的窄 façade；消费方 **MUST** 从 crate root 导入，**NEVER** 穿透 `domain` / `ports` / `adapters`。
 
 ## 新增 provider
 
-1. 在 `agent/features/provider/src/business/providers/` 添加实现（或复用 OpenAI 兼容 driver）。
+1. 在 `agent/features/provider/src/adapters/` 添加实现（或复用 OpenAI 兼容 driver）。
 2. 在 `agent/shared/src/config/`（见 `config-compat.md`）补默认 base URL / 默认 model / API key 环境变量名。
 3. **SHOULD** 同步添加 model guidance 文件（见 `prompt.md`）。
 4. **SHOULD** 成本追踪相关时同步更新 `pricing.rs`（见 `runtime.md`）。

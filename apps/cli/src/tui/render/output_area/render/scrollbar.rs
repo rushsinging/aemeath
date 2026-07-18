@@ -1,13 +1,12 @@
-use ratatui::{
-    layout::Rect,
-    widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget},
-};
+use ratatui::layout::Rect;
 
-/// 输出区内容为滚动条预留的列数：滚动条本身（1 列）+ 与内容之间的间距（2 列）。
-pub(crate) const SCROLLBAR_RESERVE_COLS: u16 = 3;
+/// 输出区右侧保留的呼吸空间列数（原 scrollbar 占位，现仅保留间距）。
+pub(crate) const SCROLLBAR_RESERVE_COLS: u16 = 2;
 
-pub(crate) fn content_area_for_scrollbar(area: Rect, needs_scrollbar: bool) -> Rect {
-    if !needs_scrollbar || area.width == 0 {
+/// 从 area 中扣除右侧呼吸空间。
+/// `needs_scrollbar` 参数保留兼容但不再影响行为（scrollbar 已移除）。
+pub(crate) fn content_area_for_scrollbar(area: Rect, _needs_scrollbar: bool) -> Rect {
+    if area.width == 0 {
         return area;
     }
     Rect {
@@ -40,30 +39,14 @@ pub(super) fn visible_range(
     }
 }
 
+/// scrollbar 已移除，此函数为 no-op。
 pub(super) fn render_scrollbar(
-    area: Rect,
-    buf: &mut ratatui::buffer::Buffer,
-    total_lines: usize,
-    visible_lines: usize,
-    should_auto_scroll: bool,
-    current_scroll_offset: usize,
+    _area: Rect,
+    _buf: &mut ratatui::buffer::Buffer,
+    _total_lines: usize,
+    _visible_lines: usize,
+    _should_auto_scroll: bool,
+    _current_scroll_offset: usize,
 ) {
-    if total_lines <= visible_lines {
-        return;
-    }
-    let scrollbar_area = Rect {
-        x: area.right().saturating_sub(1),
-        y: area.top(),
-        width: 1,
-        height: area.height,
-    };
-    let max_scroll = total_lines.saturating_sub(visible_lines);
-    let current_position = if should_auto_scroll {
-        max_scroll
-    } else {
-        max_scroll.saturating_sub(current_scroll_offset)
-    };
-    let mut scrollbar_state = ScrollbarState::new(max_scroll).position(current_position);
-    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
-    StatefulWidget::render(scrollbar, scrollbar_area, buf, &mut scrollbar_state);
+    // no-op: scrollbar 已移除，保留右侧 2 列呼吸空间。
 }

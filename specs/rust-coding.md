@@ -9,7 +9,7 @@
 - **NEVER** 在 core 库中使用 `println!` / `eprintln!`（`lib.rs` 已 deny）。
 - **NEVER** 直接读取环境变量——使用配置分层（见 `config-compat.md`）。
 - **NEVER** 硬编码 API key、base URL。
-- **NEVER** 提交没有单元测试覆盖的新增核心逻辑。
+- **NEVER** 提交没有可追溯测试证据的新增核心逻辑。测试证据 **MUST** 按下方 L0-L5 分层选择，不得用低层测试替代必要的契约、场景或系统验证。
 
 ### MUST
 - **MUST** 错误消息使用中文（`ErrorDisplay`）。
@@ -17,13 +17,13 @@
 - **MUST** 配置优先于硬编码默认值。
 - **MUST** 异步 trait 方法使用 `async_trait`。
 - **MUST** TUI 模式下所有应用主日志路由到 `~/.agents/logs/aemeath.log`。
-- **MUST** 新增 `pub fn` 在同一文件末尾添加 `#[cfg(test)] mod tests`。
-- **MUST** 单元测试覆盖三种路径：正常路径、边界条件、错误路径。
+- **MUST** 新增或修改核心行为时，先确定其测试层级与覆盖证据，并按 TDD 落地；测试可位于同文件、同级 `*_tests.rs`、模块 `tests/`、crate integration test 或场景测试。
+- **MUST** 跨层链路改动为每一层补相邻测试或契约测试，并用场景测试证明最终组合；**NEVER** 只测首尾。
 
 ### SHOULD
-- **SHOULD** 单个 `.rs` 文件控制在 400 行以内（含测试代码）；过长时按职责拆分。无强制守卫，超限不阻断构建。
-- **SHOULD** 为辅助函数（`private fn`）编写测试，除非是一行委托/包装。
-- **SHOULD** 测试命名遵循 `test_<被测函数名>_<场景描述>` 模式。
+- **SHOULD** 单个生产 `.rs` 文件控制在 400 行以内；测试按职责外置后单独保持可读，一个场景文件 SHOULD 聚焦一个稳定用户旅程。无强制守卫，超限不阻断构建。
+- **SHOULD** 私有辅助函数优先通过真实生产入口间接覆盖；只有分支复杂且无法清晰归因时直接测试。
+- **SHOULD** 测试命名采用"行为 + 条件 + 结果"，例如 `submit_when_idle_emits_user_message`，不强制 `test_` 前缀。
 
 ## 错误处理
 
@@ -77,55 +77,36 @@ UnifiedLogger 按 `record.target()` 前缀路由到对应文件：
 - **NEVER** 在生产代码中使用裸 `log::xxx!` 调用（不带 `target:`）。
 - **MUST** TUI 层使用 `crate::tui::log_xxx!` 宏（自动设置 `target: "cli::tui"`）。
 - **SHOULD** target 前缀与 crate 名一致（runtime crate 用 `runtime::`，provider crate 用 `provider::`，以此类推）。
-- 架构守卫（`target_guard.rs`）在 CI 中扫描全仓库确保合规。
+- 架构守卫（`packages/global/logging/src/domain/routing_guard.rs`）在 CI 中扫描全仓库确保合规。
 
 ## 测试规范
 
+> 全仓测试分层、覆盖率、目录组织、fixture/替身与确定性治理的完整定义见 `docs/design/03-engineering/04-testing-and-coverage.md`。本节仅列出 Rust 代码变更 **MUST** 遵守的操作约束。
+
 ### TDD（测试先行）
 
-- **MUST** 新增/修改任何核心逻辑前，**MUST** 先写或改对应测试：feature 先写表达期望行为的测试（初始失败），bug 先写复现 bug 的失败测试，重构先确认现有测试已覆盖目标行为。
-- **MUST** 实现/修复后，对应测试 **MUST** 通过（`cargo test -p <crate>` 绿）；测试 **NEVER** 为迁就实现而削弱断言。
-- **SHOULD** 遵循 Red → Green → Refactor 节奏：先红（失败测试）、再绿（最小实现通过）、最后重构。
-- 豁免沿用下方覆盖豁免（UI 渲染、`main.rs` 入口、一行委托/包装）。
+- **MUST** 新增或修改核心逻辑前先建立失败证据：feature 先写表达期望行为的测试，bug 先写复现测试，重构先确认现有测试覆盖目标行为。
+- **MUST** 实现或修复后使对应测试通过；测试 **NEVER** 为迁就实现而削弱断言。
+- insta 快照场景 **MUST** 先用语义断言建立失败证据，再生成基线。
 
-### 覆盖要求
+### 层级选择
 
-- **MUST** 每个包含公共函数的模块文件末尾有 `#[cfg(test)] mod tests`。
-- **MUST** 每个公共函数至少 3 个测试用例：正常路径、边界条件、错误路径。
-- **MUST** 测试使用 `assert!` / `assert_eq!` / `matches!` 显式断言，不可仅打印后人工观察。
-- **SHOULD** 私有辅助函数通过公有函数间接覆盖，或直接 `use super::*` 导入测试。
-- **MUST** 纯逻辑函数（无 I/O、无副作用）为最高优先级测试目标。UI 渲染代码、`main.rs` 入口代码可豁免。
-- 一行委托/包装函数可豁免 3 测试用例要求，但仍 SHOULD 有测试。
-- Code review 时 reviewer **MUST** 检查新增代码的测试覆盖。未覆盖核心逻辑的 PR 不应合并。
+- **MUST** 按 L0-L5 六层模型选择最低充分层级的覆盖证据；层级定义与适用场景见 design doc。
+- **MUST** 跨层链路改动为每一层补相邻测试或契约测试，并用场景测试证明最终组合；**NEVER** 只测首尾。
+- **NEVER** 用 L4/L5 替代 L1-L3 的状态转换、字段完整性或 Adapter 契约测试，也 **NEVER** 用大量 L1 模拟本应由 L3/L4 验证的跨边界组合。
+- **MUST** 使用 `assert!`、`assert_eq!`、`matches!` 或等价断言验证行为，**NEVER** 只打印后人工观察。
 
-## 调试方法论
+### 目录组织
 
-### 诊断日志先于推理
+- 测试文件 **MUST** 与源码分离：`foo.rs` ↔ `foo_tests.rs`（同级目录），通过 `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;` 引入。**NEVER** 在源码文件内嵌 `#[cfg(test)] mod tests { ... }`（由 `.agents/hooks/check-no-inline-tests.sh` 守卫）。
+  - 收益：`cargo build`（不带 `--cfg test`）天然暴露 dead code——任何只被测试引用的 pub 项会变 unused warning。移除 `*_tests.rs` 后 `cargo build` 即可发现仅在测试中使用的代码。
+- L2/L4 测试 **MUST** 使用同名文件与目录并存形状（`tests.rs` + `tests/`），**NEVER** 新增 `mod.rs`。
+- 测试模块与 fixture **MUST** 跟随被测能力的真实架构层和模块，**NEVER** 建立跨层万能 `test_utils` / `testing`。
+- **NEVER** 新增 `include!("tests/*.rs")` 拼接；**NEVER** 一次性移动全仓历史测试（渐进迁移）。
 
-- **MUST** 定位 bug 时，**MUST** 优先添加日志确认数据流（事件是否到达、字段是否填充），而不是依赖推理和猜测。
-- **SHOULD** 诊断日志先用 `info!` 级别确认链路通，验证通过后降回 `debug!` 或删除——避免被全局日志级别过滤掉看不到。
-- **MUST** 全局日志级别由 `logging.level` 配置（默认 `info`），debug 级别日志需要 `AEMEATH_LOG_LEVEL=debug` 环境变量拉高，或 `RUST_LOG=aemeath:<target>=debug` 按 target 拉高。详见 `AGENTS.md` 日志级别说明。
-- **SHOULD** 诊断完成后 **SHOULD** 清理诊断日志，避免污染生产日志。
+### 确定性
 
-### 链路验证不要跳层
-
-- **MUST** 当 A → B → C → D 链路中 D 不显示时，**MUST NOT** 只查 A/B/C 的传递而假设 D 内部正确。**MUST** 确认 D 内部是否真的调用了消费逻辑（如覆写方法是否绕过了默认调用链）。
-- **MUST** 排查前 **MUST** 确认用户跑的是最新编译的二进制（对比 `target/debug/aemeath` 时间戳与 `date`），避免在旧二进制上浪费诊断轮次。
-- **SHOULD** 在每一层（share → runtime → sdk → tui）的入口/出口加日志，逐层确认数据传递。
-
-### Trait 默认方法覆写陷阱
-
-- **MUST** Trait 默认方法调用其它默认方法时，**任何覆写都可能切断调用链**。新增字段要想被消费，**MUST** 确认实际被调用的入口（而非"应该被调用"的默认方法）。
-- 例：`ToolDisplay::format_header_line_with_result` 覆写了默认实现，绕过了 `format_header`——新增在 `format_header` 中解析的字段永远不会被消费。修正方式：在覆写方法中显式调用消费逻辑。
-- **SHOULD** 覆写 trait 方法时，**SHOULD** 在文档注释中说明是否调用默认方法链、以及为什么覆写。
-
-### 架构守卫的价值
-
-- **MUST** 架构守卫不是阻碍，是**设计纠偏**。view_model 不能依赖 model internals 这类守卫强制我们在 view_model 层定义独立类型 + 在 view_assembler 处投影。
-- **MUST** 守卫拦截后 **MUST NOT** 绕过，**MUST** 修正设计使其合规。如果没有守卫，反向依赖会成为长期技术债。
-
-### 选型穷举所有 case
-
-- **MUST** 选型时 **MUST** 穷举所有 case，确认方案在每种 case 下都能工作。
-- 例：role/model 显示有 4 种组合（None/None、Some/None、None/Some、Some/Some）。方案 A（从 input JSON 解析）在 case 2（只有 role 无 model）失败，因为 model 是 runtime 内部 resolve 的。
-- **SHOULD** 做当前需求时，**SHOULD** 思考"这个改动是否为后续需求铺路"。优先选择可扩展的方案（如 AgentProgressEvent 携带元数据，为后续"实时显示 subagent 活动"打下通道基础）。
+- 时间、timer、ID、随机源 **MUST** 可注入或固定；文件测试 **MUST** 使用每测试唯一临时目录。
+- **NEVER** 用短 `sleep` 或毫秒级墙钟差证明状态重置；**NEVER** 修改进程全局 cwd。
+- 测试辅助 API **MUST** 受 `cfg(test)` 或 test-only feature 约束，**NEVER** 因测试方便扩大生产 API。
+- CI 首次失败后定向重跑只用于分类 flaky，**NEVER** 用重跑成功覆盖首次失败。

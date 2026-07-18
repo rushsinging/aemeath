@@ -1,0 +1,301 @@
+use crate::domain::types::web_fetch::{WebFetchInput, WebFetchResult};
+use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use async_trait::async_trait;
+use serde_json::Value;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
+use tokio::process::Command;
+use url::Url;
+
+mod extract;
+pub struct WebFetchTool;
+
+/// Validate a URL against SSRF attacks.
+///
+/// - Only http/https schemes allowed.
+/// - Block private IPs, loopback, link-local, multicast, broadcast.
+/// - Block common cloud metadata endpoints.
+fn validate_url(raw_url: &str) -> Result<Url, String> {
+    let url = Url::parse(raw_url).map_err(|e| format!("invalid URL: {e}"))?;
+
+    // Only allow http/https
+    match url.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "scheme '{}' is not allowed. Only http and https are supported.",
+                other
+            ))
+        }
+    }
+
+    // Resolve host and check against private ranges
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL has no host".to_string())?;
+
+    // Block known cloud metadata hosts
+    if host == "169.254.169.254" || host.ends_with("169.254.169.254") {
+        return Err("access to cloud metadata service is blocked".to_string());
+    }
+
+    // Try to parse as IP address (covers both IPv4 and IPv6)
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        match ip {
+            IpAddr::V4(v4) => {
+                if v4.is_private() {
+                    return Err(format!("private IP address {} is not allowed", v4));
+                }
+                if v4.is_loopback() {
+                    return Err(format!("loopback address {} is not allowed", v4));
+                }
+                if v4.is_link_local() {
+                    return Err(format!("link-local address {} is not allowed", v4));
+                }
+                if v4.is_multicast() {
+                    return Err(format!("multicast address {} is not allowed", v4));
+                }
+                if v4.is_broadcast() {
+                    return Err(format!("broadcast address {} is not allowed", v4));
+                }
+                // 0.0.0.0
+                if v4 == Ipv4Addr::UNSPECIFIED {
+                    return Err("unspecified address 0.0.0.0 is not allowed".to_string());
+                }
+            }
+            IpAddr::V6(v6) => {
+                if v6.is_loopback() {
+                    return Err(format!("loopback address {} is not allowed", v6));
+                }
+                if v6.is_multicast() {
+                    return Err(format!("multicast address {} is not allowed", v6));
+                }
+                if v6 == Ipv6Addr::UNSPECIFIED {
+                    return Err("unspecified address :: is not allowed".to_string());
+                }
+                // IPv6 link-local: fe80::/10
+                if v6.segments()[0] & 0xffc0 == 0xfe80 {
+                    return Err(format!("link-local address {} is not allowed", v6));
+                }
+                // IPv6 unique-local (fc00::/7) — equivalent to private
+                if v6.segments()[0] & 0xfe00 == 0xfc00 {
+                    return Err(format!("unique-local address {} is not allowed", v6));
+                }
+            }
+        }
+    }
+
+    // Block well-known localhost hostnames
+    if host == "localhost" || host.ends_with(".localhost") || host == "localtest.me" {
+        return Err(format!(
+            "hostname '{}' resolves to localhost and is not allowed",
+            host
+        ));
+    }
+
+    Ok(url)
+}
+
+/// Heuristic to decide whether a response body should be parsed as HTML.
+fn looks_like_html(body: &str) -> bool {
+    let trimmed = body.trim_start();
+    trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with('<')
+}
+
+#[async_trait]
+impl TypedTool for WebFetchTool {
+    type Output = WebFetchResult;
+    fn name(&self) -> &str {
+        "WebFetch"
+    }
+
+    fn description(&self) -> &str {
+        "Fetches content from a URL via HTTP GET. Read-only. Results may be truncated for large content. For GitHub URLs, prefer `gh` CLI."
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::web::web_fetch(lang))
+    }
+
+    fn input_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        WebFetchInput::data_schema()
+    }
+    fn data_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        WebFetchResult::data_schema()
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<WebFetchResult> {
+        let args: WebFetchInput = match serde_json::from_value(input) {
+            Ok(a) => a,
+            Err(e) => {
+                return TypedToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": format!("invalid input: {e}"),
+                        "data": null
+                    })
+                    .to_string(),
+                )
+            }
+        };
+
+        if args.url.is_empty() {
+            return TypedToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": "missing required parameter: url",
+                    "data": null
+                })
+                .to_string(),
+            );
+        }
+        let raw_url = args.url.as_str();
+
+        let timeout_ms = args.timeout.unwrap_or(30_000);
+
+        // Validate URL and upgrade http to https
+        let mut url = match validate_url(raw_url) {
+            Ok(u) => u,
+            Err(e) => {
+                return TypedToolResult::error(
+                    serde_json::json!({
+                        "status": "error",
+                        "message": format!("URL rejected: {e}"),
+                        "data": { "url": raw_url }
+                    })
+                    .to_string(),
+                )
+            }
+        };
+
+        // Upgrade http to https
+        if url.scheme() == "http" {
+            url.set_scheme("https").ok();
+        }
+
+        // Use curl as it's universally available and handles redirects/TLS
+        let result = tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            Command::new("curl")
+                .args([
+                    "-sL", // silent, follow redirects
+                    "--max-time",
+                    &(timeout_ms / 1000).max(5).to_string(),
+                    "-A",
+                    "aemeath/0.1.0",
+                    // Limit redirect count to reduce SSRF surface
+                    "--max-redirs",
+                    "5",
+                    url.as_str(),
+                ])
+                .output(),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(output)) => {
+                if output.status.success() {
+                    let body = String::from_utf8_lossy(&output.stdout);
+
+                    let extracted = if looks_like_html(&body) {
+                        match extract::extract_page(
+                            &body,
+                            extract::ExtractOptions {
+                                base_url: url.as_str(),
+                                max_content_bytes: 2 * 1024 * 1024, // 2 MiB
+                                max_links: 50,
+                            },
+                        ) {
+                            Ok(e) => e,
+                            Err(err) => {
+                                return TypedToolResult::error(
+                                    serde_json::json!({
+                                        "status": "error",
+                                        "message": format!("HTML extraction failed: {err}"),
+                                        "data": { "url": url.as_str() }
+                                    })
+                                    .to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        extract::ExtractedPage {
+                            title: String::new(),
+                            markdown: body.to_string(),
+                            links: Vec::new(),
+                        }
+                    };
+
+                    // Truncate very large responses safely
+                    let max_chars = 50_000;
+                    let (content, truncated) = if extracted.markdown.len() > max_chars {
+                        let truncated =
+                            share::string_idx::slice_head(&extracted.markdown, max_chars);
+                        let truncated_content = format!(
+                            "{}...\n\n[truncated, showing first {} chars of {} total]",
+                            truncated,
+                            truncated.chars().count(),
+                            extracted.markdown.chars().count()
+                        );
+                        (truncated_content, true)
+                    } else {
+                        (extracted.markdown.clone(), false)
+                    };
+
+                    TypedToolResult::success(
+                        content.clone(),
+                        WebFetchResult {
+                            url: url.to_string(),
+                            title: extracted.title,
+                            content,
+                            truncated,
+                            links: extracted.links,
+                        },
+                    )
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    TypedToolResult::error(
+                        serde_json::json!({
+                            "status": "error",
+                            "message": format!("fetch failed: {stderr}"),
+                            "data": { "url": url.as_str() }
+                        })
+                        .to_string(),
+                    )
+                }
+            }
+            Ok(Err(e)) => TypedToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("failed to execute curl: {e}"),
+                    "data": { "url": url.as_str() }
+                })
+                .to_string(),
+            ),
+            Err(_) => TypedToolResult::error(
+                serde_json::json!({
+                    "status": "error",
+                    "message": format!("request timed out after {timeout_ms}ms"),
+                    "data": { "url": url.as_str() }
+                })
+                .to_string(),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -2,10 +2,12 @@
 
 use crate::{ChatInputEventPort, QueueDrainPort};
 
-pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
-pub use crate::chat_result::{
-    CancelHandle, ChatInputImage, ChatResult, ChatStream, ToolResultImage,
+pub use crate::chat_event::{
+    ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
+    ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
+    ToolCallStatusView,
 };
+pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
     HookEventView, HookExecutionResultView, OptionItem, WorkspaceContextView,
@@ -51,8 +53,6 @@ pub enum ChatInputEvent {
     },
     /// 忙碌期间输入的 slash/control command，永不作为 user message 发给 LLM。
     ControlCommand { raw: String },
-    /// 用户请求取消当前 Chat；与现有 cancel token 幂等合流。
-    Cancel,
     /// 整段会话重置：清空 messages + pending 输入，通知 TUI。
     ///
     /// 由 `/clear` 触发（idle 立即执行 / busy 排队等当前回合自然结束回 idle gate 后执行），
@@ -75,7 +75,8 @@ pub enum ChatInputEvent {
     /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等回合结束后执行。
     ///
     /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
-    /// runtime idle 分支执行 set_reasoning_level，结果通过 `ThinkingChanged` 事件回传 TUI。
+    /// runtime idle 分支更新会话级 reasoning 状态，后续调用通过不可变 InvocationScope 读取；
+    /// 结果通过 `ThinkingChanged` 事件回传 TUI。
     SetThinking { desired: Option<bool> },
     /// 初始化项目。由 `/init` 触发。
     /// force = true 时强制重新初始化
@@ -89,10 +90,8 @@ pub enum ChatInputEvent {
     /// 恢复指定会话。由 `/resume <id>` 触发。
     /// 需要走 idle gate（替换 loop messages）。
     ResumeSession { id: String },
-    /// 运行 reflection。由 `/reflect` 或自动触发。
-    RunReflection,
-    /// 应用 reflection 结果。由 TUI 在 reflection UI 确认后触发。
-    ApplyReflection { output: crate::ReflectionOutputView },
+    /// 查询最近的 reflection 历史。由 `/reflect [limit]` 触发；不运行或应用 reflection。
+    QueryReflectionHistory { limit: usize },
     /// 查询可用模型列表。由 TUI 启动时或 `/model` 触发。
     ListModels,
     /// 查询提醒列表。由 `/reminders` 触发。
@@ -198,15 +197,6 @@ mod tests {
             event,
             ChatInputEvent::ControlCommand { ref raw } if raw == "  /clear"
         ));
-    }
-
-    #[test]
-    fn test_chat_input_event_cancel_is_distinct_from_user_message() {
-        assert_eq!(ChatInputEvent::Cancel, ChatInputEvent::Cancel);
-        assert_ne!(
-            ChatInputEvent::Cancel,
-            ChatInputEvent::user_message("cancel", Vec::new())
-        );
     }
 
     #[test]

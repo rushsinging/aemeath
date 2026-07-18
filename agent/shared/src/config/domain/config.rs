@@ -4,13 +4,13 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::audit::AuditConfig;
 use crate::config::hooks::HooksConfig;
 use crate::config::legacy::{ApiConfig, ModelConfig};
 use crate::config::logging::LoggingConfig;
 use crate::config::memory::MemoryConfig;
 use crate::config::models::ModelsConfig;
 use crate::config::permissions::PermissionConfig;
-use crate::config::reasoning_graph::ReasoningGraphConfig;
 use crate::config::skills::SkillsConfig;
 use crate::config::storage::StorageConfig;
 use crate::config::tools::{AgentsConfig, ToolsConfig};
@@ -97,6 +97,10 @@ pub struct Config {
     #[serde(default)]
     pub skills: SkillsConfig,
 
+    /// Audit Usage pipeline configuration
+    #[serde(default)]
+    pub audit: AuditConfig,
+
     /// Storage configuration
     #[serde(default)]
     pub storage: StorageConfig,
@@ -112,10 +116,6 @@ pub struct Config {
     /// Logging configuration
     #[serde(default)]
     pub logging: LoggingConfig,
-
-    /// Reasoning Graph configuration
-    #[serde(default)]
-    pub reasoning_graph: ReasoningGraphConfig,
 
     /// Guidance system configuration
     #[serde(default)]
@@ -143,11 +143,11 @@ impl Default for Config {
             ui: UiConfig::default(),
             permissions: PermissionConfig::default(),
             skills: SkillsConfig::default(),
+            audit: AuditConfig::default(),
             storage: StorageConfig::default(),
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),
             logging: LoggingConfig::default(),
-            reasoning_graph: ReasoningGraphConfig::default(),
             guidance: GuidanceConfig::default(),
             update: UpdateConfig::default(),
             language: default_language(),

@@ -6,6 +6,7 @@
 //!   正文（含 bold/code/link）仍走 inline markdown。
 
 use crate::tui::render::output::markdown as md;
+use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::theme;
 use crate::tui::text::split_at_ascii;
@@ -22,9 +23,27 @@ pub fn markdown(text: &str, base_style: Style, width: u16) -> Vec<RenderedLine> 
     if text.is_empty() {
         return inline_lines("", base_style, width);
     }
+    // 紧凑模式：跳过连续空行，只在段落边界保留第一个空行作为视觉间距。
+    // 首尾空行也跳过——减少不必要的大面积留白。
+    let mut prev_blank = true; // 跳过开头空行
     text.lines()
+        .filter(|line| {
+            let blank = line.trim().is_empty();
+            let keep = !blank || !prev_blank;
+            prev_blank = blank;
+            keep
+        })
         .flat_map(|line| render_line(line, base_style, width))
         .collect()
+}
+
+/// fence 外紧凑模式：跳过连续空行（只在段落边界保留一个）。
+/// fence 内的代码块空行原样保留。
+pub(crate) fn should_skip_blank_outside_fence(line: &str, prev_blank: &mut bool) -> bool {
+    let blank = line.trim().is_empty();
+    let skip = blank && *prev_blank;
+    *prev_blank = blank;
+    skip
 }
 
 /// 渲染单行：先识别块级前缀（引用 / 列表），剥离后正文走 inline，再把
@@ -67,25 +86,52 @@ fn render_line(line: &str, base_style: Style, width: u16) -> Vec<RenderedLine> {
 
 /// 普通 inline markdown 行（无块级前缀）。
 fn inline_lines(text: &str, base_style: Style, width: u16) -> Vec<RenderedLine> {
-    md::inline_markdown_lines(text, base_style, width as usize)
-        .into_iter()
-        .map(|line| {
-            let visible = line
-                .spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>();
-            let plain = md::strip_inline_formatting(&visible);
-            RenderedLine::with_plain(line.spans, plain)
-        })
-        .collect()
+    let (spans, links) = md::inline_markdown_spans_with_links(text, base_style);
+    let wrapped = wrap_spans_with_prefix(spans, width as usize, None, WrapMode::Word);
+    distribute_links(wrapped, links)
+}
+
+/// 将原始行内 link 偏移分配到 wrap 后各行。
+fn distribute_links(
+    mut wrapped: Vec<RenderedLine>,
+    links: Vec<crate::tui::render::output::rendered::LinkSpan>,
+) -> Vec<RenderedLine> {
+    if links.is_empty() {
+        return wrapped;
+    }
+
+    let mut offset = 0usize;
+    for line in &mut wrapped {
+        let line_len = line.plain.chars().count();
+        let line_start = offset;
+        let line_end = offset + line_len;
+
+        let line_links: Vec<_> = links
+            .iter()
+            .filter(|ls| ls.col_start >= line_start && ls.col_start < line_end)
+            .cloned()
+            .map(|mut ls| {
+                ls.col_start -= line_start;
+                ls.col_end = (ls.col_end - line_start).min(line_len);
+                ls
+            })
+            .collect();
+        line.links = line_links;
+        offset = line_end;
+    }
+    wrapped
 }
 
 /// 在一行已渲染产物前补一个样式化 marker，保持 plain 与 spans 一致。
+/// marker 宽度补偿到 links 的 col_start（marker 不参与 plain 偏移计算——gutter 机制已处理）。
 fn prepend_marker(marker_plain: &str, marker_style: Style, line: RenderedLine) -> RenderedLine {
     let mut spans = vec![Span::styled(marker_plain.to_string(), marker_style)];
     spans.extend(line.spans);
-    RenderedLine::with_plain(spans, format!("{marker_plain}{}", line.plain))
+    let plain = format!("{marker_plain}{}", line.plain);
+    // links 的 col_start 是基于原 plain（不含 marker）的偏移；
+    // marker 加入后 plain 多了 marker 前缀，但 gutter_cols 机制会补偿显示列差。
+    // 此处保持 links 偏移不变（仍基于 content 部分）。
+    RenderedLine::with_plain_and_links(spans, plain, line.links)
 }
 
 /// 识别引用块前缀，返回（嵌套层数, 去前缀后的正文）。

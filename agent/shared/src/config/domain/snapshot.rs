@@ -5,16 +5,69 @@
 //! what consumers need.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use crate::config::audit::{DEFAULT_USAGE_QUEUE_CAPACITY, DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS};
 use crate::config::models::{
     ModelEntryConfig, ModelResolveError, ModelsConfig, ResolvedModel, ResolvedRuntimeModel,
     RuntimeModelRequest, RuntimeModelResolutionError, RuntimeModelResolver,
 };
 use crate::config::permissions::PermissionModeConfig;
 use crate::config::{
-    AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, ReasoningGraphConfig,
-    SkillsConfig,
+    AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig,
 };
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ToolResultPolicy {
+    threshold_chars: usize,
+    preview_head_chars: usize,
+    preview_tail_chars: usize,
+}
+
+impl ToolResultPolicy {
+    fn from_config(config: &ToolResultConfig) -> Self {
+        let valid = config.threshold_chars > 0
+            && config.preview_head_chars + config.preview_tail_chars <= config.threshold_chars;
+        let config = if valid {
+            config.clone()
+        } else {
+            ToolResultConfig::default()
+        };
+        Self {
+            threshold_chars: config.threshold_chars,
+            preview_head_chars: config.preview_head_chars,
+            preview_tail_chars: config.preview_tail_chars,
+        }
+    }
+
+    pub fn threshold_chars(self) -> usize {
+        self.threshold_chars
+    }
+
+    pub fn preview_head_chars(self) -> usize {
+        self.preview_head_chars
+    }
+
+    pub fn preview_tail_chars(self) -> usize {
+        self.preview_tail_chars
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct UsageWorkerConfig {
+    capacity: usize,
+    shutdown_timeout: Duration,
+}
+
+impl UsageWorkerConfig {
+    pub fn capacity(self) -> usize {
+        self.capacity
+    }
+
+    pub fn shutdown_timeout(self) -> Duration {
+        self.shutdown_timeout
+    }
+}
 
 /// Immutable snapshot of effective configuration.
 ///
@@ -84,11 +137,23 @@ impl ConfigSnapshot {
     // ── Tools / Agents ───────────────────────────────────────
 
     pub fn max_tool_concurrency(&self) -> usize {
-        self.0.tools.max_concurrency
+        if self.0.tools.max_concurrency > 0 {
+            self.0.tools.max_concurrency
+        } else {
+            super::tools::default_max_tool_concurrency()
+        }
     }
 
     pub fn max_agent_concurrency(&self) -> usize {
-        self.0.agents.max_concurrency
+        if self.0.agents.max_concurrency > 0 {
+            self.0.agents.max_concurrency
+        } else {
+            super::tools::default_max_agent_concurrency()
+        }
+    }
+
+    pub fn tool_result_policy(&self) -> ToolResultPolicy {
+        ToolResultPolicy::from_config(&self.0.tools.tool_result)
     }
 
     // ── Logging ──────────────────────────────────────────────
@@ -99,6 +164,18 @@ impl ConfigSnapshot {
 
     pub fn logs_dir(&self) -> Option<&str> {
         self.0.logging.logs_dir.as_deref()
+    }
+
+    pub fn logging_max_bytes(&self) -> u64 {
+        self.0.logging.max_bytes
+    }
+
+    pub fn logging_max_backups(&self) -> usize {
+        self.0.logging.max_backups
+    }
+
+    pub fn logging_retention_days(&self) -> u64 {
+        self.0.logging.retention_days
     }
 
     // ── UI ───────────────────────────────────────────────────
@@ -123,6 +200,25 @@ impl ConfigSnapshot {
 
     pub fn memory_enabled(&self) -> bool {
         self.0.memory.enabled
+    }
+
+    // ── Audit ───────────────────────────────────────────────
+
+    pub fn usage_worker_config(&self) -> UsageWorkerConfig {
+        UsageWorkerConfig {
+            capacity: if self.0.audit.usage_queue_capacity > 0 {
+                self.0.audit.usage_queue_capacity
+            } else {
+                DEFAULT_USAGE_QUEUE_CAPACITY
+            },
+            shutdown_timeout: Duration::from_millis(
+                if self.0.audit.usage_shutdown_timeout_ms > 0 {
+                    self.0.audit.usage_shutdown_timeout_ms
+                } else {
+                    DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS
+                },
+            ),
+        }
     }
 
     // ── Storage ──────────────────────────────────────────────
@@ -191,16 +287,6 @@ impl ConfigSnapshot {
         &self.0.skills
     }
 
-    /// 返回完整 `ReasoningGraphConfig`，供 `GraphRuntimeConfig::from_shared` 消费。
-    pub fn reasoning_graph(&self) -> &ReasoningGraphConfig {
-        &self.0.reasoning_graph
-    }
-
-    /// 返回完整 `LoggingConfig`，供 `init_logging` 消费。
-    pub fn logging(&self) -> &LoggingConfig {
-        &self.0.logging
-    }
-
     /// 按 selection 字符串解析模型，委派给 `ModelsConfig::resolve_model_selection`。
     pub fn resolve_model_selection(
         &self,
@@ -236,6 +322,23 @@ mod tests {
     use super::*;
     use crate::config::models::ProviderModelsConfig;
     use crate::config::Config;
+
+    #[test]
+    fn logging_accessors_publish_complete_static_settings() {
+        let mut config = Config::default();
+        config.logging.level = "debug".to_string();
+        config.logging.logs_dir = Some("custom/logs".to_string());
+        config.logging.max_bytes = 42;
+        config.logging.max_backups = 3;
+        config.logging.retention_days = 14;
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(snapshot.logging_level(), "debug");
+        assert_eq!(snapshot.logs_dir(), Some("custom/logs"));
+        assert_eq!(snapshot.logging_max_bytes(), 42);
+        assert_eq!(snapshot.logging_max_backups(), 3);
+        assert_eq!(snapshot.logging_retention_days(), 14);
+    }
 
     #[test]
     fn test_resolve_context_size_cli_wins() {
@@ -291,11 +394,7 @@ mod tests {
         );
         assert_eq!(snap.memory().enabled, Config::default().memory.enabled);
         assert_eq!(snap.skills().dirs, Config::default().skills.dirs);
-        assert_eq!(
-            snap.reasoning_graph().enabled,
-            Config::default().reasoning_graph.enabled
-        );
-        assert_eq!(snap.logging().level, Config::default().logging.level);
+        assert_eq!(snap.logging_level(), Config::default().logging.level);
     }
 
     #[test]
@@ -500,6 +599,53 @@ mod tests {
         assert_eq!(snap.max_agent_concurrency(), 4);
     }
 
+    #[test]
+    fn snapshot_concurrency_limits_use_domain_defaults_for_default_config() {
+        let snap = ConfigSnapshot::new(Config::default());
+
+        assert_eq!(snap.max_tool_concurrency(), 10);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    #[test]
+    fn snapshot_concurrency_limits_normalize_zero_to_domain_defaults() {
+        let mut config = Config::default();
+        config.tools.max_concurrency = 0;
+        config.agents.max_concurrency = 0;
+        let snap = ConfigSnapshot::new(config);
+
+        assert_eq!(snap.max_tool_concurrency(), 10);
+        assert_eq!(snap.max_agent_concurrency(), 4);
+    }
+
+    #[test]
+    fn snapshot_exposes_validated_tool_result_policy() {
+        let mut config = Config::default();
+        config.tools.tool_result.threshold_chars = 8_000;
+        config.tools.tool_result.preview_head_chars = 1_000;
+        config.tools.tool_result.preview_tail_chars = 250;
+        let snap = ConfigSnapshot::new(config);
+
+        let policy = snap.tool_result_policy();
+        assert_eq!(policy.threshold_chars(), 8_000);
+        assert_eq!(policy.preview_head_chars(), 1_000);
+        assert_eq!(policy.preview_tail_chars(), 250);
+    }
+
+    #[test]
+    fn snapshot_normalizes_invalid_tool_result_policy_to_compatible_defaults() {
+        let mut config = Config::default();
+        config.tools.tool_result.threshold_chars = 0;
+        config.tools.tool_result.preview_head_chars = 9_000;
+        config.tools.tool_result.preview_tail_chars = 9_000;
+        let snap = ConfigSnapshot::new(config);
+
+        let policy = snap.tool_result_policy();
+        assert_eq!(policy.threshold_chars(), 50_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
+    }
+
     /// resolve_context_size 在 CLI 传 0 时应忽略 CLI（用 snapshot 值），
     /// CLI 传 128000 时应直接使用 CLI 值。
     #[test]
@@ -516,22 +662,28 @@ mod tests {
         assert_eq!(snap.resolve_context_size(Some(128000), 96000), 128000);
     }
 
-    /// Config 含 memory.enabled=true / reasoning_graph.enabled=true 时，
-    /// 子结构 accessor 返回正确值。
+    /// Config 只暴露仍受支持的 memory 子结构。
     #[test]
-    fn test_snapshot_memory_and_reasoning_graph() {
-        // Arrange
+    fn test_snapshot_memory_accessor() {
         let mut config = Config::default();
         config.memory.enabled = true;
-        config.reasoning_graph.enabled = true;
         let snap = ConfigSnapshot::new(config);
 
-        // Act & Assert
         assert!(snap.memory().enabled, "memory().enabled 应为 true");
-        assert!(
-            snap.reasoning_graph().enabled,
-            "reasoning_graph().enabled 应为 true"
-        );
+    }
+
+    #[test]
+    fn retired_reasoning_graph_section_is_ignored_by_config() {
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "reasoning_graph": {
+                "enabled": true,
+                "max_reasoning": "high",
+                "nodes": { "plan": { "effort": "low" } }
+            }
+        }))
+        .expect("unknown retired section should remain backward-readable");
+        let serialized = serde_json::to_value(config).expect("config serializes");
+        assert!(serialized.get("reasoning_graph").is_none());
     }
 
     /// Config.language="zh" 时，snapshot.language() 应返回 "zh"。

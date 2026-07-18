@@ -1,7 +1,7 @@
 use crate::tui::render::theme;
 use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
 
-use super::super::common::{display_path, str_arg, typed_data};
+use super::super::common::{display_path, typed_data};
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
@@ -9,7 +9,14 @@ use super::super::{
 use super::helpers::{build_header_line, truncate_path};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use sdk::tool_input::{GlobInput, GrepInput};
 use std::path::Path;
+
+/// Deserialize a typed Input from a raw `serde_json::Value`, tolerating
+/// missing / malformed fields via `Default`.
+fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
+    serde_json::from_value(input.clone()).unwrap_or_default()
+}
 
 // ── Glob ─────────────────────────────────────────────────────────
 
@@ -19,11 +26,11 @@ impl ToolDisplay for GlobDisplay {
         "Glob"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let pattern = str_arg(input, "pattern", "");
-        if pattern.is_empty() {
+        let args = parse_input::<GlobInput>(input);
+        if args.pattern.is_empty() {
             self.display_name().to_string()
         } else {
-            format!("{} {pattern}", self.display_name())
+            format!("{} {}", self.display_name(), args.pattern)
         }
     }
     fn header_for_subagent(
@@ -40,16 +47,16 @@ impl ToolDisplay for GlobDisplay {
         result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let pattern = str_arg(input, "pattern", "");
+        let args = parse_input::<GlobInput>(input);
         let n = typed_data::<sdk::tool_result::GlobResult>(result_payload).map(|r| r.count);
         let suffix = n.map(|c| format!(" ({c} files)")).unwrap_or_default();
-        if pattern.is_empty() && suffix.is_empty() {
+        if args.pattern.is_empty() && suffix.is_empty() {
             Line::from(Span::styled(
                 self.display_name().to_string(),
                 Style::default().fg(theme::ACCENT_BRIGHT),
             ))
         } else {
-            build_header_line(self.display_name(), pattern, &suffix)
+            build_header_line(self.display_name(), &args.pattern, &suffix)
         }
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
@@ -80,14 +87,18 @@ impl ToolDisplay for GrepDisplay {
         "Grep"
     }
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
-        let pattern = str_arg(input, "pattern", "");
-        let path = str_arg(input, "path", ".");
+        let args = parse_input::<GrepInput>(input);
+        let path = args.path.as_deref().unwrap_or(".");
         let rel = display_path(path, workspace_root);
         let display_path = truncate_path(&rel, 40);
-        if pattern.is_empty() {
+        if args.pattern.is_empty() {
             format!("{} in {display_path}", self.display_name())
         } else {
-            format!("{} /{pattern}/ in {display_path}", self.display_name())
+            format!(
+                "{} /{}/ in {display_path}",
+                self.display_name(),
+                args.pattern
+            )
         }
     }
     fn header_for_subagent(
@@ -103,13 +114,13 @@ impl ToolDisplay for GrepDisplay {
         result_payload: Option<&ToolResultPayload>,
         workspace_root: Option<&Path>,
     ) -> Line<'static> {
-        let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
-        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let args = parse_input::<GrepInput>(input);
+        let path = args.path.as_deref().unwrap_or(".");
         let rel = display_path(path, workspace_root);
-        let arg = if pattern.is_empty() {
+        let arg = if args.pattern.is_empty() {
             format!("in {rel}")
         } else {
-            format!("/{pattern}/, path={rel}")
+            format!("/{}/, path={rel}", args.pattern)
         };
         let n = typed_data::<sdk::tool_result::GrepResult>(result_payload).map(|r| r.total_matches);
         let suffix = n.map(|c| format!(" ({c} matches)")).unwrap_or_default();

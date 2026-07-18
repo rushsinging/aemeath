@@ -19,22 +19,19 @@
 - 执行流程：LLM 返回 tool_use → Agent 收集 → 并发执行 → 结果注入回消息。
 - `Tool` trait 与 `ToolRegistry` 的定义在 `agent/features/tools`（见 `tools.md`）；本分片只负责循环里的调度与结果回填。
 
+- Runtime 自行持有 `WorkspacePersist` 与并发 semaphore；二者 **NEVER** 流入 Tools domain 或 `ToolExecutionContext`。Composition 的 `WorkspaceViews` 只在 `application/tool_execution_adapters.rs` 转成窄 live capabilities。
+- #910 当前仅完成 scope/context 结构与资源 ACL；#911 双 Tool adapter、#877 typed suspension、#912 Runtime scope ownership 仍未完成，不能据此宣称 Target 完成。
+
 ## token budget / 压缩 / 成本
 
-- token 估算：`agent/features/runtime/src/business/compact/token_estimation.rs`（`estimate_tokens` 等）。
-- **SHOULD** 修改涉及暂停 / 恢复 / 重试逻辑时同步更新 `token_estimation`。
-- 成本追踪与定价：`agent/features/runtime/src/business/cost/pricing.rs`。
+- token 估算由 Context BC 的 `context::api::compact::estimate_tokens` 提供，Runtime 在 `application/{agent,chat}` 编排中消费。
+- **SHOULD** 修改涉及暂停 / 恢复 / 重试逻辑时同步检查 Context token estimation 调用点。
+- 成本追踪与定价：`agent/features/runtime/src/application/cost/pricing.rs`。
 - **SHOULD** 成本追踪逻辑更新时同步更新 `pricing.rs`。
 - 成本历史落盘在 `~/.agents/cost_history.json`。
 
 ## slash 命令系统
 
-- slash 命令通过 `inventory` crate + 注册表自动收集，目录在 `agent/features/runtime/src/core/command/`：
-  - 值类型 `CommandDescriptor`：`core/command.rs`。
-  - 注册表：`core/command/registry.rs`（启动时遍历所有 `inventory::submit!` 的描述符）。
-  - 命令模块：`core/command/commands/`（每个命令一个文件，用 `inventory::submit! { CommandDescriptor::new(...) }` 声明）。
-- 新增命令只需两步：
-  1. 在 `core/command/commands/` 下创建文件，用 `inventory::submit!` 声明命令。
-  2. 在 `core/command/commands.rs` 注册该子模块。
-- 命令自动出现在 TUI 自动补全中，无需改 TUI 代码。
-- 注意：本机制只负责命令**注册/解析**；命令在 TUI 的展示样式见 `tui-cli.md`。
+- slash 命令的 SDK/TUI 入站路由属于 `application/client`；具体命令能力由对应 Feature 的 Published Language / Tool 提供。
+- Runtime 内不再维护 `core/command` 固定层注册表；新增命令时按实际所有者更新 SDK、TUI 或对应 Feature，**NEVER** 恢复旧 `core/command/` 路径。
+- 命令在 TUI 的展示样式见 `tui-cli.md`。

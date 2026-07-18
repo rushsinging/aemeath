@@ -3,7 +3,6 @@ use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLin
 use crate::tui::render::output::tool_display::format_tool_call;
 use crate::tui::render::theme;
 use crate::tui::view_model::output::ToolCallBlockView;
-use crate::tui::view_model::tool_name::tool_display_name;
 use crate::tui::view_model::AgentMetaView;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -33,15 +32,15 @@ pub fn render_tool_call(
             )
         })
         .unwrap_or_else(|| {
-            (
-                Line::from(vec![
-                    Span::raw("● "),
-                    Span::styled(
-                        tool_display_name(&view.title).to_string(),
-                        Style::default().fg(theme::ACCENT_BRIGHT),
-                    ),
-                ]),
-                Vec::new(),
+            // issue #839：args_preview 为 None（PendingArgs 阶段）时也走 format_tool_call，
+            // 传入空 JSON "{}" 使 format_header 生成 display_name fallback，
+            // 与正常路径行为一致，避免退化为裸 display name。
+            let effective_json = merge_agent_meta("{}", view.agent_meta.as_ref());
+            format_tool_call(
+                &view.title,
+                &effective_json,
+                view.result_payload.as_ref(),
+                view.workspace_root.as_deref(),
             )
         });
     crate::tui::log_debug!(
@@ -405,5 +404,24 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
         assert_eq!(v["role"], "coder");
         assert_eq!(v["model"], "Zhipu/glm-5.2");
+    }
+
+    // ── issue #839：args_preview 为 None 时 fallback 路径应走 format_tool_call ──
+
+    #[test]
+    fn test_tool_call_none_args_preview_uses_format_tool_call_fallback() {
+        // args_preview 为 None（PendingArgs 阶段或空字符串被过滤）时，
+        // 不应只显示裸 display name，应走 format_tool_call 统一路径。
+        let mut view = tool(ToolSemanticStatus::Running);
+        view.title = "TaskUpdate".into();
+        view.args_preview = None;
+
+        let block = render_tool_call("t1", &view, &RenderCtx { text_width: 80 });
+
+        assert!(
+            block.lines[0].plain.contains("Task"),
+            "fallback header 应包含 display name: {}",
+            block.lines[0].plain
+        );
     }
 }

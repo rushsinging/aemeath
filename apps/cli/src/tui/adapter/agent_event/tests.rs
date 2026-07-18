@@ -511,3 +511,42 @@ mod started_tests {
         );
     }
 }
+
+// ── #1106：runtime 允许发空 SystemMessage，TUI（ACL 层）不渲染 ──
+
+#[test]
+fn test_empty_system_message_from_runtime_is_dropped() {
+    // runtime 侧 `if let Some(ctx) = json.additional_context` 只判 Option 不判空串，
+    // 允许发空消息；ACL 层负责丢弃，避免空 block 渲染成空行。
+    for payload in [
+        "",
+        "   ",
+        "\n\n",
+        "<system-reminder></system-reminder>",
+        "<system-reminder>\n  \n</system-reminder>",
+    ] {
+        let mapping = map_agent_event(&UiEvent::SystemMessage(payload.to_string()));
+        assert!(
+            mapping.conversation.is_empty(),
+            "空 SystemMessage 不应产生 intent: {payload:?}"
+        );
+    }
+}
+
+#[test]
+fn test_non_empty_system_message_is_mapped() {
+    let mapping = map_agent_event(&UiEvent::SystemMessage("hello".to_string()));
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendSystemMessage(AppendSystemMessage { text })] if text == "hello"
+    ));
+}
+
+#[test]
+fn test_system_reminder_envelope_with_content_is_kept() {
+    // 信封剥离后仍有内容 → 必须保留（剥离由 model 层做，ACL 只判空）。
+    let mapping = map_agent_event(&UiEvent::SystemMessage(
+        "<system-reminder>real content</system-reminder>".to_string(),
+    ));
+    assert_eq!(mapping.conversation.len(), 1, "非空信封应保留");
+}

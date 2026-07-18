@@ -5,3 +5,13 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+sdk = { path = "../../../packages/sdk" }
+serde = { workspace = true }
+async-trait = { workspace = true }
+storage = { path = "../storage" }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

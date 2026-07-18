@@ -36,6 +36,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::ToolResult { .. } => "ToolResult",
         UiEvent::Usage { .. } => "Usage",
         UiEvent::Error(_) => "Error",
+        UiEvent::RunCancelled => "RunCancelled",
         UiEvent::Cancelled { .. } => "Cancelled",
         UiEvent::TurnStarted { .. } => "TurnStarted",
         UiEvent::MicrocompactDone { .. } => "MicrocompactDone",
@@ -53,8 +54,7 @@ fn ui_event_name(event: &UiEvent) -> &'static str {
         UiEvent::SystemMessage(_) => "SystemMessage",
         UiEvent::ModelStreamWaiting { .. } => "ModelStreamWaiting",
         UiEvent::SessionSaved { .. } => "SessionSaved",
-        UiEvent::ReflectionDone { .. } => "ReflectionDone",
-        UiEvent::ReflectionApplyDone { .. } => "ReflectionApplyDone",
+        UiEvent::ReflectionHistory { .. } => "ReflectionHistory",
         UiEvent::AskUserBatch { .. } => "AskUserBatch",
         UiEvent::HookEvent(_) => "HookEvent",
         UiEvent::AgentProgress { .. } => "AgentProgress",
@@ -367,6 +367,11 @@ impl App {
                 return;
             }
         };
+        let document = if self.view_state.output.expanded {
+            document
+        } else {
+            Self::trim_document_to_max_lines(document)
+        };
         let after_lines = document.total_lines();
         crate::tui::log_trace!(
             "tui.output.refresh_document revision={} width={} term_width={} spinner_frame={} roots={} timeline_items={} chats={} before_lines={} after_lines={} rebuilt={}",
@@ -382,6 +387,62 @@ impl App {
             need_rebuild
         );
         self.output_area.replace_document(document);
+    }
+
+    /// 最大渲染行数。超过此值的旧消息被裁剪，滚到顶部时懒加载展开。
+    const MAX_RENDER_LINES: usize = 1000;
+
+    /// 裁剪文档到最大行数，保留最新的行。如果裁剪了，顶部插入提示行。
+    fn trim_document_to_max_lines(
+        document: crate::tui::render::output::rendered::RenderedDocument,
+    ) -> crate::tui::render::output::rendered::RenderedDocument {
+        use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
+        use ratatui::style::Style;
+        use ratatui::text::Span;
+        use std::rc::Rc;
+
+        let total = document.total_lines();
+        if total <= Self::MAX_RENDER_LINES {
+            return document;
+        }
+
+        let mut kept = Self::MAX_RENDER_LINES;
+        let folded = total - kept;
+
+        // 从后向前按 block 边界保留：一旦某 block 无法完整放入剩余预算，跳过整个 block
+        // （不截断 block 内部，保证消息完整性）。继续向前找更小的 block 填满预算。
+        let mut new_blocks: Vec<RenderedBlock> = Vec::new();
+        for block in document.blocks.into_iter().rev() {
+            if kept == 0 {
+                break;
+            }
+            let block_len = block.lines.len();
+            if block_len > kept {
+                // 该 block 放不下剩余预算，跳过（不截断）
+                continue;
+            }
+            new_blocks.push(block);
+            kept -= block_len;
+        }
+        new_blocks.reverse();
+
+        // 顶部插入提示行
+        let hint_line = RenderedLine::with_plain(
+            vec![Span::styled(
+                format!("─── 更早的消息已折叠（{folded} 行）───"),
+                Style::default().fg(crate::tui::render::theme::TEXT_DIM),
+            )],
+            format!("─── 更早的消息已折叠（{folded} 行）───"),
+        );
+        new_blocks.insert(
+            0,
+            RenderedBlock {
+                block_id: "_folded_hint".into(),
+                lines: Rc::new(vec![hint_line]),
+            },
+        );
+
+        crate::tui::render::output::rendered::RenderedDocument { blocks: new_blocks }
     }
     pub(crate) fn flush_dirty_view_models(&mut self) {
         if self.view_state.dirty.output {

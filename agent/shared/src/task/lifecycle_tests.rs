@@ -11,17 +11,12 @@ fn make_task(id: &str, batch: u64, status: TaskStatus) -> Task {
         subject: format!("task-{id}"),
         description: String::new(),
         status,
-        active_form: None,
         owner: None,
         blocked_by: Vec::new(),
-        blocks: Vec::new(),
         priority: TaskPriority::Normal,
-        progress: 0,
-        progress_message: None,
         created_at: 0,
         updated_at: 0,
         session_id: None,
-        tags: Vec::new(),
         batch,
     }
 }

@@ -11,7 +11,7 @@ use ratatui::{
     style::Style,
     widgets::{Block, Borders, Widget},
 };
-use tui_textarea::TextArea;
+use ratatui_textarea::TextArea;
 
 impl InputArea {
     /// Render the input area from a ViewModel.
@@ -25,6 +25,10 @@ impl InputArea {
         let block = input_block(view_model);
         let inner_area = block.inner(area);
         block.render(area, buf);
+
+        // 用明确的 bg 覆盖 inner_area，确保旧 cursor 的 ACCENT bg 被替换。
+        // 不能用 Color::Reset（crossterm 不正确处理），用 BASE（终端底色）替代。
+        buf.set_style(inner_area, Style::default().bg(theme::BASE));
 
         let display_lines =
             wrap_input_lines_for_width(view_model.lines(), inner_area.width as usize);
@@ -110,15 +114,15 @@ fn configured_textarea(
     }
     textarea.set_cursor_line_style(Style::default());
     textarea.set_cursor_style(Style::default().bg(theme::ACCENT).fg(theme::SURFACE));
-    textarea.move_cursor(tui_textarea::CursorMove::Top);
-    textarea.move_cursor(tui_textarea::CursorMove::Head);
+    textarea.move_cursor(ratatui_textarea::CursorMove::Top);
+    textarea.move_cursor(ratatui_textarea::CursorMove::Head);
     let (cursor_row, cursor_col) =
         display_position_for_anchor(display_lines, vm.cursor_row, vm.cursor_col);
     for _ in 0..cursor_row {
-        textarea.move_cursor(tui_textarea::CursorMove::Down);
+        textarea.move_cursor(ratatui_textarea::CursorMove::Down);
     }
     for _ in 0..cursor_col {
-        textarea.move_cursor(tui_textarea::CursorMove::Forward);
+        textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
     }
     textarea
 }

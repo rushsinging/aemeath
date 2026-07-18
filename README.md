@@ -2,29 +2,40 @@
 
 基于 Rust 的 AI 编程助手，带 TUI 界面。支持多 provider、多模型、子代理（sub-agent）和技能（skill）系统。
 
-## 关键设计
+## 设计导航
 
-**[设计总纲](docs/design/01-outline.md)** — DDD 六边形架构、统一语言、Bounded Context、COLA 分层、依赖铁律。
+设计真相按系统级、模块级与横切工程三层组织，完整索引见 [`docs/design/README.md`](docs/design/README.md)。
 
-| 主题 | 设计文档 | 角色 / 状态 |
+| 层级 | 入口 | 角色 |
 |---|---|---|
-| 架构总纲 | [01-outline.md](docs/design/01-outline.md) | 全局架构原则：Bounded Context、COLA 分层、依赖铁律 |
-| 架构守卫 | [02-architecture-guards.md](docs/design/02-architecture-guards.md) | 17 个 guard + 白名单单一真相 |
-| Runtime | [03-runtime-design.md](docs/design/03-runtime-design.md) | 核心域应用服务 |
-| TUI | [04-tui-design.md](docs/design/04-tui-design.md) | 入站适配器（终端） |
-| Agent 编排 | [05-agent-orchestration.md](docs/design/05-agent-orchestration.md) | 编排范式知识地图（知识储备） |
-| Reasoning Graph | [06-agent-reasoning-graph.md](docs/design/06-agent-reasoning-graph.md) | 阶段节点驱动 reasoning effort（草案） |
-| Server | [07-server-design.md](docs/design/07-server-design.md) | 入站适配器（远端，草案） |
+| **01 · 系统级** | [系统架构](docs/design/01-system/04-system-architecture.md) · [依赖规则](docs/design/01-system/05-dependency-rules.md) · [代码组织规范](docs/design/01-system/06-code-organization.md) | 整体架构形态、依赖方向与 capability-first 组织判据 |
+| **02 · 模块级** | [模块设计索引](docs/design/02-modules/README.md) | 各能力的战术模型、公开 façade 与真实外部 seam |
+| **03 · 横切工程** | [架构守卫注册表](docs/design/03-engineering/01-architecture-guards.md) · [迁移治理](docs/design/03-engineering/03-migration-governance.md) | 可执行守卫的运行时真相与 Current → Target 追踪 |
 
 ## 项目结构
 
 ```text
 aemeath/
-├── apps/          # CLI/TUI 等应用入口
-├── packages/      # core / llm / tools 等库 crate
-├── docs/          # 设计文档与历史归档
-├── AGENTS.md      # 项目级 agent 工作约束
-└── README.md      # 项目入口说明
+├── apps/
+│   └── cli/                # CLI 二进制、TUI 与旧版 REPL
+├── agent/
+│   ├── features/           # runtime / tools / provider / project 等业务能力
+│   ├── shared/             # 横切基础设施与最小共享内核
+│   └── composition/        # 唯一生产装配入口
+├── packages/
+│   ├── sdk/                # CLI ↔ Runtime 公共契约
+│   └── global/
+│       ├── logging/        # 日志 projection 适配
+│       └── utils/          # 通用无业务语义 helper
+├── docs/
+│   ├── design/             # 三层设计真相源
+│   ├── snapshot/           # 历史 spec 快照
+│   ├── superpowers/        # 设计与实施工作流产物
+│   ├── mockups/            # UI 草图
+│   └── visual/             # 可视化资产
+├── specs/                  # 按路径 / 场景加载的开发约束
+├── AGENTS.md               # 仓库级 agent 工作约束
+└── README.md               # 仓库入口
 ```
 
 ## 文档入口

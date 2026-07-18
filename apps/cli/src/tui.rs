@@ -11,8 +11,6 @@ pub mod view_state;
 
 #[cfg(test)]
 mod architecture_tests;
-#[cfg(test)]
-mod log_scope_tests;
 
 pub const LOG_TARGET: &str = "aemeath:tui";
 

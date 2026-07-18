@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# git pre-commit hook：自动 cargo fmt 暂存的 Rust 代码
-#
-# 启用（每个 clone/worktree 共享配置，只需执行一次）：
-#   git config core.hooksPath .cargo/hooks
-#
-# 原理：pre-commit 在 commit 创建前运行，cargo fmt 修改工作区后 `git add -u`
-# 把格式化结果重新暂存，使其进入当前 commit。无 .rs 改动时直接跳过。
-# 配合 CI 的 `cargo fmt --check` 门禁，形成"源头自动修复 + CI 兜底"双层保障。
-
+# Git pre-commit：只运行本地、轻量、与 staged 路径相关的检查。
 set -euo pipefail
 
-# cd 到当前 worktree 顶（pre-commit 执行时 PWD 已是 worktree 根，显式 cd 更稳妥）
 top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$top"
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[[ -n "$staged" ]] || exit 0
 
-# 只在有暂存的 .rs 文件时才格式化，避免无谓开销
-if ! git diff --cached --name-only --diff-filter=ACMR -- '*.rs' | grep -q .; then
-    exit 0
+if printf '%s\n' "$staged" | grep -qE '\.rs$'; then
+    cargo fmt
+    git add -u -- '*.rs'
 fi
 
-cargo fmt
-# 把格式化后的改动重新暂存到当前 commit
-git add -u -- '*.rs'
+if printf '%s\n' "$staged" | grep -qE '^(agent|apps|packages|tools/xtask|\.agents)/'; then
+    cargo run --quiet -p xtask -- source-guard "$top"
+fi
+
+if printf '%s\n' "$staged" | grep -qE '(^|/)(scenario_tests|snapshots)(/|\.)|\.snap$'; then
+    drafts=$(find apps/cli -type f \( -name '*.snap.new' -o -name '.pending-snap' \) -print)
+    if [[ -n "$drafts" ]]; then
+        printf 'error: pending insta snapshot files:\n%s\n' "$drafts" >&2
+        exit 1
+    fi
+fi

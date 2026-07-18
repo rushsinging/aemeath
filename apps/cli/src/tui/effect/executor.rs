@@ -25,7 +25,7 @@ impl App {
             }
             Effect::SpawnAgentChat { .. } => {}
             Effect::SendChatInputEvent { event } => self.send_chat_input_event(event),
-            Effect::CancelAgentChat => self.cancel_agent_chat(),
+            Effect::CancelCurrentRun => self.cancel_current_run(),
             Effect::SaveSession { notify } => self.save_session_effect(notify, ui_tx),
             Effect::RunHook { message, name } => self.run_hook_effect(message, name),
             Effect::ReadClipboardImage => self.read_clipboard_image_effect(ui_tx),
@@ -33,27 +33,33 @@ impl App {
             Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
-            Effect::RunReflection { foreground } => self.run_reflection_effect(foreground, ui_tx),
-            Effect::ApplyReflection { output } => self.apply_reflection_effect(output, ui_tx),
+            Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
             Effect::ResetRuntimeState => self.reset_runtime_state().await,
+            Effect::OpenUrl { url } => self.open_url_effect(&url),
         }
     }
 
-    fn cancel_agent_chat(&mut self) {
-        self.chat.start_cancelling();
-        // #639：cancel 触发 runtime 的 CancellationToken（即时、进程内 out-of-band），
-        // NEVER 用 abort()——abort 只中断 TUI 消费流、不停 runtime loop（#639 根因）。
-        if let Some(h) = &self.chat.processing_handle {
-            h.cancel();
+    fn cancel_current_run(&mut self) {
+        let outcome = self
+            .chat
+            .processing_handle
+            .as_ref()
+            .map(|handle| handle.cancel_current_run())
+            .unwrap_or(sdk::CancelRunOutcome::NotFound);
+        if matches!(
+            outcome,
+            sdk::CancelRunOutcome::Accepted | sdk::CancelRunOutcome::AlreadyCancelling
+        ) {
+            self.chat.start_cancelling();
+            self.model
+                .conversation
+                .apply(SetStatusNotice(StatusNotice::warning(
+                    "Cancelling current response… Press Ctrl+C again to exit",
+                )));
         }
-        self.model
-            .conversation
-            .apply(SetStatusNotice(StatusNotice::warning(
-                "Cancelling current response… Press Ctrl+C again to exit",
-            )));
     }
 
     fn send_chat_input_event(&mut self, event: sdk::ChatInputEvent) {
@@ -158,25 +164,9 @@ impl App {
         // #567：set_current_turn 删除——runtime loop 内部自维护 turn 计数器。
     }
 
-    /// 执行 LLM reflection：克隆当前消息与 agent client，后台 spawn 调用 SDK，
-    /// 结果经 UiEvent 回流到 update。前台发起时先推送 ReflectionStarted。
-    fn run_reflection_effect(&mut self, foreground: bool, _ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567：run_reflection 走事件流（ChatInputEvent::RunReflection）。
-        // runtime idle 分支执行 reflection，结果通过 ReflectionResult 事件回传。
-        let _ = foreground;
+    fn query_reflection_history_effect(&mut self, limit: usize) {
         self.chat
-            .push_input_event(sdk::ChatInputEvent::RunReflection);
-    }
-
-    fn apply_reflection_effect(
-        &mut self,
-        output: sdk::ReflectionOutputView,
-        _ui_tx: &mpsc::Sender<UiEvent>,
-    ) {
-        // #567：apply_reflection 走事件流（ChatInputEvent::ApplyReflection）。
-        // runtime idle 分支执行 apply，结果通过 CommandResultText 事件回传。
-        self.chat
-            .push_input_event(sdk::ChatInputEvent::ApplyReflection { output });
+            .push_input_event(sdk::ChatInputEvent::QueryReflectionHistory { limit });
     }
 
     /// 启动时后台检查版本更新（非阻塞）。
@@ -244,6 +234,61 @@ impl App {
         // 暂时发 ListReminders 事件，recap 在 UiEvent 处理中生成。
         self.chat
             .push_input_event(sdk::ChatInputEvent::ListReminders);
+    }
+
+    /// 用系统默认程序打开 URL 或本地文件路径（Ctrl+Click markdown link / 行内代码路径）。
+    fn open_url_effect(&mut self, url: &str) {
+        // 安全校验：允许 http/https URL 和本地文件路径
+        let is_url = url.starts_with("http://") || url.starts_with("https://");
+        let is_path = url.contains('/')
+            || url.contains('\\')
+            || url.ends_with(".rs")
+            || url.ends_with(".toml")
+            || url.ends_with(".md")
+            || url.ends_with(".json");
+        if !is_url && !is_path {
+            self.set_transient_notice(StatusNotice::warning(format!("无法识别的链接目标: {url}")));
+            return;
+        }
+
+        // 本地相对路径：尝试基于 cwd 解析
+        let resolved = if !is_url && !std::path::Path::new(url).is_absolute() {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            Some(cwd.join(url).to_string_lossy().into_owned())
+        } else {
+            None
+        };
+        let target = resolved.as_deref().unwrap_or(url);
+
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(target_os = "linux")]
+        let cmd = "xdg-open";
+        #[cfg(target_os = "windows")]
+        let cmd = "cmd";
+
+        let result = {
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new(cmd)
+                    .args(["/C", "start", target])
+                    .spawn()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                std::process::Command::new(cmd).arg(target).spawn()
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                self.set_transient_notice(StatusNotice::success(format!("已打开: {url}")));
+            }
+            Err(e) => {
+                crate::tui::log_warn!("打开失败: {e}");
+                self.set_transient_notice(StatusNotice::warning(format!("打开失败: {e}")));
+            }
+        }
     }
 }
 

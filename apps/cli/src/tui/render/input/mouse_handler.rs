@@ -40,6 +40,15 @@ impl crate::tui::app::App {
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                // 输出区：检测是否点击在 markdown link / 行内代码路径上
+                if point_in_rect(row, col, &output_area) {
+                    if let Some(url) = self.output_area.link_at(row, col, &output_area) {
+                        return vec![crate::tui::effect::effect::Effect::OpenUrl {
+                            url: url.to_string(),
+                        }];
+                    }
+                }
+
                 if point_in_rect(row, col, &output_area) {
                     // 双击检测
                     let now = Instant::now();

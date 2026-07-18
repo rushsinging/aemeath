@@ -1,0 +1,34 @@
+---
+source: apps/cli/src/tui/app/scenario_tests/chat.rs
+expression: harness.screen()
+---
+
+  Aemeath - AI Agent
+
+
+  Type /help for available commands
+
+
+💭 Inspecting the repository
+ · Brewing...  (Thinking...  ⏱ 0s)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+┌ Input ───────────────────────────────────────────────────────────────────────────────────────────┐
+│ 输 入 消 息 ...                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+ Ready │ scenario-model │ in 0 │ out 0
+ │ main │ AskMe │ session scenario-session

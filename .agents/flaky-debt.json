@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "kind": "wall-clock",
+      "path": "agent/features/runtime/src/application/loop_engine/loop_runner_tests.rs",
+      "owner_issue": 649,
+      "risk": "毫秒级真实耗时比较在并行测试中可能抖动",
+      "exit_condition": "改为注入 Clock/VirtualClock，或证明不再使用墙钟差断言"
+    },
+    {
+      "kind": "fixed-tmp",
+      "path": "packages/global/logging/src/unified_logger_tests.rs",
+      "owner_issue": 649,
+      "risk": "固定 /tmp 路径在并行执行时互相覆盖",
+      "exit_condition": "改为每测试唯一临时目录"
+    },
+    {
+      "kind": "global-env-cwd",
+      "path": "workspace",
+      "owner_issue": 649,
+      "risk": "测试修改全局环境变量或 cwd 会污染并行测试",
+      "exit_condition": "扫描结果为零，或每个例外有独立 owner issue"
+    },
+    {
+      "kind": "random-source",
+      "path": "apps/cli/src/tui/view_state/spinner_anim.rs",
+      "owner_issue": 649,
+      "risk": "随机 spinner 文案会导致快照不稳定",
+      "exit_condition": "场景 Harness 固定文案，生产随机源保持隔离"
+    }
+  ]
+}

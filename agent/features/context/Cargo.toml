@@ -1,0 +1,26 @@
+[package]
+name = "context"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+share = { path = "../../shared" }
+storage = { path = "../storage" }
+task = { path = "../task" }
+sdk = { path = "../../../packages/sdk" }
+provider = { path = "../provider" }
+memory = { path = "../memory" }
+log = "0.4"
+dirs = "6"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yml = "0.0.12"
+inventory = { workspace = true }
+async-trait = { workspace = true }
+regex = "1"
+thiserror = { workspace = true }
+uuid = { version = "1", features = ["v4", "v7"] }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures-util = { workspace = true }

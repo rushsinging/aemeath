@@ -1,0 +1,159 @@
+//! 日志 target 架构守卫。
+//!
+//! 确保各 crate 的 `log::xxx!` 调用正确携带 `target:` 参数，
+//! 避免日志被路由到错误的文件。
+
+use super::routing::TargetSpec;
+use super::TargetCatalog;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+/// 递归收集目录下所有 `.rs` 文件。
+fn rust_files_under(path: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+/// 从源码中剥离 `#[cfg(test)] mod` 块，只保留生产代码。
+fn production_source(source: &str) -> String {
+    let mut output = String::new();
+    let mut skip_test_module = false;
+    let mut brace_depth = 0usize;
+
+    for line in source.lines() {
+        if line.trim() == "#[cfg(test)]" {
+            skip_test_module = true;
+            continue;
+        }
+        if skip_test_module {
+            let opens = line.matches('{').count();
+            let closes = line.matches('}').count();
+            if opens > 0 || brace_depth > 0 {
+                brace_depth = brace_depth.saturating_add(opens).saturating_sub(closes);
+                if brace_depth == 0 {
+                    skip_test_module = false;
+                }
+            }
+            continue;
+        }
+        output.push_str(line);
+        output.push('\n');
+    }
+    output
+}
+
+/// 检查源码中是否有裸 `log::xxx!(` 调用（不含 `target:`）。
+fn has_bare_log_calls(source: &str) -> Vec<String> {
+    let patterns = [
+        "log::trace!(",
+        "log::debug!(",
+        "log::info!(",
+        "log::warn!(",
+        "log::error!(",
+    ];
+    let lines: Vec<&str> = source.lines().collect();
+    let mut violations = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
+            continue;
+        }
+        for pat in &patterns {
+            if trimmed.contains(pat) {
+                // Check if target: appears on this line or the next 3 lines
+                let context = lines[i..(i + 4).min(lines.len())].join(" ");
+                if !context.contains("target:") {
+                    violations.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+    violations
+}
+
+/// 从单行中提取 `target: "xxx"` 的字符串值。
+fn extract_target_value(line: &str) -> Option<String> {
+    // 查找 target: "..." 模式
+    let target_idx = line.find("target:")?;
+    let after = &line[target_idx + 7..];
+    // 跳过空格
+    let after = after.trim_start();
+    // 检查是否有引号（字符串字面量）
+    if !after.starts_with('"') {
+        // target: 不是字符串字面量 → 引用常量（如 LOG_TARGET），合法
+        return None;
+    }
+    let inner = &after[1..];
+    let end_quote = inner.find('"')?;
+    Some(inner[..end_quote].to_string())
+}
+
+/// 检查 target 字符串字面量是否合法（在白名单内）。
+fn is_valid_target(target: &str) -> bool {
+    // 必须以 aemeath: 开头
+    if !target.starts_with("aemeath:") {
+        return false;
+    }
+    // 最多 3 段
+    let parts: Vec<&str> = target.split(':').collect();
+    if parts.len() > 3 {
+        return false;
+    }
+    TargetCatalog::exact(target).is_some()
+}
+
+fn extract_target_constant(line: &str) -> Option<String> {
+    let declaration = line.trim();
+    if !declaration.contains("const ") || !declaration.contains("TARGET") {
+        return None;
+    }
+    let value = declaration.split_once('=')?.1.trim();
+    let value = value.strip_prefix('"')?;
+    Some(value.split_once('"')?.0.to_string())
+}
+
+/// 检查源码中所有 `target: "xxx"` 字符串字面量是否合规。
+fn validate_target_values(source: &str) -> Vec<String> {
+    let mut violations = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") {
+            continue;
+        }
+        if let Some(target_val) =
+            extract_target_value(line).or_else(|| extract_target_constant(line))
+        {
+            if !is_valid_target(&target_val) {
+                violations.push(format!("invalid target: \"{}\"", target_val));
+            }
+        }
+    }
+    violations
+}
+
+/// workspace 根目录。
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .unwrap()
+        .to_path_buf()
+}
+
+#[cfg(test)]
+#[path = "routing_guard_tests.rs"]
+mod tests;

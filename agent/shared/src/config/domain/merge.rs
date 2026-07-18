@@ -3,20 +3,20 @@
 //! Overlays sparse `ConfigPatch` layers onto a full `Config`, producing a
 //! merged result.  Pure domain logic — no I/O.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::{
+    audit::AuditConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
     memory::{MemoryConfig, ReflectionConfig},
     models::{ModelsConfig, ProviderModelsConfig},
     permissions::{PermissionConfig, PermissionModeConfig},
-    reasoning_graph::ReasoningGraphConfig,
     skills::SkillsConfig,
     storage::StorageConfig,
-    tools::{AgentRoleConfig, AgentsConfig, ToolsConfig},
+    tools::{AgentRoleConfig, AgentsConfig, ToolResultConfig, ToolsConfig},
     ui::{TaskLifecycleConfig, TaskListConfig, UiConfig},
     Config, GuidanceConfig, GuidanceReloadPolicy,
 };
@@ -26,7 +26,7 @@ use std::{collections::HashMap, path::PathBuf};
 // Patch structs
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ConfigPatch {
     #[serde(default)]
     pub api: Option<ApiConfigPatch>,
@@ -45,6 +45,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub skills: Option<SkillsConfigPatch>,
     #[serde(default)]
+    pub audit: Option<AuditConfigPatch>,
+    #[serde(default)]
     pub storage: Option<StorageConfigPatch>,
     #[serde(default)]
     pub hooks: Option<HooksConfig>,
@@ -54,8 +56,6 @@ pub struct ConfigPatch {
     pub logging: Option<LoggingConfigPatch>,
     #[serde(default)]
     pub guidance: Option<GuidanceConfigPatch>,
-    #[serde(default)]
-    pub reasoning_graph: Option<ReasoningGraphConfig>,
 }
 
 impl ConfigPatch {
@@ -77,16 +77,16 @@ impl ConfigPatch {
             && self.ui.is_none()
             && self.permissions.is_none()
             && self.skills.is_none()
+            && self.audit.is_none()
             && self.storage.is_none()
             && self.memory.is_none()
             && self.logging.is_none()
-            && self.reasoning_graph.is_none()
             && self.guidance.is_none()
             && self.hooks.is_none()
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ApiConfigPatch {
     #[serde(default)]
     pub provider: Option<String>,
@@ -102,7 +102,7 @@ pub struct ApiConfigPatch {
     pub retries: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ModelConfigPatch {
     #[serde(default)]
     pub name: Option<String>,
@@ -120,7 +120,7 @@ pub struct ModelConfigPatch {
     pub stop_sequences: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ModelsConfigPatch {
     #[serde(default)]
     pub mode: Option<String>,
@@ -129,10 +129,14 @@ pub struct ModelsConfigPatch {
     #[serde(default)]
     pub providers: Option<HashMap<String, ProviderModelsConfig>>,
     #[serde(default)]
+    pub provider_api_keys: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub fallback_api_key: Option<String>,
+    #[serde(default)]
     pub guidance: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ToolsConfigPatch {
     #[serde(default)]
     pub enabled: Option<Vec<String>>,
@@ -142,9 +146,21 @@ pub struct ToolsConfigPatch {
     pub settings: Option<HashMap<String, Value>>,
     #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
+    #[serde(default)]
+    pub tool_result: Option<ToolResultConfigPatch>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ToolResultConfigPatch {
+    #[serde(default)]
+    pub threshold_chars: Option<usize>,
+    #[serde(default)]
+    pub preview_head_chars: Option<usize>,
+    #[serde(default)]
+    pub preview_tail_chars: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AgentsConfigPatch {
     #[serde(default, alias = "maxConcurrency")]
     pub max_concurrency: Option<usize>,
@@ -154,7 +170,7 @@ pub struct AgentsConfigPatch {
     pub default_model: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct UiConfigPatch {
     #[serde(default)]
     pub markdown: Option<bool>,
@@ -174,7 +190,7 @@ pub struct UiConfigPatch {
     pub task_lifecycle: Option<TaskLifecycleConfigPatch>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TaskListConfigPatch {
     #[serde(default)]
     pub max_lines: Option<usize>,
@@ -182,7 +198,7 @@ pub struct TaskListConfigPatch {
     pub fold_hint_format: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TaskLifecycleConfigPatch {
     #[serde(default)]
     pub auto_clear_completed_on_new_turn: Option<bool>,
@@ -196,7 +212,7 @@ pub struct TaskLifecycleConfigPatch {
     pub stale_remind_repeat_interval: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PermissionConfigPatch {
     #[serde(default)]
     pub mode: Option<PermissionModeConfig>,
@@ -206,13 +222,21 @@ pub struct PermissionConfigPatch {
     pub deny: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SkillsConfigPatch {
     #[serde(default)]
     pub dirs: Option<Vec<PathBuf>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct AuditConfigPatch {
+    #[serde(default)]
+    pub usage_queue_capacity: Option<usize>,
+    #[serde(default)]
+    pub usage_shutdown_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct StorageConfigPatch {
     #[serde(default)]
     pub sessions_dir: Option<PathBuf>,
@@ -226,7 +250,7 @@ pub struct StorageConfigPatch {
     pub history_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MemoryConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -235,10 +259,12 @@ pub struct MemoryConfigPatch {
     #[serde(default)]
     pub similarity_threshold: Option<f64>,
     #[serde(default)]
+    pub inject_count: Option<usize>,
+    #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ReflectionConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -248,9 +274,11 @@ pub struct ReflectionConfigPatch {
     pub auto_apply_suggestions: Option<bool>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub clear_model: bool,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct LoggingConfigPatch {
     #[serde(default, alias = "default_level")]
     pub level: Option<String>,
@@ -268,7 +296,7 @@ pub struct LoggingConfigPatch {
     pub role_logs_enabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SubAgentLogConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -278,7 +306,7 @@ pub struct SubAgentLogConfigPatch {
     pub max_payload_bytes: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GuidanceConfigPatch {
     #[serde(default)]
     pub reload_policy: Option<String>,
@@ -317,6 +345,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     if let Some(skills) = patch.skills {
         base.skills = apply_skills_patch(base.skills, skills);
     }
+    if let Some(audit) = patch.audit {
+        base.audit = apply_audit_patch(base.audit, audit);
+    }
     if let Some(storage) = patch.storage {
         base.storage = apply_storage_patch(base.storage, storage);
     }
@@ -331,9 +362,6 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(guidance) = patch.guidance {
         base.guidance = apply_guidance_patch(base.guidance, guidance);
-    }
-    if let Some(rg) = patch.reasoning_graph {
-        base.reasoning_graph = rg;
     }
     base
 }
@@ -401,6 +429,22 @@ pub(crate) fn apply_models_patch(mut base: ModelsConfig, patch: ModelsConfigPatc
             base.providers.insert(k, v);
         }
     }
+    if let Some(key) = patch.fallback_api_key {
+        for provider in base.providers.values_mut() {
+            provider.api_key = key.clone();
+        }
+    }
+    if let Some(keys) = patch.provider_api_keys {
+        for (driver, key) in keys {
+            for provider in base
+                .providers
+                .values_mut()
+                .filter(|provider| provider.driver.eq_ignore_ascii_case(&driver))
+            {
+                provider.api_key = key.clone();
+            }
+        }
+    }
     if let Some(guidance) = patch.guidance {
         for (k, v) in guidance {
             base.guidance.insert(k, v);
@@ -423,6 +467,25 @@ pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) 
     }
     if let Some(v) = patch.max_concurrency {
         base.max_concurrency = v;
+    }
+    if let Some(v) = patch.tool_result {
+        base.tool_result = apply_tool_result_patch(base.tool_result, v);
+    }
+    base
+}
+
+fn apply_tool_result_patch(
+    mut base: ToolResultConfig,
+    patch: ToolResultConfigPatch,
+) -> ToolResultConfig {
+    if let Some(v) = patch.threshold_chars {
+        base.threshold_chars = v;
+    }
+    if let Some(v) = patch.preview_head_chars {
+        base.preview_head_chars = v;
+    }
+    if let Some(v) = patch.preview_tail_chars {
+        base.preview_tail_chars = v;
     }
     base
 }
@@ -528,6 +591,16 @@ pub(crate) fn apply_skills_patch(mut base: SkillsConfig, patch: SkillsConfigPatc
     base
 }
 
+pub(crate) fn apply_audit_patch(mut base: AuditConfig, patch: AuditConfigPatch) -> AuditConfig {
+    if let Some(value) = patch.usage_queue_capacity {
+        base.usage_queue_capacity = value;
+    }
+    if let Some(value) = patch.usage_shutdown_timeout_ms {
+        base.usage_shutdown_timeout_ms = value;
+    }
+    base
+}
+
 pub(crate) fn apply_storage_patch(
     mut base: StorageConfig,
     patch: StorageConfigPatch,
@@ -568,6 +641,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     if let Some(v) = patch.similarity_threshold {
         base.similarity_threshold = v;
     }
+    if let Some(v) = patch.inject_count {
+        base.inject_count = v;
+    }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);
     }
@@ -587,7 +663,9 @@ pub(crate) fn apply_reflection_patch(
     if let Some(v) = patch.auto_apply_suggestions {
         base.auto_apply_suggestions = v;
     }
-    if let Some(v) = patch.model {
+    if patch.clear_model {
+        base.model = None;
+    } else if let Some(v) = patch.model {
         base.model = Some(v);
     }
     base
@@ -736,5 +814,24 @@ mod tests {
         assert_eq!(snapshot.max_tool_concurrency(), 8);
         assert_eq!(snapshot.max_agent_concurrency(), 5);
         assert_eq!(snapshot.agents().default_model, "legacy/model");
+    }
+
+    #[test]
+    fn tool_result_partial_patch_preserves_unspecified_policy_fields() {
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{
+                "tools": {
+                    "tool_result": { "threshold_chars": 9000 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
+        let policy = snapshot.tool_result_policy();
+
+        assert_eq!(policy.threshold_chars(), 9_000);
+        assert_eq!(policy.preview_head_chars(), 2_000);
+        assert_eq!(policy.preview_tail_chars(), 500);
     }
 }

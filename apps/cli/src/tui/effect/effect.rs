@@ -16,7 +16,7 @@ pub enum Effect {
     SendChatInputEvent {
         event: sdk::ChatInputEvent,
     },
-    CancelAgentChat,
+    CancelCurrentRun,
     /// 保存当前会话。`notify=true`（/save 手动触发）时经 UiEvent 回灌
     /// `[session saved: id]` / 失败反馈；`false`（MessagesSync 后台自动保存）静默。
     SaveSession {
@@ -32,14 +32,9 @@ pub enum Effect {
     ProcessImageFile {
         path: String,
     },
-    /// 触发 LLM reflection。`foreground=true` 时由前台 /reflect 发起（会推送
-    /// ReflectionStarted 事件），`false` 时由 maybe_auto_reflect 后台发起。
-    RunReflection {
-        foreground: bool,
-    },
-    /// 将 reflection 输出应用到 SDK memory 能力。
-    ApplyReflection {
-        output: sdk::ReflectionOutputView,
+    /// 查询最近的 reflection 历史；只向 runtime 推送查询事件，不触发 LLM。
+    QueryReflectionHistory {
+        limit: usize,
     },
     RunHook {
         name: String,
@@ -59,6 +54,10 @@ pub enum Effect {
     /// 重置 per-conversation runtime 状态（清空消息/输出/任务/UI 状态）。
     /// 由 SessionReset 事件触发（runtime idle gate 处理 Reset 后回灌）。
     ResetRuntimeState,
+    /// 用系统默认程序打开 URL（Ctrl+Click markdown link）。
+    OpenUrl {
+        url: String,
+    },
 }
 
 impl Effect {

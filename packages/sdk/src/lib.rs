@@ -16,44 +16,63 @@ pub mod content;
 pub mod error;
 pub mod models;
 pub mod project;
+pub mod run;
 pub mod session;
 pub mod session_lock;
 
 /// 会话恢复失败分类（#636 D2）。顶层 re-export 方便 runtime / CLI 直接引用。
 pub use chat_event::SessionResumeFailureKind;
+pub mod tool_input;
 pub mod tool_result;
 pub mod tui;
 pub mod types;
 pub mod update;
 
 pub mod ids;
+pub mod interaction;
 
 pub use bootstrap::ChatBootstrapArgs;
 pub use change_set::ChangeSet;
 pub use chat::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, AskUserQuestionItem,
-    CancelHandle, ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage,
-    ChatRequest, ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView,
-    OptionItem, ToolCallStatusView, ToolResultImage, UserInput, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ChatEvent, ChatEventContext, ChatInput, ChatInputEvent, ChatInputImage, ChatRequest,
+    ChatResult, ChatStream, HookEventStatus, HookEventView, HookExecutionResultView, OptionItem,
+    ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
+    ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ToolCallStatusView,
+    ToolResultImage, UserInput, WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::AgentClient;
 pub use commands::builtin_commands;
 pub use commands::{ContextEstimate, ModelSwitchResult};
-pub use config_view::ConfigView;
+pub use config_view::{
+    ConfigChangeCause, ConfigChangedEvent, ConfigField, ConfigUpdate, ConfigUpdateResult,
+    ConfigView, PermissionModeView,
+};
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
-pub use ids::{ChatId, ChatTurnId, IdParseError, InputId, ToolCallId};
+pub use ids::{
+    AgentId, ChatId, ChatTurnId, IdParseError, InputId, InteractionRequestId, ModelInvocationId,
+    RunId, RunStepId, SessionId, ToolCallId,
+};
+pub use interaction::{
+    ApprovalDecision, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,
+    InteractionReplyError, InteractionRequest, InteractionRequestBody, PlanApprovalPrompt,
+    RiskLevel, StuckDiagnostic, ToolApprovalPrompt, UserAnswer, UserQuestion,
+};
 pub use models::ModelSummary;
 pub use project::ProjectContext;
+pub use run::{
+    CancelRunOutcome, CancelRunStepOutcome, ControlDeadline, RunTerminationReason,
+    TerminateRunOutcome,
+};
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, SessionSnapshot, SessionSummary,
 };
 pub use tui::{
     classify_paste, is_image_file_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
-    QueueDrainPort, QueueFuture, ReflectionConfigView, ReflectionMemorySuggestionView,
-    ReflectionOutputView, ReminderView, SkillView, TaskStatusView, TuiLaunchContext,
+    QueueDrainPort, QueueFuture, ReflectionConfigView, ReminderView, SkillView, TaskStatusView,
+    TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, CostInfo, PermissionPrompt, StatusInfo,

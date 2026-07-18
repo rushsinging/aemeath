@@ -11,9 +11,14 @@ set -euo pipefail
 #   R3 仅 project 可定义 struct WorkspaceState；agent/features 内（project 除外）任何 struct
 #      不得同时打包 working_root + path_base + (context_stack|stack)（防 WorktreeWorkingContext 复活）。
 #   R4 生产代码调 .workspace_control() 仅限 tools 的 bash.rs / worktree.rs。
-#   R5 project 内非测试 Command::new("git") 仅限 business/git_ops.rs。
+#   R5 project 内非测试 Command::new("git") 仅限 adapters/git.rs。
 #   R6 WorkspacePersist 仅可出现在 project（def/impl）与 runtime；tools 禁用（与 R2 重叠）。
 #   R7 ToolExecutionContext / ChatLoopContext 定义不得含 cwd 字段（从 workspace 读取）。
+#   R8 Policy/Runtime 不得恢复路径 containment 或 read-before-write；Tool safety 不得读取 allow_all。
+#   R9 ExecutionScope 固定为八个纯值字段；ToolExecutionContext 固定为私有 scope + ports。
+#   R10 Tools domain 禁止 WorkspaceViews、Tokio/channel/token/semaphore 与其他活资源。
+#   R11 ToolExecutionPorts/context 不得广播 control；Control 必须按 Tool constructor 注入。
+#   R12 Runtime semaphore/token/channel 不得进入 Tools published language；本守卫不得新增 allowlist。
 # 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
 # 说明（narrowing）：R3 的 triple-bundle 检测限定 agent/features（project 除外），不扫
 #   agent/shared（持久化 DTO PersistedWorkspaceContext）与 packages/sdk（WorkspaceContextView 视图），
@@ -39,12 +44,12 @@ PROJECT_DIR = "agent/features/project/"
 RUNTIME_DIR = "agent/features/runtime/"
 FEATURES_DIR = "agent/features/"
 
-TOOL_CTX_FILE = Path("agent/features/tools/src/contract/context.rs")
-GIT_OPS_FILE = Path("agent/features/project/src/business/git_ops.rs")
+TOOL_CTX_FILE = Path("agent/features/tools/src/domain/context.rs")
+GIT_OPS_FILE = Path("agent/features/project/src/adapters/git.rs")
 # 唯一允许出现生产 .workspace_control() 调用的文件。
 WORKSPACE_CONTROL_ALLOWED = {
-    Path("agent/features/tools/src/business/bash.rs"),
-    Path("agent/features/tools/src/business/worktree.rs"),
+    Path("agent/features/tools/src/adapters/bash.rs"),
+    Path("agent/features/tools/src/adapters/worktree.rs"),
 }
 
 TRIPLE_FIELDS_REQUIRED = ("working_root", "path_base")
@@ -57,6 +62,10 @@ command_git_re = re.compile(r'Command::new\(\s*"git"\s*\)')
 workspace_control_call_re = re.compile(r"\.workspace_control\s*\(")
 persisted_ctx_re = re.compile(r"\bPersistedWorkspaceContext\b")
 workspace_persist_re = re.compile(r"\bWorkspacePersist\b")
+retired_safety_re = re.compile(
+    r"\b(?:PathAccess|PathKind|path_accesses|requires_read_before_write|validate_and_normalize_path|validate_search_path)\b"
+)
+allow_all_safety_re = re.compile(r"(?:check_command_safety|check_shell_injection).*allow_all|allow_all.*(?:check_command_safety|check_shell_injection)")
 
 
 def is_test_path(path: Path) -> bool:
@@ -170,8 +179,8 @@ def check_r1(violations: list[str]) -> None:
 def check_r7(violations: list[str]) -> None:
     """R7: ToolExecutionContext / ChatLoopContext must not carry `cwd` field."""
     targets = {
-        Path("agent/features/tools/src/contract/context.rs"): "ToolExecutionContext",
-        Path("agent/features/runtime/src/business/chat/looping/loop_runner.rs"): "ChatLoopContext",
+        Path("agent/features/tools/src/domain/context.rs"): "ToolExecutionContext",
+        Path("agent/features/runtime/src/application/chat/looping/loop_runner.rs"): "ChatLoopContext",
     }
     for path, target_name in targets.items():
         full = root / path
@@ -219,7 +228,7 @@ def check_r4(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
     if workspace_control_call_re.search(code) and rel not in WORKSPACE_CONTROL_ALLOWED:
         violations.append(
             f"{rel.as_posix()}:{lineno}: [R4] production .workspace_control() calls are restricted to "
-            f"tools/src/business/bash.rs and worktree.rs."
+            f"BashTool, EnterWorktreeTool and ExitWorktreeTool (bash.rs + worktree.rs)."
         )
 
 
@@ -230,7 +239,21 @@ def check_r5(rel: Path, lineno: int, code: str, is_test: bool, violations: list[
     if command_git_re.search(code) and rel != GIT_OPS_FILE:
         violations.append(
             f"{rel_s}:{lineno}: [R5] within project, Command::new(\"git\") is allowed only in "
-            f"business/git_ops.rs (GitCli adapter); route git through GitWorktreeOps."
+            f"adapters/git.rs (GitCli adapter); route git through GitWorktreeOps."
+        )
+
+
+def check_r8(rel: Path, lineno: int, code: str, is_test: bool, violations: list[str]) -> None:
+    if is_test:
+        return
+    rel_s = rel.as_posix()
+    if (rel_s.startswith("agent/features/policy/") or rel_s.startswith("agent/features/runtime/")) and retired_safety_re.search(code):
+        violations.append(
+            f"{rel_s}:{lineno}: [R8] path containment/read-before-write belongs to Project/Tool, not Policy/Runtime."
+        )
+    if rel_s.startswith("agent/features/tools/src/adapters/bash") and allow_all_safety_re.search(code):
+        violations.append(
+            f"{rel_s}:{lineno}: [R8] Bash safety must not be conditional on allow_all."
         )
 
 
@@ -292,11 +315,51 @@ def run_sanity() -> None:
     assert 3 in tr and 5 not in tr, "sanity test-region"
 
 
+def check_r9_r12(violations: list[str]) -> None:
+    path = root / TOOL_CTX_FILE
+    text = path.read_text()
+    blocks = {name: body for name, body in iter_struct_blocks(text)}
+    expected_scope = {"run_id", "parent_run_id", "workspace_id", "workspace_root", "invocation_source", "registry_scope", "profile", "deadline"}
+    actual_scope = struct_field_names(blocks.get("ExecutionScope", []))
+    if actual_scope != expected_scope:
+        violations.append(f"{TOOL_CTX_FILE}: [R9] ExecutionScope fields are frozen; expected {sorted(expected_scope)}, got {sorted(actual_scope)}.")
+    actual_ctx = struct_field_names(blocks.get("ToolExecutionContext", []))
+    if actual_ctx != {"scope", "ports"}:
+        violations.append(f"{TOOL_CTX_FILE}: [R9] ToolExecutionContext must contain exactly private scope + ports.")
+    ctx_block = "\n".join(blocks.get("ToolExecutionContext", []))
+    if re.search(r"\bpub(?:\([^)]*\))?\s+(?:scope|ports)\s*:", ctx_block):
+        violations.append(f"{TOOL_CTX_FILE}: [R9] context fields must remain private.")
+
+    retired_resource_bag = "Tool" + "Resources"
+    forbidden = re.compile(
+        rf"\b(?:WorkspaceViews|WorkspacePorts|WorkspacePersist|{retired_resource_bag}|Semaphore|CancellationToken)\b|"
+        r"tokio(?:::|\s*=)|(?:Sender|Receiver)\s*<"
+    )
+    for source in sorted((root / "agent/features/tools/src/domain").rglob("*.rs")):
+        source_text = source.read_text()
+        test_lines = in_test_region(source_text)
+        for lineno, raw in enumerate(source_text.splitlines(), 1):
+            if lineno not in test_lines and forbidden.search(strip_comment(raw)):
+                violations.append(f"{source.relative_to(root)}:{lineno}: [R10/R12] Tools domain must not contain Project wiring/persistence or Tokio/channel/token/semaphore resources.")
+    ports_body = "\n".join(blocks.get("ToolExecutionPorts", []))
+    if re.search(r"\bcontrol\s*:", ports_body):
+        violations.append(f"{TOOL_CTX_FILE}: [R11] ToolExecutionPorts must not expose a control field.")
+    if re.search(r"fn\s+workspace_control\s*\(", text):
+        violations.append(f"{TOOL_CTX_FILE}: [R11] workspace_control accessor is retired; inject Control per Tool.")
+    for source in sorted((root / "agent/features/tools/src").rglob("*.rs")):
+        if "WorkspaceViews" in source.read_text():
+            violations.append(f"{source.relative_to(root)}: [R10] WorkspaceViews conversion belongs to Runtime adapter.")
+    runtime_text = "\n".join(p.read_text() for p in (root / RUNTIME_DIR / "src").rglob("*.rs"))
+    if re.search(r"ToolExecution(?:Context|Ports)::new\([^;]*Semaphore", runtime_text, re.S):
+        violations.append("agent/features/runtime: [R12] Runtime Semaphore must not flow into Tools execution context.")
+
+
 run_sanity()
 
 violations: list[str] = []
 check_r1(violations)
 check_r7(violations)
+check_r9_r12(violations)
 
 for path in sorted((root / "agent" / "features").rglob("*.rs")):
     if is_generated(path):
@@ -316,6 +379,7 @@ for path in sorted((root / "agent" / "features").rglob("*.rs")):
         check_r2_r6(rel, lineno, code, line_is_test, violations)
         check_r4(rel, lineno, code, line_is_test, violations)
         check_r5(rel, lineno, code, line_is_test, violations)
+        check_r8(rel, lineno, code, line_is_test, violations)
 
 if violations:
     reason = "Context architecture guard FAILED:\n" + "\n".join(violations[:100])
