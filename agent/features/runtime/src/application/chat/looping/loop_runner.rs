@@ -26,7 +26,7 @@ use workflow::api::ReasoningSignal;
 use super::loop_context::ChatLoopContext;
 
 #[path = "main_run_port.rs"]
-mod main_run_port;
+pub(crate) mod main_run_port;
 use main_run_port::MainRunPort;
 
 /// Session actor for Main chat. The session itself only idles, accepts one real user input,
@@ -40,64 +40,71 @@ where
     Q: QueueDrainPort,
     I: InputEventDrainPort,
 {
-    let ChatLoopContext {
-        sink,
-        queue,
-        input_events,
-        client,
-        registry,
-        system_blocks,
-        system_prompt_text,
-        user_context,
-        mut chain,
-        mut context_size,
-        workspace,
-        session_id,
-        read_files,
-        session_reminders,
-        agent_runner,
-        tool_result_materializer,
-        allow_all,
-        active_run,
-        task_store,
-        task_access,
-        max_tool_concurrency,
-        agent_semaphore,
-        hook_runner,
-        memory_config,
-        memory,
-        language,
-        frozen_chats,
-        active_summary: active_summary_arc,
-        reasoning,
-        build_switched_client,
-        save_chain,
-        run_reflection_on_demand,
-        apply_reflection_on_demand,
-        list_models,
-        list_reminders,
-        list_sessions,
-    } = ctx;
-    let mut client = client;
-    let hook_ui = HookUi::new(sink.clone());
-    let mut cwd = workspace.read().current_workspace_root();
-    let memory_cwd = workspace.read().initial_cwd();
-    let mut active_summary = active_summary_arc
-        .lock()
-        .map(|value| value.clone())
-        .unwrap_or_default();
-    let mut last_total_tokens = None;
-    let mut turn_count = 0;
-    let mut pending_input = PendingInputBuffer::default();
-    let mut deferred_user_inputs = VecDeque::new();
-    let mut task_reminder_state = TaskReminderState::new();
-    let tool_identity =
-        crate::application::chat::looping::tool_identity::ToolIdentityRegistry::new();
+    let session_id_for_scope = ctx.session_id.clone();
     let chat_id = ChatId::new_v7();
-    logging::set_current_chat_id(chat_id.to_string());
-    let mut config_snapshot =
-        crate::application::chat::looping::config_reload::init_snapshot_registry(&cwd);
-    macro_rules! handle_pending_command {
+    logging::within(
+        logging::LogContextPatch {
+            session_id: logging::FieldPatch::Set(session_id_for_scope),
+            chat_id: logging::FieldPatch::Set(chat_id.to_string()),
+            ..logging::LogContextPatch::default()
+        },
+        async move {
+            let ChatLoopContext {
+                sink,
+                queue,
+                input_events,
+                client,
+                registry,
+                system_blocks,
+                system_prompt_text,
+                user_context,
+                mut chain,
+                mut context_size,
+                workspace,
+                session_id,
+                read_files,
+                session_reminders,
+                agent_runner,
+                tool_result_materializer,
+                allow_all,
+                active_run,
+                task_store,
+                task_access,
+                max_tool_concurrency,
+                agent_semaphore,
+                hook_runner,
+                memory_config,
+                memory,
+                language,
+                frozen_chats,
+                active_summary: active_summary_arc,
+                reasoning,
+                build_switched_client,
+                save_chain,
+                run_reflection_on_demand,
+                apply_reflection_on_demand,
+                list_models,
+                list_reminders,
+                list_sessions,
+            } = ctx;
+            let mut client = client;
+            let hook_ui = HookUi::new(sink.clone());
+            let mut cwd = workspace.read().current_workspace_root();
+            let memory_cwd = workspace.read().initial_cwd();
+            let mut active_summary = active_summary_arc
+                .lock()
+                .map(|value| value.clone())
+                .unwrap_or_default();
+            let mut last_total_tokens = None;
+            let mut turn_count = 0;
+            let mut pending_input = PendingInputBuffer::default();
+            let mut deferred_user_inputs = VecDeque::new();
+            let mut task_reminder_state = TaskReminderState::new();
+            let tool_identity =
+                crate::application::chat::looping::tool_identity::ToolIdentityRegistry::new();
+            let mut config_snapshot =
+                crate::application::chat::looping::config_reload::init_snapshot_registry(&cwd);
+            macro_rules! handle_pending_command {
         ($cmd:expr) => {
             match $cmd {
                 PendingCommand::Compact => {
@@ -364,161 +371,174 @@ where
         };
     }
 
-    'session: loop {
-        // Busy user messages are deliberately adopted one at a time: each starts a distinct Run.
-        let idle_result = if !pending_input.is_empty() {
-            // Busy control events are serviced at idle before the next queued user Run. They are
-            // never appended to model context.
-            let next_segment = ChatId::new_v7().to_string();
-            let gate = apply_gate(
-                GateKind::BeforeLlm,
-                &mut pending_input,
-                &sink,
-                &mut chain,
-                &next_segment,
-                &task_store,
-                task_access.as_ref(),
-                true,
-            )
-            .await;
-            if let Some(command) = gate.pending_command {
-                IdleResult::CommandRequested(command)
-            } else if gate.appended_user_messages > 0 {
-                IdleResult::Resumed(next_segment)
-            } else {
-                continue;
+            'session: loop {
+                // Busy user messages are deliberately adopted one at a time: each starts a distinct Run.
+                let idle_result = if !pending_input.is_empty() {
+                    // Busy control events are serviced at idle before the next queued user Run. They are
+                    // never appended to model context.
+                    let next_segment = ChatId::new_v7().to_string();
+                    let gate = apply_gate(
+                        GateKind::BeforeLlm,
+                        &mut pending_input,
+                        &sink,
+                        &mut chain,
+                        &next_segment,
+                        &task_store,
+                        task_access.as_ref(),
+                        true,
+                    )
+                    .await;
+                    if let Some(command) = gate.pending_command {
+                        IdleResult::CommandRequested(command)
+                    } else if gate.appended_user_messages > 0 {
+                        IdleResult::Resumed(next_segment)
+                    } else {
+                        continue;
+                    }
+                } else if let Some(event) = deferred_user_inputs.pop_front() {
+                    pending_input.push(event);
+                    let next_segment = ChatId::new_v7().to_string();
+                    let gate = apply_gate(
+                        GateKind::BeforeLlm,
+                        &mut pending_input,
+                        &sink,
+                        &mut chain,
+                        &next_segment,
+                        &task_store,
+                        task_access.as_ref(),
+                        true,
+                    )
+                    .await;
+                    if let Some(command) = gate.pending_command {
+                        IdleResult::CommandRequested(command)
+                    } else if gate.appended_user_messages > 0 {
+                        IdleResult::Resumed(next_segment)
+                    } else {
+                        continue;
+                    }
+                } else {
+                    idle_until_resume_or_shutdown(
+                        &input_events,
+                        &sink,
+                        &mut pending_input,
+                        &mut chain,
+                        &task_store,
+                        task_access.as_ref(),
+                    )
+                    .await
+                };
+
+                let segment_id = match idle_result {
+                    IdleResult::Shutdown => break 'session,
+                    IdleResult::CommandRequested(command) => handle_pending_command!(command),
+                    IdleResult::Resumed(next_segment) => next_segment,
+                };
+
+                turn_count += 1;
+                let turn_id = ChatTurnId::new_v7();
+                let turn_context = RuntimeTurnContext::new(chat_id.clone(), turn_id.clone());
+                sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
+                    .await;
+                let rollback_chain = chain.clone();
+                let rollback_frozen_chats = frozen_chats
+                    .lock()
+                    .map(|frozen| frozen.clone())
+                    .unwrap_or_default();
+                let rollback_active_summary = active_summary.clone();
+                let started_at = Instant::now();
+                cwd = workspace.read().current_workspace_root();
+
+                let text = chain
+                    .last_message()
+                    .map(|message| message.text_content())
+                    .unwrap_or_default();
+                let observation =
+                    reasoning.observe(ReasoningSignal::UserMessage { text, turn_count });
+                if observation.changed() {
+                    sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
+                        node: observation.current,
+                        effort: observation.requested,
+                        prev: observation.previous,
+                    })
+                    .await;
+                }
+
+                handle_turn_boundary_config(
+                    &mut config_snapshot,
+                    turn_count,
+                    &sink,
+                    &mut chain,
+                    &language,
+                    &segment_id,
+                )
+                .await;
+
+                let cancel = CancellationToken::new();
+                let mut run = Run::new(RunSpec::main(), None);
+                let run_id = run.id().clone();
+                active_run.activate(run_id.clone(), cancel.clone());
+                let mut port = MainRunPort {
+                    sink: &sink,
+                    queue: &queue,
+                    input_events: &input_events,
+                    client: &client,
+                    registry: &registry,
+                    system_blocks: &system_blocks,
+                    system_prompt_text: &system_prompt_text,
+                    user_context: &user_context,
+                    chain: &mut chain,
+                    context_size,
+                    workspace: &workspace,
+                    session_id: &session_id,
+                    read_files: &read_files,
+                    session_reminders: &session_reminders,
+                    agent_runner: &agent_runner,
+                    tool_result_materializer: tool_result_materializer.as_ref(),
+                    allow_all,
+                    task_access: &task_access,
+                    max_tool_concurrency,
+                    agent_semaphore: &agent_semaphore,
+                    hook_runner: &hook_runner,
+                    memory_config: &memory_config,
+                    memory: &memory,
+                    language: &language,
+                    frozen_chats: &frozen_chats,
+                    active_summary: &mut active_summary,
+                    active_summary_arc: &active_summary_arc,
+                    reasoning: reasoning.as_ref(),
+                    save_chain: &save_chain,
+                    pending_input: &mut pending_input,
+                    deferred_user_inputs: &mut deferred_user_inputs,
+                    cancel: cancel.clone(),
+                    run_id: run_id.clone(),
+                    active_run: active_run.as_ref(),
+                    turn_count,
+                    segment_id: &segment_id,
+                    turn_context,
+                    rollback_chain,
+                    rollback_frozen_chats,
+                    rollback_active_summary,
+                    memory_cwd: memory_cwd.clone(),
+                    last_total_tokens: &mut last_total_tokens,
+                    task_reminder_state: &mut task_reminder_state,
+                    tool_identity: &tool_identity,
+                    started_at,
+                };
+                let run_result = logging::within(
+                    logging::LogContextPatch {
+                        turn: logging::FieldPatch::Set(turn_count),
+                        ..logging::LogContextPatch::default()
+                    },
+                    run_loop(&mut run, &cancel, &mut port),
+                )
+                .await;
+                if let Err(error) = run_result {
+                    log::error!(target: LOG_TARGET, "main shared run loop failed: {error}");
+                }
+                active_run.clear(&run_id);
             }
-        } else if let Some(event) = deferred_user_inputs.pop_front() {
-            pending_input.push(event);
-            let next_segment = ChatId::new_v7().to_string();
-            let gate = apply_gate(
-                GateKind::BeforeLlm,
-                &mut pending_input,
-                &sink,
-                &mut chain,
-                &next_segment,
-                &task_store,
-                task_access.as_ref(),
-                true,
-            )
-            .await;
-            if let Some(command) = gate.pending_command {
-                IdleResult::CommandRequested(command)
-            } else if gate.appended_user_messages > 0 {
-                IdleResult::Resumed(next_segment)
-            } else {
-                continue;
-            }
-        } else {
-            idle_until_resume_or_shutdown(
-                &input_events,
-                &sink,
-                &mut pending_input,
-                &mut chain,
-                &task_store,
-                task_access.as_ref(),
-            )
-            .await
-        };
-
-        let segment_id = match idle_result {
-            IdleResult::Shutdown => break 'session,
-            IdleResult::CommandRequested(command) => handle_pending_command!(command),
-            IdleResult::Resumed(next_segment) => next_segment,
-        };
-
-        turn_count += 1;
-        let turn_context = RuntimeTurnContext::new(chat_id.clone(), ChatTurnId::new_v7());
-        sink.send_event(RuntimeStreamEvent::TurnChanged(turn_count))
-            .await;
-        let rollback_chain = chain.clone();
-        let rollback_frozen_chats = frozen_chats
-            .lock()
-            .map(|frozen| frozen.clone())
-            .unwrap_or_default();
-        let rollback_active_summary = active_summary.clone();
-        let started_at = Instant::now();
-        cwd = workspace.read().current_workspace_root();
-
-        let text = chain
-            .last_message()
-            .map(|message| message.text_content())
-            .unwrap_or_default();
-        let observation = reasoning.observe(ReasoningSignal::UserMessage { text, turn_count });
-        if observation.changed() {
-            sink.send_event(RuntimeStreamEvent::GraphPhaseChanged {
-                node: observation.current,
-                effort: observation.requested,
-                prev: observation.previous,
-            })
-            .await;
-        }
-
-        handle_turn_boundary_config(
-            &mut config_snapshot,
-            turn_count,
-            &sink,
-            &mut chain,
-            &language,
-            &segment_id,
-        )
-        .await;
-
-        let cancel = CancellationToken::new();
-        let mut run = Run::new(RunSpec::main(), None);
-        let run_id = run.id().clone();
-        active_run.activate(run_id.clone(), cancel.clone());
-        let mut port = MainRunPort {
-            sink: &sink,
-            queue: &queue,
-            input_events: &input_events,
-            client: &client,
-            registry: &registry,
-            system_blocks: &system_blocks,
-            system_prompt_text: &system_prompt_text,
-            user_context: &user_context,
-            chain: &mut chain,
-            context_size,
-            workspace: &workspace,
-            session_id: &session_id,
-            read_files: &read_files,
-            session_reminders: &session_reminders,
-            agent_runner: &agent_runner,
-            tool_result_materializer: tool_result_materializer.as_ref(),
-            allow_all,
-            task_access: &task_access,
-            max_tool_concurrency,
-            agent_semaphore: &agent_semaphore,
-            hook_runner: &hook_runner,
-            memory_config: &memory_config,
-            memory: &memory,
-            language: &language,
-            frozen_chats: &frozen_chats,
-            active_summary: &mut active_summary,
-            active_summary_arc: &active_summary_arc,
-            reasoning: reasoning.as_ref(),
-            save_chain: &save_chain,
-            pending_input: &mut pending_input,
-            deferred_user_inputs: &mut deferred_user_inputs,
-            cancel: cancel.clone(),
-            run_id: run_id.clone(),
-            active_run: active_run.as_ref(),
-            turn_count,
-            segment_id: &segment_id,
-            turn_context,
-            rollback_chain,
-            rollback_frozen_chats,
-            rollback_active_summary,
-            memory_cwd: memory_cwd.clone(),
-            last_total_tokens: &mut last_total_tokens,
-            task_reminder_state: &mut task_reminder_state,
-            tool_identity: &tool_identity,
-            started_at,
-        };
-        if let Err(error) = run_loop(&mut run, &cancel, &mut port).await {
-            log::error!(target: LOG_TARGET, "main shared run loop failed: {error}");
-        }
-        active_run.clear(&run_id);
-    }
-    chain
+            chain
+        },
+    )
+    .await
 }

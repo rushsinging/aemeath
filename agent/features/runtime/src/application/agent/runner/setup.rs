@@ -89,6 +89,38 @@ impl AgentRunner for CliAgentRunner {
                 };
             }
         };
+        let session_id = identity
+            .parent_run_id()
+            .map(ToString::to_string)
+            .or_else(|| {
+                self.workspace
+                    .views()
+                    .read()
+                    .current_workspace_root()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_else(|| "subagent".to_string());
+        let role_name = model_spec.map(str::to_string).unwrap_or_else(|| {
+            resolved_spec
+                .clone()
+                .unwrap_or_else(|| client.model_name().to_string())
+        });
+        let model_name = resolved_spec
+            .clone()
+            .unwrap_or_else(|| client.model_name().to_string());
+        let sub_run_id = sdk::RunId::new_v7();
+        let sub_run_context = super::loop_run::sub_run_log_context(
+            &logging::capture(),
+            &session_id,
+            sub_run_id.as_ref(),
+            &model_name,
+            client.provider_name(),
+            &role_name,
+        );
+
+        logging::instrument(sub_run_context, async move {
         log::info!(target: LOG_TARGET,
             "[SubAgent] reasoning={} level={} max_tokens={:?} (role={:?}, model={:?}, effort={:?}, default={})",
             reasoning,
@@ -131,33 +163,9 @@ impl AgentRunner for CliAgentRunner {
         }
 
         // Helper to emit progress — writes to aemeath.log via log::info! for diagnostics.
-        let session_id = identity
-            .parent_run_id()
-            .map(ToString::to_string)
-            .or_else(|| {
-                self.workspace
-                    .views()
-                    .read()
-                    .current_workspace_root()
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(ToString::to_string)
-            })
-            .unwrap_or_else(|| "subagent".to_string());
         let session_id_for_log = session_id.clone();
-        let role_name = model_spec.map(|s| s.to_string()).unwrap_or_else(|| {
-            // 未配 role 时 fallback 到实际 client 的 model 名，而非硬编码 "default"
-            resolved_spec
-                .clone()
-                .unwrap_or_else(|| client.model_name().to_string())
-        });
-        let model_name = resolved_spec
-            .clone()
-            .unwrap_or_else(|| client.model_name().to_string());
         let role_name_for_log = role_name.clone();
         let model_name_for_log = model_name.clone();
-        // 将 sub-agent 的 model 同步到日志 context（影响 hook/audit 等共享 sink 的 model 字段）
-        logging::set_current_model(model_name.clone());
         let progress = move |turn: Option<usize>, msg: &str| {
             let turn_str = turn
                 .map(|t| t.to_string())
@@ -303,6 +311,8 @@ impl AgentRunner for CliAgentRunner {
             tool_result_materializer: self.tool_result_materializer.clone(),
         }
         .run_loop()
+        .await
+        })
         .await
     }
 

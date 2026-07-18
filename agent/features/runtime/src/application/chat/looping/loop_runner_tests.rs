@@ -121,10 +121,76 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
     // Architecture guard: behavioral tests below exercise this entry point, while this assertion
     // prevents a future reintroduction of the retired Main-only orchestration state machine.
     let source = include_str!("loop_runner.rs");
-    assert!(source.contains("run_loop(&mut run, &cancel, &mut port).await"));
+    assert!(source.contains("run_loop(&mut run, &cancel, &mut port)"));
     assert!(!source.contains("ChatLoopFsm"));
     assert!(!source.contains("StallDetector"));
     assert!(!source.contains("ChatLoopTransition"));
+}
+
+#[test]
+fn main_logging_path_uses_scopes_and_no_legacy_setters() {
+    let chat_source = include_str!("../../client/trait_chat.rs");
+    let runner_source = include_str!("loop_runner.rs");
+    let port_source = include_str!("main_run_port.rs");
+
+    assert!(chat_source.contains("logging::spawn_instrumented(session_context"));
+    assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
+    assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
+    assert!(runner_source.contains("turn: logging::FieldPatch::Set(turn_count)"));
+    assert!(port_source.contains("logging::spawn_instrumented("));
+    for source in [chat_source, runner_source, port_source] {
+        assert!(!source.contains("logging::set_current_"));
+        assert!(!source.contains("logging::set_session_id"));
+    }
+}
+
+#[test]
+fn progress_forwarders_capture_logging_context_before_instrumented_spawn() {
+    let agent_calls = include_str!("agent_calls.rs");
+    let non_agent = include_str!("non_agent.rs");
+
+    for source in [agent_calls, non_agent] {
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+        assert!(production.contains("let progress_log_context = logging::capture();"));
+        assert!(production.contains("logging::spawn_instrumented(progress_log_context, async move"));
+        assert!(!production.contains("tokio::spawn("));
+    }
+}
+
+#[test]
+fn each_request_attempt_has_complete_fresh_context() {
+    let parent = logging::LogContext {
+        session_id: Some("session".into()),
+        chat_id: Some("chat".into()),
+        turn: Some(3),
+        ..logging::LogContext::default()
+    };
+    let first = loop_runner::main_run_port::request_log_context(
+        &parent,
+        "model-a",
+        "provider-a",
+        "default",
+    );
+    let retry = loop_runner::main_run_port::request_log_context(
+        &parent,
+        "model-a",
+        "provider-a",
+        "default",
+    );
+
+    assert_eq!(first.session_id.as_deref(), Some("session"));
+    assert_eq!(first.chat_id.as_deref(), Some("chat"));
+    assert_eq!(first.turn, Some(3));
+    assert_eq!(first.model.as_deref(), Some("model-a"));
+    assert_eq!(first.provider.as_deref(), Some("provider-a"));
+    assert_eq!(first.role.as_deref(), Some("default"));
+    assert_ne!(
+        first.request_id, retry.request_id,
+        "retry must get a new request_id"
+    );
 }
 
 #[derive(Clone)]
