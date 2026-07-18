@@ -1,5 +1,4 @@
 use crate::domain::types::lsp::{LspInput, LspResult};
-use crate::domain::{PathAccess, PathKind};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
@@ -7,11 +6,6 @@ use share::string_idx::slice_head;
 use tokio::process::Command;
 
 pub struct LspTool;
-
-const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "file_path",
-    kind: PathKind::File,
-}];
 
 #[async_trait]
 impl TypedTool for LspTool {
@@ -44,9 +38,6 @@ impl TypedTool for LspTool {
         // Conservative default: diagnostics may run cargo/tsc/go and write build caches.
         false
     }
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &FILE_ACCESS
-    }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> TypedToolResult<LspResult> {
         let args: LspInput = match serde_json::from_value(input) {
@@ -54,16 +45,20 @@ impl TypedTool for LspTool {
             Err(e) => return TypedToolResult::error(serde_json::json!({"status": "error", "message": format!("invalid input: {e}"), "data": null}).to_string()),
         };
         let operation = args.operation.as_str();
-        let file_path = args.file_path.as_str();
+        let requested_path = args.file_path.as_str();
 
         let language = args
             .language
             .clone()
-            .unwrap_or_else(|| detect_language(file_path));
+            .unwrap_or_else(|| detect_language(requested_path));
 
-        // Path has already been validated and normalised by PolicyEngine
-        let path_base = ctx.workspace_read().current_path_base();
-        let file_path = file_path.to_string();
+        let workspace = ctx.workspace_read();
+        let path = match workspace.resolve_file_path(std::path::Path::new(requested_path)) {
+            Ok(path) => path,
+            Err(error) => return TypedToolResult::error(error.to_string()),
+        };
+        let path_base = workspace.current_path_base();
+        let file_path = path.to_string_lossy().into_owned();
 
         match operation {
             "diagnostics" => get_diagnostics(&file_path, &language, &path_base).await,

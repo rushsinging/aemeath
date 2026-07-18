@@ -1,15 +1,9 @@
 use crate::domain::types::edit::{EditInput, EditResult};
-use crate::domain::{PathAccess, PathKind};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
 pub struct FileEditTool;
-
-const FILE_ACCESS: [PathAccess; 1] = [PathAccess {
-    field: "file_path",
-    kind: PathKind::File,
-}];
 
 #[async_trait]
 impl TypedTool for FileEditTool {
@@ -34,17 +28,11 @@ impl TypedTool for FileEditTool {
     fn is_concurrency_safe(&self) -> bool {
         false
     }
-    fn path_accesses(&self) -> &'static [PathAccess] {
-        &FILE_ACCESS
-    }
-    fn requires_read_before_write(&self) -> bool {
-        true
-    }
 
     async fn call(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> TypedToolResult<EditResult> {
         let args: EditInput = match serde_json::from_value(input) {
             Ok(a) => a,
@@ -59,10 +47,29 @@ impl TypedTool for FileEditTool {
                 )
             }
         };
-        let file_path = args.file_path.as_str();
-
-        // Path has already been validated and normalised by PolicyEngine
-        let path = std::path::PathBuf::from(file_path);
+        let requested_path = args.file_path.as_str();
+        let path = match ctx
+            .workspace_read()
+            .resolve_file_path(std::path::Path::new(requested_path))
+        {
+            Ok(path) => path,
+            Err(error) => return TypedToolResult::error(error.to_string()),
+        };
+        let file_path = path.to_string_lossy().into_owned();
+        let has_read_evidence = ctx
+            .read_files
+            .lock()
+            .map(|read_files| {
+                read_files.contains(requested_path)
+                    || read_files.contains(path.to_string_lossy().as_ref())
+            })
+            .unwrap_or(false);
+        if path.exists() && !has_read_evidence {
+            return TypedToolResult::error(format!(
+                "You must read {} before editing it. Use the Read tool first.",
+                path.display()
+            ));
+        }
         let old_string = args.old_string.as_str();
         let new_string = args.new_string.as_str();
         let replace_all = args.replace_all.unwrap_or(false);

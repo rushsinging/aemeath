@@ -64,6 +64,8 @@ pub enum WorkspaceError {
         path: PathBuf,
         root: PathBuf,
     },
+    PathTooDeep(PathBuf),
+    CannotResolveSearchPath(PathBuf),
     MissingPathAndBranch,
     InvalidBranch,
     NestedWorktree {
@@ -91,6 +93,12 @@ impl std::fmt::Display for WorkspaceError {
                 path.display(),
                 root.display()
             ),
+            WorkspaceError::PathTooDeep(path) => {
+                write!(f, "路径层级超过安全限制 {}", path.display())
+            }
+            WorkspaceError::CannotResolveSearchPath(path) => {
+                write!(f, "无法解析搜索路径 {}", path.display())
+            }
             WorkspaceError::MissingPathAndBranch => {
                 write!(f, "进入或创建 worktree 时必须提供 path 或 branch")
             }
@@ -160,6 +168,10 @@ pub trait WorkspaceRead: Send + Sync {
     fn current_workspace_root(&self) -> PathBuf;
     fn current_path_base(&self) -> PathBuf;
     fn resolve(&self, rel: &Path) -> PathBuf;
+    /// 解析文件路径并强制其位于当前 workspace root 内；目标可尚不存在。
+    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
+    /// 解析已存在的搜索目录并强制其位于当前 workspace root 内。
+    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     /// 当前工作根是否位于 linked git worktree（`.git/worktrees/*`）。
     /// 用于 worktree 嵌套校验，防止在 worktree 内再创建 worktree。
     fn in_worktree(&self) -> bool;

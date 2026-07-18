@@ -6,8 +6,8 @@ use crate::adapters::runtime::LlmClientAdapter;
 use crate::application::prompt::build::{build_system_prompt_parts, PromptContext};
 use crate::application::startup::{
     self as bootstrap, apply_config_permission_mode, build_agent_runner, build_hook_runner,
-    init_logging, resolve_api_key, resolve_base_url, resolve_concurrency_limits,
-    resolve_model_runtime_settings, spawn_mcp_connect,
+    resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
+    spawn_mcp_connect,
 };
 use crate::application::startup::{set_session_id, start_session, ChatBootstrapArgs};
 use crate::ports::legacy::ChatRuntimeContext;
@@ -114,8 +114,7 @@ pub async fn from_args_with_workspace(
     // 3. 使用 Composition 已加载的唯一 committed 配置。
     let snapshot = config_reader.committed_snapshot();
 
-    // 4. 日志初始化
-    init_logging(snapshot.logging());
+    // 4. 日志已由 Composition 在进入 Runtime 前初始化。
 
     // 5. 权限模式
     apply_config_permission_mode(&mut args, snapshot.allow_all());

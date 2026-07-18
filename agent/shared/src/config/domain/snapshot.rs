@@ -14,7 +14,7 @@ use crate::config::models::{
 };
 use crate::config::permissions::PermissionModeConfig;
 use crate::config::{
-    AgentsConfig, Config, HooksConfig, LoggingConfig, MemoryConfig, SkillsConfig, ToolResultConfig,
+    AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -166,6 +166,18 @@ impl ConfigSnapshot {
         self.0.logging.logs_dir.as_deref()
     }
 
+    pub fn logging_max_bytes(&self) -> u64 {
+        self.0.logging.max_bytes
+    }
+
+    pub fn logging_max_backups(&self) -> usize {
+        self.0.logging.max_backups
+    }
+
+    pub fn logging_retention_days(&self) -> u64 {
+        self.0.logging.retention_days
+    }
+
     // ── UI ───────────────────────────────────────────────────
 
     pub fn verbose(&self) -> bool {
@@ -275,11 +287,6 @@ impl ConfigSnapshot {
         &self.0.skills
     }
 
-    /// 返回完整 `LoggingConfig`，供 `init_logging` 消费。
-    pub fn logging(&self) -> &LoggingConfig {
-        &self.0.logging
-    }
-
     /// 按 selection 字符串解析模型，委派给 `ModelsConfig::resolve_model_selection`。
     pub fn resolve_model_selection(
         &self,
@@ -315,6 +322,23 @@ mod tests {
     use super::*;
     use crate::config::models::ProviderModelsConfig;
     use crate::config::Config;
+
+    #[test]
+    fn logging_accessors_publish_complete_static_settings() {
+        let mut config = Config::default();
+        config.logging.level = "debug".to_string();
+        config.logging.logs_dir = Some("custom/logs".to_string());
+        config.logging.max_bytes = 42;
+        config.logging.max_backups = 3;
+        config.logging.retention_days = 14;
+        let snapshot = ConfigSnapshot::new(config);
+
+        assert_eq!(snapshot.logging_level(), "debug");
+        assert_eq!(snapshot.logs_dir(), Some("custom/logs"));
+        assert_eq!(snapshot.logging_max_bytes(), 42);
+        assert_eq!(snapshot.logging_max_backups(), 3);
+        assert_eq!(snapshot.logging_retention_days(), 14);
+    }
 
     #[test]
     fn test_resolve_context_size_cli_wins() {
@@ -370,7 +394,7 @@ mod tests {
         );
         assert_eq!(snap.memory().enabled, Config::default().memory.enabled);
         assert_eq!(snap.skills().dirs, Config::default().skills.dirs);
-        assert_eq!(snap.logging().level, Config::default().logging.level);
+        assert_eq!(snap.logging_level(), Config::default().logging.level);
     }
 
     #[test]

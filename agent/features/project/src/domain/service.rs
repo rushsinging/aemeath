@@ -11,6 +11,95 @@ use crate::domain::types::{
 };
 use crate::PreparedWorkspaceRestore;
 
+const MAX_PATH_DEPTH: usize = 64;
+
+fn resolve_path_within_workspace(
+    path: &Path,
+    path_base: &Path,
+    workspace_root: &Path,
+    must_exist: bool,
+) -> Result<PathBuf, WorkspaceError> {
+    if path.components().count() > MAX_PATH_DEPTH {
+        return Err(WorkspaceError::PathTooDeep(path.to_path_buf()));
+    }
+
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        path_base.join(path)
+    };
+    let lexical = lexical_normalize(&joined);
+    let workspace = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| lexical_normalize(workspace_root));
+
+    let resolved = if must_exist {
+        lexical
+            .canonicalize()
+            .map_err(|_| WorkspaceError::CannotResolveSearchPath(path.to_path_buf()))?
+    } else {
+        canonicalize_existing_ancestor(&lexical)
+    };
+
+    if !resolved.starts_with(&workspace) {
+        return Err(WorkspaceError::PathOutsideWorkspaceRoot {
+            path: resolved,
+            root: workspace,
+        });
+    }
+    Ok(resolved)
+}
+
+fn canonicalize_existing_ancestor(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    let mut tail = Vec::new();
+    let mut current = Some(path);
+    while let Some(candidate) = current {
+        match candidate.canonicalize() {
+            Ok(mut canonical) => {
+                for component in tail.iter().rev() {
+                    canonical.push(component);
+                }
+                return canonical;
+            }
+            Err(_) => {
+                if let Some(name) = candidate.file_name() {
+                    tail.push(name.to_os_string());
+                }
+                current = candidate.parent();
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut stack = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(stack.last(), Some(Component::Normal(_))) {
+                    stack.pop();
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                stack.clear();
+                stack.push(component);
+            }
+            Component::Normal(_) => stack.push(component),
+        }
+    }
+    stack
+        .iter()
+        .map(|component| component.as_os_str())
+        .collect()
+}
+
 /// project 拥有的唯一可变 workspace 状态源（单锁）。
 pub(crate) struct WorkspaceService {
     state: Mutex<WorkspaceState>,
@@ -100,6 +189,14 @@ impl WorkspaceRead for WorkspaceService {
     }
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.lock().resolve(rel)
+    }
+    fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+        let state = self.lock();
+        resolve_path_within_workspace(path, &state.path_base, &state.workspace_root, false)
+    }
+    fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
+        let state = self.lock();
+        resolve_path_within_workspace(path, &state.path_base, &state.workspace_root, true)
     }
     fn in_worktree(&self) -> bool {
         self.lock().worktree_kind == WorktreeKind::Linked
@@ -237,6 +334,62 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn resolve_file_path_rejects_path_outside_workspace() {
+        let root = unique_temp_dir("resolve_outside_root");
+        let service = WorkspaceService::with_git(root.clone(), Arc::new(FakeGit::default()));
+
+        let result = service.resolve_file_path(Path::new("../outside.rs"));
+
+        assert!(matches!(
+            result,
+            Err(WorkspaceError::PathOutsideWorkspaceRoot { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_file_path_allows_missing_parents_inside_workspace() {
+        let root = unique_temp_dir("resolve_missing_parent_root");
+        let service = WorkspaceService::with_git(root.clone(), Arc::new(FakeGit::default()));
+
+        let path = service
+            .resolve_file_path(Path::new("deep/missing/new.rs"))
+            .unwrap();
+
+        assert_eq!(path, root.join("deep/missing/new.rs"));
+    }
+
+    #[test]
+    fn resolve_search_path_rejects_path_outside_workspace() {
+        let root = unique_temp_dir("search_outside_root");
+        let outside = unique_temp_dir("search_outside_target");
+        let service = WorkspaceService::with_git(root, Arc::new(FakeGit::default()));
+
+        let result = service.resolve_search_path(&outside);
+
+        assert!(matches!(
+            result,
+            Err(WorkspaceError::PathOutsideWorkspaceRoot { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_file_path_rejects_symlink_escape() {
+        let root = unique_temp_dir("resolve_symlink_root");
+        let outside = unique_temp_dir("resolve_symlink_target");
+        let link = root.join("escape");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let service = WorkspaceService::with_git(root, Arc::new(FakeGit::default()));
+
+        let result = service.resolve_file_path(Path::new("escape/file.rs"));
+
+        assert!(matches!(
+            result,
+            Err(WorkspaceError::PathOutsideWorkspaceRoot { .. })
+        ));
     }
 
     #[test]

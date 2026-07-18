@@ -9,7 +9,7 @@ pub mod provider_client;
 pub mod runtime_support;
 
 pub use concurrency::resolve_concurrency_limits;
-pub use logging_setup::{init_logging, set_current_turn, set_session_id};
+pub use logging_setup::{set_current_turn, set_session_id};
 pub use mcp_loader::spawn_mcp_connect;
 pub use model_runtime::{resolve_model_runtime_settings, ModelRuntimeSettings};
 pub use permissions::apply_config_permission_mode;
