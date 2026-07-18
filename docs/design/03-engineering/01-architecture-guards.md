@@ -65,6 +65,7 @@
 | 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
 | 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
 | 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
+| 26 | `check-no-inline-tests.sh` | 测试治理 | 源码文件禁止内嵌 `#[cfg(test)] mod tests { ... }`；测试 MUST 分离到 `*_tests.rs`，让 `cargo build` 天然暴露 dead code |
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
 
@@ -600,6 +601,14 @@
 - **时机**：sub-issue 创建/调整后、叶子 PR 创建前、叶子 PR 合入后、#677 关闭前。
 - **检查**：gate marker、开发前差异、无待对齐、实施结果与 PR/commit 证据、延期承接 Issue，以及原生 parent/sub-issue/blocked-by 状态。
 - **方式**：使用 `gh issue view` 与 GitHub 原生关系人工核验；该规则只服务 #677 有限生命周期，不沉淀为长期 xtask 或通用 pre-commit。
+
+## 26. check-no-inline-tests.sh
+
+- **位置**：`.agents/hooks/check-no-inline-tests.sh`，注册于 `check-architecture-guards.sh` 末尾。
+- **检查**：`agent/` / `apps/` / `packages/` 下所有 `.rs` 源码文件，查找 `#[cfg(test)] mod xxx { ... }`（内嵌测试块）。
+- **允许**：`#[cfg(test)] #[path = "xxx_tests.rs"] mod tests;`（分离文件引入）。
+- **违规**：`#[cfg(test)] mod tests { ... }`（内嵌测试块）。
+- **目的**：测试与源码分离后，`cargo build`（不带 `--cfg test`）天然暴露 dead code——任何只被测试引用的 pub 项会变 unused warning。移除 `*_tests.rs` 后 `cargo build` 即可发现仅在测试中使用的代码。详见 `specs/rust-coding.md` 测试规范。
 
 ## 附：钩子体系（非架构守卫）
 
