@@ -4,7 +4,7 @@
 //! port or public restore capability is introduced here. #890 may publish and
 //! wire the persistence boundary separately.
 
-use super::{TaskAccess, TaskStore};
+use super::{TaskAccess, TaskPersist, TaskStore};
 use crate::business::{
     BatchCreateSpec, BatchId, TaskCreateSpec, TaskId, TaskPriority, TaskRevision, TaskSnapshot,
     TaskSnapshotValidationError, TaskStatus,
@@ -72,6 +72,69 @@ fn v2_bytes(
         batches = batches.join(","),
     )
     .into_bytes()
+}
+
+#[test]
+fn task_persist_contract_collect_prepare_commit_and_same_backing_views() {
+    let store = TaskStore::new();
+    let access: &dyn TaskAccess = &store;
+    let persist: &dyn TaskPersist = &store;
+    let batch = access.create_batch(batch_spec("批次"), 1).unwrap().value;
+    let created = access.create_task(task_spec("任务"), 2).unwrap().value;
+
+    let snapshot = persist.collect_snapshot();
+    assert_eq!(snapshot.current_batch(), Some(batch.id()));
+    assert_eq!(snapshot.tasks()[0].id(), created.id());
+
+    let target = TaskStore::new();
+    let target_access: &dyn TaskAccess = &target;
+    target_access.create_batch(batch_spec("旧批次"), 3).unwrap();
+    target_access.create_task(task_spec("旧任务"), 4).unwrap();
+    let prepared = (&target as &dyn TaskPersist)
+        .prepare_restore(&snapshot)
+        .expect("合法 collect snapshot 应可 prepare");
+    let unit: () = (&target as &dyn TaskPersist).commit_restore(prepared);
+    assert_eq!(unit, ());
+
+    assert_eq!(target_access.list(), access.list());
+    assert_eq!(target_access.list_batches(), access.list_batches());
+    assert_eq!((&target as &dyn TaskPersist).collect_snapshot(), snapshot);
+}
+
+#[test]
+fn task_persist_prepare_failure_and_captured_empty_are_atomic() {
+    let store = TaskStore::new();
+    let access: &dyn TaskAccess = &store;
+    access.create_batch(batch_spec("旧批次"), 1).unwrap();
+    access.create_task(task_spec("旧任务"), 2).unwrap();
+    let before = (&store as &dyn TaskPersist).collect_snapshot();
+
+    let invalid = TaskSnapshot::decode(&v2_bytes(
+        "1",
+        &[
+            task_json("1", "1", "pending", 1, 1, None, None, &[], &[]),
+            task_json("1", "1", "pending", 1, 1, None, None, &[], &[]),
+        ],
+        "2",
+        "2",
+        Some("1"),
+        &[batch_json("1", "active", 1)],
+    ))
+    .unwrap();
+    assert!(matches!(
+        (&store as &dyn TaskPersist).prepare_restore(&invalid),
+        Err(TaskSnapshotValidationError::DuplicateTaskId { .. })
+    ));
+    assert_eq!((&store as &dyn TaskPersist).collect_snapshot(), before);
+
+    let empty = TaskSnapshot::empty();
+    let prepared = (&store as &dyn TaskPersist)
+        .prepare_restore(&empty)
+        .expect("captured empty 应合法");
+    (&store as &dyn TaskPersist).commit_restore(prepared);
+    assert!(access.list().is_empty());
+    assert!(access.list_batches().is_empty());
+    assert_eq!((&store as &dyn TaskPersist).collect_snapshot(), empty);
 }
 
 // ---- 1) mutated live state capture 保留 revision/counters/current/tasks/batches；encode V2/decode/validate ----

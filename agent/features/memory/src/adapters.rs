@@ -1,6 +1,325 @@
 use crate::*;
 use async_trait::async_trait;
-use std::sync::RwLock;
+use std::{
+    str::FromStr,
+    sync::{Arc, RwLock},
+};
+use storage::api as storage_api;
+
+const ACTIVE_MEMBER: &str = "active";
+const ARCHIVE_MEMBER: &str = "archive";
+/// Members are canonicalized into name order by Storage; "active" sorts before
+/// "archive".
+const MEMORY_MEMBER_NAMES: [&str; 2] = [ACTIVE_MEMBER, ARCHIVE_MEMBER];
+/// Fixed, project-independent segment for the shared global layer generation.
+const GLOBAL_DATASET_SEGMENT: &str = "global";
+
+/// Memory-owned translation from the per-layer persistence contract to Storage
+/// atomic datasets. Each `MemoryLayer` maps to its own dataset key with exactly
+/// two members (`active`, `archive`) and therefore its own CAS revision.
+///
+/// The global layer uses a fixed, project-independent key, so every project
+/// shares one global generation. The project layer uses the `ProjectMemoryKey`
+/// dataset key, so distinct projects are fully isolated from one another.
+///
+/// Legacy-file discovery and migration are intentionally outside this adapter;
+/// legacy classification remains follow-up work.
+pub struct AtomicDatasetMemoryStore {
+    storage: Arc<dyn storage_api::AtomicDatasetPort>,
+    global: storage_api::DatasetKey,
+    project: storage_api::DatasetKey,
+}
+
+impl AtomicDatasetMemoryStore {
+    pub fn new(
+        storage: Arc<dyn storage_api::AtomicDatasetPort>,
+        project: ProjectMemoryKey,
+    ) -> Self {
+        let global = dataset_key(GLOBAL_DATASET_SEGMENT);
+        let project = dataset_key(project.as_str());
+        Self {
+            storage,
+            global,
+            project,
+        }
+    }
+
+    fn dataset_key_for(&self, layer: MemoryLayer) -> &storage_api::DatasetKey {
+        match layer {
+            MemoryLayer::Global => &self.global,
+            MemoryLayer::Project => &self.project,
+        }
+    }
+
+    async fn load_for_open(
+        &self,
+        layer: MemoryLayer,
+    ) -> Result<CommittedMemoryDataset<storage_api::DatasetRevision>, MemoryOpenerError> {
+        let dataset_key = self.dataset_key_for(layer);
+        let manifest = self
+            .storage
+            .read_manifest(dataset_key)
+            .await
+            .map_err(map_storage_open_error)?;
+        let revision = manifest.revision().clone();
+        if manifest.members().is_empty() {
+            return Ok(CommittedMemoryDataset {
+                dataset: MemoryDataset::empty(layer),
+                revision,
+            });
+        }
+        let expected = expected_member_names();
+        if manifest.members() != expected.as_slice() {
+            return Err(MemoryOpenerError::CorruptTransaction);
+        }
+        let read = self
+            .storage
+            .read_consistent(dataset_key, &expected)
+            .await
+            .map_err(map_storage_open_error)?;
+        let storage_api::DatasetReadOutcome::Found(read) = read else {
+            return Err(MemoryOpenerError::CorruptTransaction);
+        };
+        if read.revision() != &revision {
+            return Err(MemoryOpenerError::CorruptTransaction);
+        }
+        let bytes = |name: &str| {
+            read.members()
+                .iter()
+                .find(|member| member.name().as_str() == name)
+                .map(storage_api::DatasetMember::bytes)
+                .ok_or(MemoryOpenerError::CorruptTransaction)
+        };
+        let dataset =
+            crate::codec::decode_dataset(layer, bytes(ACTIVE_MEMBER)?, bytes(ARCHIVE_MEMBER)?)
+                .map_err(map_codec_open_error)?;
+        Ok(CommittedMemoryDataset { dataset, revision })
+    }
+}
+
+fn map_codec_open_error(error: MemoryOpenError) -> MemoryOpenerError {
+    match error {
+        MemoryOpenError::UnsupportedSchema { version } => {
+            MemoryOpenerError::UnsupportedSchema { version }
+        }
+        _ => MemoryOpenerError::CorruptDataset,
+    }
+}
+
+fn map_storage_open_error(error: storage_api::StorageError) -> MemoryOpenerError {
+    match map_storage_error(&error) {
+        MemoryStorageErrorKind::PermissionDenied => MemoryOpenerError::PermissionDenied,
+        MemoryStorageErrorKind::CorruptTransaction => MemoryOpenerError::CorruptTransaction,
+        _ => MemoryOpenerError::Io,
+    }
+}
+
+fn map_memory_open_error(error: MemoryError) -> MemoryOpenerError {
+    match error {
+        MemoryError::Storage {
+            kind: MemoryStorageErrorKind::PermissionDenied,
+        } => MemoryOpenerError::PermissionDenied,
+        MemoryError::Storage {
+            kind: MemoryStorageErrorKind::CorruptTransaction,
+        } => MemoryOpenerError::CorruptTransaction,
+        MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io | MemoryStorageErrorKind::DiskFull,
+        } => MemoryOpenerError::Io,
+        _ => MemoryOpenerError::LegacyMigrationFailed,
+    }
+}
+
+fn dataset_key(segment: &str) -> storage_api::DatasetKey {
+    let segment = storage_api::SafePathSegment::from_str(segment)
+        .expect("Memory dataset segment is always a safe Storage path segment");
+    storage_api::DatasetKey::new(storage_api::StorageNamespace::Memory, vec![segment])
+        .expect("Memory dataset segment always forms a valid dataset key")
+}
+
+/// Anti-corruption mapping: Storage's published failures do not cross the
+/// Memory boundary.
+pub fn map_storage_error(error: &storage_api::StorageError) -> MemoryStorageErrorKind {
+    match error.kind() {
+        storage_api::StorageErrorKind::PermissionDenied => MemoryStorageErrorKind::PermissionDenied,
+        storage_api::StorageErrorKind::ConcurrentWrite => MemoryStorageErrorKind::ConcurrentWrite,
+        storage_api::StorageErrorKind::CorruptTransaction(_) => {
+            MemoryStorageErrorKind::CorruptTransaction
+        }
+        storage_api::StorageErrorKind::InvalidKey => MemoryStorageErrorKind::Serialization,
+        storage_api::StorageErrorKind::Io
+        | storage_api::StorageErrorKind::UnsupportedDurability => MemoryStorageErrorKind::Io,
+    }
+}
+
+fn storage_error(error: storage_api::StorageError) -> MemoryError {
+    MemoryError::Storage {
+        kind: map_storage_error(&error),
+    }
+}
+
+fn invalid_dataset(kind: MemoryStorageErrorKind) -> MemoryError {
+    MemoryError::Storage { kind }
+}
+
+fn member_name(value: &str) -> storage_api::SafePathSegment {
+    storage_api::SafePathSegment::from_str(value).expect("fixed Memory member name is safe")
+}
+
+fn expected_member_names() -> Vec<storage_api::SafePathSegment> {
+    MEMORY_MEMBER_NAMES.into_iter().map(member_name).collect()
+}
+
+fn encode_members(
+    layer: MemoryLayer,
+    dataset: &MemoryDataset,
+) -> Result<Vec<storage_api::DatasetMember>, MemoryError> {
+    if dataset.layer() != layer {
+        return Err(invalid_dataset(MemoryStorageErrorKind::Serialization));
+    }
+    let (active, archive) = crate::codec::encode_dataset(dataset)?;
+    Ok(vec![
+        storage_api::DatasetMember::new(member_name(ACTIVE_MEMBER), active),
+        storage_api::DatasetMember::new(member_name(ARCHIVE_MEMBER), archive),
+    ])
+}
+
+#[async_trait]
+impl MemoryDatasetStore for AtomicDatasetMemoryStore {
+    type Revision = storage_api::DatasetRevision;
+
+    async fn load_committed(
+        &self,
+        layer: MemoryLayer,
+    ) -> Result<CommittedMemoryDataset<Self::Revision>, MemoryError> {
+        let dataset_key = self.dataset_key_for(layer);
+        let manifest = self
+            .storage
+            .read_manifest(dataset_key)
+            .await
+            .map_err(storage_error)?;
+        let revision = manifest.revision().clone();
+
+        if manifest.members().is_empty() {
+            return Ok(CommittedMemoryDataset {
+                dataset: MemoryDataset::empty(layer),
+                revision,
+            });
+        }
+
+        let expected = expected_member_names();
+        if manifest.members() != expected.as_slice() {
+            return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
+        }
+        let read = self
+            .storage
+            .read_consistent(dataset_key, &expected)
+            .await
+            .map_err(storage_error)?;
+        let storage_api::DatasetReadOutcome::Found(read) = read else {
+            return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
+        };
+        if read.revision() != &revision {
+            return Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite));
+        }
+
+        let bytes = |name: &str| {
+            read.members()
+                .iter()
+                .find(|member| member.name().as_str() == name)
+                .map(storage_api::DatasetMember::bytes)
+                .ok_or_else(|| invalid_dataset(MemoryStorageErrorKind::CorruptTransaction))
+        };
+        let dataset =
+            crate::codec::decode_dataset(layer, bytes(ACTIVE_MEMBER)?, bytes(ARCHIVE_MEMBER)?)
+                .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
+
+        Ok(CommittedMemoryDataset { dataset, revision })
+    }
+
+    async fn commit(
+        &self,
+        layer: MemoryLayer,
+        expected: &Self::Revision,
+        dataset: &MemoryDataset,
+    ) -> Result<MemoryCommitReceipt<Self::Revision>, MemoryError> {
+        let members = encode_members(layer, dataset)?;
+        let receipt = self
+            .storage
+            .commit_atomic(
+                self.dataset_key_for(layer),
+                expected,
+                &members,
+                storage_api::WriteOptions::new(storage_api::Durability::ProcessCrashSafe),
+            )
+            .await
+            .map_err(storage_error)?;
+        let visibility = match receipt.visibility() {
+            storage_api::DatasetCommitVisibility::Visible => MemoryCommitVisibility::Visible,
+            storage_api::DatasetCommitVisibility::RecoveryPending => {
+                MemoryCommitVisibility::RecoveryPending
+            }
+        };
+        Ok(MemoryCommitReceipt::new(
+            receipt.revision().clone(),
+            visibility,
+        ))
+    }
+}
+
+pub struct ProjectMemoryOpener {
+    store: AtomicDatasetMemoryStore,
+    legacy: Arc<dyn LegacyMemorySource>,
+}
+
+impl ProjectMemoryOpener {
+    pub fn new(store: AtomicDatasetMemoryStore, legacy: Arc<dyn LegacyMemorySource>) -> Self {
+        Self { store, legacy }
+    }
+
+    pub async fn open(
+        self,
+        policy: MemoryPolicy,
+    ) -> Result<MemoryService<AtomicDatasetMemoryStore>, MemoryOpenerError> {
+        for layer in [MemoryLayer::Global, MemoryLayer::Project] {
+            let committed = self.store.load_for_open(layer).await?;
+            let legacy = self
+                .legacy
+                .probe(layer)
+                .await
+                .map_err(|error| match error {
+                    LegacyMemorySourceError::PermissionDenied => {
+                        MemoryOpenerError::PermissionDenied
+                    }
+                    LegacyMemorySourceError::Io => MemoryOpenerError::Io,
+                })?;
+            if !legacy.is_present() {
+                continue;
+            }
+            let new_is_empty =
+                committed.dataset.active().is_empty() && committed.dataset.archive().is_empty();
+            if !new_is_empty {
+                return Err(MemoryOpenerError::LegacyKeyConflict);
+            }
+            let active = match &legacy.active {
+                LegacyMemoryMember::Missing => None,
+                LegacyMemoryMember::Present(bytes) => Some(bytes.as_slice()),
+            };
+            let archive = match &legacy.archive {
+                LegacyMemoryMember::Missing => None,
+                LegacyMemoryMember::Present(bytes) => Some(bytes.as_slice()),
+            };
+            let dataset = crate::codec::decode_legacy_dataset(layer, active, archive)
+                .map_err(map_codec_open_error)?;
+            self.store
+                .commit(layer, &committed.revision, &dataset)
+                .await
+                .map_err(map_memory_open_error)?;
+        }
+        MemoryService::open(self.store, policy)
+            .await
+            .map_err(map_memory_open_error)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryPolicy {

@@ -1,10 +1,11 @@
 use std::sync::{Mutex, MutexGuard};
 
-use super::TaskAccess;
+use super::{TaskAccess, TaskPersist};
 use crate::business::{
     Batch, BatchCreateSpec, BatchId, PreparedTaskRestore, Task, TaskCommandError,
     TaskCommandResult, TaskCreateSpec, TaskId, TaskLifecycleSnapshot, TaskPriority,
-    TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskStatus, TaskStoreState, TaskStoreStats,
+    TaskReminderSnapshot, TaskRevision, TaskSnapshot, TaskSnapshotValidationError, TaskStatus,
+    TaskStoreState, TaskStoreStats,
 };
 
 /// Task BC 的内存事务 backing。
@@ -22,8 +23,9 @@ use crate::business::{
 ///
 /// `TaskStore` 只提供同步 API：不依赖任何异步运行时，锁守卫在方法返回前必然
 /// 释放，因而调用方也无法在持锁期间跨越 `.await`。这里实现同步的窄
-/// [`TaskAccess`] 端口；snapshot capture/install 仅供 crate 内持久化装配使用，
-/// 不实现或公开 `TaskPersist`，也不做 Runtime / Tool wiring 或 legacy storage integration.
+/// [`TaskAccess`] 端口与 [`TaskPersist`] 持久化端口；capture/prepare/install
+/// 内部装配仍保持 crate-private，只经端口对外发布，不做 Runtime / Tool wiring
+/// 或 legacy storage integration。
 #[derive(Debug, Default)]
 pub struct TaskStore {
     state: Mutex<TaskStoreState>,
@@ -52,15 +54,14 @@ impl TaskStore {
 
     /// Captures one coherent persistence image while holding the aggregate's
     /// single lock. Deleted tombstones and runtime-only reverse indexes are not
-    /// persisted.
-    #[allow(dead_code, reason = "crate-private persistence wiring lands in #890")]
+    /// persisted. Crate-private plumbing behind the [`TaskPersist`] port.
     pub(crate) fn capture_snapshot(&self) -> TaskSnapshot {
         self.lock().capture_snapshot()
     }
 
     /// Installs an already validated candidate with one lock acquisition and
-    /// one infallible whole-state assignment.
-    #[allow(dead_code, reason = "crate-private persistence wiring lands in #890")]
+    /// one infallible whole-state assignment. Crate-private plumbing behind the
+    /// [`TaskPersist`] port.
     pub(crate) fn install_snapshot(&self, prepared: PreparedTaskRestore) {
         *self.lock() = prepared.into_candidate();
     }
@@ -235,6 +236,26 @@ impl TaskAccess for TaskStore {
 
     fn would_create_cycle(&self, task_id: TaskId, blocked_by_id: TaskId) -> bool {
         self.lock().would_create_cycle(task_id, blocked_by_id)
+    }
+}
+
+impl TaskPersist for TaskStore {
+    fn collect_snapshot(&self) -> TaskSnapshot {
+        self.capture_snapshot()
+    }
+
+    fn prepare_restore(
+        &self,
+        snapshot: &TaskSnapshot,
+    ) -> Result<PreparedTaskRestore, TaskSnapshotValidationError> {
+        // Clone before validating: the candidate is built from the caller's
+        // snapshot alone and never reads or mutates the live backing, so a
+        // rejected restore leaves both the argument and this store untouched.
+        snapshot.clone().prepare()
+    }
+
+    fn commit_restore(&self, token: PreparedTaskRestore) {
+        self.install_snapshot(token);
     }
 }
 
