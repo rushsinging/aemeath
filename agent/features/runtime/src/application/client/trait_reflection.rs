@@ -289,6 +289,7 @@ mod tests {
                 driver: "openai".to_string(),
             },
             session_id: "test-session".to_string(),
+            session_tasks: context::compose_session_task_capture(task::wire_task().persist()),
             max_tool_concurrency: 1,
             max_agent_concurrency: 1,
             _mcp_manager: Arc::new(tools::api::McpConnectionManager::with_servers(

@@ -8,6 +8,8 @@ pub mod application;
 pub mod domain;
 pub mod ports;
 
+pub use adapters::{compose_session_task_capture, LegacyTaskCapture};
+
 pub mod context_port {
     pub use crate::domain::*;
     pub use crate::ports::ContextPort;

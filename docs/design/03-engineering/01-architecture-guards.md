@@ -35,6 +35,7 @@
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
 | 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
+| 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费 `TaskAccess`；Task persistence/restore authority 仅限 Context/Composition |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
 | 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
@@ -76,7 +77,7 @@
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `sdk` |
+| `context` | `share`, `provider`, `storage`, `task`, `sdk` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage`, `task` |
 | `storage` | `share` |
@@ -95,6 +96,7 @@
 
 - **例外 / 已批准跨 BC 依赖**：
   - `runtime/tools → task`：消费 Task-owned `TaskAccess` OHS 与 Published Language；`task` 反向依赖消费者仍被拒绝。
+  - `context → task`：Context Session adapter 消费 Task-owned `TaskPersist` 与 snapshot Published Language；Runtime/Tools 的 persistence/restore authority 由 `check-task-persistence-capability.sh` 机械拒绝。
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
@@ -204,8 +206,8 @@
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
-  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, UsageSink, from_args}`：`UsageSink` 是 Composition bridge 实现所需的 Runtime-owned outbound port；其他 Runtime 内部 port 不公开。
-  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
+  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, UsageSink, from_args_with_workspace}`：`UsageSink` 是 Composition bridge 实现所需的 Runtime-owned outbound port；bootstrap 由 Composition 注入 Task access/capture views，其他 Runtime 内部 port 不公开。
+  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session, compose_session_task_capture, LegacyTaskCapture}`
   - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory façade 符号集合；#884 已移除 Tool Result 的 `MAX_TOOL_RESULT_CHARS` / `persist_oversized_results`，Runtime 只经 `storage::api::AtomicBlobPort` 与 composition-only `FileSystemBlobAdapter` 接线，不再允许 Storage 业务 helper。#983 的 AtomicDataset 跨 crate 消费 deferred 至 #896，届时再按真实调用点治理；未新增 path exception 或 Guard allowlist。过渡集合最终随 #883/#896 收敛。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
 - **检查方式**：
@@ -214,6 +216,14 @@
   - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
   - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
 - **例外**：无 path 级白名单。Context 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
+
+### 6t. check-task-persistence-capability.sh
+
+- **功能**：把 Task persistence/restore authority 限定在 Context 与 Composition，Runtime/Tools 只能获得 `TaskAccess`。
+- **守护**：扫描 Runtime/Tools 生产 Rust 源码，拒绝 `TaskPersist`、`PreparedTaskRestore`、`TaskRestoreAdapter`、`TaskSnapshotSource`、`SessionTaskAdapters`、`TaskWiring` 与 `wire_task`；专用测试文件及 `trait_reflection.rs` 测试 fixture 不参与生产权限判断。
+- **正向路径**：Composition 创建唯一 `TaskWiring`，把 `TaskAccess` 注入 Runtime/Tools，并把 persistence view 交给 Context factory 封装为 capture-only `LegacyTaskCapture`；Runtime 无 prepare/commit restore 权限。
+- **sanity / 故意违规**：脚本内置允许 `TaskAccess`、拒绝 persistence symbols 的 detector sanity。#890 临时向 Runtime 生产文件加入 `use task::TaskPersist` 时以 exit code 2 拒绝；移除后通过。依赖图守卫另以 exit code 2 拒绝临时 `task → runtime` 依赖。
+- **范围边界**：跨 Project/Config/Memory/Task 的联合 prepare/commit gate 仍由 #871 承接；本守卫不建立联合 coordinator。
 
 ### 6a. check-provider-invocation-scope.sh
 

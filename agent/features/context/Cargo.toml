@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 share = { path = "../../shared" }
 storage = { path = "../storage" }
+task = { path = "../task" }
 sdk = { path = "../../../packages/sdk" }
 provider = { path = "../provider" }
 log = "0.4"
