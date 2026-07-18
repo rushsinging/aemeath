@@ -13,7 +13,7 @@ RUNTIME="$ROOT/agent/features/runtime/src"
 APP="$ROOT/agent/composition/src/app.rs"
 
 # guard-registry:scope.logging.settings-tests
-logging_env="$(grep -RInE '(std::env::|use[[:space:]]+std::env|env::(var|var_os)[[:space:]]*\()' "$LOGGING" --include='*.rs' --exclude='*test*.rs' || true)"
+logging_env="$(grep -RInE --include='*.rs' --exclude='*test*.rs' '(std::env::|use[[:space:]]+std::env|env::(var|var_os)[[:space:]]*\()' "$LOGGING" || true)"
 if [ -n "$logging_env" ]; then
   printf '%s\n' "$logging_env" >&2
   echo "Logging settings injection guard FAILED: Logging production code must not read env; use Composition-mapped LoggingSettings." >&2
@@ -21,7 +21,7 @@ if [ -n "$logging_env" ]; then
 fi
 
 # guard-registry:scope.logging.runtime-comments-tests
-runtime_wiring="$(grep -RInE '(UnifiedLogger|LoggingSettings|init_logging[[:space:]]*\(|AEMEATH_LOG_STDERR|use[[:space:]]+logging[^;]*[[:space:]]+as[[:space:]])' "$RUNTIME" --include='*.rs' --exclude='*test*.rs' | grep -vE ':[0-9]+:[[:space:]]*//' || true)"
+runtime_wiring="$(grep -RInE --include='*.rs' --exclude='*test*.rs' '(UnifiedLogger|LoggingSettings|init_logging[[:space:]]*\(|AEMEATH_LOG_STDERR|use[[:space:]]+logging[^;]*[[:space:]]+as[[:space:]])' "$RUNTIME" | grep -vE ':[0-9]+:[[:space:]]*//' || true)"
 if [ -n "$runtime_wiring" ]; then
   printf '%s\n' "$runtime_wiring" >&2
   echo "Logging settings injection guard FAILED: Runtime must not assemble or initialize Logging." >&2
@@ -29,7 +29,7 @@ if [ -n "$runtime_wiring" ]; then
 fi
 
 # guard-registry:scope.logging.bootstrap-tests
-composition_runtime_call="$(grep -RIn 'runtime::from_args_with_workspace' "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" --include='*.rs' --exclude='*test*.rs' || true)"
+composition_runtime_call="$(find "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" -name '*.rs' ! -name '*test*.rs' -type f -exec grep -Hn 'runtime::from_args_with_workspace' {} + || true)"
 if [ "$(printf '%s\n' "$composition_runtime_call" | grep -c . || true)" -ne 1 ] || [[ "$composition_runtime_call" != *"agent/composition/src/runtime.rs"* ]]; then
   printf '%s\n' "$composition_runtime_call" >&2
   echo "Runtime workspace bootstrap must have exactly one production consumer in Composition runtime.rs." >&2
@@ -37,7 +37,7 @@ if [ "$(printf '%s\n' "$composition_runtime_call" | grep -c . || true)" -ne 1 ] 
 fi
 
 # guard-registry:scope.logging.init-import-tests
-all_init_imports="$(grep -RIlE 'use[[:space:]]+logging::[^;]*\bUnifiedLogger\b' "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" --include='*.rs' --exclude='*test*.rs' | sed "s#^$ROOT/##" || true)"
+all_init_imports="$(find "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" -name '*.rs' ! -name '*test*.rs' -type f -exec grep -IlE 'use[[:space:]]+logging::[^;]*UnifiedLogger' {} + | sed "s#^$ROOT/##" || true)"
 if [ "$all_init_imports" != "agent/composition/src/app.rs" ]; then
   printf '%s\n' "$all_init_imports" >&2
   echo "Logging settings injection guard FAILED: UnifiedLogger may only be imported by Composition app.rs." >&2

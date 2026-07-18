@@ -219,10 +219,10 @@ pub(crate) fn sdk_event_to_ui_event(event: sdk::ChatEvent) -> UiEvent {
         sdk::ChatEvent::SessionResumeFailed { kind, id, message } => {
             UiEvent::SessionResumeFailed { kind, id, message }
         }
+        sdk::ChatEvent::ReflectionHistory { records } => UiEvent::ReflectionHistory { records },
         sdk::ChatEvent::Result(result) => UiEvent::SystemMessage(result.text),
-        // #567: 新增变体暂不映射到 UiEvent，静默忽略。
-        sdk::ChatEvent::ReflectionResult { .. }
-        | sdk::ChatEvent::ModelList { .. }
+        // These list/project/cost events have no dedicated UiEvent yet and are intentionally ignored.
+        sdk::ChatEvent::ModelList { .. }
         | sdk::ChatEvent::ReminderList { .. }
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }

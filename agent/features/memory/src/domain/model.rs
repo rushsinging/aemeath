@@ -125,6 +125,13 @@ pub enum MemoryError {
     NotFound { id: MemoryId },
     #[error("记忆持久化失败: {kind}")]
     Storage { kind: MemoryStorageErrorKind },
+    #[error("Reflection 部分应用（已完成 {result_completed}/{result_attempted}）")]
+    PartialApply {
+        result_attempted: usize,
+        result_completed: usize,
+        suggestions_added: usize,
+        outdated_marked: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]

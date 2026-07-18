@@ -1,22 +1,34 @@
 use std::sync::Arc;
 
 use context::{compose_session_task_capture, LegacyTaskCapture};
-use runtime::RuntimeBootstrapDependencies;
+use runtime::{RuntimeBootstrapDependencies, RuntimeConfigDependencies};
 
-#[derive(Clone)]
-struct TestOpener;
+struct NoopReflectionHistory;
 
 #[async_trait::async_trait]
-impl memory::api::MemoryOpener for TestOpener {
-    async fn open_memory(
+impl memory::api::ReflectionHistoryQuery for NoopReflectionHistory {
+    async fn list(
         &self,
-        _key: &memory::api::ProjectMemoryKey,
-        _config: &share::config::MemoryConfig,
-    ) -> Result<Arc<dyn memory::api::MemoryPort>, memory::api::MemoryOpenerError> {
-        Ok(Arc::new(memory::api::NoOpMemory))
+        _limit: usize,
+    ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+        Ok(Vec::new())
     }
-    fn boxed_clone(&self) -> Box<dyn memory::api::MemoryOpener> {
-        Box::new(self.clone())
+}
+
+#[async_trait::async_trait]
+impl memory::api::ReflectionHistoryStore for NoopReflectionHistory {
+    async fn append(
+        &self,
+        _record: &memory::api::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        _record: &memory::api::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
     }
 }
 
@@ -31,18 +43,13 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let access = task.access();
     let capture: Arc<dyn LegacyTaskCapture> = compose_session_task_capture(task.persist());
 
-    let wiring = context::wire_main_session(context::MainSessionDependencies {
-        workspace: workspace.clone(),
-        task_persist: task.persist(),
-        config_reader: config.reader(),
-        config_participant: config.participant(),
-        memory_opener: Box::new(TestOpener),
-    })
-    .await
-    .unwrap();
+    let history: Arc<dyn memory::ReflectionHistoryStore> = Arc::new(NoopReflectionHistory);
+
     let dependencies = RuntimeBootstrapDependencies::new(
         workspace,
-        wiring,
+        RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
+        Arc::new(memory::NoOpMemory),
+        history.clone(),
         provider::wire_provider(),
         tools::wire_tools(),
         Arc::new(policy::AllowAllPolicy),
@@ -50,6 +57,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         capture.clone(),
     );
 
+    assert!(Arc::ptr_eq(&dependencies.reflection_history(), &history));
     assert!(Arc::ptr_eq(&dependencies.task_access(), &access));
     assert!(Arc::ptr_eq(&dependencies.session_tasks(), &capture));
 }

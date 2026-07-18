@@ -253,7 +253,9 @@ pub async fn wire_main_session(
         .await
         .map_err(MainSessionError::ConfigPrepare)?;
     let memory_config = prepared_config.memory_config().clone();
-    deps.config_participant.commit_project(prepared_config);
+    deps.config_participant
+        .commit_project(prepared_config)
+        .await;
 
     // Eager-open initial memory from the workspace ProjectIdentity +
     // the project-scoped config MemoryConfig (which now includes any durable
@@ -636,7 +638,9 @@ impl MainSessionWiring {
 
         // Config commit/watch last. commit_project updates the ConfigReader's
         // internal watch, so any future bind_main_run sees the new config.
-        self.config_participant.commit_project(prepared_config);
+        self.config_participant
+            .commit_project(prepared_config)
+            .await;
 
         // _exclusive is dropped here, releasing the exclusive permit.
         Ok(())
@@ -801,7 +805,7 @@ impl ConfigWriter for GateAwareConfigWriter {
                     // Install new Memory before committing config.
                     *committed_memory.write().unwrap() = candidate_memory;
                     // commit_update fires the watch last.
-                    let change_set = config_participant.commit_update(ready);
+                    let change_set = config_participant.commit_update(*ready);
                     Ok(change_set)
                 }
             }

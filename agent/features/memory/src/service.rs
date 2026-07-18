@@ -341,7 +341,10 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
-        let mut result = ReflectionApplyResult::default();
+        // Validate the whole model-produced batch before the first durable write.
+        // This prevents malformed later suggestions/ids from causing the common
+        // form of partial application.
+        let mut prepared = Vec::with_capacity(output.suggested_memories.len());
         for suggestion in &output.suggested_memories {
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
@@ -354,27 +357,49 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            prepared.push(entry);
+        }
+        let outdated = output
+            .outdated_memories
+            .iter()
+            .map(MemoryId::new)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut result = ReflectionApplyResult {
+            attempted: prepared.len() + outdated.len(),
+            ..ReflectionApplyResult::default()
+        };
+        for entry in prepared {
             let policy = self.policy;
-            let write_result = self
+            let write_result = match self
                 .mutate_layer(entry.layer, move |dataset| {
                     apply_reflection_entry(dataset, &entry, policy)
                 })
-                .await?;
+                .await
+            {
+                Ok(value) => value,
+                Err(error) => return Err(partial_apply_or(error, &result)),
+            };
             match write_result {
                 WriteResult::Added { .. } | WriteResult::Merged { .. } => {
                     result.suggestions_added += 1;
                 }
                 WriteResult::NeedsEviction { .. } => {
-                    return Err(reflection_capacity_error());
+                    return Err(partial_apply_or(reflection_capacity_error(), &result));
                 }
                 WriteResult::NoOp => {}
             }
+            result.completed += 1;
         }
-
-        for raw_id in &output.outdated_memories {
-            let id = MemoryId::new(raw_id)?;
-            if self.mark_outdated(&id).await? {
-                result.outdated_marked += 1;
+        for id in outdated {
+            match self.mark_outdated(&id).await {
+                Ok(marked) => {
+                    if marked {
+                        result.outdated_marked += 1;
+                    }
+                    result.completed += 1;
+                }
+                Err(error) => return Err(partial_apply_or(error, &result)),
             }
         }
         Ok(result)
@@ -454,6 +479,19 @@ fn reflection_memory_id(now: u64) -> Result<MemoryId, MemoryError> {
 fn reflection_capacity_error() -> MemoryError {
     MemoryError::InvalidEntry {
         message: "Reflection 淘汰非 pinned 候选后重试一次仍超过记忆容量".to_string(),
+    }
+}
+
+fn partial_apply_or(error: MemoryError, result: &ReflectionApplyResult) -> MemoryError {
+    if result.completed == 0 {
+        error
+    } else {
+        MemoryError::PartialApply {
+            result_attempted: result.attempted,
+            result_completed: result.completed,
+            suggestions_added: result.suggestions_added,
+            outdated_marked: result.outdated_marked,
+        }
     }
 }
 

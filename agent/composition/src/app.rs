@@ -206,7 +206,47 @@ mod tests {
     use task::TaskAccess;
     use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
-    use tools::{DefaultToolCatalogGateway, MemoryPortSource, ToolCatalogGateway, ToolRegistry};
+    use tools::{DefaultToolCatalogGateway, ToolCatalogGateway, ToolRegistry};
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous_agents_dir: Option<std::ffi::OsString>,
+        previous_home: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(agents_dir: &std::path::Path, home: &std::path::Path) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+            let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
+            let previous_home = std::env::var_os("HOME");
+            unsafe {
+                std::env::set_var("AEMEATH_AGENTS_DIR", agents_dir);
+                std::env::set_var("HOME", home);
+            }
+            Self {
+                _lock: lock,
+                previous_agents_dir,
+                previous_home,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match self.previous_agents_dir.take() {
+                    Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
+                    None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
+                }
+                match self.previous_home.take() {
+                    Some(value) => std::env::set_var("HOME", value),
+                    None => std::env::remove_var("HOME"),
+                }
+            }
+        }
+    }
 
     #[derive(Default)]
     struct CountingProviderGateway {
@@ -265,7 +305,6 @@ mod tests {
             registry: &ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            memory_source: Arc<dyn MemoryPortSource>,
             workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
@@ -273,7 +312,6 @@ mod tests {
                 registry,
                 task_access,
                 skills,
-                memory_source,
                 workspace_control,
             );
         }
@@ -283,14 +321,12 @@ mod tests {
             registry: &ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            memory_source: Arc<dyn MemoryPortSource>,
             workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             DefaultToolCatalogGateway.register_all_tools_except_agent(
                 registry,
                 task_access,
                 skills,
-                memory_source,
                 workspace_control,
             );
         }
@@ -300,14 +336,12 @@ mod tests {
             registry: &mut ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
-            memory_source: Arc<dyn MemoryPortSource>,
             workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             DefaultToolCatalogGateway.register_subagent_tools(
                 registry,
                 task_access,
                 skills,
-                memory_source,
                 workspace_control,
             );
         }
@@ -347,8 +381,7 @@ mod tests {
         std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
             .expect("write MCP config");
 
-        let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
-        unsafe { std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir) };
+        let _env = EnvGuard::set(&agents_dir, temp.path());
 
         let provider = Arc::new(CountingProviderGateway::default());
         let tools = Arc::new(CountingToolGateway::default());
@@ -368,12 +401,6 @@ mod tests {
 
         let result = build_agent_client_with_gateways(args, gateways).await;
 
-        unsafe {
-            match previous_agents_dir {
-                Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
-                None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
-            }
-        }
         result.expect("build client with injected gateways");
         assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
         assert_eq!(tools.new_registry_calls.load(Ordering::SeqCst), 1);

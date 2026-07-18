@@ -19,7 +19,9 @@ use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_a
 use crate::application::chat::looping::loop_phases::build_api_messages;
 use crate::application::chat::looping::memory_inject::build_memory_block_from_port;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
-use crate::application::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
+use crate::application::chat::looping::reflection::{
+    should_run_turn_reflection, submit_interval_reflection,
+};
 use crate::application::chat::looping::stream_handler::{
     should_emit_model_stream_waiting, InvocationEventReducer,
 };
@@ -98,6 +100,8 @@ where
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
+    pub(crate) reflection_history: &'a Arc<dyn memory::api::ReflectionHistoryStore>,
+    pub(crate) reflection_tasks: &'a crate::application::reflection::ReflectionTaskAdapter,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
@@ -282,8 +286,9 @@ where
             self.system_prompt_text,
             self.context_size,
             self.memory_config,
-            self.memory.as_ref(),
-            &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
+            self.memory,
+            self.reflection_history,
+            self.reflection_tasks,
             self.client,
             self.language,
             &self.current_cwd(),
@@ -536,22 +541,17 @@ where
             &resp.stop_reason,
             false,
         ) {
-            if let Some(text) = run_reflection(
+            let _ = submit_interval_reflection(
+                self.reflection_tasks,
                 self.memory_config,
                 self.turn_count,
                 &self.chain.messages_flat(),
                 self.client,
                 self.system_prompt_text,
                 self.language,
-                self.memory.as_ref(),
-                &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
-            )
-            .await
-            {
-                self.sink
-                    .send_event(RuntimeStreamEvent::SystemMessage(text))
-                    .await;
-            }
+                self.memory,
+                self.reflection_history,
+            );
         }
 
         let outcome = self.outcome(AgentRunStatus::Completed);

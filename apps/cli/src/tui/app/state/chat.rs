@@ -6,9 +6,6 @@ pub(crate) struct ChatState {
     pub context_size: usize,
     pub tool_call_active: bool,
     pub active_tool_call_ids: std::collections::HashSet<sdk::ids::ToolCallId>,
-    pub turn_count: usize,
-    pub pending_reflection: Option<sdk::ReflectionOutputView>,
-    pub applying_reflection: Option<sdk::ReflectionOutputView>,
     pub input_event_tx: Option<tokio::sync::mpsc::UnboundedSender<sdk::ChatInputEvent>>,
     pub processing_handle: Option<crate::tui::effect::session::processing::ProcessingHandle>,
     pub is_processing: bool,
@@ -69,10 +66,7 @@ impl ChatState {
         self.clear_tool_activity();
         self.is_processing = false;
         self.is_cancelling = false;
-        self.pending_reflection = None;
-        self.applying_reflection = None;
         self.clear_processing_handle();
-        self.turn_count = 0;
     }
 
     pub(crate) fn expect_run_start(&self) {
@@ -125,9 +119,6 @@ impl Default for ChatState {
             context_size: 200_000,
             tool_call_active: false,
             active_tool_call_ids: std::collections::HashSet::new(),
-            turn_count: 0,
-            pending_reflection: None,
-            applying_reflection: None,
             input_event_tx: None,
             processing_handle: None,
             is_processing: false,

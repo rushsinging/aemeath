@@ -20,6 +20,14 @@ pub mod api {
         SafeStorageFileType, SafeStorageRoot, StorageError, StorageErrorKind, StorageKey,
         StorageNamespace, TransactionScope, WriteOptions, WriteReceipt,
     };
+
+    pub fn file_system_blob(
+        root: impl AsRef<std::path::Path>,
+    ) -> Result<std::sync::Arc<dyn AtomicBlobPort>, StorageError> {
+        Ok(std::sync::Arc::new(crate::FileSystemBlobAdapter::new(
+            root,
+        )?))
+    }
 }
 
 pub use adapters::{

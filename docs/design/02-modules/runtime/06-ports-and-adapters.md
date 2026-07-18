@@ -103,7 +103,7 @@ enum InteractionCommandOutcome {
 | Context Management | `ContextPort` | 构建 / 压缩 / 查询 compact 状态 / 追加持久化 Context；见 [Context Management](../context-management/02-compact.md) 与 [持久化摘要树](../context-management/06-persistent-summary-tree.md) |
 | Tool | `ToolCatalogPort` / `ToolExecutionPort` | schema 投影与单次执行；见 [Tool ports](../tools/02-ports-and-lifecycle.md) |
 | Policy | `PolicyPort` | 调用前决策；见 [Policy](../policy/README.md) |
-| Memory | `MemoryPort` / `ReflectionPromptPort` | 当前项目 Memory 与纯 Reflection prompt / parse；见 [Memory ports](../memory/04-ports-and-adapters.md) |
+| Memory | `MemoryPort` / `ReflectionPromptPort` / `ReflectionHistoryStore` | 当前项目 Memory、纯 Reflection prompt/parse 与 Memory-owned durable history append/query；见 [Memory ports](../memory/04-ports-and-adapters.md) |
 | Task | `TaskAccess` | 日常 Task 命令 / 查询；`TaskPersist` **NEVER** 进入 Runtime；见 [Task contracts](../task/02-ports-and-published-language.md) |
 | Hook | `HookPort` | 类型化 hook dispatch；见 [Hook](../hook/README.md) |
 | Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |
@@ -236,6 +236,24 @@ trait EventSink: Send + Sync {                         // 纯投影出口；NEVE
 ```
 
 `UsageRecord`、`UsageEmitOutcome` 与 `UsageDropReason` 是 Audit-owned Published Language，以 [Audit 模块设计](../audit/README.md) 为唯一类型真相；Runtime-owned `UsageSink` 只定义非阻塞提交对话，并直接 import/re-export Audit 类型，**NEVER** 复制同名 DTO。为避免 crate 循环，Audit crate 不依赖或实现 `UsageSink`；#931 由 Composition Root bridge 同时依赖 Runtime trait 与 Audit sender handle 并完成实现。`EventSink` 只投影 `Run` 聚合已产生的领域事实，Main 通常映射到 SDK/TUI，Sub 可映射到父级诊断流；父 Run 的 `tool_coordination` **MUST** 直接消费 `derive_sub_run` 返回的 typed `AgentRunTerminal`，**NEVER** 订阅 EventSink 来提取成功结果或错误。`UsageSink::try_record` 是 best-effort 非阻塞审计出口，接受或丢弃都不改变 Run 状态。
+
+### 2.4 Reflection 异步执行 adapter（#899）
+
+Runtime 拥有 Reflection 的执行编排；Memory 拥有 prompt/parse/apply 领域能力与 history append/query。Interval、PreCompact、Manual 三种 trigger **MUST** 全部提交到同一个 Runtime 单槽后台 adapter：
+
+```text
+submit(trigger, owned message snapshot)
+  ├─ Accepted    → spawn Provider call → parse → optional apply
+  │                 → ReflectionHistoryStore.append(record)
+  │                 → safe completion metadata → release slot
+  └─ BusySkipped → immediately return；不等待、不排队
+```
+
+- `Manual` 只表示 Runtime 显式执行 trigger；它不建立同步路径，也不能绕过 slot。
+- `/reflect [limit]` 是独立的只读 control/query：Runtime 调用 Memory-owned `ReflectionHistoryQuery::list(limit)` 并投影 safe SDK view；它 **NEVER** submit job、调用 Provider 或 apply Memory。
+- 后台完成**不主动**经 `EventSink` / SDK 向 TUI 投影 `ReflectionOutput`、formatted content 或完成正文。只有用户显式 `/reflect [limit]` 时才返回 newest-first 的安全 metadata/count 视图。
+- completion 与日志只能含 trigger、status、error category、token/count、duration、record id 等 metadata；**NEVER** 含 prompt、消息、Memory content、provider raw response、parsed/formatted output 或正文截断。
+- Run teardown 必须 drain 该 Run 的 Reflection slot；到结束 deadline 仍未完成时 cancel，并等待 cancellation/timeout 终态清槽后再释放 Run lease，**NEVER** 留下 detached job。adapter 自身的执行 timeout 同样只产出安全终态 metadata。
 
 ## 3. RuntimeContext、active Session 与 Workspace 装配
 
@@ -401,6 +419,7 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 3. **Session 快照组装**：Context Management backing implementation 直接经注入的 `TaskPersist` / Project-owned `WorkspacePersist` 收集与恢复；Runtime 只有 `TaskAccess`，且 **NEVER** 中转 Workspace 能力
 4. **Workspace / Session scope 隔离**：Composition 保留 Project 与 Context-owned opaque wiring；Main 在同一 active slot 内跨 Run 复用，Sub 从父 workspace scope 隔离派生；scope / wiring / lease **NEVER** 穿过 Runtime、Tool 或普通 ContextPort 边界
 5. **Interaction ACL**：Tool-owned `UserInteractionSpec` / Policy 决策 → Runtime-owned `InteractionRequest` → adapter SDK DTO；reply 按 request id 回到 Runtime continuation，TUI DTO / channel **NEVER** 进入 Run 聚合或 Tool BC
+6. **Reflection history ACL**：Memory-owned `ReflectionRecord` → Runtime safe-summary projection → SDK `ReflectionHistoryView`；正文、prompt 与 raw response **NEVER** 进入 SDK/TUI 或日志
 
 ## 6. 契约治理
 
@@ -420,8 +439,11 @@ Sub 装配 **MUST** 要求 `WorkspaceMode::Snapshot`，只从父 `workspace_scop
 
 ## 修改历史
 
+> **#899 durable lifecycle / compact boundary:** accepted job 先 append `Running`，成功、失败、partial apply、timeout/cancel 均以同 id `upsert` 终态；cancel 不删除 durable fact。PreCompact 只在 compact 成功产生 outcome 后 submit 预先冻结的“将被丢弃”快照；compact 失败不 submit，busy 结构化 warn 后立即 skip，绝不排队。
+
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | #899 完成 Reflection 三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query、`/reflect [limit]` 只读安全投影及 Run teardown drain/cancel timeout | #899 |
 | 2026-07-11 | 初稿：入站端口、出站端口签名、RuntimeContext 按 RunSpec 装配、Composition Root、ACL、实现缺口 | #761 |
 | 2026-07-11 | RuntimeContext/assemble 补入站端口 InputBuffer（Main=TUI 通道+buffer，Sub=固定队列）| #761 |
 | 2026-07-12 | 定义同步幂等 `cancel_run(run_id)`、per-Run cancellation scope 及 Provider/Tool/Compact/Hook 传播边界 | #700 |

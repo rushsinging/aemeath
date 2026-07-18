@@ -229,6 +229,11 @@ pub struct MemoryStats {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReflectionApplyResult {
+    /// Number of requested operations (suggestions plus outdated-memory marks).
+    pub attempted: usize,
+    /// Number of operations durably completed. This can be smaller than
+    /// `attempted` when a cross-layer apply returns `MemoryError::PartialApply`.
+    pub completed: usize,
     pub suggestions_added: usize,
     pub outdated_marked: usize,
 }
@@ -243,7 +248,19 @@ pub trait ReflectionPromptPort: Send + Sync {
 
 #[async_trait]
 pub trait ReflectionHistoryQuery: Send + Sync {
+    /// Returns at most `limit` records, newest append first. A zero limit
+    /// returns an empty result without weakening dataset validation.
     async fn list(&self, limit: usize) -> Result<Vec<ReflectionRecord>, MemoryError>;
+}
+
+/// Memory-owned write boundary for completed Reflection facts. Implementations
+/// persist `ReflectionRecord` only; provider prompts and raw responses cannot
+/// cross this typed boundary.
+#[async_trait]
+pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
+    async fn append(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
+    /// Inserts a new record or replaces the record with the same stable id.
+    async fn upsert(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
 }
 
 #[async_trait]

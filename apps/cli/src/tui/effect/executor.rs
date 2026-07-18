@@ -33,8 +33,7 @@ impl App {
             Effect::SetCurrentTurn { turn } => self.set_current_turn_effect(turn),
             Effect::FetchReminderRecap => self.fetch_reminder_recap_effect(ui_tx),
             Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
-            Effect::RunReflection { foreground } => self.run_reflection_effect(foreground, ui_tx),
-            Effect::ApplyReflection { output } => self.apply_reflection_effect(output, ui_tx),
+            Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::StartTimer { .. } | Effect::StopTimer { .. } => {}
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
@@ -165,25 +164,9 @@ impl App {
         // #567：set_current_turn 删除——runtime loop 内部自维护 turn 计数器。
     }
 
-    /// 执行 LLM reflection：克隆当前消息与 agent client，后台 spawn 调用 SDK，
-    /// 结果经 UiEvent 回流到 update。前台发起时先推送 ReflectionStarted。
-    fn run_reflection_effect(&mut self, foreground: bool, _ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567：run_reflection 走事件流（ChatInputEvent::RunReflection）。
-        // runtime idle 分支执行 reflection，结果通过 ReflectionResult 事件回传。
-        let _ = foreground;
+    fn query_reflection_history_effect(&mut self, limit: usize) {
         self.chat
-            .push_input_event(sdk::ChatInputEvent::RunReflection);
-    }
-
-    fn apply_reflection_effect(
-        &mut self,
-        output: sdk::ReflectionOutputView,
-        _ui_tx: &mpsc::Sender<UiEvent>,
-    ) {
-        // #567：apply_reflection 走事件流（ChatInputEvent::ApplyReflection）。
-        // runtime idle 分支执行 apply，结果通过 CommandResultText 事件回传。
-        self.chat
-            .push_input_event(sdk::ChatInputEvent::ApplyReflection { output });
+            .push_input_event(sdk::ChatInputEvent::QueryReflectionHistory { limit });
     }
 
     /// 启动时后台检查版本更新（非阻塞）。

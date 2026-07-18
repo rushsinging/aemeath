@@ -74,21 +74,26 @@ where
                 max_tool_concurrency,
                 agent_semaphore,
                 hook_runner,
-                memory_config: _,
-                memory: _,
+                memory_config,
+                memory,
+                reflection_history,
                 language,
                 frozen_chats,
                 active_summary: active_summary_arc,
                 reasoning,
                 build_switched_client,
                 save_chain,
-                run_reflection_on_demand,
-                apply_reflection_on_demand,
+                list_reflection_history,
                 list_models,
                 list_reminders,
                 list_sessions,
             } = ctx;
             let mut client = client;
+            // Interval and PreCompact share this single session-scoped slot.
+            let reflection_tasks =
+                crate::application::reflection::ReflectionTaskAdapter::production(
+                    std::time::Duration::from_secs(120),
+                );
             let hook_ui = HookUi::new(sink.clone());
             let mut cwd = workspace.read().current_workspace_root();
             let mut active_summary = active_summary_arc
@@ -108,54 +113,34 @@ where
         ($cmd:expr) => {
             match $cmd {
                 PendingCommand::Compact => {
-                    // #871: the *entire* manual compact — memory capture +
-                    // precompact reflection + LLM summary + apply_compact_outcome
-                    // — must run under the session-switch **shared** permit.
-                    let wiring_for_compact = wiring.clone();
-                    match wiring
-                        .with_shared(async {
-                            let memory = wiring_for_compact.committed_memory();
-                            let memory_config_for_compact =
-                                wiring_for_compact.committed_config().memory().clone();
-                            let messages = chain.messages_flat();
-                            if let Some(outcome) = manual_compact(
-                                &sink,
-                                &hook_ui,
-                                &hook_runner,
-                                turn_count,
-                                &messages,
-                                active_summary.as_deref(),
-                                &system_prompt_text,
-                                context_size,
-                                &memory_config_for_compact,
-                                memory.as_ref(),
-                                &super::reflection::REFLECTION_ENGINE,
-                                &client,
-                                &language,
-                                &cwd,
-                            )
-                            .await
-                            {
-                                apply_compact_outcome(
-                                    &sink,
-                                    outcome,
-                                    &mut chain,
-                                    &frozen_chats,
-                                    &mut active_summary,
-                                    &active_summary_arc,
-                                )
-                                .await;
-                            }
-                        })
-                        .await
+                    if let Some(outcome) = manual_compact(
+                        &sink,
+                        &hook_ui,
+                        &hook_runner,
+                        turn_count,
+                        &chain.messages_flat(),
+                        active_summary.as_deref(),
+                        &system_prompt_text,
+                        context_size,
+                        &memory_config,
+                        &memory,
+                        &reflection_history,
+                        &reflection_tasks,
+                        &client,
+                        &language,
+                        &cwd,
+                    )
+                    .await
                     {
-                        Ok(()) => {}
-                        Err(error) => {
-                            log::warn!(
-                                target: LOG_TARGET,
-                                "manual compact skipped: session switch gate closed: {error:?}"
-                            );
-                        }
+                        apply_compact_outcome(
+                            &sink,
+                            outcome,
+                            &mut chain,
+                            &frozen_chats,
+                            &mut active_summary,
+                            &active_summary_arc,
+                        )
+                        .await;
                     }
                     continue;
                 }
@@ -213,20 +198,8 @@ where
                             }
                         }
                     } else {
-                        // #871: Gate-aware session read via shared permit.
-                        let (text, is_error) = match wiring
-                            .with_shared(super::idle_commands::execute_session(
-                                &args,
-                                &session_id,
-                            ))
-                            .await
-                        {
-                            Ok(result) => result,
-                            Err(_) => (
-                                "Session is being switched, please retry.".to_string(),
-                                true,
-                            ),
-                        };
+                        let (text, is_error) =
+                            super::idle_commands::execute_session(&args, &session_id).await;
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText {
                                 text,
@@ -237,57 +210,49 @@ where
                     continue;
                 }
                 PendingCommand::ManageMemory { args } => {
-                    // #871: the *entire* memory query/mutation must run under
-                    // the session-switch gate.
                     let wiring_for_memory = wiring.clone();
-                    match wiring
+                    let config = memory_config.clone();
+                    let result = wiring
                         .with_shared(async move {
                             let memory = wiring_for_memory.committed_memory();
-                            let memory_config_for_memory =
-                                wiring_for_memory.committed_config().memory().clone();
-                            super::idle_commands::execute_memory(
-                                &args,
-                                memory.as_ref(),
-                                &memory_config_for_memory,
-                            )
-                            .await
+                            super::idle_commands::execute_memory(&args, memory.as_ref(), &config)
+                                .await
                         })
-                        .await
-                    {
-                        Ok((text, is_error)) => {
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text,
-                                    is_error,
-                                })
-                                .await;
-                        }
-                        Err(error) => {
-                            log::warn!(
-                                target: LOG_TARGET,
-                                "manage memory skipped: session switch gate closed: {error:?}"
-                            );
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: "Session is being switched, please retry."
-                                        .to_string(),
-                                    is_error: true,
-                                })
-                                .await;
-                        }
-                    }
+                        .await;
+                    let (text, is_error) = result.unwrap_or_else(|_| {
+                        ("Session is being switched, please retry.".to_string(), true)
+                    });
+                    let _ = sink
+                        .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                        .await;
                     continue;
                 }
                 PendingCommand::ResumeSession { id } => {
-                    use sdk::SessionResumeFailureKind;
-                    match crate::application::client::resume_session_to_backing(&id, &wiring).await {
-                        Ok((restore, resumed_id)) => {
+                    match context::session::load_session(&id).await {
+                        Ok(snapshot) => {
+                            let restore =
+                                context::session::SessionRestore::from_session(&snapshot);
+                            if restore.trimmed > 0 || restore.repaired > 0 {
+                                log::info!(
+                                    target: "aemeath:agent:runtime",
+                                    "resume {}: trimmed={} repaired={}",
+                                    id,
+                                    restore.trimmed,
+                                    restore.repaired
+                                );
+                            }
                             chain = restore.active_chain;
                             active_summary = restore.active_summary.clone();
+                            if let Ok(mut guard) = active_summary_arc.lock() {
+                                *guard = restore.active_summary;
+                            }
+                            if let Ok(mut guard) = frozen_chats.lock() {
+                                *guard = restore.frozen_chats;
+                            }
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
                                     messages: chain.messages_flat(),
-                                    session_id: resumed_id.clone(),
+                                    session_id: id.clone(),
                                     created_at: chrono::DateTime::parse_from_rfc3339(
                                         &restore.created_at,
                                     )
@@ -295,9 +260,19 @@ where
                                     .unwrap_or(0),
                                 })
                                 .await;
+                            if restore.trimmed > 0 || restore.repaired > 0 {
+                                log::info!(
+                                    target: "aemeath:agent:runtime",
+                                    "resume {}: trimmed={} repaired={}",
+                                    id,
+                                    restore.trimmed,
+                                    restore.repaired
+                                );
+                            }
                         }
-                        Err(crate::application::client::ResumeError::Load(e)) => {
+                        Err(e) => {
                             use context::session::SessionLoadError;
+                            use sdk::SessionResumeFailureKind;
                             let (kind, message) = match &e {
                                 SessionLoadError::NotFound { .. } => (
                                     SessionResumeFailureKind::NotFound,
@@ -327,60 +302,26 @@ where
                                 })
                                 .await;
                         }
-                        Err(crate::application::client::ResumeError::Coordinator(
-                            e,
-                        )) => {
+                    }
+                    continue;
+                }
+                PendingCommand::QueryReflectionHistory { limit } => {
+                    match list_reflection_history(limit).await {
+                        Ok(records) => {
                             let _ = sink
-                                .send_event(RuntimeStreamEvent::SessionResumeFailed {
-                                    kind: SessionResumeFailureKind::Io,
-                                    id: id.clone(),
-                                    message: format!("resume_prepared failed: {e}"),
+                                .send_event(RuntimeStreamEvent::ReflectionHistory { records })
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("List reflection history failed: {e}"),
+                                    is_error: true,
                                 })
                                 .await;
                         }
                     }
                     continue;
-                }
-                PendingCommand::RunReflection => match run_reflection_on_demand().await {
-                    Ok(view) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ReflectionResult {
-                                output: Box::new(view),
-                            })
-                            .await;
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Reflection failed: {e}"),
-                                is_error: true,
-                            })
-                            .await;
-                        continue;
-                    }
-                },
-                PendingCommand::ApplyReflection { output } => {
-                    match apply_reflection_on_demand(output).await {
-                        Ok(msg) => {
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: msg,
-                                    is_error: false,
-                                })
-                                .await;
-                            continue;
-                        }
-                        Err(e) => {
-                            let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: format!("Apply reflection failed: {e}"),
-                                    is_error: true,
-                                })
-                                .await;
-                            continue;
-                        }
-                    }
                 }
                 PendingCommand::ListModels => match list_models().await {
                     Ok(models) => {
@@ -421,7 +362,10 @@ where
     }
 
             'session: loop {
+                // Busy user messages are deliberately adopted one at a time: each starts a distinct Run.
                 let idle_result = if !pending_input.is_empty() {
+                    // Busy control events are serviced at idle before the next queued user Run. They are
+                    // never appended to model context.
                     let next_segment = ChatId::new_v7().to_string();
                     let gate = apply_gate(
                         GateKind::BeforeLlm,
@@ -523,23 +467,6 @@ where
                 let mut run = Run::new(RunSpec::main(), None);
                 let run_id = run.id().clone();
                 active_run.activate(run_id.clone(), cancel.clone());
-                // #871: Bind the Main Run BEFORE constructing the port so the port can capture
-                // the bound MemoryPort for the entire run lifetime. The shared admission
-                // permit held by `_bound` blocks `wiring.resume_prepared` (exclusive)
-                // until the run — including all Tools, Reflection, and Sub-runs — has
-                // fully completed and `_bound` is dropped.
-                let _bound = match wiring.bind_main_run().await {
-                    Ok(bound) => bound,
-                    Err(e) => {
-                        log::error!(target: LOG_TARGET, "bind_main_run failed (gate closed?): {e:?}");
-                        active_run.clear(&run_id);
-                        continue;
-                    }
-                };
-                // #871: Run-bound MemoryConfig from the committed ConfigSnapshot at bind time.
-                let bound_memory_config = _bound.config().memory().clone();
-                // #871: capture the committed memory Arc while the shared permit is held.
-                let bound_memory = wiring.committed_memory();
                 let mut port = MainRunPort {
                     sink: &sink,
                     queue: &queue,
@@ -562,8 +489,10 @@ where
                     max_tool_concurrency,
                     agent_semaphore: &agent_semaphore,
                     hook_runner: &hook_runner,
-                    memory_config: &bound_memory_config,
-                    memory: &bound_memory,
+                    memory_config: &memory_config,
+                    memory: &memory,
+                    reflection_history: &reflection_history,
+                    reflection_tasks: &reflection_tasks,
                     language: &language,
                     frozen_chats: &frozen_chats,
                     active_summary: &mut active_summary,
@@ -586,8 +515,6 @@ where
                     tool_identity: &tool_identity,
                     started_at,
                 };
-                // #871: Refresh context_size from committed ConfigSnapshot.
-                context_size = _bound.config().context_size();
                 let run_result = logging::within(
                     logging::LogContextPatch {
                         turn: logging::FieldPatch::Set(turn_count),
@@ -601,6 +528,9 @@ where
                 }
                 active_run.clear(&run_id);
             }
+            // Session shutdown joins any accepted background reflection before resources
+            // (notably history persistence) are released.
+            let _ = reflection_tasks.drain().await;
             chain
         },
     )

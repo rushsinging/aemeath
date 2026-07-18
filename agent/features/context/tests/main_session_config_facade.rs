@@ -194,7 +194,7 @@ async fn build_facade_harness(
         .prepare_for_project(&config_location)
         .await
         .unwrap();
-    config_service.commit_project(prepared_config);
+    config_service.commit_project(prepared_config).await;
 
     let task_store = Arc::new(TaskStore::new());
     let task_persist: Arc<dyn task::TaskPersist> = task_store.clone();
