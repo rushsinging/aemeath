@@ -1,29 +1,9 @@
-use crate::domain::ToolExecutionContext;
+use memory::api::{MemoryCategory, MemoryLayer};
 use serde_json::Value;
-use share::memory::{parse_category, parse_layer, MemoryCategory, MemoryLayer};
-use std::path::PathBuf;
-use storage::{memory_base_dir, project_file_name_from_path, MemoryStore};
 
 pub(super) const MAX_CONTENT_CHARS: usize = 500;
 pub(super) const MAX_TAGS: usize = 10;
 pub(super) const MAX_TAG_CHARS: usize = 32;
-
-pub(super) fn open_store(ctx: &ToolExecutionContext) -> Result<MemoryStore, String> {
-    open_store_with_base(ctx, memory_base_dir())
-}
-
-pub(super) fn open_store_with_base(
-    ctx: &ToolExecutionContext,
-    base_dir: PathBuf,
-) -> Result<MemoryStore, String> {
-    MemoryStore::new(
-        base_dir,
-        project_file_name_from_path(&ctx.workspace_read().current_workspace_root()),
-        ctx.resources.memory_config.max_entries,
-        ctx.resources.memory_config.similarity_threshold,
-    )
-    .map_err(|error| error.to_string())
-}
 
 pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
     input
@@ -36,18 +16,21 @@ pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str
 
 pub(super) fn optional_layer(input: &Value) -> Result<Option<MemoryLayer>, String> {
     match input.get("layer").and_then(|value| value.as_str()) {
-        Some(layer) => parse_layer(layer)
-            .map(Some)
-            .ok_or_else(|| format!("无效 memory layer: {layer}")),
+        Some("global") => Ok(Some(MemoryLayer::Global)),
+        Some("project") => Ok(Some(MemoryLayer::Project)),
+        Some(layer) => Err(format!("无效 memory layer: {layer}")),
         None => Ok(None),
     }
 }
 
 pub(super) fn optional_category(input: &Value) -> Result<Option<MemoryCategory>, String> {
     match input.get("category").and_then(|value| value.as_str()) {
-        Some(category) => parse_category(category)
-            .map(Some)
-            .ok_or_else(|| format!("无效 memory category: {category}")),
+        Some("fact") => Ok(Some(MemoryCategory::Fact)),
+        Some("decision") => Ok(Some(MemoryCategory::Decision)),
+        Some("preference") => Ok(Some(MemoryCategory::Preference)),
+        Some("pattern") => Ok(Some(MemoryCategory::Pattern)),
+        Some("pitfall") => Ok(Some(MemoryCategory::Pitfall)),
+        Some(category) => Err(format!("无效 memory category: {category}")),
         None => Ok(None),
     }
 }

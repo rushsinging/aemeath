@@ -136,10 +136,11 @@ Logger 可提供安全 preview helper，但业务 BC 仍负责识别自身敏感
 每个 sink 独立串行化写入，避免跨文件全局锁。文件模式使用 compact JSONL，单条 record 一行。
 
 ```rust
-trait DiagnosticSink: Send + Sync {
-    fn write(&self, line: &str) -> Result<(), SinkError>;
-    fn flush(&self) -> Result<(), SinkError>;
-}
+// Adapter-private fault-injection seam; not a public BC port.
+trait SinkWriter: Send { /* write_all + flush */ }
+trait FileOps: Send + Sync { /* open/metadata/exists/remove/rename/read_dir */ }
+trait MonotonicClock: Send + Sync { /* now */ }
+trait EmergencyWriter: Send + Sync { /* direct write */ }
 
 struct FileSinkLifecycle {
     state: SinkState,
@@ -165,6 +166,16 @@ enum SinkState { Healthy, Degraded, Recovering }
 - 同一健康 sink 的文件写顺序保持，跨 sink不承诺全局顺序；
 - retention 只删除符合本模块轮转命名协议的文件；
 - rotation 和 retention 静态参数来自 ConfigSnapshot。
+
+#939 冻结并实现以下 v1 语义：
+
+- 生命周期转换为 `Healthy --I/O failure--> Degraded`；`Degraded` 在同步写入口惰性恢复，到期首条 record 瞬时进入 `Recovering` 并只尝试一次 reopen；成功回到 `Healthy` 并写入该 record，失败回到 `Degraded`；
+- recovery interval 固定为 5 秒并使用单调时钟；无后台线程、指数退避或历史 record 重放；截止时间前的每条 record 仍直接写 emergency stderr；
+- startup 时某个 sink 的 open 失败只降级该 sink，不阻止其他 sink 或全局 logger 安装；日志根目录创建失败仍是整体初始化错误；
+- adapter-private `FileOps`、`SinkWriter`、`MonotonicClock`、`EmergencyWriter` 是 fault-injection seam，不进入公共 façade/port；open、write、flush、metadata、backup existence、remove、rename、rotation reopen 与 recovery reopen 故障均直接报告到 emergency stderr，且 `exists` 保留 `io::Result<bool>`、不得把 `try_exists` 错误吞成不存在；
+- 每个 sink 持有独立 mutex；一个 sink 的慢 I/O 或故障不占用其他 sink 的锁；显式 `Log::flush` 为 best-effort，flush 故障使对应 sink 降级并报告；全局 shutdown API 仍不在 v1 范围；
+- `max_bytes=0` 在 `LoggingSettings` 边界归一化为 1；`max_backups=0` 在轮转时删除 active 并重建空 active；
+- `retention_days=0` 禁用按天清理；非零时在初始化与每次成功轮转后清理 active 同目录、同 basename、非空数字 `.log.N` 后缀且为普通非 symlink 的过期 backup；其他 basename、目录、非法后缀、目录和 symlink 均不删除。retention 的 metadata/remove 故障直接报告但不破坏已恢复的健康 writer。
 
 Logging 是 best-effort：诊断 sink 失败不能自动阻断 Run；但失败必须可观察。需要“写失败就阻断”的数据不得走 Logging，应使用对应领域端口，例如 `AuditSink`。
 
@@ -219,10 +230,9 @@ src/
 │   ├── schema.rs           #   14 字段 DiagnosticRecord + LogContext / LogScope
 │   ├── filter.rs           #   FilterPolicy + 级别 / preview / 脱敏策略
 │   └── routing.rs          #   TargetCatalog + 最长前缀路由 + target 校验规则
-├── ports.rs               # DiagnosticSink trait 定义（消费方拥有的出站 seam）
 └── adapters/
-    ├── file_sink.rs        #   FileSinkLifecycle + stderr fallback（实现 DiagnosticSink）
-    └── lifecycle.rs        #   rotation + retention + shutdown
+    ├── file_sink.rs        #   FileSinkLifecycle + adapter-private fault seam + stderr fallback
+    └── lifecycle.rs        #   rotation + retention + recovery
 ```
 
 每个阶段是同一条 `DiagnosticRecord → 过滤 → 路由 → 写入 → 轮转` 管线的一个环节。`domain` 定义 schema、过滤策略和路由规则；`adapters` 实现具体的文件写入、rotation 与 retention 机械流程。各文件 **MUST** 私有，只通过 façade 暴露 `DiagnosticRecord` 与 `LogScope`；file writer 句柄、rotation 机械流程和 target wire type **NEVER** 泄漏到 façade 之外。跨阶段共享的 14 字段契约由 `domain/schema.rs` 唯一定义，**NEVER** 在其他文件重复字段定义。
@@ -238,6 +248,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | 实现可恢复 FileSinkLifecycle：per-sink lock、5 秒惰性 reopen、direct emergency stderr、完整 I/O fault seam、rotation/retention 与 max-bytes 边界语义 | [#939](https://github.com/rushsinging/aemeath/issues/939) |
 | 2026-07-12 | 摘要初稿：14 字段 schema、TargetCatalog、scope-local context、sink 降级及 Audit 分离 | #793 |
 | 2026-07-15 | 增加 `aemeath:llm-api-error` 独立诊断 sink、受控 JSON payload 与 Provider-owned 脱敏边界 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-07-16 | 冻结 Logging Target 物理目录：`schema`/`filter`/`routing`/`sink`/`lifecycle` 技术管线；明确不建 `capabilities/`（各目录是同一诊断管线阶段，无独立业务状态所有权） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |

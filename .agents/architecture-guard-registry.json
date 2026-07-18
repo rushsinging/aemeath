@@ -202,19 +202,19 @@
       "status": "active"
     },
     {
-      "id": "scope.config.reader-tests-and-reflection",
+      "id": "scope.config.reader-tests-only",
       "guard": "check-config-reader-injection.sh",
       "module": "config",
       "scope": {
         "kind": "pattern",
-        "value": "test paths and trait_reflection.rs"
+        "value": "test paths and file-tail cfg(test) inline modules"
       },
       "classification": "scope_exclusion",
       "owner": "config",
-      "reason": "Test construction and the registered Runtime reflection bridge are outside the production construction rule",
-      "tracking_issue": 879,
+      "reason": "Test-only ConfigAppService construction is outside the production construction rule",
+      "tracking_issue": 949,
       "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove trait_reflection scope when Runtime production cutover completes; retain test scope",
+      "exit_condition": "permanent while tests require direct fixture construction",
       "status": "active"
     },
     {

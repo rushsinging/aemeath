@@ -15,8 +15,8 @@ pub use domain::{
     AgentToolCallProgress, ImageData, PolicyDecision, ProfileExpansionError, RegistryScopeName,
     SessionReminder, SessionReminders, Tool, ToolCapabilities, ToolCapability, ToolCatalogPort,
     ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolInvocation, ToolListProvider, ToolOutcome, ToolProfile, ToolProfileName, ToolResources,
-    ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
+    ToolInvocation, ToolListProvider, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
+    ToolResources, ToolResult, TypedTool, TypedToolAdapter, TypedToolResult,
 };
 
 // Gateway/OHS: tool catalog and registration wiring.

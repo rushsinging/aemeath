@@ -271,6 +271,7 @@ mod tests {
                 skills_map: std::collections::HashMap::new(),
                 hook_runner: hook::api::HookRunner::empty(),
                 memory_config,
+                memory: std::sync::Arc::new(memory::NoOpMemory),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
                 allow_all: false,
                 context_size: 200_000,

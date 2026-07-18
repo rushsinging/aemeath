@@ -74,6 +74,8 @@ where
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
+    /// Memory domain port（MemoryTool 使用）。
+    pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
@@ -151,6 +153,7 @@ where
     fn make_agent<'b>(
         registry: &'b Arc<tools::ToolRegistry>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
+        memory: &Arc<dyn memory::MemoryPort>,
         memory_config: &share::config::MemoryConfig,
         language: &str,
         allow_all: bool,
@@ -170,6 +173,7 @@ where
                 resources: tools::ToolResources {
                     agent_runner: agent_runner.clone(),
                     registry: Some(registry.clone() as Arc<dyn tools::ToolListProvider>),
+                    memory: memory.clone(),
                     memory_config: memory_config.clone(),
                     lang: language.to_string(),
                     allow_all,
@@ -614,6 +618,7 @@ where
         let agent = Self::make_agent(
             self.registry,
             self.agent_runner,
+            self.memory,
             self.memory_config,
             self.language,
             self.allow_all,

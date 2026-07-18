@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 share = { path = "../../shared" }
 project = { path = "../project" }
+memory = { path = "../memory" }
 storage = { path = "../storage" }
 task = { path = "../task" }
 tokio = { workspace = true }

@@ -5,6 +5,8 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+sdk = { path = "../../../packages/sdk" }
+tools = { path = "../tools" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"

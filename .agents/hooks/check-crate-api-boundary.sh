@@ -81,6 +81,7 @@ TOOLS_DOMAIN_FACADE = {
     "ToolExecutionPort",
     "ToolInvocation",
     "ToolListProvider",
+    "ToolName",
     "ToolOutcome",
     "ToolProfile",
     "ToolProfileName",
@@ -109,6 +110,7 @@ TOOLS_ADAPTER_FACADE = {
 TOOLS_ROOT_ACCESS_ALLOW = {"LOG_TARGET", "types"} | TOOLS_DOMAIN_FACADE | TOOLS_ADAPTER_FACADE
 
 ROOT_ACCESS_ALLOW = {
+    "memory": {"api"},
     "provider": {
         "CancellationSignal",
         "InvocationDelta",
@@ -182,7 +184,10 @@ ROOT_ACCESS_ALLOW = {
         "UsageSink",
         "from_args_with_workspace",
     },
-      "policy": set(),
+    "policy": {
+        "AllowAllPolicy", "ApprovalSubject", "PolicyDecision", "PolicyMode", "PolicyPort",
+        "PolicyReason", "PolicyRequest", "PolicyRequestError",
+    },
     "workflow": set(),
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     "tools": TOOLS_ROOT_ACCESS_ALLOW,
@@ -190,7 +195,7 @@ ROOT_ACCESS_ALLOW = {
     "context": {"compact", "context_port", "domain", "guidance", "session", "skill", "compose_session_task_capture", "LegacyTaskCapture"},
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
     "storage": {
-        "Batch",
+        "FileSystemDatasetAdapter",
         "BatchStatus",
         "MemoryStore",
         "SafeOpenOptions",

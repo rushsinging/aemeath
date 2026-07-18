@@ -5,6 +5,7 @@ pub const LOG_TARGET: &str = "aemeath:composition";
 
 pub mod app;
 pub mod audit;
+pub mod memory;
 pub mod provider;
 pub mod runtime;
 pub mod tools;

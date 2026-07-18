@@ -16,8 +16,8 @@ import sys
 
 root = Path.cwd()
 src = root / "agent" / "composition" / "src"
-allowed_files = {"lib.rs", "app.rs", "audit.rs", "provider.rs", "runtime.rs", "tools.rs", "update.rs"}
-expected_modules = {"app", "audit", "provider", "runtime", "tools", "update"}
+allowed_files = {"lib.rs", "app.rs", "audit.rs", "memory.rs", "provider.rs", "runtime.rs", "tools.rs", "update.rs"}
+expected_modules = {"app", "audit", "memory", "provider", "runtime", "tools", "update"}
 forbidden_layers = {
     "domain", "application", "ports", "adapters",
     "api", "business", "contract", "core", "gateway", "capabilities",
@@ -68,6 +68,7 @@ else:
         required_patterns = {
             "provider gateway forwarding": r"gateways\.provider",
             "tool gateway forwarding": r"gateways\.tools",
+            "policy gateway forwarding": r"gateways\.policy",
         }
         for label, pattern in required_patterns.items():
             if not re.search(pattern, text):
@@ -85,6 +86,7 @@ else:
         required_patterns = {
             "injected provider gateway parameter": r"provider_gateway\s*:\s*Arc<dyn provider::LlmProviderGateway>",
             "injected tool gateway parameter": r"tool_gateway\s*:\s*Arc<dyn tools::ToolCatalogGateway>",
+            "injected policy parameter": r"policy\s*:\s*Arc<dyn policy::PolicyPort>",
             "provider gateway client construction": r"build_llm_client_with_gateway\s*\(\s*provider_gateway\.as_ref\(\)",
             "tool gateway registry construction": r"tool_gateway\.new_registry\s*\(\)",
             "tool gateway registration": r"tool_gateway\.register_all_tools\s*\(",

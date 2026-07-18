@@ -25,8 +25,10 @@ pub struct RuntimeBootstrapDependencies {
     config_reader: Arc<dyn config::ConfigReader>,
     config_query: Arc<dyn config::ConfigQuery>,
     config_writer: Arc<dyn config::ConfigWriter>,
+    memory: Arc<dyn memory::MemoryPort>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+    policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 }
@@ -35,8 +37,10 @@ impl RuntimeBootstrapDependencies {
     pub fn new(
         workspace: project::WorkspaceViews,
         config: RuntimeConfigDependencies,
+        memory: Arc<dyn memory::MemoryPort>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
         tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+        policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
         session_tasks: Arc<dyn context::LegacyTaskCapture>,
     ) -> Self {
@@ -45,8 +49,10 @@ impl RuntimeBootstrapDependencies {
             config_reader: config.reader,
             config_query: config.query,
             config_writer: config.writer,
+            memory,
             provider_gateway,
             tool_gateway,
+            policy,
             task_access,
             session_tasks,
         }
@@ -96,11 +102,16 @@ pub async fn from_args_with_workspace(
         config_reader,
         config_query,
         config_writer,
+        memory,
         provider_gateway,
         tool_gateway,
+        policy,
         task_access,
         session_tasks,
     } = dependencies;
+    // #917: Policy adapter 由 Composition 构造；#918 接入统一 tool coordination。
+    let _policy = policy;
+
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -288,6 +299,7 @@ pub async fn from_args_with_workspace(
             skills_map,
             hook_runner,
             memory_config,
+            memory,
             agent_semaphore,
             allow_all: args.allow_all,
             context_size,
@@ -449,8 +461,10 @@ mod tests {
         let dependencies = RuntimeBootstrapDependencies::new(
             workspace,
             RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
+            Arc::new(memory::NoOpMemory),
             provider::wire_provider(),
             tools::wire_tools(),
+            Arc::new(policy::AllowAllPolicy),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         );

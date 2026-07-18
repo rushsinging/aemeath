@@ -44,7 +44,10 @@ pub use hook_port::{HookInvocation, HookOutcome, HookPoint, HookPort};
 pub use input_buffer::InputBuffer;
 pub(crate) use input_buffer::{RuntimeInputEventDrainPort, RuntimeQueueDrainPort};
 pub use memory_port::{MemoryEntry, MemoryPort, MemoryQuery};
-pub use policy_port::{PolicyDecision, PolicyPort, PolicyRequest};
+pub use policy_port::{
+    ApprovalSubject, PolicyDecision, PolicyMode, PolicyPort, PolicyReason, PolicyRequest,
+    PolicyRequestError,
+};
 pub use provider_port::{
     InvocationDelta, InvocationEvent, InvocationOptions, InvocationRequest, InvocationStream,
     ModelCapability, ModelId, ModelToolSchema, ProviderCompletion, ProviderContentBlock,
