@@ -1,7 +1,6 @@
-use crate::adapters::policy_request::adapt_policy_request;
 use crate::application::agent::ToolCall;
-use policy::{PolicyDecision, PolicyPort};
-use tools::ToolRegistry;
+use policy::{PolicyDecision, PolicyPort, PolicyRequest};
+use tools::{ToolName, ToolRegistry};
 
 use super::engine::DeniedCall;
 
@@ -24,14 +23,19 @@ pub(crate) fn evaluate_calls(
             ));
             continue;
         };
-        let request =
-            match adapt_policy_request(run_id, step_id, &call.name, capabilities, workspace_root) {
-                Ok(request) => request,
-                Err(error) => {
-                    denied.push(denied_call(call, &error.to_string()));
-                    continue;
-                }
-            };
+        let request = match PolicyRequest::new(
+            run_id.clone(),
+            step_id.clone(),
+            ToolName::new(&call.name),
+            capabilities,
+            workspace_root,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                denied.push(denied_call(call, &error.to_string()));
+                continue;
+            }
+        };
         match policy.evaluate(&request) {
             PolicyDecision::Allow => approved.push(call.clone()),
             PolicyDecision::Deny { reason } => {
