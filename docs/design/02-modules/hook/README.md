@@ -220,8 +220,10 @@ Stop Hook 是 Hook 与 Run 状态机的关键协作点，完整语义见 [01-run
 
 - Hook command 是用户配置 shell，必须明确 workspace_root 和环境变量白名单；
 - stdin 使用结构化 JSON；
-- stdout/stderr 应有大小上限，超限内容交 Storage 机制处理，不直接塞入模型窗口；
-- timeout 必须 kill + wait 回收子进程；
+- stdout/stderr 分别有内存字节上限；达到上限后继续 drain 管道以避免反压死锁，超限部分不进入模型窗口；Storage spill 由独立后续能力承接；
+- timeout/cancel/IO 故障使用同一完整 deadline 与回收路径；
+- Unix 下每次执行创建独立进程组，回收协议固定为进程组 `TERM → grace → KILL`，返回前必须 `wait` 直接子进程；
+- 不支持进程组语义的平台必须显式返回 ExecutionFailed，**NEVER** 用仅杀直接 child 伪造完成；
 - Hook 输出的 updated input 必须由调用方重新执行 schema/Policy 校验；
 - Hook BC 不决定 updated input 是否进入 Tool 或 Context Window。
 
@@ -272,6 +274,7 @@ src/
 ├── ports.rs               # HookPort trait 签名，仅依赖 domain
 ├── adapters.rs            # 技术实现入口
 └── adapters/
+    ├── process.rs          # 受管进程组、完整 deadline、有界并发 IO、TERM/KILL/wait
     └── legacy/             # #926 前保留的 HookRunner / wire compatibility
 ```
 
@@ -292,3 +295,4 @@ src/
 | 2026-07-12 | 初稿：单 HookPort、类型化协议、失败策略与 3 次执行重试 | #790 |
 | 2026-07-16 | 冻结 Hook Target 物理目录：扁平核心 + `protocol/`（类型化协议）与 `executor/`（进程执行）技术目录；明确不建 `capabilities/`（单一 dispatch 能力无独立业务切片） | [#972](https://github.com/rushsinging/aemeath/issues/972) / [#991](https://github.com/rushsinging/aemeath/issues/991) |
 | 2026-07-18 | 修正 Target 层级方向：HookPort 使用的稳定 PL 归 `domain`，进程与兼容 wire detail 归 `adapters`，避免 `ports → adapters` 反向依赖 | [#987](https://github.com/rushsinging/aemeath/issues/987) |
+| 2026-07-18 | 落地 Unix 受管 ProcessDriver：独立进程组、完整 deadline、有界并发 IO 与 `TERM → KILL → wait` 回收；retry 仍由 #924 承接 | [#923](https://github.com/rushsinging/aemeath/issues/923) |
