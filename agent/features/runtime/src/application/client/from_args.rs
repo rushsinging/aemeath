@@ -107,6 +107,10 @@ impl RuntimeBootstrapDependencies {
         }
     }
 
+    pub fn reflection_history(&self) -> Arc<dyn memory::api::ReflectionHistoryStore> {
+        self.reflection_history.clone()
+    }
+
     pub fn task_access(&self) -> Arc<dyn task::TaskAccess> {
         self.task_access.clone()
     }

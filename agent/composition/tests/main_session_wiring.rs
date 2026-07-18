@@ -218,6 +218,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
         share::config::paths::global_memory_dir(),
     ));
+    let project_key =
+        memory::api::ProjectMemoryKey::derive(root.to_str().expect("project root is UTF-8"), None)
+            .expect("derive key");
+    let reflection_history: Arc<dyn memory::api::ReflectionHistoryStore> = Arc::new(
+        memory::AtomicDatasetReflectionHistoryStore::new(dataset_adapter.clone(), project_key),
+    );
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
         dataset_adapter,
         legacy_factory,
@@ -242,6 +248,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         wiring,
         provider::wire_provider(),
         tools::wire_tools(),
+        reflection_history,
         Arc::new(policy::AllowAllPolicy),
         task_access,
         session_tasks,
