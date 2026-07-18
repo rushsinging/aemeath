@@ -9,6 +9,19 @@ use tools::{
     Tool, ToolExecutionContext, ToolRegistry, TypedTool, TypedToolAdapter, TypedToolResult,
 };
 
+fn test_memory_source() -> Arc<dyn tools::MemoryPortSource> {
+    struct TestSource;
+    impl tools::MemoryPortSource for TestSource {
+        fn current(&self) -> Arc<dyn memory::MemoryPort> {
+            Arc::new(
+                memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                    .expect("valid default policy"),
+            )
+        }
+    }
+    Arc::new(TestSource)
+}
+
 /// A tool that records the start time and sleeps briefly.
 /// Marked as concurrency-safe or not depending on constructor.
 struct TimedTool {
@@ -59,6 +72,7 @@ fn test_ctx() -> ToolExecutionContext {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),
+            memory_source: test_memory_source(),
             lang: "en".to_string(),
             allow_all: true,
         },

@@ -6,7 +6,9 @@ set -euo pipefail
 # 作用：固化 feature 依赖方向（cli→{composition,sdk}；runtime→全部 supporting；
 #       supporting→share；share/sdk→∅），默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 # 例外（白名单内已批准）：runtime/tools→task（Task-owned OHS/PL）；
-#       context→task（#890 Session persistence adapter 消费 Task TaskPersist capability）；
+#       context→{project,config,memory,task}（#871 Main Session 联合协调消费供应方 façade/PL）；
+#       runtime/tools→memory（#871 消费 Memory-owned OHS/PL）；
+#       memory→share（消费 ConfigSnapshot 发布的 MemoryConfig PL）；
 #       tools→{project,storage}（§6.4.7 横向依赖登记）；composition→全部 feature（唯一装配根）。
 #       task 反向依赖任一消费者（runtime/tools/context）仍被拒绝。
 
@@ -19,24 +21,24 @@ import subprocess
 import sys
 
 FEATURE_CRATES = {"runtime", "config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
-TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task"}
+TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task", "memory"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
     "cli": {"composition", "sdk"},
     # Composition root may assemble runtime, shared adapters/ports, sdk, and feature gateways.
     "composition": FEATURE_CRATES | {"share", "sdk", "logging", "update"},
-    "runtime": {"config", "project", "policy", "context", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
+    "runtime": {"config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "workflow", "share", "sdk", "logging"},
     "config": {"share", "storage"},
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},
     "policy": {"share"},
-    "context": {"share", "provider", "storage", "task", "sdk"},
-    "memory": {"storage", "utils"},
+    "context": {"share", "provider", "storage", "project", "config", "memory", "task", "sdk"},
+    "memory": {"share", "storage", "utils"},
     "provider": {"share"},
-    # Approved horizontal dependencies: tools -> project/storage and Task-owned OHS/PL.
-    "tools": {"share", "project", "storage", "task"},
+    # Approved horizontal dependencies: tools -> project/storage, Memory/Task-owned OHS/PL.
+    "tools": {"share", "project", "storage", "memory", "task"},
     "storage": {"share"},
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),
@@ -76,8 +78,16 @@ def run_sanity() -> None:
         raise AssertionError("sanity allow failed: composition assembling runtime/share/sdk/provider")
     if validate_edges({"cli": {"composition", "sdk"}}, workspace):
         raise AssertionError("sanity allow failed: CLI composition + sdk")
-    if validate_edges({"runtime": {"task"}, "tools": {"task"}, "context": {"task"}}, workspace):
-        raise AssertionError("sanity allow failed: Runtime/Tools consuming TaskAccess and Context consuming Task persistence")
+    if validate_edges(
+        {
+            "runtime": {"task", "memory"},
+            "tools": {"task", "memory"},
+            "context": {"project", "config", "memory", "task"},
+            "memory": {"share"},
+        },
+        workspace,
+    ):
+        raise AssertionError("sanity allow failed: approved #871/#890 supplier façade and PL edges")
     if not validate_edges({"task": {"runtime"}}, workspace):
         raise AssertionError("sanity block failed: Task must not depend on Runtime consumer")
     if not validate_edges({"cli": {"runtime"}}, workspace):

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use share::config::MemoryConfig;
 
-use super::{AgentRunner, ToolListProvider};
+use super::{AgentRunner, MemoryPortSource, ToolListProvider};
 
 /// Tool 执行所需的共享资源——跨 session 不变的配置和服务句柄。
 ///
@@ -22,6 +22,10 @@ pub struct ToolResources {
     pub registry: Option<Arc<dyn ToolListProvider>>,
     /// Memory system configuration（MemoryTool 使用）。
     pub memory_config: MemoryConfig,
+    /// Memory port source（MemoryTool 使用）。
+    /// Runtime/Composition 提供，从 `MainSessionWiring::committed_memory()` 取值。
+    /// 子 agent 注册 fresh registry 时从父 context 克隆，保持同一项目绑定。
+    pub memory_source: Arc<dyn MemoryPortSource>,
     /// Current language code (`"en"` / `"zh"`)，用于选择 i18n 文案。
     pub lang: String,
     /// Whether all tools are auto-approved（跳过权限检查）。

@@ -428,6 +428,19 @@ mod tests {
     use std::sync::Arc;
     use tools::{ToolExecutionContext, ToolRegistry, TypedTool, TypedToolResult};
 
+    fn test_memory_source() -> Arc<dyn ::tools::MemoryPortSource> {
+        struct TestSource;
+        impl ::tools::MemoryPortSource for TestSource {
+            fn current(&self) -> Arc<dyn memory::MemoryPort> {
+                Arc::new(
+                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                        .expect("valid default policy"),
+                )
+            }
+        }
+        Arc::new(TestSource)
+    }
+
     struct ConcurrencyFlagTool {
         name: &'static str,
         safe: bool,
@@ -469,6 +482,7 @@ mod tests {
                 agent_runner: None,
                 registry: None,
                 memory_config: share::config::MemoryConfig::default(),
+                memory_source: test_memory_source(),
                 lang: "en".to_string(),
                 allow_all: true,
             },

@@ -11,7 +11,7 @@ use provider::{LlmClient, SystemBlock};
 use share::config::MemoryConfig;
 use storage::TaskStore;
 use task::TaskAccess;
-use tools::{AgentRunner, ToolRegistry};
+use tools::{AgentRunner, MemoryPortSource, ToolRegistry};
 
 /// Runtime 不变共享件——跨 session/loop/tool 传递的同一组资源。
 ///
@@ -40,6 +40,8 @@ pub struct RuntimeResources {
     pub system_prompt_text: String,
     pub user_context: String,
     pub memory_config: MemoryConfig,
+    /// MemoryPortSource（MemoryTool 使用）。从 wiring.committed_memory() 取值。
+    pub memory_source: Arc<dyn MemoryPortSource>,
     pub skills_map: HashMap<String, Skill>,
     pub context_size: usize,
     pub allow_all: bool,

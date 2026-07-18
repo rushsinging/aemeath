@@ -15,6 +15,7 @@ storage = { path = "../storage" }
 task = { path = "../task" }
 hook = { path = "../hook" }
 audit = { path = "../audit" }
+memory = { path = "../memory" }
 workflow = { path = "../workflow" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -38,3 +39,6 @@ sdk = { path = "../../../packages/sdk" }
 logging = { path = "../../../packages/global/logging" }
 
 tempfile = "3"
+
+[dev-dependencies]
+context = { path = "../context", features = ["dev"] }

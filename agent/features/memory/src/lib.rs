@@ -9,7 +9,8 @@ mod ports;
 mod service;
 
 pub use adapters::{
-    map_storage_error, AtomicDatasetMemoryStore, InMemoryMemory, MemoryPolicy, ProjectMemoryOpener,
+    map_storage_error, AtomicDatasetMemoryStore, DatasetMemoryOpener,
+    FileLegacyMemorySourceFactory, InMemoryMemory, MemoryPolicy, ProjectMemoryOpener,
 };
 pub use domain::*;
 pub use ports::*;

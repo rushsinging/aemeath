@@ -1,10 +1,15 @@
 //! Shared reflection utilities used by both TUI and REPL paths.
+//!
+//! All paths drive reflection through a single bound `memory::MemoryPort`:
+//! Main-run callers pass `BoundMainRun::memory`; idle/forced callers acquire the
+//! committed memory under `wiring.with_shared`. The runtime never opens
+//! `storage::MemoryStore`.
 
-use crate::application::reflection::runner::run_complete_reflection_with_base_dir;
-use crate::application::reflection::ReflectionRunMode;
+use crate::application::reflection::run_complete_reflection;
+use crate::application::reflection::{CompleteReflectionResult, ReflectionRunMode};
 use crate::LOG_TARGET;
+use memory::MemoryPort;
 use provider::StopReason;
-use std::path::{Path, PathBuf};
 
 /// Build the reflection context (memory + recent messages), call LLM, parse result.
 ///
@@ -14,28 +19,29 @@ pub async fn run_reflection(
     config: &share::config::MemoryConfig,
     turn_count: usize,
     messages: &[share::message::Message],
-    cwd: &Path,
+    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
 ) -> Option<String> {
-    run_reflection_with_base_dir(
+    run_complete(
+        ReflectionRunMode::Interval { turn_count },
         config,
-        turn_count,
         messages,
-        cwd,
+        memory,
         client,
         system_prompt_text,
-        storage::memory_base_dir(),
         lang,
+        "Interval reflection failed",
     )
     .await
+    .map(|result| result.formatted_content)
 }
 
 pub async fn run_precompact_reflection(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    cwd: &Path,
+    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
@@ -44,16 +50,18 @@ pub async fn run_precompact_reflection(
     if compacted_messages.is_empty() {
         return None;
     }
-    run_forced_reflection_with_base_dir(
+    run_complete(
+        ReflectionRunMode::Forced,
         config,
         &compacted_messages,
-        cwd,
+        memory,
         client,
         system_prompt_text,
-        storage::memory_base_dir(),
         lang,
+        "Forced reflection failed",
     )
     .await
+    .map(|result| result.formatted_content)
 }
 
 pub(crate) fn should_run_turn_reflection(
@@ -76,62 +84,32 @@ pub(crate) fn should_run_turn_reflection(
     turn_count.is_multiple_of(config.reflection.interval_turns)
 }
 
-async fn run_forced_reflection_with_base_dir(
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    cwd: &Path,
-    client: &provider::LlmClient,
-    system_prompt_text: &str,
-    base_dir: PathBuf,
-    lang: &str,
-) -> Option<String> {
-    match run_complete_reflection_with_base_dir(
-        ReflectionRunMode::Forced,
-        config,
-        messages,
-        cwd,
-        client,
-        system_prompt_text,
-        base_dir,
-        lang,
-    )
-    .await
-    {
-        Ok(Some(result)) => Some(result.formatted_content),
-        Ok(None) => None,
-        Err(e) => {
-            log::warn!(target: LOG_TARGET, "Forced reflection failed: {e}");
-            None
-        }
-    }
-}
 #[allow(clippy::too_many_arguments)]
-async fn run_reflection_with_base_dir(
+async fn run_complete(
+    mode: ReflectionRunMode,
     config: &share::config::MemoryConfig,
-    turn_count: usize,
     messages: &[share::message::Message],
-    cwd: &Path,
+    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
-    base_dir: PathBuf,
     lang: &str,
-) -> Option<String> {
-    match run_complete_reflection_with_base_dir(
-        ReflectionRunMode::Interval { turn_count },
+    failure_label: &str,
+) -> Option<CompleteReflectionResult> {
+    match run_complete_reflection(
+        mode,
         config,
         messages,
-        cwd,
+        memory,
         client,
         system_prompt_text,
-        base_dir,
         lang,
     )
     .await
     {
-        Ok(Some(result)) => Some(result.formatted_content),
+        Ok(Some(result)) => Some(result),
         Ok(None) => None,
         Err(e) => {
-            log::warn!(target: LOG_TARGET, "Interval reflection failed: {e}");
+            log::warn!(target: LOG_TARGET, "{failure_label}: {e}");
             None
         }
     }

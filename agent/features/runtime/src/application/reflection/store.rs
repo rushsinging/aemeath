@@ -1,5 +1,4 @@
-use share::memory::{MemoryEntry, MemoryLayer};
-use storage::MemoryStore;
+use memory::{MemoryEntry, MemoryLayer, MemoryPort};
 
 pub fn memory_summary(entries: &[MemoryEntry]) -> String {
     entries
@@ -16,9 +15,10 @@ pub fn memory_summary(entries: &[MemoryEntry]) -> String {
         .join("\n")
 }
 
-pub fn project_memory_summary(store: &MemoryStore) -> String {
-    let entries = store
-        .list(Some(MemoryLayer::Project))
-        .unwrap_or_else(|_| Vec::new());
+/// Builds the project-memory context for the reflection prompt by reading the
+/// Project layer straight from the bound `MemoryPort` — never opening legacy
+/// `storage::MemoryStore`.
+pub fn project_memory_summary(port: &dyn MemoryPort) -> String {
+    let entries = port.list(Some(MemoryLayer::Project));
     memory_summary(&entries)
 }

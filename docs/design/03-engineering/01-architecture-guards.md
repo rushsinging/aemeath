@@ -94,14 +94,14 @@
 |---|---|
 | `cli` | `composition`, `sdk` |
 | `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
+| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging` |
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `task`, `sdk` |
-| `memory` | `storage`, `utils` |
+| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `sdk` |
+| `memory` | `share`, `storage`, `utils` |
 | `provider` | `share` |
-| `tools` | `share`, `project`, `storage`, `task` |
+| `tools` | `share`, `project`, `storage`, `memory`, `task` |
 | `storage` | `share` |
 | `task` | ∅ |
 | `hook` | `share` |
@@ -117,8 +117,9 @@
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
 - **例外 / 已批准跨 BC 依赖**：
-  - `runtime/tools → task`：消费 Task-owned `TaskAccess` OHS 与 Published Language；`task` 反向依赖消费者仍被拒绝。
-  - `context → task`：Context Session adapter 消费 Task-owned `TaskPersist` 与 snapshot Published Language；Runtime/Tools 的 persistence/restore authority 由 `check-task-persistence-capability.sh` 机械拒绝。
+  - `runtime/tools → {task,memory}`：分别消费 Task-owned `TaskAccess` 与 Memory-owned `MemoryPort` / `MemoryPortSource` Published Language；Task / Memory 反向依赖消费者仍被拒绝。
+  - `context → {project,config,memory,task}`：#871 Main Session 联合协调器消费各供应 BC 的窄 façade / PL；Context 不穿透其内部类型。
+  - `memory → share`：只消费 ConfigSnapshot 发布的 `MemoryConfig` 值类型，不依赖 Config service。
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
@@ -246,9 +247,11 @@
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
-  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, RuntimeBootstrapDependencies, RuntimeConfigDependencies, UsageSink, from_args_with_workspace}`：Composition 以 typed bootstrap value 注入 Workspace/Config/Provider/Tool/Task views，避免散点参数持续膨胀；`UsageSink` 供 #931 bridge，实现细节仍私有。
-  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session, compose_session_task_capture, LegacyTaskCapture}`
-  - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory façade 符号集合；#884 已移除 Tool Result 的 `MAX_TOOL_RESULT_CHARS` / `persist_oversized_results`，Runtime 只经 `storage::api::AtomicBlobPort` 与 composition-only `FileSystemBlobAdapter` 接线，不再允许 Storage 业务 helper。#983 的 AtomicDataset 跨 crate 消费 deferred 至 #896，届时再按真实调用点治理；未新增 path exception 或 Guard allowlist。过渡集合最终随 #883/#896 收敛。
+  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, RuntimeBootstrapDependencies, UsageSink, from_args_with_workspace, resume_session_to_backing, ResumeError}`：Composition 注入唯一 `MainSessionWiring` 与 Provider/Tool/Task views；`UsageSink` 供 #931 bridge，实现细节仍私有。
+  - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、projection participant、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。
+  - `ROOT_ACCESS_ALLOW.memory`：#871 登记 Memory-owned OHS/PL、project key、opener、legacy source factory、dataset adapter contract 与稳定错误/receipt；消费方只经 crate-root façade。
+  - `ROOT_ACCESS_ALLOW.tools`：在既有 Published Language 上新增 tools-owned `MemoryPortSource` 窄 seam，供已注册 `MemoryTool` 在 resume 后动态取得 committed MemoryPort。
+  - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade加 `FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 供唯一 Composition/Config production factory 装配；业务消费者仍只经 Storage OHS。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
   - `POLICY_FORBIDDEN_PATHS` 禁止 Policy 的 `api/business/contract/core/gateway/capabilities` 文件与目录恢复
 - **检查方式**：
@@ -316,7 +319,7 @@
 | CTX-R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
 | CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
 | CTX-R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
-| CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）与 `runtime/` | 与 CTX-R2 重叠的兜底 |
+| CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）、Context Session 联合协调与 `runtime/` | 与 CTX-R2 重叠的兜底；Context 是 Session 恢复消费者 |
 
 - **白名单**（路径级 allowlist）：
 

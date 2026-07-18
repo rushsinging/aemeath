@@ -193,7 +193,7 @@ mod tests {
     use task::TaskAccess;
     use tokio::sync::Mutex;
     use tokio_util::sync::CancellationToken;
-    use tools::{DefaultToolCatalogGateway, ToolCatalogGateway, ToolRegistry};
+    use tools::{DefaultToolCatalogGateway, MemoryPortSource, ToolCatalogGateway, ToolRegistry};
 
     #[derive(Default)]
     struct CountingProviderGateway {
@@ -252,9 +252,15 @@ mod tests {
             registry: &ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+            memory_source: Arc<dyn MemoryPortSource>,
         ) {
             self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
-            DefaultToolCatalogGateway.register_all_tools(registry, task_access, skills);
+            DefaultToolCatalogGateway.register_all_tools(
+                registry,
+                task_access,
+                skills,
+                memory_source,
+            );
         }
 
         fn register_all_tools_except_agent(
@@ -262,11 +268,13 @@ mod tests {
             registry: &ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+            memory_source: Arc<dyn MemoryPortSource>,
         ) {
             DefaultToolCatalogGateway.register_all_tools_except_agent(
                 registry,
                 task_access,
                 skills,
+                memory_source,
             );
         }
 
@@ -275,8 +283,14 @@ mod tests {
             registry: &mut ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+            memory_source: Arc<dyn MemoryPortSource>,
         ) {
-            DefaultToolCatalogGateway.register_subagent_tools(registry, task_access, skills);
+            DefaultToolCatalogGateway.register_subagent_tools(
+                registry,
+                task_access,
+                skills,
+                memory_source,
+            );
         }
     }
 

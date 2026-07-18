@@ -7,7 +7,21 @@ ADAPTERS="$ROOT/agent/features/config/src/adapters.rs"
 
 violations=""
 if [ -f "$APPLICATION" ]; then
-  violations=$(grep -nE 'tokio::fs|std::fs|read_to_string|serde_json::(from_|to_)' "$APPLICATION" || true)
+  # Production application code must only orchestrate adapters. A terminal
+  # inline #[cfg(test)] module may use filesystem/serde fixtures.
+  violations=$(python3 - "$APPLICATION" <<'PY'
+from pathlib import Path
+import re
+import sys
+text = Path(sys.argv[1]).read_text()
+marker = re.search(r'(?m)^\s*#\[cfg\(test\)\]\s*\n\s*mod\s+tests\s*\{', text)
+production = text[:marker.start()] if marker else text
+pattern = re.compile(r'tokio::fs|std::fs|read_to_string|serde_json::(?:from_|to_)')
+for number, line in enumerate(production.splitlines(), 1):
+    if pattern.search(line):
+        print(f"{number}:{line}")
+PY
+  )
 fi
 stubs=""
 if [ -f "$ADAPTERS" ]; then

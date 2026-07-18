@@ -1,9 +1,10 @@
+use super::apply::apply_output_via_port;
+use super::store::project_memory_summary;
 use super::types::{ReflectionError, ReflectionResult};
 use super::{ReflectionEngine, ReflectionOutput};
 use crate::LOG_TARGET;
+use memory::MemoryPort;
 use share::i18n::runtime::reflection as t;
-use std::path::{Path, PathBuf};
-use storage::MemoryStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionRunMode {
@@ -20,58 +21,25 @@ pub struct CompleteReflectionResult {
     pub auto_applied: bool,
 }
 
+/// Runs a complete reflection cycle against a bound `MemoryPort`.
+///
+/// The summary is read via `port.list(Project)` and any auto-apply writes back
+/// to the same port — the runtime never constructs `storage::MemoryStore`.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_complete_reflection(
     mode: ReflectionRunMode,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    cwd: &Path,
+    memory: &dyn MemoryPort,
     client: &provider::LlmClient,
     system_prompt_text: &str,
-    lang: &str,
-) -> ReflectionResult<Option<CompleteReflectionResult>> {
-    run_complete_reflection_with_base_dir(
-        mode,
-        config,
-        messages,
-        cwd,
-        client,
-        system_prompt_text,
-        storage::memory_base_dir(),
-        lang,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_complete_reflection_with_base_dir(
-    mode: ReflectionRunMode,
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    cwd: &Path,
-    client: &provider::LlmClient,
-    system_prompt_text: &str,
-    base_dir: PathBuf,
     lang: &str,
 ) -> ReflectionResult<Option<CompleteReflectionResult>> {
     if !should_run_reflection(mode, config) {
         return Ok(None);
     }
 
-    let mut store = MemoryStore::new(
-        base_dir.clone(),
-        storage::project_file_name_from_path(cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .map_err(|e| ReflectionError::StoreInit(e.to_string()))?;
-
-    let entries = store
-        .list(Some(share::memory::MemoryLayer::Project))
-        .ok()
-        .unwrap_or_default();
-
-    let project_memory = ReflectionEngine::memory_summary(&entries);
+    let project_memory = project_memory_summary(memory);
     let recent_summary = ReflectionEngine::recent_messages_summary(messages, usize::MAX);
     let prompt = ReflectionEngine::build_prompt(&project_memory, &recent_summary, lang);
 
@@ -85,7 +53,7 @@ pub(crate) async fn run_complete_reflection_with_base_dir(
     let mut formatted_content = ReflectionEngine::format_output(&output, lang);
     let mut auto_applied = false;
     if config.reflection.auto_apply_suggestions {
-        match ReflectionEngine::apply_output(&output, &mut store) {
+        match apply_output_via_port(&output, memory).await {
             Ok(result) => {
                 formatted_content.push_str(&t::auto_apply_summary(
                     lang,

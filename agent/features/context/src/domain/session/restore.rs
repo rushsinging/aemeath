@@ -9,7 +9,7 @@
 //! 获取活跃链相关数据。
 
 use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
-use crate::domain::session::{ChatChain, ChatSegment, SegmentKind, Session};
+use crate::domain::session::{CanonicalSession, ChatChain, ChatSegment, SegmentKind, Session};
 use share::message::Message;
 
 /// 从 `Session` 还原出的活跃链运行时状态。
@@ -44,17 +44,29 @@ impl SessionRestore {
     /// 2. frozen_chats = 活跃链起点之前的全部段。
     /// 3. 活跃消息经 sanitize + deep_clean 修剪。
     pub fn from_session(session: &Session) -> Self {
-        let chain = ChatChain::from_chats(&session.chats);
+        Self::from_chats_and_created_at(&session.chats, &session.created_at)
+    }
+
+    /// 从磁盘 [`CanonicalSession`] 提取活跃链运行时状态。纯函数，无 IO 副作用。
+    ///
+    /// 算法与 [`Self::from_session`] 相同，但直接操作 canonical envelope
+    /// 的 `chats` / `created_at` 字段。
+    pub fn from_canonical(session: &CanonicalSession) -> Self {
+        Self::from_chats_and_created_at(&session.chats, &session.created_at)
+    }
+}
+
+impl SessionRestore {
+    /// Shared core: extract runtime backing from a list of chat segments + created_at.
+    fn from_chats_and_created_at(chats: &[ChatSegment], created_at: &str) -> Self {
+        let chain = ChatChain::from_chats(chats);
         let summary = chain.active_summary().map(|s| s.to_string());
 
-        // 活跃链起点 = 最后一个 Compact 段索引（与 ChatChain::from_chats 一致）。
-        // frozen_chats = 起点之前的全部段；若起点是首个 Compact 段，则无 frozen。
-        let active_start = session
-            .chats
+        let active_start = chats
             .iter()
             .rposition(|s| s.kind == SegmentKind::Compact)
             .unwrap_or(0);
-        let frozen_chats: Vec<ChatSegment> = session.chats[..active_start].to_vec();
+        let frozen_chats: Vec<ChatSegment> = chats[..active_start].to_vec();
 
         let mut messages = chain.messages();
         let trimmed = {
@@ -76,7 +88,7 @@ impl SessionRestore {
             active_chain: chain,
             frozen_chats,
             active_summary: summary,
-            created_at: session.created_at.clone(),
+            created_at: created_at.to_string(),
             skip_first_pending_turn: true,
             trimmed,
             repaired,

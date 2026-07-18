@@ -52,6 +52,7 @@ where
         mut chain,
         mut context_size,
         workspace,
+        wiring,
         session_id,
         read_files,
         session_reminders,
@@ -65,7 +66,8 @@ where
         max_agent_concurrency,
         agent_semaphore,
         hook_runner,
-        memory_config,
+        memory_config: _,
+        memory_source,
         language,
         frozen_chats,
         active_summary: active_summary_arc,
@@ -101,32 +103,73 @@ where
         ($cmd:expr) => {
             match $cmd {
                 PendingCommand::Compact => {
-                    if let Some(outcome) = manual_compact(
-                        &sink,
-                        &hook_ui,
-                        &hook_runner,
-                        turn_count,
-                        &chain.messages_flat(),
-                        active_summary.as_deref(),
-                        &system_prompt_text,
-                        context_size,
-                        &memory_config,
-                        &memory_cwd,
-                        &client,
-                        &language,
-                        &cwd,
-                    )
-                    .await
+                    // #871: the *entire* manual compact — memory capture +
+                    // precompact reflection + LLM summary + apply_compact_outcome
+                    // — must run under the session-switch **shared** permit.
+                    //
+                    // Previously `with_shared` only captured the `Arc<dyn
+                    // MemoryPort>` and then released, so the precompact
+                    // reflection / LLM `manual_compact` body ran *outside* the
+                    // permit. A concurrent resume (exclusive permit) could swap
+                    // memory mid-compact, racing the LLM summary against the
+                    // memory snapshot. Now the whole `manual_compact` future is
+                    // driven inside `with_shared`, so the shared permit spans
+                    // the full body — mirroring the forced-reflection and
+                    // ManageMemory paths.
+                    //
+                    // `async { ... }` (not `async move`) so the future borrows
+                    // `sink`, `hook_ui`, `hook_runner`, `chain`,
+                    // `active_summary`, etc. by reference for the duration of
+                    // the `with_shared(...).await`. The shared permit is held
+                    // until the entire body — including the LLM
+                    // `manual_compact` call — has completed.
+                    let wiring_for_compact = wiring.clone();
+                    match wiring
+                        .with_shared(async {
+                            let memory = wiring_for_compact.committed_memory();
+                            // H3: read MemoryConfig from the committed config at
+                            // compact time so it reflects any runtime resume.
+                            let memory_config_for_compact =
+                                wiring_for_compact.committed_config().memory().clone();
+                            let messages = chain.messages_flat();
+                            if let Some(outcome) = manual_compact(
+                                &sink,
+                                &hook_ui,
+                                &hook_runner,
+                                turn_count,
+                                &messages,
+                                active_summary.as_deref(),
+                                &system_prompt_text,
+                                context_size,
+                                &memory_config_for_compact,
+                                memory.as_ref(),
+                                &memory_cwd,
+                                &client,
+                                &language,
+                                &cwd,
+                            )
+                            .await
+                            {
+                                apply_compact_outcome(
+                                    &sink,
+                                    outcome,
+                                    &mut chain,
+                                    &frozen_chats,
+                                    &mut active_summary,
+                                    &active_summary_arc,
+                                )
+                                .await;
+                            }
+                        })
+                        .await
                     {
-                        apply_compact_outcome(
-                            &sink,
-                            outcome,
-                            &mut chain,
-                            &frozen_chats,
-                            &mut active_summary,
-                            &active_summary_arc,
-                        )
-                        .await;
+                        Ok(()) => {}
+                        Err(error) => {
+                            log::warn!(
+                                target: LOG_TARGET,
+                                "manual compact skipped: session switch gate closed: {error:?}"
+                            );
+                        }
                     }
                     continue;
                 }
@@ -184,8 +227,23 @@ where
                             }
                         }
                     } else {
-                        let (text, is_error) =
-                            super::idle_commands::execute_session(&args, &session_id).await;
+                        // Gate-aware session read: the export branch calls
+                        // `load_session` from disk, which must not race with a
+                        // session resume (exclusive permit). `with_shared`
+                        // acquires a shared permit for the duration of the call.
+                        let (text, is_error) = match wiring
+                            .with_shared(super::idle_commands::execute_session(
+                                &args,
+                                &session_id,
+                            ))
+                            .await
+                        {
+                            Ok(result) => result,
+                            Err(_) => (
+                                "Session is being switched, please retry.".to_string(),
+                                true,
+                            ),
+                        };
                         let _ = sink
                             .send_event(RuntimeStreamEvent::CommandResultText {
                                 text,
@@ -196,43 +254,70 @@ where
                     continue;
                 }
                 PendingCommand::ManageMemory { args } => {
-                    let (text, is_error) = super::idle_commands::execute_memory(
-                        &args,
-                        &memory_cwd.display().to_string(),
-                        &memory_config,
-                    )
-                    .await;
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                        .await;
+                    // #871: the *entire* memory query/mutation must run under
+                    // the session-switch gate. Capturing the Arc<dyn MemoryPort>
+                    // and then releasing the permit before the mutation completes
+                    // would let a concurrent resume (exclusive permit) swap
+                    // memory mid-operation. The whole execute_memory future is
+                    // driven inside with_shared so the shared permit spans the
+                    // full mutation (write/delete/list), not just the Arc clone.
+                    let wiring_for_memory = wiring.clone();
+                    match wiring
+                        .with_shared(async move {
+                            let memory = wiring_for_memory.committed_memory();
+                            // H3: read MemoryConfig from committed config so
+                            // memory commands reflect any runtime resume.
+                            let memory_config_for_memory =
+                                wiring_for_memory.committed_config().memory().clone();
+                            super::idle_commands::execute_memory(
+                                &args,
+                                memory.as_ref(),
+                                &memory_config_for_memory,
+                            )
+                            .await
+                        })
+                        .await
+                    {
+                        Ok((text, is_error)) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text,
+                                    is_error,
+                                })
+                                .await;
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                target: LOG_TARGET,
+                                "manage memory skipped: session switch gate closed: {error:?}"
+                            );
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: "Session is being switched, please retry."
+                                        .to_string(),
+                                    is_error: true,
+                                })
+                                .await;
+                        }
+                    }
                     continue;
                 }
                 PendingCommand::ResumeSession { id } => {
-                    match context::session::load_session(&id).await {
-                        Ok(snapshot) => {
-                            let restore =
-                                context::session::SessionRestore::from_session(&snapshot);
-                            if restore.trimmed > 0 || restore.repaired > 0 {
-                                log::info!(
-                                    target: "aemeath:agent:runtime",
-                                    "resume {}: trimmed={} repaired={}",
-                                    id,
-                                    restore.trimmed,
-                                    restore.repaired
-                                );
-                            }
+                    use sdk::SessionResumeFailureKind;
+                    match crate::application::client::resume_session_to_backing(&id, &wiring).await {
+                        Ok((restore, resumed_id)) => {
+                            // Update LOCAL loop variables only. The shared
+                            // backing (`active_summary_arc` / `frozen_chats`)
+                            // was already updated atomically by the
+                            // SessionProjectionParticipant inside the
+                            // exclusive gate during `resume_prepared` — we do
+                            // NOT double-write them here.
                             chain = restore.active_chain;
                             active_summary = restore.active_summary.clone();
-                            if let Ok(mut guard) = active_summary_arc.lock() {
-                                *guard = restore.active_summary;
-                            }
-                            if let Ok(mut guard) = frozen_chats.lock() {
-                                *guard = restore.frozen_chats;
-                            }
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumed {
                                     messages: chain.messages_flat(),
-                                    session_id: id.clone(),
+                                    session_id: resumed_id.clone(),
                                     created_at: chrono::DateTime::parse_from_rfc3339(
                                         &restore.created_at,
                                     )
@@ -240,19 +325,9 @@ where
                                     .unwrap_or(0),
                                 })
                                 .await;
-                            if restore.trimmed > 0 || restore.repaired > 0 {
-                                log::info!(
-                                    target: "aemeath:agent:runtime",
-                                    "resume {}: trimmed={} repaired={}",
-                                    id,
-                                    restore.trimmed,
-                                    restore.repaired
-                                );
-                            }
                         }
-                        Err(e) => {
+                        Err(crate::application::client::ResumeError::Load(e)) => {
                             use context::session::SessionLoadError;
-                            use sdk::SessionResumeFailureKind;
                             let (kind, message) = match &e {
                                 SessionLoadError::NotFound { .. } => (
                                     SessionResumeFailureKind::NotFound,
@@ -279,6 +354,17 @@ where
                                     kind,
                                     id: id.clone(),
                                     message,
+                                })
+                                .await;
+                        }
+                        Err(crate::application::client::ResumeError::Coordinator(
+                            e,
+                        )) => {
+                            let _ = sink
+                                .send_event(RuntimeStreamEvent::SessionResumeFailed {
+                                    kind: SessionResumeFailureKind::Io,
+                                    id: id.clone(),
+                                    message: format!("resume_prepared failed: {e}"),
                                 })
                                 .await;
                         }
@@ -468,7 +554,32 @@ where
         let mut run = Run::new(RunSpec::main(), None);
         let run_id = run.id().clone();
         active_run.activate(run_id.clone(), cancel.clone());
+        // Bind the Main Run BEFORE constructing the port so the port can borrow
+        // the bound MemoryPort for the entire run lifetime. The shared admission
+        // permit held by `_bound` blocks `wiring.resume_prepared` (exclusive)
+        // until the run — including all Tools, Reflection, and Sub-runs — has
+        // fully completed and `_bound` is dropped. `_bound` is declared before
+        // `port`, so it is dropped afterwards (reverse declaration order),
+        // keeping both the permit and the memory borrow valid through run_loop.
+        //
+        // `bound.config()` captures the committed ConfigSnapshot at bind time.
+        let _bound = match wiring.bind_main_run().await {
+            Ok(bound) => bound,
+            Err(e) => {
+                log::error!(target: LOG_TARGET, "bind_main_run failed (gate closed?): {e:?}");
+                active_run.clear(&run_id);
+                continue;
+            }
+        };
+        // H3: use the bound config's MemoryConfig (reflects the target project
+        // after a cross-project resume) instead of the stale bootstrap value
+        // captured once in `ChatLoopContext`. Each Main Run reads its own
+        // snapshot at bind time, so runtime resume → next run naturally
+        // refreshes. The bound memory config drives memory injection,
+        // precompact auto_compact, and interval reflection inside the port.
+        let bound_memory_config = _bound.config().memory().clone();
         let mut port = MainRunPort {
+            memory: _bound.memory(),
             sink: &sink,
             queue: &queue,
             input_events: &input_events,
@@ -491,7 +602,8 @@ where
             max_agent_concurrency,
             agent_semaphore: &agent_semaphore,
             hook_runner: &hook_runner,
-            memory_config: &memory_config,
+            memory_config: &bound_memory_config,
+            memory_source: &memory_source,
             language: &language,
             frozen_chats: &frozen_chats,
             active_summary: &mut active_summary,
@@ -515,6 +627,10 @@ where
             tool_identity: &tool_identity,
             started_at,
         };
+        // Refresh context_size from the committed ConfigSnapshot for the next
+        // iteration. This run already captured the ctx-provided value, matching
+        // the original bind-then-update timing.
+        context_size = _bound.config().context_size();
         if let Err(error) = run_loop(&mut run, &cancel, &mut port).await {
             log::error!(target: LOG_TARGET, "main shared run loop failed: {error}");
         }

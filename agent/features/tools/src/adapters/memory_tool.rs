@@ -4,12 +4,22 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 
+use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::types::memory::{MemoryInput, MemoryResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
+use std::sync::Arc;
 
-pub struct MemoryTool;
+/// Memory management tool.
+///
+/// Holds an [`Arc<dyn MemoryPortSource>`] rather than a captured `Arc<dyn
+/// MemoryPort>` because resume swaps the committed Memory under the same
+/// registry. At execution time, [`MemoryPortSource::current`] returns the port
+/// bound for the current Run.
+pub struct MemoryTool {
+    pub source: Arc<dyn MemoryPortSource>,
+}
 
 #[async_trait]
 impl TypedTool for MemoryTool {
@@ -52,13 +62,14 @@ impl TypedTool for MemoryTool {
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
         let action = args.action.as_str();
+        let port = self.source.current();
 
         match action {
-            "add" => handlers::add_memory(input, ctx),
-            "delete" => handlers::delete_memory(input, ctx),
-            "search" => handlers::search_memory(input, ctx),
-            "pin" => handlers::pin_memory(input, ctx),
-            "list" => handlers::list_memory(input, ctx),
+            "add" => handlers::add_memory(input, ctx, &*port).await,
+            "delete" => handlers::delete_memory(input, &*port).await,
+            "search" => handlers::search_memory(input, &*port),
+            "pin" => handlers::pin_memory(input, &*port).await,
+            "list" => handlers::list_memory(input, &*port),
             "add_reminder" => handlers::add_reminder(input, ctx),
             "complete_reminder" => handlers::complete_reminder(input, ctx),
             "" => TypedToolResult::error("缺少必需参数: action"),

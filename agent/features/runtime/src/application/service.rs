@@ -55,6 +55,19 @@ mod tests {
     use storage::TaskStore;
     use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext, ToolRegistry};
 
+    fn test_memory_source() -> Arc<dyn tools::MemoryPortSource> {
+        struct TestSource;
+        impl tools::MemoryPortSource for TestSource {
+            fn current(&self) -> Arc<dyn memory::MemoryPort> {
+                Arc::new(
+                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                        .expect("valid default policy"),
+                )
+            }
+        }
+        Arc::new(TestSource)
+    }
+
     #[derive(Default)]
     struct RecordingRuntimePort {
         no_tui_calls: Arc<AtomicUsize>,
@@ -157,6 +170,7 @@ mod tests {
                 skills_map: HashMap::new(),
                 hook_runner: HookRunner::empty(),
                 memory_config: MemoryConfig::default(),
+                memory_source: test_memory_source(),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
                 allow_all: false,
                 context_size: 200_000,

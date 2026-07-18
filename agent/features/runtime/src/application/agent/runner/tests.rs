@@ -13,6 +13,19 @@ use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
 
+fn test_memory_source() -> Arc<dyn tools::MemoryPortSource> {
+    struct TestSource;
+    impl tools::MemoryPortSource for TestSource {
+        fn current(&self) -> Arc<dyn memory::MemoryPort> {
+            Arc::new(
+                memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                    .expect("valid default policy"),
+            )
+        }
+    }
+    Arc::new(TestSource)
+}
+
 fn format_grouped_tool_summaries(tool_calls: &[crate::application::agent::ToolCall]) -> String {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for call in tool_calls {
@@ -312,6 +325,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),
+            memory_source: test_memory_source(),
             lang: "en".to_string(),
             allow_all: true,
         },
@@ -607,6 +621,7 @@ fn test_ctx() -> ToolExecutionContext {
             agent_runner: None,
             registry: None,
             memory_config: share::config::MemoryConfig::default(),
+            memory_source: test_memory_source(),
             lang: "en".to_string(),
             allow_all: true,
         },

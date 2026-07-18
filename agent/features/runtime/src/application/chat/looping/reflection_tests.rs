@@ -1,10 +1,10 @@
 use super::*;
+use crate::application::reflection::ReflectionRunMode;
 use crate::application::testing::text_completion_stream;
 use async_trait::async_trait;
+use memory::{InMemoryMemory, MemoryLayer, MemoryPolicy, MemoryPort};
 use provider::{InvocationStream, LlmProvider, ProviderError, SystemBlock};
-use share::memory::{MemoryCategory, MemoryLayer, MemorySource};
 use std::sync::Arc;
-use storage::MemoryStore;
 use tokio_util::sync::CancellationToken;
 
 struct StaticReflectionProvider {
@@ -55,8 +55,8 @@ fn build_client_with_usage(
     }))
 }
 
-fn temp_dir(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("aemeath-{name}-{}", uuid::Uuid::new_v4()))
+fn in_memory_port() -> Arc<InMemoryMemory> {
+    Arc::new(InMemoryMemory::new(MemoryPolicy::default()).unwrap())
 }
 
 #[test]
@@ -175,78 +175,65 @@ fn test_should_run_turn_reflection_false_when_before_finish_gate_continues() {
 
 #[tokio::test]
 async fn test_run_complete_reflection_disabled_returns_none() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+    let memory = in_memory_port();
     let client = build_client(r#"{"suggested_memories":[]}"#);
     let config = share::config::MemoryConfig {
         enabled: false,
         ..Default::default()
     };
 
-    let result = run_complete_reflection_with_base_dir(
+    let result = run_complete_reflection(
         ReflectionRunMode::Interval { turn_count: 10 },
         &config,
         &[share::message::Message::user("不会运行")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await
     .unwrap();
 
     assert!(result.is_none());
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
 }
 
 #[tokio::test]
 async fn test_run_complete_reflection_interval_miss_returns_none() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+    let memory = in_memory_port();
     let client = build_client(r#"{"suggested_memories":[]}"#);
     let mut config = share::config::MemoryConfig::default();
     config.reflection.interval_turns = 5;
 
-    let result = run_complete_reflection_with_base_dir(
+    let result = run_complete_reflection(
         ReflectionRunMode::Interval { turn_count: 4 },
         &config,
         &[share::message::Message::user("未命中 interval")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await
     .unwrap();
 
     assert!(result.is_none());
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
 }
 
 #[tokio::test]
 async fn test_run_complete_reflection_forced_skips_interval_hit_check() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+    let memory = in_memory_port();
     let response = r#"{"deviations":["forced 已运行"],"suggested_memories":[]}"#;
     let client = build_client_with_usage(response, 12, 34);
     let mut config = share::config::MemoryConfig::default();
     config.reflection.interval_turns = 5;
 
-    let result = run_complete_reflection_with_base_dir(
+    let result = run_complete_reflection(
         ReflectionRunMode::Forced,
         &config,
         &[share::message::Message::user("不需要命中 interval")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await
@@ -258,15 +245,11 @@ async fn test_run_complete_reflection_forced_skips_interval_hit_check() {
     assert_eq!(result.output_tokens, 34);
     assert!(!result.auto_applied);
     assert_eq!(result.output.deviations, vec!["forced 已运行"]);
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
 }
 
 #[tokio::test]
-async fn test_run_reflection_auto_apply_suggestions_writes_memory() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+async fn test_run_reflection_auto_apply_suggestions_writes_memory_via_port() {
+    let memory = in_memory_port();
     let response = r#"{
             "suggested_memories": [
                 {
@@ -282,45 +265,33 @@ async fn test_run_reflection_auto_apply_suggestions_writes_memory() {
     config.reflection.interval_turns = 2;
     config.reflection.auto_apply_suggestions = true;
 
-    let result = run_complete_reflection_with_base_dir(
+    let result = run_complete_reflection(
         ReflectionRunMode::Forced,
         &config,
         &[share::message::Message::user("请记住这个决策")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await
     .unwrap()
     .unwrap();
     let text = result.formatted_content.clone();
-    let store = MemoryStore::new(
-        &base_dir,
-        storage::project_file_name_from_path(&cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .unwrap();
-    let entries = store.list(Some(MemoryLayer::Project)).unwrap();
+    let entries = memory.list(Some(MemoryLayer::Project));
 
     assert!(text.contains("后台 reflection 自动写入 memory"));
     assert!(text.contains("已自动应用 Reflection：新增/合并 1 条记忆，标记 0 条过时记忆。"));
     assert!(result.auto_applied);
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].category, MemoryCategory::Decision);
+    assert_eq!(entries[0].category, memory::MemoryCategory::Decision);
     assert_eq!(entries[0].content, "后台 reflection 自动写入 memory");
-    assert_eq!(entries[0].source, MemorySource::Llm);
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
+    assert_eq!(entries[0].source, memory::MemorySource::Llm);
 }
 
 #[tokio::test]
 async fn test_run_reflection_auto_apply_false_does_not_write_memory() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+    let memory = in_memory_port();
     let response = r#"{
             "suggested_memories": [
                 {
@@ -336,50 +307,37 @@ async fn test_run_reflection_auto_apply_false_does_not_write_memory() {
     config.reflection.interval_turns = 2;
     config.reflection.auto_apply_suggestions = false;
 
-    let text = run_reflection_with_base_dir(
+    let text = run_reflection(
         &config,
         2,
         &[share::message::Message::user("请只展示建议")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await
     .unwrap();
-    let store = MemoryStore::new(
-        &base_dir,
-        storage::project_file_name_from_path(&cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .unwrap();
-    let entries = store.list(Some(MemoryLayer::Project)).unwrap();
+    let entries = memory.list(Some(MemoryLayer::Project));
 
     assert!(text.contains("auto apply false 不写入"));
     assert!(!text.contains("已自动应用 Reflection"));
     assert!(entries.is_empty());
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
 }
 
 #[tokio::test]
 async fn test_run_complete_reflection_empty_response_returns_err_empty_response() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+    let memory = in_memory_port();
     let client = build_client("   ");
     let config = share::config::MemoryConfig::default();
 
-    let result = run_complete_reflection_with_base_dir(
+    let result = run_complete_reflection(
         ReflectionRunMode::Forced,
         &config,
         &[share::message::Message::user("LLM 空响应")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await;
@@ -388,26 +346,21 @@ async fn test_run_complete_reflection_empty_response_returns_err_empty_response(
         result,
         Err(crate::application::reflection::ReflectionError::EmptyResponse)
     ));
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
 }
 
 #[tokio::test]
 async fn test_run_complete_reflection_unparseable_returns_err_unparseable() {
-    let cwd = temp_dir("reflection-cwd");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let base_dir = temp_dir("reflection-memory");
+    let memory = in_memory_port();
     let client = build_client("这不是 JSON 格式的反思结果");
     let config = share::config::MemoryConfig::default();
 
-    let result = run_complete_reflection_with_base_dir(
+    let result = run_complete_reflection(
         ReflectionRunMode::Forced,
         &config,
         &[share::message::Message::user("无法解析")],
-        &cwd,
+        memory.as_ref(),
         &client,
         "system prompt",
-        base_dir.clone(),
         "zh",
     )
     .await;
@@ -416,6 +369,4 @@ async fn test_run_complete_reflection_unparseable_returns_err_unparseable() {
         result,
         Err(crate::application::reflection::ReflectionError::Unparseable(_))
     ));
-    let _ = std::fs::remove_dir_all(cwd);
-    let _ = std::fs::remove_dir_all(base_dir);
 }

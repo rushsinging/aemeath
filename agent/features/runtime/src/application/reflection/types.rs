@@ -52,7 +52,7 @@ pub enum ReflectionError {
     #[error("failed to parse reflection JSON: {0}")]
     Parse(#[from] serde_json::Error),
     #[error(transparent)]
-    Memory(#[from] share::memory::MemoryError),
+    Memory(#[from] memory::MemoryError),
     #[error("failed to apply reflection memory suggestion: {0}")]
     Apply(String),
     #[error("reflection memory store initialization failed: {0}")]

@@ -170,7 +170,12 @@ impl AgentRunner for CliAgentRunner {
         let sub_skills =
             std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let mut sub_registry = ToolRegistry::new();
-        tools::register_subagent_tools(&mut sub_registry, sub_task_access, sub_skills);
+        tools::register_subagent_tools(
+            &mut sub_registry,
+            sub_task_access,
+            sub_skills,
+            ctx.resources.memory_source.clone(),
+        );
         let sub_schemas = sub_registry.schemas_for(&ctx.resources.lang);
         let messages = vec![Message::user(prompt)];
         // For sub-agents, use the system prompt as a single cached block
@@ -211,6 +216,7 @@ impl AgentRunner for CliAgentRunner {
                 agent_runner: None, // No nested agents
                 registry: ctx.resources.registry.clone(),
                 memory_config: ctx.resources.memory_config.clone(),
+                memory_source: ctx.resources.memory_source.clone(),
                 lang: ctx.resources.lang.clone(),
                 allow_all: ctx.resources.allow_all,
             },

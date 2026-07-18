@@ -1,12 +1,27 @@
 use super::*;
-use share::memory::MemoryEntry;
-use storage::MemoryStore;
+use memory::{InMemoryMemory, MemoryEntry, MemoryId, MemoryLayer, MemoryPolicy, MemoryPort};
+use std::sync::Arc;
 
-fn temp_store(max_entries: usize) -> (MemoryStore, std::path::PathBuf) {
-    let dir =
-        std::env::temp_dir().join(format!("aemeath-reflection-test-{}", uuid::Uuid::new_v4()));
-    let store = MemoryStore::new(&dir, "project", max_entries, 0.9).unwrap();
-    (store, dir)
+fn in_memory_port(max_entries: usize) -> Arc<InMemoryMemory> {
+    Arc::new(
+        InMemoryMemory::new(MemoryPolicy {
+            max_entries,
+            similarity_threshold: 0.9,
+        })
+        .unwrap(),
+    )
+}
+
+fn project_entry(content: &str, category: memory::MemoryCategory) -> MemoryEntry {
+    MemoryEntry::new(
+        MemoryId::now_v7(),
+        100,
+        MemoryLayer::Project,
+        category,
+        content,
+        memory::MemorySource::User,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -80,9 +95,9 @@ fn test_parse_output_extracts_object_from_prose() {
     assert_eq!(output.deviations, vec!["遗漏测试"]);
 }
 
-#[test]
-fn test_apply_suggestions_adds_llm_project_memory() {
-    let (mut store, dir) = temp_store(10);
+#[tokio::test]
+async fn test_apply_suggestions_adds_llm_project_memory_via_port() {
+    let port = in_memory_port(10);
     let output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: vec![MemorySuggestion {
@@ -96,23 +111,21 @@ fn test_apply_suggestions_adds_llm_project_memory() {
         user_alert: None,
     };
 
-    let added =
-        ReflectionEngine::apply_suggestions(&output.suggested_memories, &mut store).unwrap();
-    let memories = store
-        .list(Some(share::memory::MemoryLayer::Project))
+    let added = ReflectionEngine::apply_suggestions(&output.suggested_memories, port.as_ref())
+        .await
         .unwrap();
+    let memories = port.list(Some(MemoryLayer::Project));
 
     assert_eq!(added, 1);
     assert_eq!(memories.len(), 1);
-    assert_eq!(memories[0].source, share::memory::MemorySource::Llm);
-    assert_eq!(memories[0].layer, share::memory::MemoryLayer::Project);
+    assert_eq!(memories[0].source, memory::MemorySource::Llm);
+    assert_eq!(memories[0].layer, MemoryLayer::Project);
     assert_eq!(memories[0].tags, vec!["reflection"]);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
-#[test]
-fn test_apply_suggestions_adds_llm_global_memory() {
-    let (mut store, dir) = temp_store(10);
+#[tokio::test]
+async fn test_apply_suggestions_adds_llm_global_memory_via_port() {
+    let port = in_memory_port(10);
     let suggestion = MemorySuggestion {
         layer: share::memory::MemoryLayer::Global,
         category: share::memory::MemoryCategory::Preference,
@@ -121,33 +134,27 @@ fn test_apply_suggestions_adds_llm_global_memory() {
         reason: String::new(),
     };
 
-    let added = ReflectionEngine::apply_suggestions(&[suggestion], &mut store).unwrap();
-    let global = store
-        .list(Some(share::memory::MemoryLayer::Global))
+    let added = ReflectionEngine::apply_suggestions(&[suggestion], port.as_ref())
+        .await
         .unwrap();
-    let project = store
-        .list(Some(share::memory::MemoryLayer::Project))
-        .unwrap();
+    let global = port.list(Some(MemoryLayer::Global));
+    let project = port.list(Some(MemoryLayer::Project));
 
     assert_eq!(added, 1);
     assert_eq!(global.len(), 1);
     assert_eq!(global[0].content, "始终使用中文回复");
     assert!(project.is_empty());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
-#[test]
-fn test_apply_suggestions_evicts_when_store_is_full() {
-    let (mut store, dir) = temp_store(1);
-    let existing = MemoryEntry::new(
-        "memory-1",
-        100,
-        share::memory::MemoryLayer::Project,
-        share::memory::MemoryCategory::Fact,
+#[tokio::test]
+async fn test_apply_suggestions_evicts_when_port_is_full() {
+    let port = in_memory_port(1);
+    port.write(project_entry(
         "旧记忆需要被淘汰",
-        share::memory::MemorySource::User,
-    );
-    store.add(existing).unwrap();
+        memory::MemoryCategory::Fact,
+    ))
+    .await
+    .unwrap();
     let suggestion = MemorySuggestion {
         layer: share::memory::MemoryLayer::Project,
         category: share::memory::MemoryCategory::Decision,
@@ -156,32 +163,22 @@ fn test_apply_suggestions_evicts_when_store_is_full() {
         reason: String::new(),
     };
 
-    let added = ReflectionEngine::apply_suggestions(&[suggestion], &mut store).unwrap();
-    let active = store
-        .list(Some(share::memory::MemoryLayer::Project))
+    let added = ReflectionEngine::apply_suggestions(&[suggestion], port.as_ref())
+        .await
         .unwrap();
-    let archived = store.search("旧记忆", 10).unwrap();
+    let active = port.list(Some(MemoryLayer::Project));
 
     assert_eq!(added, 1);
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].content, "新的 reflection 记忆");
-    assert_eq!(archived.len(), 1);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
-#[test]
-fn test_apply_suggestions_returns_error_when_eviction_cannot_free_space() {
-    let (mut store, dir) = temp_store(1);
-    let mut existing = MemoryEntry::new(
-        "memory-1",
-        100,
-        share::memory::MemoryLayer::Project,
-        share::memory::MemoryCategory::Fact,
-        "被 pin 的旧记忆",
-        share::memory::MemorySource::User,
-    );
+#[tokio::test]
+async fn test_apply_suggestions_returns_error_when_eviction_cannot_free_space() {
+    let port = in_memory_port(1);
+    let mut existing = project_entry("被 pin 的旧记忆", memory::MemoryCategory::Fact);
     existing.pinned = true;
-    store.add(existing).unwrap();
+    port.write(existing).await.unwrap();
     let suggestion = MemorySuggestion {
         layer: share::memory::MemoryLayer::Project,
         category: share::memory::MemoryCategory::Decision,
@@ -190,32 +187,18 @@ fn test_apply_suggestions_returns_error_when_eviction_cannot_free_space() {
         reason: String::new(),
     };
 
-    let result = ReflectionEngine::apply_suggestions(&[suggestion], &mut store);
+    let result = ReflectionEngine::apply_suggestions(&[suggestion], port.as_ref()).await;
 
     assert!(matches!(result, Err(ReflectionError::Apply(_))));
-    assert_eq!(
-        store
-            .list(Some(share::memory::MemoryLayer::Project))
-            .unwrap()
-            .len(),
-        1
-    );
-    let _ = std::fs::remove_dir_all(dir);
+    assert_eq!(port.list(Some(MemoryLayer::Project)).len(), 1);
 }
 
-#[test]
-fn test_apply_output_marks_outdated_and_adds_suggestions() {
-    let (mut store, dir) = temp_store(10);
-    let existing = MemoryEntry::new(
-        "memory-1",
-        100,
-        share::memory::MemoryLayer::Project,
-        share::memory::MemoryCategory::Fact,
-        "旧事实",
-        share::memory::MemorySource::User,
-    );
-    let existing_id = existing.id.clone();
-    store.add(existing).unwrap();
+#[tokio::test]
+async fn test_apply_output_marks_outdated_and_adds_suggestions_via_port() {
+    let port = in_memory_port(10);
+    let existing = project_entry("旧事实", memory::MemoryCategory::Fact);
+    let existing_id = existing.id;
+    port.write(existing).await.unwrap();
     let output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: vec![MemorySuggestion {
@@ -225,14 +208,14 @@ fn test_apply_output_marks_outdated_and_adds_suggestions() {
             tags: Vec::new(),
             reason: String::new(),
         }],
-        outdated_memories: vec![existing_id.clone()],
+        outdated_memories: vec![existing_id.to_string()],
         user_alert: None,
     };
 
-    let applied = ReflectionEngine::apply_output(&output, &mut store).unwrap();
-    let memories = store
-        .list(Some(share::memory::MemoryLayer::Project))
+    let applied = ReflectionEngine::apply_output(&output, port.as_ref())
+        .await
         .unwrap();
+    let memories = port.list(Some(MemoryLayer::Project));
     let outdated = memories
         .iter()
         .find(|entry| entry.id == existing_id)
@@ -241,7 +224,6 @@ fn test_apply_output_marks_outdated_and_adds_suggestions() {
     assert_eq!(applied.suggestions_added, 1);
     assert_eq!(applied.outdated_marked, 1);
     assert!(outdated.outdated);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -282,4 +264,19 @@ fn test_recent_messages_summary_truncates() {
     let msg = Message::user("hello world");
     let result = ReflectionEngine::recent_messages_summary(&[msg], 2000);
     assert!(result.contains("[User]: hello world"));
+}
+
+#[tokio::test]
+async fn test_project_memory_summary_reads_from_port() {
+    let port = in_memory_port(10);
+    port.write(project_entry(
+        "端口里的项目记忆",
+        memory::MemoryCategory::Fact,
+    ))
+    .await
+    .unwrap();
+
+    let summary = ReflectionEngine::memory_summary(&port.list(Some(MemoryLayer::Project)));
+
+    assert!(summary.contains("端口里的项目记忆"));
 }

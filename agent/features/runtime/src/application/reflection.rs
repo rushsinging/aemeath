@@ -59,32 +59,32 @@ impl ReflectionEngine {
         None
     }
 
-    pub fn apply_suggestions(
+    pub async fn apply_suggestions(
         suggestions: &[MemorySuggestion],
-        store: &mut storage::MemoryStore,
+        port: &dyn memory::MemoryPort,
     ) -> ReflectionResult<usize> {
-        apply::apply_suggestions(suggestions, store)
+        apply::apply_suggestions_via_port(suggestions, port).await
     }
 
-    pub fn apply_output(
+    pub async fn apply_output(
         output: &ReflectionOutput,
-        store: &mut storage::MemoryStore,
+        port: &dyn memory::MemoryPort,
     ) -> ReflectionResult<ReflectionApplyResult> {
-        apply::apply_output(output, store)
+        apply::apply_output_via_port(output, port).await
     }
 
-    pub fn apply_outdated(
+    pub async fn apply_outdated(
         ids: &[String],
-        store: &mut storage::MemoryStore,
+        port: &dyn memory::MemoryPort,
     ) -> ReflectionResult<usize> {
-        apply::apply_outdated(ids, store)
+        apply::apply_outdated_via_port(ids, port).await
     }
 
     pub fn format_output(output: &ReflectionOutput, lang: &str) -> String {
         format::format_output(output, lang)
     }
 
-    pub fn memory_summary(entries: &[share::memory::MemoryEntry]) -> String {
+    pub fn memory_summary(entries: &[memory::MemoryEntry]) -> String {
         store::memory_summary(entries)
     }
 

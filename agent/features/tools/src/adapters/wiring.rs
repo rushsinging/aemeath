@@ -4,6 +4,7 @@
 //! orchestration without moving execution logic.
 
 pub use super::mcp::{McpServerConfig, McpToolDef, McpTransportKind};
+use crate::domain::MemoryPortSource;
 use share::skill_ops::Skill;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +31,7 @@ pub trait ToolCatalogGateway: Send + Sync {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        memory_source: Arc<dyn MemoryPortSource>,
     );
 
     fn register_all_tools_except_agent(
@@ -37,6 +39,7 @@ pub trait ToolCatalogGateway: Send + Sync {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        memory_source: Arc<dyn MemoryPortSource>,
     );
 
     fn register_subagent_tools(
@@ -44,6 +47,7 @@ pub trait ToolCatalogGateway: Send + Sync {
         registry: &mut ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        memory_source: Arc<dyn MemoryPortSource>,
     );
 }
 
@@ -65,8 +69,9 @@ impl ToolCatalogGateway for DefaultToolCatalogGateway {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        memory_source: Arc<dyn MemoryPortSource>,
     ) {
-        register_all_tools(registry, task_access, skills);
+        register_all_tools(registry, task_access, skills, memory_source);
     }
 
     fn register_all_tools_except_agent(
@@ -74,8 +79,9 @@ impl ToolCatalogGateway for DefaultToolCatalogGateway {
         registry: &ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        memory_source: Arc<dyn MemoryPortSource>,
     ) {
-        register_all_tools_except_agent(registry, task_access, skills);
+        register_all_tools_except_agent(registry, task_access, skills, memory_source);
     }
 
     fn register_subagent_tools(
@@ -83,25 +89,38 @@ impl ToolCatalogGateway for DefaultToolCatalogGateway {
         registry: &mut ToolRegistry,
         task_access: Arc<dyn TaskAccess>,
         skills: Arc<Mutex<HashMap<String, Skill>>>,
+        memory_source: Arc<dyn MemoryPortSource>,
     ) {
-        register_subagent_tools(registry, task_access, skills);
+        register_subagent_tools(registry, task_access, skills, memory_source);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use task::TaskStore;
+
+    fn test_memory_source() -> Arc<dyn MemoryPortSource> {
+        struct TestSource;
+        impl MemoryPortSource for TestSource {
+            fn current(&self) -> Arc<dyn memory::MemoryPort> {
+                Arc::new(
+                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
+                        .expect("valid default policy"),
+                )
+            }
+        }
+        Arc::new(TestSource)
+    }
 
     #[test]
     fn default_tool_catalog_gateway_is_object_safe_and_callable() {
         let gateway: &dyn ToolCatalogGateway = &DefaultToolCatalogGateway;
         let mut registry = gateway.new_registry();
-        let task_store = Arc::new(TaskStore::new());
+        let task_store = Arc::new(task::TaskStore::new());
         let task_access: Arc<dyn TaskAccess> = task_store.clone();
         let skills = Arc::new(Mutex::new(HashMap::new()));
 
-        gateway.register_subagent_tools(&mut registry, task_access, skills);
+        gateway.register_subagent_tools(&mut registry, task_access, skills, test_memory_source());
 
         assert!(registry.contains("Read"));
         assert!(registry.contains("Bash"));

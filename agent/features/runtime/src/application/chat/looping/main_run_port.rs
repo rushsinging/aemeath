@@ -18,7 +18,7 @@ use crate::application::chat::looping::finalize::{
 use crate::application::chat::looping::hook_ui::HookUi;
 use crate::application::chat::looping::llm_log::{log_llm_input, log_llm_output_and_tool_calls};
 use crate::application::chat::looping::loop_phases::build_api_messages;
-use crate::application::chat::looping::memory_inject::build_memory_block;
+use crate::application::chat::looping::memory_inject::build_memory_block_from_port;
 use crate::application::chat::looping::post_batch::run_post_tool_batch;
 use crate::application::chat::looping::reflection::{run_reflection, should_run_turn_reflection};
 use crate::application::chat::looping::stream_handler::{
@@ -75,6 +75,11 @@ where
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
+    /// MemoryPortSource for ToolResources (sub-agent registration uses this).
+    pub(crate) memory_source: &'a Arc<dyn tools::MemoryPortSource>,
+    /// Bound Main Run 的 MemoryPort（来自 `BoundMainRun::memory`）。Main 注入
+    /// 只读此 port，不再打开旧 `storage::MemoryStore`。
+    pub(crate) memory: &'a dyn memory::MemoryPort,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
     pub(crate) active_summary: &'a mut Option<String>,
@@ -153,6 +158,7 @@ where
         registry: &'b Arc<tools::ToolRegistry>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory_config: &share::config::MemoryConfig,
+        memory_source: &Arc<dyn tools::MemoryPortSource>,
         language: &str,
         allow_all: bool,
         workspace: &project::WorkspaceViews,
@@ -172,6 +178,7 @@ where
                     agent_runner: agent_runner.clone(),
                     registry: Some(registry.clone() as Arc<dyn tools::ToolListProvider>),
                     memory_config: memory_config.clone(),
+                    memory_source: memory_source.clone(),
                     lang: language.to_string(),
                     allow_all,
                 },
@@ -250,6 +257,7 @@ where
             self.system_prompt_text,
             self.context_size,
             self.memory_config,
+            self.memory,
             &self.memory_cwd,
             self.client,
             self.language,
@@ -289,8 +297,12 @@ where
         let tool_schemas = self.registry.schemas_for(self.language);
         let mut effective_system_blocks = self.system_blocks.to_vec();
         if self.memory_config.enabled && self.memory_config.inject_count > 0 {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             if let Some(block) =
-                build_memory_block(&self.memory_cwd, self.memory_config.inject_count)
+                build_memory_block_from_port(self.memory, now, self.memory_config.inject_count)
             {
                 effective_system_blocks.push(block);
             }
@@ -506,7 +518,7 @@ where
                 self.memory_config,
                 self.turn_count,
                 &self.chain.messages_flat(),
-                &self.memory_cwd,
+                self.memory,
                 self.client,
                 self.system_prompt_text,
                 self.language,
@@ -627,6 +639,7 @@ where
             self.registry,
             self.agent_runner,
             self.memory_config,
+            self.memory_source,
             self.language,
             self.allow_all,
             self.workspace,

@@ -59,6 +59,10 @@ where
     pub chain: context::session::ChatChain,
     pub context_size: usize,
     pub workspace: project::WorkspaceViews,
+    /// Context-owned Main Session coordinator. Used for:
+    /// - `bind_main_run` before each Run (admission gate)
+    /// - `resume_session_to_backing` for runtime ResumeSession commands
+    pub wiring: Arc<context::MainSessionWiring>,
     pub session_id: String,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
@@ -76,6 +80,8 @@ where
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub hook_runner: hook::api::HookRunner,
     pub memory_config: share::config::MemoryConfig,
+    /// MemoryPortSource for ToolResources (used by sub-agent registration).
+    pub memory_source: Arc<dyn tools::MemoryPortSource>,
     pub language: String,
     /// Workflow-owned Main adaptive reasoning capability。
     pub reasoning: Arc<dyn ReasoningPort>,

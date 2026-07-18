@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use context::SessionProjectionParticipant;
 use sdk::SdkError;
 
 use crate::adapters::runtime::LlmClientAdapter;
@@ -9,7 +10,7 @@ use crate::application::startup::{
     resolve_api_key, resolve_base_url, resolve_concurrency_limits, resolve_model_runtime_settings,
     spawn_mcp_connect,
 };
-use crate::application::startup::{set_session_id, start_session, ChatBootstrapArgs};
+use crate::application::startup::{set_session_id, ChatBootstrapArgs};
 use crate::ports::legacy::ChatRuntimeContext;
 use crate::ports::legacy::ProviderInfoPort;
 use context::skill::{load_all_skills, Skill};
@@ -19,12 +20,63 @@ use storage::TaskStore;
 use super::{AgentClientImpl, RuntimeHandle};
 use crate::LOG_TARGET;
 
+// ─── RuntimeProjectionParticipant ────────────────────────────────────
+
+/// Concrete [`SessionProjectionParticipant`] that owns the three leased
+/// projection slots (`current_chain` / `frozen_chats` / `active_summary`).
+///
+/// Constructed in `from_args_with_workspace` **before** the first
+/// `resume_prepared` call. Registered with `MainSessionWiring` so that
+/// `resume_prepared` atomically updates the backing inside the exclusive
+/// session-switch gate — closing the CM5 observability window.
+///
+/// After bootstrap the same three `Arc<Mutex<…>>` are moved into
+/// [`RuntimeHandle`], so Main Run, the loop runner and the participant all
+/// read from / write to the **same** projection backing.
+struct RuntimeProjectionParticipant {
+    chain: Arc<Mutex<context::session::ChatChain>>,
+    frozen: Arc<Mutex<Vec<context::session::ChatSegment>>>,
+    summary: Arc<Mutex<Option<String>>>,
+}
+
+impl RuntimeProjectionParticipant {
+    /// Creates a new participant with default (empty) backing.
+    fn new() -> Self {
+        Self {
+            chain: Arc::new(Mutex::new(context::session::ChatChain::default())),
+            frozen: Arc::new(Mutex::new(Vec::new())),
+            summary: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl SessionProjectionParticipant for RuntimeProjectionParticipant {
+    fn prepare(
+        &self,
+        session: &context::domain::session::CanonicalSession,
+    ) -> context::session::SessionRestore {
+        context::session::SessionRestore::from_canonical(session)
+    }
+
+    fn commit(&self, prepared: context::session::SessionRestore) {
+        // Sync, infallible, no-await — runs inside the exclusive gate's
+        // no-failure commit phase.
+        if let Ok(mut c) = self.chain.lock() {
+            *c = prepared.active_chain;
+        }
+        if let Ok(mut f) = self.frozen.lock() {
+            *f = prepared.frozen_chats;
+        }
+        if let Ok(mut s) = self.summary.lock() {
+            *s = prepared.active_summary;
+        }
+    }
+}
+
 /// Runtime bootstrap 所需的活依赖；由 Composition 一次性构造并注入。
 pub struct RuntimeBootstrapDependencies {
     workspace: project::WorkspaceViews,
-    config_reader: Arc<dyn config::ConfigReader>,
-    config_query: Arc<dyn config::ConfigQuery>,
-    config_writer: Arc<dyn config::ConfigWriter>,
+    wiring: Arc<context::MainSessionWiring>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     task_access: Arc<dyn task::TaskAccess>,
@@ -34,7 +86,7 @@ pub struct RuntimeBootstrapDependencies {
 impl RuntimeBootstrapDependencies {
     pub fn new(
         workspace: project::WorkspaceViews,
-        config: RuntimeConfigDependencies,
+        wiring: Arc<context::MainSessionWiring>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
         tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
         task_access: Arc<dyn task::TaskAccess>,
@@ -42,9 +94,7 @@ impl RuntimeBootstrapDependencies {
     ) -> Self {
         Self {
             workspace,
-            config_reader: config.reader,
-            config_query: config.query,
-            config_writer: config.writer,
+            wiring,
             provider_gateway,
             tool_gateway,
             task_access,
@@ -59,25 +109,9 @@ impl RuntimeBootstrapDependencies {
     pub fn session_tasks(&self) -> Arc<dyn context::LegacyTaskCapture> {
         self.session_tasks.clone()
     }
-}
 
-pub struct RuntimeConfigDependencies {
-    reader: Arc<dyn config::ConfigReader>,
-    query: Arc<dyn config::ConfigQuery>,
-    writer: Arc<dyn config::ConfigWriter>,
-}
-
-impl RuntimeConfigDependencies {
-    pub fn new(
-        reader: Arc<dyn config::ConfigReader>,
-        query: Arc<dyn config::ConfigQuery>,
-        writer: Arc<dyn config::ConfigWriter>,
-    ) -> Self {
-        Self {
-            reader,
-            query,
-            writer,
-        }
+    pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
+        self.wiring.clone()
     }
 }
 
@@ -93,14 +127,30 @@ pub async fn from_args_with_workspace(
 ) -> Result<AgentClientImpl, SdkError> {
     let RuntimeBootstrapDependencies {
         workspace,
-        config_reader,
-        config_query,
-        config_writer,
+        wiring,
         provider_gateway,
         tool_gateway,
         task_access,
         session_tasks,
     } = dependencies;
+
+    // Config query/writer come from the wiring gate-aware façade.
+    // Bootstrap reads committed_config directly from wiring (one-shot).
+    let config_query = wiring.config_query();
+    let config_writer = wiring.config_writer();
+
+    // 0. Construct the projection backing and register it with wiring so that
+    //    any startup resume (step 3 below) atomically updates the leased
+    //    projection (chain/frozen/summary) inside the exclusive gate —
+    //    closing the CM5 observability window. The same Arc<Mutex<…>> are
+    //    later moved into RuntimeHandle so Main Run reads from the same
+    //    backing.
+    let projection = RuntimeProjectionParticipant::new();
+    let current_chain = Arc::clone(&projection.chain);
+    let frozen_chats = Arc::clone(&projection.frozen);
+    let active_summary = Arc::clone(&projection.summary);
+    wiring.register_projection_participant(Arc::new(projection));
+
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
 
@@ -111,28 +161,65 @@ pub async fn from_args_with_workspace(
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    // 3. 使用 Composition 已加载的唯一 committed 配置。
-    let snapshot = config_reader.committed_snapshot();
+    // 3. Session — startup resume FIRST, so the committed config snapshot read
+    //    below reflects the target project's config (model, API key, hooks,
+    //    memory, etc.) after a cross-project resume. For non-resume,
+    //    committed_config() is unchanged so behavior is identical.
+    //
+    //    The projection participant (registered in step 0) ensures that
+    //    `resume_prepared` atomically updates the leased projection backing
+    //    inside the exclusive gate. We do NOT extract chain/frozen/summary
+    //    from the restore return value — the backing Arcs already hold the
+    //    new values by the time `resume_session_to_backing` returns.
+    let session_id = if let Some(resume_id) = args.resume.as_ref() {
+        match crate::application::client::resume_helper::resume_session_to_backing(
+            resume_id, &wiring,
+        )
+        .await
+        {
+            Ok((_restore, sid)) => {
+                log::info!(target: LOG_TARGET, "startup resume: {}", sid);
+                sid
+            }
+            Err(error) => {
+                return Err(SdkError::Init(format!(
+                    "startup resume of session {resume_id} failed: {error}"
+                )));
+            }
+        }
+    } else {
+        // Non-resume: use the wiring's committed session id so Runtime
+        // and the Context coordinator share the same canonical session.
+        let session_id = wiring.committed_session().id.clone();
+        log::info!(target: LOG_TARGET, "session started");
+        session_id
+    };
+    set_session_id(session_id.clone());
 
-    // 4. 日志已由 Composition 在进入 Runtime 前初始化。
+    // 4. Read committed config AFTER any startup resume so the snapshot
+    //    reflects the target project. For non-resume this is identical to
+    //    reading before — committed_config() is unchanged.
+    let snapshot = wiring.committed_config();
 
-    // 5. 权限模式
+    // 5. 日志已由 Composition 在进入 Runtime 前初始化。
+
+    // 6. 权限模式
     apply_config_permission_mode(&mut args, snapshot.allow_all());
 
-    // 6. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
+    // 7. 模型选择与运行参数解析 — 由 ConfigSnapshot 收敛 config 语义。
     let runtime_model = snapshot
         .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
         .map_err(|e| SdkError::Init(e.to_string()))?;
     let resolved_model = runtime_model.resolved_model().clone();
     let driver = resolved_model.driver.as_str();
-    // 7. API key
+    // 8. API key
     let api_key = resolve_api_key(args.api_key.take(), &resolved_model, None).ok_or_else(|| {
         SdkError::Init(
             "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
         )
     })?;
 
-    // 8. Base URL + model + runtime settings
+    // 9. Base URL + model + runtime settings
     let base_url = resolve_base_url(args.base_url.clone(), &resolved_model);
     let model = resolved_model.model.id.clone();
     let runtime_settings = resolve_model_runtime_settings(
@@ -150,7 +237,7 @@ pub async fn from_args_with_workspace(
         args.no_think
     );
 
-    // 9. LLM client
+    // 10. LLM client
     let client = Arc::new(
         bootstrap::build_llm_client_with_gateway(
             provider_gateway.as_ref(),
@@ -166,7 +253,7 @@ pub async fn from_args_with_workspace(
         .map_err(|error| SdkError::Init(error.to_string()))?,
     );
 
-    // 10. Tooling
+    // 11. Tooling
     // Legacy store 仅供持久化兼容（snapshot/restore、input_gate clear，#891）。
     let task_store = Arc::new(TaskStore::new());
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
@@ -174,20 +261,36 @@ pub async fn from_args_with_workspace(
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
     }
     let skills = Arc::new(tokio::sync::Mutex::new(skills_map.clone()));
+    // MemoryPortSource: delegates to wiring.committed_memory() at execution
+    // time so resume swaps are transparent to the already-registered tool.
+    let memory_source: Arc<dyn tools::MemoryPortSource> = {
+        struct WiringMemoryPortSource {
+            wiring: Arc<context::MainSessionWiring>,
+        }
+        impl tools::MemoryPortSource for WiringMemoryPortSource {
+            fn current(&self) -> Arc<dyn memory::MemoryPort> {
+                self.wiring.committed_memory()
+            }
+        }
+        Arc::new(WiringMemoryPortSource {
+            wiring: wiring.clone(),
+        })
+    };
     let registry = {
         let reg = tool_gateway.new_registry();
-        tool_gateway.register_all_tools(&reg, task_access.clone(), skills.clone());
+        tool_gateway.register_all_tools(
+            &reg,
+            task_access.clone(),
+            skills.clone(),
+            memory_source.clone(),
+        );
         Arc::new(reg)
     };
     let mcp_manager = spawn_mcp_connect(registry.clone(), &cwd).await;
 
-    // 11. Hook runner
+    // 12. Hook runner
     let hook_runner = build_hook_runner(Some(snapshot.hooks()), &cwd);
     let _hook_runner_before = hook_runner.clone();
-
-    // 12. Session
-    let session_id = start_session(args.resume.clone());
-    set_session_id(session_id.clone());
 
     // 13. Tool Result blob 与 materialization policy。
     let blob_adapter = Arc::new(
@@ -288,6 +391,7 @@ pub async fn from_args_with_workspace(
             skills_map,
             hook_runner,
             memory_config,
+            memory_source,
             agent_semaphore,
             allow_all: args.allow_all,
             context_size,
@@ -310,11 +414,11 @@ pub async fn from_args_with_workspace(
         _mcp_manager: mcp_manager,
         current_client: std::sync::RwLock::new(current_client),
         active_run,
-        current_chain: Arc::new(Mutex::new(context::session::ChatChain::default())),
-        frozen_chats: Arc::new(Mutex::new(Vec::new())),
-        active_summary: Arc::new(Mutex::new(None)),
+        current_chain,
+        frozen_chats,
+        active_summary,
         workspace,
-        config_reader,
+        wiring: wiring.clone(),
         config_query,
         config_writer,
         event_sink_factory: Arc::new(|tx| {
@@ -446,9 +550,17 @@ mod tests {
         let config = config::wire_project_config(&root)
             .await
             .expect("wire config");
+        let task_wiring = task::wire_task();
+        let wiring = context::test_support::wire_in_memory(
+            &workspace,
+            task_wiring.persist(),
+            config.reader(),
+            config.participant(),
+        )
+        .await;
         let dependencies = RuntimeBootstrapDependencies::new(
             workspace,
-            RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
+            wiring,
             provider::wire_provider(),
             tools::wire_tools(),
             Arc::new(task::TaskStore::new()),
@@ -470,6 +582,37 @@ mod tests {
         assert_eq!(
             client.inner.workspace.read().current_path_base(),
             root.canonicalize().expect("canonicalize root")
+        );
+    }
+
+    /// Structural guard (H3): startup resume must happen BEFORE the committed
+    /// config snapshot is read, so the snapshot reflects the target project
+    /// after a cross-project resume.
+    ///
+    /// The ordering invariant: `set_session_id` (post-resume) must appear
+    /// textually before `committed_config()` in `from_args_with_workspace`.
+    #[test]
+    fn startup_resume_precedes_committed_config_read() {
+        let source = include_str!("from_args.rs");
+        let resume_pos = source
+            .find("startup resume")
+            .expect("source should contain 'startup resume'");
+        let session_id_pos = source
+            .find("set_session_id(session_id.clone())")
+            .expect("source should contain set_session_id");
+        let snapshot_pos = source
+            .rfind("let snapshot = wiring.committed_config()")
+            .expect("source should contain committed_config read");
+
+        assert!(
+            resume_pos < session_id_pos,
+            "startup resume block should precede set_session_id"
+        );
+        assert!(
+            session_id_pos < snapshot_pos,
+            "set_session_id (post-resume) should precede the committed_config snapshot read — \
+           H3: snapshot must be determined after startup resume so model/API key/MemoryConfig \
+           come from the target project"
         );
     }
 }

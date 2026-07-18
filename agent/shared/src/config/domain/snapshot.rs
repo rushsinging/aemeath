@@ -69,151 +69,204 @@ impl UsageWorkerConfig {
     }
 }
 
+/// Config-owned 单调版本号。每次 committed active state 切换恰好递增一次。
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct ConfigRevision(u64);
+
+impl ConfigRevision {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
 /// Immutable snapshot of effective configuration.
 ///
 /// Wraps `Config` in `Arc` for cheap cloning via `watch::Receiver`.
 /// All fields on the inner `Config` are accessed only through accessor
 /// methods — consumers cannot mutate or reach the raw `Config`.
 #[derive(Debug, Clone)]
-pub struct ConfigSnapshot(Arc<Config>);
+pub struct ConfigSnapshot {
+    revision: ConfigRevision,
+    inner: Arc<Config>,
+}
 
 impl ConfigSnapshot {
-    /// Create a new snapshot from a merged `Config`.
+    /// Create a bootstrap snapshot. ConfigAppService commits use
+    /// `new_with_revision` to preserve monotonic committed identity.
     pub fn new(config: Config) -> Self {
-        Self(Arc::new(config))
+        Self::new_with_revision(ConfigRevision::default(), config)
     }
 
-    /// Create a snapshot from an `Arc<Config>` (e.g. from `watch`).
+    pub fn new_with_revision(revision: ConfigRevision, config: Config) -> Self {
+        Self {
+            revision,
+            inner: Arc::new(config),
+        }
+    }
+
+    /// Create a new snapshot carrying the same config but a different revision.
+    ///
+    /// The `Arc<Config>` is shared (cheap clone); only the revision field changes.
+    /// Used by `ConfigAppService` to stamp the next monotonic revision at commit time.
+    pub fn with_revision(&self, revision: ConfigRevision) -> Self {
+        Self {
+            revision,
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// Create a bootstrap snapshot from an `Arc<Config>` (e.g. from `watch`).
     pub fn from_arc(config: Arc<Config>) -> Self {
-        Self(config)
+        Self {
+            revision: ConfigRevision::default(),
+            inner: config,
+        }
+    }
+
+    pub fn revision(&self) -> ConfigRevision {
+        self.revision
+    }
+
+    /// Config-owned application service uses this owned clone to install the
+    /// exact prepared candidate as its committed active state.
+    pub fn to_config(&self) -> Config {
+        (*self.inner).clone()
     }
 
     // ── API ──────────────────────────────────────────────────
 
     pub fn api_key(&self) -> Option<&str> {
-        self.0.api.key.as_deref()
+        self.inner.api.key.as_deref()
     }
 
     pub fn base_url(&self) -> Option<&str> {
-        self.0.api.base_url.as_deref()
+        self.inner.api.base_url.as_deref()
     }
 
     pub fn provider(&self) -> Option<&str> {
-        self.0.api.provider.as_deref()
+        self.inner.api.provider.as_deref()
     }
 
     pub fn api_timeout_secs(&self) -> u64 {
-        self.0.api.timeout
+        self.inner.api.timeout
     }
 
     // ── Model ────────────────────────────────────────────────
 
     pub fn model_name(&self) -> &str {
-        &self.0.model.name
+        &self.inner.model.name
     }
 
     pub fn max_tokens(&self) -> u32 {
-        if self.0.model.max_tokens > 0 {
-            self.0.model.max_tokens
+        if self.inner.model.max_tokens > 0 {
+            self.inner.model.max_tokens
         } else {
             crate::config::models::DEFAULT_MAX_TOKENS
         }
     }
 
     pub fn context_size(&self) -> usize {
-        self.0.model.context_size
+        self.inner.model.context_size
     }
 
     // ── Permissions ──────────────────────────────────────────
 
     pub fn permission_mode(&self) -> PermissionModeConfig {
-        self.0.permissions.mode
+        self.inner.permissions.mode
     }
 
     pub fn allow_all(&self) -> bool {
-        self.0.permissions.mode == PermissionModeConfig::AllowAll
+        self.inner.permissions.mode == PermissionModeConfig::AllowAll
     }
 
     // ── Tools / Agents ───────────────────────────────────────
 
     pub fn max_tool_concurrency(&self) -> usize {
-        if self.0.tools.max_concurrency > 0 {
-            self.0.tools.max_concurrency
+        if self.inner.tools.max_concurrency > 0 {
+            self.inner.tools.max_concurrency
         } else {
             super::tools::default_max_tool_concurrency()
         }
     }
 
     pub fn max_agent_concurrency(&self) -> usize {
-        if self.0.agents.max_concurrency > 0 {
-            self.0.agents.max_concurrency
+        if self.inner.agents.max_concurrency > 0 {
+            self.inner.agents.max_concurrency
         } else {
             super::tools::default_max_agent_concurrency()
         }
     }
 
     pub fn tool_result_policy(&self) -> ToolResultPolicy {
-        ToolResultPolicy::from_config(&self.0.tools.tool_result)
+        ToolResultPolicy::from_config(&self.inner.tools.tool_result)
     }
 
     // ── Logging ──────────────────────────────────────────────
 
     pub fn logging_level(&self) -> &str {
-        &self.0.logging.level
+        &self.inner.logging.level
     }
 
     pub fn logs_dir(&self) -> Option<&str> {
-        self.0.logging.logs_dir.as_deref()
+        self.inner.logging.logs_dir.as_deref()
     }
 
     pub fn logging_max_bytes(&self) -> u64 {
-        self.0.logging.max_bytes
+        self.inner.logging.max_bytes
     }
 
     pub fn logging_max_backups(&self) -> usize {
-        self.0.logging.max_backups
+        self.inner.logging.max_backups
     }
 
     pub fn logging_retention_days(&self) -> u64 {
-        self.0.logging.retention_days
+        self.inner.logging.retention_days
     }
 
     // ── UI ───────────────────────────────────────────────────
 
     pub fn verbose(&self) -> bool {
-        self.0.ui.verbose
+        self.inner.ui.verbose
     }
 
     pub fn color(&self) -> bool {
-        self.0.ui.color
+        self.inner.ui.color
     }
 
     pub fn markdown(&self) -> bool {
-        self.0.ui.markdown
+        self.inner.ui.markdown
     }
 
     pub fn tui(&self) -> bool {
-        self.0.ui.tui
+        self.inner.ui.tui
     }
 
     // ── Memory ───────────────────────────────────────────────
 
     pub fn memory_enabled(&self) -> bool {
-        self.0.memory.enabled
+        self.inner.memory.enabled
     }
 
     // ── Audit ───────────────────────────────────────────────
 
     pub fn usage_worker_config(&self) -> UsageWorkerConfig {
         UsageWorkerConfig {
-            capacity: if self.0.audit.usage_queue_capacity > 0 {
-                self.0.audit.usage_queue_capacity
+            capacity: if self.inner.audit.usage_queue_capacity > 0 {
+                self.inner.audit.usage_queue_capacity
             } else {
                 DEFAULT_USAGE_QUEUE_CAPACITY
             },
             shutdown_timeout: Duration::from_millis(
-                if self.0.audit.usage_shutdown_timeout_ms > 0 {
-                    self.0.audit.usage_shutdown_timeout_ms
+                if self.inner.audit.usage_shutdown_timeout_ms > 0 {
+                    self.inner.audit.usage_shutdown_timeout_ms
                 } else {
                     DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS
                 },
@@ -224,13 +277,13 @@ impl ConfigSnapshot {
     // ── Storage ──────────────────────────────────────────────
 
     pub fn persist_sessions(&self) -> bool {
-        self.0.storage.persist_sessions
+        self.inner.storage.persist_sessions
     }
 
     // ── Guidance ─────────────────────────────────────────────
 
     pub fn language(&self) -> &str {
-        &self.0.language
+        &self.inner.language
     }
 
     // ── Reasoning ────────────────────────────────────────────
@@ -251,8 +304,8 @@ impl ConfigSnapshot {
             }
         }
         // snapshot value (already env > file merged)
-        if self.0.model.context_size > 0 {
-            return self.0.model.context_size;
+        if self.inner.model.context_size > 0 {
+            return self.inner.model.context_size;
         }
         // provider model contextWindow
         if model_context_window > 0 {
@@ -264,27 +317,27 @@ impl ConfigSnapshot {
 
     /// 返回完整 `ModelsConfig`，供消费方读取 providers / guidance / model entries 等。
     pub fn models(&self) -> &ModelsConfig {
-        &self.0.models
+        &self.inner.models
     }
 
     /// 返回完整 `AgentsConfig`，供消费方读取 roles / max_concurrency 等。
     pub fn agents(&self) -> &AgentsConfig {
-        &self.0.agents
+        &self.inner.agents
     }
 
     /// 返回完整 `HooksConfig`，供 `build_hook_runner` 等消费。
     pub fn hooks(&self) -> &HooksConfig {
-        &self.0.hooks
+        &self.inner.hooks
     }
 
     /// 返回完整 `MemoryConfig`，供 memory 命令 / 持久化逻辑消费。
     pub fn memory(&self) -> &MemoryConfig {
-        &self.0.memory
+        &self.inner.memory
     }
 
     /// 返回完整 `SkillsConfig`，供 `load_configured_skills` 消费。
     pub fn skills(&self) -> &SkillsConfig {
-        &self.0.skills
+        &self.inner.skills
     }
 
     /// 按 selection 字符串解析模型，委派给 `ModelsConfig::resolve_model_selection`。
@@ -292,7 +345,7 @@ impl ConfigSnapshot {
         &self,
         selection: &str,
     ) -> Result<ResolvedModel, ModelResolveError> {
-        self.0.models.resolve_model_selection(selection)
+        self.inner.models.resolve_model_selection(selection)
     }
 
     /// 解析本次运行使用的模型与运行参数。
@@ -302,18 +355,18 @@ impl ConfigSnapshot {
         cli_max_tokens: Option<u32>,
     ) -> Result<ResolvedRuntimeModel, RuntimeModelResolutionError> {
         RuntimeModelResolver::resolve(
-            &self.0.models,
+            &self.inner.models,
             RuntimeModelRequest {
                 model_override,
                 cli_max_tokens,
-                config_max_tokens: Some(self.0.model.max_tokens),
+                config_max_tokens: Some(self.inner.model.max_tokens),
             },
         )
     }
 
     /// 列出所有可用模型 `(source_key, ModelEntryConfig)`，委派给 `ModelsConfig::list_models`。
     pub fn list_models(&self) -> Vec<(String, ModelEntryConfig)> {
-        self.0.models.list_models()
+        self.inner.models.list_models()
     }
 }
 

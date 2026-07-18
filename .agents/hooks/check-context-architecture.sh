@@ -12,7 +12,7 @@ set -euo pipefail
 #      不得同时打包 working_root + path_base + (context_stack|stack)（防 WorktreeWorkingContext 复活）。
 #   R4 生产代码调 .workspace_control() 仅限 tools 的 bash.rs / worktree.rs。
 #   R5 project 内非测试 Command::new("git") 仅限 adapters/git.rs。
-#   R6 WorkspacePersist 仅可出现在 project（def/impl）与 runtime；tools 禁用（与 R2 重叠）。
+#   R6 WorkspacePersist 仅可出现在 project（def/impl）、Context Session 协调与 runtime；tools 禁用（与 R2 重叠）。
 #   R7 ToolExecutionContext / ChatLoopContext 定义不得含 cwd 字段（从 workspace 读取）。
 #   R8 Policy/Runtime 不得恢复路径 containment 或 read-before-write；Tool safety 不得读取 allow_all。# 例外：测试文件 / #[cfg(test)] 区域对 R4 / R5 / R6 放行。
 # 说明（narrowing）：R3 的 triple-bundle 检测限定 agent/features（project 除外），不扫
@@ -36,6 +36,7 @@ root = Path.cwd()
 
 TOOLS_DIR = "agent/features/tools/"
 PROJECT_DIR = "agent/features/project/"
+CONTEXT_DIR = "agent/features/context/"
 RUNTIME_DIR = "agent/features/runtime/"
 FEATURES_DIR = "agent/features/"
 
@@ -207,13 +208,17 @@ def check_r2_r6(rel: Path, lineno: int, code: str, is_test: bool, violations: li
                 f"{rel_s}:{lineno}: [R2/R6] tools must not reference WorkspacePersist "
                 f"(persistence belongs to runtime session boundary, not tools)."
             )
-    # R6: WorkspacePersist allowed only in project (def/impl) and runtime.
+    # R6: WorkspacePersist allowed only in project (def/impl), Context Session coordination, and runtime.
     if workspace_persist_re.search(code) and not is_test:
-        allowed = rel_s.startswith(PROJECT_DIR) or rel_s.startswith(RUNTIME_DIR)
+        allowed = (
+            rel_s.startswith(PROJECT_DIR)
+            or rel_s.startswith(CONTEXT_DIR)
+            or rel_s.startswith(RUNTIME_DIR)
+        )
         if not allowed:
             violations.append(
-                f"{rel_s}:{lineno}: [R6] WorkspacePersist may only appear in project (def/impl) "
-                f"or runtime; found outside both."
+                f"{rel_s}:{lineno}: [R6] WorkspacePersist may only appear in project (def/impl), "
+                f"Context Session coordination, or runtime; found outside all owners."
             )
 
 

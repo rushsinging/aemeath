@@ -1,29 +1,9 @@
-use crate::domain::ToolExecutionContext;
+use memory::{MemoryCategory, MemoryLayer};
 use serde_json::Value;
-use share::memory::{parse_category, parse_layer, MemoryCategory, MemoryLayer};
-use std::path::PathBuf;
-use storage::{memory_base_dir, project_file_name_from_path, MemoryStore};
 
 pub(super) const MAX_CONTENT_CHARS: usize = 500;
 pub(super) const MAX_TAGS: usize = 10;
 pub(super) const MAX_TAG_CHARS: usize = 32;
-
-pub(super) fn open_store(ctx: &ToolExecutionContext) -> Result<MemoryStore, String> {
-    open_store_with_base(ctx, memory_base_dir())
-}
-
-pub(super) fn open_store_with_base(
-    ctx: &ToolExecutionContext,
-    base_dir: PathBuf,
-) -> Result<MemoryStore, String> {
-    MemoryStore::new(
-        base_dir,
-        project_file_name_from_path(&ctx.workspace_read().current_workspace_root()),
-        ctx.resources.memory_config.max_entries,
-        ctx.resources.memory_config.similarity_threshold,
-    )
-    .map_err(|error| error.to_string())
-}
 
 pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
     input
@@ -36,7 +16,7 @@ pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str
 
 pub(super) fn optional_layer(input: &Value) -> Result<Option<MemoryLayer>, String> {
     match input.get("layer").and_then(|value| value.as_str()) {
-        Some(layer) => parse_layer(layer)
+        Some(layer) => parse_memory_layer(layer)
             .map(Some)
             .ok_or_else(|| format!("无效 memory layer: {layer}")),
         None => Ok(None),
@@ -45,7 +25,7 @@ pub(super) fn optional_layer(input: &Value) -> Result<Option<MemoryLayer>, Strin
 
 pub(super) fn optional_category(input: &Value) -> Result<Option<MemoryCategory>, String> {
     match input.get("category").and_then(|value| value.as_str()) {
-        Some(category) => parse_category(category)
+        Some(category) => parse_memory_category(category)
             .map(Some)
             .ok_or_else(|| format!("无效 memory category: {category}")),
         None => Ok(None),
@@ -87,4 +67,23 @@ pub(super) fn validate_content(content: &str) -> Result<(), String> {
         return Err(format!("memory content 不能超过 {MAX_CONTENT_CHARS} 字符"));
     }
     Ok(())
+}
+
+fn parse_memory_layer(s: &str) -> Option<MemoryLayer> {
+    match s.to_ascii_lowercase().as_str() {
+        "global" => Some(MemoryLayer::Global),
+        "project" => Some(MemoryLayer::Project),
+        _ => None,
+    }
+}
+
+fn parse_memory_category(s: &str) -> Option<MemoryCategory> {
+    match s.to_ascii_lowercase().as_str() {
+        "fact" => Some(MemoryCategory::Fact),
+        "decision" => Some(MemoryCategory::Decision),
+        "preference" => Some(MemoryCategory::Preference),
+        "pattern" => Some(MemoryCategory::Pattern),
+        "pitfall" => Some(MemoryCategory::Pitfall),
+        _ => None,
+    }
 }
