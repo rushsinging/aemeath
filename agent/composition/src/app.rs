@@ -101,3 +101,168 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         skills_map: launch.skills_map,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use provider::{
+        InvocationScope, InvocationStream, LlmClient, LlmClientPool, LlmConfigOptions, LlmError,
+        LlmProvider, LlmProviderGateway, ProviderError, SystemBlock,
+    };
+    use share::config::ModelsConfig;
+    use share::message::Message;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use task::TaskAccess;
+    use tokio::sync::Mutex;
+    use tokio_util::sync::CancellationToken;
+    use tools::{DefaultToolCatalogGateway, ToolCatalogGateway, ToolRegistry};
+
+    #[derive(Default)]
+    struct CountingProviderGateway {
+        client_from_config_calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmProviderGateway for CountingProviderGateway {
+        fn client_from_provider(&self, provider: Arc<dyn LlmProvider>) -> LlmClient {
+            provider::wire_provider().client_from_provider(provider)
+        }
+
+        fn client_from_config(&self, options: LlmConfigOptions) -> Result<LlmClient, LlmError> {
+            self.client_from_config_calls.fetch_add(1, Ordering::SeqCst);
+            provider::wire_provider().client_from_config(options)
+        }
+
+        fn client_pool(
+            &self,
+            default_client: Arc<LlmClient>,
+            models_config: Arc<ModelsConfig>,
+            timeout_secs: u64,
+        ) -> LlmClientPool {
+            provider::wire_provider().client_pool(default_client, models_config, timeout_secs)
+        }
+
+        async fn invocation_stream(
+            &self,
+            client: &LlmClient,
+            scope: &InvocationScope,
+            system: &[SystemBlock],
+            messages: &[Message],
+            tool_schemas: &[serde_json::Value],
+            cancel: &CancellationToken,
+        ) -> Result<InvocationStream, ProviderError> {
+            provider::wire_provider()
+                .invocation_stream(client, scope, system, messages, tool_schemas, cancel)
+                .await
+        }
+    }
+
+    #[derive(Default)]
+    struct CountingToolGateway {
+        new_registry_calls: AtomicUsize,
+        register_all_tools_calls: AtomicUsize,
+    }
+
+    impl ToolCatalogGateway for CountingToolGateway {
+        fn new_registry(&self) -> ToolRegistry {
+            self.new_registry_calls.fetch_add(1, Ordering::SeqCst);
+            DefaultToolCatalogGateway.new_registry()
+        }
+
+        fn register_all_tools(
+            &self,
+            registry: &ToolRegistry,
+            task_access: Arc<dyn TaskAccess>,
+            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+        ) {
+            self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
+            DefaultToolCatalogGateway.register_all_tools(registry, task_access, skills);
+        }
+
+        fn register_all_tools_except_agent(
+            &self,
+            registry: &ToolRegistry,
+            task_access: Arc<dyn TaskAccess>,
+            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+        ) {
+            DefaultToolCatalogGateway.register_all_tools_except_agent(
+                registry,
+                task_access,
+                skills,
+            );
+        }
+
+        fn register_subagent_tools(
+            &self,
+            registry: &mut ToolRegistry,
+            task_access: Arc<dyn TaskAccess>,
+            skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+        ) {
+            DefaultToolCatalogGateway.register_subagent_tools(registry, task_access, skills);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn build_agent_client_with_gateways_consumes_injected_provider_and_tools() {
+        let temp = tempfile::tempdir().expect("create temp root");
+        let root = temp.path().join("root");
+        let agents_dir = temp.path().join("agents");
+        std::fs::create_dir_all(&root).expect("create project root");
+        std::fs::create_dir_all(&agents_dir).expect("create agents dir");
+        std::fs::write(
+            agents_dir.join("aemeath.json"),
+            serde_json::json!({
+                "models": {
+                    "default": "local/test-model",
+                    "providers": {
+                        "local": {
+                            "baseUrl": "http://127.0.0.1:1/v1",
+                            "apiKey": "test-api-key",
+                            "driver": "openai",
+                            "models": [{
+                                "id": "test-model",
+                                "name": "Test Model",
+                                "input": ["text"],
+                                "contextWindow": 8192,
+                                "max_tokens": 1024
+                            }]
+                        }
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .expect("write config");
+        std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
+            .expect("write MCP config");
+
+        let previous_agents_dir = std::env::var_os("AEMEATH_AGENTS_DIR");
+        unsafe { std::env::set_var("AEMEATH_AGENTS_DIR", &agents_dir) };
+
+        let provider = Arc::new(CountingProviderGateway::default());
+        let tools = Arc::new(CountingToolGateway::default());
+        let gateways = FeatureGateways::new(tools.clone(), provider.clone());
+        let args = AgentArgs {
+            cwd: Some(root),
+            api_key: Some("test-api-key".to_string()),
+            base_url: Some("http://127.0.0.1:1/v1".to_string()),
+            model: Some("local/test-model".to_string()),
+            context_size: 8192,
+            ..Default::default()
+        };
+
+        let result = build_agent_client_with_gateways(args, gateways).await;
+
+        unsafe {
+            match previous_agents_dir {
+                Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
+                None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
+            }
+        }
+        result.expect("build client with injected gateways");
+        assert_eq!(provider.client_from_config_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(tools.new_registry_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(tools.register_all_tools_calls.load(Ordering::SeqCst), 1);
+    }
+}

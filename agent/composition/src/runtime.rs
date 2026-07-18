@@ -6,7 +6,7 @@ pub(crate) use runtime::AgentClientImpl;
 
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
-    _gateways: FeatureGateways,
+    gateways: FeatureGateways,
     workspace: project::WorkspaceViews,
     config: config::ConfigWiring,
 ) -> Result<AgentClientImpl, sdk::SdkError> {
@@ -21,6 +21,8 @@ pub(crate) async fn from_args_with_gateways(
         config.reader(),
         config.query(),
         config.writer(),
+        gateways.provider,
+        gateways.tools,
         task_access,
         session_tasks,
     )

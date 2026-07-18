@@ -37,7 +37,33 @@ pub fn build_llm_client(
     max_reasoning: Option<&str>,
     timeout_secs: u64,
 ) -> Result<LlmClient, provider::LlmError> {
-    let client = LlmClient::from_config(LlmConfigOptions {
+    let gateway = provider::wire_provider();
+    build_llm_client_with_gateway(
+        gateway.as_ref(),
+        driver,
+        api_key,
+        base_url,
+        model,
+        resolved_model,
+        runtime_settings,
+        max_reasoning,
+        timeout_secs,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_llm_client_with_gateway(
+    gateway: &dyn provider::LlmProviderGateway,
+    driver: &str,
+    api_key: String,
+    base_url: Option<String>,
+    model: String,
+    resolved_model: &ResolvedModel,
+    runtime_settings: &ModelRuntimeSettings,
+    max_reasoning: Option<&str>,
+    timeout_secs: u64,
+) -> Result<LlmClient, provider::LlmError> {
+    let client = gateway.client_from_config(LlmConfigOptions {
         driver: driver.to_string(),
         source_key: resolved_model.source_key.clone(),
         api_style: resolved_model.model.api_style.clone(),

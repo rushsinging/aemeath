@@ -167,8 +167,10 @@
 - **允许的顶层源码**：`lib.rs`, `app.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/provider/runtime/tools/update` 五个 wiring module。
 - **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
 - **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
-- **范围边界**：本守卫只证明 Composition 物理结构与 façade 模块声明；`FeatureGateways` 真实注入由 #948 承接，全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
+- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Tool gateway 被 Runtime 主 bootstrap 实际消费；全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
 - **#1002 故意违规证据**：临时创建 `agent/composition/src/domain.rs` 时，单 Guard 与总编排均以 exit 2 命中 `forbidden Hexagonal/COLA layer`；删除探针后两者 clean pass。
+- **#948 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.tools` 传给 Runtime；Runtime 主 bootstrap 必须声明两个 trait-object 参数，并分别经 `build_llm_client_with_gateway`、`new_registry`、`register_all_tools` 消费。规则使用结构化正向断言，白名单仍为 0。
+- **#948 故意违规证据**：临时把 `gateways.provider` 改为默认 `provider::wire_provider()` 后，单 Guard 与总编排均以 exit 2 命中 `missing provider gateway forwarding`；恢复后 clean pass。
 
 ## 5. check-cola-layer-purity.sh
 
