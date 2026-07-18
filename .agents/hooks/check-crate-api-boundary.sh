@@ -167,7 +167,7 @@ ROOT_ACCESS_ALLOW = {
         "CURRENT_USAGE_SCHEMA_VERSION",
         "file_usage_append_store",
     },
-    "runtime": {"AgentClientImpl", "UsageSink", "from_args"},
+    "runtime": {"AgentClientImpl", "UsageSink", "from_args_with_workspace"},
     "policy": {
         "validate_and_normalize_path",
         "validate_and_normalize_path_from_base",
@@ -178,7 +178,7 @@ ROOT_ACCESS_ALLOW = {
     "project": PROJECT_ROOT_ACCESS_ALLOW,
     "tools": TOOLS_ROOT_ACCESS_ALLOW,
     # Context 的 Target façade 位于 crate 根；只允许访问这些稳定发布模块。
-    "context": {"compact", "context_port", "domain", "guidance", "session", "skill"},
+    "context": {"compact", "context_port", "domain", "guidance", "session", "skill", "compose_session_task_capture", "LegacyTaskCapture"},
     # Storage 的 #991 过渡 façade；最终随 #880/#983/#883/#884 收敛。
     "storage": {
         "Batch",

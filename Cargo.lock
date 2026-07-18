@@ -409,11 +409,13 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "config",
+ "context",
  "project",
  "provider",
  "runtime",
  "sdk",
  "share",
+ "task",
  "tools",
  "update",
 ]
@@ -472,6 +474,7 @@ dependencies = [
  "serde_yml",
  "share",
  "storage",
+ "task",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",

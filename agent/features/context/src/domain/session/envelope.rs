@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use share::message::Message;
 use std::path::PathBuf;
-use storage::TaskSnapshot;
+use storage::TaskSnapshot as LegacyTaskSnapshot;
+use task::TaskSnapshot;
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
@@ -43,6 +44,11 @@ pub struct CanonicalSession {
     pub updated_at: String,
     #[serde(default)]
     pub metadata: SessionMetadata,
+    /// Canonical typed task image owned by the Task BC. The Task snapshot uses
+    /// its own versioned `encode`/`decode` wire rather than serde on the runtime
+    /// entities, so the [`SnapshotState`] slot is bridged through
+    /// [`task_snapshot_state`] instead of a plain derive.
+    #[serde(with = "task_snapshot_state")]
     pub tasks: SnapshotState<TaskSnapshot>,
     pub workspace: SnapshotState<PersistedWorkspaceContext>,
     pub revision: u64,
@@ -100,8 +106,11 @@ struct LegacySession {
     updated_at: String,
     #[serde(default)]
     metadata: SessionMetadata,
+    /// The pre-#890 on-disk task image is the untyped storage DTO. It is upgraded
+    /// to the canonical [`TaskSnapshot`] during legacy decode; it is never stored
+    /// as the canonical type directly.
     #[serde(default)]
-    tasks: Option<TaskSnapshot>,
+    tasks: Option<LegacyTaskSnapshot>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -150,6 +159,71 @@ pub enum SessionCodecError {
     LegacyWorkspaceIdMismatch,
     #[error("Session JSON encode failed: {0}")]
     Encode(String),
+}
+
+/// Upgrades a pre-#890 storage task snapshot to the canonical [`TaskSnapshot`].
+///
+/// The two representations are *not* assumed identical: the legacy DTO is
+/// re-serialized to its wire bytes and decoded through the Task BC's own
+/// versioned V1 decode path, which is the single authority for interpreting
+/// legacy task wire data. Any incompatibility surfaces as a typed decode error
+/// rather than a silent, lossy field-by-field copy.
+fn upgrade_legacy_task_snapshot(
+    legacy: LegacyTaskSnapshot,
+) -> Result<TaskSnapshot, SessionCodecError> {
+    let bytes = serde_json::to_vec(&legacy)
+        .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))?;
+    TaskSnapshot::decode(&bytes).map_err(|error| SessionCodecError::InvalidJson(error.to_string()))
+}
+
+/// serde bridge for `SnapshotState<TaskSnapshot>`.
+///
+/// [`TaskSnapshot`] intentionally does not implement serde on its runtime
+/// entities; its canonical wire form is produced by `encode`/`decode`. This
+/// module reuses the derived [`SnapshotState`] tagging by routing the captured
+/// payload through a `serde_json::Value` produced by that canonical codec, so
+/// the envelope stays a plain typed field while the Task BC keeps sole ownership
+/// of its wire format.
+mod task_snapshot_state {
+    use super::{SnapshotState, TaskSnapshot, Value};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S>(
+        state: &SnapshotState<TaskSnapshot>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let wire = match state {
+            SnapshotState::Missing => SnapshotState::Missing,
+            SnapshotState::CapturedEmpty => SnapshotState::CapturedEmpty,
+            SnapshotState::Captured(snapshot) => {
+                let bytes = snapshot.encode().map_err(serde::ser::Error::custom)?;
+                let value: Value =
+                    serde_json::from_slice(&bytes).map_err(serde::ser::Error::custom)?;
+                SnapshotState::Captured(value)
+            }
+        };
+        wire.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<SnapshotState<TaskSnapshot>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match SnapshotState::<Value>::deserialize(deserializer)? {
+            SnapshotState::Missing => SnapshotState::Missing,
+            SnapshotState::CapturedEmpty => SnapshotState::CapturedEmpty,
+            SnapshotState::Captured(value) => {
+                let bytes = serde_json::to_vec(&value).map_err(serde::de::Error::custom)?;
+                let snapshot = TaskSnapshot::decode(&bytes).map_err(serde::de::Error::custom)?;
+                SnapshotState::Captured(snapshot)
+            }
+        })
+    }
 }
 
 pub struct SessionCodec;
@@ -224,7 +298,9 @@ impl SessionCodec {
         }
         let (workspace, captured_workspace) = upgrade_workspace(legacy.cwd, legacy.workspace)?;
         let tasks = match legacy.tasks {
-            Some(tasks) => SnapshotState::Captured(tasks),
+            Some(legacy_tasks) => {
+                SnapshotState::Captured(upgrade_legacy_task_snapshot(legacy_tasks)?)
+            }
             None if captured_workspace => SnapshotState::CapturedEmpty,
             None => SnapshotState::Missing,
         };
