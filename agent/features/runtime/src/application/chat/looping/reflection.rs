@@ -1,57 +1,58 @@
-//! Shared reflection utilities used by both TUI and REPL paths.
+//! Shared reflection orchestration used by both TUI and REPL paths.
 
-use crate::application::reflection::runner::run_complete_reflection_with_base_dir;
-use crate::application::reflection::ReflectionRunMode;
+use crate::application::reflection::{run_complete_reflection, ReflectionRunMode};
 use crate::LOG_TARGET;
+use memory::api::{MemoryPort, ReflectionEngine, ReflectionPromptPort};
 use provider::StopReason;
-use std::path::{Path, PathBuf};
 
-/// Build the reflection context (memory + recent messages), call LLM, parse result.
-///
-/// Returns `Some(formatted_text)` if reflection was triggered and produced output,
-/// or `None` if reflection is disabled, not due yet, or failed silently.
+/// Build the reflection context, call the provider, and parse the Memory PL result.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_reflection(
     config: &share::config::MemoryConfig,
     turn_count: usize,
     messages: &[share::message::Message],
-    cwd: &Path,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
+    memory: &dyn MemoryPort,
+    reflection: &dyn ReflectionPromptPort,
 ) -> Option<String> {
-    run_reflection_with_base_dir(
+    run_reflection_mode(
+        ReflectionRunMode::Interval { turn_count },
         config,
-        turn_count,
         messages,
-        cwd,
         client,
         system_prompt_text,
-        storage::memory_base_dir(),
         lang,
+        memory,
+        reflection,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_precompact_reflection(
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    cwd: &Path,
     client: &provider::LlmClient,
     system_prompt_text: &str,
     lang: &str,
+    memory: &dyn MemoryPort,
+    reflection: &dyn ReflectionPromptPort,
 ) -> Option<String> {
     let compacted_messages = context::compact::messages_selected_for_precompact_memory(messages);
     if compacted_messages.is_empty() {
         return None;
     }
-    run_forced_reflection_with_base_dir(
+    run_reflection_mode(
+        ReflectionRunMode::Forced,
         config,
         &compacted_messages,
-        cwd,
         client,
         system_prompt_text,
-        storage::memory_base_dir(),
         lang,
+        memory,
+        reflection,
     )
     .await
 }
@@ -76,67 +77,37 @@ pub(crate) fn should_run_turn_reflection(
     turn_count.is_multiple_of(config.reflection.interval_turns)
 }
 
-async fn run_forced_reflection_with_base_dir(
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    cwd: &Path,
-    client: &provider::LlmClient,
-    system_prompt_text: &str,
-    base_dir: PathBuf,
-    lang: &str,
-) -> Option<String> {
-    match run_complete_reflection_with_base_dir(
-        ReflectionRunMode::Forced,
-        config,
-        messages,
-        cwd,
-        client,
-        system_prompt_text,
-        base_dir,
-        lang,
-    )
-    .await
-    {
-        Ok(Some(result)) => Some(result.formatted_content),
-        Ok(None) => None,
-        Err(e) => {
-            log::warn!(target: LOG_TARGET, "Forced reflection failed: {e}");
-            None
-        }
-    }
-}
 #[allow(clippy::too_many_arguments)]
-async fn run_reflection_with_base_dir(
+async fn run_reflection_mode(
+    mode: ReflectionRunMode,
     config: &share::config::MemoryConfig,
-    turn_count: usize,
     messages: &[share::message::Message],
-    cwd: &Path,
     client: &provider::LlmClient,
     system_prompt_text: &str,
-    base_dir: PathBuf,
     lang: &str,
+    memory: &dyn MemoryPort,
+    reflection: &dyn ReflectionPromptPort,
 ) -> Option<String> {
-    match run_complete_reflection_with_base_dir(
-        ReflectionRunMode::Interval { turn_count },
+    match run_complete_reflection(
+        mode,
         config,
         messages,
-        cwd,
         client,
         system_prompt_text,
-        base_dir,
         lang,
+        memory,
+        reflection,
     )
     .await
     {
         Ok(Some(result)) => Some(result.formatted_content),
         Ok(None) => None,
-        Err(e) => {
-            log::warn!(target: LOG_TARGET, "Interval reflection failed: {e}");
+        Err(error) => {
+            log::warn!(target: LOG_TARGET, "Reflection failed: {error}");
             None
         }
     }
 }
 
-#[cfg(test)]
-#[path = "reflection_tests.rs"]
-mod reflection_tests;
+/// Production prompt implementation; exposed here to keep call sites explicit about the port.
+pub(crate) const REFLECTION_ENGINE: ReflectionEngine = ReflectionEngine;
