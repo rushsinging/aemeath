@@ -2,7 +2,11 @@
 
 use crate::{ChatInputEventPort, QueueDrainPort};
 
-pub use crate::chat_event::{ChatEvent, ChatEventContext, ToolCallStatusView};
+pub use crate::chat_event::{
+    ChatEvent, ChatEventContext, ReflectionApplyStatusView, ReflectionErrorCategoryView,
+    ReflectionHistoryView, ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView,
+    ToolCallStatusView,
+};
 pub use crate::chat_result::{ChatInputImage, ChatResult, ChatStream, ToolResultImage};
 pub use crate::chat_view::{
     AgentProgressEventView, AgentProgressKindView, AgentToolCallProgressView, HookEventStatus,
@@ -86,10 +90,8 @@ pub enum ChatInputEvent {
     /// 恢复指定会话。由 `/resume <id>` 触发。
     /// 需要走 idle gate（替换 loop messages）。
     ResumeSession { id: String },
-    /// 运行 reflection。由 `/reflect` 或自动触发。
-    RunReflection,
-    /// 应用 reflection 结果。由 TUI 在 reflection UI 确认后触发。
-    ApplyReflection { output: crate::ReflectionOutputView },
+    /// 查询最近的 reflection 历史。由 `/reflect [limit]` 触发；不运行或应用 reflection。
+    QueryReflectionHistory { limit: usize },
     /// 查询可用模型列表。由 TUI 启动时或 `/model` 触发。
     ListModels,
     /// 查询提醒列表。由 `/reminders` 触发。

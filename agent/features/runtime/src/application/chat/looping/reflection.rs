@@ -1,11 +1,16 @@
 //! Shared reflection orchestration used by both TUI and REPL paths.
 
-use crate::application::reflection::{run_complete_reflection, ReflectionRunMode};
-use crate::LOG_TARGET;
-use memory::api::{MemoryPort, ReflectionEngine, ReflectionPromptPort};
+use std::sync::Arc;
+
+use crate::application::reflection::{
+    run_complete_reflection, ReflectionRunMode, ReflectionTaskAdapter, ReflectionTaskRequest,
+    ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+};
+use memory::api::{MemoryPort, ReflectionEngine, ReflectionHistoryStore, ReflectionPromptPort};
 use provider::StopReason;
 
-/// Build the reflection context, call the provider, and parse the Memory PL result.
+/// Legacy/manual PL runner retained for internal compatibility. Automatic
+/// triggers use the non-blocking submit functions below.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_reflection(
     config: &share::config::MemoryConfig,
@@ -17,7 +22,7 @@ pub async fn run_reflection(
     memory: &dyn MemoryPort,
     reflection: &dyn ReflectionPromptPort,
 ) -> Option<String> {
-    run_reflection_mode(
+    match run_complete_reflection(
         ReflectionRunMode::Interval { turn_count },
         config,
         messages,
@@ -28,33 +33,100 @@ pub async fn run_reflection(
         reflection,
     )
     .await
+    {
+        Ok(Some(result)) => Some(result.formatted_content),
+        Ok(None) | Err(_) => None,
+    }
 }
 
+/// Submit interval reflection with an owned message snapshot. This function does
+/// not await execution and never exposes generated reflection text to chat UI.
 #[allow(clippy::too_many_arguments)]
-pub async fn run_precompact_reflection(
+pub(crate) fn submit_interval_reflection(
+    adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
+    turn_count: usize,
     messages: &[share::message::Message],
-    client: &provider::LlmClient,
+    client: &Arc<provider::LlmClient>,
     system_prompt_text: &str,
     lang: &str,
-    memory: &dyn MemoryPort,
-    reflection: &dyn ReflectionPromptPort,
-) -> Option<String> {
-    let compacted_messages = context::compact::messages_selected_for_precompact_memory(messages);
-    if compacted_messages.is_empty() {
-        return None;
-    }
-    run_reflection_mode(
-        ReflectionRunMode::Forced,
+    memory: &Arc<dyn MemoryPort>,
+    history: &Arc<dyn ReflectionHistoryStore>,
+) -> ReflectionTaskSubmitOutcome {
+    submit(
+        adapter,
+        ReflectionTaskTrigger::Interval { turn_count },
         config,
-        &compacted_messages,
+        messages.to_vec(),
         client,
         system_prompt_text,
         lang,
         memory,
-        reflection,
+        history,
     )
-    .await
+}
+
+/// Submit a frozen snapshot of exactly the messages discarded by a successful compact.
+/// Busy submissions are skipped immediately and never queued.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn submit_precompact_reflection_snapshot(
+    adapter: &ReflectionTaskAdapter,
+    config: &share::config::MemoryConfig,
+    snapshot: Vec<share::message::Message>,
+    client: &Arc<provider::LlmClient>,
+    system_prompt_text: &str,
+    lang: &str,
+    memory: &Arc<dyn MemoryPort>,
+    history: &Arc<dyn ReflectionHistoryStore>,
+) {
+    if snapshot.is_empty() || !reflection_enabled(config) {
+        return;
+    }
+    if submit(
+        adapter,
+        ReflectionTaskTrigger::PreCompact,
+        config,
+        snapshot,
+        client,
+        system_prompt_text,
+        lang,
+        memory,
+        history,
+    ) == ReflectionTaskSubmitOutcome::BusySkipped
+    {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "[reflection_busy] trigger=pre_compact status=busy_skipped queued=false"
+        );
+    }
+}
+
+fn reflection_enabled(config: &share::config::MemoryConfig) -> bool {
+    config.enabled && config.reflection.enabled && config.reflection.interval_turns > 0
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit(
+    adapter: &ReflectionTaskAdapter,
+    trigger: ReflectionTaskTrigger,
+    config: &share::config::MemoryConfig,
+    messages: Vec<share::message::Message>,
+    client: &Arc<provider::LlmClient>,
+    system_prompt_text: &str,
+    lang: &str,
+    memory: &Arc<dyn MemoryPort>,
+    history: &Arc<dyn ReflectionHistoryStore>,
+) -> ReflectionTaskSubmitOutcome {
+    adapter.submit_complete(
+        ReflectionTaskRequest::new(trigger, messages),
+        config.clone(),
+        Arc::clone(client),
+        system_prompt_text.to_owned(),
+        lang.to_owned(),
+        Arc::clone(memory),
+        Arc::new(REFLECTION_ENGINE) as Arc<dyn ReflectionPromptPort>,
+        Arc::clone(history),
+    )
 }
 
 pub(crate) fn should_run_turn_reflection(
@@ -75,38 +147,6 @@ pub(crate) fn should_run_turn_reflection(
         return false;
     }
     turn_count.is_multiple_of(config.reflection.interval_turns)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_reflection_mode(
-    mode: ReflectionRunMode,
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    client: &provider::LlmClient,
-    system_prompt_text: &str,
-    lang: &str,
-    memory: &dyn MemoryPort,
-    reflection: &dyn ReflectionPromptPort,
-) -> Option<String> {
-    match run_complete_reflection(
-        mode,
-        config,
-        messages,
-        client,
-        system_prompt_text,
-        lang,
-        memory,
-        reflection,
-    )
-    .await
-    {
-        Ok(Some(result)) => Some(result.formatted_content),
-        Ok(None) => None,
-        Err(error) => {
-            log::warn!(target: LOG_TARGET, "Reflection failed: {error}");
-            None
-        }
-    }
 }
 
 /// Production prompt implementation; exposed here to keep call sites explicit about the port.

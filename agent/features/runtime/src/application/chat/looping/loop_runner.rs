@@ -75,19 +75,24 @@ where
                 hook_runner,
                 memory_config,
                 memory,
+                reflection_history,
                 language,
                 frozen_chats,
                 active_summary: active_summary_arc,
                 reasoning,
                 build_switched_client,
                 save_chain,
-                run_reflection_on_demand,
-                apply_reflection_on_demand,
+                list_reflection_history,
                 list_models,
                 list_reminders,
                 list_sessions,
             } = ctx;
             let mut client = client;
+            // Interval and PreCompact share this single session-scoped slot.
+            let reflection_tasks =
+                crate::application::reflection::ReflectionTaskAdapter::production(
+                    std::time::Duration::from_secs(120),
+                );
             let hook_ui = HookUi::new(sink.clone());
             let mut cwd = workspace.read().current_workspace_root();
             let memory_cwd = workspace.read().initial_cwd();
@@ -118,8 +123,9 @@ where
                         &system_prompt_text,
                         context_size,
                         &memory_config,
-                        memory.as_ref(),
-                        &super::reflection::REFLECTION_ENGINE,
+                        &memory,
+                        &reflection_history,
+                        &reflection_tasks,
                         &client,
                         &language,
                         &cwd,
@@ -293,46 +299,23 @@ where
                     }
                     continue;
                 }
-                PendingCommand::RunReflection => match run_reflection_on_demand().await {
-                    Ok(view) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ReflectionResult {
-                                output: Box::new(view),
-                            })
-                            .await;
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("Reflection failed: {e}"),
-                                is_error: true,
-                            })
-                            .await;
-                        continue;
-                    }
-                },
-                PendingCommand::ApplyReflection { output } => {
-                    match apply_reflection_on_demand(output).await {
-                        Ok(msg) => {
+                PendingCommand::QueryReflectionHistory { limit } => {
+                    match list_reflection_history(limit).await {
+                        Ok(records) => {
                             let _ = sink
-                                .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: msg,
-                                    is_error: false,
-                                })
+                                .send_event(RuntimeStreamEvent::ReflectionHistory { records })
                                 .await;
-                            continue;
                         }
                         Err(e) => {
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: format!("Apply reflection failed: {e}"),
+                                    text: format!("List reflection history failed: {e}"),
                                     is_error: true,
                                 })
                                 .await;
-                            continue;
                         }
                     }
+                    continue;
                 }
                 PendingCommand::ListModels => match list_models().await {
                     Ok(models) => {
@@ -502,6 +485,8 @@ where
                     hook_runner: &hook_runner,
                     memory_config: &memory_config,
                     memory: &memory,
+                    reflection_history: &reflection_history,
+                    reflection_tasks: &reflection_tasks,
                     language: &language,
                     frozen_chats: &frozen_chats,
                     active_summary: &mut active_summary,
@@ -538,6 +523,9 @@ where
                 }
                 active_run.clear(&run_id);
             }
+            // Session shutdown joins any accepted background reflection before resources
+            // (notably history persistence) are released.
+            let _ = reflection_tasks.drain().await;
             chain
         },
     )

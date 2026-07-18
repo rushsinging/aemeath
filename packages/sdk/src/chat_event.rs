@@ -27,6 +27,66 @@ pub enum ToolCallStatusView {
     Running,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionTriggerView {
+    Interval,
+    PreCompact,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionStatusView {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionApplyStatusView {
+    NotApplied,
+    Applied,
+    PartiallyApplied,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReflectionErrorCategoryView {
+    LlmCall,
+    EmptyResponse,
+    Parse,
+    InvalidSuggestion,
+    Apply,
+    History,
+    Cancelled,
+    TimedOut,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReflectionTokenUsageView {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+/// Safe reflection history projection. It intentionally contains only metadata
+/// and aggregate counts, never reflection output, prompts, or conversation text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReflectionHistoryView {
+    pub id: String,
+    pub timestamp: u64,
+    pub trigger: ReflectionTriggerView,
+    pub status: ReflectionStatusView,
+    pub deviations: usize,
+    pub suggestions: usize,
+    pub outdated: usize,
+    pub apply_status: ReflectionApplyStatusView,
+    pub error_category: Option<ReflectionErrorCategoryView>,
+    pub token_usage: Option<ReflectionTokenUsageView>,
+    pub duration_ms: u64,
+}
+
 /// Chat 事件流中的单个事件。
 #[derive(Debug)]
 pub enum ChatEvent {
@@ -323,11 +383,9 @@ pub enum ChatEvent {
         id: String,
         message: String,
     },
-    /// #567：Reflection 结果回传。
-    ///
-    /// Deprecated by #899: retained temporarily for the existing TUI delivery chain.
-    ReflectionResult {
-        output: Box<crate::ReflectionOutputView>,
+    /// Reflection 历史查询结果。记录仅含安全元数据和计数，不含正文。
+    ReflectionHistory {
+        records: Vec<ReflectionHistoryView>,
     },
     /// #567：模型列表回传。
     ModelList {

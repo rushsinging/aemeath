@@ -1,11 +1,9 @@
 use sdk::{
     ConfigField, ConfigUpdateResult, ConfigView, MemoryConfigView, ReflectionConfigView,
-    ReflectionMemorySuggestionView, ReflectionOutputView, SessionSummary, SkillView,
-    WorkspaceContextView, WorkspaceStackEntryView,
+    SessionSummary, SkillView, WorkspaceContextView, WorkspaceStackEntryView,
 };
 
 use context::skill::Skill;
-use memory::api::{MemoryCategory, MemoryLayer};
 
 pub(crate) fn config_snapshot_to_sdk(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
@@ -62,49 +60,6 @@ pub(crate) fn skill_to_sdk(skill: Skill) -> SkillView {
         description: Some(skill.description),
         content: skill.content,
         source: Some(skill.source_path.display().to_string()),
-    }
-}
-
-pub(crate) fn reflection_output_to_sdk_with_content(
-    output: memory::api::ReflectionOutput,
-    content: String,
-    input_tokens: u32,
-    output_tokens: u32,
-    auto_applied: bool,
-) -> ReflectionOutputView {
-    ReflectionOutputView {
-        content,
-        input_tokens,
-        output_tokens,
-        suggested_memories: output
-            .suggested_memories
-            .into_iter()
-            .map(|memory| ReflectionMemorySuggestionView {
-                content: memory.content,
-                layer: memory_layer_to_sdk(memory.layer).to_string(),
-                category: memory_category_to_sdk(memory.category).to_string(),
-                tags: memory.tags,
-            })
-            .collect(),
-        outdated_memories: output.outdated_memories,
-        auto_applied,
-    }
-}
-
-fn memory_layer_to_sdk(layer: MemoryLayer) -> &'static str {
-    match layer {
-        MemoryLayer::Global => "global",
-        MemoryLayer::Project => "project",
-    }
-}
-
-fn memory_category_to_sdk(category: MemoryCategory) -> &'static str {
-    match category {
-        MemoryCategory::Fact => "fact",
-        MemoryCategory::Decision => "decision",
-        MemoryCategory::Preference => "preference",
-        MemoryCategory::Pattern => "pattern",
-        MemoryCategory::Pitfall => "pitfall",
     }
 }
 
@@ -173,35 +128,6 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
         // input_id 不来自 share::Message；由 runtime→TUI 边界（UserMessagesAdded 事件）
         // 在 event.rs 处按 (InputId, Message) 元组注入（#507 修复）。
         input_id: None,
-    }
-}
-
-pub(crate) fn message_from_sdk(message: sdk::ChatMessage) -> share::message::Message {
-    let role = match message.role.as_str() {
-        "assistant" => share::message::Role::Assistant,
-        _ => share::message::Role::User,
-    };
-    let content =
-        serde_json::from_value(serde_json::to_value(&message.content).unwrap_or_default())
-            .unwrap_or_else(|_| {
-                vec![share::message::ContentBlock::Text {
-                    text: String::new(),
-                }]
-            });
-    let metadata = message
-        .metadata
-        .map(|metadata| share::message::MessageMetadata {
-            source: match metadata.source {
-                sdk::ChatMessageSource::User => share::message::MessageSource::User,
-                sdk::ChatMessageSource::SystemGenerated => {
-                    share::message::MessageSource::SystemGenerated
-                }
-            },
-        });
-    share::message::Message {
-        role,
-        content,
-        metadata,
     }
 }
 

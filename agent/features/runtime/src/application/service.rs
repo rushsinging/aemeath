@@ -63,6 +63,35 @@ mod tests {
 
     struct NoopAgentRunner;
 
+    struct NoopReflectionHistory;
+
+    #[async_trait]
+    impl memory::api::ReflectionHistoryQuery for NoopReflectionHistory {
+        async fn list(
+            &self,
+            _limit: usize,
+        ) -> Result<Vec<memory::api::ReflectionRecord>, memory::api::MemoryError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[async_trait]
+    impl memory::api::ReflectionHistoryStore for NoopReflectionHistory {
+        async fn append(
+            &self,
+            _record: &memory::api::ReflectionRecord,
+        ) -> Result<(), memory::api::MemoryError> {
+            Ok(())
+        }
+
+        async fn upsert(
+            &self,
+            _record: &memory::api::ReflectionRecord,
+        ) -> Result<(), memory::api::MemoryError> {
+            Ok(())
+        }
+    }
+
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
         async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
@@ -158,6 +187,7 @@ mod tests {
                 hook_runner: HookRunner::empty(),
                 memory_config: MemoryConfig::default(),
                 memory: std::sync::Arc::new(memory::NoOpMemory),
+                reflection_history: Arc::new(NoopReflectionHistory),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
                 allow_all: true,
                 context_size: 200_000,

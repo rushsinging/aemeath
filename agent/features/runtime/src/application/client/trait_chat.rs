@@ -107,6 +107,7 @@ pub(super) async fn chat_impl(
                 hook_runner: inner.context.resources.hook_runner.clone(),
                 memory_config: inner.context.resources.memory_config.clone(),
                 memory: inner.context.resources.memory.clone(),
+                reflection_history: inner.context.resources.reflection_history.clone(),
                 language: inner.context.resources.language.clone(),
                 frozen_chats: inner.frozen_chats.clone(),
                 active_summary: inner.active_summary.clone(),
@@ -142,29 +143,13 @@ pub(super) async fn chat_impl(
                         })
                     })
                 },
-                run_reflection_on_demand: {
+                list_reflection_history: {
                     let inner = inner.clone();
-                    std::sync::Arc::new(move || {
+                    std::sync::Arc::new(move |limit| {
                         let inner = inner.clone();
                         Box::pin(async move {
                             let me = super::accessors::AgentClientImpl { inner };
-                            // 从 inner.current_chain 读取扁平消息
-                            let messages = me.inner.current_chain.lock().unwrap().messages_flat();
-                            let sdk_msgs: Vec<sdk::ChatMessage> = messages
-                                .into_iter()
-                                .map(super::mapping::message_to_sdk)
-                                .collect();
-                            super::trait_reflection::run_reflection_impl(&me, sdk_msgs).await
-                        })
-                    })
-                },
-                apply_reflection_on_demand: {
-                    let inner = inner.clone();
-                    std::sync::Arc::new(move |output: sdk::ReflectionOutputView| {
-                        let inner = inner.clone();
-                        Box::pin(async move {
-                            let me = super::accessors::AgentClientImpl { inner };
-                            super::trait_reflection::apply_reflection_impl(&me, output).await
+                            super::trait_reflection::list_reflection_history_impl(&me, limit).await
                         })
                     })
                 },

@@ -68,14 +68,31 @@ async fn run_single_turn(
     client: std::sync::Arc<dyn sdk::AgentClient>,
     text: String,
 ) -> Result<(), sdk::SdkError> {
-    let mut stream = client
-        .chat(sdk::ChatRequest {
-            user_input: Some(sdk::UserInput {
+    let reflection_limit = match parse_reflection_history_command(&text) {
+        Ok(limit) => limit,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(());
+        }
+    };
+    let (user_input, input_events) = if let Some(limit) = reflection_limit {
+        let (tx, port) = crate::tui::effect::session::processing::TuiInputEventPort::channel();
+        let _ = tx.send(sdk::ChatInputEvent::QueryReflectionHistory { limit });
+        (None, Some(std::sync::Arc::new(port) as _))
+    } else {
+        (
+            Some(sdk::UserInput {
                 text,
                 images: Vec::new(),
             }),
+            None,
+        )
+    };
+    let mut stream = client
+        .chat(sdk::ChatRequest {
+            user_input,
             queue_drain: None,
-            input_events: None,
+            input_events,
         })
         .await?;
     // #636 D1: SIGTERM/SIGHUP 时让 stream 自然结束（runtime 端会 graceful + auto-save）。
@@ -152,13 +169,37 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         | sdk::ChatEvent::CommandResultText { .. }
         | sdk::ChatEvent::SessionResumed { .. }
         | sdk::ChatEvent::ToolCallUpdate { .. }
-        | sdk::ChatEvent::ReflectionResult { .. }
         | sdk::ChatEvent::ModelList { .. }
         | sdk::ChatEvent::ReminderList { .. }
         | sdk::ChatEvent::SessionList { .. }
         | sdk::ChatEvent::ProjectInfo { .. }
         | sdk::ChatEvent::TasksSnapshot { .. }
         | sdk::ChatEvent::CostUpdate { .. } => {}
+        sdk::ChatEvent::ReflectionHistory { records } => {
+            eprintln!("Reflection history ({}):", records.len());
+            for record in records {
+                let tokens = record.token_usage.map_or_else(
+                    || "n/a".to_string(),
+                    |usage| format!("{}/{}", usage.input_tokens, usage.output_tokens),
+                );
+                let error = record
+                    .error_category
+                    .map_or_else(|| "none".to_string(), |category| format!("{category:?}"));
+                eprintln!(
+                    "- timestamp={} trigger={:?} status={:?} counts(deviations/suggestions/outdated)={}/{}/{} apply={:?} error={} tokens(in/out)={} duration={}ms",
+                    record.timestamp,
+                    record.trigger,
+                    record.status,
+                    record.deviations,
+                    record.suggestions,
+                    record.outdated,
+                    record.apply_status,
+                    error,
+                    tokens,
+                    record.duration_ms,
+                );
+            }
+        }
         sdk::ChatEvent::ApiError { error, .. } => {
             eprintln!("\n  ✗ API 错误: {error}");
         }
@@ -215,6 +256,25 @@ fn render_event(event: sdk::ChatEvent) -> Result<(), sdk::SdkError> {
         }
     }
     Ok(())
+}
+
+fn parse_reflection_history_command(input: &str) -> Result<Option<usize>, &'static str> {
+    let mut parts = input.split_whitespace();
+    if parts.next() != Some("/reflect") {
+        return Ok(None);
+    }
+    let limit = match parts.next() {
+        None => 10,
+        Some(value) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|limit| *limit > 0)
+            .ok_or("用法: /reflect [limit]，limit 必须是大于 0 的数字。")?,
+    };
+    if parts.next().is_some() {
+        return Err("用法: /reflect [limit]，limit 必须是大于 0 的数字。");
+    }
+    Ok(Some(limit))
 }
 
 fn print_stdout(text: &str) -> Result<(), sdk::SdkError> {
@@ -307,6 +367,18 @@ mod tests {
     #[test]
     fn test_is_exit_command_rejects_regular_text() {
         assert!(!is_exit_command("hello"));
+    }
+
+    #[test]
+    fn test_reflect_command_parses_default_and_explicit_limit() {
+        assert_eq!(parse_reflection_history_command("/reflect"), Ok(Some(10)));
+        assert_eq!(
+            parse_reflection_history_command(" /reflect 3 "),
+            Ok(Some(3))
+        );
+        assert!(parse_reflection_history_command("/reflect 0").is_err());
+        assert!(parse_reflection_history_command("/reflect nope").is_err());
+        assert_eq!(parse_reflection_history_command("hello"), Ok(None));
     }
 
     #[test]

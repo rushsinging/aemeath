@@ -473,8 +473,8 @@ pub(crate) fn project_stream_event(
         crate::application::chat::RuntimeStreamEvent::SessionResumeFailed { kind, id, message } => {
             ChatEvent::SessionResumeFailed { kind, id, message }
         }
-        crate::application::chat::RuntimeStreamEvent::ReflectionResult { output } => {
-            ChatEvent::ReflectionResult { output }
+        crate::application::chat::RuntimeStreamEvent::ReflectionHistory { records } => {
+            ChatEvent::ReflectionHistory { records }
         }
         crate::application::chat::RuntimeStreamEvent::ModelList { models } => {
             ChatEvent::ModelList { models }

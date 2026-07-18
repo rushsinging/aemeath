@@ -21,7 +21,6 @@ pub enum SpinnerPhase {
     Thinking,
     Generating,
     AgentWorking,
-    Reflecting,
     Compacting,
     CallingTool(String),
     CallingTools {
@@ -41,7 +40,6 @@ impl SpinnerPhase {
             Self::Thinking => "Thinking...".to_string(),
             Self::Generating => "Generating...".to_string(),
             Self::AgentWorking => "Agent working...".to_string(),
-            Self::Reflecting => "Reflecting...".to_string(),
             Self::Compacting => "Compacting...".to_string(),
             Self::CallingTool(name) => format!("Calling {name}..."),
             Self::CallingTools { remaining } => {

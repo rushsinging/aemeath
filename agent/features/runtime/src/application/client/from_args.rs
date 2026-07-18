@@ -25,6 +25,7 @@ pub struct RuntimeBootstrapDependencies {
     config_query: Arc<dyn config::ConfigQuery>,
     config_writer: Arc<dyn config::ConfigWriter>,
     memory: Arc<dyn memory::MemoryPort>,
+    reflection_history: Arc<dyn memory::ReflectionHistoryStore>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
     policy: Arc<dyn policy::PolicyPort>,
@@ -38,6 +39,7 @@ impl RuntimeBootstrapDependencies {
         workspace: project::WorkspaceViews,
         config: RuntimeConfigDependencies,
         memory: Arc<dyn memory::MemoryPort>,
+        reflection_history: Arc<dyn memory::ReflectionHistoryStore>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
         tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
         policy: Arc<dyn policy::PolicyPort>,
@@ -50,12 +52,17 @@ impl RuntimeBootstrapDependencies {
             config_query: config.query,
             config_writer: config.writer,
             memory,
+            reflection_history,
             provider_gateway,
             tool_gateway,
             policy,
             task_access,
             session_tasks,
         }
+    }
+
+    pub fn reflection_history(&self) -> Arc<dyn memory::ReflectionHistoryStore> {
+        self.reflection_history.clone()
     }
 
     pub fn task_access(&self) -> Arc<dyn task::TaskAccess> {
@@ -103,6 +110,7 @@ pub async fn from_args_with_workspace(
         config_query,
         config_writer,
         memory,
+        reflection_history,
         provider_gateway,
         tool_gateway,
         policy,
@@ -304,6 +312,7 @@ pub async fn from_args_with_workspace(
             hook_runner,
             memory_config,
             memory,
+            reflection_history,
             policy,
             agent_semaphore,
             allow_all: args.allow_all,
@@ -467,6 +476,10 @@ mod tests {
             workspace,
             RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
             Arc::new(memory::NoOpMemory),
+            Arc::new(memory::AtomicDatasetReflectionHistoryStore::new(
+                Arc::new(storage::FileSystemDatasetAdapter::new(temp.path()).unwrap()),
+                memory::ProjectMemoryKey::derive(root.to_str().unwrap(), None).unwrap(),
+            )),
             provider::wire_provider(),
             tools::wire_tools(),
             Arc::new(policy::AllowAllPolicy),
