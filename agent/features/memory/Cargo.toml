@@ -6,8 +6,11 @@ edition.workspace = true
 [dependencies]
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+storage = { path = "../storage" }
 thiserror.workspace = true
+tokio.workspace = true
+utils = { path = "../../../packages/global/utils" }
 uuid = { version = "1", features = ["serde", "v7"] }
 
 [dev-dependencies]
-tokio.workspace = true
