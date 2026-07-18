@@ -4,8 +4,8 @@
 //! 将单次 hook 执行的原始结果（exit code + stdout JSON）分类为 directive，
 //! 并依据能力矩阵校验非阻塞 point 的 Block。
 
-use crate::contract::invocation::HookPoint;
-use crate::contract::outcome::{HookDirective, HookReason};
+use crate::domain::invocation::HookPoint;
+use crate::domain::outcome::{HookDirective, HookReason};
 
 /// stdout/stderr 大小上限（字节）。超出部分截断。
 const OUTPUT_MAX_BYTES: usize = 8192;
@@ -150,7 +150,7 @@ pub fn classify_directive(
 
 /// 能力矩阵校验：非阻塞 point 收到 Block 时降级为 Continue。
 fn enforce_block_permission(
-    meta: crate::contract::metadata::HookPointMetadata,
+    meta: crate::domain::metadata::HookPointMetadata,
     reason: HookReason,
 ) -> HookDirective {
     if meta.can_block {

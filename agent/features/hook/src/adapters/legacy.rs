@@ -22,5 +22,5 @@ pub use result::*;
 pub use runner::HookRunner;
 
 #[cfg(test)]
-#[path = "hook/tests.rs"]
+#[path = "legacy/tests.rs"]
 mod tests;

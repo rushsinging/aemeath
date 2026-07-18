@@ -6,8 +6,7 @@
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::contract::invocation::HookInvocation;
-use crate::contract::outcome::HookOutcome;
+use crate::domain::{HookInvocation, HookOutcome};
 
 /// Hook BC 的出站端口。
 ///

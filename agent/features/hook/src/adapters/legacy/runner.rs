@@ -1,7 +1,7 @@
 //! Hook 运行器 — 核心执行引擎
 
-use crate::business::hook::data::{HookData, HookInput};
-use crate::business::hook::result::{HookJsonOutput, HookResult};
+use crate::adapters::legacy::data::{HookData, HookInput};
+use crate::adapters::legacy::result::{HookJsonOutput, HookResult};
 use crate::LOG_TARGET;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use std::path::Path;
@@ -390,7 +390,7 @@ mod tests {
         };
         let input = HookInput {
             event: HookEvent::Stop,
-            data: HookData::Stop(crate::business::hook::data::StopHookData { turns: 1 }),
+            data: HookData::Stop(crate::adapters::legacy::data::StopHookData { turns: 1 }),
         };
         let cancel = tokio_util::sync::CancellationToken::new();
         let cancel_task = cancel.clone();
