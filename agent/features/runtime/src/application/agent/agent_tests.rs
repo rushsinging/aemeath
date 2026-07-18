@@ -1,7 +1,7 @@
 use crate::application::agent::{Agent, ToolCall};
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, Notify};
@@ -9,7 +9,28 @@ use tools::{
     Tool, ToolExecutionContext, ToolRegistry, TypedTool, TypedToolAdapter, TypedToolResult,
 };
 
-/// A tool that records the start time and sleeps briefly.
+#[test]
+fn agent_for_test_persist_uses_context_workspace_backing() {
+    let temp = tempfile::tempdir().expect("workspace");
+    let ctx = crate::application::testing::test_tool_execution_context(
+        temp.path().to_path_buf(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let backing = crate::application::testing::runtime_workspace(&ctx);
+    let registry = ToolRegistry::new();
+    let agent = Agent::for_test(&registry, ctx, 1);
+
+    backing
+        .control()
+        .change_directory(temp.path().to_path_buf())
+        .expect("mutate shared workspace backing");
+    assert_eq!(
+        agent.workspace_persist.snapshot(),
+        backing.persist().snapshot(),
+        "Agent::for_test persist must observe the exact context backing",
+    );
+}
+
 /// Marked as concurrency-safe or not depending on constructor.
 struct TimedTool {
     name: String,
@@ -53,30 +74,10 @@ impl TypedTool for TimedTool {
 }
 
 fn test_ctx() -> ToolExecutionContext {
-    let cwd = std::env::current_dir().unwrap();
-    ToolExecutionContext {
-        resources: tools::ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory: Arc::new(memory::NoOpMemory),
-            memory_config: share::config::MemoryConfig::default(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        workspace: project::wire_production_workspace(cwd)
-            .expect("workspace 初始化成功")
-            .into_views(),
-        run_id: sdk::RunId::new_v7().to_string(),
-        cancel: tokio_util::sync::CancellationToken::new(),
-        read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 10,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    }
+    crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    )
 }
 
 #[test]
@@ -247,10 +248,7 @@ async fn test_execute_tools_concurrent_safe_tools_run_in_parallel() {
     });
 
     let ctx = test_ctx();
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+    let agent = Agent::for_test(&registry, ctx, 10);
 
     let tool_calls = vec![
         ToolCall {
@@ -359,12 +357,8 @@ async fn test_execute_tools_concurrency_window_backfills_without_exceeding_limit
         active,
         max_active: max_active.clone(),
     });
-    let mut ctx = test_ctx();
-    ctx.max_tool_concurrency = 2;
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+    let ctx = test_ctx();
+    let agent = Agent::for_test(&registry, ctx, 2);
     let calls = labels
         .iter()
         .enumerate()
@@ -431,10 +425,7 @@ async fn test_execute_tools_non_concurrent_safe_run_sequentially() {
     });
 
     let ctx = test_ctx();
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+    let agent = Agent::for_test(&registry, ctx, 10);
 
     let tool_calls = vec![
         ToolCall {
@@ -526,10 +517,7 @@ async fn test_execute_tools_preserves_original_order() {
     });
 
     let ctx = test_ctx();
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+    let agent = Agent::for_test(&registry, ctx, 10);
 
     // Pass calls in order: tool_c, tool_a, tool_b
     let id_c = sdk::ids::ToolCallId::from_legacy_or_new("1");
@@ -613,12 +601,12 @@ async fn test_execute_tools_cancel_interrupts_in_flight_tool() {
         started: started.clone(),
         completed: completed.clone(),
     });
-    let ctx = test_ctx();
-    let cancel = ctx.cancel.clone();
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let ctx = crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        cancel.clone(),
+    );
+    let agent = Agent::for_test(&registry, ctx, 10);
 
     let call = ToolCall {
         provider_id: "provider-cancel".to_string(),
@@ -684,10 +672,7 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
     }
     registry.register(ShortTimeoutTool);
 
-    let agent = Agent {
-        registry: &registry,
-        ctx: test_ctx(),
-    };
+    let agent = Agent::for_test(&registry, test_ctx(), 10);
 
     let results = agent
         .execute_tools(&[ToolCall {
@@ -727,10 +712,7 @@ async fn test_execute_tools_mixed_concurrent_and_sequential() {
     });
 
     let ctx = test_ctx();
-    let agent = Agent {
-        registry: &registry,
-        ctx,
-    };
+    let agent = Agent::for_test(&registry, ctx, 10);
 
     let id_p1 = sdk::ids::ToolCallId::from_legacy_or_new("p1");
     let id_s1 = sdk::ids::ToolCallId::from_legacy_or_new("s1");

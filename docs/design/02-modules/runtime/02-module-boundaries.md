@@ -170,6 +170,8 @@ adapters ───────▶ ports ◀────── application
 
 ## 6. 迁移边界
 
+Runtime owns live execution mechanics—including semaphore, cancellation implementation, Project persistence view and channel adapters—and **MUST** convert them at its adapter boundary. `ExecutionScope` crossing into Tools is a fixed pure-value snapshot; no Runtime semaphore/token/channel or `WorkspaceViews` may enter Tools domain. Runtime retains `WorkspacePersist`, while Tools receive only their narrow Read/Control capabilities. This Target does not imply #911, #877, #897 or #912 is complete; Current status remains exclusively in Migration Governance.
+
 本文的 Target 模块图与依赖规则是验收目标；源码现状、迁移顺序、责任与退出条件 **MUST** 只在 [Migration Governance](../../03-engineering/03-migration-governance.md) 维护，本文 **NEVER** 复制 Current 类型或进度。
 
 ## 7. 相关文档

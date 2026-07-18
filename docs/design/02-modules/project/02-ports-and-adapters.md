@@ -4,6 +4,9 @@
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#791（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文只描述 Project 模块的目标态；实现路径与迁移进度统一见 [Migration Governance](../../03-engineering/03-migration-governance.md)。
 
+Project capabilities are distributed independently: file Tools receive `WorkspaceRead`; only Bash, EnterWorktree and ExitWorktree receive `WorkspaceControl`; Runtime/Context persistence boundaries retain `WorkspacePersist`. A combined Read+Control+Persist+isolation wrapper **MUST NOT** be broadcast through Tool execution context. Composition-only views are converted by the Runtime adapter and never enter Tools domain.
+
+
 ## 1. 端口体系
 
 Workspace BC 暴露三个对外 trait + 一个内部出站端口：

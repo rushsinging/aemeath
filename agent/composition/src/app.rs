@@ -265,9 +265,15 @@ mod tests {
             registry: &ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+            workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
-            DefaultToolCatalogGateway.register_all_tools(registry, task_access, skills);
+            DefaultToolCatalogGateway.register_all_tools(
+                registry,
+                task_access,
+                skills,
+                workspace_control,
+            );
         }
 
         fn register_all_tools_except_agent(
@@ -275,11 +281,13 @@ mod tests {
             registry: &ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+            workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             DefaultToolCatalogGateway.register_all_tools_except_agent(
                 registry,
                 task_access,
                 skills,
+                workspace_control,
             );
         }
 
@@ -288,8 +296,14 @@ mod tests {
             registry: &mut ToolRegistry,
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
+            workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
-            DefaultToolCatalogGateway.register_subagent_tools(registry, task_access, skills);
+            DefaultToolCatalogGateway.register_subagent_tools(
+                registry,
+                task_access,
+                skills,
+                workspace_control,
+            );
         }
     }
 

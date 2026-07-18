@@ -3,7 +3,6 @@ mod helpers;
 
 #[cfg(test)]
 mod tests;
-
 use crate::domain::types::memory::{MemoryInput, MemoryResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;

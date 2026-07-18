@@ -38,9 +38,12 @@ pub fn build_agent_runner(
     reasoning: bool,
     timeout_secs: u64,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
+    max_tool_concurrency: usize,
+    agent_semaphore: Arc<tokio::sync::Semaphore>,
     tool_result_materializer: Arc<
         crate::application::tool_result_materialization::ToolResultMaterializer,
     >,
+    workspace: project::WorkspaceViews,
 ) -> Arc<agent_runner::CliAgentRunner> {
     let models_config = Arc::new(models.cloned().unwrap_or_default());
     let pool = build_llm_client_pool(agents, client.clone(), models_config.clone(), timeout_secs);
@@ -54,7 +57,12 @@ pub fn build_agent_runner(
         hook_runner,
         reasoning,
         models_config,
+        max_tool_concurrency,
+        agent_semaphore,
         tool_result_materializer,
+        workspace: crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
+            workspace,
+        ),
     })
 }
 

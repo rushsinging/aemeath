@@ -70,11 +70,9 @@ where
     /// Runtime/Tool 日常状态唯一来源（#889 low-privilege 端口）。
     pub(crate) task_access: &'a Arc<dyn task::TaskAccess>,
     pub(crate) max_tool_concurrency: usize,
-    pub(crate) max_agent_concurrency: usize,
     pub(crate) agent_semaphore: &'a Arc<tokio::sync::Semaphore>,
     pub(crate) hook_runner: &'a hook::api::HookRunner,
     pub(crate) memory_config: &'a share::config::MemoryConfig,
-    /// Memory domain port（MemoryTool 使用）。
     pub(crate) memory: &'a Arc<dyn memory::MemoryPort>,
     pub(crate) language: &'a str,
     pub(crate) frozen_chats: &'a Arc<std::sync::Mutex<Vec<context::session::ChatSegment>>>,
@@ -154,7 +152,6 @@ where
         registry: &'b Arc<tools::ToolRegistry>,
         agent_runner: &Option<Arc<dyn tools::AgentRunner>>,
         memory: &Arc<dyn memory::MemoryPort>,
-        memory_config: &share::config::MemoryConfig,
         language: &str,
         allow_all: bool,
         workspace: &project::WorkspaceViews,
@@ -162,34 +159,44 @@ where
         read_files: &Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
         session_reminders: &Arc<std::sync::Mutex<tools::SessionReminders>>,
         max_tool_concurrency: usize,
-        max_agent_concurrency: usize,
         agent_semaphore: &Arc<tokio::sync::Semaphore>,
         session_id: &str,
         run_id: &sdk::RunId,
     ) -> Agent<'b> {
         Agent {
             registry,
-            ctx: tools::ToolExecutionContext {
-                resources: tools::ToolResources {
-                    agent_runner: agent_runner.clone(),
-                    registry: Some(registry.clone() as Arc<dyn tools::ToolListProvider>),
-                    memory: memory.clone(),
-                    memory_config: memory_config.clone(),
-                    lang: language.to_string(),
-                    allow_all,
-                },
-                workspace: workspace.clone(),
-                run_id: run_id.to_string(),
-                cancel: cancel.clone(),
-                read_files: read_files.clone(),
-                session_reminders: Some(session_reminders.clone()),
-                plan_mode: None,
-                max_tool_concurrency,
-                max_agent_concurrency,
-                agent_semaphore: agent_semaphore.clone(),
-                progress_tx: None,
-                parent_session_id: Some(session_id.to_string()),
-            },
+            ctx: tools::ToolExecutionContext::new(
+                tools::ExecutionScope::builder(
+                    run_id.to_string(),
+                    workspace.read().workspace_id(),
+                    workspace.read().current_workspace_root(),
+                )
+                .build(),
+                tools::ToolExecutionPorts::new(
+                    crate::application::tool_execution_adapters::cancellation(cancel.clone()),
+                    crate::application::tool_execution_adapters::RuntimeWorkspaceAccess::new(
+                        workspace.clone(),
+                    )
+                    .read_access(),
+                    Arc::new(tools::MutexReadSet(read_files.clone())),
+                    Arc::new(tools::FixedPlanMode(None)),
+                    memory.clone(),
+                    Arc::new(tools::FixedGuidance {
+                        language: language.to_string(),
+                        allow_all,
+                    }),
+                )
+                .with_memory_context(
+                    Some(session_id.to_string()),
+                    Some(session_reminders.clone()),
+                )
+                .with_agent(agent_runner.clone())
+                .with_catalog(Some(registry.clone() as Arc<dyn tools::CatalogQuery>)),
+            ),
+            max_tool_concurrency,
+            agent_semaphore: agent_semaphore.clone(),
+            workspace_persist: workspace.persist(),
+            runtime_cancellation: cancel.clone(),
         }
     }
 
@@ -619,7 +626,6 @@ where
             self.registry,
             self.agent_runner,
             self.memory,
-            self.memory_config,
             self.language,
             self.allow_all,
             self.workspace,
@@ -627,7 +633,6 @@ where
             self.read_files,
             self.session_reminders,
             self.max_tool_concurrency,
-            self.max_agent_concurrency,
             self.agent_semaphore,
             self.session_id,
             &self.run_id,
@@ -708,7 +713,7 @@ where
             self.sink,
             &HookUi::new(self.sink.clone()),
             self.hook_runner,
-            &agent.ctx,
+            &agent.runtime_cancellation,
             self.turn_count,
             &self.current_cwd(),
         )

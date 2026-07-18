@@ -56,14 +56,8 @@ impl TypedTool for FileEditTool {
             Err(error) => return TypedToolResult::error(error.to_string()),
         };
         let file_path = path.to_string_lossy().into_owned();
-        let has_read_evidence = ctx
-            .read_files
-            .lock()
-            .map(|read_files| {
-                read_files.contains(requested_path)
-                    || read_files.contains(path.to_string_lossy().as_ref())
-            })
-            .unwrap_or(false);
+        let has_read_evidence = ctx.read_set().contains(requested_path)
+            || ctx.read_set().contains(path.to_string_lossy().as_ref());
         if path.exists() && !has_read_evidence {
             return TypedToolResult::error(format!(
                 "You must read {} before editing it. Use the Read tool first.",

@@ -50,7 +50,7 @@ pub(crate) async fn finalize_sub_agent(
     system: &str,
     model_spec: Option<&str>,
     output: &str,
-    progress_tx: Option<&tokio::sync::mpsc::Sender<AgentProgressEvent>>,
+    progress_sink: Option<&std::sync::Arc<dyn tools::ProgressSink>>,
     workspace_root: &Path,
 ) {
     log_agent_outcome(outcome, session_id);
@@ -77,8 +77,8 @@ pub(crate) async fn finalize_sub_agent(
     for (_, _, json_output) in &hook_results {
         if let Some(ref output) = json_output {
             if let Some(ref sys_msg) = output.system_message {
-                if let Some(tx) = progress_tx {
-                    let _ = tx.try_send(AgentProgressEvent {
+                if let Some(sink) = progress_sink {
+                    sink.emit(AgentProgressEvent {
                         sequence: outcome.turns,
                         kind: AgentProgressKind::Message {
                             text: format!("[hook] {sys_msg}"),

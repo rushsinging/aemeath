@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use provider::{InvocationStream, LlmProvider, ProviderError, ProviderErrorKind, SystemBlock};
 use share::config::AgentRoleConfig;
 use share::message::Message;
-use std::collections::HashSet;
 use std::sync::Arc;
 use tools::AgentProgressKind;
 use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
@@ -189,6 +188,52 @@ fn test_build_json_logger_tool_result_data_contains_full_output() {
     assert_eq!(data["output"], "完整输出");
 }
 
+#[derive(Clone)]
+struct ManualCancellation {
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    notify: Arc<tokio::sync::Notify>,
+}
+impl ManualCancellation {
+    fn new() -> Self {
+        Self {
+            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            notify: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+    fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+}
+#[async_trait::async_trait]
+impl tools::CancellationSignal for ManualCancellation {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            self.notify.notified().await;
+        }
+    }
+    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+        Arc::new(self.clone())
+    }
+}
+
+#[tokio::test]
+async fn non_tokio_signal_propagates_to_runtime_token() {
+    let signal = ManualCancellation::new();
+    let token = tokio_util::sync::CancellationToken::new();
+    let _guard =
+        super::loop_run::CancellationPropagationGuard::new(Arc::new(signal.clone()), token.clone());
+
+    signal.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(1), token.cancelled())
+        .await
+        .expect("non-Tokio signal must propagate to Runtime token");
+}
+
 #[test]
 fn test_sub_run_cancellation_scope_is_one_way() {
     let parent = tokio_util::sync::CancellationToken::new();
@@ -239,17 +284,23 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
         .run_agent(AgentRunRequest {
             prompt: "prompt",
             system: "system",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: None,
         })
         .await;
 
     driver.await.unwrap();
     assert_eq!(result, tools::AgentRunTerminal::Cancelled);
     assert!(
-        !ctx.cancel.is_cancelled(),
+        !ctx.cancellation().is_cancelled(),
         "按 Sub Run ID 取消不得反向取消父 Run token"
     );
     assert!(registry.active_ids().is_empty());
@@ -264,10 +315,16 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
         .run_agent(AgentRunRequest {
             prompt: "prompt",
             system: "system",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: None,
         })
         .await;
 
@@ -281,16 +338,23 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
         "interrupted",
     ));
     let ctx = test_ctx();
-    ctx.cancel.cancel();
+    let signal = ManualCancellation::new();
+    signal.cancel();
 
     let result = runner
         .run_agent(AgentRunRequest {
             prompt: "prompt",
             system: "system",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: Arc::new(signal),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: None,
         })
         .await;
 
@@ -307,29 +371,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     let runner = test_runner_with_blocking_provider(calls.clone());
     let cwd = std::env::current_dir().unwrap();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let ctx = ToolExecutionContext {
-        resources: tools::ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory: Arc::new(memory::NoOpMemory),
-            memory_config: share::config::MemoryConfig::default(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        workspace: project::wire_production_workspace(cwd)
-            .expect("workspace 初始化成功")
-            .into_views(),
-        run_id: sdk::RunId::new_v7().to_string(),
-        cancel: cancel.clone(),
-        read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 10,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    };
+    let ctx = crate::application::testing::test_tool_execution_context(cwd, cancel.clone());
 
     let canceller_calls = calls.clone();
     let canceller = tokio::spawn(async move {
@@ -348,10 +390,16 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
         runner.run_agent(AgentRunRequest {
             prompt: "prompt",
             system: "system",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: None,
         }),
     )
     .await
@@ -380,10 +428,18 @@ async fn test_started_event_emitted_with_role_and_model() {
         .run_agent(AgentRunRequest {
             prompt: "p",
             system: "s",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: Some(crate::application::tool_execution_adapters::progress(
+                tx.clone(),
+            )),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: Some("coder"),
-            progress_tx: Some(tx),
         })
         .await;
 
@@ -416,10 +472,18 @@ async fn test_started_event_without_role_uses_main_agent_model() {
         .run_agent(AgentRunRequest {
             prompt: "p",
             system: "s",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: Some(crate::application::tool_execution_adapters::progress(
+                tx.clone(),
+            )),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: Some(tx),
         })
         .await;
 
@@ -450,10 +514,16 @@ async fn test_started_event_not_emitted_without_progress_tx() {
         .run_agent(AgentRunRequest {
             prompt: "p",
             system: "s",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: None,
         })
         .await;
 
@@ -474,10 +544,16 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
         .run_agent(AgentRunRequest {
             prompt: "prompt",
             system: "system",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_secs(30),
             model_spec: None,
-            progress_tx: None,
         })
         .await;
 
@@ -501,10 +577,16 @@ async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
         .run_agent(AgentRunRequest {
             prompt: "prompt",
             system: "system",
-            ctx: &ctx,
+            identity: ctx.scope(),
+            cancellation: ctx.cancellation(),
+            progress: ctx.progress_sink(),
+            memory: ctx.memory(),
+            catalog: ctx.catalog_query(),
+            read_set: ctx.read_set(),
+            plan_mode: ctx.plan_mode_state(),
+            guidance: ctx.guidance(),
             timeout: std::time::Duration::from_nanos(1),
             model_spec: None,
-            progress_tx: None,
         })
         .await;
 
@@ -549,7 +631,15 @@ fn test_runner(error: ProviderError) -> CliAgentRunner {
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: Arc::new(share::config::ModelsConfig::default()),
+        max_tool_concurrency: 10,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        workspace: crate::application::testing::runtime_workspace(
+            &crate::application::testing::test_tool_execution_context(
+                std::env::temp_dir(),
+                tokio_util::sync::CancellationToken::new(),
+            ),
+        ),
     }
 }
 
@@ -564,7 +654,15 @@ fn test_runner_with_blocking_provider(calls: Arc<std::sync::Mutex<usize>>) -> Cl
         hook_runner: hook::api::HookRunner::empty(),
         reasoning: false,
         models_config: Arc::new(share::config::ModelsConfig::default()),
+        max_tool_concurrency: 10,
+        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
+        workspace: crate::application::testing::runtime_workspace(
+            &crate::application::testing::test_tool_execution_context(
+                std::env::temp_dir(),
+                tokio_util::sync::CancellationToken::new(),
+            ),
+        ),
     }
 }
 
@@ -602,30 +700,10 @@ impl LlmProvider for BlockingThenCancelledProvider {
 }
 
 fn test_ctx() -> ToolExecutionContext {
-    let cwd = std::env::current_dir().unwrap();
-    ToolExecutionContext {
-        resources: tools::ToolResources {
-            agent_runner: None,
-            registry: None,
-            memory: Arc::new(memory::NoOpMemory),
-            memory_config: share::config::MemoryConfig::default(),
-            lang: "en".to_string(),
-            allow_all: true,
-        },
-        workspace: project::wire_production_workspace(cwd)
-            .expect("workspace 初始化成功")
-            .into_views(),
-        run_id: sdk::RunId::new_v7().to_string(),
-        cancel: tokio_util::sync::CancellationToken::new(),
-        read_files: Arc::new(std::sync::Mutex::new(HashSet::new())),
-        session_reminders: None,
-        plan_mode: None,
-        max_tool_concurrency: 10,
-        max_agent_concurrency: 4,
-        agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-        progress_tx: None,
-        parent_session_id: None,
-    }
+    crate::application::testing::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    )
 }
 
 struct ErrorProvider {

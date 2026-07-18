@@ -81,15 +81,17 @@ impl<'a> SubAgentRun<'a> {
         let old_len = self.messages.len();
         let previous_summary =
             compact_summary_from_system_blocks(&self.system_blocks).map(str::to_owned);
+        let cancellation = self.agent.ctx.cancellation();
+        let cancel_token = self.runtime_cancellation.clone();
         let result = tokio::select! {
-            _ = self.agent.ctx.cancel.cancelled() => None,
+            _ = cancellation.cancelled() => None,
             result = context::compact::compact_messages_with_llm(
                 &self.messages,
                 previous_summary.as_deref(),
                 self.ctx_context_size,
                 Some(&self.client),
                 None,
-                &self.agent.ctx.cancel,
+                &cancel_token,
             ) => result,
         };
 

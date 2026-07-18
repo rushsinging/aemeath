@@ -7,7 +7,7 @@ set -euo pipefail
 #       supporting→share；share/sdk→∅），默认拒绝未声明的业务依赖，防双向/横向乱依赖。
 # 例外（白名单内已批准）：runtime/tools→task（Task-owned OHS/PL）；
 #       context→task（#890 Session persistence adapter 消费 Task TaskPersist capability）；
-#       tools→{project,storage}（§6.4.7 横向依赖登记）；composition→全部 feature（唯一装配根）。
+#       tools→project（§6.4.7 横向依赖登记；#897 后 Memory 仅经正式 port）；composition→全部 feature（唯一装配根）。
 #       task 反向依赖任一消费者（runtime/tools/context）仍被拒绝。
 
 ROOT="${AEMEATH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 FEATURE_CRATES = {"runtime", "config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
-TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task", "memory"}
+TOOLS_DEPENDENCY_BUDGET = {"share", "project", "task", "memory"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
@@ -35,8 +35,8 @@ business_allow = {
     "context": {"share", "provider", "storage", "task", "memory", "sdk"},
     "memory": {"storage", "utils"},
     "provider": {"share"},
-    # Approved horizontal dependencies: tools -> project/storage and Task-owned OHS/PL.
-    "tools": {"share", "project", "storage", "task", "memory"},
+    # Approved horizontal dependencies: tools -> project/memory and Task-owned OHS/PL.
+    "tools": {"share", "project", "task", "memory"},
     "storage": {"share"},
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),

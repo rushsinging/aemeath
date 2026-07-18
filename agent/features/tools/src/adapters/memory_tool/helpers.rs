@@ -16,21 +16,25 @@ pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str
 
 pub(super) fn optional_layer(input: &Value) -> Result<Option<MemoryLayer>, String> {
     match input.get("layer").and_then(|value| value.as_str()) {
-        Some("global") => Ok(Some(MemoryLayer::Global)),
-        Some("project") => Ok(Some(MemoryLayer::Project)),
-        Some(layer) => Err(format!("无效 memory layer: {layer}")),
+        Some(layer) => match layer {
+            "global" => Ok(Some(MemoryLayer::Global)),
+            "project" => Ok(Some(MemoryLayer::Project)),
+            _ => Err(format!("无效 memory layer: {layer}")),
+        },
         None => Ok(None),
     }
 }
 
 pub(super) fn optional_category(input: &Value) -> Result<Option<MemoryCategory>, String> {
     match input.get("category").and_then(|value| value.as_str()) {
-        Some("fact") => Ok(Some(MemoryCategory::Fact)),
-        Some("decision") => Ok(Some(MemoryCategory::Decision)),
-        Some("preference") => Ok(Some(MemoryCategory::Preference)),
-        Some("pattern") => Ok(Some(MemoryCategory::Pattern)),
-        Some("pitfall") => Ok(Some(MemoryCategory::Pitfall)),
-        Some(category) => Err(format!("无效 memory category: {category}")),
+        Some(category) => match category {
+            "fact" => Ok(Some(MemoryCategory::Fact)),
+            "decision" => Ok(Some(MemoryCategory::Decision)),
+            "preference" => Ok(Some(MemoryCategory::Preference)),
+            "pattern" => Ok(Some(MemoryCategory::Pattern)),
+            "pitfall" => Ok(Some(MemoryCategory::Pitfall)),
+            _ => Err(format!("无效 memory category: {category}")),
+        },
         None => Ok(None),
     }
 }

@@ -44,7 +44,7 @@ impl TypedTool for EnterPlanModeTool {
         };
 
         // Set plan mode in context
-        if let Some(mode) = ctx.plan_mode.as_ref() {
+        if let Some(mode) = ctx.plan_mode().as_ref() {
             if *mode {
                 return TypedToolResult::success("Already in plan mode", PlanModeResult::default());
             }
@@ -97,7 +97,7 @@ impl TypedTool for ExitPlanModeTool {
         };
 
         // Check if we're in plan mode
-        if let Some(mode) = ctx.plan_mode.as_ref() {
+        if let Some(mode) = ctx.plan_mode().as_ref() {
             if !*mode {
                 return TypedToolResult::success("Not in plan mode", PlanModeResult::default());
             }

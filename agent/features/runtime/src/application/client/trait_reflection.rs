@@ -200,7 +200,7 @@ mod tests {
             &self,
             _prompt: &str,
             _system: &str,
-            _ctx: &tools::ToolExecutionContext,
+            _cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
         ) -> String {
             String::new()
         }

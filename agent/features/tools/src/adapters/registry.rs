@@ -68,6 +68,7 @@ fn register_named_scope(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    workspace_control: Arc<dyn project::WorkspaceControl>,
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
     let mut scope = RegistryScopeBuilder::new(selected_scope.name());
@@ -94,7 +95,9 @@ fn register_named_scope(
         "Bash",
         Caps::ReadWorkspace | Caps::ExecuteProcess | Caps::WorkspaceControl,
         [true, true, true],
-        bash::BashTool
+        bash::BashTool {
+            control: workspace_control.clone()
+        }
     );
     builtin!(
         "Read",
@@ -249,13 +252,17 @@ fn register_named_scope(
         "EnterWorktree",
         Caps::ReadWorkspace | Caps::WorkspaceControl,
         [true, false, true],
-        worktree::EnterWorktreeTool
+        worktree::EnterWorktreeTool {
+            control: workspace_control.clone()
+        }
     );
     builtin!(
         "ExitWorktree",
         Caps::ReadWorkspace | Caps::WorkspaceControl,
         [true, false, true],
-        worktree::ExitWorktreeTool
+        worktree::ExitWorktreeTool {
+            control: workspace_control.clone()
+        }
     );
 
     let built_scope = scope.build();
@@ -271,19 +278,28 @@ pub fn register_all_tools(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    workspace_control: Arc<dyn project::WorkspaceControl>,
 ) {
-    register_named_scope(registry, task_access, skills, BuiltinRegistryScope::Main);
+    register_named_scope(
+        registry,
+        task_access,
+        skills,
+        workspace_control,
+        BuiltinRegistryScope::Main,
+    );
 }
 
 pub fn register_subagent_tools(
     registry: &mut ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    workspace_control: Arc<dyn project::WorkspaceControl>,
 ) {
     register_named_scope(
         registry,
         task_access,
         skills,
+        workspace_control,
         BuiltinRegistryScope::SubAgent,
     );
 }
@@ -293,11 +309,13 @@ pub fn register_all_tools_except_agent(
     registry: &ToolRegistry,
     task_access: Arc<dyn TaskAccess>,
     skills: Arc<Mutex<HashMap<String, Skill>>>,
+    workspace_control: Arc<dyn project::WorkspaceControl>,
 ) {
     register_named_scope(
         registry,
         task_access,
         skills,
+        workspace_control,
         BuiltinRegistryScope::LegacyNoAgent,
     );
 }
@@ -311,10 +329,16 @@ mod tests {
     fn assembled_scope(scope: BuiltinRegistryScope) -> RegistryScope {
         let registry = ToolRegistry::new();
         let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
+        let workspace = tempfile::tempdir().expect("workspace");
+        let control = project::wire_production_workspace(workspace.path().to_path_buf())
+            .expect("workspace wiring")
+            .into_views()
+            .control();
         register_named_scope(
             &registry,
             task_access,
             Arc::new(Mutex::new(HashMap::new())),
+            control,
             scope,
         )
     }

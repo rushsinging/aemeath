@@ -43,6 +43,11 @@ impl ToolExecution {
 pub struct Agent<'a> {
     pub registry: &'a ToolRegistry,
     pub ctx: ToolExecutionContext,
+    pub max_tool_concurrency: usize,
+    pub agent_semaphore: std::sync::Arc<tokio::sync::Semaphore>,
+    pub workspace_persist: std::sync::Arc<dyn project::WorkspacePersist>,
+    /// Runtime-owned token for provider, hook, and loop infrastructure.
+    pub runtime_cancellation: tokio_util::sync::CancellationToken,
 }
 
 pub use crate::domain::agent_run::ToolCall;
@@ -64,7 +69,7 @@ async fn call_tool_with_timeout(
     mut input: serde_json::Value,
     ctx: &ToolExecutionContext,
 ) -> Result<ToolResult, String> {
-    if ctx.cancel.is_cancelled() {
+    if ctx.cancellation().is_cancelled() {
         return Err(tool_call_cancelled_message(name));
     }
 
@@ -94,8 +99,9 @@ async fn call_tool_with_timeout(
 
     let timeout = tool.timeout_secs();
     let started = std::time::Instant::now();
+    let cancellation = ctx.cancellation();
     tokio::select! {
-        _ = ctx.cancel.cancelled() => {
+        _ = cancellation.cancelled() => {
             let message = tool_call_cancelled_message(name);
             log::debug!(target: LOG_TARGET, "{message}");
             Err(message)
@@ -126,6 +132,23 @@ async fn call_tool_with_timeout(
 }
 
 impl<'a> Agent<'a> {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        registry: &'a ToolRegistry,
+        ctx: ToolExecutionContext,
+        max_tool_concurrency: usize,
+    ) -> Self {
+        let workspace_persist = crate::application::testing::workspace_persist(&ctx);
+        Self {
+            registry,
+            ctx,
+            max_tool_concurrency,
+            agent_semaphore: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+            workspace_persist,
+            runtime_cancellation: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+
     pub fn extract_tool_calls_with_ids<F>(
         message: &Message,
         mut runtime_id_for_provider: F,
@@ -189,7 +212,7 @@ impl<'a> Agent<'a> {
         // Execute concurrent-safe tools in parallel using join_all
         if !concurrent_calls.is_empty() {
             let semaphore =
-                std::sync::Arc::new(tokio::sync::Semaphore::new(self.ctx.max_tool_concurrency));
+                std::sync::Arc::new(tokio::sync::Semaphore::new(self.max_tool_concurrency));
 
             let futures: Vec<_> = concurrent_calls
                 .iter()
@@ -228,7 +251,7 @@ impl<'a> Agent<'a> {
         // Execute non-concurrent tools sequentially
         for (call, &pos) in sequential_calls.iter().zip(sequential_positions.iter()) {
             // Check for cancellation between sequential tool calls
-            if self.ctx.cancel.is_cancelled() {
+            if self.ctx.cancellation().is_cancelled() {
                 results[pos] = Some(ToolExecution::new(
                     call,
                     ToolOutcome::error("Cancelled by user"),
@@ -275,7 +298,7 @@ impl<'a> Agent<'a> {
         call: &ToolCall,
         ctx: &ToolExecutionContext,
     ) -> ToolExecution {
-        if ctx.cancel.is_cancelled() {
+        if ctx.cancellation().is_cancelled() {
             return ToolExecution::new(call, ToolOutcome::error("Cancelled by user"));
         }
         if let Some(tool) = self.registry.get(&call.name) {
