@@ -56,7 +56,7 @@
 - **Bug / Feature 执行流程**（issue → 方案 → 确认 → worktree → PR → 关闭）
 - **Milestone / Release Gate 管理**（版本验收、收尾退役、大文件拆分）
 - **大型工作的拆分与跟踪**（GitHub Sub-issues 原生层级）
-- **Git 工作流**（release 分支、PR 策略、squash / merge commit）
+- **Git 工作流**（main 开发、release 发版、PR 策略、squash / merge commit）
 - **代码修改后检查**（废弃路径 / 死代码清理）
 - **发版**（tag 触发、版本号、release notes）
 - **Hook 阻断处理**（止血 + 报告）

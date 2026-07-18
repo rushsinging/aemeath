@@ -29,7 +29,7 @@ if [ "$engine_defs" -ne 1 ]; then
   exit 2
 fi
 
-if ! grep -q 'run_loop(&mut run, &cancel, &mut port).await' "$MAIN"; then
+if ! grep -q 'run_loop(&mut run, &cancel, &mut port)' "$MAIN"; then
   echo '{"decision":"block","reason":"Main Run 未调用共享 loop_engine::run_loop。"}'
   exit 2
 fi

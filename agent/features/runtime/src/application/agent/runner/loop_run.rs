@@ -20,6 +20,40 @@ use std::sync::Arc;
 use tools::AgentRunTerminal;
 use tools::{AgentProgressEvent, AgentProgressKind};
 
+pub(super) fn sub_run_log_context(
+    parent: &logging::LogContext,
+    session_id: &str,
+    sub_run_id: &str,
+    model: &str,
+    provider: &str,
+    role: &str,
+) -> logging::LogContext {
+    parent.patched(logging::LogContextPatch {
+        session_id: logging::FieldPatch::Set(session_id.to_string()),
+        chat_id: logging::FieldPatch::Set(sub_run_id.to_string()),
+        turn: logging::FieldPatch::Clear,
+        request_id: logging::FieldPatch::Clear,
+        model: logging::FieldPatch::Set(model.to_string()),
+        provider: logging::FieldPatch::Set(provider.to_string()),
+        role: logging::FieldPatch::Set(role.to_string()),
+    })
+}
+
+pub(super) fn sub_request_log_context(
+    parent: &logging::LogContext,
+    model: &str,
+    provider: &str,
+    role: &str,
+) -> logging::LogContext {
+    parent.patched(logging::LogContextPatch {
+        request_id: logging::FieldPatch::Set(uuid::Uuid::now_v7().to_string()),
+        model: logging::FieldPatch::Set(model.to_string()),
+        provider: logging::FieldPatch::Set(provider.to_string()),
+        role: logging::FieldPatch::Set(role.to_string()),
+        ..logging::LogContextPatch::default()
+    })
+}
+
 #[derive(Clone)]
 struct SubAgentEventSink;
 
@@ -108,6 +142,7 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx_context_size: usize,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
+    pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -197,7 +232,7 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_input(&self, turn_number: usize) {
+    fn log_input(&self) {
         let mut data = build_json_logger_input_data(
             &self.messages,
             self.system_blocks.len(),
@@ -214,7 +249,6 @@ impl<'a> SubAgentRun<'a> {
             );
         }
         log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
-        logging::set_current_turn(turn_number);
     }
 
     fn progress_api_ok(&self, turn_number: usize, resp: &provider::StreamResponse) {
@@ -227,7 +261,7 @@ impl<'a> SubAgentRun<'a> {
         );
     }
 
-    fn log_output(&self, turn_number: usize, resp: &provider::StreamResponse) {
+    fn log_output(&self, resp: &provider::StreamResponse) {
         let mut data = build_json_logger_output_data(
             resp,
             self.start_time.elapsed().as_secs_f64(),
@@ -244,7 +278,6 @@ impl<'a> SubAgentRun<'a> {
             );
         }
         log::debug!(target: LOG_TARGET, "{}", serde_json::to_string(&data).unwrap_or_default());
-        logging::set_current_turn(turn_number);
     }
 
     fn send_text_progress(&self, turn: usize, resp: &provider::StreamResponse) {
@@ -265,11 +298,7 @@ impl<'a> SubAgentRun<'a> {
         }
     }
 
-    fn log_tool_calls(
-        &self,
-        turn_number: usize,
-        tool_calls: &[crate::application::agent::ToolCall],
-    ) {
+    fn log_tool_calls(&self, tool_calls: &[crate::application::agent::ToolCall]) {
         for tool_call in tool_calls {
             let data = build_json_logger_tool_call_data(tool_call);
             log::debug!(
@@ -278,7 +307,6 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::to_string(&data).unwrap_or_default()
             );
         }
-        logging::set_current_turn(turn_number);
     }
 
     fn build_call_info(
@@ -367,208 +395,281 @@ impl RunLoopPort for SubAgentRun<'_> {
         use crate::application::loop_engine::StepTokenUsage;
         self.turn_count += 1;
         let turn_number = self.turn_count;
-        self.progress_turn_start(turn_number);
-        (self.log_request_messages)(turn_number, &self.messages);
-        self.log_input(turn_number);
+        logging::within(
+            logging::LogContextPatch {
+                turn: logging::FieldPatch::Set(turn_number),
+                request_id: logging::FieldPatch::Clear,
+                ..logging::LogContextPatch::default()
+            },
+            async move {
+                self.progress_turn_start(turn_number);
+                (self.log_request_messages)(turn_number, &self.messages);
+                self.log_input();
 
-        // Sub-runs receive the formal NoOp MemoryPort and do not inherit memory injection.
-        let effective_blocks = self.system_blocks.clone();
+                // Sub-runs receive the formal NoOp MemoryPort and do not inherit memory injection.
+                let effective_blocks = self.system_blocks.clone();
 
-        let messages_for_api = messages_for_llm(&self.messages);
-        let mut coordinator =
-            crate::application::model_invocation::ModelInvocationCoordinator::new();
-        let resp = loop {
-            let mut reducer =
-                crate::application::chat::looping::InvocationEventReducer::new(SubAgentEventSink);
-            let response = match self
-                .client
-                .invocation_stream(
-                    &self.invocation_scope,
-                    &effective_blocks,
-                    &messages_for_api,
-                    &self.sub_schemas,
-                    &self.runtime_cancellation,
-                )
-                .await
-            {
-                Ok(stream) => {
-                    coordinator
-                        .pull_stream(stream, &self.runtime_cancellation, false, |event| {
-                            reducer.apply(event)
-                        })
-                        .await
-                }
-                Err(error) => Err((error, false)),
-            };
+                let messages_for_api = messages_for_llm(&self.messages);
+                let mut coordinator =
+                    crate::application::model_invocation::ModelInvocationCoordinator::new();
+                let resp = loop {
+                    // A retry is a fresh provider request and therefore gets a fresh request id.
+                    let request_context = sub_request_log_context(
+                        &logging::capture(),
+                        &self.model_name_for_log,
+                        self.client.provider_name(),
+                        &self.role_name_for_log,
+                    );
+                    let response = logging::instrument(request_context, async {
+                        let mut reducer =
+                            crate::application::chat::looping::InvocationEventReducer::new(
+                                SubAgentEventSink,
+                            );
+                        match self
+                            .client
+                            .invocation_stream(
+                                &self.invocation_scope,
+                                &effective_blocks,
+                                &messages_for_api,
+                                &self.sub_schemas,
+                                &self.runtime_cancellation,
+                            )
+                            .await
+                        {
+                            Ok(stream) => {
+                                coordinator
+                                    .pull_stream(
+                                        stream,
+                                        &self.runtime_cancellation,
+                                        false,
+                                        |event| reducer.apply(event),
+                                    )
+                                    .await
+                            }
+                            Err(error) => Err((error, false)),
+                        }
+                    })
+                    .await;
 
-            match response {
-                Ok((resp, _)) => break resp,
-                Err((error, _))
-                    if error.is_cancelled() || self.agent.ctx.cancellation().is_cancelled() =>
-                {
-                    self.runtime_cancellation.cancel();
-                    return Err(LoopEngineError::Cancelled);
-                }
-                Err((error, visible_delta)) => match coordinator
-                    .handle_failure(&error, visible_delta, &self.runtime_cancellation)
-                    .await
-                {
-                    crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
-                        log::info!(
-                            target: crate::LOG_TARGET,
-                            "sub-agent model invocation retrying: attempt={} delay_ms={}",
-                            attempt,
-                            delay.as_millis(),
-                        );
+                    match response {
+                        Ok((resp, _)) => break resp,
+                        Err((error, _))
+                            if error.is_cancelled()
+                                || self.agent.ctx.cancellation().is_cancelled() =>
+                        {
+                            self.runtime_cancellation.cancel();
+                            return Err(LoopEngineError::Cancelled);
+                        }
+                        Err((error, visible_delta)) => match coordinator
+                            .handle_failure(&error, visible_delta, &self.runtime_cancellation)
+                            .await
+                        {
+                            crate::application::model_invocation::RetryStep::Retry {
+                                attempt,
+                                delay,
+                            } => {
+                                log::info!(
+                                    target: crate::LOG_TARGET,
+                                    "sub-agent model invocation retrying: attempt={} delay_ms={}",
+                                    attempt,
+                                    delay.as_millis(),
+                                );
+                            }
+                            crate::application::model_invocation::RetryStep::Cancelled => {
+                                self.runtime_cancellation.cancel();
+                                return Err(LoopEngineError::Cancelled);
+                            }
+                            crate::application::model_invocation::RetryStep::Compact
+                            | crate::application::model_invocation::RetryStep::Fail => {
+                                return Err(LoopEngineError::Adapter(error.to_string()));
+                            }
+                        },
                     }
-                    crate::application::model_invocation::RetryStep::Cancelled => {
-                        self.runtime_cancellation.cancel();
-                        return Err(LoopEngineError::Cancelled);
-                    }
-                    crate::application::model_invocation::RetryStep::Compact
-                    | crate::application::model_invocation::RetryStep::Fail => {
-                        return Err(LoopEngineError::Adapter(error.to_string()));
-                    }
-                },
-            }
-        };
+                };
 
-        self.last_total_tokens = Some(crate::application::token_usage::normalized_total_tokens(
-            &resp.usage,
-        ));
-        self.progress_api_ok(turn_number, &resp);
+                self.last_total_tokens = Some(
+                    crate::application::token_usage::normalized_total_tokens(&resp.usage),
+                );
+                self.progress_api_ok(turn_number, &resp);
 
-        let usage = StepTokenUsage {
-            input_tokens: resp.usage.input_tokens as u64,
-            output_tokens: resp.usage.output_tokens as u64,
-            cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
-            cache_creation_tokens: resp.usage.cache_creation_tokens.map(u64::from).unwrap_or(0),
-            reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
-            total_tokens: crate::application::token_usage::normalized_total_tokens(&resp.usage),
-            context_window: self.ctx_context_size as u64,
-            est_system_tokens: effective_blocks
-                .iter()
-                .map(|b| context::compact::estimate_tokens(&b.text))
-                .sum(),
-            est_tool_tokens: context::compact::estimate_tool_schemas_tokens(&self.sub_schemas),
-            est_message_tokens: context::compact::estimate_messages_tokens(&messages_for_api),
-            stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
-        };
+                let usage = StepTokenUsage {
+                    input_tokens: resp.usage.input_tokens as u64,
+                    output_tokens: resp.usage.output_tokens as u64,
+                    cached_tokens: resp.usage.cached_tokens.map(u64::from).unwrap_or(0),
+                    cache_creation_tokens: resp
+                        .usage
+                        .cache_creation_tokens
+                        .map(u64::from)
+                        .unwrap_or(0),
+                    reasoning_tokens: resp.usage.reasoning_tokens.map(u64::from).unwrap_or(0),
+                    total_tokens: crate::application::token_usage::normalized_total_tokens(
+                        &resp.usage,
+                    ),
+                    context_window: self.ctx_context_size as u64,
+                    est_system_tokens: effective_blocks
+                        .iter()
+                        .map(|b| context::compact::estimate_tokens(&b.text))
+                        .sum(),
+                    est_tool_tokens: context::compact::estimate_tool_schemas_tokens(
+                        &self.sub_schemas,
+                    ),
+                    est_message_tokens: context::compact::estimate_messages_tokens(
+                        &messages_for_api,
+                    ),
+                    stop_reason: format!("{:?}", resp.stop_reason).to_lowercase(),
+                };
 
-        self.messages.push(resp.assistant_message.clone());
-        self.log_output(turn_number, &resp);
-        self.send_text_progress(turn_number, &resp);
+                self.messages.push(resp.assistant_message.clone());
+                self.log_output(&resp);
+                self.send_text_progress(turn_number, &resp);
 
-        let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
-        if resp.stop_reason == StopReason::MaxTokens {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
-                turn_number,
-            );
-            self.messages.push(Message::user(
-                "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
+                let tool_calls = Agent::extract_tool_calls(&resp.assistant_message);
+                if resp.stop_reason == StopReason::MaxTokens {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "turn {}: 模型响应触发 max_tokens 限制，注入分块提示",
+                        turn_number,
+                    );
+                    self.messages.push(Message::user(
+                        "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
                  请基于已有内容继续，或用更紧凑的方式重新组织响应：\
                  大文件改用 Edit 分块写入（每次 < 12k 字符），\
                  长命令用 Bash heredoc 分段执行。\
                  不要重复已输出的内容，直接从截断点继续。"
-                    .to_string(),
-            ));
-            if tool_calls.is_empty() {
-                // Preserve the old retry path: a text-only truncation did not
-                // trigger compaction before asking the model to continue.
-                self.last_total_tokens = None;
-                // An empty tool phase advances the shared state machine while
-                // retaining the old behavior of retrying a truncated response.
-                return Ok((
+                            .to_string(),
+                    ));
+                    if tool_calls.is_empty() {
+                        // Preserve the old retry path: a text-only truncation did not
+                        // trigger compaction before asking the model to continue.
+                        self.last_total_tokens = None;
+                        // An empty tool phase advances the shared state machine while
+                        // retaining the old behavior of retrying a truncated response.
+                        return Ok((
+                            ModelStep::Tools {
+                                text: resp.assistant_message.text_content(),
+                                calls: Vec::new(),
+                            },
+                            usage,
+                        ));
+                    }
+                }
+
+                if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
+                    return Ok((
+                        ModelStep::Complete {
+                            text: resp.assistant_message.text_content(),
+                        },
+                        usage,
+                    ));
+                }
+
+                Ok((
                     ModelStep::Tools {
                         text: resp.assistant_message.text_content(),
-                        calls: Vec::new(),
+                        calls: tool_calls,
                     },
                     usage,
-                ));
-            }
-        }
-
-        if tool_calls.is_empty() || resp.stop_reason == StopReason::EndTurn {
-            return Ok((
-                ModelStep::Complete {
-                    text: resp.assistant_message.text_content(),
-                },
-                usage,
-            ));
-        }
-
-        Ok((
-            ModelStep::Tools {
-                text: resp.assistant_message.text_content(),
-                calls: tool_calls,
+                ))
             },
-            usage,
-        ))
+        )
+        .await
     }
 
     async fn execute_tools(
         &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
         calls: &[(crate::application::agent::ToolCall, ToolGuardDecision)],
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
-        if calls.is_empty() {
-            return Ok(ToolStep::Continue);
-        }
-        let allowed: Vec<_> = calls
-            .iter()
-            .filter_map(|(call, decision)| {
-                matches!(decision, ToolGuardDecision::Allow).then_some(call.clone())
-            })
-            .collect();
-        let mut results: Vec<_> = calls
-            .iter()
-            .filter_map(|(call, decision)| match decision {
-                ToolGuardDecision::SoftBlock { reason } => Some(
-                    crate::application::chat::looping::tool_fuse::blocked_tool_execution(
-                        call, reason,
-                    ),
-                ),
-                ToolGuardDecision::Allow => None,
-            })
-            .collect();
-
         let turn_number = self.turn_count;
-        let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
-        self.log_tool_calls(turn_number, &all_calls);
-        let call_info = self.build_call_info(&all_calls);
-        if let Some(ref sink) = self.progress_sink {
-            sink.emit(build_tool_calls_progress_event(turn_number, &allowed));
-        }
+        logging::within(
+            logging::LogContextPatch {
+                turn: logging::FieldPatch::Set(turn_number),
+                request_id: logging::FieldPatch::Clear,
+                ..logging::LogContextPatch::default()
+            },
+            async move {
+                if calls.is_empty() {
+                    return Ok(ToolStep::Continue);
+                }
+                let allowed: Vec<_> = calls
+                    .iter()
+                    .filter_map(|(call, decision)| {
+                        matches!(decision, ToolGuardDecision::Allow).then_some(call.clone())
+                    })
+                    .collect();
+                let mut results: Vec<_> = calls
+                    .iter()
+                    .filter_map(|(call, decision)| match decision {
+                        ToolGuardDecision::SoftBlock { reason } => Some(
+                            crate::application::chat::looping::tool_fuse::blocked_tool_execution(
+                                call, reason,
+                            ),
+                        ),
+                        ToolGuardDecision::Allow => None,
+                    })
+                    .collect();
 
-        let cancellation = self.agent.ctx.cancellation();
-        let mut executed = tokio::select! {
-            _ = cancellation.cancelled() => {
-                return Err(LoopEngineError::Cancelled);
-            }
-            executed = self.agent.execute_tools(&allowed) => executed,
-        };
-        results.append(&mut executed);
-        let mut by_id: std::collections::HashMap<_, _> = results
-            .into_iter()
-            .map(|result| (result.call_id.clone(), result))
-            .collect();
-        let results: Vec<_> = calls
-            .iter()
-            .filter_map(|(call, _)| by_id.remove(&call.id))
-            .collect();
-        self.progress_tools_done(turn_number, results.len());
-        self.log_result_summaries(turn_number, &results, &call_info);
-        self.log_tool_results(turn_number, &results, &call_info);
-        append_tool_results(
-            self.tool_result_materializer.as_ref(),
-            &mut self.messages,
-            results,
-            &self.session_id,
+                let (approved, denied) =
+                    crate::application::chat::looping::permissions::evaluate_calls(
+                        &allowed,
+                        self.agent.registry,
+                        self.policy.as_ref(),
+                        run_id,
+                        step_id,
+                        &self.agent.ctx.workspace_read().current_workspace_root(),
+                    );
+                results.extend(denied.into_iter().filter_map(|denied| {
+                    allowed
+                        .iter()
+                        .find(|call| call.id.to_string() == denied.id)
+                        .map(|call| {
+                            crate::application::agent::ToolExecution::new(
+                                call,
+                                tools::ToolOutcome::error(denied.reason),
+                            )
+                        })
+                }));
+                let allowed = approved;
+
+                let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();
+                self.log_tool_calls(&all_calls);
+                let call_info = self.build_call_info(&all_calls);
+                if let Some(ref sink) = self.progress_sink {
+                    sink.emit(build_tool_calls_progress_event(turn_number, &allowed));
+                }
+
+                let cancellation = self.agent.ctx.cancellation();
+                let mut executed = tokio::select! {
+                    _ = cancellation.cancelled() => {
+                        return Err(LoopEngineError::Cancelled);
+                    }
+                    executed = self.agent.execute_tools(&allowed) => executed,
+                };
+                results.append(&mut executed);
+                let mut by_id: std::collections::HashMap<_, _> = results
+                    .into_iter()
+                    .map(|result| (result.call_id.clone(), result))
+                    .collect();
+                let results: Vec<_> = calls
+                    .iter()
+                    .filter_map(|(call, _)| by_id.remove(&call.id))
+                    .collect();
+                self.progress_tools_done(turn_number, results.len());
+                self.log_result_summaries(turn_number, &results, &call_info);
+                self.log_tool_results(turn_number, &results, &call_info);
+                append_tool_results(
+                    self.tool_result_materializer.as_ref(),
+                    &mut self.messages,
+                    results,
+                    &self.session_id,
+                )
+                .await;
+                Ok(ToolStep::Continue)
+            },
         )
-        .await;
-        Ok(ToolStep::Continue)
+        .await
     }
 
     async fn on_stuck(

@@ -354,7 +354,10 @@ impl McpConnectionManager {
                         client: client_arc.clone(),
                     };
 
-                    registry.register(mcp_tool);
+                    registry.register_with_capabilities(
+                        mcp_tool,
+                        crate::domain::ToolCapabilities::all(),
+                    );
                 }
             }
         }

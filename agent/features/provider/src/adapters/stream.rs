@@ -109,6 +109,26 @@ pub(crate) fn parse_invocation_stream(
     )
 }
 
+#[cfg(test)]
+fn observe_bridge_context(stage: &'static str) {
+    bridge_context_observations()
+        .lock()
+        .expect("bridge context observations lock poisoned")
+        .push((stage, logging::capture()));
+}
+
+#[cfg(test)]
+fn bridge_context_observations(
+) -> &'static std::sync::Mutex<Vec<(&'static str, logging::LogContext)>> {
+    static OBSERVATIONS: std::sync::OnceLock<
+        std::sync::Mutex<Vec<(&'static str, logging::LogContext)>>,
+    > = std::sync::OnceLock::new();
+    OBSERVATIONS.get_or_init(Default::default)
+}
+
+#[cfg(not(test))]
+fn observe_bridge_context(_stage: &'static str) {}
+
 pub(crate) fn invocation_stream_from_legacy_decoder(
     response: Response,
     effective_reasoning: ReasoningLevel,
@@ -117,16 +137,20 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
 ) -> InvocationStream {
     let (sender, receiver) = std::sync::mpsc::sync_channel(INVOCATION_STREAM_CAPACITY);
     let runtime = tokio::runtime::Handle::current();
+    let bridge_context = logging::capture();
+    let producer_context = bridge_context.clone();
+    let producer_runtime = runtime.clone();
     let producer_cancel = cancel.clone();
     tokio::task::spawn_blocking(move || {
-        let usage = std::sync::Arc::new(std::sync::Mutex::new(RawUsageSnapshot::default()));
-        let mut handler = InvocationEventHandler::new(
-            sender.clone(),
-            producer_cancel.clone(),
-            decoder,
-            usage.clone(),
-        );
-        let terminal = runtime.block_on(async {
+        producer_runtime.block_on(logging::instrument(producer_context, async move {
+            observe_bridge_context("producer");
+            let usage = std::sync::Arc::new(std::sync::Mutex::new(RawUsageSnapshot::default()));
+            let mut handler = InvocationEventHandler::new(
+                sender.clone(),
+                producer_cancel.clone(),
+                decoder,
+                usage.clone(),
+            );
             let result = match decoder {
                 LegacyStreamDecoder::Anthropic => {
                     parse_stream(response, &mut handler, &producer_cancel).await
@@ -156,7 +180,7 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
                     .await
                 }
             };
-            match result {
+            let terminal = match result {
                 Ok(response) => InvocationEvent::Completed(completion_from_legacy(
                     response,
                     usage
@@ -167,17 +191,25 @@ pub(crate) fn invocation_stream_from_legacy_decoder(
                     effective_reasoning,
                 )),
                 Err(error) => InvocationEvent::Failed(provider_error_from_legacy(error)),
-            }
-        });
-        let _ = sender.send(terminal);
+            };
+            let _ = sender.send(terminal);
+        }));
     });
     Box::pin(futures_util::stream::unfold(
-        receiver,
-        |receiver| async move {
-            tokio::task::spawn_blocking(move || receiver.recv().ok().map(|event| (event, receiver)))
-                .await
-                .ok()
-                .flatten()
+        (receiver, runtime, bridge_context),
+        |(receiver, runtime, bridge_context)| async move {
+            let blocking_runtime = runtime.clone();
+            let blocking_context = bridge_context.clone();
+            tokio::task::spawn_blocking(move || {
+                blocking_runtime.block_on(logging::instrument(blocking_context, async move {
+                    observe_bridge_context("consumer");
+                    receiver.recv().ok().map(|event| (event, receiver))
+                }))
+            })
+            .await
+            .ok()
+            .flatten()
+            .map(|(event, receiver)| (event, (receiver, runtime, bridge_context)))
         },
     ))
 }
@@ -205,6 +237,7 @@ impl InvocationEventHandler {
     }
 
     fn send_delta(&self, delta: InvocationDelta) {
+        observe_bridge_context("event");
         if self.sender.send(InvocationEvent::Delta(delta)).is_err() {
             self.cancel.cancel();
         }
@@ -565,7 +598,85 @@ pub async fn parse_stream(
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        bridge_context_observations, invocation_stream_from_legacy_decoder, LegacyStreamDecoder,
+    };
     use crate::domain::invoke::StreamEvent;
+    use crate::ReasoningLevel;
+    use futures_util::StreamExt;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn legacy_stream_bridge_preserves_each_callers_opaque_log_context() {
+        bridge_context_observations()
+            .lock()
+            .expect("bridge context observations lock poisoned")
+            .clear();
+
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fixture server");
+        let address = server.local_addr().expect("fixture server address");
+        let fixture = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "content-type: text/event-stream\r\n",
+            "connection: close\r\n\r\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,",
+            "\"delta\":{\"type\":\"text_delta\",\"text\":\"x\"}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let fixture_server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut socket, _) = server.accept().await.expect("accept fixture request");
+                let mut request = [0_u8; 1024];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut request).await;
+                tokio::io::AsyncWriteExt::write_all(&mut socket, fixture.as_bytes())
+                    .await
+                    .expect("write fixture response");
+            }
+        });
+
+        let run = |request_id: &'static str| async move {
+            let context = logging::LogContext {
+                session_id: Some(format!("session-{request_id}")),
+                request_id: Some(request_id.to_string()),
+                ..logging::LogContext::default()
+            };
+            logging::instrument(context.clone(), async move {
+                let response = reqwest::get(format!("http://{address}/{request_id}"))
+                    .await
+                    .expect("fixture response");
+                let mut stream = invocation_stream_from_legacy_decoder(
+                    response,
+                    ReasoningLevel::Off,
+                    CancellationToken::new(),
+                    LegacyStreamDecoder::Anthropic,
+                );
+                while stream.next().await.is_some() {}
+                context
+            })
+            .await
+        };
+
+        let (first, second) = tokio::join!(run("request-a"), run("request-b"));
+        fixture_server.await.expect("fixture server task");
+
+        let observations = bridge_context_observations()
+            .lock()
+            .expect("bridge context observations lock poisoned")
+            .clone();
+        for expected in [first, second] {
+            for stage in ["producer", "event", "consumer"] {
+                assert!(
+                    observations
+                        .iter()
+                        .any(|(observed_stage, context)| *observed_stage == stage
+                            && context == &expected),
+                    "missing {stage} observation for {expected:?}; got {observations:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn anthropic_message_start_deserializes_all_input_token_components() {

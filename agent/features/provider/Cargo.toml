@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+logging = { path = "../../../packages/global/logging" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

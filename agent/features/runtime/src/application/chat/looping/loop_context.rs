@@ -65,7 +65,7 @@ where
     pub agent_runner: Option<Arc<dyn tools::AgentRunner>>,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
-    pub allow_all: bool,
+    pub policy: Arc<dyn policy::PolicyPort>,
     pub(crate) active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     /// Legacy 持久化兼容句柄（input_gate clear，#890/#891）。
     pub task_store: Arc<storage::TaskStore>,

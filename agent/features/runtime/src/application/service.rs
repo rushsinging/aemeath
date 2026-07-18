@@ -111,7 +111,6 @@ mod tests {
             markdown: true,
             context_size: 200_000,
             resume: None,
-            allow_all: false,
             max_tool_concurrency: 10,
         }
     }
@@ -150,6 +149,7 @@ mod tests {
                 system_prompt_text: String::new(),
                 user_context: String::new(),
                 agent_runner: Arc::new(NoopAgentRunner),
+                policy: Arc::new(policy::AllowAllPolicy),
                 tool_result_materializer:
                     crate::application::testing::test_tool_result_materializer(),
                 task_store: Arc::new(TaskStore::new()),
@@ -159,7 +159,7 @@ mod tests {
                 memory_config: MemoryConfig::default(),
                 memory: std::sync::Arc::new(memory::NoOpMemory),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
-                allow_all: false,
+                allow_all: true,
                 context_size: 200_000,
                 language: "en".to_string(),
             },

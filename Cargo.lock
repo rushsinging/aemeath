@@ -2559,6 +2559,7 @@ dependencies = [
  "futures-util",
  "httpdate",
  "log",
+ "logging",
  "reqwest",
  "reqwest-eventsource",
  "serde",

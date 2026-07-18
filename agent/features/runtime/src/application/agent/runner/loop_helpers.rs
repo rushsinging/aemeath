@@ -50,7 +50,7 @@ impl<'a> SubAgentRun<'a> {
 
     pub(super) fn log_tool_results(
         &self,
-        turn_number: usize,
+        _turn_number: usize,
         results: &[crate::application::agent::ToolExecution],
         call_info: &std::collections::HashMap<sdk::ids::ToolCallId, (String, String)>,
     ) {
@@ -67,7 +67,6 @@ impl<'a> SubAgentRun<'a> {
                 serde_json::to_string(&data).unwrap_or_default()
             );
         }
-        logging::set_current_turn(turn_number);
     }
 
     pub(super) async fn compact_now(&mut self, turn_number: usize) {

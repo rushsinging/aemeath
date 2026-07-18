@@ -121,10 +121,76 @@ fn main_production_path_is_wired_to_shared_run_loop_without_legacy_fsm() {
     // Architecture guard: behavioral tests below exercise this entry point, while this assertion
     // prevents a future reintroduction of the retired Main-only orchestration state machine.
     let source = include_str!("loop_runner.rs");
-    assert!(source.contains("run_loop(&mut run, &cancel, &mut port).await"));
+    assert!(source.contains("run_loop(&mut run, &cancel, &mut port)"));
     assert!(!source.contains("ChatLoopFsm"));
     assert!(!source.contains("StallDetector"));
     assert!(!source.contains("ChatLoopTransition"));
+}
+
+#[test]
+fn main_logging_path_uses_scopes_and_no_legacy_setters() {
+    let chat_source = include_str!("../../client/trait_chat.rs");
+    let runner_source = include_str!("loop_runner.rs");
+    let port_source = include_str!("main_run_port.rs");
+
+    assert!(chat_source.contains("logging::spawn_instrumented(session_context"));
+    assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
+    assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
+    assert!(runner_source.contains("turn: logging::FieldPatch::Set(turn_count)"));
+    assert!(port_source.contains("logging::spawn_instrumented("));
+    for source in [chat_source, runner_source, port_source] {
+        assert!(!source.contains("logging::set_current_"));
+        assert!(!source.contains("logging::set_session_id"));
+    }
+}
+
+#[test]
+fn progress_forwarders_capture_logging_context_before_instrumented_spawn() {
+    let agent_calls = include_str!("agent_calls.rs");
+    let non_agent = include_str!("non_agent.rs");
+
+    for source in [agent_calls, non_agent] {
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+        assert!(production.contains("let progress_log_context = logging::capture();"));
+        assert!(production.contains("logging::spawn_instrumented(progress_log_context, async move"));
+        assert!(!production.contains("tokio::spawn("));
+    }
+}
+
+#[test]
+fn each_request_attempt_has_complete_fresh_context() {
+    let parent = logging::LogContext {
+        session_id: Some("session".into()),
+        chat_id: Some("chat".into()),
+        turn: Some(3),
+        ..logging::LogContext::default()
+    };
+    let first = loop_runner::main_run_port::request_log_context(
+        &parent,
+        "model-a",
+        "provider-a",
+        "default",
+    );
+    let retry = loop_runner::main_run_port::request_log_context(
+        &parent,
+        "model-a",
+        "provider-a",
+        "default",
+    );
+
+    assert_eq!(first.session_id.as_deref(), Some("session"));
+    assert_eq!(first.chat_id.as_deref(), Some("chat"));
+    assert_eq!(first.turn, Some(3));
+    assert_eq!(first.model.as_deref(), Some("model-a"));
+    assert_eq!(first.provider.as_deref(), Some("provider-a"));
+    assert_eq!(first.role.as_deref(), Some("default"));
+    assert_ne!(
+        first.request_id, retry.request_id,
+        "retry must get a new request_id"
+    );
 }
 
 #[derive(Clone)]
@@ -423,6 +489,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -436,7 +503,6 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -541,6 +607,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
             SequenceProvider::new(vec!["first attempted final", "after hook feedback"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -554,7 +621,6 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -732,6 +798,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
             SequenceProvider::new(vec!["final response"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -743,7 +810,6 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -827,6 +893,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
             TwoTurnProvider,
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -840,7 +907,6 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -998,6 +1064,7 @@ async fn test_continue_false_json_treated_as_block() {
             SequenceProvider::new(vec!["first response", "second response"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1011,7 +1078,6 @@ async fn test_continue_false_json_treated_as_block() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1122,6 +1188,7 @@ async fn test_stall_triggers_stop_hook_check() {
             ]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1135,7 +1202,6 @@ async fn test_stall_triggers_stop_hook_check() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1285,6 +1351,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
             SequenceProvider::new(vec!["turn one final", "turn two final"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1298,7 +1365,6 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1450,6 +1516,7 @@ async fn test_stall_detector_resets_across_user_turns() {
             IdenticalReplyProvider::new("Done.", per_turn_delay),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1463,7 +1530,6 @@ async fn test_stall_detector_resets_across_user_turns() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1649,6 +1715,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1662,7 +1729,6 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1773,6 +1839,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1786,7 +1853,6 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1877,6 +1943,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1890,7 +1957,6 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -1958,6 +2024,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
             SequenceProvider::new(vec!["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"]),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -1971,7 +2038,6 @@ async fn test_stop_hook_block_limit_stops_loop() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -2145,6 +2211,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2158,7 +2225,6 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: active_run.clone(),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -2381,6 +2447,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2394,7 +2461,6 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: active_run.clone(),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -2607,6 +2673,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2620,7 +2687,6 @@ async fn test_chat_impl_idle_until_first_input_event() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -2733,6 +2799,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
             provider.clone(),
         ))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2746,7 +2813,6 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -2830,6 +2896,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2843,7 +2910,6 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -2907,6 +2973,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -2920,7 +2987,6 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),
@@ -3054,6 +3120,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         input_events,
         client: Arc::new(provider::LlmClient::from_provider(Arc::new(provider))),
         registry: Arc::new(ToolRegistry::new()),
+        policy: Arc::new(policy::AllowAllPolicy),
         system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         user_context: String::new(),
@@ -3067,7 +3134,6 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
         agent_runner: None,
         tool_result_materializer: crate::application::testing::test_tool_result_materializer(),
-        allow_all: false,
         active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
         task_store: Arc::new(storage::TaskStore::new()),
         task_access: Arc::new(task::TaskStore::new()),

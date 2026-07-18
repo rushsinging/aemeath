@@ -75,7 +75,11 @@ pub(super) async fn chat_impl(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let sink = (me.inner.event_sink_factory)(tx);
     let inner = me.inner.clone();
-    tokio::spawn(async move {
+    let session_context = logging::LogContext {
+        session_id: Some(inner.session_id.clone()),
+        ..logging::LogContext::default()
+    };
+    logging::spawn_instrumented(session_context, async move {
         let final_chain = crate::application::chat::process_chat_loop(
             crate::application::chat::ChatLoopContext {
                 sink,
@@ -94,7 +98,7 @@ pub(super) async fn chat_impl(
                 session_reminders: Arc::new(Mutex::new(Default::default())),
                 agent_runner: Some(inner.context.resources.agent_runner.clone()),
                 tool_result_materializer: inner.context.resources.tool_result_materializer.clone(),
-                allow_all: inner.context.resources.allow_all,
+                policy: inner.context.resources.policy.clone(),
                 active_run: inner.active_run.clone(),
                 task_store: inner.context.resources.task_store.clone(),
                 task_access: inner.context.resources.task_access.clone(),

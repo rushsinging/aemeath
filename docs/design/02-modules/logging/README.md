@@ -248,6 +248,7 @@ src/
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-07-18 | Main/Sub 生产链按 session→chat/sub-run→turn→physical request 建立不可变 scope；Runtime task 与 Provider blocking stream bridge 显式传播 opaque `LogContext`，legacy 全局状态最终退役仍由 #942 承接 | [#940](https://github.com/rushsinging/aemeath/issues/940) |
 | 2026-07-18 | 实现可恢复 FileSinkLifecycle：per-sink lock、5 秒惰性 reopen、direct emergency stderr、完整 I/O fault seam、rotation/retention 与 max-bytes 边界语义 | [#939](https://github.com/rushsinging/aemeath/issues/939) |
 | 2026-07-12 | 摘要初稿：14 字段 schema、TargetCatalog、scope-local context、sink 降级及 Audit 分离 | #793 |
 | 2026-07-15 | 增加 `aemeath:llm-api-error` 独立诊断 sink、受控 JSON payload 与 Provider-owned 脱敏边界 | [#700](https://github.com/rushsinging/aemeath/issues/700) |

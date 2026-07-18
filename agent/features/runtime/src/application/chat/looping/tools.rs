@@ -11,7 +11,7 @@ use crate::application::chat::looping::{
 };
 use hook::api::{HookData, ToolHookData};
 
-use crate::application::chat::looping::engine::{DeniedCall, PolicyEngine};
+use crate::application::chat::looping::engine::DeniedCall;
 use crate::LOG_TARGET;
 use sdk::ids::ToolCallId;
 use share::config::hooks::HookEvent;
@@ -26,7 +26,9 @@ pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeTurnContext,
     tool_calls: &[ToolCall],
     registry: &Arc<ToolRegistry>,
-    allow_all: bool,
+    policy: &dyn policy::PolicyPort,
+    run_id: &sdk::RunId,
+    step_id: &sdk::RunStepId,
     agent: &Agent<'_>,
     sink: &S,
     hook_ui: &HookUi<S>,
@@ -39,9 +41,14 @@ pub(crate) async fn execute_tool_round<S>(
 where
     S: ChatEventSink,
 {
-    let engine = PolicyEngine::new(allow_all);
-
-    let (approved, denied) = evaluate_calls(tool_calls, registry, &engine);
+    let (approved, denied) = evaluate_calls(
+        tool_calls,
+        registry,
+        policy,
+        run_id,
+        step_id,
+        workspace_root,
+    );
     let denied_results =
         deny_tool_calls(&denied, sink, context, hook_ui, hook_runner, workspace_root).await;
 
@@ -454,7 +461,10 @@ mod tests {
     #[tokio::test]
     async fn test_non_concurrency_safe_tools_emit_running_after_previous_result() {
         let registry = Arc::new(ToolRegistry::new());
-        registry.register(UnsafeLifecycleTool);
+        registry.register_with_capabilities(
+            UnsafeLifecycleTool,
+            tools::ToolCapabilities::ReadWorkspace,
+        );
         let ctx = test_tool_context();
         let agent = Agent::for_test(registry.as_ref(), ctx, 10);
         let sink = RecordingSink::default();
@@ -473,7 +483,9 @@ mod tests {
             &context,
             &calls,
             &registry,
-            true,
+            &policy::AllowAllPolicy,
+            &sdk::RunId::new_v7(),
+            &sdk::RunStepId::new_v7(),
             &agent,
             &sink,
             &hook_ui,

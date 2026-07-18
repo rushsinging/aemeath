@@ -85,7 +85,7 @@
 | `policy` | `share` |
 | `context` | `share`, `provider`, `storage`, `task`, `memory`, `sdk` |
 | `memory` | `storage`, `utils` |
-| `provider` | `share` |
+| `provider` | `share`, `logging` |
 | `tools` | `share`, `project`, `storage`, `task`, `memory` |
 | `storage` | `share` |
 | `task` | ∅ |
@@ -102,6 +102,7 @@
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
 - **例外 / 已批准跨 BC 依赖**：
+  - `provider → logging`：仅消费共享诊断基础设施与 opaque `LogContext` 传播；Provider **NEVER** 解释 Runtime session/run 业务语义。
   - `runtime/tools → task`：消费 Task-owned `TaskAccess` OHS 与 Published Language；`task` 反向依赖消费者仍被拒绝。
   - `context → task`：Context Session adapter 消费 Task-owned `TaskPersist` 与 snapshot Published Language；Runtime/Tools 的 persistence/restore authority 由 `check-task-persistence-capability.sh` 机械拒绝。
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
