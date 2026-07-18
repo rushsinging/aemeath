@@ -108,6 +108,7 @@ pub(super) struct SubAgentRun<'a> {
     pub ctx_context_size: usize,
     pub tool_result_materializer:
         Arc<crate::application::tool_result_materialization::ToolResultMaterializer>,
+    pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl<'a> SubAgentRun<'a> {
@@ -510,6 +511,8 @@ impl RunLoopPort for SubAgentRun<'_> {
 
     async fn execute_tools(
         &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
         calls: &[(crate::application::agent::ToolCall, ToolGuardDecision)],
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<ToolStep, LoopEngineError> {
@@ -533,6 +536,27 @@ impl RunLoopPort for SubAgentRun<'_> {
                 ToolGuardDecision::Allow => None,
             })
             .collect();
+
+        let (approved, denied) = crate::application::chat::looping::permissions::evaluate_calls(
+            &allowed,
+            self.agent.registry,
+            self.policy.as_ref(),
+            run_id,
+            step_id,
+            &self.agent.ctx.workspace_read().current_workspace_root(),
+        );
+        results.extend(denied.into_iter().filter_map(|denied| {
+            allowed
+                .iter()
+                .find(|call| call.id.to_string() == denied.id)
+                .map(|call| {
+                    crate::application::agent::ToolExecution::new(
+                        call,
+                        tools::ToolOutcome::error(denied.reason),
+                    )
+                })
+        }));
+        let allowed = approved;
 
         let turn_number = self.turn_count;
         let all_calls: Vec<_> = calls.iter().map(|(call, _)| call.clone()).collect();

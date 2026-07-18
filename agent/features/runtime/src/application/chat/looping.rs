@@ -23,7 +23,9 @@ mod loop_runner;
 mod loop_runner_tests;
 pub(crate) mod memory_inject;
 mod non_agent;
-mod permissions;
+pub(crate) mod permissions;
+#[cfg(test)]
+mod permissions_tests;
 mod post_batch;
 mod queue;
 pub(crate) mod reflection;

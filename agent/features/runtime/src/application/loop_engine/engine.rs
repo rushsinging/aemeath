@@ -90,6 +90,8 @@ pub trait RunLoopPort: Send {
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
     async fn execute_tools(
         &mut self,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
         calls: &[(ToolCall, ToolGuardDecision)],
         cancel: &CancellationToken,
     ) -> Result<ToolStep, LoopEngineError>;
@@ -390,7 +392,7 @@ where
                 let tool_step = match await_interruptible(
                     run,
                     cancel,
-                    port.execute_tools(&guarded_calls, cancel),
+                    port.execute_tools(run.id(), &step_id, &guarded_calls, cancel),
                 )
                 .await
                 {

@@ -85,7 +85,7 @@ fn register_named_scope(
                     .register_mut(spec.clone())
                     .expect("built-in tool registration specification must be valid");
                 if is_authorized(&spec, &profile) {
-                    registry.register($tool);
+                    registry.register_with_capabilities($tool, spec.required_capabilities());
                 }
             }
         }};
