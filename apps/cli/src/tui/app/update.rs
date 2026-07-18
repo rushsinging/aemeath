@@ -391,7 +391,7 @@ impl App {
     }
 
     /// 最大渲染行数。超过此值的旧消息被裁剪，滚到顶部时懒加载展开。
-    const MAX_RENDER_LINES: usize = 2000;
+    const MAX_RENDER_LINES: usize = 1000;
 
     /// 裁剪文档到最大行数，保留最新的行。如果裁剪了，顶部插入提示行。
     fn trim_document_to_max_lines(
@@ -410,26 +410,20 @@ impl App {
         let mut kept = Self::MAX_RENDER_LINES;
         let folded = total - kept;
 
-        // 从后向前保留 block 的行
+        // 从后向前按 block 边界保留：一旦某 block 无法完整放入剩余预算，跳过整个 block
+        // （不截断 block 内部，保证消息完整性）。继续向前找更小的 block 填满预算。
         let mut new_blocks: Vec<RenderedBlock> = Vec::new();
         for block in document.blocks.into_iter().rev() {
             if kept == 0 {
                 break;
             }
             let block_len = block.lines.len();
-            if block_len <= kept {
-                new_blocks.push(block);
-                kept -= block_len;
-            } else {
-                // 部分保留
-                let start = block_len - kept;
-                let lines: Vec<RenderedLine> = block.lines[start..].to_vec();
-                new_blocks.push(RenderedBlock {
-                    block_id: block.block_id,
-                    lines: Rc::new(lines),
-                });
-                kept = 0;
+            if block_len > kept {
+                // 该 block 放不下剩余预算，跳过（不截断）
+                continue;
             }
+            new_blocks.push(block);
+            kept -= block_len;
         }
         new_blocks.reverse();
 
