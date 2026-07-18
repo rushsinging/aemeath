@@ -10,7 +10,7 @@ mod task_persistence;
 
 pub use atomic_blob_session::AtomicBlobSessionStore;
 pub use in_memory_session::InMemorySessionRepository;
-pub use memory_injection::NoOpContextMemorySource;
+pub use memory_injection::{MemoryRetrieveAdapter, NoOpContextMemorySource};
 pub use session_legacy_workspace::{decode as decode_session, LegacySessionDecoder};
 pub use task_persistence::{compose_session_task_capture, LegacyTaskCapture};
 

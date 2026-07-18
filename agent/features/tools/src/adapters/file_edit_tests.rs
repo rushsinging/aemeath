@@ -17,6 +17,7 @@ fn test_ctx(root: std::path::PathBuf, read_file: String) -> ToolExecutionContext
         resources: crate::domain::ToolResources {
             agent_runner: None,
             registry: None,
+            memory: std::sync::Arc::new(memory::NoOpMemory),
             memory_config: share::config::MemoryConfig::default(),
             lang: "en".to_string(),
             allow_all: false,

@@ -439,6 +439,7 @@ mod tests {
             resources: tools::ToolResources {
                 agent_runner: None,
                 registry: None,
+                memory: Arc::new(memory::NoOpMemory),
                 memory_config: share::config::MemoryConfig::default(),
                 lang: "en".to_string(),
                 allow_all: true,

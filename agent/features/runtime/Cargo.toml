@@ -9,6 +9,7 @@ config = { path = "../config" }
 provider = { path = "../provider" }
 tools = { path = "../tools" }
 project = { path = "../project" }
+memory = { path = "../memory" }
 policy = { path = "../policy" }
 context = { path = "../context" }
 storage = { path = "../storage" }

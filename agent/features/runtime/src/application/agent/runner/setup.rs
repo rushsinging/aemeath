@@ -210,6 +210,8 @@ impl AgentRunner for CliAgentRunner {
             resources: tools::ToolResources {
                 agent_runner: None, // No nested agents
                 registry: ctx.resources.registry.clone(),
+                // 子 agent 明确使用 NoOpMemory，不继承主 agent 的 memory 实例。
+                memory: std::sync::Arc::new(memory::NoOpMemory),
                 memory_config: ctx.resources.memory_config.clone(),
                 lang: ctx.resources.lang.clone(),
                 allow_all: ctx.resources.allow_all,
