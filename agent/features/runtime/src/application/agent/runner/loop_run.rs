@@ -12,7 +12,6 @@ use crate::application::loop_engine::{
 use crate::domain::agent_run::{Run, RunDomainEvent, RunSpec};
 use crate::LOG_TARGET;
 use async_trait::async_trait;
-use futures::StreamExt;
 use provider::LlmClient;
 use provider::{StopReason, SystemBlock};
 use share::message::Message;
@@ -372,7 +371,7 @@ impl RunLoopPort for SubAgentRun<'_> {
         let resp = loop {
             let mut reducer =
                 crate::application::chat::looping::InvocationEventReducer::new(SubAgentEventSink);
-            let response = self
+            let response = match self
                 .client
                 .invocation_stream(
                     &self.invocation_scope,
@@ -381,39 +380,26 @@ impl RunLoopPort for SubAgentRun<'_> {
                     &self.sub_schemas,
                     &self.agent.ctx.cancel,
                 )
-                .await;
-
-            let response = match response {
-                Ok(mut stream) => {
-                    let mut terminal = None;
-                    while let Some(event) = stream.next().await {
-                        match reducer.apply(event) {
-                            Ok(Some(response)) => terminal = Some(Ok(response)),
-                            Ok(None) => {}
-                            Err(error) => terminal = Some(Err(error)),
-                        }
-                        if terminal.is_some() {
-                            break;
-                        }
-                    }
-                    terminal.unwrap_or_else(|| {
-                        Err(provider::ProviderError::fatal(
-                            provider::ProviderErrorKind::Protocol,
-                            "provider stream ended without terminal event",
-                        ))
-                    })
+                .await
+            {
+                Ok(stream) => {
+                    coordinator
+                        .pull_stream(stream, &self.agent.ctx.cancel, false, |event| {
+                            reducer.apply(event)
+                        })
+                        .await
                 }
-                Err(error) => Err(error),
+                Err(error) => Err((error, false)),
             };
 
             match response {
-                Ok(resp) => break resp,
-                Err(error) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
+                Ok((resp, _)) => break resp,
+                Err((error, _)) if error.is_cancelled() || self.agent.ctx.cancel.is_cancelled() => {
                     self.agent.ctx.cancel.cancel();
                     return Err(LoopEngineError::Cancelled);
                 }
-                Err(error) => match coordinator
-                    .handle_failure(&error, reducer.saw_visible_delta(), &self.agent.ctx.cancel)
+                Err((error, visible_delta)) => match coordinator
+                    .handle_failure(&error, visible_delta, &self.agent.ctx.cancel)
                     .await
                 {
                     crate::application::model_invocation::RetryStep::Retry { attempt, delay } => {
