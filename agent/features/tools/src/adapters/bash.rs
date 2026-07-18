@@ -72,15 +72,10 @@ impl TypedTool for BashTool {
         };
         let command = args.command.as_str();
         if let Some(reason) = check_command_safety(command) {
-            if reason.contains("dedicated file tools") || !ctx.resources.allow_all {
-                return TypedToolResult::error(format!("Command blocked ({reason}): {command}\nUse the dedicated tool requested by the error message, or ask the user to execute it manually if this is intentional."));
-            }
+            return TypedToolResult::error(format!("Command blocked ({reason}): {command}\nUse the dedicated tool requested by the error message, or ask the user to execute it manually if this is intentional."));
         }
-        // Check for shell injection patterns (skip when allow_all is set)
-        if !ctx.resources.allow_all {
-            if let Some(reason) = check_shell_injection(command) {
-                return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
-            }
+        if let Some(reason) = check_shell_injection(command) {
+            return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
         }
         let timeout_ms = args.timeout.unwrap_or(120_000);
 

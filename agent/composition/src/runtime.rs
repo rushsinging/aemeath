@@ -6,18 +6,25 @@ pub(crate) use runtime::AgentClientImpl;
 
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
-    _gateways: FeatureGateways,
+    gateways: FeatureGateways,
     workspace: project::WorkspaceViews,
     config: config::ConfigWiring,
 ) -> Result<AgentClientImpl, sdk::SdkError> {
-    // TODO(#47): This composition-level wiring scaffold will consume gateways
-    // when the runtime bootstrap migration is ready for feature gateway injection.
+    // Task BC wiring: Composition owns the single backing and its persistence envelope.
+    let task_wiring = task::wire_task();
+    let task_access = task_wiring.access();
+    let session_tasks = context::compose_session_task_capture(task_wiring.persist());
+
     runtime::from_args_with_workspace(
         args,
         workspace,
         config.reader(),
         config.query(),
         config.writer(),
+        gateways.provider,
+        gateways.tools,
+        task_access,
+        session_tasks,
     )
     .await
 }

@@ -14,6 +14,6 @@ pub(crate) use from_args::*;
 #[allow(unused_imports)]
 pub(crate) use mapping::*;
 
-// 对外公开导出（gateway 通过 runtime::{from_args, AgentClientImpl} 公开）
+// 对外仅发布 Composition 装配所需的 workspace bootstrap。
 pub use accessors::AgentClientImpl;
-pub use from_args::{from_args, from_args_with_workspace};
+pub use from_args::from_args_with_workspace;

@@ -5,15 +5,18 @@
 **次触发**：新增内置 Tool，或改 MCP 工具加载 / 注册。
 **配套**：tool 在 Agent 循环中的执行编排在 `runtime.md`；工具调用的 TUI 展示在 `tui-cli.md`。
 
-## Tool trait 与注册
+## Tool trait、注册与 Scope/Profile
 
-- `Tool` trait：`agent/features/tools/src/contract/tool.rs`。各内置工具实现该 trait。
-- `ToolRegistry`：`agent/features/tools/src/core/tool_registry.rs`，负责工具注册与查找。
+- `Tool` / `TypedTool` trait：`agent/features/tools/src/domain/tool.rs`；内置工具实现在 `agent/features/tools/src/adapters/`。
+- `ToolRegistry`：`agent/features/tools/src/adapters/tool_registry.rs`，负责工具注册与查找。
+- #909 已落地 `RegistryScope` / `ToolProfile` 与“只收缩”规则：`agent/features/tools/src/domain/scope_profile.rs`；capability Published Language：`agent/features/tools/src/domain/published_language.rs`。Main 是 `all()` baseline；Sub 与兼容 `legacy-no-agent` Profile 必须从 Main 经 `derive_restricted` 构造。`TaskRead` 用于 TaskGet/TaskList，变更类 Task tools 使用 `TaskMutation`；LSP 因调用外部 CLI 必须同时声明 `ReadWorkspace | ExecuteProcess`。
+- 当前 MCP 动态工具注册仍绕过 `RegistryScopeBuilder` / Scope/Profile；这是 #911 / MCP Ready 的 out-of-scope 差距，不能据 #909 声称全局注册不变量已完成，也不得在 #911 adapter 落地前提前改写 MCP/ToolRegistry 调用链。
+- 内置工具的名称、required capabilities、Scope 成员关系与 factory 必须只在 `agent/features/tools/src/adapters/registry.rs` 的单一注册规格中声明。历史 `register_all_tools*` 入口仅作兼容；`NoAgent` 对应 `legacy-no-agent` Scope，等待 #914 退役。
 - 异步 trait 方法使用 `async_trait`（见 `rust-coding.md`）。
 
 ## MCP 工具
 
-- MCP 主体在 `agent/features/tools/src/business/`：`mcp_manager.rs`、`mcp_tool.rs`、`mcp.rs`、`read_mcp_resource.rs`、`list_mcp_resources.rs`。
+- MCP 主体在 `agent/features/tools/src/adapters/`：`mcp_manager.rs`、`mcp_tool.rs`、`mcp.rs`、`read_mcp_resource.rs`、`list_mcp_resources.rs`。
 - MCP 加载器：`agent/features/runtime/src/application/startup/mcp_loader.rs`（`load_mcp_manager`、`parse_mcp_servers_config`、`spawn_mcp_connect`）。
 - MCP 外部协议 adapter：`agent/shared/src/adapter/mcp.rs`。
 - MCP server 配置来源：`~/.agents/mcp.json`（动态加载，当前通过 `serde_json::Value` 配置——属开放决策）。

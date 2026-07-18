@@ -35,8 +35,9 @@
 | 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
 | 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单 |
 | 4a | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
-| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级 | 未迁移 Feature 继续受 COLA 依赖方向约束；Runtime、Context、Provider 与 Storage 锁定各自 Hexagonal 目录，Storage 暂留登记过渡模块 |
+| 5 | `check-cola-layer-purity.sh` | 迁移期固定层级与 Tools scope/profile 边界 | 未迁移 Feature 继续受 COLA 依赖方向约束；已迁移 Feature 锁定各自目标目录；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
 | 6 | `check-crate-api-boundary.sh` | Feature 边界 | 未迁移 feature 经 `::<crate>::api`；Runtime、Context、Storage 仅开放登记的 crate-root 窄 façade |
+| 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费 `TaskAccess`；Task persistence/restore authority 仅限 Context/Composition |
 | 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
 | 6b | `check-provider-pull-stream.sh` | Provider 流边界 | 生产路径禁止恢复 `CallbackHandler` / `StreamHandler` / `RuntimeStreamHandler` / `stream_message_raw` / callback `stream_message`；Runtime 与 Context 只能主动 poll `InvocationStream` |
 | 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
@@ -55,6 +56,8 @@
 | 15 | `check-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
 | 16 | `check-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
 | 17 | `check-log-target-prefix.sh` | 日志架构 | log target 字符串字面量必须以 `aemeath:` 开头 |
+| 17a | `check-logging-scope-context.sh` | 日志架构 | 禁止在 legacy 精确基线外新增进程级执行上下文状态；新路径必须使用 `LogContext` task-local scope |
+| 17b | `check-logging-settings-injection.sh` | 日志架构 | Logging 禁止读取 env；Runtime 禁止装配或初始化 Logging；`UnifiedLogger::init` 只能由 Composition 单一入口调用 |
 | 18 | `no_mod_rs.sh` | 文件约定 | 禁止 `mod.rs` |
 | 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
 | 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
@@ -94,8 +97,8 @@
 | `share` | `logging`, `utils` |
 | `project` | `share` |
 | `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `sdk` |
-| `memory` | ∅ |
+| `context` | `share`, `provider`, `storage`, `task`, `sdk` |
+| `memory` | `storage`, `utils` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage`, `task` |
 | `storage` | `share` |
@@ -108,12 +111,13 @@
 | `logging` | ∅ |
 | `utils` | ∅ |
 
-> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL、`MemoryPort` 与 in-memory contract baseline，且该 crate 不依赖其他 workspace crate。旧 Memory 业务实现和生产消费者仍暂留 `share` / Storage / Runtime，分别由 #896/#897/#900 迁移与退役；当前双结构 **NEVER** 视为生产切线完成。
+> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL/`MemoryPort`；#896 新增 Memory-owned `MemoryDatasetStore`、AtomicDataset integration adapter 与 `utils` key hash。`memory → storage` 只允许 adapter 消费 Storage crate-root OHS，domain/ports/service 的层间方向由 `check-cola-layer-purity.sh` 守卫；旧业务实现和生产消费者仍由 #883/#897/#900 迁移退役。
 >
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 
 - **例外 / 已批准跨 BC 依赖**：
   - `runtime/tools → task`：消费 Task-owned `TaskAccess` OHS 与 Published Language；`task` 反向依赖消费者仍被拒绝。
+  - `context → task`：Context Session adapter 消费 Task-owned `TaskPersist` 与 snapshot Published Language；Runtime/Tools 的 persistence/restore authority 由 `check-task-persistence-capability.sh` 机械拒绝。
   - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
   - `composition →` 全部 feature：唯一装配根。
 - **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
@@ -180,16 +184,19 @@
 - **允许的顶层源码**：`lib.rs`, `app.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/provider/runtime/tools/update` 五个 wiring module。
 - **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
 - **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
-- **范围边界**：本守卫只证明 Composition 物理结构与 façade 模块声明；`FeatureGateways` 真实注入由 #948 承接，全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
+- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Tool gateway 被 Runtime 主 bootstrap 实际消费；全部 Adapter 构造上移由 #950 承接，正式跨 capability 边界替换由 #1022 承接。
 - **#1002 故意违规证据**：临时创建 `agent/composition/src/domain.rs` 时，单 Guard 与总编排均以 exit 2 命中 `forbidden Hexagonal/COLA layer`；删除探针后两者 clean pass。
+- **#948 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.tools` 传给 Runtime；Runtime 主 bootstrap 必须声明两个 trait-object 参数，并分别经 `build_llm_client_with_gateway`、`new_registry`、`register_all_tools` 消费。规则使用结构化正向断言，白名单仍为 0。
+- **#948 故意违规证据**：临时把 `gateways.provider` 改为默认 `provider::wire_provider()` 后，单 Guard 与总编排均以 exit 2 命中 `missing provider gateway forwarding`；恢复后 clean pass。
 
 ## 5. check-cola-layer-purity.sh
 
 - **定位**：这是迁移期固定层级守卫，只描述当前执行中的路径与 `crate::<layer>` 引用约束，**NEVER** 代表 [代码组织规范](../01-system/06-code-organization.md) 的 Target 目录原则。
-- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 在 #915 后暂时限制为 `POLICY_HEX_LAYERS = {domain}` 与精确顶层文件 `lib.rs/domain.rs`，#917 以真实 AllowAll 实现恢复 `adapters.rs`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}` 并暂时允许过渡目录；Audit 在 #928 后允许真实 `domain + ports + adapters`，继续禁止空 COLA 占位。
-- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context、Policy、Storage 与 Audit 使用各自目标规则。Policy 由 `POLICY_HEX_LAYERS = {domain}`、`POLICY_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs}` 和 legacy 层禁单锁定 #915 后过渡基线；`adapters.rs` 只有 #917 提供真实 AllowAll 实现时才能恢复，禁止空层占位；Audit 由 `AUDIT_HEX_LAYERS = {domain, ports, adapters}`、`AUDIT_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, ports.rs, adapters.rs}` 和 legacy 禁单锁定 #928 基线；Storage domain 额外禁止物理 fs API、`PathBuf` 与 `crate::adapters`。
+- **功能**：检查未迁移 feature 的迁移期固定层目录与层间依赖方向；Runtime 限制为 `RUNTIME_HEX_LAYERS = {domain, application, ports, adapters, shared}`；Context 限制为 `CONTEXT_HEX_LAYERS = {domain, application, ports, adapters}`；Policy 在 #916 后暂时只允许 `lib.rs`，#917 以真实 Policy PL/AllowAll 恢复 `domain.rs/adapters.rs`；Storage 限制为 `STORAGE_HEX_LAYERS = {domain, ports, adapters}` 并暂时允许过渡目录；Audit 在 #928 后允许真实 `domain + ports + adapters`，继续禁止空 COLA 占位；Tools 同时锁定 #909 scope/profile 授权边界。
+- **Tools scope/profile 机械约束**：生产代码不得恢复 `ToolProfile::excludes` 或按 `ToolName` / `tool_name` match 的授权黑名单；`ToolProfile::allowed_capabilities` 必须是唯一私有字段，只允许 `baseline`、`derive_restricted` 与只读 accessor，不得新增 setter/insert/union、`&mut self` 或字段赋值式扩大 API；`RegistryScopeBuilder` / `RegistryScope` 不得由 crate root façade 导出，`ToolRegistry` 不得进入 domain。扫描不设路径白名单、exception、exclude 或 skip，脚本内含 capability 正例及各类违规反例 sanity。
+- **实际检查语义**：普通 feature 的顶层目录受 `FEATURE_LAYERS` 限制；Runtime、Context、Policy、Storage 与 Audit 使用各自目标规则。Policy 由 `POLICY_HEX_LAYERS = ∅`、`POLICY_ALLOWED_TOP_LEVEL_FILES = {lib.rs}` 和 legacy 层禁单锁定 #916 后过渡基线；`domain.rs/adapters.rs` 只有 #917 提供真实实现时才能恢复，禁止空层占位；Audit 由 `AUDIT_HEX_LAYERS = {domain, ports, adapters}`、`AUDIT_ALLOWED_TOP_LEVEL_FILES = {lib.rs, domain.rs, ports.rs, adapters.rs}` 和 legacy 禁单锁定 #928 基线；Storage domain 额外禁止物理 fs API、`PathBuf` 与 `crate::adapters`。
 - **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据 **MUST** 只在 [Migration Governance §1](03-migration-governance.md) 维护；本节 **MUST** 只登记现行脚本行为、常量与白名单。
-- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS`；Runtime/Context/Storage 使用各自登记目标层；Policy 在 #915 后只允许 `domain`，#917 随真实实现恢复 `adapters`；Audit 使用 `domain/ports/adapters` 与精确顶层文件集合，后续 #929/#930 只能随真实实现同步增量扩展；Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
+- **结构定义**：未迁移 feature 使用 `FEATURE_LAYERS`；Runtime/Context/Storage 使用各自登记目标层；Policy 在 #916 后无内部层，#917 随真实实现恢复 `domain/adapters`；Audit 使用 `domain/ports/adapters` 与精确顶层文件集合，后续 #929/#930 只能随真实实现同步增量扩展；Storage 过渡集合有 #883 退出条件，**NEVER** 扩张。
 - **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
 
 | 当前层 | 禁止依赖 |
@@ -201,7 +208,7 @@
 
 - **检查方式**：
   - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Runtime、Context、Provider、Policy、Storage 与 Audit 使用各自目标规则。
-  - Policy 顶层在 #915 后只允许 `lib.rs/domain.rs`；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，`adapters.rs` 由 #917 随真实实现恢复。
+  - Policy 顶层在 #916 后只允许 `lib.rs`；重新出现 path helper、`api/business/contract/core/gateway/capabilities` 或空 `domain/adapters` 时直接失败，#917 随真实实现恢复。
   - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
   - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
   - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
@@ -220,24 +227,26 @@
 
 - **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：4 个精确 `path + target layer` 例外，均为 #995 只迁目录而不改变接线语义后仍存在的 Current 倒置：`application/client/accessors.rs → adapters`、`application/client/from_args.rs → adapters`、`ports/input_buffer.rs → application`、`ports/legacy.rs → application`。脚本对其做 stale 自检；由 #874–#879 删除，禁止扩张。
 
+- **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Policy/Runtime 生产代码禁止恢复 `PathAccess` / `PathKind` / `path_accesses` / `requires_read_before_write` / Policy path helper；Bash safety 禁止与 `allow_all` 条件耦合。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。规则无路径例外。
+
 ## 6. check-crate-api-boundary.sh
 
-- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context、Policy、Storage、Project 与 Audit 使用登记的 crate-root 窄 façade；Workflow 只允许 `workflow::api` 与 composition-only wiring。脚本同时禁止 Runtime 恢复重复 `ports/reasoning_port.rs`。Policy 的 root 集合在 #915 后仅保留 #916 待迁出的 4 个 path guard；Context 继续通过既有 `guidance` 模块发布目的性 assessment 入口，不暴露 `adapters::prompt::security`；Audit 的 `ROOT_ACCESS_ALLOW.audit` 只包含 #927 真实消费者需要的 Usage PL / QueryPort；`LOG_TARGET` 不作为跨 crate façade。
+- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context、Policy、Storage、Project 与 Audit 使用登记的 crate-root 窄 façade；Workflow 只允许 `workflow::api` 与 composition-only wiring。#916 后 Policy root allowlist 为空；Project `WorkspaceRead` 独占安全路径解析，Tool 直接消费；Context 继续通过既有 `guidance` 模块发布 purpose-specific assessment；Audit 的公开面按真实消费者登记。
 - **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
 - **常量**：
   - `FEATURE_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, update}`
   - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
   - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
   - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-   - `ROOT_ACCESS_ALLOW.policy = {validate_and_normalize_path, validate_and_normalize_path_from_base, validate_search_path, validate_search_path_from_base}`：#915 已删除 warning scanner/formatter/type；剩余 4 个 path guard 由 #916 迁出。`policy::domain` 与 `policy::api` 均禁止跨 crate 消费。
-   - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；`assess_guidance` / `GuidanceAssessment` 经该目的性 façade发布，Context 的 `adapters::prompt::security` 保持私有。
+  - `ROOT_ACCESS_ALLOW.policy = ∅`：#916 已删除全部 path façade；#917 只可随真实 Policy PL/AllowAll 消费增量登记。
+  - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；`assess_guidance` / `GuidanceAssessment` 经该目的性 façade发布，Context 的 `adapters::prompt::security` 保持私有。
    - `ROOT_ACCESS_ALLOW.audit`：#927 Usage PL/query contract 加 #928 AppendLog PL、File adapter type/factory；后续公开面必须由真实消费者证明。
    - `ROOT_ACCESS_ALLOW.storage`：既有过渡 façade 加 #928 `SafeStorageRoot` / `SafeStorageDir` / typed entry/open options 路径安全 PL；不包含任何 AppendLog/Usage 类型。
   - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
   - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
   - `ROOT_ACCESS_ALLOW.workflow = ∅`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` composition wiring 由函数调用规则允许，graph/node/config 不再作为 crate-root façade。
-  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, UsageSink, from_args}`：`UsageSink` 是 Composition bridge 实现所需的 Runtime-owned outbound port；其他 Runtime 内部 port 不公开。
-  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session}`
+  - `ROOT_ACCESS_ALLOW.runtime = {AgentClientImpl, UsageSink, from_args_with_workspace}`：`UsageSink` 是 Composition bridge 实现所需的 Runtime-owned outbound port；bootstrap 由 Composition 注入 Task access/capture views，其他 Runtime 内部 port 不公开。
+  - `ROOT_ACCESS_ALLOW.context = {context_port, compact, guidance, skill, session, compose_session_task_capture, LegacyTaskCapture}`
   - `ROOT_ACCESS_ALLOW.storage`：#991 过渡期真实消费者使用的 Task/Memory façade 符号集合；#884 已移除 Tool Result 的 `MAX_TOOL_RESULT_CHARS` / `persist_oversized_results`，Runtime 只经 `storage::api::AtomicBlobPort` 与 composition-only `FileSystemBlobAdapter` 接线，不再允许 Storage 业务 helper。#983 的 AtomicDataset 跨 crate 消费 deferred 至 #896，届时再按真实调用点治理；未新增 path exception 或 Guard allowlist。过渡集合最终随 #883/#896 收敛。
   - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
   - `POLICY_FORBIDDEN_PATHS` 禁止 Policy 的 `api/business/contract/core/gateway/capabilities` 文件与目录恢复
@@ -247,6 +256,14 @@
   - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
   - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
 - **例外**：无 path 级白名单。Context、Policy 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
+
+### 6t. check-task-persistence-capability.sh
+
+- **功能**：把 Task persistence/restore authority 限定在 Context 与 Composition，Runtime/Tools 只能获得 `TaskAccess`。
+- **守护**：扫描 Runtime/Tools 生产 Rust 源码，拒绝 `TaskPersist`、`PreparedTaskRestore`、`TaskRestoreAdapter`、`TaskSnapshotSource`、`SessionTaskAdapters`、`TaskWiring` 与 `wire_task`；专用测试文件及 `trait_reflection.rs` 测试 fixture 不参与生产权限判断。
+- **正向路径**：Composition 创建唯一 `TaskWiring`，把 `TaskAccess` 注入 Runtime/Tools，并把 persistence view 交给 Context factory 封装为 capture-only `LegacyTaskCapture`；Runtime 无 prepare/commit restore 权限。
+- **sanity / 故意违规**：脚本内置允许 `TaskAccess`、拒绝 persistence symbols 的 detector sanity。#890 临时向 Runtime 生产文件加入 `use task::TaskPersist` 时以 exit code 2 拒绝；移除后通过。依赖图守卫另以 exit code 2 拒绝临时 `task → runtime` 依赖。
+- **范围边界**：跨 Project/Config/Memory/Task 的联合 prepare/commit gate 仍由 #871 承接；本守卫不建立联合 coordinator。
 
 ### 6a. check-provider-invocation-scope.sh
 
@@ -477,6 +494,21 @@
 - **例外**：`packages/global/logging/src/`（该目录的精确白名单校验由 Rust 测试 `domain/routing_guard.rs` 覆盖；#936 将其切换为消费唯一 TargetCatalog）。
 - **错误信息**：`log target must start with 'aemeath:' (or use LOG_TARGET constant)`。
 - **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 有同功能的 `cargo test` 守卫，使用精确白名单校验。
+
+### 17a. check-logging-scope-context.sh
+
+- **功能**：扫描整个 `packages/global/logging/src` 的生产 Rust 文件，拒绝未登记的 `static`、`static mut`、`lazy_static!` 与 `thread_local!` 状态；`pub`、多行声明同样参与检查。
+- **守护**：新日志执行上下文只能通过不可变 `LogContext` 与 Tokio task-local scope 传播；禁止以改名或移动文件的方式恢复 Main/Sub 共享的进程级可变 current 状态。
+- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / LEGACY_EXECUTION_CONTEXT / BOOT_TS / APP_VERSION / PID / TEST_LOCK`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。其中 `LEGACY_EXECUTION_CONTEXT` 只为 #940 消费迁移及 #942 退役保留；白名单 **NEVER** 扩张，新增进程元数据必须有独立设计证据。
+- **故意违规证据**：在 `formatter.rs` 临时新增带 `pub(crate)`、多行声明且不使用 `CURRENT_*` 命名的 `ACTIVE_REQUEST` 后，单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
+- **退出条件**：#942 删除 legacy setters 与 `LEGACY_EXECUTION_CONTEXT` 后，从精确白名单删除该项。
+
+### 17b. check-logging-settings-injection.sh
+
+- **功能**：扫描 Logging、Runtime 与全仓初始化调用，锁定 ConfigSnapshot → LoggingSettings 的单向注入。
+- **守护**：`packages/global/logging/src` 生产代码不得读取 env；Runtime 不得调用 `UnifiedLogger::init`、构造 `LoggingSettings`、恢复 `init_logging` 或读取 `AEMEATH_LOG_STDERR`；`UnifiedLogger::init` 的唯一生产调用点必须是 `agent/composition/src/logging_setup.rs`。
+- **白名单**：无路径排除或 migration exception；Config `EnvAdapter` 仍是 `AEMEATH_LOG_LEVEL` 的唯一业务 env reader，Composition 仅映射系统输出模式 `AEMEATH_LOG_STDERR`。
+- **故意违规证据**：临时在 Logging formatter 恢复 `std::env::var("AEMEATH_LOG_LEVEL")` 后单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
 
 ## 18. no_mod_rs.sh
 
