@@ -26,6 +26,8 @@ pub struct RuntimeHandle {
     pub cwd: std::path::PathBuf,
     pub resolved_model: ResolvedModel,
     pub session_id: String,
+    /// Context-owned capture-only facade; exposes no Task restore authority.
+    pub(crate) session_tasks: Arc<dyn context::LegacyTaskCapture>,
     pub max_tool_concurrency: usize,
     pub max_agent_concurrency: usize,
     pub _mcp_manager: Arc<McpConnectionManager>,

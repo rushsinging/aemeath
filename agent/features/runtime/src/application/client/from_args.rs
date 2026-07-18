@@ -22,6 +22,9 @@ use crate::LOG_TARGET;
 /// 从 Args 初始化 AgentClient。
 ///
 /// 模型选择直接使用 `Config.models.select_for_run()`，无需外部注入。
+///
+/// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
+/// Task BC 的 backing 或持久化封套（跨域越权，#890）。
 pub async fn from_args_with_workspace(
     mut args: ChatBootstrapArgs,
     workspace: project::WorkspaceViews,
@@ -30,6 +33,8 @@ pub async fn from_args_with_workspace(
     config_writer: Arc<dyn config::ConfigWriter>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+    task_access: Arc<dyn task::TaskAccess>,
+    session_tasks: Arc<dyn context::LegacyTaskCapture>,
 ) -> Result<AgentClientImpl, SdkError> {
     // 1. Guidance 目录初始化
     context::guidance::init_guidance_dir();
@@ -98,10 +103,8 @@ pub async fn from_args_with_workspace(
     );
 
     // 10. Tooling
-    // Legacy store 仅供持久化兼容（snapshot/restore、input_gate clear，#890/#891）。
+    // Legacy store 仅供持久化兼容（snapshot/restore、input_gate clear，#891）。
     let task_store = Arc::new(TaskStore::new());
-    // #889：Runtime/Tool 日常状态唯一来源 —— low-privilege TaskAccess 端口。
-    let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     let skills_map = load_configured_skills(&cwd, Some(snapshot.skills()));
     if !skills_map.is_empty() {
         log::info!(target: LOG_TARGET, "[Skills] loaded {} skills", skills_map.len());
@@ -237,6 +240,7 @@ pub async fn from_args_with_workspace(
         cwd,
         resolved_model,
         session_id,
+        session_tasks,
         max_tool_concurrency,
         max_agent_concurrency,
         _mcp_manager: mcp_manager,
@@ -262,30 +266,6 @@ pub async fn from_args_with_workspace(
     Ok(AgentClientImpl {
         inner: Arc::new(handle),
     })
-}
-
-pub async fn from_args(args: ChatBootstrapArgs) -> Result<AgentClientImpl, SdkError> {
-    let cwd = args
-        .cwd
-        .clone()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let workspace = project::wire_production_workspace(cwd.clone())
-        .expect("workspace 初始化成功")
-        .into_views();
-    let config = config::wire_project_config(&cwd)
-        .await
-        .map_err(|error| SdkError::Init(format!("配置初始化失败：{error:?}")))?;
-    from_args_with_workspace(
-        args,
-        workspace,
-        config.reader(),
-        config.query(),
-        config.writer(),
-        provider::wire_provider(),
-        tools::wire_tools(),
-    )
-    .await
 }
 
 // ─── 内部辅助 ───
@@ -336,6 +316,17 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn from_args_keeps_cloned_workspace_views_synchronized() {
+        // Capture-only fake for tests — no-op that never reaches the real Task BC.
+        struct NoOpTaskCapture;
+        impl context::LegacyTaskCapture for NoOpTaskCapture {
+            fn capture_legacy_session(
+                &self,
+                _session: &mut context::session::Session,
+            ) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
         let temp = tempfile::tempdir().expect("create temp root");
         let root = temp.path().join("root");
         let sub = root.join("sub");
@@ -399,6 +390,8 @@ mod tests {
             config.writer(),
             provider::wire_provider(),
             tools::wire_tools(),
+            Arc::new(task::TaskStore::new()),
+            Arc::new(NoOpTaskCapture),
         )
         .await
         .expect("build client with workspace");

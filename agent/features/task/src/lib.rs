@@ -43,8 +43,23 @@
 //! let _state = task::TaskStoreState::empty();
 //! ```
 //!
-//! Snapshot validation is public, but capture, candidate preparation, and
-//! installation remain crate-private until #890 publishes a persistence port:
+//! Snapshot validation is public. #890 publishes the persistence boundary as the
+//! [`TaskPersist`] port plus the opaque [`PreparedTaskRestore`] token, wired
+//! through [`TaskWiring`] / [`wire_task`]; the inherent capture / prepare /
+//! install plumbing stays crate-private so consumers can only round-trip through
+//! the port:
+//! ```
+//! use std::sync::Arc;
+//! use task::{wire_task, TaskAccess, TaskPersist};
+//! let wiring = wire_task();
+//! let access: Arc<dyn TaskAccess> = wiring.access();
+//! let persist: Arc<dyn TaskPersist> = wiring.persist();
+//! let snapshot = persist.collect_snapshot();
+//! let prepared = persist.prepare_restore(&snapshot).expect("empty snapshot restores");
+//! persist.commit_restore(prepared);
+//! assert!(access.list().is_empty());
+//! ```
+//! The crate-private plumbing behind the port stays unreachable:
 //! ```compile_fail
 //! let store = task::TaskStore::new();
 //! let _ = store.capture_snapshot();
@@ -54,11 +69,35 @@
 //! let _ = snapshot.prepare();
 //! ```
 //! ```compile_fail
-//! let _ = task::PreparedTaskRestore;
-//! ```
-//! ```compile_fail
 //! let store = task::TaskStore::new();
 //! store.install_snapshot(());
+//! ```
+//! `PreparedTaskRestore` is public but opaque: no constructor, no field access,
+//! no `Clone`, no serde. It cannot be built outside the crate:
+//! ```compile_fail
+//! let _ = task::PreparedTaskRestore { candidate: unreachable!() };
+//! ```
+//! Its wrapped state cannot be reached:
+//! ```compile_fail
+//! fn peek(prepared: task::PreparedTaskRestore) {
+//!     let _ = prepared.candidate;
+//! }
+//! ```
+//! A prepared token is single-use: `commit_restore` consumes it by value, so it
+//! cannot be committed twice:
+//! ```compile_fail
+//! let wiring = task::wire_task();
+//! let persist = wiring.persist();
+//! let snapshot = persist.collect_snapshot();
+//! let prepared = persist.prepare_restore(&snapshot).unwrap();
+//! persist.commit_restore(prepared);
+//! persist.commit_restore(prepared);
+//! ```
+//! `TaskWiring` hands out only capability views; the concrete backing never
+//! escapes:
+//! ```compile_fail
+//! let wiring = task::wire_task();
+//! let _backing: std::sync::Arc<task::TaskStore> = wiring.persist();
 //! ```
 //! `TaskStore` has no external stateful restore owner in #888:
 //! ```compile_fail
@@ -93,9 +132,10 @@ mod core;
 
 pub use business::{
     detect_batch_all_completed, detect_interrupted_batch, detect_stale_batches, Batch,
-    BatchCreateSpec, BatchId, BatchStatus, InterruptedBatchInfo, StaleBatchInfo, Task,
-    TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId, TaskLifecycleSnapshot,
-    TaskPriority, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot, TaskRevision,
-    TaskSnapshot, TaskSnapshotCodecError, TaskSnapshotValidationError, TaskStatus, TaskStoreStats,
+    BatchCreateSpec, BatchId, BatchStatus, InterruptedBatchInfo, PreparedTaskRestore,
+    StaleBatchInfo, Task, TaskCommandError, TaskCommandResult, TaskCreateSpec, TaskEvent, TaskId,
+    TaskLifecycleSnapshot, TaskPriority, TaskPriorityStats, TaskReminderItem, TaskReminderSnapshot,
+    TaskRevision, TaskSnapshot, TaskSnapshotCodecError, TaskSnapshotValidationError, TaskStatus,
+    TaskStoreStats,
 };
-pub use core::{TaskAccess, TaskStore};
+pub use core::{wire_task, TaskAccess, TaskPersist, TaskStore, TaskWiring};
