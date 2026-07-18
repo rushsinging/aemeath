@@ -22,6 +22,8 @@ impl crate::tui::app::App {
                     // 滚动真相归 view_state；render 前由 App/layout/document projection 同步指标。
                     let total_lines = self.output_area.document().total_lines();
                     self.view_state.output.scroll_up(3, total_lines);
+                    // 滚轮到顶也触发懒加载展开（App 据返回后 mark_output_dirty 重建 document）
+                    self.view_state.output.try_expand_at_top(total_lines);
                 }
                 return Vec::new();
             }
