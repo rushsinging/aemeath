@@ -66,6 +66,17 @@ Release Gate issue 模板见仓库 `.github/ISSUE_TEMPLATE/`。
 - **MUST** 创建 PR 前，在 worktree 分支上执行 `git pull origin main` 拉取最新主分支。
 - **MUST** 发版时从 `origin/main` 最新 commit 切出 `release/vX.Y.Z` 分支，使用 **Merge commit**（`--no-ff`）将 `main` 合入 `release/vX.Y.Z` 后，在 release 分支 HEAD 打 `vX.Y.Z` tag 触发发版 workflow。
 
+### 分支保护规则（Rulesets）
+
+`main` 分支的保护规则通过 **GitHub Repository Rulesets** 强制，配置固化为 `.github/rulesets/*.json`（唯一真相源），由 `.github/rulesets/setup.sh` 同步到 GitHub 服务端。规则包含：
+
+- **pull_request**：要求 PR 合并，dismiss stale reviews
+- **required_status_checks**：要求 `Coverage` check 通过
+- **deletion**：禁止删除 `main`
+- **non_fast_forward**：禁止 force push
+
+新仓库初始化或规则变更后，**MUST** 执行 `bash .github/rulesets/setup.sh` 同步。Rulesets 优先级高于旧 branch protection；迁移时先确认无冲突。
+
 ## 代码修改后检查
 
 每次完成代码修改后（含 bug 修复、feature 实现、重构），**SHOULD** 检查是否产生了应当被移除的旧代码、废弃路径、过期兼容层、仅被测试引用的死代码。发现时 **MUST** 向用户报告并建议清理方案，**NEVER** 在知情的情况下让待退役代码静默遗留。
