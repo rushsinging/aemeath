@@ -346,10 +346,18 @@ struct MemoryState {
 pub struct InMemoryMemory {
     policy: MemoryPolicy,
     state: RwLock<MemoryState>,
+    clock: crate::service::MemoryClock,
 }
 
 impl InMemoryMemory {
     pub fn new(policy: MemoryPolicy) -> Result<Self, MemoryError> {
+        Self::new_with_clock(policy, crate::service::system_time_seconds)
+    }
+
+    pub fn new_with_clock(
+        policy: MemoryPolicy,
+        clock: impl Fn() -> u64 + Send + Sync + 'static,
+    ) -> Result<Self, MemoryError> {
         if policy.max_entries == 0 {
             return Err(MemoryError::InvalidEntry {
                 message: "max_entries 必须大于 0".to_string(),
@@ -363,6 +371,7 @@ impl InMemoryMemory {
         Ok(Self {
             policy,
             state: RwLock::new(MemoryState::default()),
+            clock: Arc::new(clock),
         })
     }
 
@@ -515,9 +524,38 @@ impl MemoryPort for InMemoryMemory {
 
     async fn apply_reflection(
         &self,
-        _output: &ReflectionOutput,
+        output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
-        Ok(ReflectionApplyResult::default())
+        let mut result = ReflectionApplyResult::default();
+        for suggestion in &output.suggested_memories {
+            let now = (self.clock)();
+            let id = reflection_memory_id(now)?;
+            let mut entry = MemoryEntry::new(
+                id,
+                now,
+                suggestion.layer,
+                suggestion.category,
+                suggestion.content.clone(),
+                MemorySource::Llm,
+            )?;
+            entry.tags = suggestion.tags.clone();
+
+            let mut state = self.state.write().expect("memory state lock poisoned");
+            apply_reflection_entry(&mut state, entry, self.policy)?;
+            state.revision = state.revision.saturating_add(1);
+            result.suggestions_added += 1;
+        }
+
+        for raw_id in &output.outdated_memories {
+            let id = MemoryId::new(raw_id)?;
+            let mut state = self.state.write().expect("memory state lock poisoned");
+            if let Some(entry) = state.active.iter_mut().find(|entry| entry.id == id) {
+                entry.outdated = true;
+                state.revision = state.revision.saturating_add(1);
+                result.outdated_marked += 1;
+            }
+        }
+        Ok(result)
     }
 
     async fn archive(&self, ids: &[MemoryId]) -> Result<(), MemoryError> {
@@ -616,6 +654,76 @@ impl InMemoryMemory {
         state.revision = state.revision.saturating_add(1);
         Ok(true)
     }
+}
+
+fn reflection_memory_id(now: u64) -> Result<MemoryId, MemoryError> {
+    let timestamp = uuid::Timestamp::from_unix_time(now, 0, 0, 0);
+    MemoryId::new(uuid::Uuid::new_v7(timestamp).to_string())
+}
+
+fn reflection_capacity_error() -> MemoryError {
+    MemoryError::InvalidEntry {
+        message: "Reflection 淘汰非 pinned 候选后重试一次仍超过记忆容量".to_string(),
+    }
+}
+
+fn apply_reflection_entry(
+    state: &mut MemoryState,
+    mut entry: MemoryEntry,
+    policy: MemoryPolicy,
+) -> Result<(), MemoryError> {
+    validate_content(&entry.content)?;
+    if state.active.iter().any(|stored| stored.id == entry.id)
+        || state.archive.iter().any(|stored| stored.id == entry.id)
+    {
+        return Err(MemoryError::InvalidEntry {
+            message: "记忆 ID 必须唯一".to_string(),
+        });
+    }
+    if let Some(existing) = state.active.iter_mut().find(|stored| {
+        stored.layer == entry.layer
+            && jaccard_similarity(&stored.content, &entry.content) >= policy.similarity_threshold
+    }) {
+        existing.tags.append(&mut entry.tags);
+        existing.tags.sort();
+        existing.tags.dedup();
+        existing.accessed_at = entry.created_at;
+        existing.access_count = existing.access_count.saturating_add(1);
+        return Ok(());
+    }
+    let layer_entries = state
+        .active
+        .iter()
+        .filter(|stored| stored.layer == entry.layer)
+        .cloned()
+        .collect::<Vec<_>>();
+    if layer_entries.len() >= policy.max_entries {
+        let candidates = eviction_candidates(&layer_entries, 3, entry.created_at);
+        let ids = candidates
+            .iter()
+            .map(|candidate| candidate.id)
+            .collect::<Vec<_>>();
+        let mut moved = Vec::new();
+        state.active.retain(|stored| {
+            if ids.contains(&stored.id) && !stored.pinned {
+                moved.push(stored.clone());
+                false
+            } else {
+                true
+            }
+        });
+        state.archive.extend(moved);
+        let remaining = state
+            .active
+            .iter()
+            .filter(|stored| stored.layer == entry.layer)
+            .count();
+        if remaining >= policy.max_entries {
+            return Err(reflection_capacity_error());
+        }
+    }
+    state.active.push(entry);
+    Ok(())
 }
 
 fn validate_content(content: &str) -> Result<(), MemoryError> {

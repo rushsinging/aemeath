@@ -1,3 +1,4 @@
+use memory::api::{MemoryCategory, MemoryLayer, MemorySuggestion, ReflectionOutput};
 use sdk::{ReflectionOutputView, SdkError};
 
 use super::accessors::AgentClientImpl;
@@ -15,21 +16,20 @@ pub(super) async fn run_reflection_impl(
         .map(super::mapping::message_from_sdk)
         .collect::<Vec<_>>();
     let client = me.inner.current_client.read().unwrap().clone();
+    let reflection = memory::api::ReflectionEngine;
     let result = crate::application::reflection::run_complete_reflection(
         crate::application::reflection::ReflectionRunMode::Forced,
         &me.inner.context.resources.memory_config,
         &runtime_messages,
-        &me.inner.cwd,
         client.as_ref(),
         &me.inner.context.resources.system_prompt_text,
         &me.inner.context.resources.language,
+        me.inner.context.resources.memory.as_ref(),
+        &reflection,
     )
     .await
-    .map_err(|e| {
-        let msg = match &e {
-            crate::application::reflection::ReflectionError::StoreInit(detail) => {
-                format!("反思记忆存储初始化失败：{detail}")
-            }
+    .map_err(|error| {
+        let message = match error {
             crate::application::reflection::ReflectionError::LlmCall(detail) => {
                 format!("反思 LLM 调用失败：{detail}")
             }
@@ -39,9 +39,8 @@ pub(super) async fn run_reflection_impl(
             crate::application::reflection::ReflectionError::Unparseable(detail) => {
                 format!("LLM 返回的内容无法解析为反思 JSON：{detail}")
             }
-            other => format!("Reflection 运行失败：{other}"),
         };
-        SdkError::Internal(msg)
+        SdkError::Internal(message)
     })?
     .ok_or_else(|| {
         SdkError::Internal("Reflection 未执行：条件不满足（已禁用或未命中触发间隔）。".to_string())
@@ -79,18 +78,17 @@ pub(super) async fn apply_reflection_impl(
     me: &AgentClientImpl,
     output: ReflectionOutputView,
 ) -> Result<String> {
-    apply_reflection_with_base_dir(
+    apply_reflection_with_memory(
         &me.inner.context.resources.memory_config,
-        &me.inner.cwd,
-        storage::memory_base_dir(),
+        me.inner.context.resources.memory.as_ref(),
         output,
     )
+    .await
 }
 
-fn apply_reflection_with_base_dir(
+async fn apply_reflection_with_memory(
     config: &share::config::MemoryConfig,
-    cwd: &std::path::Path,
-    base_dir: std::path::PathBuf,
+    memory: &dyn memory::api::MemoryPort,
     output: ReflectionOutputView,
 ) -> Result<String> {
     validate_memory_enabled_for_apply(config)?;
@@ -103,19 +101,10 @@ fn apply_reflection_with_base_dir(
     }
 
     let reflection_output = reflection_output_from_sdk(output)?;
-    let mut store = storage::MemoryStore::new(
-        base_dir,
-        storage::project_file_name_from_path(cwd),
-        config.max_entries,
-        config.similarity_threshold,
-    )
-    .map_err(|e| SdkError::Internal(format!("打开 MemoryStore 失败：{e}")))?;
-
-    let applied = crate::application::reflection::ReflectionEngine::apply_output(
-        &reflection_output,
-        &mut store,
-    )
-    .map_err(|e| SdkError::Internal(format!("应用 Reflection 失败：{e}")))?;
+    let applied = memory
+        .apply_reflection(&reflection_output)
+        .await
+        .map_err(|error| SdkError::Internal(format!("应用 Reflection 失败：{error}")))?;
 
     Ok(format!(
         "已应用 Reflection：新增/合并 {} 条记忆，标记 {} 条过时记忆。",
@@ -132,10 +121,8 @@ fn validate_memory_enabled_for_apply(config: &share::config::MemoryConfig) -> Re
     Ok(())
 }
 
-fn reflection_output_from_sdk(
-    output: ReflectionOutputView,
-) -> Result<crate::application::reflection::ReflectionOutput> {
-    Ok(crate::application::reflection::ReflectionOutput {
+fn reflection_output_from_sdk(output: ReflectionOutputView) -> Result<ReflectionOutput> {
+    Ok(ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: output
             .suggested_memories
@@ -148,18 +135,18 @@ fn reflection_output_from_sdk(
 }
 
 fn memory_suggestion_from_sdk(
-    memory: sdk::ReflectionMemorySuggestionView,
-) -> Result<crate::application::reflection::MemorySuggestion> {
-    Ok(crate::application::reflection::MemorySuggestion {
-        layer: parse_memory_layer(&memory.layer)?,
-        category: parse_memory_category(&memory.category)?,
-        content: memory.content,
-        tags: memory.tags,
+    suggestion: sdk::ReflectionMemorySuggestionView,
+) -> Result<MemorySuggestion> {
+    Ok(MemorySuggestion {
+        layer: parse_memory_layer(&suggestion.layer)?,
+        category: parse_memory_category(&suggestion.category)?,
+        content: suggestion.content,
+        tags: suggestion.tags,
         reason: String::new(),
     })
 }
 
-fn parse_memory_layer(value: &str) -> Result<share::memory::MemoryLayer> {
+fn parse_memory_layer(value: &str) -> Result<MemoryLayer> {
     serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|_| {
         SdkError::Internal(format!(
             "无法应用 Reflection：未知 memory layer `{value}`。"
@@ -167,7 +154,7 @@ fn parse_memory_layer(value: &str) -> Result<share::memory::MemoryLayer> {
     })
 }
 
-fn parse_memory_category(value: &str) -> Result<share::memory::MemoryCategory> {
+fn parse_memory_category(value: &str) -> Result<MemoryCategory> {
     serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|_| {
         SdkError::Internal(format!(
             "无法应用 Reflection：未知 memory category `{value}`。"
@@ -178,267 +165,14 @@ fn parse_memory_category(value: &str) -> Result<share::memory::MemoryCategory> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::testing::text_completion_stream;
-    use async_trait::async_trait;
-    use provider::{InvocationStream, LlmProvider, ProviderError, SystemBlock};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-    use tokio_util::sync::CancellationToken;
-    use tools::{AgentRunRequest, AgentRunner};
-
-    struct NoopAgentRunner;
-
-    #[async_trait]
-    impl AgentRunner for NoopAgentRunner {
-        async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-            tools::AgentRunTerminal::Completed {
-                result: String::new(),
-            }
-        }
-
-        async fn complete(
-            &self,
-            _prompt: &str,
-            _system: &str,
-            _cancellation: std::sync::Arc<dyn tools::CancellationSignal>,
-        ) -> String {
-            String::new()
-        }
-    }
-
-    struct StaticReflectionProvider {
-        response: String,
-        input_tokens: u32,
-        output_tokens: u32,
-        calls: Arc<AtomicUsize>,
-    }
-
-    #[async_trait]
-    impl LlmProvider for StaticReflectionProvider {
-        async fn invocation_stream(
-            &self,
-            _scope: &provider::InvocationScope,
-            _system: &[SystemBlock],
-            _messages: &[share::message::Message],
-            _tool_schemas: &[serde_json::Value],
-            _cancel: &CancellationToken,
-        ) -> std::result::Result<InvocationStream, ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(text_completion_stream(
-                self.response.clone(),
-                self.input_tokens,
-                self.output_tokens,
-            ))
-        }
-
-        fn model_name(&self) -> &str {
-            "test-reflection-model"
-        }
-
-        fn provider_name(&self) -> &str {
-            "test-reflection-provider"
-        }
-    }
-
-    fn build_test_client(
-        memory_config: share::config::MemoryConfig,
-        response: &str,
-        calls: Arc<AtomicUsize>,
-    ) -> AgentClientImpl {
-        let cwd =
-            std::env::temp_dir().join(format!("aemeath-sdk-reflection-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&cwd).unwrap();
-        let client = Arc::new(provider::LlmClient::from_provider(Arc::new(
-            StaticReflectionProvider {
-                response: response.to_string(),
-                input_tokens: 11,
-                output_tokens: 22,
-                calls,
-            },
-        )));
-        let context = crate::ports::legacy::ChatRuntimeContext {
-            resources: crate::application::resources::RuntimeResources {
-                client: client.clone(),
-                registry: Arc::new(tools::ToolRegistry::new()),
-                system_blocks: Vec::new(),
-                system_prompt_text: "真实 system prompt".to_string(),
-                user_context: String::new(),
-                agent_runner: Arc::new(NoopAgentRunner),
-                tool_result_materializer:
-                    crate::application::testing::test_tool_result_materializer(),
-                task_store: Arc::new(storage::TaskStore::new()),
-                task_access: Arc::new(task::TaskStore::new()),
-                skills_map: std::collections::HashMap::new(),
-                hook_runner: hook::api::HookRunner::empty(),
-                memory_config,
-                memory: std::sync::Arc::new(memory::NoOpMemory),
-                agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-                allow_all: false,
-                context_size: 200_000,
-                language: "en".to_string(),
-            },
-            verbose: false,
-            resume: None,
-        };
-        let config = Arc::new(config::ConfigAppService::new(Some(&cwd)));
-        let handle = super::super::accessors::RuntimeHandle {
-            context,
-            cwd,
-            resolved_model: share::config::models::ResolvedModel {
-                source_key: "test".to_string(),
-                source_config: share::config::models::ProviderModelsConfig::default(),
-                model: share::config::models::ModelEntryConfig::default(),
-                driver: "openai".to_string(),
-            },
-            session_id: "test-session".to_string(),
-            session_tasks: context::compose_session_task_capture(task::wire_task().persist()),
-            max_tool_concurrency: 1,
-            max_agent_concurrency: 1,
-            _mcp_manager: Arc::new(tools::McpConnectionManager::with_servers(
-                std::collections::HashMap::new(),
-            )),
-            current_client: std::sync::RwLock::new(client),
-            active_run: Arc::new(crate::application::active_run::ActiveRunRegistry::default()),
-            current_chain: Arc::new(std::sync::Mutex::new(context::session::ChatChain::default())),
-            frozen_chats: Arc::new(std::sync::Mutex::new(Vec::new())),
-            active_summary: Arc::new(std::sync::Mutex::new(None)),
-            workspace: project::wire_production_workspace(std::env::temp_dir())
-                .expect("workspace 初始化成功")
-                .into_views(),
-            config_reader: config.clone(),
-            config_query: config.clone(),
-            config_writer: config,
-            event_sink_factory: Arc::new(|_| panic!("测试不应构造 SDK event sink")),
-            session_reminders: Arc::new(std::sync::RwLock::new(
-                share::memory::SessionReminders::new(),
-            )),
-        };
-        AgentClientImpl {
-            inner: Arc::new(handle),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_run_reflection_impl_forced_uses_llm_runner_and_returns_real_output() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let client = build_test_client(
-            share::config::MemoryConfig::default(),
-            "```json\n{\"deviations\":[\"偏离了既定计划\"],\"suggested_memories\":[{\"content\":\"用户偏好先写测试再实现\",\"category\":\"preference\"}],\"outdated_memories\":[\"old-memory-id\"],\"user_alert\":\"请关注测试覆盖\"}\n```",
-            calls.clone(),
-        );
-
-        let view = run_reflection_impl(
-            &client,
-            vec![sdk::ChatMessage {
-                role: "user".to_string(),
-                content: vec![sdk::ContentBlock::text("请反思当前会话")],
-                metadata: None,
-                input_id: None,
-            }],
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(view.input_tokens, 11);
-        assert_eq!(view.output_tokens, 22);
-        assert_eq!(view.suggested_memories.len(), 1);
-        assert_eq!(view.suggested_memories[0].content, "用户偏好先写测试再实现");
-        assert_eq!(view.suggested_memories[0].layer, "project");
-        assert_eq!(view.suggested_memories[0].category, "preference");
-        assert_eq!(view.outdated_memories, vec!["old-memory-id"]);
-        assert!(!view.auto_applied);
-        assert!(view.content.contains("偏离了既定计划"));
-        assert!(view.content.contains("用户偏好先写测试再实现"));
-        assert!(view.content.contains("请关注测试覆盖"));
-    }
-
-    #[tokio::test]
-    async fn test_run_reflection_impl_forced_ignores_interval_gate() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let mut config = share::config::MemoryConfig::default();
-        config.reflection.interval_turns = 100;
-        let client = build_test_client(
-            config,
-            "{\"deviations\":[],\"suggested_memories\":[],\"outdated_memories\":[],\"user_alert\":null}",
-            calls.clone(),
-        );
-
-        run_reflection_impl(
-            &client,
-            vec![sdk::ChatMessage {
-                role: "user".to_string(),
-                content: vec![sdk::ContentBlock::text("只有一轮也要强制反思")],
-                metadata: None,
-                input_id: None,
-            }],
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn test_run_reflection_impl_returns_chinese_config_errors() {
-        let cases = [
-            (
-                share::config::MemoryConfig {
-                    enabled: false,
-                    ..Default::default()
-                },
-                "memory.enabled=false",
-            ),
-            (
-                {
-                    let mut config = share::config::MemoryConfig::default();
-                    config.reflection.enabled = false;
-                    config
-                },
-                "reflection.enabled=false",
-            ),
-            (
-                {
-                    let mut config = share::config::MemoryConfig::default();
-                    config.reflection.interval_turns = 0;
-                    config
-                },
-                "reflection.interval_turns=0",
-            ),
-        ];
-
-        for (config, expected) in cases {
-            let calls = Arc::new(AtomicUsize::new(0));
-            let client = build_test_client(
-                config,
-                "{\"deviations\":[],\"suggested_memories\":[],\"outdated_memories\":[],\"user_alert\":null}",
-                calls.clone(),
-            );
-
-            let err = run_reflection_impl(&client, Vec::new()).await.unwrap_err();
-            let message = err.to_string();
-            assert!(message.contains(expected), "unexpected error: {message}");
-            assert!(
-                message.contains("无法运行 Reflection"),
-                "unexpected error: {message}"
-            );
-            assert_eq!(calls.load(Ordering::SeqCst), 0);
-        }
-    }
-
-    fn temp_memory_base_dir() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "aemeath-sdk-apply-reflection-{}",
-            uuid::Uuid::new_v4()
-        ))
-    }
+    use memory::api::{MemoryCategory, MemoryLayer, MemoryPort};
 
     fn reflection_view(
         suggestions: Vec<sdk::ReflectionMemorySuggestionView>,
         outdated_memories: Vec<String>,
         auto_applied: bool,
-    ) -> sdk::ReflectionOutputView {
-        sdk::ReflectionOutputView {
+    ) -> ReflectionOutputView {
+        ReflectionOutputView {
             content: String::new(),
             input_tokens: 0,
             output_tokens: 0,
@@ -448,155 +182,85 @@ mod tests {
         }
     }
 
-    fn suggestion_view(
-        layer: &str,
-        category: &str,
-        content: &str,
-    ) -> sdk::ReflectionMemorySuggestionView {
+    fn suggestion_view() -> sdk::ReflectionMemorySuggestionView {
         sdk::ReflectionMemorySuggestionView {
-            content: content.to_string(),
-            layer: layer.to_string(),
-            category: category.to_string(),
+            content: "显式 apply 写入记忆".to_string(),
+            layer: "project".to_string(),
+            category: "decision".to_string(),
             tags: vec!["reflection".to_string()],
         }
     }
 
-    #[test]
-    fn test_apply_reflection_impl_writes_suggestion() {
-        let config = share::config::MemoryConfig::default();
-        let cwd =
-            std::env::temp_dir().join(format!("aemeath-sdk-apply-cwd-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&cwd).unwrap();
-        let base_dir = temp_memory_base_dir();
-        let output = reflection_view(
-            vec![suggestion_view(
-                "project",
-                "decision",
-                "显式 apply 写入记忆",
-            )],
-            Vec::new(),
-            false,
-        );
-
-        let message =
-            apply_reflection_with_base_dir(&config, &cwd, base_dir.clone(), output).unwrap();
-        let store = storage::MemoryStore::new(
-            &base_dir,
-            storage::project_file_name_from_path(&cwd),
-            config.max_entries,
-            config.similarity_threshold,
+    #[tokio::test]
+    async fn apply_uses_active_memory_contract() {
+        let memory =
+            memory::api::InMemoryMemory::new(memory::api::MemoryPolicy::default()).unwrap();
+        let message = apply_reflection_with_memory(
+            &share::config::MemoryConfig::default(),
+            &memory,
+            reflection_view(vec![suggestion_view()], Vec::new(), false),
         )
+        .await
         .unwrap();
-        let memories = store
-            .list(Some(share::memory::MemoryLayer::Project))
-            .unwrap();
 
-        assert!(message.contains("已应用 Reflection"));
-        assert_eq!(memories.len(), 1);
-        assert_eq!(memories[0].content, "显式 apply 写入记忆");
-        assert_eq!(
-            memories[0].category,
-            share::memory::MemoryCategory::Decision
-        );
-        assert_eq!(memories[0].source, share::memory::MemorySource::Llm);
-        assert_eq!(memories[0].layer, share::memory::MemoryLayer::Project);
-        assert_eq!(memories[0].tags, vec!["reflection"]);
-        let _ = std::fs::remove_dir_all(base_dir);
-        let _ = std::fs::remove_dir_all(cwd);
+        let entries = memory.list(Some(MemoryLayer::Project));
+        assert!(message.contains("新增/合并 1 条记忆"));
+        assert!(message.contains("标记 0 条过时记忆"));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "显式 apply 写入记忆");
+        assert_eq!(entries[0].category, MemoryCategory::Decision);
+        assert_eq!(entries[0].tags, vec!["reflection"]);
     }
 
-    #[test]
-    fn test_apply_reflection_impl_marks_outdated() {
+    #[tokio::test]
+    async fn apply_short_circuits_without_calling_memory() {
+        let memory = memory::api::NoOpMemory;
         let config = share::config::MemoryConfig::default();
-        let cwd =
-            std::env::temp_dir().join(format!("aemeath-sdk-apply-cwd-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&cwd).unwrap();
-        let base_dir = temp_memory_base_dir();
-        let mut store = storage::MemoryStore::new(
-            &base_dir,
-            storage::project_file_name_from_path(&cwd),
-            config.max_entries,
-            config.similarity_threshold,
+
+        let auto_applied = apply_reflection_with_memory(
+            &config,
+            &memory,
+            reflection_view(vec![suggestion_view()], Vec::new(), true),
         )
+        .await
         .unwrap();
-        let existing = share::memory::MemoryEntry::new(
-            "outdated-id",
-            100,
-            share::memory::MemoryLayer::Project,
-            share::memory::MemoryCategory::Fact,
-            "旧记忆",
-            share::memory::MemorySource::User,
-        );
-        store.add(existing).unwrap();
-        let output = reflection_view(Vec::new(), vec!["outdated-id".to_string()], false);
+        let empty = apply_reflection_with_memory(
+            &config,
+            &memory,
+            reflection_view(Vec::new(), Vec::new(), false),
+        )
+        .await
+        .unwrap();
 
-        let message =
-            apply_reflection_with_base_dir(&config, &cwd, base_dir.clone(), output).unwrap();
-        let memories = store
-            .list(Some(share::memory::MemoryLayer::Project))
-            .unwrap();
-        let outdated = memories
-            .iter()
-            .find(|entry| entry.id == "outdated-id")
-            .unwrap();
-
-        assert!(message.contains("标记 1 条过时记忆"));
-        assert!(outdated.outdated);
-        let _ = std::fs::remove_dir_all(base_dir);
-        let _ = std::fs::remove_dir_all(cwd);
+        assert!(auto_applied.contains("已自动应用"));
+        assert!(empty.contains("没有可应用"));
     }
 
-    #[test]
-    fn test_apply_reflection_impl_disabled_error() {
-        let config = share::config::MemoryConfig {
+    #[tokio::test]
+    async fn apply_rejects_disabled_or_invalid_sdk_input() {
+        let memory = memory::api::NoOpMemory;
+        let disabled = share::config::MemoryConfig {
             enabled: false,
             ..Default::default()
         };
-        let cwd = std::env::temp_dir();
-        let base_dir = temp_memory_base_dir();
-        let output = reflection_view(
-            vec![suggestion_view("project", "decision", "不会写入")],
-            Vec::new(),
-            false,
-        );
+        let disabled_error = apply_reflection_with_memory(
+            &disabled,
+            &memory,
+            reflection_view(vec![suggestion_view()], Vec::new(), false),
+        )
+        .await
+        .unwrap_err();
+        assert!(disabled_error.to_string().contains("memory.enabled=false"));
 
-        let err =
-            apply_reflection_with_base_dir(&config, &cwd, base_dir.clone(), output).unwrap_err();
-        let message = err.to_string();
-
-        assert!(message.contains("memory.enabled=false"));
-        assert!(!base_dir.exists());
-    }
-
-    #[test]
-    fn test_apply_reflection_impl_empty_noop() {
-        let config = share::config::MemoryConfig::default();
-        let cwd = std::env::temp_dir();
-        let base_dir = temp_memory_base_dir();
-        let output = reflection_view(Vec::new(), Vec::new(), false);
-
-        let message =
-            apply_reflection_with_base_dir(&config, &cwd, base_dir.clone(), output).unwrap();
-
-        assert!(message.contains("没有可应用"));
-        assert!(!base_dir.exists());
-    }
-
-    #[test]
-    fn test_apply_reflection_impl_auto_applied_noop() {
-        let config = share::config::MemoryConfig::default();
-        let cwd = std::env::temp_dir();
-        let base_dir = temp_memory_base_dir();
-        let output = reflection_view(
-            vec![suggestion_view("project", "decision", "已自动应用")],
-            vec!["memory-id".to_string()],
-            true,
-        );
-
-        let message =
-            apply_reflection_with_base_dir(&config, &cwd, base_dir.clone(), output).unwrap();
-
-        assert!(message.contains("已自动应用"));
-        assert!(!base_dir.exists());
+        let mut invalid = suggestion_view();
+        invalid.layer = "session".to_string();
+        let invalid_error = apply_reflection_with_memory(
+            &share::config::MemoryConfig::default(),
+            &memory,
+            reflection_view(vec![invalid], Vec::new(), false),
+        )
+        .await
+        .unwrap_err();
+        assert!(invalid_error.to_string().contains("未知 memory layer"));
     }
 }

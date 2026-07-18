@@ -260,7 +260,8 @@ where
             self.system_prompt_text,
             self.context_size,
             self.memory_config,
-            &self.memory_cwd,
+            self.memory.as_ref(),
+            &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
             self.client,
             self.language,
             &self.current_cwd(),
@@ -505,10 +506,11 @@ where
                 self.memory_config,
                 self.turn_count,
                 &self.chain.messages_flat(),
-                &self.memory_cwd,
                 self.client,
                 self.system_prompt_text,
                 self.language,
+                self.memory.as_ref(),
+                &crate::application::chat::looping::reflection::REFLECTION_ENGINE,
             )
             .await
             {
