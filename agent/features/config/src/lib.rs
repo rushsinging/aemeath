@@ -1,3 +1,5 @@
+pub(crate) const LOG_TARGET: &str = "aemeath:agent:config";
+const _: &str = LOG_TARGET;
 mod adapters;
 mod application;
 mod contract;

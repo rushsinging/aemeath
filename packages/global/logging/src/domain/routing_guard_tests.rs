@@ -184,8 +184,11 @@ fn workspace_scan_flags_missing_owner_constant() {
     // An owner with production log calls but no LOG_TARGET constant violates
     // the single-owner-constant invariant.
     let root = scratch_workspace(
-        "agent/features/runtime/src",
-        &[("lib.rs", "log::info!(target: crate::LOG_TARGET, \"x\");\n")],
+        "agent/features/runtime",
+        &[(
+            "src/lib.rs",
+            "log::info!(target: crate::LOG_TARGET, \"x\");\n",
+        )],
     );
     let violations = inspect_workspace(&root).expect("scan scratch");
     assert!(violations
@@ -197,14 +200,14 @@ fn workspace_scan_flags_missing_owner_constant() {
 fn workspace_scan_flags_duplicate_owner_constant() {
     // Two LOG_TARGET definitions inside one owner scope are forbidden.
     let root = scratch_workspace(
-        "agent/features/runtime/src",
+        "agent/features/runtime",
         &[
             (
-                "lib.rs",
+                "src/lib.rs",
                 "pub(crate) const LOG_TARGET: &str = \"aemeath:agent:runtime\";\n",
             ),
             (
-                "extra.rs",
+                "src/extra.rs",
                 "pub(crate) const LOG_TARGET: &str = \"aemeath:agent:runtime\";\n",
             ),
         ],
@@ -216,20 +219,230 @@ fn workspace_scan_flags_duplicate_owner_constant() {
 }
 
 #[test]
-fn workspace_scan_flags_empty_owner_that_defines_a_constant() {
-    // Owners with no registered target (config/memory/task) must not define a
-    // LOG_TARGET constant at all.
+fn workspace_scan_accepts_anonymous_reference_to_owner_constant() {
     let root = scratch_workspace(
-        "agent/features/config/src",
+        "agent/features/config",
         &[(
-            "lib.rs",
-            "pub(crate) const LOG_TARGET: &str = \"aemeath:agent:config\";\n",
+            "src/lib.rs",
+            concat!(
+                "pub(crate) const LOG_TARGET: &str = \"aemeath:agent:config\";\n",
+                "const _: &str = LOG_TARGET;\n",
+            ),
         )],
     );
     let violations = inspect_workspace(&root).expect("scan scratch");
+    assert!(!violations.iter().any(|violation| {
+        violation.path.starts_with("agent/features/config")
+            && matches!(
+                violation.kind,
+                ViolationKind::MissingOwnerConstant | ViolationKind::DuplicateOwnerConstant
+            )
+    }));
+}
+
+#[test]
+fn workspace_scan_requires_a_constant_even_without_log_calls() {
+    let root = scratch_workspace(
+        "agent/features/config",
+        &[
+            ("Cargo.toml", "[package]\nname = \"config\"\n"),
+            ("src/lib.rs", "pub fn load() {}\n"),
+        ],
+    );
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"agent/features/config\"]\n",
+    )
+    .unwrap();
+    let violations = inspect_workspace(&root).expect("scan scratch");
     assert!(violations
         .iter()
-        .any(|v| v.kind == ViolationKind::EmptyOwnerConstant));
+        .any(|v| v.kind == ViolationKind::MissingOwnerConstant));
+}
+
+#[test]
+fn workspace_manifest_and_guard_cover_the_same_members() {
+    let root = workspace_root();
+    let manifest_members = workspace_members(&root).expect("parse workspace members");
+    let guarded_members = OWNERS
+        .iter()
+        .map(|(member, _)| (*member).to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(manifest_members, guarded_members);
+    assert_eq!(manifest_members.len(), 21);
+}
+
+#[test]
+fn every_workspace_member_root_has_exactly_one_crate_private_target() {
+    let root = workspace_root();
+    for (member, owner) in OWNERS {
+        let crate_root = crate_root(&root.join(member)).expect("workspace member crate root");
+        let source = std::fs::read_to_string(&crate_root).expect("read crate root");
+        let declarations = owner_constant_declarations(&source);
+        assert_eq!(
+            declarations,
+            vec![owner.target.to_owned()],
+            "{} must contain exactly one crate-private LOG_TARGET in {}",
+            owner.name,
+            crate_root.display()
+        );
+    }
+}
+
+#[test]
+fn every_workspace_member_has_an_independent_catalog_route() {
+    use super::super::routing::{DiagnosticSinkId as Sink, ModuleOwner as Owner};
+
+    let expected = [
+        ("apps/cli", "aemeath:tui", Owner::Tui, Sink::Tui, "tui.log"),
+        (
+            "agent/composition",
+            "aemeath:composition",
+            Owner::Composition,
+            Sink::Composition,
+            "composition.log",
+        ),
+        (
+            "agent/features/audit",
+            "aemeath:agent:audit",
+            Owner::Audit,
+            Sink::Audit,
+            "agent-audit.log",
+        ),
+        (
+            "agent/features/config",
+            "aemeath:agent:config",
+            Owner::Config,
+            Sink::Config,
+            "agent-config.log",
+        ),
+        (
+            "agent/features/hook",
+            "aemeath:agent:hook",
+            Owner::Hook,
+            Sink::Hook,
+            "agent-hook.log",
+        ),
+        (
+            "agent/features/memory",
+            "aemeath:agent:memory",
+            Owner::Memory,
+            Sink::Memory,
+            "agent-memory.log",
+        ),
+        (
+            "agent/features/policy",
+            "aemeath:agent:policy",
+            Owner::Policy,
+            Sink::Policy,
+            "agent-policy.log",
+        ),
+        (
+            "agent/features/context",
+            "aemeath:context",
+            Owner::Context,
+            Sink::Context,
+            "context.log",
+        ),
+        (
+            "agent/features/project",
+            "aemeath:agent:project",
+            Owner::Project,
+            Sink::Project,
+            "agent-project.log",
+        ),
+        (
+            "agent/features/provider",
+            "aemeath:agent:provider",
+            Owner::Provider,
+            Sink::Provider,
+            "agent-provider.log",
+        ),
+        (
+            "agent/features/runtime",
+            "aemeath:agent:runtime",
+            Owner::Runtime,
+            Sink::Runtime,
+            "agent-runtime.log",
+        ),
+        (
+            "agent/features/storage",
+            "aemeath:agent:storage",
+            Owner::Storage,
+            Sink::Storage,
+            "agent-storage.log",
+        ),
+        (
+            "agent/features/task",
+            "aemeath:agent:task",
+            Owner::Task,
+            Sink::Task,
+            "agent-task.log",
+        ),
+        (
+            "agent/features/tools",
+            "aemeath:agent:tools",
+            Owner::Tools,
+            Sink::Tools,
+            "agent-tools.log",
+        ),
+        (
+            "agent/features/update",
+            "aemeath:agent:update",
+            Owner::Update,
+            Sink::Update,
+            "agent-update.log",
+        ),
+        (
+            "agent/features/workflow",
+            "aemeath:agent:workflow",
+            Owner::Workflow,
+            Sink::Workflow,
+            "agent-workflow.log",
+        ),
+        (
+            "agent/shared",
+            "aemeath:shared",
+            Owner::Shared,
+            Sink::Shared,
+            "shared.log",
+        ),
+        (
+            "packages/sdk",
+            "aemeath:sdk",
+            Owner::Sdk,
+            Sink::Sdk,
+            "sdk.log",
+        ),
+        (
+            "packages/global/logging",
+            "aemeath:logging",
+            Owner::Logging,
+            Sink::Logging,
+            "logging.log",
+        ),
+        (
+            "packages/global/utils",
+            "aemeath:utils",
+            Owner::Utils,
+            Sink::Utils,
+            "utils.log",
+        ),
+        (
+            "tools/xtask",
+            "aemeath:xtask",
+            Owner::Xtask,
+            Sink::Xtask,
+            "xtask.log",
+        ),
+    ];
+    assert_eq!(expected.len(), OWNERS.len());
+    for (member, target, owner, sink, file) in expected {
+        let rule = OWNERS.iter().find(|(path, _)| *path == member).unwrap().1;
+        assert_eq!(rule.target, target);
+        let spec = TargetCatalog::exact(target).expect("member target registered");
+        assert_eq!((spec.owner, spec.sink, spec.file_name), (owner, sink, file));
+    }
 }
 
 #[test]

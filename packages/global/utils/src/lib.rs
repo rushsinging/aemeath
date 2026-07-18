@@ -1,3 +1,5 @@
+pub(crate) const LOG_TARGET: &str = "aemeath:utils";
+const _: &str = LOG_TARGET;
 use sha2::{Digest, Sha256};
 
 /// 对多个已分隔字段生成稳定 SHA-256 十六进制摘要。
