@@ -78,6 +78,7 @@ pub struct RuntimeBootstrapDependencies {
     wiring: Arc<context::MainSessionWiring>,
     provider_gateway: Arc<dyn provider::LlmProviderGateway>,
     tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+    policy: Arc<dyn policy::PolicyPort>,
     task_access: Arc<dyn task::TaskAccess>,
     session_tasks: Arc<dyn context::LegacyTaskCapture>,
 }
@@ -88,6 +89,7 @@ impl RuntimeBootstrapDependencies {
         wiring: Arc<context::MainSessionWiring>,
         provider_gateway: Arc<dyn provider::LlmProviderGateway>,
         tool_gateway: Arc<dyn tools::ToolCatalogGateway>,
+        policy: Arc<dyn policy::PolicyPort>,
         task_access: Arc<dyn task::TaskAccess>,
         session_tasks: Arc<dyn context::LegacyTaskCapture>,
     ) -> Self {
@@ -96,6 +98,7 @@ impl RuntimeBootstrapDependencies {
             wiring,
             provider_gateway,
             tool_gateway,
+            policy,
             task_access,
             session_tasks,
         }
@@ -129,6 +132,7 @@ pub async fn from_args_with_workspace(
         wiring,
         provider_gateway,
         tool_gateway,
+        policy,
         task_access,
         session_tasks,
     } = dependencies;
@@ -330,7 +334,6 @@ pub async fn from_args_with_workspace(
     );
 
     // 16. Policy port — derived from snapshot.allow_all().
-    let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
 
     // 17. Memory port — gate-aware, from wiring.
     let memory: Arc<dyn memory::api::MemoryPort> = wiring.committed_memory();
@@ -574,6 +577,7 @@ mod tests {
             wiring,
             provider::wire_provider(),
             tools::wire_tools(),
+            Arc::new(policy::AllowAllPolicy),
             Arc::new(task::TaskStore::new()),
             Arc::new(NoOpTaskCapture),
         );

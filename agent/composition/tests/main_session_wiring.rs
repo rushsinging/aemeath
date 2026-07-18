@@ -242,6 +242,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         wiring,
         provider::wire_provider(),
         tools::wire_tools(),
+        Arc::new(policy::AllowAllPolicy),
         task_access,
         session_tasks,
     );

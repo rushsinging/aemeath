@@ -21,27 +21,3 @@ pub trait MemoryPortSource: Send + Sync {
     /// Returns the currently committed [`memory::MemoryPort`].
     fn current(&self) -> Arc<dyn memory::MemoryPort>;
 }
-
-#[cfg(test)]
-pub use test_support::test_memory_source;
-
-/// Test-only helpers for creating a [`MemoryPortSource`] backed by
-/// [`memory::InMemoryMemory`].
-#[cfg(test)]
-pub mod test_support {
-    use super::*;
-
-    /// Creates a fresh empty [`memory::InMemoryMemory`] backed source for tests.
-    pub fn test_memory_source() -> Arc<dyn MemoryPortSource> {
-        struct TestSource;
-        impl MemoryPortSource for TestSource {
-            fn current(&self) -> Arc<dyn memory::MemoryPort> {
-                Arc::new(
-                    memory::InMemoryMemory::new(memory::MemoryPolicy::default())
-                        .expect("valid default policy"),
-                )
-            }
-        }
-        Arc::new(TestSource)
-    }
-}

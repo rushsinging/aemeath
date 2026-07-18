@@ -204,8 +204,7 @@ impl ConfigAppService {
                 chain.push(override_patch);
             }
         }
-        let mut config = chain.merge(Config::default());
-        resolve_provider_api_keys(&mut config);
+        let config = chain.merge(Config::default());
         ConfigValidator::validate(&config)
             .map_err(|e| ConfigError::Load(format!("配置校验失败：{e:?}")))?;
         Ok(config)
@@ -239,8 +238,7 @@ async fn load_config(
     if !cli_patch.is_empty() {
         chain.push(cli_patch.clone());
     }
-    let mut config = chain.merge(Config::default());
-    resolve_provider_api_keys(&mut config);
+    let config = chain.merge(Config::default());
     ConfigValidator::validate(&config)?;
     Ok(config)
 }
@@ -287,27 +285,6 @@ fn map_adapter_persist_error(error: ConfigAdapterError) -> ConfigPersistError {
         ConfigAdapterError::CorruptTransaction => ConfigPersistError::CorruptTransaction,
         ConfigAdapterError::Parse => ConfigPersistError::Serialization,
         ConfigAdapterError::Io | ConfigAdapterError::Invalid => ConfigPersistError::Io,
-    }
-}
-
-fn resolve_provider_api_keys(config: &mut Config) {
-    for provider in config.models.providers.values_mut() {
-        if !provider.api_key.is_empty() {
-            continue;
-        }
-        if let Some(env_name) =
-            share::config::domain::driver_env::driver_api_key_env_name(&provider.driver)
-        {
-            if let Ok(value) = std::env::var(env_name) {
-                provider.api_key = value;
-                continue;
-            }
-        }
-        if let Ok(value) = std::env::var("LLM_API_KEY") {
-            provider.api_key = value;
-        } else if let Ok(value) = std::env::var("OPENAI_API_KEY") {
-            provider.api_key = value;
-        }
     }
 }
 

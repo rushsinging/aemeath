@@ -6,6 +6,57 @@ use super::*;
 
 use context::session::ChatChain;
 
+#[derive(Clone)]
+struct TestMemoryOpener;
+
+#[async_trait::async_trait]
+impl memory::api::MemoryOpener for TestMemoryOpener {
+    async fn open_memory(
+        &self,
+        _key: &memory::api::ProjectMemoryKey,
+        _config: &share::config::MemoryConfig,
+    ) -> Result<Arc<dyn memory::api::MemoryPort>, memory::api::MemoryOpenerError> {
+        Ok(Arc::new(memory::api::NoOpMemory))
+    }
+
+    fn boxed_clone(&self) -> Box<dyn memory::api::MemoryOpener> {
+        Box::new(self.clone())
+    }
+}
+
+fn test_wiring() -> Arc<context::MainSessionWiring> {
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap())
+        .expect("workspace 初始化成功")
+        .into_views();
+    let persist = workspace.persist();
+    let config = Arc::new(config::ConfigAppService::new(Some(
+        &workspace.read().initial_cwd(),
+    )));
+    let now = context::session::now_iso();
+    Arc::new(context::MainSessionWiring::build(
+        context::MainSessionWiringBuilder {
+            workspace_read: workspace.read(),
+            workspace_persist: persist.clone(),
+            task_persist: Arc::new(task::TaskStore::new()),
+            config_reader: config.clone(),
+            config_participant: config,
+            memory_opener: Box::new(TestMemoryOpener),
+            initial_session: context::session::CanonicalSession {
+                id: context::session::new_session_id(),
+                chats: Vec::new(),
+                created_at: now.clone(),
+                updated_at: now,
+                metadata: Default::default(),
+                tasks: context::session::SnapshotState::Missing,
+                workspace: context::session::SnapshotState::Captured(persist.snapshot()),
+                revision: 0,
+                committed_steps: Vec::new(),
+            },
+            initial_memory: Arc::new(memory::api::NoOpMemory),
+        },
+    ))
+}
+
 fn test_save_chain() -> Arc<
     dyn Fn(
             &context::session::ChatChain,
@@ -495,6 +546,7 @@ async fn test_process_chat_loop_stop_hook_blocked_continues_until_success() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -613,6 +665,7 @@ async fn test_stop_hook_feedback_message_is_marked_system_generated() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -804,6 +857,7 @@ async fn test_process_chat_loop_uses_workspace_workspace_root_for_stop_hook_env(
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace,
         session_id: "test-worktree-stop-hook-env".to_string(),
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -899,6 +953,7 @@ async fn test_process_chat_loop_drains_input_after_stop_hook_before_done() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1070,6 +1125,7 @@ async fn test_continue_false_json_treated_as_block() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1194,6 +1250,7 @@ async fn test_stall_triggers_stop_hook_check() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1357,6 +1414,7 @@ async fn test_loop_persists_across_turns_until_shutdown() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1522,6 +1580,7 @@ async fn test_stall_detector_resets_across_user_turns() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1721,6 +1780,7 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1845,6 +1905,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -1949,6 +2010,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2030,6 +2092,7 @@ async fn test_stop_hook_block_limit_stops_loop() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2217,6 +2280,7 @@ async fn test_cancel_aborts_turn_then_returns_to_idle() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2453,6 +2517,7 @@ async fn test_cancel_later_turn_preserves_completed_prior_turns() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2679,6 +2744,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2805,6 +2871,7 @@ async fn test_empty_seed_start_emits_no_turn_signal_before_first_input() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(Vec::new()),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2902,6 +2969,7 @@ async fn test_resume_skip_pending_user_turn_idles_until_new_input() {
         user_context: String::new(),
         chain: messages, // 末条为 User，模拟 resume
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -2979,6 +3047,7 @@ async fn test_messages_with_user_tail_idles_without_pending_input() {
         user_context: String::new(),
         chain: messages,
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),
@@ -3126,6 +3195,7 @@ async fn test_api_error_finalizes_with_done_and_no_duplicate_error() {
         user_context: String::new(),
         chain: ChatChain::from_flat_messages(vec![]),
         context_size: 200_000,
+        wiring: test_wiring(),
         workspace: project::wire_production_workspace(std::env::current_dir().unwrap())
             .expect("workspace 初始化成功")
             .into_views(),

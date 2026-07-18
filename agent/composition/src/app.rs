@@ -32,15 +32,28 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 pub struct FeatureGateways {
     pub tools: Arc<dyn ToolCatalogGateway>,
     pub provider: Arc<dyn LlmProviderGateway>,
+    pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl FeatureGateways {
-    pub fn new(tools: Arc<dyn ToolCatalogGateway>, provider: Arc<dyn LlmProviderGateway>) -> Self {
-        Self { tools, provider }
+    pub fn new(
+        tools: Arc<dyn ToolCatalogGateway>,
+        provider: Arc<dyn LlmProviderGateway>,
+        policy: Arc<dyn policy::PolicyPort>,
+    ) -> Self {
+        Self {
+            tools,
+            provider,
+            policy,
+        }
     }
 
     pub fn wire_default() -> Self {
-        Self::new(crate::tools::wire_tools(), crate::provider::wire_provider())
+        Self::new(
+            crate::tools::wire_tools(),
+            crate::provider::wire_provider(),
+            Arc::new(policy::AllowAllPolicy),
+        )
     }
 }
 
@@ -253,6 +266,7 @@ mod tests {
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
             memory_source: Arc<dyn MemoryPortSource>,
+            workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             self.register_all_tools_calls.fetch_add(1, Ordering::SeqCst);
             DefaultToolCatalogGateway.register_all_tools(
@@ -260,6 +274,7 @@ mod tests {
                 task_access,
                 skills,
                 memory_source,
+                workspace_control,
             );
         }
 
@@ -269,12 +284,14 @@ mod tests {
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
             memory_source: Arc<dyn MemoryPortSource>,
+            workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             DefaultToolCatalogGateway.register_all_tools_except_agent(
                 registry,
                 task_access,
                 skills,
                 memory_source,
+                workspace_control,
             );
         }
 
@@ -284,12 +301,14 @@ mod tests {
             task_access: Arc<dyn TaskAccess>,
             skills: Arc<Mutex<HashMap<String, share::skill_ops::Skill>>>,
             memory_source: Arc<dyn MemoryPortSource>,
+            workspace_control: Arc<dyn project::WorkspaceControl>,
         ) {
             DefaultToolCatalogGateway.register_subagent_tools(
                 registry,
                 task_access,
                 skills,
                 memory_source,
+                workspace_control,
             );
         }
     }
@@ -333,7 +352,11 @@ mod tests {
 
         let provider = Arc::new(CountingProviderGateway::default());
         let tools = Arc::new(CountingToolGateway::default());
-        let gateways = FeatureGateways::new(tools.clone(), provider.clone());
+        let gateways = FeatureGateways::new(
+            tools.clone(),
+            provider.clone(),
+            Arc::new(policy::AllowAllPolicy),
+        );
         let args = AgentArgs {
             cwd: Some(root),
             api_key: Some("test-api-key".to_string()),

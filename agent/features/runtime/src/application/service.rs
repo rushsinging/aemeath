@@ -63,6 +63,13 @@ mod tests {
 
     struct NoopAgentRunner;
 
+    struct StaticMemorySource;
+    impl tools::MemoryPortSource for StaticMemorySource {
+        fn current(&self) -> Arc<dyn memory::MemoryPort> {
+            Arc::new(memory::NoOpMemory)
+        }
+    }
+
     #[async_trait]
     impl AgentRunner for NoopAgentRunner {
         async fn run_agent(&self, _request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
@@ -158,6 +165,7 @@ mod tests {
                 hook_runner: HookRunner::empty(),
                 memory_config: MemoryConfig::default(),
                 memory: std::sync::Arc::new(memory::NoOpMemory),
+                memory_source: std::sync::Arc::new(StaticMemorySource),
                 agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
                 allow_all: true,
                 context_size: 200_000,

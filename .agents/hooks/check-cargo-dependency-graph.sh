@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 FEATURE_CRATES = {"runtime", "config", "project", "policy", "context", "memory", "provider", "tools", "storage", "task", "hook", "audit", "update", "workflow"}
-TOOLS_DEPENDENCY_BUDGET = {"share", "project", "storage", "task", "memory"}
+TOOLS_DEPENDENCY_BUDGET = {"share", "project", "task", "memory"}
 
 business_allow = {
     # Task #47 target shape: apps/cli -> composition -> runtime, and apps/cli -> sdk.
@@ -33,12 +33,12 @@ business_allow = {
     # packages/global/* are shared infrastructure and may be consumed by share/sdk.
     "share": {"logging", "utils"},
     "project": {"share"},
-    "policy": {"share"},
+    "policy": {"share", "sdk", "tools"},
     "context": {"share", "provider", "storage", "project", "config", "memory", "task", "sdk"},
     "memory": {"share", "storage", "utils"},
-    "provider": {"share"},
+    "provider": {"share", "logging"},
     # Approved horizontal dependencies: tools -> project/storage, Memory/Task-owned OHS/PL.
-    "tools": {"share", "project", "storage", "memory", "task"},
+    "tools": {"share", "project", "memory", "task"},
     "storage": {"share"},
     # Task owns its Published Language and OHS; it must not depend back on consumers.
     "task": set(),

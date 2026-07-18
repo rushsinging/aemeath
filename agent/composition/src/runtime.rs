@@ -51,6 +51,7 @@ pub(crate) async fn from_args_with_gateways(
         wiring,
         gateways.provider,
         gateways.tools,
+        gateways.policy,
         task_access,
         session_tasks,
     );
