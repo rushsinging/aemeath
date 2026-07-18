@@ -29,7 +29,7 @@ if [ -n "$runtime_wiring" ]; then
 fi
 
 # guard-registry:scope.logging.bootstrap-tests
-composition_runtime_call="$(find "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" -name '*.rs' ! -name '*test*.rs' -type f -exec grep -Hn 'runtime::from_args_with_workspace' {} + || true)"
+composition_runtime_call="$(find "$ROOT/agent" "$ROOT/apps" "$ROOT/packages" -name '*.rs' ! -name '*test*.rs' ! -path '*/tests/*' -type f -exec grep -Hn 'runtime::from_args_with_workspace' {} + || true)"
 if [ "$(printf '%s\n' "$composition_runtime_call" | grep -c . || true)" -ne 1 ] || [[ "$composition_runtime_call" != *"agent/composition/src/runtime.rs"* ]]; then
   printf '%s\n' "$composition_runtime_call" >&2
   echo "Runtime workspace bootstrap must have exactly one production consumer in Composition runtime.rs." >&2
