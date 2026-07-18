@@ -564,8 +564,9 @@
 - **位置**：`.agents/hooks/check-config-reader-injection.sh`。
 - **功能**：禁止 Runtime/TUI/CLI 直接构造 `ConfigAppService`，并禁止 TUI/CLI 持有 ConfigReader/Query/Writer/participant/subscription/watch。
 - **守护**：Composition 构造唯一 Config wiring；Runtime 只持注入视图与 Main Run snapshot；交付层只见 SDK DTO。
-- **检查方式**：扫描 Runtime/TUI 的 `ConfigAppService::new` 及 TUI Config 契约符号。
-- **例外**：仅 `trait_reflection.rs` 的测试 fixture；生产路径零例外。
+- **检查方式**：Python 扫描 Runtime/TUI/CLI 的生产 Rust 源码；跳过 `*_test.rs` / `*_tests.rs` / `tests.rs` / `tests/`，并只剥离文件尾 `#[cfg(test)] mod name { ... }` 内联测试块。声明式 `#[cfg(test)] mod name;` 后的生产代码仍继续扫描。
+- **例外 / 白名单**：生产路径 0。`trait_reflection.rs` 测试 fixture 不再整文件豁免，只作为 `cfg(test)` 类别排除；path allowlist、行级 allow、`grep -v` / exclude / skip 均为 0。
+- **#949 故意违规证据**：在 `trait_reflection.rs` 生产区域加入 `ConfigAppService::new` 探针时，旧 Guard 因整文件 `grep -v` 错误 clean pass；收紧后单 Guard 与总编排均 exit 2，恢复后 clean pass。
 - **失败模式**：`Config reader injection guard FAILED`，exit 2。
 
 ## 25. check-production-reachability.sh

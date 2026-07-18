@@ -25,6 +25,7 @@ use crate::LOG_TARGET;
 ///
 /// `task_access` 和 `session_tasks` 由 Composition 层注入：Runtime 不得自行创建
 /// Task BC 的 backing 或持久化封套（跨域越权，#890）。
+#[allow(clippy::too_many_arguments)]
 pub async fn from_args_with_workspace(
     mut args: ChatBootstrapArgs,
     workspace: project::WorkspaceViews,

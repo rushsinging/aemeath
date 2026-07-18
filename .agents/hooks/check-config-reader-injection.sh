@@ -9,21 +9,69 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
   ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 fi
 
-violations=$(grep -rn "ConfigAppService::new" \
-  "$ROOT/agent/features/runtime/src/" "$ROOT/apps/cli/src/" \
-  --include="*.rs" 2>/dev/null | \
-  grep -v "_test" | \
-  grep -v "tests" | \
-  grep -v "trait_reflection.rs" || true)
+cd "$ROOT"
+python3 - <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
 
-contract_leaks=$(grep -RInE '\b(ConfigReader|ConfigQuery|ConfigWriter|ProjectConfigParticipant|ConfigSubscription|watch::Receiver<ConfigSnapshot>)\b' \
-  "$ROOT/apps/cli/src" 2>/dev/null || true)
+root = Path.cwd()
+violations: list[str] = []
+construction = re.compile(r"\bConfigAppService::new\b")
+contract_leak = re.compile(
+    r"\b(ConfigReader|ConfigQuery|ConfigWriter|ProjectConfigParticipant|ConfigSubscription|watch::Receiver<ConfigSnapshot>)\b"
+)
 
-if [ -n "$violations$contract_leaks" ]; then
-  echo "Config reader injection guard FAILED" >&2
-  [ -z "$violations" ] || echo "$violations" >&2
-  [ -z "$contract_leaks" ] || echo "$contract_leaks" >&2
-  exit 2
-fi
 
-echo "Config reader injection guard OK."
+def is_test_file(path: Path) -> bool:
+    return (
+        path.name.endswith("_test.rs")
+        or path.name.endswith("_tests.rs")
+        or path.stem == "tests"
+        or "tests" in path.parts
+    )
+
+
+def production_prefix(text: str) -> str:
+    # 仓库约定内联测试模块位于文件尾部；只剥离 `#[cfg(test)] mod name {`，
+    # 不剥离声明式 `#[cfg(test)] mod name;` 后面的生产代码。
+    marker = re.compile(
+        r"(?m)^\s*#\[cfg\(test\)\]\s*(?:#\[[^\n]+\]\s*)*mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{"
+    )
+    matches = list(marker.finditer(text))
+    return text[: matches[-1].start()] if matches else text
+
+
+for base in [root / "agent" / "features" / "runtime" / "src", root / "apps" / "cli" / "src"]:
+    for path in sorted(base.rglob("*.rs")):
+        if is_test_file(path):
+            continue
+        production = production_prefix(path.read_text())
+        for lineno, line in enumerate(production.splitlines(), 1):
+            if construction.search(line):
+                violations.append(
+                    f"{path.relative_to(root)}:{lineno}: Runtime/TUI/CLI must not construct ConfigAppService"
+                )
+
+for path in sorted((root / "apps" / "cli" / "src").rglob("*.rs")):
+    if is_test_file(path):
+        continue
+    production = production_prefix(path.read_text())
+    for lineno, line in enumerate(production.splitlines(), 1):
+        if contract_leak.search(line):
+            violations.append(
+                f"{path.relative_to(root)}:{lineno}: delivery layer must not hold Config-owned contracts"
+            )
+
+if violations:
+    print(
+        json.dumps(
+            {"decision": "block", "reason": "Config reader injection guard FAILED:\n" + "\n".join(violations)},
+            ensure_ascii=False,
+        )
+    )
+    sys.exit(2)
+
+print("Config reader injection guard OK.")
+PY
