@@ -170,23 +170,11 @@ impl MemoryPort for NoOpMemory {
 |---|---|---|
 | 领域模型 | Memory BC 私有 model capability | MemoryEntry、枚举、scoring、dedup、format——纯数据 + 纯函数 |
 | 领域服务 | Memory BC 的 MemoryService | MemoryPort 实现：检索、去重判定、淘汰候选、apply |
-| 文件 I/O | Storage adapter | read_entries / write_entries / 路径解析 / 原子写 / 损坏兜底 |
+| 文件 I/O integration | Memory-owned `AtomicDatasetMemoryStore` adapter | 把 Memory dataset/codec/key 翻译为 Storage `AtomicDatasetPort` PL；不拥有领域排序 |
 
-```text
-Memory BC                        Storage BC
-┌─────────────────┐              ┌──────────────────┐
-│ MemoryPort impl │ ──读写委托──▶ │ MemoryStorageAdapter │
-│ (领域逻辑)       │              │ (文件 I/O)        │
-│ - scoring       │              │ - read_entries    │
-│ - dedup         │              │ - write_entries   │
-│ - retrieval     │              │ - path resolve    │
-│ - apply         │              │ - atomic write    │
-└─────────────────┘              └──────────────────┘
-```
+Memory core 只依赖 Memory-owned `MemoryDatasetStore` port；`AtomicDatasetMemoryStore` 位于 Memory adapters 层并消费 Storage 的 crate-root OHS。Storage **NEVER** import Memory 聚合，Memory domain/ports/service **NEVER** import Storage 类型，只有 integration adapter 终止 Storage PL。
 
-MemoryPort 实现持有 `MemoryStorageAdapter`（或等价窄 Storage port），领域逻辑在 Memory 侧，I/O 委托给 Storage 侧。Memory 代码 **NEVER** import Storage 的具体 store 类型；Storage adapter **NEVER** 实现 scoring、dedup、检索排序或 Reflection apply 规则。
-
-`MemoryService` **MUST** 使用独立的 async mutation mutex 串行化本实例的 candidate / durable / publish 用例，并以短时同步 `RwLock<CommittedMemoryState { dataset, revision }>` 服务查询；它 **NEVER** 在 storage await 期间持有 state write lock。mutation 从同一已提交 state clone candidate 与 expected `DatasetRevision`，随后把 candidate bytes 与 expected revision 交给基于 Storage [`AtomicDatasetPort`](../storage/README.md#42-多-member-dataset-事务) 的 `MemoryDatasetStore`。内部 owned task 持有 mutation permit 完成 CAS commit 与无失败 state publish；caller future 在 handoff 前可取消，handoff 后丢弃只停止等待，**NEVER** 取消已开始的 durable 事务。
+`MemoryService` **MUST** 使用独立的 async mutation mutex 串行化本实例的 candidate / durable / publish 用例，并以短时同步 `RwLock<CommittedMemoryState { dataset, revision }>` 服务查询；它 **NEVER** 在 storage await 期间持有 state write lock。Global 与 Project 各自拥有独立 dataset/revision：Global 使用固定共享 key，Project 使用 versioned `ProjectIdentity` key；每层 active + archive 两 member 同代提交。跨层 compact 明确拆成两个可观察 layer command，某层失败返回真实错误，**NEVER** 伪装为全局原子成功。
 
 跨进程锁只让提交依次执行，**NEVER** 单独防止 stale writer。`MemoryDatasetStore` **MUST** 原样回传 open 时 `read_consistent` 得到的 revision，并在 `commit_atomic(expected, members, ...)` 的 CAS 冲突时映射为 `MemoryStorageErrorKind::ConcurrentWrite`。第一次冲突时，MemoryService 在 mutation mutex 内重新 `read_consistent`、验证并发布外部已提交的完整 state / revision，再基于新 state **重新执行领域命令一次**；若再次冲突则返回结构化错误，绝不覆盖。普通查询仍只读内存：v0.1.0 不提供跨进程实时 watch，其他进程的提交在下一次 open 或本实例冲突刷新后可见。
 
@@ -291,6 +279,7 @@ Target 要求机械守卫证明：production Memory wiring 只由 Composition Ro
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：MemoryPort trait、ReflectionPromptPort、NoOpMemory、Storage 边界、Composition Root、现状缺口 M1-M10 | #789 |
+| 2026-07-17 | #896 落地 MemoryService candidate/CAS/receipt、Global/Project 独立 dataset revision、Memory-owned AtomicDataset adapter、v2 project key 与 LegacyMemorySource/open migration seam | #896 |
 | 2026-07-14 | 将构造守卫语言对齐 capability-first 组织，移除固定横向层命名 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 增加 DatasetRevision CAS、committed receipt 发布语义与跨实例冲突刷新，移除 Current 路径和未登记守卫声明 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 查询统一返回带 retrieval mode、relevance 与 archive/outdated/TTL 状态的 MemorySearchResult envelope | [#972](https://github.com/rushsinging/aemeath/issues/972) |

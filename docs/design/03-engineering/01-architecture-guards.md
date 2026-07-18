@@ -77,7 +77,7 @@
 | `project` | `share` |
 | `policy` | `share` |
 | `context` | `share`, `provider`, `storage`, `sdk` |
-| `memory` | ∅ |
+| `memory` | `storage`, `utils` |
 | `provider` | `share` |
 | `tools` | `share`, `project`, `storage`, `task` |
 | `storage` | `share` |
@@ -90,7 +90,7 @@
 | `logging` | ∅ |
 | `utils` | ∅ |
 
-> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL、`MemoryPort` 与 in-memory contract baseline，且该 crate 不依赖其他 workspace crate。旧 Memory 业务实现和生产消费者仍暂留 `share` / Storage / Runtime，分别由 #896/#897/#900 迁移与退役；当前双结构 **NEVER** 视为生产切线完成。
+> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL/`MemoryPort`；#896 新增 Memory-owned `MemoryDatasetStore`、AtomicDataset integration adapter 与 `utils` key hash。`memory → storage` 只允许 adapter 消费 Storage crate-root OHS，domain/ports/service 的层间方向由 `check-cola-layer-purity.sh` 守卫；旧业务实现和生产消费者仍由 #883/#897/#900 迁移退役。
 >
 > **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
 

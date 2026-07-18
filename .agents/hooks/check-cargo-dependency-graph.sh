@@ -28,7 +28,7 @@ business_allow = {
     "project": {"share"},
     "policy": {"share"},
     "context": {"share", "provider", "storage", "sdk"},
-    "memory": set(),
+    "memory": {"storage", "utils"},
     "provider": {"share"},
     # Approved horizontal dependencies: tools -> project/storage and Task-owned OHS/PL.
     "tools": {"share", "project", "storage", "task"},
