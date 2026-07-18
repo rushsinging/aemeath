@@ -368,6 +368,10 @@ impl App {
             }
         };
         let document = if self.view_state.output.expanded {
+            crate::tui::log_debug!(
+                "refresh_document: expanded=true, NOT trimming (full document {} lines)",
+                document.total_lines()
+            );
             document
         } else {
             Self::trim_document_to_max_lines(document)

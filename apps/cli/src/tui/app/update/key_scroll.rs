@@ -6,11 +6,19 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 fn try_expand_at_top(app: &mut App, total_lines: usize, visible_height: usize) -> bool {
     let view = &app.view_state.output;
     if view.expanded {
+        crate::tui::log_debug!(
+            "try_expand_at_top: already expanded, skip"
+        );
         return false;
     }
     let max_offset = total_lines.saturating_sub(visible_height);
+    crate::tui::log_debug!(
+        "try_expand_at_top: scroll_offset={} max_offset={} total={} visible={}",
+        view.scroll_offset, max_offset, total_lines, visible_height
+    );
     if view.scroll_offset >= max_offset {
         app.view_state.output.expanded = true;
+        crate::tui::log_debug!("try_expand_at_top: EXPANDED triggered, marking output dirty");
         true
     } else {
         false
