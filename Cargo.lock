@@ -1327,10 +1327,12 @@ name = "hook"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "libc",
  "log",
  "serde",
  "serde_json",
  "share",
+ "tempfile",
  "tokio",
  "tokio-util",
  "uuid",

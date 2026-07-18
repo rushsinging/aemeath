@@ -11,8 +11,9 @@
 
 ## Hook
 
-- Hook 主体：`agent/features/hook/src/business/hook/`（`events.rs`、`runner.rs`、`data.rs`、`result.rs`）。
-- **Hook 执行环境 MUST** 同时注入 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`（注入点 `runner.rs`），兼容现有 Claude Code hook 脚本。
+- Hook 稳定 PL 与能力矩阵：`agent/features/hook/src/domain/**`；`HookPort`：`agent/features/hook/src/ports.rs`。
+- Hook 进程执行 adapter：`agent/features/hook/src/adapters/process.rs`；旧兼容 Runner：`agent/features/hook/src/adapters/legacy/**`。
+- **Hook 执行环境 MUST** 同时注入 `AEMEATH_PROJECT_DIR` 与 `CLAUDE_PROJECT_DIR`（兼容投影在 `adapters/legacy/runner.rs`），兼容现有 Claude Code hook 脚本。
 - Claude Code hooks 配置 → Aemeath hooks 的结构转换在配置层 `agent/shared/src/config/hooks.rs`，见 `config-compat.md`。
 
 ## Audit（审计）
