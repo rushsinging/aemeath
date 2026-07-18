@@ -32,15 +32,28 @@ pub fn agent_client_from_runtime(client: AgentClientImpl) -> AgentClientHandle {
 pub struct FeatureGateways {
     pub tools: Arc<dyn ToolCatalogGateway>,
     pub provider: Arc<dyn LlmProviderGateway>,
+    pub policy: Arc<dyn policy::PolicyPort>,
 }
 
 impl FeatureGateways {
-    pub fn new(tools: Arc<dyn ToolCatalogGateway>, provider: Arc<dyn LlmProviderGateway>) -> Self {
-        Self { tools, provider }
+    pub fn new(
+        tools: Arc<dyn ToolCatalogGateway>,
+        provider: Arc<dyn LlmProviderGateway>,
+        policy: Arc<dyn policy::PolicyPort>,
+    ) -> Self {
+        Self {
+            tools,
+            provider,
+            policy,
+        }
     }
 
     pub fn wire_default() -> Self {
-        Self::new(crate::tools::wire_tools(), crate::provider::wire_provider())
+        Self::new(
+            crate::tools::wire_tools(),
+            crate::provider::wire_provider(),
+            Arc::new(policy::AllowAllPolicy),
+        )
     }
 }
 
@@ -319,7 +332,11 @@ mod tests {
 
         let provider = Arc::new(CountingProviderGateway::default());
         let tools = Arc::new(CountingToolGateway::default());
-        let gateways = FeatureGateways::new(tools.clone(), provider.clone());
+        let gateways = FeatureGateways::new(
+            tools.clone(),
+            provider.clone(),
+            Arc::new(policy::AllowAllPolicy),
+        );
         let args = AgentArgs {
             cwd: Some(root),
             api_key: Some("test-api-key".to_string()),

@@ -20,6 +20,7 @@ pub(crate) async fn from_args_with_gateways(
         runtime::RuntimeConfigDependencies::new(config.reader(), config.query(), config.writer()),
         gateways.provider,
         gateways.tools,
+        gateways.policy,
         task_access,
         session_tasks,
     );
